@@ -1,0 +1,224 @@
+import { Conversation } from "@/lib/ghl/conversations";
+import { cn } from "@/lib/utils";
+import { formatDistanceToNow } from "date-fns";
+import { Mail, MessageSquare, MessageCircle, Layers, Link as LinkIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card";
+import { ConversationPreviewCard } from "./conversation-preview-card";
+
+interface ConversationListProps {
+    conversations: Conversation[];
+    selectedId: string | null;
+    onSelect: (id: string) => void;
+    // Context Mode Props
+    isContextMode?: boolean;
+    onToggleContextMode?: (enabled: boolean) => void;
+    selectedIds?: Set<string>;
+    onToggleSelect?: (id: string, checked: boolean) => void;
+
+    // Deals Mode Props
+    viewMode?: 'chats' | 'deals';
+    onViewModeChange?: (mode: 'chats' | 'deals') => void;
+    deals?: any[];
+    onSelectDeal?: (id: string) => void;
+}
+
+/**
+ * Map GHL conversation type codes to friendly display names
+ */
+function getChannelInfo(type: string): { name: string; icon: React.ReactNode; color: string } {
+    const typeUpper = type?.toUpperCase() || '';
+
+    if (typeUpper.includes('EMAIL')) {
+        return { name: 'Email', icon: <Mail className="w-3 h-3" />, color: 'bg-purple-50 text-purple-600' };
+    }
+    if (typeUpper.includes('WHATSAPP')) {
+        return { name: 'WhatsApp', icon: <MessageCircle className="w-3 h-3" />, color: 'bg-green-50 text-green-600' };
+    }
+    if (typeUpper.includes('PHONE') || typeUpper.includes('SMS') || typeUpper.includes('CALL')) {
+        return { name: 'SMS', icon: <MessageSquare className="w-3 h-3" />, color: 'bg-blue-50 text-blue-600' };
+    }
+    if (typeUpper.includes('WEBCHAT') || typeUpper.includes('LIVE')) {
+        return { name: 'Live Chat', icon: <MessageSquare className="w-3 h-3" />, color: 'bg-orange-50 text-orange-600' };
+    }
+    // Fallback
+    return { name: type || 'Unknown', icon: <MessageSquare className="w-3 h-3" />, color: 'bg-gray-50 text-gray-600' };
+}
+
+export function ConversationList({
+    conversations,
+    selectedId,
+    onSelect,
+    isContextMode = false,
+    onToggleContextMode,
+    selectedIds,
+    onToggleSelect,
+    viewMode,
+    onViewModeChange,
+    deals,
+    onSelectDeal
+}: ConversationListProps) {
+    const effectiveViewMode = viewMode || 'chats';
+
+    if (effectiveViewMode === 'deals' && deals && deals.length > 0) {
+        // RENDER DEALS LIST
+        return (
+            <div className="h-full flex flex-col border-r">
+                {/* Mode Toggle Header */}
+                <div className="p-2 border-b grid grid-cols-2 gap-1 bg-slate-50">
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => onViewModeChange?.('chats')}
+                        className="text-xs text-muted-foreground"
+                    >
+                        Chats
+                    </Button>
+                    <Button
+                        variant="default"
+                        size="sm"
+                        className="text-xs bg-white text-indigo-600 border shadow-sm"
+                    >
+                        <Layers className="w-3 h-3 mr-1" /> Deals
+                    </Button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto">
+                    {deals.map(d => (
+                        <div
+                            key={d.id}
+                            className={cn(
+                                "border-b transition-colors p-3 cursor-pointer hover:bg-slate-50",
+                                selectedId === d.id ? "bg-indigo-50 border-l-4 border-l-indigo-500" : "border-l-4 border-l-transparent"
+                            )}
+                            onClick={() => onSelectDeal?.(d.id)}
+                        >
+                            <div className="flex justify-between items-start mb-1">
+                                <h4 className="font-semibold text-sm truncate text-indigo-900">{d.title}</h4>
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${d.stage === 'ACTIVE' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                                    {d.stage}
+                                </span>
+                            </div>
+                            <div className="flex items-center text-xs text-gray-500">
+                                <Layers className="w-3 h-3 mr-1 opacity-50" />
+                                <span>{d.conversationIds?.length || 0} participants</span>
+                                <span className="mx-1">•</span>
+                                <span>{formatDistanceToNow(new Date(d.lastActivityAt || d.updatedAt), { addSuffix: true })}</span>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+    }
+
+    if (conversations.length === 0 && effectiveViewMode === 'chats') {
+        return <div className="p-4 text-center text-gray-500">No conversations found.</div>;
+    }
+
+    return (
+        <div className="h-full flex flex-col border-r">
+            {/* Mode Toggle Header + Context Toggle */}
+            {onViewModeChange && (
+                <div className="p-2 border-b grid grid-cols-2 gap-1 bg-slate-50">
+                    <Button
+                        variant="default"
+                        size="sm"
+                        className="text-xs bg-white text-indigo-600 border shadow-sm"
+                    >
+                        <MessageSquare className="w-3 h-3 mr-1" /> Chats
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => onViewModeChange('deals')}
+                        className="text-xs text-muted-foreground"
+                    >
+                        Deals
+                    </Button>
+                </div>
+            )}
+
+            {/* Context Toggle Header (Only in Chat Mode) */}
+            {onToggleContextMode && (
+                <div className="p-2 border-b flex items-center justify-between bg-slate-50">
+                    <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider pl-2">Threads</span>
+                    <Button
+                        variant={isContextMode ? "default" : "ghost"}
+                        size="sm"
+                        className="h-8 text-xs gap-2"
+                        onClick={() => onToggleContextMode(!isContextMode)}
+                    >
+                        <Layers className="w-3 h-3" />
+                        {isContextMode ? "Deal Binding Active" : "Bind Deal"}
+                    </Button>
+                </div>
+            )}
+
+            <div className="flex-1 overflow-y-auto">
+                {conversations.map((c) => {
+                    const channel = getChannelInfo(c.lastMessageType || c.type);
+                    const isChecked = selectedIds?.has(c.id);
+
+                    return (
+                        <HoverCard key={c.id} openDelay={300} closeDelay={100}>
+                            <HoverCardTrigger asChild>
+                                <div
+                                    className={cn(
+                                        "border-b transition-colors flex items-start p-2 cursor-pointer",
+                                        selectedId === c.id && !isContextMode ? "bg-slate-100 border-l-blue-500" : "border-l-transparent",
+                                        isContextMode && isChecked ? "bg-purple-50" : "hover:bg-slate-50",
+                                        selectedId === c.id ? "border-l-4" : "border-l-4"
+                                    )}
+                                    onClick={() => onSelect(c.id)}
+                                >
+                                    {/* Checkbox for Context Mode */}
+                                    {isContextMode && onToggleSelect && (
+                                        <div
+                                            className="mr-3 pt-1"
+                                            onClick={(e) => e.stopPropagation()}
+                                        >
+                                            <Checkbox
+                                                checked={isChecked}
+                                                onCheckedChange={(checked) => onToggleSelect(c.id, checked === true)}
+                                            />
+                                        </div>
+                                    )}
+
+                                    <div className="flex-1 min-w-0">
+                                        {/* Contact name */}
+                                        <div className="flex items-center justify-between">
+                                            <h4 className="font-semibold text-sm truncate flex-1">
+                                                {c.contactName || c.contactId || "Unknown Contact"}
+                                            </h4>
+                                            {(c as any).activeDealId && (
+                                                <div title={`Linked to Deal: ${(c as any).activeDealTitle}`} className="ml-1">
+                                                    <LinkIcon className="h-3 w-3 text-indigo-500" />
+                                                </div>
+                                            )}
+                                        </div>
+                                        {/* Channel icon */}
+                                        <div className="flex items-center gap-1 mt-1">
+                                            {channel.icon}
+                                            <span className="text-[10px] text-gray-500">{channel.name}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </HoverCardTrigger>
+                            <HoverCardContent
+                                side="right"
+                                align="start"
+                                sideOffset={8}
+                                className="w-80 p-0"
+                            >
+                                <ConversationPreviewCard conversation={c} />
+                            </HoverCardContent>
+                        </HoverCard>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
+

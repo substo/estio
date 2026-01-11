@@ -1,0 +1,40 @@
+import HeroSection from "@/components/homepage/hero-section";
+import PageWrapper from "@/components/wrapper/page-wrapper";
+import { FeaturesSection } from "@/components/marketing/features-section";
+import { AboutSection } from "@/components/marketing/about-section";
+
+import db from "@/lib/db";
+
+export default async function Home() {
+    // Fetch the site config to get the logo URLs
+    const siteConfig = await db.siteConfig.findFirst();
+    const logo = (siteConfig?.theme as any)?.logo;
+
+    return (
+        <PageWrapper
+            logoUrl={logo?.url}
+            lightUrl={logo?.lightUrl}
+        >
+            {/* Static content for crawlers that don't execute JS */}
+            <noscript>
+                <div style={{ padding: '2rem', maxWidth: '800px', margin: '0 auto' }}>
+                    <h1>Estio</h1>
+                    <p>
+                        Estio is a comprehensive Real Estate integration platform designed for GoHighLevel users.
+                        We provide verified MLS data connectivity, CRM synchronization, and lead management tools for real estate professionals.
+                    </p>
+                    <nav>
+                        <a href="/privacy-policy">Privacy Policy</a> |
+                        <a href="/terms-of-service">Terms of Service</a>
+                    </nav>
+                </div>
+            </noscript>
+
+            <div className="flex flex-col justify-center items-center w-full mt-[1rem] p-3">
+                <HeroSection />
+                <FeaturesSection />
+                <AboutSection />
+            </div>
+        </PageWrapper>
+    );
+}
