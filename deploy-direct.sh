@@ -27,6 +27,10 @@ else
     echo "🐢 Mode: FULL (Clean Build)"
 fi
 
+# AUTOMATED BACKUP (Security Best Practice)
+./scripts/backup.sh
+
+
 # SSH Multiplexing setup
 SSH_CONTROL_PATH="/tmp/estio-deploy-mux-%r@%h:%p"
 SSH_OPTS="-S $SSH_CONTROL_PATH"

@@ -28,7 +28,11 @@ import { PROPERTY_LOCATIONS } from '@/lib/properties/locations';
 import { SearchableSelect } from './searchable-select';
 import { MultiPropertySelect } from './multi-property-select';
 import { ContactPropertyTypeSelector } from './contact-property-type-selector';
-import { CONTACT_TYPES, CONTACT_TYPE_CONFIG, DEFAULT_CONTACT_TYPE, type ContactType } from './contact-types';
+// AI Analyzer moved to Coordinator Panel
+import {
+    CONTACT_TYPES, CONTACT_TYPE_CONFIG, DEFAULT_CONTACT_TYPE, type ContactType,
+    LEAD_GOALS, LEAD_PRIORITIES, LEAD_STAGES, REQUIREMENT_STATUSES, REQUIREMENT_CONDITIONS
+} from './contact-types';
 
 // Types for contact data (used in edit mode)
 export type ContactData = {
@@ -273,6 +277,8 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
             <input type="hidden" name="contactType" value={contactType} />
 
             <div className="flex-1 overflow-y-auto px-1 py-2">
+                {/* AI Analyzer moved to Conversations > AI Coordinator Panel */}
+
                 {/* Contact Type Selector */}
                 <div className="mb-4 p-3 bg-muted/50 rounded-lg border">
                     <Label className="text-sm font-medium mb-2 block">Contact Type</Label>
@@ -341,7 +347,7 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
                                             <SelectValue placeholder="Select Goal" />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            {["To Buy", "To Rent", "To List", "Other"].map(o => (
+                                            {LEAD_GOALS.map(o => (
                                                 <SelectItem key={o} value={o}>{o}</SelectItem>
                                             ))}
                                         </SelectContent>
@@ -354,7 +360,7 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            {["Low", "Medium", "High"].map(o => (
+                                            {LEAD_PRIORITIES.map(o => (
                                                 <SelectItem key={o} value={o}>{o}</SelectItem>
                                             ))}
                                         </SelectContent>
@@ -367,7 +373,7 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            {["Unassigned", "Searching", "Inspecting", "Negotiating", "Closed - Won", "Closed - Lost"].map(o => (
+                                            {LEAD_STAGES.map(o => (
                                                 <SelectItem key={o} value={o}>{o}</SelectItem>
                                             ))}
                                         </SelectContent>
@@ -532,8 +538,7 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
                                     <Select name="requirementStatus" defaultValue={contact?.requirementStatus || "For Sale"}>
                                         <SelectTrigger><SelectValue /></SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="For Sale">For Sale</SelectItem>
-                                            <SelectItem value="For Rent">For Rent</SelectItem>
+                                            {REQUIREMENT_STATUSES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                                         </SelectContent>
                                     </Select>
                                 </div>
@@ -562,7 +567,7 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
                                     <Select name="requirementCondition" defaultValue={contact?.requirementCondition || "Any Condition"}>
                                         <SelectTrigger><SelectValue /></SelectTrigger>
                                         <SelectContent>
-                                            {["Any Condition", "New", "Resale"].map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                                            {REQUIREMENT_CONDITIONS.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                                         </SelectContent>
                                     </Select>
                                 </div>

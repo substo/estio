@@ -1,11 +1,13 @@
 import { Conversation } from "@/lib/ghl/conversations";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
-import { Mail, MessageSquare, MessageCircle, Layers, Link as LinkIcon } from "lucide-react";
+import { Mail, MessageSquare, MessageCircle, Layers, Link as LinkIcon, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card";
 import { ConversationPreviewCard } from "./conversation-preview-card";
+import { WhatsAppStatus } from './whatsapp-status';
+import Link from 'next/link';
 
 interface ConversationListProps {
     conversations: Conversation[];
@@ -65,6 +67,9 @@ export function ConversationList({
         // RENDER DEALS LIST
         return (
             <div className="h-full flex flex-col border-r">
+                {/* Status Bar */}
+                <WhatsAppStatus />
+
                 {/* Mode Toggle Header */}
                 <div className="p-2 border-b grid grid-cols-2 gap-1 bg-slate-50">
                     <Button
@@ -90,6 +95,7 @@ export function ConversationList({
                             key={d.id}
                             className={cn(
                                 "border-b transition-colors p-3 cursor-pointer hover:bg-slate-50",
+                                "bg-slate-50", // Placeholder for logic
                                 selectedId === d.id ? "bg-indigo-50 border-l-4 border-l-indigo-500" : "border-l-4 border-l-transparent"
                             )}
                             onClick={() => onSelectDeal?.(d.id)}
@@ -119,6 +125,9 @@ export function ConversationList({
 
     return (
         <div className="h-full flex flex-col border-r">
+            {/* Status Bar */}
+            <WhatsAppStatus />
+
             {/* Mode Toggle Header + Context Toggle */}
             {onViewModeChange && (
                 <div className="p-2 border-b grid grid-cols-2 gap-1 bg-slate-50">
@@ -144,15 +153,22 @@ export function ConversationList({
             {onToggleContextMode && (
                 <div className="p-2 border-b flex items-center justify-between bg-slate-50">
                     <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider pl-2">Threads</span>
-                    <Button
-                        variant={isContextMode ? "default" : "ghost"}
-                        size="sm"
-                        className="h-8 text-xs gap-2"
-                        onClick={() => onToggleContextMode(!isContextMode)}
-                    >
-                        <Layers className="w-3 h-3" />
-                        {isContextMode ? "Deal Binding Active" : "Bind Deal"}
-                    </Button>
+                    <div className="flex gap-1">
+                        <Link href="/admin/conversations/import">
+                            <Button variant="ghost" size="sm" className="h-8 text-xs gap-1">
+                                <Upload className="w-3 h-3" /> Import
+                            </Button>
+                        </Link>
+                        <Button
+                            variant={isContextMode ? "default" : "ghost"}
+                            size="sm"
+                            className="h-8 text-xs gap-2"
+                            onClick={() => onToggleContextMode(!isContextMode)}
+                        >
+                            <Layers className="w-3 h-3" />
+                            {isContextMode ? "Deal Binding Active" : "Bind Deal"}
+                        </Button>
+                    </div>
                 </div>
             )}
 
@@ -221,4 +237,3 @@ export function ConversationList({
         </div>
     );
 }
-

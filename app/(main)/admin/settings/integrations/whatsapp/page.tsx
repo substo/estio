@@ -181,6 +181,23 @@ export default function WhatsAppSettingsPage() {
         });
     }, []);
 
+    // Polling for connection status when QR code is visible
+    useEffect(() => {
+        if (!qrCode) return;
+
+        const interval = setInterval(async () => {
+            const data = await getWhatsAppSettings();
+            if (data && data.evolutionConnectionStatus === 'open') {
+                setSettings(prev => ({ ...prev, evolutionConnectionStatus: 'open' }));
+                setQrCode(null); // Clear QR code to show success state
+                toast({ title: "Connected", description: "WhatsApp device connected successfully." });
+                clearInterval(interval);
+            }
+        }, 3000);
+
+        return () => clearInterval(interval);
+    }, [qrCode]);
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setSaving(true);

@@ -22,6 +22,35 @@ interface EvolutionInstance {
 
 export const evolutionClient = {
     /**
+     * Check if Evolution API is reachable
+     * Use this before attempting operations to provide graceful error handling
+     */
+    healthCheck: async (): Promise<{ ok: boolean; error?: string }> => {
+        try {
+            await axios.get(`${EVOLUTION_API_URL}/`, { timeout: 5000 });
+            return { ok: true };
+        } catch (error: any) {
+            if (evolutionClient.isConnectionError(error)) {
+                return {
+                    ok: false,
+                    error: 'WhatsApp service is unavailable. Please ensure Docker is running (local) or contact support (production).'
+                };
+            }
+            return { ok: false, error: error.message };
+        }
+    },
+
+    /**
+     * Check if an error is a connection refusal (Docker not running)
+     */
+    isConnectionError: (error: any): boolean => {
+        return error?.code === 'ECONNREFUSED' ||
+            error?.cause?.code === 'ECONNREFUSED' ||
+            (Array.isArray(error?.errors) && error.errors.some((e: any) => e?.code === 'ECONNREFUSED'));
+    },
+
+    /**
+
      * Create a new instance for a location
      */
     createInstance: async (locationId: string, instanceName: string): Promise<EvolutionInstance> => {
@@ -38,15 +67,7 @@ export const evolutionClient = {
                     instanceName: instanceName,
                     token: locationId, // Use locationId as the token for simplicity/security lookup
                     integration: "WHATSAPP-BAILEYS",
-                    // webhook: webhookUrl, // Temporarily commented out to debug "Invalid url" error
-                    // webhook_by_events: true,
-                    // events: [
-                    //     "MESSAGES_UPSERT",
-                    //     "MESSAGES_UPDATE",
-                    //     "CONNECTION_UPDATE",
-                    //     "SEND_MESSAGE",
-                    //     "QRCODE_UPDATED"
-                    // ]
+                    qrcode: true
                 },
                 {
                     headers: {
@@ -91,29 +112,29 @@ export const evolutionClient = {
             while (attempt < maxRetries && !webhookSuccess) {
                 attempt++;
                 try {
-                    /*
-                        const webhookUrl = `${process.env.APP_BASE_URL || 'https://estio.co'}/api/webhooks/evolution`;
-                        await axios.post(
-                            `${EVOLUTION_API_URL}/webhook/set/${instanceName}`,
-                            {
-                                webhook: {
-                                    url: webhookUrl,
-                                    enabled: true,
-                                    events: [
-                                        "MESSAGES_UPSERT",
-                                        "MESSAGES_UPDATE",
-                                        "CONNECTION_UPDATE",
-                                        "SEND_MESSAGE",
-                                        "QRCODE_UPDATED"
-                                    ],
-                                    webhookByEvents: true
+                    const webhookUrl = `${process.env.APP_BASE_URL || 'https://estio.co'}/api/webhooks/evolution`;
+                    await axios.post(
+                        `${EVOLUTION_API_URL}/webhook/set/${instanceName}`,
+                        {
+                            webhook: {
+                                url: webhookUrl,
+                                enabled: true,
+                                events: [
+                                    "QRCODE_UPDATED",
+                                    "CONNECTION_UPDATE",
+                                    "MESSAGES_UPSERT",
+                                    "MESSAGES_UPDATE"
+                                ],
+                                webhookByEvents: true,
+                                headers: {
+                                    "ngrok-skip-browser-warning": "true"
                                 }
-                            },
-                            { headers: { 'apikey': EVOLUTION_GLOBAL_API_KEY } }
-                        );
-                        webhookSuccess = true;
-                        console.log(`Webhook Configured Successfully (Attempt ${attempt})`);
-                       */
+                            }
+                        },
+                        { headers: { 'apikey': EVOLUTION_GLOBAL_API_KEY } }
+                    );
+                    webhookSuccess = true;
+                    console.log(`Webhook Configured Successfully (Attempt ${attempt})`);
                 } catch (whErr: any) {
                     const errorMsg = JSON.stringify(whErr.response?.data || whErr.message, null, 2);
                     console.warn(`Failed to configure webhook (Attempt ${attempt}/${maxRetries}):`, errorMsg);
@@ -141,30 +162,20 @@ export const evolutionClient = {
                 }
             );
             console.log("Connect Instance Response:", JSON.stringify(response.data, null, 2));
-            return response.data; // Likely contains base64
+
+            // Check for valid response with base64
+            // Some versions return { qrcode: { base64: "..." } } or just { base64: "..." }
+            // Evolution v2.2.x might return it differently
+            if (response.data) {
+                if (response.data.base64) return response.data;
+                if (response.data.qrcode?.base64) return response.data.qrcode;
+                if (response.data.qrcode && typeof response.data.qrcode === 'string') return { base64: response.data.qrcode };
+            }
+
+            return null;
         } catch (error: any) {
             console.error('Error connecting evolution instance:', error.response?.data || error);
-            throw error;
-        }
-    },
-
-    /**
-     * Explicitly fetch QR Code (Base64)
-     */
-    fetchQRCode: async (instanceName: string) => {
-        try {
-            const response = await axios.get(
-                `${EVOLUTION_API_URL}/instance/qrcode/base64/${instanceName}`,
-                {
-                    headers: {
-                        'apikey': EVOLUTION_GLOBAL_API_KEY
-                    }
-                }
-            );
-            console.log("Fetch QRCode Response:", JSON.stringify(response.data, null, 2));
-            return response.data;
-        } catch (error: any) {
-            console.warn('Error fetching specific QR endpoint:', error.response?.data || error.message);
+            // Don't throw, just return null so we can try other methods
             return null;
         }
     },
@@ -267,13 +278,11 @@ export const evolutionClient = {
                 `${EVOLUTION_API_URL}/message/sendText/${instanceName}`,
                 {
                     number: cleanNumber,
+                    text: text,
                     options: {
                         delay: 1200,
                         presence: "composing",
                         linkPreview: false
-                    },
-                    textMessage: {
-                        text: text
                     }
                 },
                 {
@@ -284,7 +293,10 @@ export const evolutionClient = {
             );
             return response.data;
         } catch (error: any) {
-            console.error('Error sending evolution message:', error.response?.data || error);
+            console.error('Error sending evolution message:', {
+                status: error.response?.status,
+                data: JSON.stringify(error.response?.data, null, 2)
+            });
             throw error;
         }
     }

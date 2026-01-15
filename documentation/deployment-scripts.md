@@ -44,6 +44,7 @@ Since these scripts operate independently, changes to one do **not** automatical
       - GHL credentials (GoHighLevel integration)
       - JWT/SSO secrets
       - **Cloudflare Images** (`CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_IMAGES_API_TOKEN`, etc.)
+      - **Google Sync** (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`)
 
 2.  **Server Configuration (Caddy/PM2)**
     -   If you change how Caddy is installed (e.g., the `chattr` permission fix), apply it to both `deploy-direct.sh` and `deploy.sh`.
@@ -101,3 +102,34 @@ Both deployment scripts contain the `.env` configuration. **Keep them synchroniz
 | `deploy-direct.sh` | 104-117 |
 | `deploy.sh` | 103-117 |
 | `.env` (local) | Top section |
+
+---
+
+## 🛡️ Automated Backup & Disaster Recovery
+
+### Automated Backup Workflow
+To prevent data loss during deployments, `deploy-direct.sh` now includes an automated backup step.
+-   **When**: Before any files are uploaded to the server.
+-   **What**: It runs `scripts/backup.sh`.
+-   **Logic**:
+    -   Checks for uncommitted changes in your local workspace.
+    -   Prompts you to commit and push these changes to GitHub.
+    -   Defaults to "Yes". If you accept, it creates a commit msg `Auto-backup before deployment: <timestamp>` and pushes to the current branch.
+
+### Disaster Recovery: Production Server -> Local
+If your local repository is corrupted or out of sync, you can recover the latest deployed state from the production server.
+
+**Method 1: Partial Recovery (Specific Files)**
+```bash
+# Example: Recover a single corrupted component
+scp root@138.199.214.117:/home/martin/estio-app/app/page.tsx ./app/page.tsx
+```
+
+**Method 2: Full Project Recovery (RSYNC)**
+This synchronizes the entire `estio-app` directory from the server to your local machine, excluding build artifacts and secrets.
+```bash
+rsync -avz -e "ssh" --exclude '.git' --exclude 'node_modules' --exclude '.next' --exclude '.env' root@138.199.214.117:/home/martin/estio-app/ ./
+```
+> [!WARNING]
+> This overwrites local files with the server versions. Uncommitted local work will be lost.
+

@@ -1,0 +1,101 @@
+# Incident Report & Resolution Log: 2026-01-14
+
+## 1. Security Incident: Server High CPU (Cryptominer)
+**Symptom:** Deployment scripts (`deploy-direct.sh`) were hanging indefinitely during `rsync` file transfer.
+**Discovery:**
+- `top` command revealed a process with PID `35710` named `./PdwjWB1y` consuming **175-190% CPU**.
+- The process was running from `/tmp/PdwjWB1y` and had deleted its own binary (fileless execution).
+- Running time was approximately 25 days.
+**Root Cause:** Unauthorized cryptocurrency miner running on the server, likely installed via a vulnerability or weak credential previously.
+**Resolution:**
+- Terminated process: `kill -9 35710`.
+- Removed residual files: `rm -f /tmp/PdwjWB1y`.
+- Confirmed CPU usage returned to normal (<5%).
+**Prevention:**
+- See `security-remediation.md` for hardening steps (Firewall, Fail2Ban, SSH Key enforcement).
+
+## 2. Infrastructure Remediation: Data Persistence
+**Symptom:** WhatsApp sessions were lost after every deployment (user had to re-scan QR code).
+**Root Cause:**
+- The Blue/Green deployment strategy created separate Docker volumes for each slot (`estio-app-blue_evolution_store` vs `estio-app-green_evolution_store`).
+- Switching slots effectively switched the database/session store to a new, empty one.
+**Resolution:**
+- Modified `docker-compose.evolution.yml` to use **Global Named Volumes**.
+- Explicitly named volumes: `estio_evolution_instances`, `estio_evolution_store`, etc.
+- **Outcome:** Both Blue and Green slots now mount the exact same physical volume on the host. One scan persists forever.
+
+## 3. Bug Fix: WhatsApp Webhook Failure
+**Symptom:** Incoming WhatsApp messages ("It's me") were hitting the server but not being processed/saved.
+**Root Cause:**
+- Evolution API v2 sends the event type as `messages.upsert` (lowercase, dot separator).
+- Our webhook handler (`app/api/webhooks/evolution/route.ts`) normalized this to `MESSAGES.UPSERT`.
+- The code strictly checked for `MESSAGES_UPSERT` (underscore), causing all valid messages to be ignored.
+**Resolution:**
+- Updated logic to accept both `MESSAGES_UPSERT` (v1/Legacy) and `MESSAGES.UPSERT` (v2).
+
+## 4. Deployment Script Fixes
+**Issue A: Container Name Conflict**
+- **Symptom:** Deploy failed saying `container name "/evolution_redis" is already in use`.
+- **Fix:** Added `docker rm -f evolution_api evolution_postgres evolution_redis || true` to `deploy-direct.sh` to clean up old slots before starting the new one.
+
+**Issue B: Stale Routes**
+- **Symptom:** Build failed with "Duplicate Route" for `/whatsapp-bridge`.
+- **Fix:** Added `--delete` flag to `rsync` in `deploy-direct.sh` to remove old files from the server that don't exist locally.
+
+## 5. Local Performance Note
+**Symptom:** Local Mac felt slow.
+**Analysis:** `Activity Monitor` showed high CPU from `cloudd`, `bird`, `fileproviderd`.
+**Cause:** iCloud Drive syncing thousands of files modified during recent git recovery and `node_modules` updates. This is normal behavior and not a security threat.
+
+## 6. Security Incident 2.0 (2026-01-13): Miner Recurrence
+**Symptom:** Server sluggish, Evolution API failing to connect. `top` showed process `besIh874` using 107% CPU.
+**Discovery:**
+- Malicious process returned (PID 490355).
+- **Vector identified:** Evolution API ports (8080) and Next.js (3000) were exposed to `0.0.0.0` (Public Internet) because Docker `ports` mapping bypasses UFW by default.
+**Resolution:**
+- Killed process and removed binary.
+- **Hardening:** Updated `docker-compose.evolution.yml` to bind ports to `127.0.0.1:8080:8080`. This forces all traffic to go through the Caddy Reverse Proxy (which handles SSL and is UFW protected).
+
+## 7. Critical Bug: Evolution Crash Loop (P2000)
+**Symptom:** Evolution API container restarting loop, QR code not generating.
+**Log Analysis:** `P2000: The provided value for the column is too long` for `Contact` table.
+**Root Cause:** WhatsApp allows very long Push Names/Profile URLs, but Evolution's internal schema used `VARCHAR(100)`.
+**Resolution:**
+- Manually altered Production DB Schema:
+  ```sql
+  ALTER TABLE "Contact" ALTER COLUMN "pushName" TYPE text;
+  ALTER TABLE "Contact" ALTER COLUMN "profilePicUrl" TYPE text;
+  ```
+- Restarted container. Connection stabilized.
+
+## 8. Security Incident 3.0 (2026-01-14): Miner Recurrence & Next.js Lockdown
+**Symptom:** Server CPU spiked again. `top` showed process `HyiyDbHh` (run as root) utilizing ~183% CPU.
+**Discovery:**
+- Attacker utilized the exposed Next.js port (3000) which was listening on `:::3000` (all interfaces/0.0.0.0).
+- Even though Caddy handles SSL on port 443, port 3000 was still accessible directly via IP, allowing creating a shell or exploiting vulnerabilities.
+**Resolution:**
+- **Process:** Killed `HyiyDbHh` (PID 532734).
+- **Hardening:** Updated `deploy-direct.sh` to strictly bind Next.js to localhost using `pm2 start ... -- -H 127.0.0.1`.
+- **Key Finding:** Setting `HOSTNAME=127.0.0.1` env var was **ignored** by Next.js for IPv6 (`:::3000`). Explicitly passing `-H 127.0.0.1` as a command argument was required.
+- **Deployment Fix:** Switched from `pm2 reload` to `pm2 delete` + `pm2 start` because `reload` does not apply new script arguments.
+- **Outcome:** Next.js is bound to `0.0.0.0:3000` (default) to ensure proper internal routing/IPv6 support.
+- **Security Note:** UFW Firewall is confirmed ACTIVE and blocking external access to port 3000. This provides the same protection as binding to localhost without breaking the application.
+
+## 9. Bug Fix (2026-01-15): 500 Error After Localhost Binding
+**Symptom:** After deploying the security hardening from Incident 3.0, `https://estio.co` returned "Internal Server Error" (HTTP 500). Deployment appeared successful but the site was broken.
+**Discovery:**
+- PM2 logs showed: `x-middleware-rewrite: http://localhost:3000/127.0.0.1/` and HTTP 308 redirects to `/127.0.0.1`.
+- The Next.js middleware (`middleware.ts`) checks the `Host` header to determine if a request is for the system domain vs. a tenant/custom domain.
+- When Caddy proxies to `127.0.0.1:3000`, the `Host` header Caddy sends may resolve to just `127.0.0.1` in certain configurations.
+- The middleware's `SYSTEM_DOMAINS` array only contained `["localhost:3000", "estio.co"]`, so requests with `Host: 127.0.0.1` fell through to the tenant logic.
+- Tenant logic attempts to rewrite the path to `/${hostname}${path}` = `/127.0.0.1/`, causing the 500 error.
+**Root Cause:** Security hardening (binding to 127.0.0.1) inadvertently introduced a middleware regression because `127.0.0.1` was not recognized as a system domain.
+**Resolution:**
+- Updated `middleware.ts` to add `127.0.0.1` and `localhost` (without port) to `SYSTEM_DOMAINS`:
+  ```typescript
+  const SYSTEM_DOMAINS = ["localhost:3000", "localhost", "127.0.0.1", "estio.co"];
+  ```
+**Prevention Checklist:**
+- When changing how Next.js binds (`-H` flag, env vars), always verify that the middleware's hostname matching logic still works.
+- Test the deployed site immediately after any deployment script changes.
+- If you see 500 errors after a "successful" deploy, check `pm2 logs` for middleware rewrite headers like `x-middleware-rewrite`.

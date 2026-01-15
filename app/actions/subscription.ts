@@ -25,22 +25,16 @@ export async function subscribe(prevState: any, formData: FormData) {
     }
 
     // 2. Sync to GoHighLevel (Side Effect) using OAuth Token
-    const locationId = process.env.NEXT_PUBLIC_GHL_NEWSLETTER_LOCATION_ID;
+    const ghlLocationId = process.env.NEXT_PUBLIC_GHL_NEWSLETTER_LOCATION_ID;
 
-    if (!locationId) {
+    if (!ghlLocationId) {
         console.warn("Missing NEXT_PUBLIC_GHL_NEWSLETTER_LOCATION_ID. Skipping sync.");
         return { success: true, message: "Successfully subscribed!" };
     }
 
     try {
-        // Fetch valid access token from DB (auto-refreshes if needed)
-        const accessToken = await getAccessToken(locationId);
-
-        if (!accessToken) {
-            throw new Error(`No valid access token found for Location ${locationId}. Please install the app in this location.`);
-        }
-
-        const contactId = await syncContactToGHL(accessToken, {
+        // syncContactToGHL now handles token fetching and creating/refreshing internally
+        const contactId = await syncContactToGHL(ghlLocationId, {
             email,
             tags: ['subscription-lead'],
             name: 'Subscriber',

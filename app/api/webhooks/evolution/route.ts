@@ -7,14 +7,20 @@ export async function POST(req: NextRequest) {
         const body = await req.json();
         console.log("Evolution Webhook Payload:", JSON.stringify(body, null, 2));
 
-        const eventType = body.event;
+        const eventType = (body.event || '').toUpperCase(); // Normalize to uppercase: CONNECTION.UPDATE
         const instanceName = body.instance;
 
         // Evolution instances are named after location IDs in our implementation
+        console.log(`[Evolution Webhook] Lookup Location for Instance: ${instanceName}`);
         const location = await db.location.findFirst({ where: { evolutionInstanceId: instanceName } });
-        if (!location) return NextResponse.json({ status: 'ignored' }, { status: 200 });
 
-        if (eventType === 'MESSAGES_UPSERT') {
+        if (!location) {
+            console.warn(`[Evolution Webhook] IGNORED: No location found for instance ${instanceName}`);
+            return NextResponse.json({ status: 'ignored', reason: 'Location not found' }, { status: 200 });
+        }
+        console.log(`[Evolution Webhook] Found Location: ${location.id}`);
+
+        if (eventType === 'MESSAGES_UPSERT' || eventType === 'MESSAGES.UPSERT') {
             const msg = body.data;
             const key = msg.key;
             const messageContent = msg.message;
@@ -35,20 +41,47 @@ export async function POST(req: NextRequest) {
                 direction: isFromMe ? 'outbound' : 'inbound',
                 source: 'whatsapp_evolution',
                 locationId: location.id,
-
+                contactName: msg.pushName || msg.key?.remoteJid // Attempt to capture pushName
             };
 
             console.log(`[Evolution] Processing ${normalized.direction} message for ${location.id}`);
             await processNormalizedMessage(normalized);
 
-        } else if (eventType === 'CONNECTION_UPDATE') {
-            const status = body.data.status;
+        } else if (eventType === 'CONNECTION_UPDATE' || eventType === 'CONNECTION.UPDATE') {
+            const status = body.data.status || body.data.state;
             // Map status if needed, simple storage for now
             await db.location.update({
                 where: { id: location.id },
                 data: { evolutionConnectionStatus: status }
             });
             console.log(`[Evolution] Connection update for ${instanceName}: ${status}`);
+
+        } else if (eventType === 'MESSAGES_UPDATE' || eventType === 'MESSAGES.UPDATE') {
+            // Status updates (Delivered, Read, etc.)
+            const data = body.data;
+            // data structure usually: { key: { remoteJid, fromMe, id }, update: { status: 'READ' }, ... }
+            // OR sometimes Evolution simplifies it.
+            // Let's check logs if unsure, but standard Baileys event via Evolution:
+            // Payload: { event: 'messages.update', data: [ { key: ..., update: { status: ... } } ] }
+
+            // Evolution v1.6+ implementation might vary. 
+            // Assuming standard format or checking `body.data` structure.
+
+            // Iterating if array
+            const updates = Array.isArray(data) ? data : [data];
+
+            for (const item of updates) {
+                const wamId = item.key?.id;
+                const newStatus = item.update?.status || item.status;
+
+                if (wamId && newStatus) {
+                    const { processStatusUpdate } = await import('@/lib/whatsapp/sync');
+                    await processStatusUpdate(wamId, newStatus);
+                }
+            }
+
+        } else if (eventType === 'QRCODE_UPDATED' || eventType === 'QRCODE.UPDATED') {
+            console.log(`[Evolution] QR Code update for ${instanceName}`);
         }
 
         return NextResponse.json({ status: 'ok' });

@@ -109,6 +109,16 @@ export async function connectEvolutionDevice() {
     const location = user.locations[0];
 
     try {
+        // 0. Health Check: Ensure Evolution API is reachable before attempting connection
+        const health = await evolutionClient.healthCheck();
+        if (!health.ok) {
+            console.error("Evolution Health Check Failed:", health.error);
+            return {
+                success: false,
+                error: health.error || "WhatsApp service is temporarily unavailable. Please try again later."
+            };
+        }
+
         // 1. Check if instance exists, if not create
         let qrCodeBase64 = null;
         const instanceName = location.id;
@@ -121,13 +131,20 @@ export async function connectEvolutionDevice() {
                 qrCodeBase64 = createRes.qrcode.base64;
             }
         } catch (e: any) {
+            // Check if this is a connection error
+            if (evolutionClient.isConnectionError(e)) {
+                return {
+                    success: false,
+                    error: "WhatsApp service is unavailable. Please ensure Docker is running (local) or contact support."
+                };
+            }
             // If already exists, ignored or handle
             console.log("Instance might already exist, fetching connect...");
         }
 
+
         // 2. Fetch connection status/QR
         // If we didn't get QR from create (e.g. already existed), fetch it
-        // Retry logic: The QR code might take a few seconds to generate after instance creation/boot
         if (!qrCodeBase64) {
             let attempts = 0;
             // Increase to 10 attempts (approx 20s) as Evolution startup can be slow
@@ -135,40 +152,38 @@ export async function connectEvolutionDevice() {
                 attempts++;
                 console.log(`Polling for QR Code (Attempt ${attempts}/10)...`);
 
-                // 2. Try connect endpoint as fallback
+                // Strategy A: Try connect endpoint (Trigger connection)
                 if (!qrCodeBase64) {
                     const connectRes = await evolutionClient.connectInstance(instanceName);
-                    if (connectRes.base64) {
-                        qrCodeBase64 = connectRes.base64;
-                    } else if (connectRes.qrcode?.base64) {
-                        qrCodeBase64 = connectRes.qrcode.base64;
+                    if (connectRes?.base64 || connectRes?.qrcode?.base64) {
+                        qrCodeBase64 = connectRes.base64 || connectRes.qrcode.base64;
+                        console.log("Got QR Code from connectInstance!");
+                        break;
                     }
                 }
 
-                // 3. Fallback: Check fetchInstance state
+                // Strategy B: Check fetchInstance state (Just in case it's already connected or has QR in metadata)
                 if (!qrCodeBase64) {
                     const fetchRes = await evolutionClient.fetchInstance(instanceName);
                     if (fetchRes?.qrcode?.base64) {
                         qrCodeBase64 = fetchRes.qrcode.base64;
                         console.log("Got QR Code from fetchInstance!");
+                        break;
                     }
 
                     // Log status for debugging
                     let status = "unknown";
                     if (fetchRes && !Array.isArray(fetchRes)) {
                         status = fetchRes.connectionStatus;
-                        console.log("Current Instance Status:", status);
                     } else if (Array.isArray(fetchRes)) {
                         const instanceRef = fetchRes.find((i: any) => i.instance?.instanceName === instanceName) || fetchRes[0];
                         status = instanceRef?.connectionStatus || "unknown";
-                        if (instanceRef) console.log("Current Instance Status (Array):", status);
                     }
+                    console.log("Current Instance Status:", status);
 
-                    // Force Restart Strategy if closed
-                    if (status === "close") {
-                        console.log("Instance is closed. Attempting restart...");
-                        await evolutionClient.restartInstance(instanceName);
-                        await new Promise(r => setTimeout(r, 2000));
+                    if (status === "open") {
+                        console.log("Instance is ALREADY OPEN/CONNECTED!");
+                        return { success: true, message: "Instance is already connected" };
                     }
                 }
 
@@ -191,8 +206,18 @@ export async function connectEvolutionDevice() {
 
     } catch (e: any) {
         console.error("Evolution Connect Error:", e);
+
+        // Return user-friendly error for connection issues
+        if (evolutionClient.isConnectionError(e)) {
+            return {
+                success: false,
+                error: "WhatsApp service is temporarily unavailable. Please try again later or contact support."
+            };
+        }
+
         return { success: false, error: e.message };
     }
+
 }
 
 export async function logoutEvolutionInstance() {

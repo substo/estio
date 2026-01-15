@@ -25,11 +25,11 @@ async function upsertContactRole(
 
     // 1. Sync to GHL first (to get ID)
     let ghlId: string | null = null;
-    if (location.ghlRefreshToken) {
+    if (location.ghlRefreshToken && location.ghlLocationId) {
         try {
             const tokens = await refreshGhlAccessToken(location);
             if (tokens.ghlAccessToken) {
-                ghlId = await syncContactToGHL(tokens.ghlAccessToken, {
+                ghlId = await syncContactToGHL(location.ghlLocationId, {
                     name: data.name,
                     email: data.email || undefined,
                     phone: data.phone || undefined,
@@ -116,11 +116,11 @@ async function upsertCompanyRole(
 
     // 1. Sync to GHL first (to get ID)
     let ghlId: string | null = null;
-    if (location.ghlRefreshToken) {
+    if (location.ghlRefreshToken && location.ghlLocationId) {
         try {
             const tokens = await refreshGhlAccessToken(location);
             if (tokens.ghlAccessToken) {
-                ghlId = await syncCompanyToGHL(tokens.ghlAccessToken, {
+                ghlId = await syncCompanyToGHL(location.ghlLocationId, {
                     name: data.name,
                     email: data.email || undefined,
                     phone: data.phone || undefined,

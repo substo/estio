@@ -39,6 +39,12 @@ export async function updateAiSettings(
                 googleAiModelExtraction: formData.get("googleAiModelExtraction") as string || "gemini-2.5-flash",
                 googleAiModelDesign: formData.get("googleAiModelDesign") as string || "gemini-2.5-flash",
                 brandVoice: formData.get("brandVoice") as string,
+                outreachConfig: {
+                    enabled: formData.get("outreachEnabled") === "on",
+                    visionIdPrompt: formData.get("visionIdPrompt") as string,
+                    icebreakerPrompt: formData.get("icebreakerPrompt") as string,
+                    qualifierPrompt: formData.get("qualifierPrompt") as string,
+                }
             },
             update: {
                 googleAiApiKey: formData.get("googleAiApiKey") as string,
@@ -46,6 +52,12 @@ export async function updateAiSettings(
                 googleAiModelExtraction: formData.get("googleAiModelExtraction") as string || "gemini-2.5-flash",
                 googleAiModelDesign: formData.get("googleAiModelDesign") as string || "gemini-2.5-flash",
                 brandVoice: formData.get("brandVoice") as string,
+                outreachConfig: {
+                    enabled: formData.get("outreachEnabled") === "on",
+                    visionIdPrompt: formData.get("visionIdPrompt") as string,
+                    icebreakerPrompt: formData.get("icebreakerPrompt") as string,
+                    qualifierPrompt: formData.get("qualifierPrompt") as string,
+                }
             },
         });
 

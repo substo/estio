@@ -10,6 +10,7 @@ import {
   REQUIREMENT_STATUSES, REQUIREMENT_CONDITIONS, CONTACT_TYPES
 } from '@/app/(main)/admin/contacts/_components/contact-types';
 import { syncContactToGHL } from '@/lib/ghl/stakeholders';
+import { syncContactToGoogle } from '@/lib/google/people';
 
 // --- Helpers & Zod Transforms ---
 
@@ -440,25 +441,54 @@ export async function createContact(
       return contact;
     });
 
-    // Sync to GHL if we have an access token (Standard Procedure)
-    // Fetch location to get token
-    const location = await db.location.findUnique({ where: { id: data.locationId }, select: { ghlAccessToken: true } });
-    if (location?.ghlAccessToken) {
+    // Fetch location to get token and GHL Location ID
+    const location = await db.location.findUnique({ where: { id: data.locationId }, select: { ghlAccessToken: true, ghlLocationId: true } });
+    if (location?.ghlAccessToken && location?.ghlLocationId) {
       // Fire and forget or await? Usually await to catch errors, but don't block UI if non-critical.
       // We will try/catch and log error but not fail the action
       try {
         console.log('[createContact] Syncing to GHL...');
-        const ghlId = await syncContactToGHL(location.ghlAccessToken, {
-          name: contact.name || undefined,
-          email: contact.email || undefined,
-          phone: contact.phone || undefined,
+        // Create in GHL (Fire & Forget)
+        syncContactToGHL(
+          location.ghlLocationId,
+          {
+            name: contact.name || undefined,
+            email: contact.email || undefined,
+            phone: contact.phone || undefined
+          },
+          contact.ghlContactId
+        ).then(async (ghlId) => {
+          if (ghlId) {
+            await db.contact.update({ where: { id: contact.id }, data: { ghlContactId: ghlId } });
+          }
+        }).catch(e => {
+          console.error('[createContact] GHL Sync Failed (async):', e);
         });
-        if (ghlId) {
-          await db.contact.update({ where: { id: contact.id }, data: { ghlContactId: ghlId } });
-        }
       } catch (e) {
-        console.error('[createContact] GHL Sync Failed:', e);
+        console.error('[createContact] GHL Sync Failed (sync):', e);
       }
+    }
+
+    // Sync to Google Contacts if any user in this location has it enabled
+    try {
+      const googleUser = await db.user.findFirst({
+        where: {
+          locations: { some: { id: data.locationId } },
+          googleSyncEnabled: true,
+          googleRefreshToken: { not: null }
+        },
+        select: { id: true }
+      });
+
+      if (googleUser) {
+        console.log('[createContact] Syncing to Google Contacts...');
+        // Fire and forget - don't block the response
+        syncContactToGoogle(googleUser.id, contact.id).catch(e =>
+          console.error('[createContact] Google Sync Failed:', e)
+        );
+      }
+    } catch (googleError) {
+      console.error('[createContact] Google Sync check failed:', googleError);
     }
 
 
@@ -632,7 +662,62 @@ export async function updateContact(
       await handleContactRoles(tx, data.contactId, data);
     });
 
-    // TODO: Update GHL? (Optional, usually specialized logic for updates)
+    // 3-Way Sync: Estio -> GHL + Google Contacts
+
+    // 1. Sync to GoHighLevel
+    try {
+      const location = await db.location.findUnique({
+        where: { id: data.locationId },
+        select: { ghlAccessToken: true, ghlLocationId: true }
+      });
+
+      if (location?.ghlAccessToken && location?.ghlLocationId) {
+        console.log('[updateContact] Syncing to GoHighLevel...');
+        const ghlId = await syncContactToGHL(location.ghlLocationId, {
+          name: data.name || undefined,
+          email: data.email || undefined,
+          phone: data.phone || undefined,
+        });
+        // Update ghlContactId if it was newly created
+        if (ghlId) {
+          const existingContact = await db.contact.findUnique({
+            where: { id: data.contactId },
+            select: { ghlContactId: true }
+          });
+          if (!existingContact?.ghlContactId) {
+            await db.contact.update({
+              where: { id: data.contactId },
+              data: { ghlContactId: ghlId }
+            });
+          }
+        }
+        console.log('[updateContact] GHL Sync complete');
+      }
+    } catch (ghlError) {
+      console.error('[updateContact] GHL Sync Failed:', ghlError);
+    }
+
+    // 2. Sync to Google Contacts
+    try {
+      const googleUser = await db.user.findFirst({
+        where: {
+          locations: { some: { id: data.locationId } },
+          googleSyncEnabled: true,
+          googleRefreshToken: { not: null }
+        },
+        select: { id: true }
+      });
+
+      if (googleUser) {
+        console.log('[updateContact] Syncing to Google Contacts...');
+        // Fire and forget - don't block the response
+        syncContactToGoogle(googleUser.id, data.contactId).catch(e =>
+          console.error('[updateContact] Google Sync Failed:', e)
+        );
+      }
+    } catch (googleError) {
+      console.error('[updateContact] Google Sync check failed:', googleError);
+    }
 
   } catch (error) {
     console.error('[updateContact] Database Error:', error);
@@ -832,14 +917,14 @@ export async function createViewing(
 
     let ghlAppointmentId: string | undefined;
 
-    if (agent?.ghlCalendarId && contact.location.ghlAccessToken) {
+    if (agent?.ghlCalendarId && contact.location.ghlAccessToken && contact.location.ghlLocationId) {
       try {
         let ghlContactId = contact.ghlContactId;
 
         // Ensure GHL Contact Exists
         if (!ghlContactId) {
           console.log('[createViewing] Syncing contact to GHL before appointment...');
-          ghlContactId = await syncContactToGHL(contact.location.ghlAccessToken, {
+          ghlContactId = await syncContactToGHL(contact.location.ghlLocationId, {
             name: contact.name || undefined,
             email: contact.email || undefined,
             phone: contact.phone || undefined,

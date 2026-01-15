@@ -1,29 +1,29 @@
 
-import { ghlFetch } from './client';
+import { ghlFetchWithAuth } from './token';
 import { GHLContact } from './types';
 
 /**
- * Syncs a Contact to GoHighLevel.
- * Uses email or phone to deduplicate if possible, but GHL API handles upsert by email usually.
+ * Syncs a Contact to GoHighLevel (LeadConnector API).
+ * Uses email or phone to deduplicate if possible.
  * 
- * @param accessToken GHL OAuth Access Token
+ * @param locationId GHL Location ID (required for LeadConnector API)
  * @param data Contact data (name, email, phone, etc.)
+ * @param currentGhlId Optional: Pass known ID to skip search
  * @returns The GHL Contact ID
  */
 export async function syncContactToGHL(
-    accessToken: string,
+    locationId: string,
     data: {
         name?: string;
         email?: string;
         phone?: string;
         companyName?: string;
         tags?: string[];
-    }
+    },
+    currentGhlId?: string | null
 ): Promise<string | null> {
     try {
         // Prepare payload
-        // GHL V2 Contacts API expects firstName/lastName usually, but 'name' might work or need splitting
-        // Let's split name if provided
         let firstName = '';
         let lastName = '';
         if (data.name) {
@@ -33,6 +33,7 @@ export async function syncContactToGHL(
         }
 
         const payload: any = {
+            locationId,
             firstName,
             lastName,
             email: data.email,
@@ -42,61 +43,119 @@ export async function syncContactToGHL(
             source: 'Estio App Stakeholder',
         };
 
-        // Remove undefined/empty
+        // Remove undefined/empty (but keep locationId!)
         Object.keys(payload).forEach(key => {
-            if (payload[key] === undefined || payload[key] === '' || payload[key] === null) {
+            if (key !== 'locationId' && (payload[key] === undefined || payload[key] === '' || payload[key] === null)) {
                 delete payload[key];
             }
         });
 
-        // 1. Search for existing contact by email or phone to avoid duplicates if GHL doesn't auto-merge
-        // GHL V2 'upsert' endpoint is preferred if available, or we search first.
-        // The standard POST /contacts usually fails if email exists, so we should search first.
+        // Create update payload (specifically remove locationId for PUT requests to avoid 422)
+        const { locationId: _unused, ...updatePayload } = payload;
 
+        // 0. OPTIMIZATION: Try to update directly if we have an ID
+        if (currentGhlId) {
+            console.log(`[GHL Sync] optimizing: Sending update directly to known ID ${currentGhlId}`);
+            try {
+                const res = await ghlFetchWithAuth<{ contact: GHLContact }>(
+                    locationId,
+                    `/contacts/${currentGhlId}`,
+                    {
+                        method: 'PUT',
+                        body: JSON.stringify(updatePayload),
+                    }
+                );
+                return res.contact.id;
+            } catch (err: any) {
+                console.warn(`[GHL Sync] Direct update failed for ${currentGhlId}. Falling back to search.`, err.message);
+            }
+        }
+
+        // 1. Search for existing contact by email or phone to avoid duplicates
         let existingId: string | null = null;
 
+        const hasContacts = (res: { contacts?: GHLContact[] }) => res.contacts && res.contacts.length > 0;
+
         if (data.email) {
-            const search = await ghlFetch<{ contacts: GHLContact[] }>(
-                `/contacts/?query=${encodeURIComponent(data.email)}`,
-                accessToken
+            console.log(`[GHL DEBUG] Searching by email: ${data.email}`);
+            const search = await ghlFetchWithAuth<{ contacts: GHLContact[] }>(
+                locationId,
+                `/contacts/?locationId=${locationId}&query=${encodeURIComponent(data.email)}`
             );
-            if (search.contacts && search.contacts.length > 0) {
-                existingId = search.contacts[0].id;
+            if (hasContacts(search)) {
+                existingId = search.contacts![0].id;
+                console.log(`[GHL DEBUG] Found by email: ${existingId}`);
             }
         }
 
         if (!existingId && data.phone) {
-            const search = await ghlFetch<{ contacts: GHLContact[] }>(
-                `/contacts/?query=${encodeURIComponent(data.phone)}`,
-                accessToken
+            const cleanPhone = data.phone.replace(/\D/g, '');
+            console.log(`[GHL DEBUG] Searching by clean phone: ${cleanPhone}`);
+            let search = await ghlFetchWithAuth<{ contacts: GHLContact[] }>(
+                locationId,
+                `/contacts/?locationId=${locationId}&query=${encodeURIComponent(cleanPhone)}`
             );
-            if (search.contacts && search.contacts.length > 0) {
-                existingId = search.contacts[0].id;
+
+            if (hasContacts(search)) {
+                existingId = search.contacts![0].id;
+                console.log(`[GHL DEBUG] Found by clean phone: ${existingId}`);
+            } else if (cleanPhone !== data.phone) {
+                console.log(`[GHL DEBUG] Searching by raw phone: ${data.phone}`);
+                search = await ghlFetchWithAuth<{ contacts: GHLContact[] }>(
+                    locationId,
+                    `/contacts/?locationId=${locationId}&query=${encodeURIComponent(data.phone)}`
+                );
+                if (hasContacts(search)) {
+                    existingId = search.contacts![0].id;
+                    console.log(`[GHL DEBUG] Found by raw phone: ${existingId}`);
+                }
             }
         }
 
         if (existingId) {
-            // Update
-            const res = await ghlFetch<{ contact: GHLContact }>(
+            // Update existing contact
+            console.log(`[GHL Sync] Updating existing contact ${existingId}`);
+            const res = await ghlFetchWithAuth<{ contact: GHLContact }>(
+                locationId,
                 `/contacts/${existingId}`,
-                accessToken,
                 {
                     method: 'PUT',
-                    body: JSON.stringify(payload),
+                    body: JSON.stringify(updatePayload),
                 }
             );
             return res.contact.id;
         } else {
-            // Create
-            const res = await ghlFetch<{ contact: GHLContact }>(
-                `/contacts/`,
-                accessToken,
-                {
-                    method: 'POST',
-                    body: JSON.stringify(payload),
+            // Create new contact
+            console.log(`[GHL Sync] Creating new contact in location ${locationId}`);
+            try {
+                const res = await ghlFetchWithAuth<{ contact: GHLContact }>(
+                    locationId,
+                    `/contacts/`,
+                    {
+                        method: 'POST',
+                        body: JSON.stringify(payload),
+                    }
+                );
+                return res.contact.id;
+            } catch (error: any) {
+                if (error.status === 400 && (error.data?.message?.includes('duplicated') || error.message?.includes('duplicated'))) { // Also check error.message if data is not present
+                    // Sometimes ghlFetchWithAuth wraps error differently
+                    const metaContactId = error.data?.meta?.contactId;
+                    if (metaContactId) {
+                        console.log(`[GHL Sync] Caught duplicate error. Recovering with ID from meta: ${metaContactId}`);
+                        const res = await ghlFetchWithAuth<{ contact: GHLContact }>(
+                            locationId,
+                            `/contacts/${metaContactId}`,
+                            {
+                                method: 'PUT',
+                                body: JSON.stringify(updatePayload),
+                            }
+                        );
+                        return res.contact.id;
+                    }
                 }
-            );
-            return res.contact.id;
+                throw error;
+            }
         }
 
     } catch (error) {
@@ -112,7 +171,7 @@ export async function syncContactToGHL(
  * For now, per plan, we treat Developers as Contacts with a company name.
  */
 export async function syncCompanyToGHL(
-    accessToken: string,
+    locationId: string,
     data: {
         name: string; // Company Name
         email?: string;
@@ -126,7 +185,7 @@ export async function syncCompanyToGHL(
     // Let's put the Company Name in 'companyName' and maybe 'Developer' as first name?
     // Or just use the name as provided.
 
-    return syncContactToGHL(accessToken, {
+    return syncContactToGHL(locationId, {
         name: data.name, // This might end up as First Name = "Dev", Last Name = "Corp"
         companyName: data.name,
         email: data.email,

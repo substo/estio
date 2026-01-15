@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Conversation } from "@/lib/ghl/conversations";
-import { generateAIDraft, generateMultiContextDraftAction, getContactContext } from "../actions";
+import { generateAIDraft, generateMultiContextDraftAction, getContactContext, runAgentAction } from "../actions";
 import { createPersistentDeal, findExistingDeal, removeConversationFromDeal } from "../../deals/actions";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,10 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
     // Context Display State
     const [contactContext, setContactContext] = useState<any>(null);
     const [loadingContext, setLoadingContext] = useState(false);
+
+    // Agent State
+    const [agentActions, setAgentActions] = useState<any[]>([]);
+    const [runningAgent, setRunningAgent] = useState(false);
 
     const isContextMode = selectedConversations && selectedConversations.length > 0;
 
@@ -129,6 +133,33 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
         }
         // Visually remove from selection
         onDeselect?.(conversationId);
+    };
+
+    const handleRunAgent = async () => {
+        if (!conversation?.contactId) return;
+
+        setRunningAgent(true);
+        setError(null);
+        setAgentActions([]);
+
+        try {
+            const result = await runAgentAction(conversation.id, conversation.contactId);
+
+            if (result.success) {
+                setReasoning(result.thought || "Agent completed.");
+                setDraft(result.draft || "");
+                setAgentActions(result.actions || []);
+
+                // Refresh context after agent (may have updated fields)
+                getContactContext(conversation.contactId).then(setContactContext);
+            } else {
+                setError(result.error || "Agent failed.");
+            }
+        } catch (e: any) {
+            setError("Agent crashed: " + e.message);
+        } finally {
+            setRunningAgent(false);
+        }
     };
 
     return (
@@ -351,6 +382,41 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
                         </>
                     )}
                 </Button>
+
+                {/* Autonomous Agent Button */}
+                {!isContextMode && (
+                    <Button
+                        onClick={handleRunAgent}
+                        disabled={runningAgent || generating}
+                        variant="outline"
+                        className="w-full border-purple-400 text-purple-700 hover:bg-purple-50"
+                    >
+                        {runningAgent ? (
+                            <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Agent Thinking...
+                            </>
+                        ) : (
+                            <>
+                                <Sparkles className="mr-2 h-4 w-4" />
+                                Run Agent (Autonomous)
+                            </>
+                        )}
+                    </Button>
+                )}
+
+                {/* Agent Actions Summary */}
+                {agentActions.length > 0 && (
+                    <Alert className="bg-green-50 border-green-200">
+                        <Check className="h-4 w-4 text-green-600" />
+                        <AlertTitle className="text-green-800 text-sm">Agent Actions</AlertTitle>
+                        <AlertDescription className="text-xs text-green-700">
+                            {agentActions.map((a, i) => (
+                                <div key={i}>• {a.tool}: {JSON.stringify(a.result?.message || a.result || a.error)}</div>
+                            ))}
+                        </AlertDescription>
+                    </Alert>
+                )}
 
                 {error && (
                     <Alert variant="destructive">

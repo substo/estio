@@ -53,6 +53,8 @@ model Location {
   evolutionInstanceId       String?
   evolutionApiToken         String?
   evolutionConnectionStatus String? // "open", "connecting", "close"
+  
+  whatsappImportSessions WhatsAppImportSession[]
 }
 
 model LeadSource {
@@ -144,6 +146,12 @@ model User {
   updatedProperties Property[] @relation("PropertyUpdater")
   viewings          Viewing[]
   contactHistory    ContactHistory[]
+
+  // Google Contact Sync Credentials
+  googleAccessToken  String?  @db.Text
+  googleRefreshToken String?  @db.Text
+  googleSyncToken    String?  // To track the last sync point
+  googleSyncEnabled  Boolean  @default(false)
 }
 
 model Property {
@@ -296,6 +304,8 @@ model SiteConfig {
   searchConfig   Json?   // { metaTitle, metaDescription, emptyTitle, emptyBody }
   submissionsConfig Json? // { title, emptyTitle, emptyBody, headerStyle, heroImage }
   
+  outreachConfig Json?    // AI Outreach Assistant Configuration (Prompts, Enabled status)
+    
   publicListingEnabled Boolean @default(true) // Feature Flag for "List Your Property"
 
   // Existing Fields
@@ -382,6 +392,10 @@ model Contact {
   viewings                Viewing[]
   history                 ContactHistory[]
   conversations           Conversation[]
+
+  // Google Sync
+  googleContactId         String?
+  lastGoogleSync          DateTime?
 }
 
 model Company {
@@ -734,5 +748,25 @@ model Message {
 
   @@index([conversationId])
   @@index([createdAt])
+}
+
+model WhatsAppImportSession {
+  id              String   @id @default(cuid())
+  locationId      String
+  fileName        String
+  status          String   @default("pending") // pending, mapping, importing, complete, failed
+  rawContent      String   @db.Text
+  parsedData      Json?    // Parsed messages before final import
+  contactMappings Json?    // { "Display Name": "contactId" }
+  uniqueAuthors   String[] @default([]) // List of unique sender names for easy mapping UI
+  messageCount    Int      @default(0)
+  errorMessage    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  location        Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  
+  @@index([locationId])
+  @@index([status])
 }
 

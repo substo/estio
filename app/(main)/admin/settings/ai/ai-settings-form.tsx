@@ -139,6 +139,87 @@ export function AiSettingsForm({ initialData, locationId }: { initialData: any, 
 
                 <Separator />
 
+                {/* Outreach Assistant Configuration */}
+                <div className="space-y-4">
+                    <h3 className="text-lg font-medium">Outreach Assistant</h3>
+                    <div className="space-y-4 border rounded-lg p-4 bg-slate-50/50">
+                        <div className="flex items-center space-x-2">
+                            <input
+                                type="checkbox"
+                                id="outreachEnabled"
+                                name="outreachEnabled"
+                                className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                                defaultChecked={initialData?.outreachConfig?.enabled ?? false}
+                            />
+                            <Label htmlFor="outreachEnabled" className="font-medium">Enable Martin's Outreach Assistant</Label>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                            Automatically analyze new leads to generate Vision IDs, extract requirements, and draft agentic follow-up messages.
+                        </p>
+
+                        <div className="grid gap-4 pt-2">
+                            <div className="grid gap-2">
+                                <Label htmlFor="visionIdPrompt">Vision ID & Extraction Prompt</Label>
+                                <textarea
+                                    id="visionIdPrompt"
+                                    name="visionIdPrompt"
+                                    className="flex min-h-[120px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                    placeholder="Instructions for generating the Visual ID and extracting requirements..."
+                                    defaultValue={initialData?.outreachConfig?.visionIdPrompt || `Analyze Input: Identify the lead's name, whether it is a Rent or Sale inquiry, the property URL (if any), and the notes provided.
+
+Contact Creation: Generate the "First Name" and "Last Name" fields for a phone contact.
+
+First Name Field: [Full First Name] [Full Last Name]
+Last Name (Second Name) Field: Lead [Rent/Sale] [Ref #] [Brief Details]
+
+If a specific property URL is provided: Include the Ref number, type (2bdr Apt), Area, and Price.
+Example: Lead Rent DT4012 2bdr Apt Chlorakas, Paphos €750/mo
+
+If multiple properties or general notes are provided: Use the Ref numbers and key requirements (Budget/Area).
+Example: Lead Rent DT1234/DT5562 Paphos/Peyia €1200 Budget
+
+Sale vs Rent: Always specify "Lead Sale" or "Lead Rent" at the start.
+
+Also extract any explicit requirements (District, Bedrooms, Price, etc.) to populate the contact fields.`}
+                                />
+                            </div>
+
+                            <div className="grid gap-2">
+                                <Label htmlFor="icebreakerPrompt">Step 1: The Icebreaker Prompt</Label>
+                                <textarea
+                                    id="icebreakerPrompt"
+                                    name="icebreakerPrompt"
+                                    className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                    placeholder="Draft a very short message to acknowledge the inquiry..."
+                                    defaultValue={initialData?.outreachConfig?.icebreakerPrompt || `Goal: Get a response about a viewing.
+Content: Mention the specific property (if URL/Ref provided) or the general area.
+Tone: Concise, direct, and helpful. No "How are you?" or "Hope you're well."
+At the end of the first message only write the exact property mentioned full url for the leads reference.`}
+                                />
+                            </div>
+
+                            <div className="grid gap-2">
+                                <Label htmlFor="qualifierPrompt">Step 2: The Qualifier Prompt</Label>
+                                <textarea
+                                    id="qualifierPrompt"
+                                    name="qualifierPrompt"
+                                    className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                    placeholder="Draft a follow-up message to be sent after they reply..."
+                                    defaultValue={initialData?.outreachConfig?.qualifierPrompt || `Goal: Gather data not found in the initial lead file.
+Questions to include:
+"When are you looking to start a tenancy?" (or "When are you looking to purchase?" if sale).
+"How long of a contract are you looking for?" (If rent).
+"What is your monthly budget range?"
+"Are there any other options on downtowncyprus.com you’d like to see?"
+Ask for their email address to set up automated property alerts.`}
+                                />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <Separator />
+
                 {/* Brand Voice Section */}
                 <div className="space-y-4">
                     <h3 className="text-lg font-medium">Brand Voice & Research</h3>

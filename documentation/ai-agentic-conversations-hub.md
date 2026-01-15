@@ -171,20 +171,30 @@ The conversation list now correctly displays the channel type (Email, SMS, Whats
 
 ---
 
-## 5. Agentic Coordinator (Implemented)
+## 5. Agentic Coordinator (Implemented - V2)
 
-We have upgraded the AI from a passive "Drafter" to an **Autonomous Agent** with Tool Use capabilities.
+We have upgraded the AI from a passive "Drafter" to a full **Autonomous Agent** with Tool Use capabilities. This is now the primary AI interaction in the Coordinator Panel.
 
 ### Agent Architecture
-*   **Model**: Google Gemini 2.5 Flash.
-*   **Paradigm**: ReAct / Function Calling.
-*   **Process**: The Agent receives the Deal Context + Latest User Input, "thinks" about the next step, and executes specific tools before generating a final response.
+*   **Model**: Google Gemini 2.5 Pro (configurable).
+*   **Paradigm**: Manus-inspired "Plan -> Act -> Verify" loop with JSON function calling.
+*   **Location**: The "Run Agent (Autonomous)" button in the AI Coordinator panel (`/admin/conversations`).
 
-### Available Tools
-1.  `searchProperties(criteria)`: Queries the internal database for properties matching specific criteria (location, price, beds).
-2.  `getMarketStats(location, type)`: Performs analysis on internal data to provide price-per-sqm trends or recent sales data.
-3.  `readDealHistory(dealId)`: Fetches the full unified timeline to understand context.
-4.  `draftMessage(recipient, content)`: Prepares a message for human approval.
+### Available Tools (lib/ai/tools.ts)
+| Tool                       | Description                                                      |
+|----------------------------|------------------------------------------------------------------|
+| `update_requirements`      | Updates Contact requirements (status, district, budget, etc.)   |
+| `search_properties`        | Queries DB for matching properties                               |
+| `create_viewing`           | Schedules a viewing and syncs to GHL Calendar                    |
+| `log_activity`             | Appends timestamped log to Contact's "Other Details"             |
+
+### How It Works
+1.  Agent receives conversation history + contact context.
+2.  Gemini outputs JSON with `thought`, `tool_calls`, and `final_response`.
+3.  System executes each tool call sequentially.
+4.  Results + draft are displayed in the UI for human approval.
+
+> **Full Documentation**: See [AI Autonomous Agent](ai-autonomous-agent.md) for architecture, prompts, and code references.
 
 ---
 

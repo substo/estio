@@ -44,7 +44,34 @@ export async function syncMessageFromWebhook(payload: any) {
             // Webhook usually has basic details.
             // But let's try to sync if we have token.
             if (location.ghlAccessToken) {
-                await ensureLocalContactSynced(ghlContactId, location.id, location.ghlAccessToken);
+                // [JIT Sync] Ensure contact exists locally (if it's a GHL ID we don't have yet)
+                // First, check if we can find it locally by ID or GHL ID
+                const existingContact = await db.contact.findFirst({
+                    where: {
+                        OR: [
+                            { id: ghlContactId },
+                            { ghlContactId: ghlContactId }
+                        ],
+                        locationId: location.id
+                    },
+                    select: { id: true, ghlContactId: true }
+                });
+
+                if (!existingContact) {
+                    // If not found locally, assume it's a GHL ID and try to sync
+                    try {
+                        await ensureLocalContactSynced(ghlContactId, location.id, location.ghlAccessToken);
+                    } catch (e) {
+                        console.warn(`[syncMessageFromWebhook] Skipping sync: Contact ${ghlContactId} could not be resolved locally.`);
+                        // If it fails (e.g. 400 Bad Request because it was an internal ID that doesn't exist), we should probably stop?
+                        // But we might still want to record the message if we can link it to a conversation?
+                        // Actually, if we can't find the contact, we can't really link the message safely unless we create a placeholder.
+                        // For now, let's proceed and let the message creation fail if foreign key fails, or handle it.
+                    }
+                } else if (existingContact.ghlContactId) {
+                    // Optionally refresh if it has a GHL ID, but not strictly necessary for every message
+                    // await ensureLocalContactSynced(existingContact.ghlContactId, location.id, location.ghlAccessToken);
+                }
                 contact = await db.contact.findUnique({ where: { ghlContactId: ghlContactId } });
             }
         } catch (e) {

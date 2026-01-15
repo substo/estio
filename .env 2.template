@@ -1,0 +1,51 @@
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
+CLERK_SECRET_KEY=
+
+CLERK_WEBHOOK_SECRET=
+NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
+NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
+NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/
+NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/
+
+SUPABASE_URL=
+SUPABASE_SERVICE_KEY=
+SUPABASE_ANON_KEY=
+
+UPSTASH_REDIS_REST_URL=
+UPSTASH_REDIS_REST_TOKEN=
+
+FRONTEND_URL=
+
+# GHL
+GHL_CLIENT_ID=
+GHL_CLIENT_SECRET=
+GHL_REDIRECT_URI=
+APP_BASE_URL=
+WIDGET_BASE_URL=
+
+DATABASE_URL= # Set this to the Transaction connection pooler string you copied in Step 1
+DIRECT_URL=  # Set this to the Session connection pooler string you copied in Step 1
+
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+NEXT_PUBLIC_STRIPE_PUBLIC_KEY=
+
+NEXT_PUBLIC_STRIPE_PRICE_ID=
+
+# GoHighLevel OAuth Configuration
+GHL_CLIENT_ID=
+GHL_CLIENT_SECRET=
+GHL_REDIRECT_URI=
+APP_BASE_URL=
+WIDGET_BASE_URL=
+
+# JWT Secret for SSO Token Signing (generate with: openssl rand -base64 32)
+JWT_SECRET=
+SSO_TOKEN_EXPIRY_MINUTES=5
+SESSION_EXPIRY_HOURS=24
+
+# Permission Configuration
+# Comma-separated list of allowed GoHighLevel user roles
+# Options: admin, user, account-admin, account-user, agency-admin, agency-user
+# Example: admin,user (allows both admins and regular users)
+ALLOWED_GHL_ROLES=admin,user

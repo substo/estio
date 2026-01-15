@@ -1,5 +1,6 @@
 import db from "@/lib/db";
 import { getContact } from "@/lib/ghl/contacts";
+import { generateVisualId } from "@/lib/google/utils";
 
 /**
  * Ensures a GHL Contact exists in our local database.
@@ -77,4 +78,108 @@ export async function ensureLocalContactSynced(ghlContactId: string, locationId:
         console.error("[JIT Sync] Error ensuring local contact:", error);
         return null;
     }
+}
+
+/**
+ * Ensures a remote GHL contact exists for a local contact.
+ * Reverse of ensureLocalContactSynced.
+ * 
+ * 1. Checks if we already have a GHL ID.
+ * 2. If not, searches GHL by Phone/Email.
+ * 3. If found, links it.
+ * 4. If not found, CREATES it in GHL and links it.
+ */
+export async function ensureRemoteContact(contactId: string, ghlLocationId: string, accessToken: string) {
+    // 1. Get Local Contact
+    const contact = await db.contact.findUnique({
+        where: { id: contactId },
+        include: {
+            propertyRoles: {
+                include: { property: true }
+            }
+        }
+    });
+
+    if (!contact) return null;
+
+    // Already linked?
+    if (contact.ghlContactId) {
+        return contact.ghlContactId;
+    }
+
+    // 2. Search GHL
+    try {
+        const { ghlFetch } = await import("@/lib/ghl/client");
+
+        let foundGhlId: string | null = null;
+
+        // Search by Phone (preferred)
+        // We append locationId to be explicit and avoid 403s if token is ambiguous
+        if (contact.phone) {
+            // Strip format
+            const cleanPhone = contact.phone.replace(/\D/g, '');
+            const searchRes = await ghlFetch<{ contacts: any[] }>(`/contacts/?locationId=${ghlLocationId}&query=${cleanPhone}`, accessToken);
+            if (searchRes.contacts?.length > 0) {
+                // Best match?
+                foundGhlId = searchRes.contacts[0].id;
+                console.log(`[JIT Sync] Found existing GHL contact by phone: ${foundGhlId}`);
+            }
+        }
+
+        // Search by Email (fallback)
+        if (!foundGhlId && contact.email) {
+            const searchRes = await ghlFetch<{ contacts: any[] }>(`/contacts/?locationId=${ghlLocationId}&query=${contact.email}`, accessToken);
+            if (searchRes.contacts?.length > 0) {
+                foundGhlId = searchRes.contacts[0].id;
+                console.log(`[JIT Sync] Found existing GHL contact by email: ${foundGhlId}`);
+            }
+        }
+
+        // 3. Create if not found
+        if (!foundGhlId) {
+            console.log(`[JIT Sync] Creating NEW contact in GHL for ${contact.name}`);
+            const payload: any = {
+                locationId: ghlLocationId, // CRITICAL: Must specify location
+                name: contact.name,
+                email: contact.email,
+                phone: contact.phone,
+                source: "Shadow WhatsApp",
+                companyName: generateVisualId(contact) // <--- SYNC VISUAL ID TO GHL
+            };
+
+            // First Name / Last Name helper
+            if (contact.name) {
+                const parts = contact.name.trim().split(' ');
+                if (parts.length > 1) {
+                    payload.firstName = parts[0];
+                    payload.lastName = parts.slice(1).join(' ');
+                } else {
+                    payload.firstName = contact.name;
+                }
+            }
+
+            const createRes = await ghlFetch<{ contact: { id: string } }>(`/contacts/`, accessToken, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+
+            if (createRes?.contact?.id) {
+                foundGhlId = createRes.contact.id;
+            }
+        }
+
+        // 4. Update Local
+        if (foundGhlId) {
+            await db.contact.update({
+                where: { id: contact.id },
+                data: { ghlContactId: foundGhlId }
+            });
+            return foundGhlId;
+        }
+
+    } catch (error) {
+        console.error("[JIT Sync] Failed to ensure remote contact:", error);
+    }
+
+    return null;
 }

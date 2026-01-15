@@ -51,7 +51,7 @@ interface GetConversationsParams {
 }
 
 interface SendMessagePayload {
-    type: 'SMS' | 'Email' | 'WhatsApp';
+    type: 'SMS' | 'Email' | 'WhatsApp' | 'Custom';
     contactId: string;
     message?: string;
     subject?: string; // For Email
@@ -60,6 +60,7 @@ interface SendMessagePayload {
     emailFromName?: string; // Custom sender display name
     attachments?: string[];
     replyMessageId?: string; // For threading
+    conversationProviderId?: string; // For Custom Channels
 }
 
 export async function getConversations(accessToken: string, params: GetConversationsParams) {

@@ -75,7 +75,7 @@ export function ConversationInterface({ initialConversations }: ConversationInte
         setLoadingMessages(true);
         fetchMessages(activeId)
             .then(msgs => {
-                setMessages(msgs.reverse()); // Ensure chronological order
+                setMessages(msgs); // Keep chronological order (Oldest -> Newest)
             })
             .catch(err => console.error(err))
             .finally(() => setLoadingMessages(false));
@@ -104,7 +104,7 @@ export function ConversationInterface({ initialConversations }: ConversationInte
         if (res.success) {
             // refresh messages
             const newMsgs = await fetchMessages(activeConversation.id);
-            setMessages(newMsgs.reverse());
+            setMessages(newMsgs); // Keep chronological order
         } else {
             alert('Failed to send message: ' + JSON.stringify(res.error));
         }
@@ -114,9 +114,8 @@ export function ConversationInterface({ initialConversations }: ConversationInte
         <PanelGroup orientation="horizontal" className="h-full w-full max-w-full overflow-hidden">
             {/* Left: List */}
             <Panel
-                defaultSize={15}
-                minSize={10}
-                maxSize={25}
+                defaultSize={20}
+                minSize={15}
                 className="border-r"
             >
                 <ConversationList
@@ -138,7 +137,10 @@ export function ConversationInterface({ initialConversations }: ConversationInte
                 />
             </Panel>
 
-            <PanelResizeHandle className="w-1 bg-gray-200 hover:bg-blue-400 transition-colors" />
+            <PanelResizeHandle
+                className="w-1 bg-gray-200 hover:bg-blue-400 transition-colors z-50 flex flex-col justify-center"
+                style={{ width: '2px', cursor: 'col-resize' }}
+            />
 
             {/* Center: Chat */}
             <Panel defaultSize={55} minSize={30} className="overflow-hidden">
@@ -168,7 +170,10 @@ export function ConversationInterface({ initialConversations }: ConversationInte
                 )}
             </Panel>
 
-            <PanelResizeHandle className="w-1 bg-gray-200 hover:bg-blue-400 transition-colors" />
+            <PanelResizeHandle
+                className="w-1 bg-gray-200 hover:bg-blue-400 transition-colors z-50"
+                style={{ width: '1px', cursor: 'col-resize' }}
+            />
 
             {/* Right: AI Coordinator */}
             <Panel defaultSize={25} minSize={20}>

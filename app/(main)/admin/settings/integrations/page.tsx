@@ -29,6 +29,28 @@ export default function IntegrationsPage() {
                         </div>
                     </div>
                 </Link>
+
+                {/* Google Contacts Integration Card */}
+                <Link href="/admin/settings/integrations/google" className="group block h-full">
+                    <div className="flex h-full flex-col justify-between rounded-lg border p-6 transition-colors hover:border-primary hover:bg-muted/50">
+                        <div className="space-y-4">
+                            <div className="flex items-center space-x-3">
+                                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-100 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400">
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6">
+                                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z" />
+                                    </svg>
+                                </div>
+                                <h3 className="font-semibold text-lg">Google Contacts</h3>
+                            </div>
+                            <p className="text-sm text-muted-foreground">
+                                Sync contacts to Google and visualize lead details on incoming calls.
+                            </p>
+                        </div>
+                        <div className="mt-6 flex items-center text-sm font-medium text-primary group-hover:underline">
+                            Configure Integration &rarr;
+                        </div>
+                    </div>
+                </Link>
             </div>
         </div>
     );

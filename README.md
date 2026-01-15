@@ -14,6 +14,8 @@
    git clone <repository-url>
    cd <project-directory>
    ```
+   > **Note**: For a detailed step-by-step setup (including Docker modules), see [Local Development Guide](documentation/local-development-guide.md).
+
 
 2. Install dependencies:
    ```
