@@ -1,5 +1,5 @@
 # WhatsApp Integration: Custom Channel ("Linked Device")
-**Last Updated:** 2026-01-13
+**Last Updated:** 2026-01-17
 **Related:** [Legacy Integration](whatsapp-integration-legacy.md)
 
 ## Overview
@@ -40,6 +40,55 @@ We use a **Hybrid Approach**:
 3.  **JIT Sync**: Server ensures the contact exists in GHL (`ensureRemoteContact`).
 4.  **GHL Push**: Server pushes the inbound message to GHL using `type: 'Custom'` and `conversationProviderId`.
 
+## Architecture V2 (Jan 2026 Updates)
+
+To handle high-volume sync and rate limits, we introduced a **Queue-Based Architecture**:
+
+### 1. BullMQ & Redis Queue
+- **Purpose**: Rate-limit requests to GHL API to prevent `429 Too Many Requests`.
+- **Implementation**: Messages are no longer sent directly to GHL. Instead, they are added to `ghlSyncQueue`.
+- **Worker**: A background worker processes the queue at a rate of **5 jobs per second**.
+- **Infrastructure**: Redis is required and runs on port `6379`.
+
+### 2. Full History Sync
+- **Feature**: When a new instance is connected, we now set `syncFullHistory: true`.
+- **Behavior**: Evolution API fetches *all* historical messages from the phone. These messages are processed by our webhook handler.
+- **Handling**: The Queue System allows us to ingest thousands of historical messages without crashing or getting blocked by GHL API, as they are trickled in at a safe rate.
+
+### 3. Connection Self-Healing
+- **Problem**: Webhook events sometimes fail to reach the server (e.g., during startup), leaving the DB status as "closed" even if the phone is connected.
+- **Solution**: The frontend (`actions.ts`) now implements a "Lazy Sync" check. If the DB says "closed", it proactively polls the Evolution API. If Evolution reports "open", it auto-corrects the DB status to "open".
+
+### 4. Clean Disconnect Procedure
+- **Old Behavior**: Only logged out the session.
+- **New Behavior**: Performing a disconnect now calls `deleteInstance` on Evolution API. This ensures a completely clean slate for the next connection, preventing "ghost" instances and QR code persistence issues.
+
+### 5. Lazy-Load History Sync (Jan 17, 2026)
+
+**Problem**: `syncFullHistory: true` stores messages in Evolution's internal database, but does NOT trigger webhook events for historical messages. Webhooks only fire for real-time messages.
+
+**Solution**: Implemented a **pull-based** approach:
+
+#### How It Works
+1. **On Conversation Click**: When user clicks a conversation in the UI, `fetchMessages` is called.
+2. **Evolution Check**: If Evolution is connected and the contact has a phone number:
+   - Calls Evolution API `/chat/findMessages/{instanceName}` endpoint
+   - Fetches up to 50 messages for that specific chat
+3. **Processing**: Each message is processed through `processNormalizedMessage`:
+   - Deduplicates by `wamId` (skips existing messages)
+   - Creates new messages in local database
+   - Syncs to Google Contacts and GHL (via queue)
+4. **Display**: Returns all messages from local database to UI
+
+#### Key Files
+- **`lib/evolution/client.ts`**: Added `fetchChats()` and `fetchMessages()` methods
+- **`app/(main)/admin/conversations/actions.ts`**: Enhanced `fetchMessages` with Evolution history fetch
+
+#### Benefits
+- **Lazy Loading**: Only fetches messages when user views a conversation (not all at once)
+- **Efficient**: Doesn't overwhelm the server or GHL API on connection
+- **Deduplication**: Same message is never saved twice (checked by `wamId`)
+
 ## Setup Guide
 
 ### 1. Create GHL Marketplace App (Once per Agency)
@@ -72,9 +121,8 @@ We track message delivery status (`sent`, `delivered`, `read`, `failed`) by list
 |-------|-----|
 | **"Unsuccessful" Message** | Ensure you are using the Custom Channel ID and not `type: 'WhatsApp'`. Verify `GHL_CUSTOM_PROVIDER_ID` in `.env`. |
 | **Duplicates in GHL** | Check loop prevention logic in `custom-provider/route.ts`. Ensure `wamId` is stored before generic sync runs. |
-| **Split Brain (Offline/Online)** | **Production Only**: Local Development environments connect to their own Evolution instances but share the Production Database. To prevent Local from setting the Prod DB status to "Offline", we wrapped the DB status update in `if (process.env.NODE_ENV === 'production')` in `actions.ts`. |
+| **QR Code Persists after Scan** | This is usually a sync delay. **Fix**: Refresh the page. The new "Self-Healing" logic will detect the connection and remove the QR code. |
 | **Evolution API Crash Loop** | **Error P2000**: "Value too long". Occurs if a Contact name or Profile Pic URL exceeds 191 chars. **Fix**: Manually altered the Postgres `Contact` table columns (`pushName`, `profilePicUrl`) to `TEXT` (unlimited length). |
-| **QR Code Broken Image** | The UI component was double-embedding the base64 prefix. Fixed in `whatsapp-status.tsx`. |
 | **Duplicate Conversations (Same Contact)** | **Issue**: Race conditions can create multiple conversations for one contact. **Fix**: Run `scripts/merge-same-contact-conversations.ts` to merge them. **Prevention**: Logic updated to search last 2 digits for robust matching (`sync.ts`). |
 
 ### 4. Server Logging & Debugging

@@ -6,6 +6,7 @@ export async function POST(req: NextRequest) {
     try {
         const body = await req.json();
         console.log("Evolution Webhook Payload:", JSON.stringify(body, null, 2));
+        if (body.data) console.log("Evolution Webhook Data:", JSON.stringify(body.data, null, 2));
 
         const eventType = (body.event || '').toUpperCase(); // Normalize to uppercase: CONNECTION.UPDATE
         const instanceName = body.instance;
@@ -56,6 +57,11 @@ export async function POST(req: NextRequest) {
             });
             console.log(`[Evolution] Connection update for ${instanceName}: ${status}`);
 
+        } else if (eventType === 'CHATS_UPSERT' || eventType === 'CHATS.UPSERT') {
+            const data = body.data;
+            console.log(`[Evolution] Received CHATS_UPSERT with ${Array.isArray(data) ? data.length : 1} chats.`);
+            // Ideally we should process last messages from chats if needed, 
+            // but usually MESSAGES_UPSERT follows. 
         } else if (eventType === 'MESSAGES_UPDATE' || eventType === 'MESSAGES.UPDATE') {
             // Status updates (Delivered, Read, etc.)
             const data = body.data;

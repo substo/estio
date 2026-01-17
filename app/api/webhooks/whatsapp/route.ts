@@ -31,9 +31,19 @@ export async function POST(req: NextRequest) {
         const entry = body.entry?.[0];
         const changes = entry?.changes?.[0];
         const value = changes?.value;
+        const field = changes?.field;
+
+        console.log(`[WhatsApp Webhook] Received Event: ${field}`);
+
+        if (field !== "messages") {
+            // We might be receiving other events like 'presence' or 'status'
+            return new NextResponse("OK", { status: 200 });
+        }
+
         const phoneNumberId = value?.metadata?.phone_number_id;
 
         if (!phoneNumberId) {
+            console.warn("[WhatsApp Webhook] Missing phone_number_id in metadata");
             return new NextResponse("OK", { status: 200 });
         }
 

@@ -146,6 +146,53 @@ export async function fetchMessages(conversationId: string) {
         await ensureConversationHistory(conversation.contactId, location.id, location.ghlAccessToken!);
     }
 
+    // [Evolution History Fetch] Pull messages from Evolution API if connected
+    if (location.evolutionInstanceId && conversation.contact?.phone) {
+        try {
+            const { evolutionClient } = await import("@/lib/evolution/client");
+            const { processNormalizedMessage } = await import("@/lib/whatsapp/sync");
+
+            const phoneNumber = conversation.contact.phone.replace(/\D/g, '');
+            const remoteJid = `${phoneNumber}@s.whatsapp.net`;
+
+            console.log(`[History Fetch] Fetching messages for ${remoteJid}...`);
+            const evolutionMessages = await evolutionClient.fetchMessages(location.evolutionInstanceId, remoteJid, 50);
+
+            let synced = 0;
+            for (const msg of evolutionMessages) {
+                try {
+                    const key = msg.key;
+                    const messageContent = msg.message;
+                    if (!messageContent || !key?.id) continue;
+
+                    const isFromMe = key.fromMe;
+                    const normalized: any = {
+                        from: isFromMe ? location.id : phoneNumber,
+                        to: isFromMe ? phoneNumber : location.id,
+                        body: messageContent.conversation || messageContent.extendedTextMessage?.text || '[Media]',
+                        type: 'text',
+                        wamId: key.id,
+                        timestamp: new Date(msg.messageTimestamp ? msg.messageTimestamp * 1000 : Date.now()),
+                        direction: isFromMe ? 'outbound' : 'inbound',
+                        source: 'whatsapp_evolution',
+                        locationId: location.id,
+                        contactName: msg.pushName
+                    };
+
+                    await processNormalizedMessage(normalized);
+                    synced++;
+                } catch (msgErr) {
+                    // Skip individual message errors
+                }
+            }
+            if (synced > 0) {
+                console.log(`[History Fetch] Synced ${synced} messages for conversation ${conversationId}`);
+            }
+        } catch (e) {
+            console.error("[History Fetch] Error fetching Evolution messages:", e);
+        }
+    }
+
     // 4. Fetch messages from DB
     const messages = await db.message.findMany({
         where: { conversationId: conversation.id },

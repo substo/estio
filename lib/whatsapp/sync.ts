@@ -22,7 +22,10 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
 
     // Check deduplication
     const existing = await db.message.findUnique({ where: { wamId } });
-    if (existing) return;
+    if (existing) {
+        console.log(`[WhatsApp Sync] Skipped existing message: ${wamId}`);
+        return;
+    }
 
     // Normalize Phones
     const normalizedFrom = from.startsWith('+') ? from : `+${from}`;
@@ -41,6 +44,8 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     // "39 73" does not contain "973", but it contains "73".
     // This returns ~1% of the DB, which is filtered strictly in-memory below.
     const searchSuffix = rawInputPhone.length > 2 ? rawInputPhone.slice(-2) : rawInputPhone;
+
+    console.log(`[WhatsApp Sync] Processing message ${wamId} from ${contactPhone}. Suffix: ${searchSuffix}`);
 
     const candidates = await db.contact.findMany({
         where: {
@@ -119,6 +124,8 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         }
     });
 
+    console.log(`[WhatsApp Sync] Created message ${wamId} for conversation ${conversation.id}`);
+
     // Update Conversation
     await db.conversation.update({
         where: { id: conversation.id },
@@ -148,8 +155,6 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
 
             // 2. Google Contact Sync (Opportunistic)
             // find a user in this location who has google sync enabled
-            // We use 'contains' because locationIds is an array of strings in DB probably, or related model. 
-            // In schema User has 'locations Location[]', so we use 'locations: { some: { id: locationId } }'
             const googleUser = await db.user.findFirst({
                 where: {
                     locations: { some: { id: locationId } },
@@ -159,39 +164,29 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
 
             if (googleUser) {
                 console.log(`[WhatsApp Sync] Syncing contact ${contact.id} to Google User ${googleUser.email}...`);
-                // We don't await this to avoid blocking the message flow? 
-                // Actually, let's await safely to catch errors but not fail headers
                 syncContactToGoogle(googleUser.id, contact.id).catch(e => console.error("Google Sync bg error", e));
             }
 
             if (remoteCid) {
-                console.log(`[WhatsApp Sync] Syncing ${direction} message to GHL (Contact: ${remoteCid})...`);
+                // Dynamically import Queue to avoid circular deps if any
+                const { ghlSyncQueue } = await import("@/lib/queue/ghl-sync");
+
+                console.log(`[WhatsApp Sync] Queueing message ${wamId} for GHL Sync (Contact: ${remoteCid})...`);
 
                 const customProviderId = process.env.GHL_CUSTOM_PROVIDER_ID;
-                const ghlPayload: any = {
+
+                // Add to Queue (Standard BullMQ)
+                await ghlSyncQueue.add('sync-message', {
                     contactId: remoteCid,
                     type: customProviderId ? 'Custom' : 'WhatsApp',
-                    message: body,
-                    // If inbound, we might need to specify it (depending on API)
-                    // For now, passing it in payload if API supports it, or relying on GHL to infer?
-                    // Usually GHL assumes outbound for /conversations/messages.
-                    // Ideally we should use /conversations/messages/inbound for inbound?
-                    // Let's try the standard endpoint with direction param if possible, or context.
-                };
+                    body: body,
+                    conversationProviderId: customProviderId,
+                    direction: direction,
+                    accessToken: locationDef.ghlAccessToken,
+                    wamId: wamId
+                });
 
-                if (customProviderId) {
-                    ghlPayload.conversationProviderId = customProviderId;
-                }
-
-                // If it's inbound, we attempt to mark it as such (though API support varies)
-                // Some GHL endpoints accept `direction` or `status`
-                if (direction === 'inbound') {
-                    // ghlPayload.direction = 'inbound'; // Speculative
-                    // If this fails to show as inbound, we might need to use the specific inbound endpoint.
-                }
-
-                await sendMessage(locationDef.ghlAccessToken, ghlPayload);
-                console.log(`[WhatsApp Sync] Synced to GHL successfully.`);
+                console.log(`[WhatsApp Sync] Job added to queue for ${wamId}`);
             } else {
                 console.warn(`[WhatsApp Sync] Failed to resolve GHL Contact ID. Message not synced.`);
             }

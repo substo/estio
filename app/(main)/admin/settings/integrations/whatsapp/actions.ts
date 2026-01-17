@@ -77,6 +77,35 @@ export async function getWhatsAppSettings() {
         try { decryptedAccessToken = cryptr.decrypt(location.whatsappAccessToken); } catch (e) { }
     }
 
+    // Evolution Status Check (Lazy Sync)
+    // If DB says "close" or "connecting", double check with API in case webhook failed
+    let evolutionStatus = location.evolutionConnectionStatus || "close";
+    if (location.evolutionInstanceId && evolutionStatus !== "open") {
+        try {
+            // Only try to fetch if we have an instance ID
+            const instanceData = await evolutionClient.fetchInstance(location.evolutionInstanceId);
+            let realStatus = "unknown";
+
+            if (Array.isArray(instanceData)) {
+                const ref = instanceData.find((i: any) => i.instance?.instanceName === location.evolutionInstanceId) || instanceData[0];
+                realStatus = ref?.instance?.status || ref?.connectionStatus || "unknown";
+            } else if (instanceData) {
+                realStatus = instanceData.instance?.status || instanceData.connectionStatus || "unknown";
+            }
+
+            if (realStatus === "open" || realStatus === "connected") {
+                evolutionStatus = "open";
+                // Sync back to DB
+                await db.location.update({
+                    where: { id: location.id },
+                    data: { evolutionConnectionStatus: "open" }
+                });
+            }
+        } catch (e) {
+            // Ignore error, fallback to DB status
+        }
+    }
+
     return {
         // Meta
         businessAccountId: location.whatsappBusinessAccountId || "",
@@ -91,7 +120,7 @@ export async function getWhatsAppSettings() {
 
         // Evolution
         evolutionInstanceId: location.evolutionInstanceId || "",
-        evolutionConnectionStatus: location.evolutionConnectionStatus || "close",
+        evolutionConnectionStatus: evolutionStatus,
 
         locationId: location.id,
     };
@@ -173,17 +202,22 @@ export async function connectEvolutionDevice() {
 
                     // Log status for debugging
                     let status = "unknown";
-                    if (fetchRes && !Array.isArray(fetchRes)) {
-                        status = fetchRes.connectionStatus;
-                    } else if (Array.isArray(fetchRes)) {
+                    // Handle both array (v2) and object (v1?) responses
+                    if (Array.isArray(fetchRes)) {
                         const instanceRef = fetchRes.find((i: any) => i.instance?.instanceName === instanceName) || fetchRes[0];
-                        status = instanceRef?.connectionStatus || "unknown";
+                        status = instanceRef?.instance?.status || instanceRef?.connectionStatus || "unknown";
+                    } else if (fetchRes) {
+                        status = fetchRes.instance?.status || fetchRes.connectionStatus || "unknown";
                     }
-                    console.log("Current Instance Status:", status);
+                    console.log("Current Instance Status Key:", status);
 
-                    if (status === "open") {
+                    if (status === "open" || status === "connected") {
                         console.log("Instance is ALREADY OPEN/CONNECTED!");
-                        return { success: true, message: "Instance is already connected" };
+                        await db.location.update({
+                            where: { id: location.id },
+                            data: { evolutionConnectionStatus: "open" }
+                        });
+                        return { success: true, message: "Instance is successfully connected" };
                     }
                 }
 
@@ -233,15 +267,175 @@ export async function logoutEvolutionInstance() {
 
     try {
         if (location.evolutionInstanceId) {
-            await evolutionClient.logoutInstance(location.evolutionInstanceId);
+            // Best Practice: Fully delete the instance to ensure a fresh start on next connect (Full cleanup)
+            await evolutionClient.deleteInstance(location.evolutionInstanceId);
+
             await db.location.update({
                 where: { id: location.id },
-                data: { evolutionConnectionStatus: "close" } // Reset status
+                data: {
+                    evolutionConnectionStatus: "close"
+                } // Reset status
             });
         }
         revalidatePath("/admin/settings/integrations/whatsapp");
         return { success: true };
     } catch (e: any) {
+        return { success: false, error: e.message };
+    }
+}
+
+export async function syncEvolutionChats() {
+    const { userId } = await auth();
+    if (!userId) throw new Error("Unauthorized");
+
+    const user = await db.user.findUnique({
+        where: { clerkId: userId },
+        include: { locations: true },
+    });
+    if (!user || !user.locations.length) throw new Error("No location found");
+    const location = user.locations[0];
+
+    if (!location.evolutionInstanceId) {
+        return { success: false, error: "No WhatsApp instance connected" };
+    }
+
+    try {
+        console.log("[Chat Sync] Starting chat sync for", location.evolutionInstanceId);
+
+        // Fetch all chats from Evolution
+        const chats = await evolutionClient.fetchChats(location.evolutionInstanceId);
+        if (!chats.length) {
+            return { success: true, message: "No chats found", synced: 0 };
+        }
+
+        let contactsCreated = 0;
+        let conversationsCreated = 0;
+
+        for (const chat of chats) {
+            const remoteJid = chat.id || chat.remoteJid;
+            if (!remoteJid || remoteJid.includes("@g.us")) continue; // Skip groups
+
+            const phoneNumber = remoteJid.replace('@s.whatsapp.net', '');
+            const contactName = chat.name || chat.pushName || `WhatsApp ${phoneNumber}`;
+
+            // Find or create contact
+            let contact = await db.contact.findFirst({
+                where: {
+                    locationId: location.id,
+                    phone: { contains: phoneNumber.slice(-7) } // Match last 7 digits
+                }
+            });
+
+            if (!contact) {
+                contact = await db.contact.create({
+                    data: {
+                        locationId: location.id,
+                        phone: `+${phoneNumber}`,
+                        name: contactName,
+                        status: "New",
+                        contactType: "Lead"
+                    }
+                });
+                contactsCreated++;
+            }
+
+            // Find or create conversation
+            let conversation = await db.conversation.findFirst({
+                where: { contactId: contact.id, locationId: location.id }
+            });
+
+            if (!conversation) {
+                conversation = await db.conversation.create({
+                    data: {
+                        locationId: location.id,
+                        contactId: contact.id,
+                        status: "open",
+                        ghlConversationId: `wa_${Date.now()}_${contact.id}`,
+                        lastMessageType: "TYPE_WHATSAPP"
+                    }
+                });
+                conversationsCreated++;
+            }
+        }
+
+        console.log(`[Chat Sync] Completed. Created ${contactsCreated} contacts, ${conversationsCreated} conversations.`);
+        revalidatePath("/admin/conversations");
+        return { success: true, contactsCreated, conversationsCreated };
+    } catch (e: any) {
+        console.error("[Chat Sync] Error:", e);
+        return { success: false, error: e.message };
+    }
+}
+
+/**
+ * Fetch messages for a specific conversation from Evolution API (on-demand)
+ */
+export async function fetchConversationHistory(conversationId: string) {
+    const { userId } = await auth();
+    if (!userId) throw new Error("Unauthorized");
+
+    const user = await db.user.findUnique({
+        where: { clerkId: userId },
+        include: { locations: true },
+    });
+    if (!user || !user.locations.length) throw new Error("No location found");
+    const location = user.locations[0];
+
+    if (!location.evolutionInstanceId) {
+        return { success: false, error: "No WhatsApp instance connected" };
+    }
+
+    // Get conversation and contact
+    const conversation = await db.conversation.findUnique({
+        where: { id: conversationId },
+        include: { contact: true }
+    });
+
+    if (!conversation || !conversation.contact?.phone) {
+        return { success: false, error: "Conversation or contact not found" };
+    }
+
+    try {
+        const phoneNumber = conversation.contact.phone.replace(/\D/g, '');
+        const remoteJid = `${phoneNumber}@s.whatsapp.net`;
+
+        console.log(`[History Fetch] Fetching messages for ${remoteJid}...`);
+        const messages = await evolutionClient.fetchMessages(location.evolutionInstanceId, remoteJid, 100);
+
+        const { processNormalizedMessage } = await import("@/lib/whatsapp/sync");
+        let synced = 0;
+
+        for (const msg of messages) {
+            try {
+                const key = msg.key;
+                const messageContent = msg.message;
+                if (!messageContent || !key?.id) continue;
+
+                const isFromMe = key.fromMe;
+                const normalized: any = {
+                    from: isFromMe ? location.id : phoneNumber,
+                    to: isFromMe ? phoneNumber : location.id,
+                    body: messageContent.conversation || messageContent.extendedTextMessage?.text || '[Media]',
+                    type: 'text',
+                    wamId: key.id,
+                    timestamp: new Date(msg.messageTimestamp ? msg.messageTimestamp * 1000 : Date.now()),
+                    direction: isFromMe ? 'outbound' : 'inbound',
+                    source: 'whatsapp_evolution',
+                    locationId: location.id,
+                    contactName: msg.pushName
+                };
+
+                await processNormalizedMessage(normalized);
+                synced++;
+            } catch (msgErr) {
+                console.error("[History Fetch] Error processing message:", msgErr);
+            }
+        }
+
+        console.log(`[History Fetch] Synced ${synced} messages for conversation ${conversationId}`);
+        return { success: true, synced };
+    } catch (e: any) {
+        console.error("[History Fetch] Error:", e);
         return { success: false, error: e.message };
     }
 }

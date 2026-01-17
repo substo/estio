@@ -67,7 +67,10 @@ export const evolutionClient = {
                     instanceName: instanceName,
                     token: locationId, // Use locationId as the token for simplicity/security lookup
                     integration: "WHATSAPP-BAILEYS",
-                    qrcode: true
+                    qrcode: true,
+                    reject_call: false,
+                    msg_retry: true,
+                    syncFullHistory: true
                 },
                 {
                     headers: {
@@ -113,6 +116,7 @@ export const evolutionClient = {
                 attempt++;
                 try {
                     const webhookUrl = `${process.env.APP_BASE_URL || 'https://estio.co'}/api/webhooks/evolution`;
+                    console.log(`[Evolution] Setting Webhook URL to: ${webhookUrl}`);
                     await axios.post(
                         `${EVOLUTION_API_URL}/webhook/set/${instanceName}`,
                         {
@@ -123,7 +127,8 @@ export const evolutionClient = {
                                     "QRCODE_UPDATED",
                                     "CONNECTION_UPDATE",
                                     "MESSAGES_UPSERT",
-                                    "MESSAGES_UPDATE"
+                                    "MESSAGES_UPDATE",
+                                    "CHATS_UPSERT"
                                 ],
                                 webhookByEvents: true,
                                 headers: {
@@ -298,6 +303,83 @@ export const evolutionClient = {
                 data: JSON.stringify(error.response?.data, null, 2)
             });
             throw error;
+        }
+    },
+
+    /**
+     * Update Instance Settings
+     */
+    updateSettings: async (instanceName: string, settings: any) => {
+        try {
+            console.log(`[Evolution] Updating settings for ${instanceName}...`, settings);
+            const response = await axios.post(
+                `${EVOLUTION_API_URL}/settings/set/${instanceName}`,
+                settings,
+                {
+                    headers: {
+                        'apikey': EVOLUTION_GLOBAL_API_KEY
+                    }
+                }
+            );
+            console.log(`[Evolution] Settings updated for ${instanceName}:`, response.data);
+            return response.data;
+        } catch (error: any) {
+            console.error('Error updating evolution settings:', error.response?.data || error);
+            // Don't throw to avoid blocking flow
+            return null;
+        }
+    },
+
+    /**
+     * Fetch all chats for an instance
+     */
+    fetchChats: async (instanceName: string) => {
+        try {
+            console.log(`[Evolution] Fetching chats for ${instanceName}...`);
+            const response = await axios.post(
+                `${EVOLUTION_API_URL}/chat/findChats/${instanceName}`,
+                {},
+                {
+                    headers: {
+                        'apikey': EVOLUTION_GLOBAL_API_KEY
+                    }
+                }
+            );
+            console.log(`[Evolution] Found ${response.data?.length || 0} chats`);
+            return response.data || [];
+        } catch (error: any) {
+            console.error('Error fetching chats:', error.response?.data || error);
+            return [];
+        }
+    },
+
+    /**
+     * Fetch messages for a specific chat
+     */
+    fetchMessages: async (instanceName: string, remoteJid: string, count: number = 50) => {
+        try {
+            console.log(`[Evolution] Fetching messages for ${remoteJid}...`);
+            const response = await axios.post(
+                `${EVOLUTION_API_URL}/chat/findMessages/${instanceName}`,
+                {
+                    where: {
+                        key: {
+                            remoteJid: remoteJid
+                        }
+                    },
+                    limit: count
+                },
+                {
+                    headers: {
+                        'apikey': EVOLUTION_GLOBAL_API_KEY
+                    }
+                }
+            );
+            console.log(`[Evolution] Found ${response.data?.messages?.records?.length || response.data?.length || 0} messages`);
+            return response.data?.messages?.records || response.data || [];
+        } catch (error: any) {
+            console.error('Error fetching messages:', error.response?.data || error);
+            return [];
         }
     }
 };
