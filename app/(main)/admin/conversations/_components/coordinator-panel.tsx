@@ -410,7 +410,7 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
                     <Alert className="bg-green-50 border-green-200">
                         <Check className="h-4 w-4 text-green-600" />
                         <AlertTitle className="text-green-800 text-sm">Agent Actions</AlertTitle>
-                        <AlertDescription className="text-xs text-green-700">
+                        <AlertDescription className="text-xs text-green-700 break-all">
                             {agentActions.map((a, i) => (
                                 <div key={i}>• {a.tool}: {JSON.stringify(a.result?.message || a.result || a.error)}</div>
                             ))}

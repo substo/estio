@@ -94,19 +94,19 @@ export function ConversationList({
                         <div
                             key={d.id}
                             className={cn(
-                                "border-b transition-colors p-3 cursor-pointer hover:bg-slate-50",
+                                "border-b transition-colors p-2 cursor-pointer hover:bg-slate-50",
                                 "bg-slate-50", // Placeholder for logic
                                 selectedId === d.id ? "bg-indigo-50 border-l-4 border-l-indigo-500" : "border-l-4 border-l-transparent"
                             )}
                             onClick={() => onSelectDeal?.(d.id)}
                         >
-                            <div className="flex justify-between items-start mb-1">
+                            <div className="flex justify-between items-start">
                                 <h4 className="font-semibold text-sm truncate text-indigo-900">{d.title}</h4>
                                 <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${d.stage === 'ACTIVE' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
                                     {d.stage}
                                 </span>
                             </div>
-                            <div className="flex items-center text-xs text-gray-500">
+                            <div className="flex items-center text-xs text-gray-500 mt-1">
                                 <Layers className="w-3 h-3 mr-1 opacity-50" />
                                 <span>{d.conversationIds?.length || 0} participants</span>
                                 <span className="mx-1">•</span>

@@ -11,6 +11,7 @@ interface EvolutionInstance {
         instanceName: string;
         instanceId: string;
         status: string;
+        owner: string;
     };
     hash: {
         apikey: string;

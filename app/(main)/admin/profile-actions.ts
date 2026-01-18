@@ -3,6 +3,7 @@
 import db from '@/lib/db';
 import { auth, clerkClient } from '@clerk/nextjs/server';
 import { revalidatePath } from 'next/cache';
+import { updateGHLUser } from '@/lib/ghl/users';
 
 export async function completeUserProfile(formData: FormData) {
     const { userId: clerkUserId } = await auth();
@@ -20,24 +21,53 @@ export async function completeUserProfile(formData: FormData) {
 
     try {
         // 1. Update local DB
-        await db.user.update({
+        const user = await db.user.update({
             where: { clerkId: clerkUserId },
             data: {
                 firstName: firstName.trim(),
                 lastName: lastName.trim(),
                 phone: phone?.trim() || null
+            },
+            include: {
+                locationRoles: {
+                    include: {
+                        location: true
+                    },
+                    take: 1 // Just need one to get auth context
+                }
             }
         });
 
         // 2. Sync to Clerk
-        const client = await clerkClient();
-        await client.users.updateUser(clerkUserId, {
-            firstName: firstName.trim(),
-            lastName: lastName.trim()
-        });
+        try {
+            const client = await clerkClient();
+            await client.users.updateUser(clerkUserId, {
+                firstName: firstName.trim(),
+                lastName: lastName.trim()
+            });
+        } catch (clerkError) {
+            console.error('[Profile] Failed to sync to Clerk:', clerkError);
+            // Continue even if Clerk fails, as local DB is primary
+        }
 
-        // 3. TODO: Sync to GHL if ghlUserId exists and we have write scope
-        // This would require users.write scope which may not be available
+        // 3. Sync to GHL
+        if (user.ghlUserId && user.locationRoles.length > 0) {
+            const location = user.locationRoles[0].location;
+            if (location.ghlLocationId) {
+                try {
+                    await updateGHLUser(location.ghlLocationId, user.ghlUserId, {
+                        firstName: firstName.trim(),
+                        lastName: lastName.trim(),
+                        phone: phone?.trim() || undefined,
+                        email: user.email // optional but good for consistency
+                    });
+                    console.log('[Profile] Synced to GHL successfully');
+                } catch (ghlError) {
+                    console.error('[Profile] Failed to sync to GHL:', ghlError);
+                    // Don't fail the whole request
+                }
+            }
+        }
 
         revalidatePath('/admin');
         return { success: true };

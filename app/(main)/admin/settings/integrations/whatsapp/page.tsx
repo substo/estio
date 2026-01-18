@@ -11,6 +11,17 @@ import { useToast } from "@/components/ui/use-toast";
 import { FacebookSDKScript } from "@/components/integrations/facebook-sdk-script";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+    AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 export default function WhatsAppSettingsPage() {
     const [loading, setLoading] = useState(true);
@@ -342,21 +353,41 @@ export default function WhatsAppSettingsPage() {
                                     <h3 className="font-medium text-lg text-green-700">Device Connected</h3>
                                     <p className="text-sm text-muted-foreground">Shadow API is active and syncing messages.</p>
                                 </div>
-                                <Button
-                                    variant="outline"
-                                    className="border-red-200 text-red-600 hover:bg-red-50"
-                                    onClick={async () => {
-                                        if (!confirm("Are you sure you want to disconnect?")) return;
-                                        setSaving(true);
-                                        await logoutEvolutionInstance();
-                                        setSettings(prev => ({ ...prev, evolutionConnectionStatus: 'close' }));
-                                        setSaving(false);
-                                        toast({ title: "Disconnected", description: "Linked device disconnected." });
-                                    }}
-                                    disabled={saving}
-                                >
-                                    Disconnect Device
-                                </Button>
+                                <AlertDialog>
+                                    <AlertDialogTrigger asChild>
+                                        <Button
+                                            variant="outline"
+                                            className="border-red-200 text-red-600 hover:bg-red-50"
+                                            disabled={saving}
+                                        >
+                                            {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                                            Disconnect Device
+                                        </Button>
+                                    </AlertDialogTrigger>
+                                    <AlertDialogContent>
+                                        <AlertDialogHeader>
+                                            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                                            <AlertDialogDescription>
+                                                This will disconnect the current WhatsApp session. You will need to scan the QR code again to reconnect.
+                                            </AlertDialogDescription>
+                                        </AlertDialogHeader>
+                                        <AlertDialogFooter>
+                                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                            <AlertDialogAction
+                                                className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+                                                onClick={async () => {
+                                                    setSaving(true);
+                                                    await logoutEvolutionInstance();
+                                                    setSettings(prev => ({ ...prev, evolutionConnectionStatus: 'close' }));
+                                                    setSaving(false);
+                                                    toast({ title: "Disconnected", description: "Linked device disconnected." });
+                                                }}
+                                            >
+                                                Disconnect
+                                            </AlertDialogAction>
+                                        </AlertDialogFooter>
+                                    </AlertDialogContent>
+                                </AlertDialog>
                             </div>
                         ) : (
                             <div className="flex flex-col items-center space-y-4">

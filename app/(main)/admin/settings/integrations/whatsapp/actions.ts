@@ -138,7 +138,8 @@ export async function connectEvolutionDevice() {
     const location = user.locations[0];
 
     try {
-        // 0. Health Check: Ensure Evolution API is reachable before attempting connection
+
+        // 0.5 Health Check: Ensure Evolution API is reachable before attempting connection
         const health = await evolutionClient.healthCheck();
         if (!health.ok) {
             console.error("Evolution Health Check Failed:", health.error);
@@ -202,17 +203,40 @@ export async function connectEvolutionDevice() {
 
                     // Log status for debugging
                     let status = "unknown";
+                    let ownerJid = "";
+
                     // Handle both array (v2) and object (v1?) responses
                     if (Array.isArray(fetchRes)) {
                         const instanceRef = fetchRes.find((i: any) => i.instance?.instanceName === instanceName) || fetchRes[0];
                         status = instanceRef?.instance?.status || instanceRef?.connectionStatus || "unknown";
+                        ownerJid = instanceRef?.instance?.owner || "";
                     } else if (fetchRes) {
                         status = fetchRes.instance?.status || fetchRes.connectionStatus || "unknown";
+                        ownerJid = fetchRes.instance?.owner || "";
                     }
-                    console.log("Current Instance Status Key:", status);
+                    console.log(`Current Instance Status: ${status}, Owner: ${ownerJid}`);
 
                     if (status === "open" || status === "connected") {
                         console.log("Instance is ALREADY OPEN/CONNECTED!");
+
+                        // SECURITY CHECK: Verify Owner Match
+                        const cleanUserPhone = (user.phone || '').replace(/\D/g, '');
+                        const cleanOwnerPhone = ownerJid ? ownerJid.replace(/\D/g, '').replace('@s.whatsapp.net', '') : '';
+
+                        // We check if the owner phone ENDS WITH the user phone (to handle country codes somewhat gracefully if user didn't include them, though exact match is better)
+                        // Actually, Evolution usually returns full international format "357..."
+                        // We should enforce rigorous checking.
+
+                        if (cleanOwnerPhone && !cleanOwnerPhone.includes(cleanUserPhone) && !cleanUserPhone.includes(cleanOwnerPhone)) {
+                            console.log(`[Security Mismatch] Connected: ${cleanOwnerPhone}, Expected: ${cleanUserPhone}`);
+                            // Disconnect immediately
+                            await evolutionClient.logoutInstance(instanceName);
+                            return {
+                                success: false,
+                                error: `Security Mismatch: The connected WhatsApp number (${cleanOwnerPhone}) does not match your profile number (${user.phone}). Please scan with the correct device.`
+                            };
+                        }
+
                         await db.location.update({
                             where: { id: location.id },
                             data: { evolutionConnectionStatus: "open" }

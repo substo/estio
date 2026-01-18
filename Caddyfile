@@ -23,8 +23,13 @@ estio.co {
 # 2. Wildcard for Custom Domains (Dynamic)
 # Accepts any other traffic on port 443
 :443 {
+    # Block raw IP access to prevent on-demand TLS abuse
+    @ip_request header Host 138.199.214.117
+    abort @ip_request
+
     tls {
         on_demand
     }
     reverse_proxy localhost:3000
 }
+

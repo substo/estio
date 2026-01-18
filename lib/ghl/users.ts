@@ -58,3 +58,38 @@ export async function searchGHLUsers(
 
     return response.users || [];
 }
+
+/**
+ * Updates an existing user in GoHighLevel
+ */
+export async function updateGHLUser(
+    locationId: string,
+    userId: string,
+    userData: {
+        firstName?: string;
+        lastName?: string;
+        phone?: string;
+        email?: string;
+    }
+): Promise<GHLUser> {
+    const payload = {
+        firstName: userData.firstName,
+        lastName: userData.lastName,
+        phone: userData.phone,
+        email: userData.email,
+    };
+
+    console.log(`[GHL Update User] Updating user ${userId}:`, JSON.stringify(payload, null, 2));
+
+    try {
+        const result = await ghlFetchWithAuth<GHLUser>(locationId, `/users/${userId}`, {
+            method: 'PUT',
+            body: JSON.stringify(payload),
+        });
+        console.log('[GHL Update User] Success:', result);
+        return result;
+    } catch (error) {
+        console.error('[GHL Update User] Failed:', error);
+        throw error;
+    }
+}

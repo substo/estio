@@ -222,6 +222,17 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
         sh get-docker.sh
     fi
     
+    # Clean up existing Evolution containers to prevent name conflicts
+    # Using 'docker compose down' (without -v) preserves named volumes containing:
+    # - WhatsApp sessions (evolution_instances, evolution_store)
+    # - Database (evolution_pgdata)
+    # - Redis cache (evolution_redis_data)
+    echo "Gracefully stopping existing Evolution containers (preserving data)..."
+    # Force remove singleton containers by name (safe because volumes are persisted)
+    # This is necessary because 'docker compose down' in the new slot won't see containers from the old slot.
+    echo "Cleaning up existing Evolution containers..."
+    docker rm -f evolution_api evolution_postgres evolution_redis 2>/dev/null || true
+    
     # Start Evolution Stack
     docker compose -f docker-compose.evolution.yml up -d
 ENDSSH
@@ -236,14 +247,17 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
     
     # Reload PM2 (Always pointing to Symlink)
     cd "$SYMLINK_PATH"
+    # Always Delete and Restart to ensure arguments (like -H 127.0.0.1) are applied
+    # This prevents the "reload" trap where new args are ignored
     if pm2 describe estio-app > /dev/null 2>&1; then
-        echo "Reloading PM2..."
-        pm2 reload estio-app
-    else
-        echo "Starting PM2..."
-        PORT=3000 NODE_ENV=production pm2 start npm --name 'estio-app' -- start
-        pm2 save
+        echo "Deleting old PM2 process..."
+        pm2 delete estio-app
     fi
+
+    echo "Starting PM2 (Strict Localhost Binding)..."
+    # Added -- -H 127.0.0.1 to strictly bind to localhost
+    PORT=3000 NODE_ENV=production pm2 start npm --name 'estio-app' -- start -- -H 127.0.0.1
+    pm2 save
 ENDSSH
 
 # Step 6: Configure Caddy (Ensure it's resilient)

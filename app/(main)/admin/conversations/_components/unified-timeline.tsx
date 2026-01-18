@@ -2,7 +2,8 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { fetchDealTimeline } from '../../deals/actions';
-import { formatDistanceToNow } from 'date-fns';
+
+import { MessageBubble } from './message-bubble';
 import { MessageSquare, Sparkles } from "lucide-react";
 
 interface UnifiedTimelineProps {
@@ -36,7 +37,7 @@ export function UnifiedTimeline({ dealId }: UnifiedTimelineProps) {
     }, [timelineMessages]);
 
     return (
-        <div className="flex-1 bg-slate-200/50 p-0 flex flex-col relative overflow-hidden h-full">
+        <div className="flex-1 bg-slate-200/50 p-0 flex flex-col relative overflow-hidden h-full min-w-0 w-full">
             <div className="h-14 border-b bg-white flex items-center px-4 justify-between shrink-0">
                 <div className="flex items-center gap-2 text-gray-700">
                     <MessageSquare className="w-4 h-4" />
@@ -59,30 +60,15 @@ export function UnifiedTimeline({ dealId }: UnifiedTimelineProps) {
                         <p className="text-sm">No activity yet. Start a conversation!</p>
                     </div>
                 ) : (
-                    timelineMessages.map((msg) => {
-                        const isOutbound = msg.direction === 'outbound';
-                        return (
-                            <div key={msg.id} className={`flex ${isOutbound ? 'justify-end' : 'justify-start'}`}>
-                                <div className={`max-w-[80%] flex flex-col ${isOutbound ? 'items-end' : 'items-start'}`}>
-                                    <div className="text-[10px] text-gray-400 mb-1 px-1">
-                                        {isOutbound ? 'You' : msg.senderName} • {formatDistanceToNow(new Date(msg.createdAt), { addSuffix: true })}
-                                    </div>
-                                    <div
-                                        className={`p-3 rounded-xl text-sm shadow-sm whitespace-pre-wrap ${isOutbound
-                                            ? 'bg-indigo-600 text-white rounded-br-none'
-                                            : 'bg-white text-gray-800 border rounded-bl-none'
-                                            }`}
-                                    >
-                                        {msg.body}
-                                    </div>
-                                    {/* Optional: Channel Indicator */}
-                                    <div className="text-[9px] text-gray-300 mt-0.5 px-1 uppercase tracking-wider">
-                                        {msg.type}
-                                    </div>
-                                </div>
-                            </div>
-                        );
-                    })
+                    timelineMessages.map((msg) => (
+                        <MessageBubble
+                            key={msg.id}
+                            message={msg}
+                            contactName={msg.senderName}
+                            // UnifiedTimeline messages have senderEmail on them from the action
+                            contactEmail={msg.senderEmail}
+                        />
+                    ))
                 )}
             </div>
         </div>

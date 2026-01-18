@@ -30,8 +30,31 @@ export default function IntegrationsPage() {
                     </div>
                 </Link>
 
+                {/* GoHighLevel Integration Card */}
+                <Link href="/admin/settings/integrations/ghl" className="group block h-full">
+                    <div className="flex h-full flex-col justify-between rounded-lg border p-6 transition-colors hover:border-primary hover:bg-muted/50">
+                        <div className="space-y-4">
+                            <div className="flex items-center space-x-3">
+                                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-100 text-purple-600 dark:bg-purple-900/20 dark:text-purple-400">
+                                    <svg viewBox="0 0 24 24" className="h-6 w-6 fill-current">
+                                        <path d="M12 2L2 7l10 5 10-5-10-5zm0 9l2.5-1.25L12 8.5l-2.5 1.25L12 11zm0 2.5l-5-2.5-5 2.5L12 22l10-8.5-5-2.5-5 2.5z" />
+                                    </svg>
+                                </div>
+                                <h3 className="font-semibold text-lg">GoHighLevel</h3>
+                            </div>
+                            <p className="text-sm text-muted-foreground">
+                                Manage the connection to your GoHighLevel location, specific tokens, and syncing preferences.
+                            </p>
+                        </div>
+                        <div className="mt-6 flex items-center text-sm font-medium text-primary group-hover:underline">
+                            Configure Integration &rarr;
+                        </div>
+                    </div>
+                </Link>
+
                 {/* Google Contacts Integration Card */}
                 <Link href="/admin/settings/integrations/google" className="group block h-full">
+
                     <div className="flex h-full flex-col justify-between rounded-lg border p-6 transition-colors hover:border-primary hover:bg-muted/50">
                         <div className="space-y-4">
                             <div className="flex items-center space-x-3">

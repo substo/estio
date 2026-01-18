@@ -44,6 +44,8 @@ services:
     container_name: evolution_redis
     image: redis:alpine
     restart: always
+    ports:
+      - "127.0.0.1:6379:6379"
     command: redis-server --appendonly yes
     volumes:
       - evolution_redis_data:/data

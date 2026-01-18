@@ -151,6 +151,18 @@ The following safeguards are in place to prevent and recover from Evolution API 
 - **Container Policy**: All Evolution containers (`evolution_api`, `evolution_postgres`, `evolution_redis`) have `restart: always` policy.
 - **Server Reboot Recovery**: `deploy-direct.sh` runs `docker update --restart=always` after each deploy to ensure containers survive server reboots.
 
+### Data Persistence (Named Volumes)
+WhatsApp sessions and data are **preserved across deployments** because they are stored in Docker named volumes, not inside containers:
+
+| Volume Name | Contents |
+|-------------|----------|
+| `evolution_instances` | WhatsApp session keys (QR code scans) |
+| `evolution_store` | WhatsApp message cache |
+| `evolution_pgdata` | PostgreSQL database |
+| `evolution_redis_data` | Redis cache (message queue) |
+
+**Industry Best Practice**: The deployment script uses `docker compose down` (without `-v`) followed by `docker compose up -d`. This gracefully stops containers while explicitly preserving volumes. Data is only lost if you manually run `docker compose down -v` or `docker volume rm`.
+
 ### Health Check Endpoint
 - **Client Method**: `evolutionClient.healthCheck()` in `lib/evolution/client.ts` verifies API availability before operations.
 - **Graceful Degradation**: If Evolution API is unreachable, the UI displays a user-friendly message instead of a cryptic error.

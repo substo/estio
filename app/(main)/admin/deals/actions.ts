@@ -266,10 +266,17 @@ export async function fetchDealTimeline(dealId: string) {
     // We want a unified feed format
     return messages.map(m => ({
         id: m.id,
-        body: m.body,
+        body: m.body || "",
         createdAt: m.createdAt,
+        dateAdded: m.createdAt, // Alias for MessageBubble compatibility
         direction: m.direction,
         type: m.type,
+
+        // Extended fields for MessageBubble
+        subject: m.subject,
+        emailFrom: m.emailFrom,
+        emailTo: m.emailTo,
+
         senderName: m.direction === 'outbound' ? 'You' : (m.conversation.contact.name || "Unknown Contact"),
         senderEmail: m.conversation.contact.email,
         contactId: m.conversation.contact.ghlContactId,

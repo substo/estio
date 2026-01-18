@@ -2,6 +2,31 @@
 
 This guide covers the complete setup process for running the Estio CRM/IDX platform locally, including the necessary Docker services for the Evolution API (WhatsApp integration).
 
+## 🚀 Quick Start (TL;DR)
+
+If you have already installed the project, run these two commands to start:
+
+1. **Start Services** (Background):
+   ```bash
+   docker-compose -f docker-compose.evolution.yml up -d
+   ```
+
+2. **Start App**:
+   ```bash
+   npm run dev
+   ```
+
+3. **(Optional) Expose with Ngrok**:
+   Required for **Webhooks** (WhatsApp, GHL) to reach your local machine.
+   ```bash
+   ngrok http 3000
+   ```
+   **Update Config**:
+   Copy the `https://....ngrok-free.app` URL and update your `.env`:
+   ```env
+   APP_BASE_URL=https://<your-id>.ngrok-free.app
+   ```
+
 ## Prerequisites
 
 1.  **Node.js**: Version 18+ (tested with v20).
@@ -38,7 +63,10 @@ The project requires external services (Postgres, Redis, Evolution API) to be ru
     # Start Evolution API and its dependencies (Redis, Postgres) in the background
     docker-compose -f docker-compose.evolution.yml up -d
     ```
-3.  **Verify**: Run `docker ps`. You should see `evolution_api`, `evolution_redis`, and `evolution_postgres` running.
+3.  **Verify**: Run `docker ps`. You should see:
+    - `evolution_api` (Port 8080)
+    - `evolution_redis` (Port 6379 exposed to host)
+    - `evolution_postgres` running.
 
 ### 4. Database Setup
 If this is your first time:

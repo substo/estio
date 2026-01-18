@@ -17,8 +17,10 @@ This guide details the migration and deployment configuration for the Estio appl
 To prevent "Out Of Memory" (OOM) errors during resource-intensive Next.js builds, the `deploy-direct.sh` script now includes a **Self-Healing Swap Check**:
 
 1.  **Check**: On every deploy, it checks if the server has active Swap (`swapon --show`).
-2.  **Heal**: If no swap is detected, it **automatically creates a 4GB Swap file**, enables it, and adds it to `/etc/fstab` for persistence.
-3.  **Result**: This effectively gives the server 8GB of addressable memory (4GB RAM + 4GB Swap), eliminating build crashes.
+2.  **Heal**: If no swap is detected, it **automatically creates a swap file**, enables it, and adds it to `/etc/fstab` for persistence.
+3.  **Result**: This effectively gives the server additional virtual memory, eliminating build crashes.
+
+> **Current Configuration (Jan 2026):** The server is configured with an **8GB swap file** after manual intervention due to severe OOM issues during Next.js 16 builds. This provides ~12GB of addressable memory (4GB RAM + 8GB Swap).
 
 ## Infrastructure Setup
 

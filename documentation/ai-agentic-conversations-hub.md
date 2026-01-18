@@ -131,11 +131,17 @@ The conversation list uses a **compact layout** by default, showing only the con
 *   `conversation-preview-card.tsx`: The popover content component.
 *   `conversation-list.tsx`: Wraps each row with `HoverCard` + `HoverCardTrigger` + `HoverCardContent`.
 
-### Email Overflow Containment
-Large HTML emails (especially with wide tables or embedded images) could previously cause the entire app window to expand. This is now fixed with:
+### Email Overflow Containment & Layout Stability
+Large HTML emails or long text strings (URLs, JSON) could previously cause the entire app window to expand horizontally. This is now robustly fixed with:
 *   **Panel Overflow Control**: `PanelGroup` and Chat `Panel` have `overflow-hidden` to contain content.
-*   **Message Bubble Containment**: Each bubble has `overflow-hidden` preventing inner content from pushing bounds.
-*   **Prose Width Constraint**: Email HTML uses `max-w-full overflow-x-auto` instead of `max-w-none`, allowing horizontal scroll within the bubble if needed.
+*   **Aggressive Breaking**: Message bubbles now enforce `break-all` and `overflow-x-auto`. This ensures that even unbreakable strings force a line break or verify safe horizontal scrolling within the bubble, protecting the main 3-column layout.
+*   **Prose Width Constraint**: Email HTML uses `max-w-full` allowing scroll within the bubble if needed.
+
+### Unified Message Rendering
+We refactored the message display into a shared component (`_components/message-bubble.tsx`) used by both the Chat Window and the Deal Timeline. This ensures:
+*   **Consistent Visuals**: Identical styling for Headers, Timestamps, and Status indicators across all views.
+*   **Feature Parity**: One-click "Expand/Collapse" for emails and attachment rendering are available everywhere.
+*   **Maintainability**: Updates to message styling now propagate instantly to all parts of the Admin Hub.
 
 ### Channel-Specific From/To Display
 Message bubbles now display contextually appropriate sender/recipient information based on channel type:

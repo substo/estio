@@ -110,3 +110,97 @@ If white-label branding is critical:
 | How many times per location? | Once - when first user authorizes the app |
 
 **Bottom Line**: The domain switch is a one-time inconvenience during setup. All subsequent logins (for all users) work seamlessly on your domain!
+
+---
+
+## Q3: Why Can't I Edit Redirect URLs in a Live Marketplace App?
+
+### The Issue
+When your GHL Marketplace app is **live/published**, the redirect URL settings become locked:
+- ❌ Add button is not clickable
+- ❌ Trash/delete icon is not clickable
+- ❌ Cannot modify existing redirect URLs
+
+### Why This Happens
+GoHighLevel uses **"App Updates with Versioning"** which means:
+- **Live versions are never edited directly**
+- Redirect URLs are security-critical and get locked after approval
+- This ensures stability for existing app installations
+
+### How to Change Redirect URLs on a Live App
+
+You must **create a new version** of your app:
+
+1. Go to your app in the GHL Marketplace Developer dashboard
+2. Click **"Create New Version"** or look for **"Draft Version"**
+3. In the new draft version, modify the redirect URLs:
+   - Add new URLs (e.g., new ngrok URL)
+   - Remove old/unused URLs
+4. Submit the new version for review
+5. Once approved, it replaces the live version
+
+### Do I Need to Update GHL Every Time My Ngrok URL Changes?
+
+**Short Answer: No!** Creating a new app version every time ngrok restarts is impractical and not recommended.
+
+### Industry Best Practices for OAuth + Local Development
+
+#### ✅ Option 1: Ngrok Reserved Subdomain (RECOMMENDED)
+
+**The Problem**: Free ngrok generates random URLs like `https://abc123.ngrok-free.app` that change on every restart, requiring constant OAuth provider updates.
+
+**The Solution**: Pay for ngrok's **reserved subdomain** feature (~$8/month):
+
+```bash
+# Instead of random URL:
+ngrok http 3000  # ❌ Gets random URL each time
+
+# Use reserved subdomain:
+ngrok http --subdomain=estio-dev 3000  # ✅ Always: https://estio-dev.ngrok.io
+```
+
+**Benefits**:
+- URL never changes (`https://estio-dev.ngrok.io`)
+- **One-time setup** in GHL marketplace app
+- All developers can use the same reserved subdomain
+- No more version updates for redirect URLs
+
+#### ✅ Option 2: Production Callback Relay (FREE)
+
+Since you already have `https://estio.co/api/oauth/callback` registered:
+
+1. **Keep using the production redirect URL** in GHL
+2. Your production server receives the OAuth callback
+3. Tokens are stored in the shared database
+4. Your local dev environment can use those tokens
+
+**How it works**:
+```
+GHL → estio.co/api/oauth/callback → Saves tokens to DB → Local dev reads tokens
+```
+
+**This is what we currently use** - no ngrok URL needed in GHL at all!
+
+#### ❌ Option 3: Update GHL Each Time (NOT RECOMMENDED)
+
+Creating a new app version every time ngrok restarts:
+- Requires GHL review process (can take hours/days)
+- Creates version clutter in your app history
+- Impractical for daily development
+- **Only do this for permanent URL changes**
+
+### Summary for Future Developers
+
+| Strategy | Cost | Setup | Best For |
+|----------|------|-------|----------|
+| **Production Callback Relay** | Free | Already done | Most daily development |
+| **Ngrok Reserved Subdomain** | ~$8/mo | One-time | Teams needing isolated local OAuth |
+| **Update GHL Each Time** | Free | Repeated | Never - avoid this |
+
+### Our Recommended Workflow
+
+1. **For daily development**: Use the production callback (`estio.co`). OAuth tokens are shared via the database.
+2. **For isolated OAuth testing**: Consider ngrok reserved subdomain.
+3. **For permanent changes**: Create a new GHL app version with the new URL.
+
+> **Note**: The ngrok URL in `.env.local` (`APP_BASE_URL`) is still useful for **webhooks** (WhatsApp, etc.) that need to reach your local machine directly - this is separate from OAuth redirect URLs.

@@ -50,3 +50,28 @@ ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGFGC3uGBRLjvdvUWbilVD6ss8tYkALDpd7UjBa7VSph
 ## 4. Future Maintenance
 - **Pushing changes**: `git push origin main`
 - **Backups**: The old `.git.corrupted` folder has been deleted after verifying successful push.
+
+## 5. Post-Recovery Incident: Dev Server Hang (2026-01-16)
+
+**Symptom:**  
+`npm run dev` hanged indefinitely at the `> next dev` step and could not be terminated with `Ctrl+C`.
+
+**Why it worked "because of corrupted files":**  
+The user noted that the project started previously when files were corrupted.  
+*   **Explanation:** The "corrupted" state (often missing or 0-byte files) likely caused Next.js to skip initializing complex modules (like `middleware.ts` or specific configs). Because the problematic logic wasn't loaded, the server didn't hang—it just didn't do anything useful.
+*   **The Hang:** Once files were fully recovered, the application attempted to boot the full Next.js 16 (Turbopack) environment. A combination of conflicting configuration and dependency mismatches caused a deadlock.
+
+**Root Causes:**
+1.  **Dependency Mismatch:** Conflict between React 19 and `@react-pdf/renderer` (expecting React 18).
+2.  **Configuration Error:** `next.config.js` contained a deprecated `eslint` block which triggered warnings/errors in Next.js 16.
+3.  **Middleware Conflict:** The `middleware.ts` logic interacted poorly with the Next.js 16 startup sequence, causing a hang.
+4.  **Environment Confusion:** A rogue `package-lock.json` in the user's home directory (`~`) caused Next.js to misidentify the project root.
+
+**Resolution:**
+1.  **Cleaned Cache & Deps:** Removed `.next` and `node_modules`, then reinstalled using `npm install --legacy-peer-deps` (to resolve React 19 conflicts).
+2.  **Fixed `next.config.js`:** Removed the invalid `eslint` configuration block.
+3.  **Updated Middleware Deps:** Updated `@clerk/nextjs` to the latest version to ensure compatibility with Next.js 16.
+4.  **Process Termination:** Used `pkill -9 -f "next dev"` to forcefully clear zombie processes.
+
+**Status:**  
+Server is now functional and accessible at `http://localhost:3000`.

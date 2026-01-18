@@ -11,7 +11,6 @@ export const GHL_CONFIG = {
         "contacts.write",
         "opportunities.readonly",
         "opportunities.write",
-        "users.readonly",
         "locations.readonly",
         "locations/customValues.readonly",
         "locations/customValues.write",
@@ -36,6 +35,8 @@ export const GHL_CONFIG = {
         "conversations/message.readonly",
         "conversations/message.write",
         "conversations/reports.readonly",
-        "conversations/livechat.write"
+        "conversations/livechat.write",
+        "users.readonly",
+        "users.write"
     ]
 };

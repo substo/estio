@@ -22,13 +22,25 @@ const isPublicRoute = createRouteMatcher([
 const SYSTEM_DOMAINS = ["localhost:3000", "localhost", "127.0.0.1", "estio.co"];
 
 export default clerkMiddleware(async (auth, req: NextRequest) => {
-  const { userId } = await auth();
+  let hostname = req.headers.get("host");
+
+  // Remove port if present (for localhost testing)
+  hostname = hostname ? hostname.replace(":3000", "") : "";
   const url = req.nextUrl;
+
+  // LOOP PROTECTION: Check for the special query param we signal on internal rewrites
+  if (url.searchParams.has("_internal_rewrite")) {
+    const response = NextResponse.next();
+    // FORCE CSP HEADER: Allow iframe embedding for GHL
+    response.headers.set(
+      'Content-Security-Policy',
+      "frame-ancestors 'self' https://*.gohighlevel.com https://*.leadconnectorhq.com https://app.gohighlevel.com https://estio.co;"
+    );
+    return response;
+  }
 
   // 0. Global WWW Redirect
   // Ensure strict cannonical domain (non-www) for SEO and consistency.
-  // We check the Host header directly because req.nextUrl.hostname can sometimes represent the internal proxy hostname (localhost)
-  // depending on Next.js configuration.
   const host = req.headers.get("host");
   if (host && host.startsWith("www.") && host !== "localhost") {
     const newHostname = host.replace(/^www\./, "");
@@ -39,10 +51,6 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
     return NextResponse.redirect(newUrl);
   }
 
-  let hostname = req.headers.get("host");
-
-  // Remove port if present (for localhost testing)
-  hostname = hostname ? hostname.replace(":3000", "") : "";
   console.log(`[Middleware] Incoming Request: ${req.url} | Host Header: ${req.headers.get("host")} | Resolved Hostname: ${hostname}`);
 
   const searchParams = req.nextUrl.searchParams.toString();
@@ -50,14 +58,64 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
   const path = `${url.pathname}${searchParams.length > 0 ? `?${searchParams}` : ""
     }`;
 
+  // Helper: Create Internal Rewrite using ABSOLUTE URL
+  // We use http://127.0.0.1:3000 to avoid EPROTO errors (SSL handshake on HTTP port).
+  // CRITICAL: We MUST force specific headers so Clerk believes it's still on the original domain/protocol.
+  const createInternalRewrite = (targetPath: string) => {
+    // 1. Construct Absolute URL to localhost (HTTP) to keep it internal.
+    // We use the incoming port if available (for local dev on 3001 etc), default to 3000.
+    const port = req.nextUrl.port || '3000';
+    const destUrl = new URL(targetPath, `http://localhost:${port}`);
+
+    // Handle params (merge existing + new)
+    // Note: URL constructor above handles the path, but we need to merge current request params if not present?
+    // Actually, the original logic was:
+    // if targetPath has '?', split it.
+    // We should probably preserve that logic or simplify.
+    // The previous implementation used req.nextUrl.clone().
+    // Let's replicate the logic but on the new URL.
+
+    // If targetPath implies query params, we need to respect them.
+    // But we also usually want to carry over the original request's params if they aren't overridden?
+    // The original code:
+    // const [p, q] = targetPath.split('?');
+    // destUrl.pathname = p;
+    // const targetParams = new URLSearchParams(q);
+    // targetParams.forEach((v, k) => destUrl.searchParams.set(k, v));
+
+    // Let's do the same.
+    if (targetPath.includes('?')) {
+      const [p, q] = targetPath.split('?');
+      destUrl.pathname = p;
+      const targetParams = new URLSearchParams(q);
+      targetParams.forEach((v, k) => destUrl.searchParams.set(k, v));
+    }
+
+    // Add Loop Protection
+    destUrl.searchParams.set('_internal_rewrite', 'true');
+
+    // 2. Prepare Headers to preserve Clerk Context
+    const requestHeaders = new Headers(req.headers);
+    requestHeaders.set('x-forwarded-proto', 'https'); // Force HTTPS context for Clerk
+    requestHeaders.set('x-forwarded-host', req.headers.get('host') || '');
+    requestHeaders.set('host', req.headers.get('host') || ''); // Masquerade as original host
+
+    return NextResponse.rewrite(destUrl, {
+      request: {
+        headers: requestHeaders,
+      },
+    });
+  };
+
+
   // 1. System/Admin Domain Logic (Existing Dashboard)
   // If accessing via localhost (base), main app domain, or Clerk's OAuth domain.
-  if (SYSTEM_DOMAINS.includes(hostname || "") || hostname === "localhost" || hostname === "clerk.estio.co") {
+  if (SYSTEM_DOMAINS.includes(hostname || "") || hostname === "clerk.estio.co") {
 
     // Allow public routes without any auth
     if (isPublicRoute(req)) {
       console.log(`[Middleware] System Domain Public Route matched: ${path} for host ${hostname}`);
-      return NextResponse.next();
+      return createInternalRewrite(path);
     }
 
     // Protect dashboard and other private routes with Clerk
@@ -65,7 +123,7 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
       await auth.protect();
     }
 
-    const response = NextResponse.next();
+    const response = createInternalRewrite(path);
 
     // FORCE CSP HEADER: Allow iframe embedding for GHL
     response.headers.set(
@@ -112,6 +170,9 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
     const isAuthPage =
       url.pathname.startsWith("/sign-in") ||
       url.pathname.startsWith("/sign-up");
+
+    // Access auth() only when needed
+    const { userId } = await auth();
 
     if (!userId && !isHandshakePath && !isAuthPage) {
       // HYBRID ADMIN ACCESS MODEL:
@@ -173,32 +234,20 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
       const requestHeaders = new Headers(req.headers);
       requestHeaders.set("x-enable-satellite", "true");
 
-      // Pass updated headers to the rewrite
-      const rewriteUrl = new URL(path, req.url);
-      if ((rewriteUrl.hostname === 'localhost' || rewriteUrl.hostname === '127.0.0.1') && rewriteUrl.port === '3000') {
-        rewriteUrl.protocol = 'http:';
-      }
-
-      response = NextResponse.rewrite(rewriteUrl, {
-        request: {
-          headers: requestHeaders,
-        },
-      });
+      // Use internal rewrite helper (which adds loop protection param)
+      response = createInternalRewrite(path);
     } else {
       // Standard rewrite without enabling satellite mode
-      const rewriteUrl = new URL(path, req.url);
-      if ((rewriteUrl.hostname === 'localhost' || rewriteUrl.hostname === '127.0.0.1') && rewriteUrl.port === '3000') {
-        rewriteUrl.protocol = 'http:';
-      }
-      response = NextResponse.rewrite(rewriteUrl);
+      response = createInternalRewrite(path);
     }
 
   } else {
-    const rewriteUrl = new URL(`/${hostname}${path}`, req.url);
-    if ((rewriteUrl.hostname === 'localhost' || rewriteUrl.hostname === '127.0.0.1') && rewriteUrl.port === '3000') {
-      rewriteUrl.protocol = 'http:';
-    }
-    response = NextResponse.rewrite(rewriteUrl);
+    // IF we are rewriting to `/[domain]`, Next.js handles it.
+
+    // Strategy: Try relative first.
+    // `path` includes search params.
+    const mappedPath = `/${hostname}${url.pathname}${searchParams.length > 0 ? `?${searchParams}` : ""}`;
+    response = createInternalRewrite(mappedPath);
   }
 
   // FORCE CSP HEADER: Allow iframe embedding for GHL

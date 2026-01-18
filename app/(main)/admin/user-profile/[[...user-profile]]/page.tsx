@@ -1,18 +1,48 @@
-"use client"
-
 import config from "@/config";
 import { UserProfile } from "@clerk/nextjs";
-import { useRouter } from "next/navigation";
+import { redirect } from "next/navigation";
+import { currentUser } from "@clerk/nextjs/server";
+import db from "@/lib/db";
+import { UserProfileForm } from "../_components/user-profile-form";
 
-const UserProfilePage = () => {
-    const router = useRouter()
-
+const UserProfilePage = async () => {
     if (!config?.auth?.enabled) {
-        router.back()
+        redirect('/admin');
     }
+
+    const user = await currentUser();
+
+    // Fetch local user details to populate the form
+    // We assume the user exists in DB properly via sync, but fallback gracefully
+    let dbUser = null;
+    if (user) {
+        dbUser = await db.user.findUnique({
+            where: { clerkId: user.id },
+            select: {
+                firstName: true,
+                lastName: true,
+                phone: true,
+                email: true
+            }
+        });
+    }
+
+    const initialData = {
+        firstName: dbUser?.firstName || user?.firstName || '',
+        lastName: dbUser?.lastName || user?.lastName || '',
+        phone: dbUser?.phone || '',
+        email: dbUser?.email || user?.emailAddresses[0]?.emailAddress || ''
+    };
+
     return (
-        <div className="h-full flex items-center justify-center p-9">
-            {config?.auth?.enabled && <UserProfile path="/admin/user-profile" routing="path" />}
+        <div className="flex flex-col items-center justify-start p-6 space-y-8 w-full max-w-5xl mx-auto">
+            <div className="w-full">
+                <UserProfileForm initialData={initialData} />
+            </div>
+
+            <div className="w-full flex justify-center">
+                <UserProfile path="/admin/user-profile" routing="path" />
+            </div>
         </div>
     )
 }
