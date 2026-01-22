@@ -189,7 +189,7 @@ We replaced the static stats view with a comprehensive **Contact Details** card:
 *   **Quick Actions**: Click the contact name or distinct edit icon to open the full **Edit Contact Dialog**.
 *   **Essential Info**: Displays Email, Phone, Lead Status, and Contact Type at a glance.
 *   **Property Context**: Automatically lists **Interested Properties** and **Recent Viewings** fetched from the database relations (`propertyRoles`, `viewings`).
-*   **Usage Stats**: Still tracks AI token usage and cost, but organized discreetly at the bottom.
+*   **Usage Stats**: AI token usage and cost tracking has been relocated to a **Global Header Badge** (`components/ai-cost-badge.tsx`). This badge is visible on all admin pages and shows Today + Month costs at a glance. Clicking opens a detailed modal with all-time usage and per-conversation breakdown.
 
 #### 2. Edit Contact Integration
 Users can now **View and Edit** the contact without leaving the conversation context:

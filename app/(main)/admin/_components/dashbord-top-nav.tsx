@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { UserProfile } from '@/components/user-profile'
+import { AICostBadge } from '@/components/ai-cost-badge'
 import config from '@/config'
 import { HamburgerMenuIcon } from '@radix-ui/react-icons'
 import { Home, Settings, List, FileText } from 'lucide-react'
@@ -67,6 +68,7 @@ export default function DashboardTopNav({ children }: { children: ReactNode }) {
           </SheetContent>
         </Sheet>
         <div className="flex justify-center items-center gap-2 ml-auto">
+          <AICostBadge />
           {config?.auth?.enabled && <UserProfile />}
           <ModeToggle />
         </div>
@@ -75,3 +77,4 @@ export default function DashboardTopNav({ children }: { children: ReactNode }) {
     </div>
   )
 }
+

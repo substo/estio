@@ -1211,3 +1211,120 @@ export async function getAgentExecutions(conversationId: string) {
         createdAt: e.createdAt.toISOString()
     }));
 }
+
+/**
+ * Get aggregate AI usage across all conversations for the current location.
+ * Returns usage broken down by time period (today, this month, all-time)
+ * and top conversations for the detailed modal.
+ */
+export async function getAggregateAIUsage() {
+    try {
+        const location = await getLocationContext();
+        if (!location) {
+            return {
+                today: { totalTokens: 0, totalCost: 0 },
+                thisMonth: { totalTokens: 0, totalCost: 0 },
+                allTime: { totalTokens: 0, totalCost: 0, conversationCount: 0 },
+                topConversations: []
+            };
+        }
+
+        // Calculate date boundaries
+        const now = new Date();
+        const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+        // Aggregate from AgentExecution for time-based filtering (more accurate)
+        const [todayUsage, monthUsage, allTimeUsage, topConversations] = await Promise.all([
+            // Today's usage
+            db.agentExecution.aggregate({
+                where: {
+                    conversation: { locationId: location.id },
+                    createdAt: { gte: startOfToday }
+                },
+                _sum: {
+                    totalTokens: true,
+                    cost: true
+                }
+            }),
+            // This month's usage
+            db.agentExecution.aggregate({
+                where: {
+                    conversation: { locationId: location.id },
+                    createdAt: { gte: startOfMonth }
+                },
+                _sum: {
+                    totalTokens: true,
+                    cost: true
+                }
+            }),
+            // All-time usage (from Conversation for efficiency)
+            db.conversation.aggregate({
+                where: { locationId: location.id },
+                _sum: {
+                    totalTokens: true,
+                    totalCost: true
+                },
+                _count: {
+                    id: true
+                }
+            }),
+            // Top conversations by cost (for modal breakdown)
+            db.conversation.findMany({
+                where: {
+                    locationId: location.id,
+                    totalCost: { gt: 0 }
+                },
+                orderBy: { totalCost: 'desc' },
+                take: 10,
+                select: {
+                    id: true,
+                    ghlConversationId: true,
+                    totalTokens: true,
+                    totalCost: true,
+                    lastMessageAt: true,
+                    contact: {
+                        select: {
+                            name: true,
+                            email: true
+                        }
+                    }
+                }
+            })
+        ]);
+
+        return {
+            today: {
+                totalTokens: todayUsage._sum.totalTokens || 0,
+                totalCost: todayUsage._sum.cost || 0
+            },
+            thisMonth: {
+                totalTokens: monthUsage._sum.totalTokens || 0,
+                totalCost: monthUsage._sum.cost || 0
+            },
+            allTime: {
+                totalTokens: allTimeUsage._sum.totalTokens || 0,
+                totalCost: allTimeUsage._sum.totalCost || 0,
+                conversationCount: allTimeUsage._count.id || 0
+            },
+            topConversations: topConversations.map(c => ({
+                id: c.id,
+                conversationId: c.ghlConversationId,
+                contactName: c.contact?.name || 'Unknown',
+                contactEmail: c.contact?.email,
+                totalTokens: c.totalTokens,
+                totalCost: c.totalCost,
+                lastMessageAt: c.lastMessageAt.toISOString()
+            }))
+        };
+    } catch (e) {
+        console.error('[getAggregateAIUsage] Error:', e);
+        return {
+            today: { totalTokens: 0, totalCost: 0 },
+            thisMonth: { totalTokens: 0, totalCost: 0 },
+            allTime: { totalTokens: 0, totalCost: 0, conversationCount: 0 },
+            topConversations: []
+        };
+    }
+}
+

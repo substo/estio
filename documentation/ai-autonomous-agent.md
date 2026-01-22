@@ -215,25 +215,31 @@ To ensure the AI's reasoning is not lost, we implemented a full persistence laye
     *   `executeNextTaskAction` creates a new `AgentExecution` record after each task.
     *   The `CoordinatorPanel` fetches the last 20 executions via `getAgentExecutions`.
 
-### Usage & Cost Tracking (New)
+### Usage & Cost Tracking
 
-To provide transparency into AI operations, the system now tracks detailed usage metrics:
+To provide transparency into AI operations, the system tracks detailed usage metrics:
 
 *   **Token Counting**: Tracks prompt and completion tokens for every execution.
-*   **Cost Estimation**: Calculates cost in USD based on the specific model used (e.g., `gemini-3-pro` vs `gemini-3-flash`) and its pricing tier (standard vs high-context).
+*   **Cost Estimation**: Calculates cost in USD based on the specific model used (e.g., `gemini-3-pro` vs `gemini-3-flash`) and its pricing tier.
 *   **Data & Visibility**:
-*   **Database**: Stores `model`, `cost`, `promptTokens`, `completionTokens` in `AgentExecution`.
-*   **Pricing Engine**: `lib/ai/pricing.ts` maintains an up-to-date registry of model rates (Gemini 3.0/2.5 families).
-*   **UI**: Mission Control displays the total estimated conversation cost, and the Trace Modal breaks down cost per-run.
+    *   **Database**: Stores `model`, `cost`, `promptTokens`, `completionTokens` in `AgentExecution`.
+    *   **Pricing Engine**: `lib/ai/pricing.ts` maintains an up-to-date registry of model rates.
+    *   **UI**: **Global Header Badge** (`components/ai-cost-badge.tsx`) displays usage on all admin pages:
+        *   **At a Glance**: Shows Today + This Month costs in the header
+        *   **Click to Expand**: Opens detailed modal with All-Time totals and per-conversation breakdown
+        *   **Top Conversations**: Lists conversations ranked by AI cost with direct navigation links
 
 ### Key Files
 
 | File | Purpose |
 |------|---------|
 | `lib/ai/agent.ts` | System prompts requesting structured thought output |
+| `lib/ai/pricing.ts` | Model pricing registry for cost estimation |
+| `components/ai-cost-badge.tsx` | Global header badge with usage modal |
 | `coordinator-panel.tsx` | Collapsible UI component display + Full Trace Modal |
-| `actions.ts` | Backend logic for saving `AgentExecution` and fetching history |
+| `actions.ts` | Backend logic for saving `AgentExecution`, fetching history, and aggregate usage |
 | `prisma/schema.prisma` | DB definition for `AgentExecution` model |
+
 
 ### Full Trace Modal
 

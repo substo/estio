@@ -371,27 +371,9 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
                             {loadingContext && <div className="text-xs text-center text-indigo-500 mt-2">Loading full details...</div>}
                         </div>
                     )}
-
-                    <div className="flex justify-between pt-2 border-t mt-2">
-                        <span className="text-gray-500 flex items-center gap-1">
-                            <Sparkles className="h-3 w-3" />
-                            Est. AI Cost:
-                        </span>
-                        <div className="text-right">
-                            <div className="font-mono font-bold text-green-700">
-                                ${(!conversationUsage.totalCost || conversationUsage.totalCost === 0)
-                                    ? '0.00'
-                                    : (conversationUsage.totalCost < 0.01
-                                        ? conversationUsage.totalCost.toFixed(4)
-                                        : conversationUsage.totalCost.toFixed(2))}
-                            </div>
-                            <div className="text-[10px] text-gray-400 font-mono">
-                                {conversationUsage.totalTokens.toLocaleString()} tokens
-                            </div>
-                        </div>
-                    </div>
                 </CardContent>
             </Card>
+
 
             {/* PLANNER SECTION */}
             <div className="space-y-3">
