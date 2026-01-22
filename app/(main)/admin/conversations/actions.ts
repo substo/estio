@@ -551,7 +551,7 @@ export async function sendReply(conversationId: string, contactId: string, messa
     }
 }
 
-export async function generateAIDraft(conversationId: string, contactId: string) {
+export async function generateAIDraft(conversationId: string, contactId: string, instruction?: string) {
     const location = await getAuthenticatedLocation();
     if (!location?.ghlAccessToken) {
         throw new Error("Unauthorized");
@@ -580,7 +580,8 @@ export async function generateAIDraft(conversationId: string, contactId: string)
         conversationId,
         contactId,
         locationId: location.id, // CRITICAL: SiteConfig uses internal Location.id
-        accessToken: location.ghlAccessToken
+        accessToken: location.ghlAccessToken,
+        instruction
     });
 
     return result;

@@ -12,6 +12,7 @@ interface ChatWindowProps {
     loading: boolean;
     onSendMessage: (text: string, type: 'SMS' | 'Email' | 'WhatsApp') => void;
     onSync?: () => void;
+    onGenerateDraft?: (instruction?: string) => Promise<string | null>; // Returns draft text or null if failed
 }
 
 /**
@@ -35,11 +36,13 @@ function getInitialChannel(conversation: Conversation): 'SMS' | 'Email' | 'Whats
 
 import { MessageBubble } from "./message-bubble";
 import { SuggestionBubbles } from "./suggestion-bubbles";
+import { Sparkles, Loader2 as Spinner } from "lucide-react"; // Import Sparkles explicitly if not already
 
-export function ChatWindow({ conversation, messages, loading, onSendMessage, onSync, suggestions = [] }: ChatWindowProps & { suggestions?: string[] }) {
+export function ChatWindow({ conversation, messages, loading, onSendMessage, onSync, onGenerateDraft, suggestions = [] }: ChatWindowProps & { suggestions?: string[] }) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const [draft, setDraft] = useState("");
     const [sending, setSending] = useState(false);
+    const [generatingDraft, setGeneratingDraft] = useState(false);
     const [selectedChannel, setSelectedChannel] = useState<'SMS' | 'Email' | 'WhatsApp'>(getInitialChannel(conversation));
 
     // Update channel if conversation changes
@@ -60,6 +63,26 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
         onSendMessage(draft, selectedChannel);
         setDraft("");
         setSending(false);
+    };
+
+    const handleAiDraft = async () => {
+        if (!onGenerateDraft || generatingDraft) return;
+        setGeneratingDraft(true);
+        try {
+            // Pass current draft as user instruction
+            const instruction = draft.trim();
+            const text = await onGenerateDraft(instruction);
+
+            if (text) {
+                // REPLACE content (per user request) instead of appending
+                // Also ensures we don't duplicate the instruction if the AI repeated it
+                setDraft(text);
+            }
+        } catch (e) {
+            console.error("Draft generation failed", e);
+        } finally {
+            setGeneratingDraft(false);
+        }
     };
 
     return (
@@ -121,22 +144,42 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
                 />
 
                 <div className="p-4 flex flex-col gap-3 max-w-4xl mx-auto">
-                    {/* Channel Selector */}
-                    <div className="flex items-center gap-2">
-                        <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Reply via:</span>
-                        <Select
-                            value={selectedChannel}
-                            onValueChange={(v: 'SMS' | 'Email' | 'WhatsApp') => setSelectedChannel(v)}
-                        >
-                            <SelectTrigger className="h-8 w-auto min-w-[100px] text-xs border-dashed focus:ring-0 focus:border-solid">
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="SMS">SMS / Text</SelectItem>
-                                <SelectItem value="Email">Email</SelectItem>
-                                <SelectItem value="WhatsApp">WhatsApp</SelectItem>
-                            </SelectContent>
-                        </Select>
+                    {/* Channel Selector & AI Toolbar */}
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Reply via:</span>
+                            <Select
+                                value={selectedChannel}
+                                onValueChange={(v: 'SMS' | 'Email' | 'WhatsApp') => setSelectedChannel(v)}
+                            >
+                                <SelectTrigger className="h-8 w-auto min-w-[100px] text-xs border-dashed focus:ring-0 focus:border-solid">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="SMS">SMS / Text</SelectItem>
+                                    <SelectItem value="Email">Email</SelectItem>
+                                    <SelectItem value="WhatsApp">WhatsApp</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        {/* AI Draft Button */}
+                        {onGenerateDraft && (
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={handleAiDraft}
+                                disabled={generatingDraft}
+                                className="h-8 text-xs font-medium text-purple-600 hover:text-purple-700 hover:bg-purple-50 gap-1.5 transition-colors"
+                            >
+                                {generatingDraft ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                    <Sparkles className="w-3.5 h-3.5" />
+                                )}
+                                {generatingDraft ? "Generating..." : "AI Draft"}
+                            </Button>
+                        )}
                     </div>
 
                     <div className="relative shadow-sm rounded-xl border focus-within:ring-2 focus-within:ring-blue-500/20 transition-all">

@@ -214,6 +214,18 @@ export function ConversationInterface({ initialConversations }: ConversationInte
                             onSendMessage={handleSendMessage}
                             onSync={handleSync}
                             suggestions={suggestions}
+                            onGenerateDraft={async (instruction?: string) => {
+                                try {
+                                    const res = await generateAIDraft(activeConversation.id, activeConversation.contactId, instruction);
+                                    if (res.reasoning) {
+                                        toast({ title: "Draft Generated", description: res.reasoning });
+                                    }
+                                    return res.draft;
+                                } catch (e: any) {
+                                    toast({ title: "Draft Failed", description: e.message, variant: "destructive" });
+                                    return null;
+                                }
+                            }}
                         />
                     ) : (
                         <div className="h-full flex items-center justify-center text-gray-400 bg-slate-50">

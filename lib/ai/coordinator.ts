@@ -11,9 +11,16 @@ interface CoordinationContext {
     locationId: string;
     contactId: string;
     accessToken: string;
+    instruction?: string;
 }
 
+import { calculateRunCost } from "@/lib/ai/pricing";
+
 export async function generateDraft(context: CoordinationContext) {
+    let modelName = "gemini-2.5-flash"; // Modern default
+    let promptTokens = 0;
+    let completionTokens = 0;
+
     try {
         // 0. Fetch Config
         const siteConfig = await db.siteConfig.findUnique({
@@ -21,7 +28,11 @@ export async function generateDraft(context: CoordinationContext) {
         });
         const configAny = siteConfig as any;
         const apiKey = configAny?.googleAiApiKey || process.env.GOOGLE_API_KEY;
-        const modelName = configAny?.googleAiModel || "gemini-1.5-flash";
+
+        // Use config model if present, otherwise default
+        if (configAny?.googleAiModel) {
+            modelName = configAny.googleAiModel;
+        }
 
         if (!apiKey) {
             return {
@@ -32,18 +43,88 @@ export async function generateDraft(context: CoordinationContext) {
 
         const genAI = new GoogleGenerativeAI(apiKey);
         const model = genAI.getGenerativeModel({ model: modelName });
-        // 1. Fetch Conversation History & Details
-        const [messagesData, conversationData] = await Promise.all([
-            getMessages(context.accessToken, context.conversationId),
-            getConversation(context.accessToken, context.conversationId)
-        ]);
 
-        const messages = Array.isArray(messagesData?.messages?.messages)
-            ? [...messagesData.messages.messages].reverse() // Oldest first for context
-            : [];
+        console.log(`[AI Draft] Starting generation for Conversation: ${context.conversationId}, Model: ${modelName}`);
+
+        // 1. Fetch Conversation History & Details
+        // STRATEGY: Local Database is the PRIMARY source of truth.
+        // We only fetch from GHL if the conversation is missing locally or explicitly designated as GHL-sourced but empty.
+
+        let messages: any[] = [];
+        let conversationType = 'SMS';
+        let foundLocally = false;
+
+        // Step 1: Try Local Lookup (Primary)
+        try {
+            const localConversation = await db.conversation.findUnique({
+                where: { id: context.conversationId },
+                include: { messages: { orderBy: { createdAt: 'desc' }, take: 20 } }
+            });
+
+            if (localConversation) {
+                console.log(`[AI Draft] Local DB Fetch Success. Found ${localConversation.messages.length} messages.`);
+                messages = localConversation.messages.reverse().map(m => ({
+                    direction: m.direction,
+                    body: m.body
+                }));
+                conversationType = localConversation.lastMessageType || 'SMS';
+                foundLocally = true;
+            } else {
+                console.log(`[AI Draft] Conversation not found locally (ID: ${context.conversationId}).`);
+            }
+        } catch (dbError) {
+            console.error("[AI Draft] Local DB Error:", dbError);
+        }
+
+        // Step 2: GHL Fallback (Secondary)
+        // Used only if local lookup failed OR yielded no messages (and we suspect there might be history in GHL)
+        if (!foundLocally || messages.length === 0) {
+            console.log(`[AI Draft] Local context empty/missing. Attempting GHL Fallback...`);
+
+            let ghlIdToUse = context.conversationId;
+
+            // If we found it locally (but empty messages), try to find a linked GHL ID
+            if (foundLocally) {
+                const localRef = await db.conversation.findUnique({
+                    where: { id: context.conversationId },
+                    select: { ghlConversationId: true }
+                });
+                if (localRef?.ghlConversationId) {
+                    ghlIdToUse = localRef.ghlConversationId;
+                }
+            }
+
+            // Only attempt GHL if the ID looks valid (length check) 
+            // and is essentially distinct/valid compared to raw input if that was internal
+            if (ghlIdToUse && ghlIdToUse.length > 15) {
+                try {
+                    console.log(`[AI Draft] Fetching from GHL (ID: ${ghlIdToUse})...`);
+                    const [messagesData, conversationData] = await Promise.all([
+                        getMessages(context.accessToken, ghlIdToUse),
+                        getConversation(context.accessToken, ghlIdToUse)
+                    ]);
+
+                    const ghlMessages = Array.isArray(messagesData?.messages?.messages)
+                        ? [...messagesData.messages.messages].reverse()
+                        : [];
+
+                    if (ghlMessages.length > 0) {
+                        messages = ghlMessages;
+                        conversationType = conversationData?.conversation?.lastMessageType || conversationData?.conversation?.type || 'SMS';
+                        console.log(`[AI Draft] GHL Fallback Success. Found ${messages.length} messages.`);
+                    } else {
+                        console.log(`[AI Draft] GHL returned no messages.`);
+                    }
+                } catch (ghlError) {
+                    console.warn(`[AI Draft] GHL Fallback Failed:`, (ghlError as any).message);
+                }
+            } else {
+                console.log(`[AI Draft] Skipping GHL fallback (ID likely internal/invalid: ${ghlIdToUse})`);
+            }
+        }
 
         // Determine Channel
-        const channelType = (conversationData?.conversation?.lastMessageType || conversationData?.conversation?.type || 'SMS').toUpperCase();
+        const channelType = conversationType.toUpperCase();
         const isEmail = channelType.includes('EMAIL');
         const channelName = isEmail ? 'Email' : 'SMS';
 
@@ -138,21 +219,87 @@ export async function generateDraft(context: CoordinationContext) {
         Just the draft message text.
         `;
 
+        // Add specific user instruction if provided
+        // Add specific user instruction if provided
+        let finalPrompt = fullPrompt;
+        if (context.instruction) {
+            finalPrompt += `\n\nSPECIFIC USER INSTRUCTION:\nThe user has provided a sketch/instruction for this reply: "${context.instruction}"\n\nYour Draft MUST:\n1. Follow this instruction precisely.\n2. Expand it into a full, polite message suitable for the channel.\n3. Do NOT just repeat the instruction. meaningfuly draft the message.`;
+        }
+
+        console.log("--- [AI Draft] FULL PROMPT START ---");
+        console.log(finalPrompt);
+        console.log("--- [AI Draft] FULL PROMPT END ---");
+
         // 4. Call Gemini
-        const result = await model.generateContent(fullPrompt);
+        const result = await model.generateContent(finalPrompt);
         const response = result.response;
         const text = response.text();
+
+        // 5. Track Costs & Usage
+        if (response.usageMetadata) {
+            promptTokens = response.usageMetadata.promptTokenCount;
+            completionTokens = response.usageMetadata.candidatesTokenCount;
+        } else {
+            // Fallback estimate if API doesn't return usage
+            promptTokens = Math.ceil(fullPrompt.length / 4);
+            completionTokens = Math.ceil(text.length / 4);
+        }
+
+        const cost = calculateRunCost(modelName, promptTokens, completionTokens);
+
+        // 6. Persist to DB
+        // Determine DB conversation ID (internal)
+        const dbConversation = await db.conversation.findUnique({
+            where: { ghlConversationId: context.conversationId },
+            select: { id: true }
+        });
+
+        if (dbConversation) {
+            // Log Execution
+            await db.agentExecution.create({
+                data: {
+                    conversationId: dbConversation.id,
+                    taskId: "quick-draft",
+                    taskTitle: "Quick AI Draft",
+                    taskStatus: "done",
+                    thoughtSummary: "Generated draft reply based on conversation context.",
+                    draftReply: text,
+                    promptTokens,
+                    completionTokens,
+                    totalTokens: promptTokens + completionTokens,
+                    model: modelName,
+                    cost
+                }
+            });
+
+            // Update Conversation Totals
+            await db.conversation.update({
+                where: { id: dbConversation.id },
+                data: {
+                    promptTokens: { increment: promptTokens },
+                    completionTokens: { increment: completionTokens },
+                    totalTokens: { increment: promptTokens + completionTokens },
+                    totalCost: { increment: cost }
+                }
+            });
+        }
 
         return {
             draft: text,
             reasoning: "Generated based on conversation history and contact interest."
         };
 
-    } catch (error) {
+    } catch (error: any) {
         console.error("AI Coordinator Error:", error);
+
+        // Return clearer error message to UI
+        let message = "Error generating draft.";
+        if (error.message?.includes("API key")) message = "Invalid or missing API Key.";
+        if (error.message?.includes("429")) message = "AI Rate limit exceeded. Try again later.";
+
         return {
-            draft: "Error generating draft.",
-            reasoning: "Failed to call AI service."
+            draft: message,
+            reasoning: `Technical Error: ${error.message || "Unknown error"}`
         };
     }
 }
