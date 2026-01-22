@@ -48,6 +48,19 @@ export default function ImportPropertyPage() {
     const [previewData, setPreviewData] = useState<any>(null);
     const [draftId, setDraftId] = useState<string | null>(null);
     const [selectedModel, setSelectedModel] = useState("gemini-2.5-flash");
+    const [availableModels, setAvailableModels] = useState<any[]>([]);
+
+    useEffect(() => {
+        let mounted = true;
+        // Import dynamically to avoid circular deps if any, or just standard import
+        import("@/app/(main)/admin/conversations/actions").then(mod => {
+            mod.getAvailableAiModelsAction().then(models => {
+                if (mounted && models && models.length > 0) setAvailableModels(models);
+            });
+        });
+        return () => { mounted = false; };
+    }, []);
+
     const [maxImages, setMaxImages] = useState(50);
     const [activeTab, setActiveTab] = useState("link");
 
@@ -348,7 +361,7 @@ export default function ImportPropertyPage() {
                                             value={selectedModel}
                                             onChange={(e) => setSelectedModel(e.target.value)}
                                         >
-                                            {GOOGLE_AI_MODELS.map((model) => (
+                                            {(availableModels.length > 0 ? availableModels : GOOGLE_AI_MODELS).map((model) => (
                                                 <option key={model.value} value={model.value}>
                                                     {model.label}
                                                 </option>

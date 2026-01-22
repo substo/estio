@@ -1,13 +1,13 @@
 
 export const AI_PRICING = {
     // --- Gemini 3.0 Models (Latest 2026) ---
-    'gemini-3-pro': {
+    'gemini-3-pro-preview': {
         inputCostPerMillion: 2.00,
         outputCostPerMillion: 12.00,
         inputCostPerMillionHighContext: 4.00, // > 200k context
         outputCostPerMillionHighContext: 18.00, // > 200k context
     },
-    'gemini-3-flash': {
+    'gemini-3-flash-preview': {
         inputCostPerMillion: 0.50,
         outputCostPerMillion: 3.00,
     },
@@ -42,6 +42,28 @@ export const AI_PRICING = {
         outputCostPerMillionHighContext: 2.10,
     },
 
+    // --- Aliases & Previews ---
+    'gemini-flash-latest': { // Maps to 2.5 Flash
+        inputCostPerMillion: 0.30,
+        outputCostPerMillion: 2.50,
+    },
+    'gemini-flash-lite-latest': { // Maps to 2.5 Flash-Lite
+        inputCostPerMillion: 0.10,
+        outputCostPerMillion: 0.40,
+    },
+    'gemini-2.0-flash': { // Legacy 2.0
+        inputCostPerMillion: 0.20,
+        outputCostPerMillion: 1.00,
+    },
+    'gemini-2.0-flash-lite': {
+        inputCostPerMillion: 0.10,
+        outputCostPerMillion: 0.40,
+    },
+    'gemini-robotics-er-1.5-preview': { // Specialized, assume Pro pricing
+        inputCostPerMillion: 3.50,
+        outputCostPerMillion: 10.50,
+    },
+
     // Fallback
     'default': {
         inputCostPerMillion: 1.25, // Based on 2.5 Pro
@@ -49,7 +71,7 @@ export const AI_PRICING = {
     }
 };
 
-export const DEFAULT_MODEL = 'gemini-3-flash';
+export const DEFAULT_MODEL = 'gemini-3-flash-preview';
 
 /**
  * Calculate the cost of an AI run.

@@ -115,7 +115,8 @@ export async function fetchConversations(status: 'open' | 'closed' | 'all' = 'al
                 locationId: location.ghlLocationId || "",
                 // Injected Deal Info
                 activeDealId: dealMap.get(c.ghlConversationId)?.id,
-                activeDealTitle: dealMap.get(c.ghlConversationId)?.title
+                activeDealTitle: dealMap.get(c.ghlConversationId)?.title,
+                suggestedActions: c.suggestedActions || []
             })),
             total: conversationsWithGhlId.length
         };
@@ -551,7 +552,7 @@ export async function sendReply(conversationId: string, contactId: string, messa
     }
 }
 
-export async function generateAIDraft(conversationId: string, contactId: string, instruction?: string) {
+export async function generateAIDraft(conversationId: string, contactId: string, instruction?: string, model?: string) {
     const location = await getAuthenticatedLocation();
     if (!location?.ghlAccessToken) {
         throw new Error("Unauthorized");
@@ -581,7 +582,8 @@ export async function generateAIDraft(conversationId: string, contactId: string,
         contactId,
         locationId: location.id, // CRITICAL: SiteConfig uses internal Location.id
         accessToken: location.ghlAccessToken,
-        instruction
+        instruction,
+        model
     });
 
     return result;
@@ -764,6 +766,12 @@ async function getBasicLocationContext() {
         throw new Error("Unauthorized");
     }
     return location;
+}
+
+export async function getAvailableAiModelsAction() {
+    const location = await getBasicLocationContext();
+    const { getAvailableModels } = await import("@/lib/ai/fetch-models");
+    return getAvailableModels(location.id);
 }
 
 export async function getEvolutionStatus() {
@@ -1329,3 +1337,32 @@ export async function getAggregateAIUsage() {
     }
 }
 
+
+export async function refreshConversation(conversationId: string) {
+    const location = await getAuthenticatedLocation();
+
+    // Fetch from DB to get latest fields like suggestedActions
+    const conversation = await db.conversation.findUnique({
+        where: { ghlConversationId: conversationId },
+        include: { contact: true }
+    });
+
+    if (!conversation) return null;
+
+    // Map to UI format (Conversation interface)
+    return {
+        id: conversation.ghlConversationId,
+        contactId: conversation.contact.ghlContactId || conversation.contactId,
+        contactName: conversation.contact.name || "Unknown",
+        contactPhone: conversation.contact.phone || undefined,
+        contactEmail: conversation.contact.email || undefined,
+        lastMessageBody: conversation.lastMessageBody || "",
+        lastMessageDate: Math.floor(conversation.lastMessageAt.getTime() / 1000),
+        unreadCount: conversation.unreadCount,
+        status: conversation.status as any,
+        type: conversation.lastMessageType || 'TYPE_SMS',
+        lastMessageType: conversation.lastMessageType || undefined,
+        locationId: location.ghlLocationId || "",
+        suggestedActions: conversation.suggestedActions || []
+    };
+}

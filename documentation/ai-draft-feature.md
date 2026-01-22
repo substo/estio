@@ -62,6 +62,38 @@ Search server logs for the tag `[AI Draft]`.
 ### Common Issues
 1.  **"Error generating draft"**:
     -   Check if the Google Gemini API Key is configured in `SiteConfig` or `.env`.
-    -   Check if the contact has valid data (Phone/Name).
-2.  **Repetitive Drafts**:
-    -   The AI relies on the last 20 messages. If the history is repetitive, the AI might mimic it. Try providing a specific instruction in the input box.
+
+## 4. AI Model Selection
+
+### Overview
+Users can override the default AI model directly from the Chat Window before generating a draft.
+
+### Workflow
+1.  **Select Model**: Use the dropdown next to the "AI Draft" button (defaults to System Default `gemini-3-flash`).
+2.  **Generate**: Click "AI Draft" or a suggestion bubble.
+3.  **Backend**: The selected model ID is passed to `generateAIDraft` -> `generateDraft`.
+4.  **Cost Tracking**: `AgentExecution` records the specific model used for accurate cost calculation.
+
+### Configuration
+-   **Default Model**: Configured in **Settings > AI Agent**.
+-   **Available Models**: Fetched dynamically from Google's API to support the latest models (e.g., Gemini 3.0). Falls back to `lib/ai/pricing.ts` defaults if offline.
+
+
+## 6. Smart Replies (Auto-Suggestions)
+
+### Overview
+The system automatically analyzes inbound WhatsApp messages to suggest 3 quick "next actions" or intents (e.g., "Confirm Viewing", "Send Price List"). These appear as bubbles in the Chat Window.
+
+### Workflow
+1.  **Inbound Message**: Contact sends a message.
+2.  **Background Analysis**: `lib/whatsapp/sync.ts` triggers `generateSmartReplies` (fire-and-forget).
+3.  **AI Generation**: Gemini reads the last 15 messages and generates 3 short intents (JSON).
+4.  **Storage**: Suggestions are stored in `Conversation.suggestedActions`.
+5.  **UI Update**: When the agent views the conversation, the bubbles appear.
+6.  **Action**: Clicking a bubble uses the intent text as the **Instruction** for the AI Draft generator.
+
+### Example
+-   **User**: "Is the 2-bed in Paphos still available?"
+-   **Smart Suggestion**: "Confirm Availability"
+-   **Agent Clicks Bubble**: "Confirm Availability"
+-   **AI Draft Generates**: "Hi! Yes, the 2-bedroom apartment in Paphos is currently available. Would you like to schedule a viewing?"

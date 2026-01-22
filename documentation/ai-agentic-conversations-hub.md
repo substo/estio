@@ -38,7 +38,7 @@ We chose to build this **internally** rather than relying on GoHighLevel's nativ
         1.  Fetch message history from the Local DB.
         2.  Identify the Contact.
         3.  Look up related **Properties** and **Viewings** in our Database.
-        4.  Feed this "enriched context" to Gemini 2.5 Flash to generate drafts.
+        4.  Feed this "enriched context" to **System Default (e.g. Gemini 3 Flash)** to generate drafts.
 
 3.  **User Interface**:
     *   **Location**: `/admin/conversations`

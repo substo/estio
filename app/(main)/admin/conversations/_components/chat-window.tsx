@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Conversation, Message } from "@/lib/ghl/conversations";
+import { GOOGLE_AI_MODELS } from "@/lib/ai/models";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,7 +13,7 @@ interface ChatWindowProps {
     loading: boolean;
     onSendMessage: (text: string, type: 'SMS' | 'Email' | 'WhatsApp') => void;
     onSync?: () => void;
-    onGenerateDraft?: (instruction?: string) => Promise<string | null>; // Returns draft text or null if failed
+    onGenerateDraft?: (instruction?: string, model?: string) => Promise<string | null>; // Returns draft text or null if failed
 }
 
 /**
@@ -38,12 +39,29 @@ import { MessageBubble } from "./message-bubble";
 import { SuggestionBubbles } from "./suggestion-bubbles";
 import { Sparkles, Loader2 as Spinner } from "lucide-react"; // Import Sparkles explicitly if not already
 
+import { getAvailableAiModelsAction } from "@/app/(main)/admin/conversations/actions";
+
 export function ChatWindow({ conversation, messages, loading, onSendMessage, onSync, onGenerateDraft, suggestions = [] }: ChatWindowProps & { suggestions?: string[] }) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const [draft, setDraft] = useState("");
     const [sending, setSending] = useState(false);
     const [generatingDraft, setGeneratingDraft] = useState(false);
     const [selectedChannel, setSelectedChannel] = useState<'SMS' | 'Email' | 'WhatsApp'>(getInitialChannel(conversation));
+    const [selectedModel, setSelectedModel] = useState("gemini-2.5-flash");
+    const [availableModels, setAvailableModels] = useState<any[]>([]); // Dynamic list
+
+    // Fetch available models on mount
+    useEffect(() => {
+        let mounted = true;
+        getAvailableAiModelsAction().then(models => {
+            if (mounted && models && models.length > 0) {
+                setAvailableModels(models);
+                // Optional: Check if default selectedModel is in list, if not switch to first
+            }
+        }).catch(err => console.error("Failed to load AI models:", err));
+
+        return () => { mounted = false; };
+    }, []);
 
     // Update channel if conversation changes
     useEffect(() => {
@@ -65,13 +83,13 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
         setSending(false);
     };
 
-    const handleAiDraft = async () => {
+    const handleAiDraft = async (instructionOverride?: string) => {
         if (!onGenerateDraft || generatingDraft) return;
         setGeneratingDraft(true);
         try {
-            // Pass current draft as user instruction
-            const instruction = draft.trim();
-            const text = await onGenerateDraft(instruction);
+            // Pass instruction (override or current draft)
+            const instruction = instructionOverride || draft.trim();
+            const text = await onGenerateDraft(instruction, selectedModel);
 
             if (text) {
                 // REPLACE content (per user request) instead of appending
@@ -140,7 +158,7 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
                 {/* Suggestions Area - Renders if suggestions exist */}
                 <SuggestionBubbles
                     suggestions={suggestions}
-                    onSelect={(text) => setDraft(text)}
+                    onSelect={(text) => handleAiDraft(text)}
                 />
 
                 <div className="p-4 flex flex-col gap-3 max-w-4xl mx-auto">
@@ -163,23 +181,40 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
                             </Select>
                         </div>
 
-                        {/* AI Draft Button */}
-                        {onGenerateDraft && (
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={handleAiDraft}
-                                disabled={generatingDraft}
-                                className="h-8 text-xs font-medium text-purple-600 hover:text-purple-700 hover:bg-purple-50 gap-1.5 transition-colors"
-                            >
-                                {generatingDraft ? (
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                ) : (
-                                    <Sparkles className="w-3.5 h-3.5" />
-                                )}
-                                {generatingDraft ? "Generating..." : "AI Draft"}
-                            </Button>
-                        )}
+                        {/* AI Draft Toolbar */}
+                        <div className="flex items-center gap-2">
+                            {onGenerateDraft && (
+                                <>
+                                    <Select value={selectedModel} onValueChange={setSelectedModel}>
+                                        <SelectTrigger className="h-8 w-[140px] text-xs border-slate-200 bg-white/50">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {(availableModels.length > 0 ? availableModels : GOOGLE_AI_MODELS).map(m => (
+                                                <SelectItem key={m.value} value={m.value} className="text-xs">
+                                                    {m.label}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => handleAiDraft()}
+                                        disabled={generatingDraft}
+                                        className="h-8 text-xs font-medium text-purple-600 hover:text-purple-700 hover:bg-purple-50 gap-1.5 transition-colors"
+                                    >
+                                        {generatingDraft ? (
+                                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        ) : (
+                                            <Sparkles className="w-3.5 h-3.5" />
+                                        )}
+                                        {generatingDraft ? "Generating..." : "AI Draft"}
+                                    </Button>
+                                </>
+                            )}
+                        </div>
                     </div>
 
                     <div className="relative shadow-sm rounded-xl border focus-within:ring-2 focus-within:ring-blue-500/20 transition-all">

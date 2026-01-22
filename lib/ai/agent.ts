@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
 import * as tools from "./tools";
+import { DEFAULT_MODEL } from "@/lib/ai/pricing";
 
 const PLANNER_SYSTEM_PROMPT = `
 You are the Estio Real Estate Planner. Your job is to break down a high-level "Ultimate Goal" into a concrete, sequential checklist of tasks.
@@ -78,9 +79,10 @@ export async function generateAgentPlan(contactId: string, locationId: string, h
         const apiKey = siteConfig?.googleAiApiKey || process.env.GOOGLE_API_KEY;
         if (!apiKey) throw new Error("No AI API Key");
 
+        // Prepare Model
         const genAI = new GoogleGenerativeAI(apiKey);
         const model = genAI.getGenerativeModel({
-            model: "gemini-3-flash-preview",
+            model: DEFAULT_MODEL,
             generationConfig: { responseMimeType: "application/json" }
         });
 
@@ -231,7 +233,7 @@ export class DealAgent {
 
             // Prepare Model
             const model = this.genAI.getGenerativeModel({
-                model: "gemini-3-flash-preview",
+                model: DEFAULT_MODEL,
                 generationConfig: { responseMimeType: "application/json" }
             });
 

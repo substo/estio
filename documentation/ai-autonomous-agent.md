@@ -122,7 +122,7 @@ Response must be valid JSON with structured reasoning:
 2.  `handleRunAgent()` calls `runAgentAction(conversationId, contactId)`.
 3.  Server action fetches the last 30 messages from `db.message`.
 4.  `runAgent()` is invoked with formatted history string.
-5.  Agent sends prompt to **Gemini 2.5 Pro** (JSON mode).
+5.  Agent sends prompt to **Gemini 2.5 Pro** (or configured default) (JSON mode).
 6.  Gemini returns:
     ```json
     {
@@ -160,7 +160,7 @@ Response must be valid JSON with structured reasoning:
 
 *   Toggle "Outreach Assistant" on/off.
 *   Configure custom prompts for Vision ID, Icebreaker, and Qualifier (legacy extraction mode).
-*   Model selection applies to the Agent as well (defaults to `gemini-2.5-pro`).
+*   Model selection applies to the Agent as well (defaults to **System Default**).
 
 ## AI Thinking Display
 

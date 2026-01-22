@@ -42,10 +42,12 @@ export async function crawlPropertyWithPython(url: string, interactionSelector?:
     }
 }
 
+import { DEFAULT_MODEL } from "@/lib/ai/pricing";
+
 export async function scrapePropertyWithCrawl4AI(
     url: string,
     apiKey: string,
-    modelName: string = "gemini-1.5-pro",
+    modelName: string = DEFAULT_MODEL,
     userHints?: string,
     interactionSelector?: string | null
 ): Promise<AIPropertyData> {

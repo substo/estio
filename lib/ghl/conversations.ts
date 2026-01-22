@@ -16,6 +16,7 @@ export interface Conversation {
     contactEmail?: string; // For Email display
     lastMessageDirection?: 'inbound' | 'outbound';
     lastMessageId?: string;
+    suggestedActions?: string[];
 }
 
 export interface Message {

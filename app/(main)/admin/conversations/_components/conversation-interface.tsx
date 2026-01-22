@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Conversation, Message } from '@/lib/ghl/conversations';
-import { fetchMessages, sendReply, generateAIDraft, syncWhatsAppHistory } from '../actions';
+import { fetchMessages, sendReply, generateAIDraft, syncWhatsAppHistory, refreshConversation } from '../actions';
 import { toast } from '@/components/ui/use-toast';
 import { getDealContexts } from '../../deals/actions';
 import { UnifiedTimeline } from './unified-timeline';
@@ -77,6 +77,13 @@ export function ConversationInterface({ initialConversations }: ConversationInte
         fetchMessages(activeId)
             .then(msgs => {
                 setMessages(msgs); // Keep chronological order (Oldest -> Newest)
+
+                // Refresh conversation details (status, suggests, etc)
+                refreshConversation(activeId).then(fresh => {
+                    if (fresh) {
+                        setConversations(prev => prev.map(c => c.id === activeId ? { ...c, ...fresh } : c));
+                    }
+                });
 
                 // [Background Sync] Smart Sync for selected conversation
                 // This answers: "conversation that is highlighted selected get to be synched in the background"
@@ -213,10 +220,10 @@ export function ConversationInterface({ initialConversations }: ConversationInte
                             loading={loadingMessages}
                             onSendMessage={handleSendMessage}
                             onSync={handleSync}
-                            suggestions={suggestions}
-                            onGenerateDraft={async (instruction?: string) => {
+                            suggestions={[...(activeConversation?.suggestedActions || []), ...suggestions]}
+                            onGenerateDraft={async (instruction?: string, model?: string) => {
                                 try {
-                                    const res = await generateAIDraft(activeConversation.id, activeConversation.contactId, instruction);
+                                    const res = await generateAIDraft(activeConversation.id, activeConversation.contactId, instruction, model);
                                     if (res.reasoning) {
                                         toast({ title: "Draft Generated", description: res.reasoning });
                                     }

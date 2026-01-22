@@ -705,6 +705,7 @@ model Conversation {
   lastMessageAt     DateTime @default(now())
   lastMessageType   String?  // TYPE_SMS, TYPE_EMAIL, TYPE_WHATSAPP
   unreadCount       Int      @default(0)
+  suggestedActions  String[] @default([])
   
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt

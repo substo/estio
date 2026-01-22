@@ -12,12 +12,13 @@ interface CoordinationContext {
     contactId: string;
     accessToken: string;
     instruction?: string;
+    model?: string;
 }
 
-import { calculateRunCost } from "@/lib/ai/pricing";
+import { calculateRunCost, DEFAULT_MODEL } from "@/lib/ai/pricing";
 
 export async function generateDraft(context: CoordinationContext) {
-    let modelName = "gemini-2.5-flash"; // Modern default
+    let modelName = DEFAULT_MODEL; // Modern default
     let promptTokens = 0;
     let completionTokens = 0;
 
@@ -32,6 +33,11 @@ export async function generateDraft(context: CoordinationContext) {
         // Use config model if present, otherwise default
         if (configAny?.googleAiModel) {
             modelName = configAny.googleAiModel;
+        }
+
+        // Override with explicit request
+        if (context.model) {
+            modelName = context.model;
         }
 
         if (!apiKey) {
@@ -56,10 +62,18 @@ export async function generateDraft(context: CoordinationContext) {
 
         // Step 1: Try Local Lookup (Primary)
         try {
-            const localConversation = await db.conversation.findUnique({
+            let localConversation = await db.conversation.findUnique({
                 where: { id: context.conversationId },
                 include: { messages: { orderBy: { createdAt: 'desc' }, take: 20 } }
             });
+
+            if (!localConversation) {
+                // Try looking up by GHL ID (as UI often passes this)
+                localConversation = await db.conversation.findUnique({
+                    where: { ghlConversationId: context.conversationId },
+                    include: { messages: { orderBy: { createdAt: 'desc' }, take: 20 } }
+                });
+            }
 
             if (localConversation) {
                 console.log(`[AI Draft] Local DB Fetch Success. Found ${localConversation.messages.length} messages.`);

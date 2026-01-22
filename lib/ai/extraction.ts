@@ -1,6 +1,7 @@
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
+import { DEFAULT_MODEL } from "@/lib/ai/pricing";
 
 interface ExtractionResult {
     phoneContactEntry: {
@@ -45,7 +46,7 @@ export async function analyzeContactRequirements(
         }
 
         const apiKey = siteConfig?.googleAiApiKey || process.env.GOOGLE_API_KEY;
-        const modelName = siteConfig?.googleAiModel || "gemini-1.5-flash";
+        const modelName = siteConfig?.googleAiModel || DEFAULT_MODEL;
 
         if (!apiKey) {
             console.error("No AI API Key found.");

@@ -78,7 +78,9 @@ async function getCrmCredentials(clerkId: string) {
     };
 }
 
-export async function* runImportWorkflow(notionUrl: string, aiModel: string = "gemini-1.5-pro", clerkId: string, userHints?: string, maxImages: number = 50): AsyncGenerator<ImportStatus> {
+import { DEFAULT_MODEL } from "@/lib/ai/pricing";
+
+export async function* runImportWorkflow(notionUrl: string, aiModel: string = DEFAULT_MODEL, clerkId: string, userHints?: string, maxImages: number = 50): AsyncGenerator<ImportStatus> {
     try {
         yield { type: 'status', step: 'INIT', message: 'Checking permissions and credentials...' };
 
@@ -301,7 +303,7 @@ export async function* runImportWorkflow(notionUrl: string, aiModel: string = "g
     }
 }
 
-export async function* runPasteImportWorkflow(text: string, analysisImageIds: string[], galleryImageIds: string[], aiModel: string = "gemini-2.0-flash", clerkId: string, userHints?: string): AsyncGenerator<ImportStatus> {
+export async function* runPasteImportWorkflow(text: string, analysisImageIds: string[], galleryImageIds: string[], aiModel: string = DEFAULT_MODEL, clerkId: string, userHints?: string): AsyncGenerator<ImportStatus> {
     try {
         yield { type: 'status', step: 'INIT', message: 'Verifying credentials...' };
 

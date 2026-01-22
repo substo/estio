@@ -21,8 +21,10 @@ export interface FeedMappingConfig {
     };
 }
 
+import { DEFAULT_MODEL } from "@/lib/ai/pricing";
+
 export class AiFeedMapper {
-    static async analyzeFeedStructure(xmlSnippet: string, apiKey: string, modelName: string = "gemini-2.5-flash"): Promise<FeedMappingConfig> {
+    static async analyzeFeedStructure(xmlSnippet: string, apiKey: string, modelName: string = DEFAULT_MODEL): Promise<FeedMappingConfig> {
         if (!apiKey) throw new Error("Google AI API Key is required");
 
         console.log(`[AiFeedMapper] Initializing ${modelName}...`);

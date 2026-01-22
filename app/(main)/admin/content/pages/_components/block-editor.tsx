@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Eye, Edit3, Trash2, GripVertical, ChevronDown, ChevronUp, Plus, X, Sparkles, Send, Loader2, Code, FileJson, AlertTriangle, Check, Image as ImageIcon } from "lucide-react";
 import { refineBlockContent, regeneratePageDesign, generateSectionFromPrompt } from "@/app/(main)/admin/content/ai-actions";
+import { getAvailableAiModelsAction } from "@/app/(main)/admin/conversations/actions";
 import { toast } from "sonner";
 import { GOOGLE_AI_MODELS } from "@/lib/ai/models";
 import { CloudflareImageUploader } from "@/components/media/CloudflareImageUploader";
@@ -261,6 +262,16 @@ export function BlockEditor({ blocks, onChange, onPreview, siteConfig }: BlockEd
     const [aiSectionModel, setAiSectionModel] = useState("gemini-2.5-flash");
     const [isGeneratingSection, setIsGeneratingSection] = useState(false);
     const [isPastingImage, setIsPastingImage] = useState(false);
+
+    const [availableModels, setAvailableModels] = useState<any[]>([]);
+
+    useEffect(() => {
+        let mounted = true;
+        getAvailableAiModelsAction().then(models => {
+            if (mounted && models && models.length > 0) setAvailableModels(models);
+        }).catch(err => console.error(err));
+        return () => { mounted = false; };
+    }, []);
 
     // Direct Image Upload Helper (Replicating CloudflareImageUploader logic for programmatic use)
     const handleDirectImageUpload = async (file: File) => {
@@ -534,7 +545,7 @@ export function BlockEditor({ blocks, onChange, onPreview, siteConfig }: BlockEd
                                         value={designModel}
                                         onChange={(e) => setDesignModel(e.target.value)}
                                     >
-                                        {GOOGLE_AI_MODELS.map((model) => (
+                                        {(availableModels.length > 0 ? availableModels : GOOGLE_AI_MODELS).map((model) => (
                                             <option key={model.value} value={model.value}>
                                                 {model.label}
                                             </option>
@@ -1589,7 +1600,7 @@ export function BlockEditor({ blocks, onChange, onPreview, siteConfig }: BlockEd
                                     <SelectValue placeholder="Select Model" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {GOOGLE_AI_MODELS.map((model) => (
+                                    {(availableModels.length > 0 ? availableModels : GOOGLE_AI_MODELS).map((model) => (
                                         <SelectItem key={model.value} value={model.value}>
                                             {model.label}
                                         </SelectItem>

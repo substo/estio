@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { extractPropertyDataWithAI, AIPropertyData } from '@/app/(main)/admin/properties/import/ai-property-extraction';
+import { DEFAULT_MODEL } from "@/lib/ai/pricing";
 
 export async function scrapeNotionProperty(url: string, aiModel?: string): Promise<AIPropertyData> {
     // Use existing Puppeteer service instance
@@ -364,7 +365,7 @@ export async function resolveGoogleMapsLocation(query: string): Promise<{ mapUrl
     }
 }
 
-export async function scrapeAddressFromMaps(mapUrl: string, apiKey: string, model: string = "gemini-1.5-flash"): Promise<{ addressLine1?: string, city?: string, postalCode?: string, country?: string, shortLink?: string }> {
+export async function scrapeAddressFromMaps(mapUrl: string, apiKey: string, model: string = DEFAULT_MODEL): Promise<{ addressLine1?: string, city?: string, postalCode?: string, country?: string, shortLink?: string }> {
     // 1. Convert URL to Browser-Friendly Format
     const targetUrl = convertMapUrl(mapUrl);
     console.log(`[MAP_SCRAPE] Starting scraping for URL: ${targetUrl} (Original: ${mapUrl})`);

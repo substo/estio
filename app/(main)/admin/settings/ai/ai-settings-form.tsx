@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useState, useEffect } from "react";
 import { useFormStatus } from "react-dom";
 import { updateAiSettings } from "./actions";
 import { Input } from "@/components/ui/input";
@@ -32,6 +32,19 @@ export function AiSettingsForm({ initialData, locationId }: { initialData: any, 
     // but used for the "Generate Brand Voice" action
     const [researchUrl, setResearchUrl] = useState("");
     const [isGeneratingVoice, setIsGeneratingVoice] = useState(false);
+
+    const [availableModels, setAvailableModels] = useState<any[]>([]);
+
+    useEffect(() => {
+        let mounted = true;
+        // Dynamically import action if needed or just use import
+        import("@/app/(main)/admin/conversations/actions").then(mod => {
+            mod.getAvailableAiModelsAction().then(models => {
+                if (mounted && models && models.length > 0) setAvailableModels(models);
+            });
+        });
+        return () => { mounted = false; };
+    }, []);
 
     return (
         <div className="space-y-8">
@@ -89,7 +102,7 @@ export function AiSettingsForm({ initialData, locationId }: { initialData: any, 
                                 className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                 defaultValue={initialData?.googleAiModel || "gemini-2.5-flash"}
                             >
-                                {GOOGLE_AI_MODELS.map((model) => (
+                                {(availableModels.length > 0 ? availableModels : GOOGLE_AI_MODELS).map((model) => (
                                     <option key={model.value} value={model.value}>
                                         {model.label}
                                     </option>
@@ -107,7 +120,7 @@ export function AiSettingsForm({ initialData, locationId }: { initialData: any, 
                                     className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
                                     defaultValue={initialData?.googleAiModelExtraction || "gemini-2.5-flash"}
                                 >
-                                    {GOOGLE_AI_MODELS.map((model) => (
+                                    {(availableModels.length > 0 ? availableModels : GOOGLE_AI_MODELS).map((model) => (
                                         <option key={model.value} value={model.value}>
                                             {model.label}
                                         </option>
@@ -125,7 +138,7 @@ export function AiSettingsForm({ initialData, locationId }: { initialData: any, 
                                     className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
                                     defaultValue={initialData?.googleAiModelDesign || "gemini-2.5-flash"}
                                 >
-                                    {GOOGLE_AI_MODELS.map((model) => (
+                                    {(availableModels.length > 0 ? availableModels : GOOGLE_AI_MODELS).map((model) => (
                                         <option key={model.value} value={model.value}>
                                             {model.label}
                                         </option>

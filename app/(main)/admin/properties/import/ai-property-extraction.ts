@@ -6,6 +6,7 @@ import fs from "fs";
 import path from "path";
 import { FEATURE_CATEGORIES } from "@/lib/properties/filter-constants";
 import { PROPERTY_TYPES, RENTAL_PERIODS } from "@/lib/properties/constants";
+import { DEFAULT_MODEL } from "@/lib/ai/pricing";
 
 
 // --- INTERFACES ---
@@ -114,7 +115,7 @@ export async function extractPropertyDataWithAI(
     if (!configAny?.googleAiApiKey) return { success: false, error: "Google AI API Key is not configured." };
 
     const apiKey = configAny.googleAiApiKey;
-    const model = modelOverride || "gemini-2.0-flash";
+    const model = modelOverride || DEFAULT_MODEL;
 
     // --- STAGE 1: VISION (The "Eyes") ---
     console.log("[IMPORT][AI] --- STAGE 1: VISION EXTRACTION ---");

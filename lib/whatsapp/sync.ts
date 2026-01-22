@@ -1,4 +1,5 @@
 import db from "@/lib/db";
+import { generateSmartReplies } from "@/lib/ai/smart-replies";
 
 export interface NormalizedMessage {
     locationId: string;
@@ -17,6 +18,7 @@ export interface NormalizedMessage {
 // ... handleWhatsAppMessage ...
 
 export async function processNormalizedMessage(msg: NormalizedMessage) {
+    console.log(`[WhatsApp Sync] processNormalizedMessage Called for ${msg.wamId} (${msg.direction})`);
     const { locationId, from, to, body, type, wamId, timestamp, contactName, source } = msg;
     const direction = msg.direction || "inbound";
 
@@ -192,6 +194,11 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         }
     } catch (err) {
     }
+    // --- Smart Reply Generation (Background) ---
+    if (direction === "inbound") {
+        generateSmartReplies(conversation.id).catch(e => console.error("Smart Reply bg error", e));
+    }
+
     return { status: 'processed' };
 }
 

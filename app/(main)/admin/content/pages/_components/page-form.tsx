@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useActionState } from "react";
+import { useState, useActionState, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -11,6 +11,7 @@ import { useFormStatus } from "react-dom";
 import { Loader2, Sparkles, ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { GOOGLE_AI_MODELS } from "@/lib/ai/models";
+import { getAvailableAiModelsAction } from "@/app/(main)/admin/conversations/actions";
 import { BlockEditor } from "./block-editor";
 
 import { PublicBlockRenderer } from "@/app/(public-site)/_components/public-block-renderer";
@@ -48,6 +49,15 @@ export function PageForm({ initialData, siteConfig }: { initialData?: any; siteC
     const [brandVoiceOverride, setBrandVoiceOverride] = useState("");
     const [extractionModel, setExtractionModel] = useState("gemini-1.5-flash");
     const [showAdvanced, setShowAdvanced] = useState(false);
+    const [availableModels, setAvailableModels] = useState<any[]>([]);
+
+    useEffect(() => {
+        let mounted = true;
+        getAvailableAiModelsAction().then(models => {
+            if (mounted && models && models.length > 0) setAvailableModels(models);
+        }).catch(err => console.error(err));
+        return () => { mounted = false; };
+    }, []);
 
     // @ts-ignore
     const [state, formAction] = useActionState(upsertPage, initialState);
@@ -182,7 +192,7 @@ export function PageForm({ initialData, siteConfig }: { initialData?: any; siteC
                                         value={extractionModel}
                                         onChange={(e) => setExtractionModel(e.target.value)}
                                     >
-                                        {GOOGLE_AI_MODELS.map((model) => (
+                                        {(availableModels.length > 0 ? availableModels : GOOGLE_AI_MODELS).map((model) => (
                                             <option key={model.value} value={model.value}>
                                                 {model.label}
                                             </option>

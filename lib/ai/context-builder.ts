@@ -2,6 +2,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
 import { getMessages, getConversation } from "@/lib/ghl/conversations";
+import { DEFAULT_MODEL } from "@/lib/ai/pricing";
 
 interface MultiContextParams {
     dealContextId: string;
@@ -28,7 +29,7 @@ export async function generateMultiContextDraft(params: MultiContextParams) {
         if (!apiKey) throw new Error("No AI API Key configured");
 
         const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: configAny?.googleAiModel || "gemini-1.5-flash" });
+        const model = genAI.getGenerativeModel({ model: configAny?.googleAiModel || DEFAULT_MODEL });
 
         // 3. Fetch All Linked Conversations
         const conversationPromises = dealContext.conversationIds.map(async (cid: string) => {
