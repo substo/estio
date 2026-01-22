@@ -184,7 +184,8 @@ export async function registerClerkDomain(domain: string) {
             body: JSON.stringify({
                 name: name,
                 is_satellite: true,
-                proxy_url: `https://${name}/api/auth-proxy` // Helper for our proxy setup if CNAME fails
+                // Do NOT set proxy_url for the main domain (estio.co) as it creates a loop
+                proxy_url: name === 'estio.co' ? undefined : `https://${name}/api/auth-proxy`
             })
         });
 

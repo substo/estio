@@ -1,101 +1,161 @@
-
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
 import * as tools from "./tools";
 
-const MANUS_SYSTEM_PROMPT = `
-You are the Estio Real Estate Super-Agent, an autonomous AI designed to manage real estate leads with expert precision.
+const PLANNER_SYSTEM_PROMPT = `
+You are the Estio Real Estate Planner. Your job is to break down a high-level "Ultimate Goal" into a concrete, sequential checklist of tasks.
 
-## Core Methodology (Plan -> Act -> Verify)
-1. **Analyze**: Deeply understand the user's intent, the conversation history, and the current state of the contact.
-2. **Plan**: Formulate a strategy. Is the lead ready to view? Do they need more properties? Are they unresponsive?
-3. **Act**: Use your tools to execute the plan. Update requirements, schedule viewings, or draft replies.
-4. **Verify**: Ensure the action was successful and meaningful.
+## Input
+- **Ultimate Goal**: What needs to be achieved (e.g., "Qualify the lead and book a viewing").
+- **Analysis**: Your detailed analysis of the conversation history and contact state.
 
-## Your Capabilities (Tools)
-You have access to the following tools. You invoke them by outputting a JSON object with the key "tool_calls".
+## Output
+Produce a JSON object containing a "plan" array. Each item must have:
+- "id": unique string "1", "2", etc.
+- "title": Actionable task name (e.g., "Confirm Budget", "Send Listing #123", "Ask for Availability").
+- "status": "pending" (always pending initially).
 
-- **update_requirements**: Set status, budget, district, fields.
-- **search_properties**: Find listings matching criteria.
-- **create_viewing**: Schedule a physical viewing.
-- **log_activity**: Add a structured note to the CRM log.
-- **draft_reply**: Generate a text response for the agent to send.
+## Guidelines
+- Be granular but efficient.
+- Don't create too many steps (3-5 is usually best).
+- Ordering matters. Logical flow: Qualify -> Propose -> Schedule -> Close.
 
-## Rules
-- **Vision ID**: Always ensure the contact's "requirements" fields are up to date so the "Visual ID" (e.g., "Lead Rent Paphos") is accurate.
-- **Tone**: Professional, concise, high-end Real Estate Agent.
-- **Safety**: Do not hallucinate property details. Only use what you find in search_properties.
-
-## Output Format
-Response must be valid JSON:
+## Example Output
 {
-  "thought": "Internal reasoning process...",
-  "tool_calls": [
-     { "name": "update_requirements", "arguments": { ... } },
-     { "name": "log_activity", "arguments": { "message": "Updated budget to..." } }
-  ],
-  "final_response": "Draft text if applicable, otherwise null"
+  "thought": "User wants to book a viewing. Need to qualify budget first.",
+  "plan": [
+    { "id": "1", "title": "Ask about Budget Range", "status": "pending" },
+    { "id": "2", "title": "Check Availability for Next Tuesday", "status": "pending" }
+  ]
 }
 `;
 
-export async function runAgent(contactId: string, locationId: string, history: string, notes: string = "") {
+const EXECUTOR_SYSTEM_PROMPT = `
+You are the Estio Real Estate Executor. You are executing a specific task from a larger plan.
+
+## Your Task
+- **Task**: The specific item you are working on right now.
+- **Goal**: The ultimate goal of the entire plan.
+- **History**: Full conversation history.
+
+## Tools
+You have tools to perform actions. Invoke them via "tool_calls".
+- **update_requirements**: Set fields.
+- **search_properties**: Search listings.
+- **create_viewing**: Schedule physical viewing.
+- **log_activity**: Add structured note.
+- **draft_reply**: IMPORTANT: Generate the actual reply text to the user here.
+
+## Output
+Response must be valid JSON with structured reasoning:
+{
+  "thought_summary": "One-line summary of your reasoning (shown by default)",
+  "thought_steps": [
+    { "step": 1, "description": "What you analyzed or decided", "conclusion": "The outcome or finding" },
+    { "step": 2, "description": "Next analysis step", "conclusion": "What you found" }
+  ],
+  "tool_calls": [...],
+  "task_completed": boolean, // Set to true ONLY if you have fully achieved the current task.
+  "task_result": "Summary of what was done (e.g. 'Budget confirmed as 500k')",
+  "final_response": "The draft text to send to the lead."
+}
+
+IMPORTANT: Always include both thought_summary (brief) and thought_steps (detailed array) so users can view your full reasoning process on demand.
+`;
+
+
+export interface AgentTask {
+    id: string;
+    title: string;
+    status: 'pending' | 'in-progress' | 'done' | 'failed';
+    result?: string;
+}
+
+// --- Planner Function ---
+export async function generateAgentPlan(contactId: string, locationId: string, history: string, goal: string): Promise<{ success: boolean, plan?: AgentTask[], thought?: string }> {
     try {
-        // 1. Setup
         const siteConfig = await db.siteConfig.findUnique({ where: { locationId } });
         const apiKey = siteConfig?.googleAiApiKey || process.env.GOOGLE_API_KEY;
         if (!apiKey) throw new Error("No AI API Key");
 
         const genAI = new GoogleGenerativeAI(apiKey);
         const model = genAI.getGenerativeModel({
-            model: "gemini-2.5-pro", // Creating a more capable agent requires Pro
+            model: "gemini-3-flash-preview",
             generationConfig: { responseMimeType: "application/json" }
         });
 
-        // 2. Fetch Context
+        const context = `
+GOAL: ${goal}
+HISTORY: ${history}
+`;
+
+        const result = await model.generateContent([PLANNER_SYSTEM_PROMPT, context]);
+        const parsed = JSON.parse(result.response.text());
+
+        return {
+            success: true,
+            plan: parsed.plan,
+            thought: parsed.thought
+        };
+    } catch (e) {
+        console.error("Plan Generation Failed", e);
+        return { success: false };
+    }
+}
+
+// --- Executor Function ---
+export async function executeAgentTask(contactId: string, locationId: string, history: string, currentTask: AgentTask, allTasks: AgentTask[]) {
+    try {
+        const siteConfig = await db.siteConfig.findUnique({ where: { locationId } });
+        const apiKey = siteConfig?.googleAiApiKey || process.env.GOOGLE_API_KEY;
+        if (!apiKey) throw new Error("No AI API Key");
+
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const modelName = "gemini-2.5-pro";
+        const model = genAI.getGenerativeModel({
+            model: modelName,
+            generationConfig: { responseMimeType: "application/json" }
+        });
+
+        // Fetch Contact for Context
         const contact = await db.contact.findUnique({
             where: { id: contactId },
             include: { propertyRoles: { include: { property: true } } }
         });
-        if (!contact) throw new Error("Contact not found");
 
         const context = `
+        CURRENT TASK: ${currentTask.title}
+        FULL PLAN: ${JSON.stringify(allTasks.map(t => t.title))}
+        
         CONTACT CONTEXT:
-        Name: ${contact.name}
-        Phone: ${contact.phone}
-        Current Req Status: ${contact.requirementStatus}
-        Current District: ${contact.requirementDistrict}
-        Current Budget: ${contact.requirementMaxPrice}
-        Notes: ${contact.requirementOtherDetails}
-        
-        CONVERSATION HISTORY:
-        ${history}
-        
-        INPUT NOTES:
-        ${notes}
-        `;
+Name: ${contact?.name}
+Budget: ${contact?.requirementMaxPrice}
+District: ${contact?.requirementDistrict}
 
-        // 3. Generate Plan & Actions
+HISTORY:
+        ${history}
+`;
+
         const result = await model.generateContent([
-            MANUS_SYSTEM_PROMPT,
+            EXECUTOR_SYSTEM_PROMPT,
             context
         ]);
 
         const responseText = result.response.text();
-        console.log("Agent Response:", responseText);
+        console.log("Executor Response:", responseText);
 
         let parsed;
         try {
             parsed = JSON.parse(responseText);
         } catch (e) {
-            console.error("Agent JSON Parse Error", e);
             return { success: false, message: "Agent failed to think." };
         }
 
-        // 4. Execute Tools
-        const results = [];
+        // Execute Tools
+        const actions = [];
         if (parsed.tool_calls) {
             for (const call of parsed.tool_calls) {
-                console.log(`Executing tool: ${call.name}`);
+                console.log(`Executing tool: ${call.name} `);
                 try {
                     let res;
                     switch (call.name) {
@@ -111,31 +171,40 @@ export async function runAgent(contactId: string, locationId: string, history: s
                         case "log_activity":
                             res = await tools.appendLog(contactId, call.arguments.message);
                             break;
+                        case "draft_reply":
+                            // Handled via final_response, but if tool called, ok.
+                            break;
                         default:
-                            console.warn(`Unknown tool: ${call.name}`);
+                            console.warn(`Unknown tool: ${call.name} `);
                     }
-                    results.push({ tool: call.name, result: res });
+                    actions.push({ tool: call.name, result: res });
                 } catch (err) {
                     console.error(`Tool execution failed for ${call.name}`, err);
-                    results.push({ tool: call.name, error: "Failed" });
+                    actions.push({ tool: call.name, error: "Failed" });
                 }
             }
         }
 
-        // 5. Finalize
-        // If "draft_reply" was in output (or just final_response text), return it
         return {
             success: true,
-            thought: parsed.thought,
-            actions: results,
-            draft: parsed.final_response
+            thoughtSummary: parsed.thought_summary || parsed.thought || "",
+            thoughtSteps: parsed.thought_steps || [],
+            actions: actions,
+            draft: parsed.final_response,
+            taskCompleted: parsed.task_completed,
+            taskResult: parsed.task_result,
+            usage: {
+                ...result.response.usageMetadata,
+                model: modelName
+            }
         };
 
     } catch (e) {
-        console.error("Agent Run Failed", e);
-        return { success: false, message: "Agent run failed." };
+        console.error("Agent Execution Failed", e);
+        return { success: false, message: "Agent execution failed." };
     }
 }
+
 
 export class DealAgent {
     private genAI: GoogleGenerativeAI;
@@ -162,28 +231,28 @@ export class DealAgent {
 
             // Prepare Model
             const model = this.genAI.getGenerativeModel({
-                model: "gemini-2.5-pro",
+                model: "gemini-3-flash-preview",
                 generationConfig: { responseMimeType: "application/json" }
             });
 
             // Format History
-            const historyStr = history.map(h => `${h.role}: ${h.content}`).join("\n");
+            const historyStr = history.map(h => `${h.role}: ${h.content} `).join("\n");
 
             // Deal Agent Prompt (Variant)
             const SYSTEM_PROMPT = `
-            You are the Estio Deal Coordinator. You are managing a real estate deal.
-            
-            DEAL: ${deal.title}
-            STAGE: ${deal.stage}
+            You are the Estio Deal Coordinator.You are managing a real estate deal.
+
+    DEAL: ${deal.title}
+STAGE: ${deal.stage}
             
             Your goal is to coordinate between agents, buyers, and sellers.
-            
-            OUTPUT: JSON with 'thought' and 'final_response' (draft reply) and optionally 'tool_calls' (same tools available).
+
+    OUTPUT: JSON with 'thought' and 'final_response'(draft reply) and optionally 'tool_calls'(same tools available).
             `;
 
             const result = await model.generateContent([
                 SYSTEM_PROMPT,
-                `History:\n${historyStr}\n\nNew Message: ${message}`
+                `History: \n${historyStr} \n\nNew Message: ${message} `
             ]);
 
             const responseText = result.response.text();

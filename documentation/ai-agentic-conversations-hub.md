@@ -181,6 +181,21 @@ The conversation list now correctly displays the channel type (Email, SMS, Whats
 
 We have upgraded the AI from a passive "Drafter" to a full **Autonomous Agent** with Tool Use capabilities. This is now the primary AI interaction in the Coordinator Panel.
 
+### Mission Control UI Enhancements
+The "Mission Control" panel has been refined to provide better visibility and control:
+
+#### 1. "Details" Section (Formerly Context & Stats)
+We replaced the static stats view with a comprehensive **Contact Details** card:
+*   **Quick Actions**: Click the contact name or distinct edit icon to open the full **Edit Contact Dialog**.
+*   **Essential Info**: Displays Email, Phone, Lead Status, and Contact Type at a glance.
+*   **Property Context**: Automatically lists **Interested Properties** and **Recent Viewings** fetched from the database relations (`propertyRoles`, `viewings`).
+*   **Usage Stats**: Still tracks AI token usage and cost, but organized discreetly at the bottom.
+
+#### 2. Edit Contact Integration
+Users can now **View and Edit** the contact without leaving the conversation context:
+*   The `EditContactDialog` is fully integrated.
+*   Agents can update Lead Stage, assign new Properties, or add Notes immediately while chatting.
+
 ### Agent Architecture
 *   **Model**: Google Gemini 2.5 Pro (configurable).
 *   **Paradigm**: Manus-inspired "Plan -> Act -> Verify" loop with JSON function calling.

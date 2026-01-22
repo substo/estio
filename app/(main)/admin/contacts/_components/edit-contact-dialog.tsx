@@ -43,7 +43,7 @@ import { HistoryTab } from './history-tab';
 import { ContactForm, type ContactData } from './contact-form';
 import { CONTACT_TYPE_CONFIG, type ContactType } from './contact-types';
 
-export function EditContactForm({ contact, onSuccess, leadSources }: { contact: ContactData; onSuccess: () => void; leadSources: string[] }) {
+export function EditContactForm({ contact, onSuccess, onDelete, leadSources, initialMode = 'edit' }: { contact: ContactData; onSuccess?: () => void; onDelete?: () => void; leadSources: string[]; initialMode?: 'view' | 'edit' | 'create' }) {
     const { toast } = useToast();
     const [isDeleting, setIsDeleting] = useState(false);
 
@@ -178,7 +178,8 @@ export function EditContactForm({ contact, onSuccess, leadSources }: { contact: 
         const result = await deleteContact(contact.id);
         if (result.success) {
             toast({ title: "Success", description: result.message });
-            onSuccess();
+            if (onDelete) onDelete();
+            else if (onSuccess) onSuccess();
         } else {
             toast({ title: "Error", description: result.message, variant: "destructive" });
             setIsDeleting(false);
@@ -191,7 +192,7 @@ export function EditContactForm({ contact, onSuccess, leadSources }: { contact: 
 
     return (
         <ContactForm
-            mode="edit"
+            initialMode={initialMode}
             contact={contact}
             locationId={contact.locationId}
             onSuccess={onSuccess}
@@ -203,23 +204,25 @@ export function EditContactForm({ contact, onSuccess, leadSources }: { contact: 
                     <TabsTrigger value="history">History</TabsTrigger>
                 </>
             }
-            additionalTabContent={
+            additionalTabContent={(isEditing) => (
                 <>
                     {showViewings ? (
                         <TabsContent value="viewings" forceMount={true} className="space-y-4 pt-4 data-[state=inactive]:hidden">
                             <div className="space-y-4">
                                 <div className="flex justify-between items-center">
                                     <h3 className="font-semibold">Viewings</h3>
-                                    <Button
-                                        onClick={() => {
-                                            resetViewingForm();
-                                            setViewingModalOpen(true);
-                                        }}
-                                        size="sm"
-                                        type="button"
-                                    >
-                                        Add a New Property Viewing
-                                    </Button>
+                                    {isEditing && (
+                                        <Button
+                                            onClick={() => {
+                                                resetViewingForm();
+                                                setViewingModalOpen(true);
+                                            }}
+                                            size="sm"
+                                            type="button"
+                                        >
+                                            Add a New Property Viewing
+                                        </Button>
+                                    )}
                                 </div>
 
                                 <Dialog open={viewingModalOpen} onOpenChange={setViewingModalOpen}>
@@ -302,12 +305,16 @@ export function EditContactForm({ contact, onSuccess, leadSources }: { contact: 
                                                         <span>{new Date(v.date).toLocaleString()} - {v.property.unitNumber || v.property.title}</span>
                                                         <div className="flex items-center space-x-2">
                                                             <span className="text-muted-foreground text-xs mr-2">{v.user.name}</span>
-                                                            <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={() => handleEditViewing(v)}>
-                                                                <Pencil className="h-3 w-3" />
-                                                            </Button>
-                                                            <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-red-50" onClick={() => handleDeleteViewing(v.id)}>
-                                                                <Trash className="h-3 w-3" />
-                                                            </Button>
+                                                            {isEditing && (
+                                                                <>
+                                                                    <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={() => handleEditViewing(v)}>
+                                                                        <Pencil className="h-3 w-3" />
+                                                                    </Button>
+                                                                    <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-red-50" onClick={() => handleDeleteViewing(v.id)}>
+                                                                        <Trash className="h-3 w-3" />
+                                                                    </Button>
+                                                                </>
+                                                            )}
                                                         </div>
                                                     </div>
                                                     <div className="text-gray-600">{v.notes}</div>
@@ -327,7 +334,7 @@ export function EditContactForm({ contact, onSuccess, leadSources }: { contact: 
                         </div>
                     </TabsContent>
                 </>
-            }
+            )}
             additionalFooter={
                 <AlertDialog>
                     <AlertDialogTrigger asChild>

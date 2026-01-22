@@ -4,7 +4,9 @@ import { Toaster } from "@/components/ui/sonner"
 import AuthWrapper from '@/components/wrapper/auth-wrapper'
 import { GeistSans } from 'geist/font/sans'
 import type { Metadata } from 'next'
-import '../globals.css'
+import '@/app/globals.css'
+
+console.log('[MainLayout] Rendering');
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://estio.co"),
@@ -35,21 +37,21 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <AuthWrapper>
-      <html lang="en" suppressHydrationWarning>
-        <head>
-          <link
-            rel="preload"
-            href="https://utfs.io/f/31dba2ff-6c3b-4927-99cd-b928eaa54d5f-5w20ij.png"
-            as="image"
-          />
-          <link
-            rel="preload"
-            href="https://utfs.io/f/69a12ab1-4d57-4913-90f9-38c6aca6c373-1txg2.png"
-            as="image"
-          />
-        </head>
-        <body className={GeistSans.className}>
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <link
+          rel="preload"
+          href="https://utfs.io/f/31dba2ff-6c3b-4927-99cd-b928eaa54d5f-5w20ij.png"
+          as="image"
+        />
+        <link
+          rel="preload"
+          href="https://utfs.io/f/69a12ab1-4d57-4913-90f9-38c6aca6c373-1txg2.png"
+          as="image"
+        />
+      </head>
+      <body className={GeistSans.className}>
+        <AuthWrapper>
           <Provider>
             <ThemeProvider
               attribute="class"
@@ -61,8 +63,8 @@ export default function RootLayout({
               <Toaster />
             </ThemeProvider>
           </Provider>
-        </body>
-      </html>
-    </AuthWrapper>
+        </AuthWrapper>
+      </body>
+    </html>
   )
 }

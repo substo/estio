@@ -118,3 +118,33 @@ The only robust solution that satisfies all constraints (Clerk needs "Secure" co
     - Force `X-Forwarded-Host: [original_host]`.
     - **CRITICAL**: Force `Host: [original_host]` (This was missing in Attempt B, causing Clerk Key mismatch).
 3.  **Loop Protection**: Use **Query Param** (`?_internal_rewrite=true`) instead of headers, as headers proved unreliable (Attempt A).
+
+### 8. The System Domain Breakthrough & Deployment Caching (2026-01-18 Late Update)
+- **Symptom**: 500 Errors persisted despite implementing "Robust Solution" above. Logs showed "Split Brain" behavior where server seemed to run old code.
+- **Analysis 1: The "Over-Engineering" Trap**:
+    - We were trying to rewrite *everything* to `127.0.0.1`.
+    - **Discovery**: For the main domain (`estio.co`) and `localhost`, **NO REWRITE IS NEEDED**.
+    - Rewriting `estio.co` -> `127.0.0.1` creates a completely unnecessary loop and context loss.
+    - **Correct Strategy**:
+        - **System Domains (estio.co, localhost)** -> `NextResponse.next()` (Serve directly).
+        - **Tenant Domains (custom.com)** -> Rewrite to `http://localhost:3000` (Soft Rewrite).
+- **Analysis 2: Deployment Artifact Caching**:
+    - **Symptom**: Code changes verified on server (`cat middleware.ts`) but logs showed old behavior.
+    - **Cause**: `deploy-direct.sh --quick` (and even some full builds) were reusing `.next` cache or `node_modules` in a way that prevented `middleware.ts` from being recompiled correctly.
+    - **Action**: Required "Nuclear" deployment (kill processes + `rm -rf .next` + clean build).
+
+### 9. Validated Final Middleware Strategy
+To fix the 500 Error + EPROTO + Clerk Context issues simultaneously:
+
+1.  **System Domains (`estio.co`)**:
+    - **DO NOT REWRITE**. Use `NextResponse.next()`.
+    - This allows Next.js to handle the request natively, preserving all headers and auth context without complex masquerading.
+
+2.  **Tenant Domains**:
+    - Rewrite to `http://localhost:3000` (or `127.0.0.1`).
+    - **MUST** set `X-Forwarded-Proto: https` to prevent `EPROTO`.
+    - **MUST** set `Host` to original host to preserve Clerk context.
+
+3.  **Deployment**:
+    - **NEVER** use `--quick` when changing Middleware or `next.config.js`.
+    - Always ensure a clean build for core logic changes.

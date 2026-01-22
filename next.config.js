@@ -7,6 +7,7 @@ const nextConfig = {
     pagesBufferLength: 5,
   },
 
+
   images: {
     remotePatterns: [{
       protocol: 'https',
@@ -57,9 +58,8 @@ const nextConfig = {
     contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
   },
   experimental: {
-    serverActions: {
-      bodySizeLimit: '10mb',
-    },
+    // serverActions is enabled by default in Next.js 15.
+    // bodySizeLimit currently removed to test stability. Default is 1MB.
   },
 
   async headers() {

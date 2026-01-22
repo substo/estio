@@ -3,7 +3,7 @@ import { Conversation, Message } from "@/lib/ghl/conversations";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Send, MessageSquare } from "lucide-react";
+import { Loader2, Send, MessageSquare, RefreshCw } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface ChatWindowProps {
@@ -11,6 +11,7 @@ interface ChatWindowProps {
     messages: Message[];
     loading: boolean;
     onSendMessage: (text: string, type: 'SMS' | 'Email' | 'WhatsApp') => void;
+    onSync?: () => void;
 }
 
 /**
@@ -33,8 +34,9 @@ function getInitialChannel(conversation: Conversation): 'SMS' | 'Email' | 'Whats
 }
 
 import { MessageBubble } from "./message-bubble";
+import { SuggestionBubbles } from "./suggestion-bubbles";
 
-export function ChatWindow({ conversation, messages, loading, onSendMessage }: ChatWindowProps) {
+export function ChatWindow({ conversation, messages, loading, onSendMessage, onSync, suggestions = [] }: ChatWindowProps & { suggestions?: string[] }) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const [draft, setDraft] = useState("");
     const [sending, setSending] = useState(false);
@@ -73,7 +75,13 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage }: C
                         </p>
                     </div>
                 </div>
-                {/* Could add Actions here (e.g. Call, Archive) */}
+                <div className="flex items-center gap-2">
+                    {conversation.lastMessageType === 'TYPE_WHATSAPP' && onSync && (
+                        <Button variant="ghost" size="icon" onClick={onSync} title="Sync WhatsApp History">
+                            <RefreshCw className="h-4 w-4 text-gray-500" />
+                        </Button>
+                    )}
+                </div>
             </div>
 
             {/* Messages Area */}
@@ -105,8 +113,14 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage }: C
             </div>
 
             {/* Input Area */}
-            <div className="p-4 border-t bg-white">
-                <div className="flex flex-col gap-3 max-w-4xl mx-auto">
+            <div className="border-t bg-white">
+                {/* Suggestions Area - Renders if suggestions exist */}
+                <SuggestionBubbles
+                    suggestions={suggestions}
+                    onSelect={(text) => setDraft(text)}
+                />
+
+                <div className="p-4 flex flex-col gap-3 max-w-4xl mx-auto">
                     {/* Channel Selector */}
                     <div className="flex items-center gap-2">
                         <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Reply via:</span>
@@ -130,7 +144,8 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage }: C
                             value={draft}
                             onChange={(e) => setDraft(e.target.value)}
                             placeholder={`Type a message (${selectedChannel})...`}
-                            className="min-h-[80px] w-full resize-none border-0 focus-visible:ring-0 bg-transparent py-3 px-4 text-sm"
+                            className="min-h-[42px] max-h-[300px] w-full resize-none border-0 focus-visible:ring-0 bg-transparent py-3 px-4 text-sm"
+                            style={{ height: draft ? 'auto' : '42px' }} // Dynamic height simulation or just default small
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                                     handleSend();
@@ -159,6 +174,6 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage }: C
                     </p>
                 </div>
             </div>
-        </div>
+        </div >
     );
 }

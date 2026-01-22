@@ -28,8 +28,13 @@ export function UserProfile() {
     const router = useRouter()
 
     if (!config?.auth?.enabled) {
-        router.back()
+        return null;
     }
+
+    return <UserProfileContent />
+}
+
+function UserProfileContent() {
     const { user } = useUser();
     return (
         <DropdownMenu>

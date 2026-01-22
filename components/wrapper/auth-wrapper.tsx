@@ -8,6 +8,7 @@ interface AuthWrapperProps {
 }
 
 const AuthWrapper = async ({ children }: AuthWrapperProps) => {
+  console.log('[AuthWrapper] Rendering. Config Enabled:', config.auth.enabled);
   if (!config.auth.enabled) {
     return <>{children}</>;
   }

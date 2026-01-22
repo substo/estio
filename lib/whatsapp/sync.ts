@@ -20,11 +20,10 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     const { locationId, from, to, body, type, wamId, timestamp, contactName, source } = msg;
     const direction = msg.direction || "inbound";
 
-    // Check deduplication
     const existing = await db.message.findUnique({ where: { wamId } });
     if (existing) {
         console.log(`[WhatsApp Sync] Skipped existing message: ${wamId}`);
-        return;
+        return { status: 'skipped', id: existing.id };
     }
 
     // Normalize Phones
@@ -192,8 +191,8 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
             }
         }
     } catch (err) {
-        console.error(`[WhatsApp Sync] Failed to sync message to GHL:`, err);
     }
+    return { status: 'processed' };
 }
 
 export async function processStatusUpdate(wamId: string, rawStatus: string) {
@@ -232,4 +231,3 @@ export async function processStatusUpdate(wamId: string, rawStatus: string) {
     // GHL API might not support updating status of injected messages easily.
     // But we at least have it locally.
 }
-

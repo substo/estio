@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useState, useEffect, useActionState, useTransition } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button } from '@/components/ui/button';
-import { X } from 'lucide-react';
+import { X, Pencil } from 'lucide-react';
 
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -91,28 +91,71 @@ export type ContactData = {
     propertyWonDate?: Date | null;
 };
 
+// Helper to safely display values
+const RenderField = ({
+    label,
+    value,
+    children,
+    isEditing,
+    className = ""
+}: {
+    label: string,
+    value?: React.ReactNode | string | number | null,
+    children: React.ReactNode,
+    isEditing: boolean,
+    className?: string
+}) => {
+    if (isEditing) {
+        return (
+            <div className={`space-y-2 ${className}`}>
+                <Label>{label}</Label>
+                {children}
+            </div>
+        );
+    }
+    // View Mode
+    if (value === null || value === undefined || value === "") return null;
+    return (
+        <div className={`space-y-1 ${className}`}>
+            <Label className="text-muted-foreground text-xs uppercase tracking-wider">{label}</Label>
+            <div className="font-medium text-sm p-2 bg-muted/30 rounded-md border border-border/50 min-h-[36px] flex items-center w-full overflow-hidden text-ellipsis">
+                {value}
+            </div>
+        </div>
+    );
+};
+
 interface ContactFormProps {
-    mode: 'create' | 'edit';
+    initialMode?: 'create' | 'edit' | 'view';
     contact?: ContactData;
     locationId: string;
-    onSuccess: () => void;
+    onSuccess?: () => void;
     /** Additional content to render inside the form (e.g., viewings tab for edit mode) */
     additionalTabs?: React.ReactNode;
     /** Additional footer content (e.g., delete button for edit mode) */
     additionalFooter?: React.ReactNode;
     /** Additional tab content nodes (for e.g. Viewings tab content) */
-    /** Additional tab content nodes (for e.g. Viewings tab content) */
-    additionalTabContent?: React.ReactNode;
+    additionalTabContent?: React.ReactNode | ((isEditing: boolean) => React.ReactNode);
     /** Number of additional tabs passed (for grid calculation) */
     additionalTabCount?: number;
     leadSources?: string[];
 }
 
-function SubmitButton({ mode }: { mode: 'create' | 'edit' }) {
+function SubmitButton({ isEditing, isCreating, toggler }: { isEditing: boolean, isCreating: boolean, toggler: () => void }) {
     const { pending } = useFormStatus();
+
+    if (!isEditing) {
+        return (
+            <Button type="button" onClick={toggler}>
+                <Pencil className="mr-2 h-4 w-4" />
+                Edit Contact
+            </Button>
+        );
+    }
+
     return (
         <Button type="submit" disabled={pending}>
-            {pending ? (mode === 'create' ? 'Creating...' : 'Saving...') : (mode === 'create' ? 'Create Contact' : 'Save Changes')}
+            {pending ? (isCreating ? 'Creating...' : 'Saving...') : (isCreating ? 'Create Contact' : 'Save Changes')}
         </Button>
     );
 }
@@ -126,9 +169,13 @@ function formatDate(date: Date | null | undefined) {
     }
 }
 
-export function ContactForm({ mode, contact, locationId, onSuccess, additionalTabs, additionalTabContent, additionalFooter, additionalTabCount = 0, leadSources = [] }: ContactFormProps) {
+export function ContactForm({ initialMode = 'create', contact, locationId, onSuccess, additionalTabs, additionalTabContent, additionalFooter, additionalTabCount = 0, leadSources = [] }: ContactFormProps) {
     const router = useRouter();
-    const action = mode === 'create' ? createContact : updateContact;
+
+    const [isEditing, setIsEditing] = useState(initialMode !== 'view');
+    const isCreating = initialMode === 'create';
+
+    const action = isCreating ? createContact : updateContact;
     const [state, formAction] = useActionState(action, {
         message: '',
         errors: {},
@@ -137,11 +184,19 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
     const { toast } = useToast();
     const [isPending, startTransition] = useTransition();
 
+    const toggleEdit = () => {
+        if (isCreating) return;
+        setIsEditing(!isEditing);
+    };
+
     // Determine initial contact type from existing data or default
     const initialContactType = (contact?.contactType as ContactType) || DEFAULT_CONTACT_TYPE;
 
     // Contact Type State
     const [contactType, setContactType] = useState<ContactType>(initialContactType);
+    // If not editing, we shouldn't show the type selector unless specifically asked? 
+    // Actually we can just show it as DisplayField or Selector.
+
     const currentConfig = CONTACT_TYPE_CONFIG[contactType];
 
     // Entity Assignment State
@@ -208,22 +263,29 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
     // Handle success/error state changes
     useEffect(() => {
         if (state.success) {
-            // Reset form state
-            setSelectedPropertyId('');
-            setSelectedCompanyId('');
-            if (mode === 'create') {
+            // Reset form state if creating
+            if (isCreating) {
+                setSelectedPropertyId('');
+                setSelectedCompanyId('');
                 setInterestedProperties([]);
                 setInspectedProperties([]);
                 setEmailedProperties([]);
                 setMatchedProperties([]);
                 setSelectedDistricts([]);
                 setSelectedAreas([]);
+                if (onSuccess) onSuccess();
+            } else {
+                // If editing, just toggle back to view mode + refresh
+                setIsEditing(false);
+                router.refresh();
+                if (onSuccess) onSuccess();
             }
+
             toast({
                 title: 'Success',
-                description: mode === 'create' ? 'Contact created successfully.' : 'Contact updated successfully.',
+                description: isCreating ? 'Contact created successfully.' : 'Contact updated successfully.',
             });
-            onSuccess();
+
         } else if (state.message && !state.success) {
             toast({
                 title: 'Error',
@@ -231,7 +293,7 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
                 variant: 'destructive',
             });
         }
-    }, [state, toast, onSuccess, mode]);
+    }, [state, toast, onSuccess, isCreating]);
 
     // Fetch data when form is rendered
     const hasPropertiesTab = currentConfig.visibleTabs.includes('properties');
@@ -273,31 +335,32 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
     return (
         <form action={formAction} className="flex flex-col flex-1 overflow-hidden">
             <input type="hidden" name="locationId" value={locationId} />
-            {mode === 'edit' && contact && <input type="hidden" name="contactId" value={contact.id} />}
+            {contact && <input type="hidden" name="contactId" value={contact.id} />}
             <input type="hidden" name="contactType" value={contactType} />
 
-            <div className="flex-1 overflow-y-auto px-1 py-2">
+            <div className={`flex-1 overflow-y-auto px-1 py-2 ${!isEditing ? 'bg-muted/10' : ''}`}>
                 {/* AI Analyzer moved to Conversations > AI Coordinator Panel */}
 
                 {/* Contact Type Selector */}
-                <div className="mb-4 p-3 bg-muted/50 rounded-lg border">
-                    <Label className="text-sm font-medium mb-2 block">Contact Type</Label>
-                    <Select value={contactType} onValueChange={(v) => setContactType(v as ContactType)}>
-                        <SelectTrigger className="w-full">
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {CONTACT_TYPES.map((type) => (
-                                <SelectItem key={type} value={type}>
-                                    <div className="flex flex-col">
-                                        <span>{CONTACT_TYPE_CONFIG[type].label}</span>
-                                    </div>
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground mt-1">{currentConfig.description}</p>
-                </div>
+                <RenderField label="Contact Type" value={CONTACT_TYPE_CONFIG[contactType]?.label} isEditing={isEditing} className="mb-4">
+                    <div className="mb-4 p-3 bg-muted/50 rounded-lg border">
+                        <Select value={contactType} onValueChange={(v) => setContactType(v as ContactType)}>
+                            <SelectTrigger className="w-full">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {CONTACT_TYPES.map((type) => (
+                                    <SelectItem key={type} value={type}>
+                                        <div className="flex flex-col">
+                                            <span>{CONTACT_TYPE_CONFIG[type].label}</span>
+                                        </div>
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground mt-1">{currentConfig.description}</p>
+                    </div>
+                </RenderField>
 
                 <Tabs defaultValue="details" className="w-full">
                     <TabsList className={`w-full grid ${gridCols[visibleTabCount] || 'grid-cols-4'}`}>
@@ -320,28 +383,24 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
                     <TabsContent value="details" forceMount={true} className="space-y-4 pt-4 data-[state=inactive]:hidden">
                         {/* Basic Info */}
                         <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <Label htmlFor="name">Name</Label>
+                            <RenderField label="Name" value={contact?.name} isEditing={isEditing}>
                                 <Input id="name" name="name" required placeholder="Full Name" defaultValue={contact?.name || ''} />
                                 {state.errors?.name && <p className="text-sm text-red-500">{state.errors.name.join(', ')}</p>}
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="email">Email</Label>
+                            </RenderField>
+                            <RenderField label="Email" value={contact?.email} isEditing={isEditing}>
                                 <Input id="email" name="email" type="email" placeholder="email@example.com" defaultValue={contact?.email || ''} />
                                 {state.errors?.email && <p className="text-sm text-red-500">{state.errors.email.join(', ')}</p>}
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="phone">Phone</Label>
+                            </RenderField>
+                            <RenderField label="Phone" value={contact?.phone} isEditing={isEditing}>
                                 <Input id="phone" name="phone" type="tel" placeholder="+123..." defaultValue={contact?.phone || ''} />
                                 {state.errors?.phone && <p className="text-sm text-red-500">{state.errors.phone.join(', ')}</p>}
-                            </div>
+                            </RenderField>
                         </div>
 
                         {/* Lead Fields (conditional) */}
                         {currentConfig.showLeadFields && (
                             <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label>Goal</Label>
+                                <RenderField label="Goal" value={contact?.leadGoal} isEditing={isEditing}>
                                     <Select name="leadGoal" defaultValue={contact?.leadGoal || undefined}>
                                         <SelectTrigger>
                                             <SelectValue placeholder="Select Goal" />
@@ -352,9 +411,8 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
                                             ))}
                                         </SelectContent>
                                     </Select>
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Priority</Label>
+                                </RenderField>
+                                <RenderField label="Priority" value={contact?.leadPriority} isEditing={isEditing}>
                                     <Select name="leadPriority" defaultValue={contact?.leadPriority || "Medium"}>
                                         <SelectTrigger>
                                             <SelectValue />
@@ -365,9 +423,8 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
                                             ))}
                                         </SelectContent>
                                     </Select>
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Stage</Label>
+                                </RenderField>
+                                <RenderField label="Stage" value={contact?.leadStage} isEditing={isEditing}>
                                     <Select name="leadStage" defaultValue={contact?.leadStage || "Unassigned"}>
                                         <SelectTrigger>
                                             <SelectValue />
@@ -378,9 +435,8 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
                                             ))}
                                         </SelectContent>
                                     </Select>
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Source</Label>
+                                </RenderField>
+                                <RenderField label="Source" value={contact?.leadSource} isEditing={isEditing}>
                                     <Select name="leadSource" defaultValue={contact?.leadSource || undefined}>
                                         <SelectTrigger>
                                             <SelectValue placeholder="Select Source" />
@@ -391,9 +447,8 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
                                             ))}
                                         </SelectContent>
                                     </Select>
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Assigned Agent</Label>
+                                </RenderField>
+                                <RenderField label="Assigned Agent" value={contact?.leadAssignedToAgent ? (users.find(u => u.id === contact?.leadAssignedToAgent)?.name || contact?.leadAssignedToAgent) : null} isEditing={isEditing}>
                                     <Select name="leadAssignedToAgent" defaultValue={contact?.leadAssignedToAgent || undefined}>
                                         <SelectTrigger><SelectValue placeholder="Select Agent" /></SelectTrigger>
                                         <SelectContent>
@@ -402,27 +457,26 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
                                             ))}
                                         </SelectContent>
                                     </Select>
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Next Action</Label>
+                                </RenderField>
+                                <RenderField label="Next Action" value={contact?.leadNextAction} isEditing={isEditing}>
                                     <Input name="leadNextAction" defaultValue={contact?.leadNextAction || ''} />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Follow Up Date</Label>
+                                </RenderField>
+                                <RenderField label="Follow Up Date" value={contact?.leadFollowUpDate ? formatDate(contact?.leadFollowUpDate) : null} isEditing={isEditing}>
                                     <Input name="leadFollowUpDate" type="date" defaultValue={formatDate(contact?.leadFollowUpDate)} />
-                                </div>
-                                <div className="col-span-2 space-y-2">
-                                    <Label>Other Details</Label>
-                                    <Textarea name="leadOtherDetails" placeholder="Add any other details..." defaultValue={contact?.leadOtherDetails || ''} />
+                                </RenderField>
+                                <div className="col-span-2">
+                                    <RenderField label="Other Details" value={contact?.leadOtherDetails} isEditing={isEditing}>
+                                        <Textarea name="leadOtherDetails" placeholder="Add any other details..." defaultValue={contact?.leadOtherDetails || ''} />
+                                    </RenderField>
                                 </div>
                             </div>
                         )}
 
 
-                        {/* Current Roles Display (Edit Mode Only) */}
-                        {mode === 'edit' && contact && (
+                        {/* Roles Display */}
+                        {contact && (
                             <div className="border-t pt-4 mt-2">
-                                <Label className="mb-2 block">Current Roles</Label>
+                                <Label className="mb-2 block">Roles & Associations</Label>
                                 {(!contact.propertyRoles?.length && !contact.companyRoles?.length) ? (
                                     <p className="text-sm text-muted-foreground">No roles assigned.</p>
                                 ) : (
@@ -430,17 +484,21 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
                                         {contact.propertyRoles?.map((role) => (
                                             <div key={role.id} className="text-sm flex justify-between items-center bg-gray-50 dark:bg-gray-900 p-2 rounded">
                                                 <span><span className="font-medium">{role.role}</span> at {role.property.reference || role.property.title}</span>
-                                                <Button type="button" variant="ghost" size="icon" className="h-6 w-6 hover:text-destructive" onClick={() => handleDeleteRole(role.id, 'property')}>
-                                                    <X className="h-4 w-4" />
-                                                </Button>
+                                                {isEditing && (
+                                                    <Button type="button" variant="ghost" size="icon" className="h-6 w-6 hover:text-destructive" onClick={() => handleDeleteRole(role.id, 'property')}>
+                                                        <X className="h-4 w-4" />
+                                                    </Button>
+                                                )}
                                             </div>
                                         ))}
                                         {contact.companyRoles?.map((role) => (
                                             <div key={role.id} className="text-sm flex justify-between items-center bg-gray-50 dark:bg-gray-900 p-2 rounded">
                                                 <span><span className="font-medium">{role.role}</span> at {role.company.name}</span>
-                                                <Button type="button" variant="ghost" size="icon" className="h-6 w-6 hover:text-destructive" onClick={() => handleDeleteRole(role.id, 'company')}>
-                                                    <X className="h-4 w-4" />
-                                                </Button>
+                                                {isEditing && (
+                                                    <Button type="button" variant="ghost" size="icon" className="h-6 w-6 hover:text-destructive" onClick={() => handleDeleteRole(role.id, 'company')}>
+                                                        <X className="h-4 w-4" />
+                                                    </Button>
+                                                )}
                                             </div>
                                         ))}
                                     </div>
@@ -449,7 +507,7 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
                         )}
 
                         {/* Entity Assignment - Based on Contact Type */}
-                        {currentConfig.entityType !== 'none' && (
+                        {isEditing && currentConfig.entityType !== 'none' && (
                             <div className="border-t pt-4 mt-2 space-y-4">
                                 <Label className="text-sm font-medium">
                                     {currentConfig.entityLabel || 'Assign to'}
@@ -533,26 +591,23 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
                     {currentConfig.visibleTabs.includes('requirements') && (
                         <TabsContent value="requirements" forceMount={true} className="space-y-4 pt-4 data-[state=inactive]:hidden">
                             <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label>Requirement Status</Label>
+                                <RenderField label="Requirement Status" value={contact?.requirementStatus} isEditing={isEditing}>
                                     <Select name="requirementStatus" defaultValue={contact?.requirementStatus || "For Sale"}>
                                         <SelectTrigger><SelectValue /></SelectTrigger>
                                         <SelectContent>
                                             {REQUIREMENT_STATUSES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                                         </SelectContent>
                                     </Select>
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>District</Label>
+                                </RenderField>
+                                <RenderField label="District" value={contact?.requirementDistrict} isEditing={isEditing}>
                                     <Select name="requirementDistrict" defaultValue={contact?.requirementDistrict || "Any District"}>
                                         <SelectTrigger><SelectValue /></SelectTrigger>
                                         <SelectContent>
                                             {districts.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
                                         </SelectContent>
                                     </Select>
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Bedrooms</Label>
+                                </RenderField>
+                                <RenderField label="Bedrooms" value={contact?.requirementBedrooms} isEditing={isEditing}>
                                     <Select name="requirementBedrooms" defaultValue={contact?.requirementBedrooms || "Any Bedrooms"}>
                                         <SelectTrigger><SelectValue /></SelectTrigger>
                                         <SelectContent>
@@ -561,18 +616,16 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
                                             ))}
                                         </SelectContent>
                                     </Select>
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Condition</Label>
+                                </RenderField>
+                                <RenderField label="Condition" value={contact?.requirementCondition} isEditing={isEditing}>
                                     <Select name="requirementCondition" defaultValue={contact?.requirementCondition || "Any Condition"}>
                                         <SelectTrigger><SelectValue /></SelectTrigger>
                                         <SelectContent>
                                             {REQUIREMENT_CONDITIONS.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                                         </SelectContent>
                                     </Select>
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Min Price</Label>
+                                </RenderField>
+                                <RenderField label="Min Price" value={contact?.requirementMinPrice} isEditing={isEditing}>
                                     <Select name="requirementMinPrice" defaultValue={contact?.requirementMinPrice || "Any"}>
                                         <SelectTrigger><SelectValue /></SelectTrigger>
                                         <SelectContent className="max-h-[200px]">
@@ -581,9 +634,8 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
                                             ))}
                                         </SelectContent>
                                     </Select>
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Max Price</Label>
+                                </RenderField>
+                                <RenderField label="Max Price" value={contact?.requirementMaxPrice} isEditing={isEditing}>
                                     <Select name="requirementMaxPrice" defaultValue={contact?.requirementMaxPrice || "Any"}>
                                         <SelectTrigger><SelectValue /></SelectTrigger>
                                         <SelectContent className="max-h-[200px]">
@@ -592,15 +644,13 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
                                             ))}
                                         </SelectContent>
                                     </Select>
-                                </div>
+                                </RenderField>
                             </div>
 
-                            <div className="space-y-2">
-                                <Label>Property Types</Label>
+                            <RenderField label="Property Types" value={contact?.requirementPropertyTypes?.length ? contact?.requirementPropertyTypes.join(', ') : null} isEditing={isEditing}>
                                 <ContactPropertyTypeSelector name="requirementPropertyTypes" defaultValue={contact?.requirementPropertyTypes} />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Locations</Label>
+                            </RenderField>
+                            <RenderField label="Locations" value={contact?.requirementPropertyLocations?.length ? contact?.requirementPropertyLocations.join(', ') : null} isEditing={isEditing}>
                                 <input
                                     type="hidden"
                                     name="requirementPropertyLocations"
@@ -612,10 +662,11 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
                                     onChange={handleLocationChange}
                                     modal={true}
                                 />
-                            </div>
-                            <div className="col-span-2 space-y-2">
-                                <Label>Other Details</Label>
-                                <Textarea name="requirementOtherDetails" placeholder="Add other specific requirements..." defaultValue={contact?.requirementOtherDetails || ''} />
+                            </RenderField>
+                            <div className="col-span-2">
+                                <RenderField label="Other Details" value={contact?.requirementOtherDetails} isEditing={isEditing}>
+                                    <Textarea name="requirementOtherDetails" placeholder="Add other specific requirements..." defaultValue={contact?.requirementOtherDetails || ''} />
+                                </RenderField>
                             </div>
                         </TabsContent>
                     )}
@@ -624,37 +675,33 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
                     {currentConfig.visibleTabs.includes('matching') && (
                         <TabsContent value="matching" forceMount={true} className="space-y-4 pt-4 data-[state=inactive]:hidden">
                             <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label>Properties To Match</Label>
+                                <RenderField label="Properties To Match" value={contact?.matchingPropertiesToMatch} isEditing={isEditing}>
                                     <Select name="matchingPropertiesToMatch" defaultValue={contact?.matchingPropertiesToMatch || "Updated and New"}>
                                         <SelectTrigger><SelectValue /></SelectTrigger>
                                         <SelectContent>
                                             {["None", "New Only", "Updated and New"].map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
                                         </SelectContent>
                                     </Select>
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Email Matched Properties</Label>
+                                </RenderField>
+                                <RenderField label="Email Matched Properties" value={contact?.matchingEmailMatchedProperties} isEditing={isEditing}>
                                     <Select name="matchingEmailMatchedProperties" defaultValue={contact?.matchingEmailMatchedProperties || "Yes - Automatic"}>
                                         <SelectTrigger><SelectValue /></SelectTrigger>
                                         <SelectContent>
                                             {["No - Manual", "Yes - Automatic", "No - Client Unsubscribed"].map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
                                         </SelectContent>
                                     </Select>
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Frequency</Label>
+                                </RenderField>
+                                <RenderField label="Frequency" value={contact?.matchingNotificationFrequency} isEditing={isEditing}>
                                     <Select name="matchingNotificationFrequency" defaultValue={contact?.matchingNotificationFrequency || "Weekly"}>
                                         <SelectTrigger><SelectValue /></SelectTrigger>
                                         <SelectContent>
                                             {["Daily", "Weekly", "Bi Weekly", "Monthly"].map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
                                         </SelectContent>
                                     </Select>
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Last Match Date</Label>
+                                </RenderField>
+                                <RenderField label="Last Match Date" value={contact?.matchingLastMatchDate ? formatDate(contact?.matchingLastMatchDate) : null} isEditing={isEditing}>
                                     <Input name="matchingLastMatchDate" type="date" defaultValue={formatDate(contact?.matchingLastMatchDate)} />
-                                </div>
+                                </RenderField>
                             </div>
                         </TabsContent>
                     )}
@@ -663,8 +710,16 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
                     {currentConfig.visibleTabs.includes('properties') && (
                         <TabsContent value="properties" forceMount={true} className="space-y-4 pt-4 data-[state=inactive]:hidden">
                             <div className="grid gap-4">
-                                <div className="space-y-2">
-                                    <Label>Interested Properties</Label>
+                                <RenderField label="Interested Properties" value={
+                                    interestedProperties.length > 0 ? (
+                                        <ul className="list-disc pl-5 mt-1">
+                                            {interestedProperties.map(id => {
+                                                const p = properties.find(prop => prop.id === id);
+                                                return <li key={id}>{p ? (p.reference || p.title) : 'Unknown Property'}</li>
+                                            })}
+                                        </ul>
+                                    ) : null
+                                } isEditing={isEditing} className="w-full">
                                     <MultiPropertySelect
                                         name="propertiesInterested"
                                         options={properties.map(p => ({ value: p.id, label: p.reference || p.title }))}
@@ -673,9 +728,17 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
                                         placeholder={loadingData ? "Loading..." : "Search and select properties..."}
                                         disabled={loadingData}
                                     />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Inspected Properties</Label>
+                                </RenderField>
+                                <RenderField label="Inspected Properties" value={
+                                    inspectedProperties.length > 0 ? (
+                                        <ul className="list-disc pl-5 mt-1">
+                                            {inspectedProperties.map(id => {
+                                                const p = properties.find(prop => prop.id === id);
+                                                return <li key={id}>{p ? (p.reference || p.title) : 'Unknown Property'}</li>
+                                            })}
+                                        </ul>
+                                    ) : null
+                                } isEditing={isEditing} className="w-full">
                                     <MultiPropertySelect
                                         name="propertiesInspected"
                                         options={properties.map(p => ({ value: p.id, label: p.reference || p.title }))}
@@ -684,9 +747,17 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
                                         placeholder="Search and select properties..."
                                         disabled={loadingData}
                                     />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Properties Emailed</Label>
+                                </RenderField>
+                                <RenderField label="Properties Emailed" value={
+                                    emailedProperties.length > 0 ? (
+                                        <ul className="list-disc pl-5 mt-1">
+                                            {emailedProperties.map(id => {
+                                                const p = properties.find(prop => prop.id === id);
+                                                return <li key={id}>{p ? (p.reference || p.title) : 'Unknown Property'}</li>
+                                            })}
+                                        </ul>
+                                    ) : null
+                                } isEditing={isEditing} className="w-full">
                                     <MultiPropertySelect
                                         name="propertiesEmailed"
                                         options={properties.map(p => ({ value: p.id, label: p.reference || p.title }))}
@@ -695,9 +766,17 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
                                         placeholder="Search and select properties..."
                                         disabled={loadingData}
                                     />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Properties Matched</Label>
+                                </RenderField>
+                                <RenderField label="Properties Matched" value={
+                                    matchedProperties.length > 0 ? (
+                                        <ul className="list-disc pl-5 mt-1">
+                                            {matchedProperties.map(id => {
+                                                const p = properties.find(prop => prop.id === id);
+                                                return <li key={id}>{p ? (p.reference || p.title) : 'Unknown Property'}</li>
+                                            })}
+                                        </ul>
+                                    ) : null
+                                } isEditing={isEditing} className="w-full">
                                     <MultiPropertySelect
                                         name="propertiesMatched"
                                         options={properties.map(p => ({ value: p.id, label: p.reference || p.title }))}
@@ -706,43 +785,39 @@ export function ContactForm({ mode, contact, locationId, onSuccess, additionalTa
                                         placeholder="Search and select properties..."
                                         disabled={loadingData}
                                     />
-                                </div>
+                                </RenderField>
                             </div>
 
-                            {/* Property Won - Only shown in edit mode or if contact exists */}
-                            {mode === 'edit' && contact && (
+                            {/* Property Won - Only shown if contact exists */}
+                            {(contact) && (
                                 <div className="border-t pt-4">
                                     <h3 className="font-semibold mb-2">Property Won</h3>
                                     <div className="grid grid-cols-2 gap-4">
-                                        <div className="space-y-2">
-                                            <Label>Property Won Reference</Label>
+                                        <RenderField label="Property Won Reference" value={contact.propertyWonReference} isEditing={isEditing}>
                                             <Input name="propertyWonReference" defaultValue={contact.propertyWonReference || ''} />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label>Won Date</Label>
+                                        </RenderField>
+                                        <RenderField label="Won Date" value={contact.propertyWonDate ? formatDate(contact.propertyWonDate) : null} isEditing={isEditing}>
                                             <Input name="propertyWonDate" type="date" defaultValue={formatDate(contact.propertyWonDate)} />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label>Won Value</Label>
+                                        </RenderField>
+                                        <RenderField label="Won Value" value={contact.propertyWonValue} isEditing={isEditing}>
                                             <Input name="propertyWonValue" type="number" defaultValue={contact.propertyWonValue || ''} />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label>Commission</Label>
+                                        </RenderField>
+                                        <RenderField label="Commission" value={contact.wonCommission} isEditing={isEditing}>
                                             <Input name="wonCommission" type="number" defaultValue={contact.wonCommission || ''} />
-                                        </div>
+                                        </RenderField>
                                     </div>
                                 </div>
                             )}
                         </TabsContent>
                     )}
 
-                    {additionalTabContent}
+                    {typeof additionalTabContent === 'function' ? additionalTabContent(isEditing) : additionalTabContent}
                 </Tabs>
             </div>
 
-            <div className="pt-4 border-t flex justify-between">
-                {additionalFooter}
-                <SubmitButton mode={mode} />
+            <div className={`pt-4 border-t flex items-center justify-between ${!isEditing ? 'bg-background p-2' : ''}`}>
+                {isEditing ? additionalFooter : <div />}
+                <SubmitButton isEditing={isEditing} isCreating={isCreating} toggler={toggleEdit} />
             </div>
         </form >
     );

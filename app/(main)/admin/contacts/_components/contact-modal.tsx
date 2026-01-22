@@ -9,7 +9,7 @@ import {
     DialogTitle,
     DialogDescription
 } from '@/components/ui/dialog';
-import ContactView from './contact-view';
+
 import { EditContactForm } from './edit-contact-dialog';
 import { useEffect, useState } from 'react';
 import { getContactDetails } from '../actions';
@@ -66,7 +66,7 @@ export default function ContactModal({ contactId, mode }: ContactModalProps) {
                         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                     </div>
                 ) : data ? (
-                    mode === 'edit' ? (
+                    <div className="pt-4 flex-1 min-h-0 flex flex-col">
                         <EditContactForm
                             contact={data.contact}
                             leadSources={data.leadSources}
@@ -74,18 +74,9 @@ export default function ContactModal({ contactId, mode }: ContactModalProps) {
                                 handleOpenChange(false);
                                 router.refresh();
                             }}
+                            initialMode={mode}
                         />
-                    ) : (
-                        <div className="pt-4 flex-1 min-h-0 flex flex-col">
-                            <ContactView
-                                contact={data.contact}
-                                leadSources={data.leadSources}
-                                propertyMap={data.propertyMap}
-                                userMap={data.userMap}
-                                variant="modal"
-                            />
-                        </div>
-                    )
+                    </div>
                 ) : (
                     <div className="text-center py-8 text-muted-foreground">
                         Contact not found or failed to load.

@@ -63,31 +63,32 @@ To handle high-volume sync and rate limits, we introduced a **Queue-Based Archit
 - **Old Behavior**: Only logged out the session.
 - **New Behavior**: Performing a disconnect now calls `deleteInstance` on Evolution API. This ensures a completely clean slate for the next connection, preventing "ghost" instances and QR code persistence issues.
 
-### 5. Lazy-Load History Sync (Jan 17, 2026)
+### 5. Smart Background Sync (Jan 21, 2026)
 
-**Problem**: `syncFullHistory: true` stores messages in Evolution's internal database, but does NOT trigger webhook events for historical messages. Webhooks only fire for real-time messages.
+**Problem**: The previous "Lazy-Load" approach triggered a full history fetch (50+ messages) every time a conversation was opened. This caused unnecessary API calls, delays, and "History Fetch" logs even when up-to-date.
 
-**Solution**: Implemented a **pull-based** approach:
+**Solution**: Implemented a **Smart Background Sync** with deduplication intelligence:
 
 #### How It Works
-1. **On Conversation Click**: When user clicks a conversation in the UI, `fetchMessages` is called.
-2. **Evolution Check**: If Evolution is connected and the contact has a phone number:
-   - Calls Evolution API `/chat/findMessages/{instanceName}` endpoint
-   - Fetches up to 50 messages for that specific chat
-3. **Processing**: Each message is processed through `processNormalizedMessage`:
-   - Deduplicates by `wamId` (skips existing messages)
-   - Creates new messages in local database
-   - Syncs to Google Contacts and GHL (via queue)
-4. **Display**: Returns all messages from local database to UI
+1. **Silent Trigger**: When a user selects a conversation, a background process starts *immediately* but does not block the UI (no loading spinners).
+2. **Smart Limits**:
+   - Fetches a small batch (default: 20 messages).
+   - **Consecutive Duplicate Detection**: The sync loop counts how many existing messages it encounters. If it finds **5 consecutive duplicates**, it assumes the history is up-to-date and **stops early**. This prevents re-scanning thousands of old messages.
+3. **Manual Override**: A "Sync History" button (refresh icon) is available in the Chat Window header. This allows the user to force a deeper history fetch if they suspect missing messages (e.g., after a long phone disconnection).
 
 #### Key Files
-- **`lib/evolution/client.ts`**: Added `fetchChats()` and `fetchMessages()` methods
-- **`app/(main)/admin/conversations/actions.ts`**: Enhanced `fetchMessages` with Evolution history fetch
+- **`app/(main)/admin/conversations/actions.ts`**: 
+    - `syncWhatsAppHistory(id, limit)`: The core action. accepted an optional limit and returns sync stats (synced count, skipped count).
+- **`lib/whatsapp/sync.ts`**: 
+    - `processNormalizedMessage`: Updated to return a status (`{ status: 'skipped' | 'processed' }`) to enable the duplicate detection logic.
+- **`app/(main)/admin/conversations/_components/conversation-interface.tsx`**: 
+    - Calls `syncWhatsAppHistory` silently on conversation selection.
+    - Updates the UI only if new messages are found.
 
 #### Benefits
-- **Lazy Loading**: Only fetches messages when user views a conversation (not all at once)
-- **Efficient**: Doesn't overwhelm the server or GHL API on connection
-- **Deduplication**: Same message is never saved twice (checked by `wamId`)
+- **Zero Latency**: User sees cached messages immediately; new ones pop in if found.
+- **Efficiency**: Stops processing as soon as it hits known history.
+- **Resilience**: Manual button handles edge cases.
 
 ## Setup Guide
 

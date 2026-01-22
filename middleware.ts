@@ -1,27 +1,25 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-const isProtectedRoute = createRouteMatcher(["/admin(.*)"]);
+const isProtectedRoute = createRouteMatcher(["/dashboard(.*)", "/forum(.*)"]);
 const isPublicRoute = createRouteMatcher([
   "/",
   "/sign-in(.*)",
   "/sign-up(.*)",
-  "/api/oauth(.*)",
-  "/api/clerk(.*)",
-  "/api/auth-proxy(.*)",
-  "/sso(.*)",
-  "/setup(.*)",
-  "/(public-site)(.*)",
-  "/v1/oauth_callback(.*)", // Add explicit exclusion for Clerk's OAuth callback if it hits this server
-  "/api/webhooks(.*)"
+  "/api(.*)",
+  "/sso-callback",
+  "/monitoring(.*)",
+  "/site.webmanifest",
+  "/robots.txt",
+  "/images(.*)",
 ]);
 
-// Define your system domains (Dashboard/Admin access)
 // Include 127.0.0.1 for when Caddy proxies to local Next.js (without port in Host header)
 const SYSTEM_DOMAINS = ["localhost:3000", "localhost", "127.0.0.1", "estio.co"];
 
 export default clerkMiddleware(async (auth, req: NextRequest) => {
+  // export default async function middleware(req: NextRequest) {
+  // const auth = () => ({ userId: null, protect: () => {} }); // Mock auth for debugging
   let hostname = req.headers.get("host");
 
   // Remove port if present (for localhost testing)
@@ -42,7 +40,12 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
   // 0. Global WWW Redirect
   // Ensure strict cannonical domain (non-www) for SEO and consistency.
   const host = req.headers.get("host");
+  console.log(`[Middleware] [${req.method}] ${req.url}`);
+  console.log(`[Middleware] Host: ${host}, Hostname (Clean): ${hostname}`);
+  console.log(`[Middleware] Headers: X-Forwarded-Proto=${req.headers.get('x-forwarded-proto')}, X-Forwarded-Host=${req.headers.get('x-forwarded-host')}`);
+
   if (host && host.startsWith("www.") && host !== "localhost") {
+    console.log(`[Middleware] Redirecting WWW to non-WWW`);
     const newHostname = host.replace(/^www\./, "");
     const newUrl = new URL(req.url);
     newUrl.hostname = newHostname;
@@ -51,39 +54,21 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
     return NextResponse.redirect(newUrl);
   }
 
-  console.log(`[Middleware] Incoming Request: ${req.url} | Host Header: ${req.headers.get("host")} | Resolved Hostname: ${hostname}`);
+  // console.log(`[Middleware] Incoming Request: ${req.url} | Host Header: ${req.headers.get("host")} | Resolved Hostname: ${hostname}`);
 
   const searchParams = req.nextUrl.searchParams.toString();
   // Construct the path (e.g. /search)
   const path = `${url.pathname}${searchParams.length > 0 ? `?${searchParams}` : ""
     }`;
 
-  // Helper: Create Internal Rewrite using ABSOLUTE URL
-  // We use http://127.0.0.1:3000 to avoid EPROTO errors (SSL handshake on HTTP port).
-  // CRITICAL: We MUST force specific headers so Clerk believes it's still on the original domain/protocol.
+  // Helper: Create Internal Rewrite using RELATIVE URL
+  // We switch back to standard Next.js rewrites to avoid proxy loops and 308 redirects.
+  // The absolute URL approach (http://localhost:3000) was causing issues on Next.js 15.
   const createInternalRewrite = (targetPath: string) => {
-    // 1. Construct Absolute URL to localhost (HTTP) to keep it internal.
-    // We use the incoming port if available (for local dev on 3001 etc), default to 3000.
-    const port = req.nextUrl.port || '3000';
-    const destUrl = new URL(targetPath, `http://localhost:${port}`);
+    // Construct URL relative to the current request's origin
+    const destUrl = new URL(targetPath, req.url);
 
-    // Handle params (merge existing + new)
-    // Note: URL constructor above handles the path, but we need to merge current request params if not present?
-    // Actually, the original logic was:
-    // if targetPath has '?', split it.
-    // We should probably preserve that logic or simplify.
-    // The previous implementation used req.nextUrl.clone().
-    // Let's replicate the logic but on the new URL.
-
-    // If targetPath implies query params, we need to respect them.
-    // But we also usually want to carry over the original request's params if they aren't overridden?
-    // The original code:
-    // const [p, q] = targetPath.split('?');
-    // destUrl.pathname = p;
-    // const targetParams = new URLSearchParams(q);
-    // targetParams.forEach((v, k) => destUrl.searchParams.set(k, v));
-
-    // Let's do the same.
+    // Handle params (merge existing + new logic if needed)
     if (targetPath.includes('?')) {
       const [p, q] = targetPath.split('?');
       destUrl.pathname = p;
@@ -94,36 +79,45 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
     // Add Loop Protection
     destUrl.searchParams.set('_internal_rewrite', 'true');
 
-    // 2. Prepare Headers to preserve Clerk Context
-    const requestHeaders = new Headers(req.headers);
-    requestHeaders.set('x-forwarded-proto', 'https'); // Force HTTPS context for Clerk
-    requestHeaders.set('x-forwarded-host', req.headers.get('host') || '');
-    requestHeaders.set('host', req.headers.get('host') || ''); // Masquerade as original host
+    // DEBUG: Log the rewrite
+    console.log(`[Middleware] Rewriting to (Relative): ${destUrl.pathname}`);
 
+    // Standard Rewrite - internal to Next.js
     return NextResponse.rewrite(destUrl, {
       request: {
-        headers: requestHeaders,
+        headers: req.headers, // Pass original headers
       },
     });
   };
 
-
   // 1. System/Admin Domain Logic (Existing Dashboard)
   // If accessing via localhost (base), main app domain, or Clerk's OAuth domain.
   if (SYSTEM_DOMAINS.includes(hostname || "") || hostname === "clerk.estio.co") {
+    // console.log(`[Middleware] Matched System Domain: ${hostname}`);
 
     // Allow public routes without any auth
     if (isPublicRoute(req)) {
       console.log(`[Middleware] System Domain Public Route matched: ${path} for host ${hostname}`);
-      return createInternalRewrite(path);
+      // FIX: Do not rewrite system domains, serve directly.
+      const response = NextResponse.next();
+      response.headers.set(
+        'Content-Security-Policy',
+        "frame-ancestors 'self' https://*.gohighlevel.com https://*.leadconnectorhq.com https://app.gohighlevel.com https://estio.co;"
+      );
+      return response;
     }
 
     // Protect dashboard and other private routes with Clerk
     if (isProtectedRoute(req)) {
+      console.log(`[Middleware] Protecting Route: ${path}`);
       await auth.protect();
     }
 
-    const response = createInternalRewrite(path);
+    // CRITICAL FIX: For System Domains (estio.co, localhost), we DO NOT rewrite.
+    // Rewriting creates an internal proxy request which strips Clerk context and causes EPROTO errors.
+    // tailored for Caddy/Next.js setup.
+    console.log(`[Middleware] System Domain -> Serving directly (next)`);
+    const response = NextResponse.next();
 
     // FORCE CSP HEADER: Allow iframe embedding for GHL
     response.headers.set(
@@ -135,6 +129,7 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
   }
 
   // 2. Tenant Domain Logic (Public Website)
+  // console.log(`[Middleware] Matched Tenant Domain: ${hostname}`);
 
   // Custom Domain Admin & Auth Access:
   // If a user goes to website.com/admin, or auth pages, we want to show them the main app.
@@ -152,6 +147,7 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
   let response;
 
   if (isSystemPath) {
+    console.log(`[Middleware] Tenant Domain System Path matched: ${path}`);
     // NOTE: Sign-up and sign-in are allowed directly on tenant domains for public users
     // (e.g., users saving favorite properties). Admin access still triggers SSO handshake.
 
@@ -180,6 +176,7 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
       // - SSO handshake only for /setup and other system paths that require primary domain auth
 
       if (url.pathname.startsWith("/admin")) {
+        console.log(`[Middleware] Tenant Admin (Unauthenticated) -> Redirecting to Sign In`);
         // Redirect to tenant's sign-in page with redirect back to /admin
         // This allows admins to log in on the tenant domain directly
         // Role checking happens server-side in admin pages (redirects public users to home)
@@ -188,6 +185,7 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
         return NextResponse.redirect(signInUrl);
       }
 
+      console.log(`[Middleware] Tenant System Path (Unauthenticated) -> SSO Handshake`);
       // For other system paths (like /setup), use SSO handshake with primary domain
       // These require the user to be logged into estio.co first
       const handshakeUrl = new URL("https://estio.co/sso/handshake");
@@ -226,7 +224,7 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
     // DEBUG: Log trigger conditions for troubleshooting
     if (hostname !== "localhost" && !SYSTEM_DOMAINS.includes(hostname || "")) {
       // Only log on tenant domains to reduce noise
-      console.log(`[Middleware] Satellite Check for ${hostname}: Session=${hasSession}, UAT=${hasClientUat}, Ticket=${hasTicket}, AuthPath=${isAuthPath}`);
+      // console.log(`[Middleware] Satellite Check for ${hostname}: Session=${hasSession}, UAT=${hasClientUat}, Ticket=${hasTicket}, AuthPath=${isAuthPath}`);
     }
 
     if (hasSession || hasClientUat || hasTicket || isAuthPath) {
@@ -243,6 +241,7 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
 
   } else {
     // IF we are rewriting to `/[domain]`, Next.js handles it.
+    console.log(`[Middleware] Tenant Public Content: ${hostname}${path}`);
 
     // Strategy: Try relative first.
     // `path` includes search params.
@@ -259,13 +258,18 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
 
   return response;
 });
+// }
 
 export const config = {
   matcher: [
-    // Skip Next.js internals and all static files, unless found in search params
-    // Skip Next.js internals and all static files, unless found in search params
-    '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
-    // Always run for API routes
+    /*
+     * Match all request paths except for the ones starting with:
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico (favicon file)
+     * - images/ (public images)
+     */
+    '/((?!_next/static|_next/image|favicon.ico|images/|.*\\.(?:css|js|png|jpg|jpeg|gif|webp|svg|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
     '/(api|trpc)(.*)',
   ],
 };

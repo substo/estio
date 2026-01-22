@@ -13,12 +13,19 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   // Ensure the user exists in our local database whenever they access the dashboard
   const user = await currentUser();
 
+  if (user) {
+    console.log(`[DashboardLayout] User: ${user.id} (${user.emailAddresses[0]?.emailAddress})`);
+  } else {
+    console.log('[DashboardLayout] No user found via currentUser()');
+  }
+
   if (!user) {
     // This shouldn't happen as middleware protects /admin, but safety first
     redirect('/sign-in');
   }
 
   const localUser = await ensureUserExists(user);
+  console.log(`[DashboardLayout] Local User ensuring complete. ID: ${localUser?.id}`);
 
   // AUTHORIZATION CHECK: Verify user has access to at least one location
   // Public users (signed up via satellite domains) won't have any location access
@@ -31,6 +38,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       }
     }
   });
+  console.log(`[DashboardLayout] Locations found: ${userWithLocations?.locations?.length || 0}`);
 
   if (!userWithLocations?.locations?.length) {
     // User has no admin access - redirect to appropriate page

@@ -1,4 +1,3 @@
-import { Queue, Worker, Job } from 'bullmq';
 import db from '@/lib/db';
 
 const REDIS_CONNECTION = {
@@ -19,35 +18,50 @@ interface GhlSyncJobData {
     wamId: string; // For logging
 }
 
-// 1. Queue Instance (Producer)
-export const ghlSyncQueue = new Queue<GhlSyncJobData>(QUEUE_NAME, {
-    connection: REDIS_CONNECTION,
-    defaultJobOptions: {
-        attempts: 3,
-        backoff: {
-            type: 'exponential',
-            delay: 1000,
-        },
-        removeOnComplete: true, // Keep memory clean
-        removeOnFail: 100, // Keep last 100 failed jobs for debugging
-    },
-});
+// 1. Queue Instance (Producer) - Lazy Loaded via Dynamic Import
+// We use a factory function to avoid bundling bullmq at compile time
+let _queuePromise: Promise<any> | null = null;
+
+async function getQueueInstance() {
+    if (!_queuePromise) {
+        _queuePromise = (async () => {
+            const { Queue } = await import('bullmq');
+            return new Queue<GhlSyncJobData>(QUEUE_NAME, {
+                connection: REDIS_CONNECTION,
+                defaultJobOptions: {
+                    attempts: 3,
+                    backoff: {
+                        type: 'exponential',
+                        delay: 1000,
+                    },
+                    removeOnComplete: true,
+                    removeOnFail: 100,
+                },
+            });
+        })();
+    }
+    return _queuePromise;
+}
+
+// Legacy export for compatibility
+export const ghlSyncQueue = {
+    add: async (...args: any[]) => {
+        const queue = await getQueueInstance();
+        return queue.add(...args);
+    }
+};
 
 // 2. Worker Instance (Consumer)
-// Note: In Next.js serverless environment, workers need careful instantiation.
-// We will instantiate this in a singleton pattern or keeping it running.
-// If this file is imported by the API route that receives webhooks, the worker *might* start.
-// But for reliability, this should be run in a separate process or via instrumentation.
-// For now, we will lazy-load the worker to ensure it runs when the app interacts with it.
+let worker: any | null = null;
 
-let worker: Worker<GhlSyncJobData> | null = null;
-
-export function initGhlSyncWorker() {
+export async function initGhlSyncWorker() {
     if (worker) return;
 
     console.log('[Queue] Initializing GHL Sync Worker...');
 
-    worker = new Worker<GhlSyncJobData>(QUEUE_NAME, async (job: Job<GhlSyncJobData>) => {
+    const { Worker, Job } = await import('bullmq');
+
+    worker = new Worker<GhlSyncJobData>(QUEUE_NAME, async (job: any) => {
         const { contactId, body, type, conversationProviderId, accessToken, wamId } = job.data;
         console.log(`[Queue] Processing GHL Sync for message ${wamId} (Job ${job.id})`);
 
@@ -75,14 +89,15 @@ export function initGhlSyncWorker() {
 
     }, {
         connection: REDIS_CONNECTION,
-        concurrency: 1, // Process 1 job at a time per worker instance
+        concurrency: 1,
         limiter: {
-            max: 5, // Max 5 jobs
-            duration: 1000, // Per 1000ms (1 second)
+            max: 5,
+            duration: 1000,
         },
     });
 
-    worker.on('failed', (job: Job<GhlSyncJobData> | undefined, err: Error) => {
+    worker.on('failed', (job: any, err: Error) => {
         console.error(`[Queue] Job ${job?.id} failed: ${err.message}`);
     });
 }
+

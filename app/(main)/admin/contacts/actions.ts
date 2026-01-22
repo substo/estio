@@ -727,7 +727,7 @@ export async function updateContact(
     };
   }
 
-  revalidatePath('/admin/contacts');
+  // revalidatePath('/admin/contacts');
   return {
     message: 'Contact updated successfully.',
     success: true,

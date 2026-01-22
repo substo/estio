@@ -68,14 +68,7 @@ export default async function ConversationsPage() {
 
     return (
         <div className="h-[calc(100vh-64px)] w-full max-w-full min-w-0 overflow-hidden flex flex-col">
-            <header className="border-b h-14 flex items-center px-4 shrink-0 bg-white">
-                <h1 className="font-semibold text-lg">Agentic Conversations</h1>
-                <div className="ml-auto flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground bg-slate-100 px-2 py-1 rounded">
-                        Connected to: {location.name}
-                    </span>
-                </div>
-            </header>
+
 
             <main className="flex-1 overflow-hidden relative">
                 <Suspense fallback={<div>Loading Interface...</div>}>

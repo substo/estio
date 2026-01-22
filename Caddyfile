@@ -1,29 +1,23 @@
 {
     # Global On-Demand TLS Configuration
     on_demand_tls {
-        # Caddy checks this URL before issuing a certificate
-        # If returns 200 -> Cert Issued
-        # If returns 4xx/5xx -> Cert Denied
         ask http://localhost:3000/api/verify-domain
     }
 }
 
-# 1. Main Dashboard/App Domain (Static)
-# We state this explicitly to ensure it always has a cert managed normally (not on-demand)
 estio.co {
     reverse_proxy localhost:3000
+    
+    # STANDARD PROXY - NO SPOOFING
+    # We pass the real Host header. Next.js sees 'estio.co'.
+    # This matches the user's description of the "previous working state"
 }
 
-# 3. Catch-all for HTTP (Redirect to HTTPS)
 :80 {
-    # We must explicitly redirect HTTP -> HTTPS because we are using a catch-all :443
     redir https://{host}{uri} permanent
 }
 
-# 2. Wildcard for Custom Domains (Dynamic)
-# Accepts any other traffic on port 443
 :443 {
-    # Block raw IP access to prevent on-demand TLS abuse
     @ip_request header Host 138.199.214.117
     abort @ip_request
 
@@ -31,5 +25,6 @@ estio.co {
         on_demand
     }
     reverse_proxy localhost:3000
+    
+    # STANDARD PROXY - NO SPOOFING
 }
-

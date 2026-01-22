@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { Conversation, Message } from '@/lib/ghl/conversations';
-import { fetchMessages, sendReply, generateAIDraft } from '../actions';
+import { fetchMessages, sendReply, generateAIDraft, syncWhatsAppHistory } from '../actions';
+import { toast } from '@/components/ui/use-toast';
 import { getDealContexts } from '../../deals/actions';
 import { UnifiedTimeline } from './unified-timeline';
 import { ConversationList } from './conversation-list';
@@ -76,6 +77,20 @@ export function ConversationInterface({ initialConversations }: ConversationInte
         fetchMessages(activeId)
             .then(msgs => {
                 setMessages(msgs); // Keep chronological order (Oldest -> Newest)
+
+                // [Background Sync] Smart Sync for selected conversation
+                // This answers: "conversation that is highlighted selected get to be synched in the background"
+                // It runs silently and stops after finding duplicates.
+                if (msgs && msgs.length >= 0) {
+                    // We run this without awaiting or loading state
+                    syncWhatsAppHistory(activeId, 20).then(res => {
+                        if (res.success && res.count && res.count > 0) {
+                            console.log(`[Smart Sync] Found ${res.count} new messages.`);
+                            // Refresh quietly
+                            fetchMessages(activeId).then(setMessages);
+                        }
+                    }).catch(err => console.error("[Smart Sync] Error:", err));
+                }
             })
             .catch(err => console.error(err))
             .finally(() => setLoadingMessages(false));
@@ -109,6 +124,51 @@ export function ConversationInterface({ initialConversations }: ConversationInte
             alert('Failed to send message: ' + JSON.stringify(res.error));
         }
     };
+
+
+    const handleSync = async () => {
+        if (!activeId) return;
+        // Don't clear messages, just show loading overlay if supported or just toast
+        // We set loadingMessages to true which shows spinner, consistent with initial load
+        setLoadingMessages(true);
+        try {
+            toast({ title: "Syncing WhatsApp...", description: "Checking for missed messages." });
+            const res = await syncWhatsAppHistory(activeId);
+
+            if (res.success) {
+                const count = res.count || 0;
+                if (count > 0) {
+                    toast({ title: "Sync Complete", description: `Recovered ${count} messages.` });
+                    // Re-fetch to display them
+                    const msgs = await fetchMessages(activeId);
+                    setMessages(msgs);
+                } else {
+                    toast({ title: "Up to date", description: "No new messages found." });
+                    // Optional: Re-fetch anyway just in case DB had updates from elsewhere?
+                    // But usually not needed if count is 0. 
+                    // However, to be safe and clear loading state correctly:
+                    const msgs = await fetchMessages(activeId);
+                    setMessages(msgs);
+                }
+            } else {
+                toast({ title: "Sync Failed", description: String(res.error), variant: "destructive" });
+                // Re-fetch to reset loading state and show what we have
+                const msgs = await fetchMessages(activeId);
+                setMessages(msgs);
+            }
+        } catch (e) {
+            console.error("Sync error:", e);
+            toast({ title: "Sync Error", description: "An unexpected error occurred.", variant: "destructive" });
+            setLoadingMessages(false);
+        }
+    };
+
+    const [suggestions, setSuggestions] = useState<string[]>([]);
+
+    // Reset suggestions when active conversation changes
+    useEffect(() => {
+        setSuggestions([]);
+    }, [activeId]);
 
     return (
         <PanelGroup orientation="horizontal" className="h-full w-full max-w-full overflow-hidden">
@@ -152,6 +212,8 @@ export function ConversationInterface({ initialConversations }: ConversationInte
                             messages={messages}
                             loading={loadingMessages}
                             onSendMessage={handleSendMessage}
+                            onSync={handleSync}
+                            suggestions={suggestions}
                         />
                     ) : (
                         <div className="h-full flex items-center justify-center text-gray-400 bg-slate-50">
@@ -184,6 +246,7 @@ export function ConversationInterface({ initialConversations }: ConversationInte
                             selectedConversations={isContextMode ? selectedConversations : undefined}
                             onDraftApproved={(text) => handleSendMessage(text, getMessageType(activeConversation))}
                             onDeselect={(id) => handleToggleSelect(id, false)}
+                            onSuggestionsGenerated={setSuggestions}
                         />
                     ) : <div className="h-full bg-slate-50" />
                 ) : (
@@ -195,6 +258,7 @@ export function ConversationInterface({ initialConversations }: ConversationInte
                             selectedConversations={conversations.filter(c => activeDeal.conversationIds.includes(c.id))}
                             onDraftApproved={(text) => handleSendMessage(text, 'Email')}
                             onDeselect={() => undefined} // No deselect in deal mode
+                            onSuggestionsGenerated={setSuggestions}
                         />
                     ) : (
                         <div className="h-full bg-slate-50 p-4 text-center text-gray-400 text-xs flex flex-col items-center justify-center">

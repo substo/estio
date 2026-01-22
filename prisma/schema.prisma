@@ -709,14 +709,61 @@ model Conversation {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
   
+  // AI Agent Planner
+  agentPlan         Json?    // Stores the structured task list [ { id, title, status, result } ]
+  
+  // Accumulated Usage Stats
+  // Accumulated Usage Stats
+  promptTokens      Int      @default(0)
+  completionTokens  Int      @default(0)
+  totalTokens       Int      @default(0)
+  totalCost         Float    @default(0)
+  
   // Relations
   location          Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
   contact           Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
   messages          Message[]
+  executions        AgentExecution[]
 
   @@index([locationId])
   @@index([contactId])
   @@index([lastMessageAt])
+}
+
+// AI Agent Execution History - stores complete trace of each agent action
+model AgentExecution {
+  id              String   @id @default(cuid())
+  conversationId  String
+  
+  // Task Info
+  taskId          String?  // ID from the plan
+  taskTitle       String?  // Title of the executed task
+  taskStatus      String?  // Result status: done, failed
+  
+  // Thinking Trace
+  thoughtSummary  String?  @db.Text
+  thoughtSteps    Json?    // Array of { step, description, conclusion }
+  
+  // Tool Execution Results
+  toolCalls       Json?    // Array of { tool, arguments, result, error }
+  
+  // Output
+  draftReply      String?  @db.Text
+  
+  // Token Usage Stats
+  promptTokens     Int?
+  completionTokens Int?
+  totalTokens      Int?
+  model            String?
+  cost             Float?
+  
+  createdAt       DateTime @default(now())
+  
+  // Relations
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  
+  @@index([conversationId])
+  @@index([createdAt])
 }
 
 model Message {

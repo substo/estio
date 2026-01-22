@@ -8,6 +8,7 @@ import db from "@/lib/db";
 import { generateMultiContextDraft } from "@/lib/ai/context-builder";
 import { ensureLocalContactSynced } from "@/lib/crm/contact-sync";
 import { ensureConversationHistory, syncMessageFromWebhook } from "@/lib/ghl/sync";
+import { calculateRunCost } from "@/lib/ai/pricing";
 
 
 async function getAuthenticatedLocation() {
@@ -56,7 +57,7 @@ export async function fetchConversations(status: 'open' | 'closed' | 'all' = 'al
         });
 
         // Map to UI format matching the GHL Conversation interface
-        const mapped = conversations.map(c => ({
+        const mapped = conversations.map((c: any) => ({
             id: c.ghlConversationId,
             contactId: c.contactId, // Internal ID, UI might expect GHL contact ID? Let's check usages. 
             // Actually `conversation.contactId` in GHL interface is GHL ID.
@@ -83,7 +84,7 @@ export async function fetchConversations(status: 'open' | 'closed' | 'all' = 'al
                 locationId: location.id,
                 stage: 'ACTIVE',
                 conversationIds: {
-                    hasSome: conversationsWithGhlId.map(c => c.ghlConversationId)
+                    hasSome: conversationsWithGhlId.map((c: any) => c.ghlConversationId)
                 }
             },
             select: { id: true, title: true, conversationIds: true }
@@ -99,7 +100,7 @@ export async function fetchConversations(status: 'open' | 'closed' | 'all' = 'al
         }
 
         return {
-            conversations: conversationsWithGhlId.map(c => ({
+            conversations: conversationsWithGhlId.map((c: any) => ({
                 id: c.ghlConversationId,
                 contactId: c.contact.ghlContactId || c.contactId, // Fallback to internal ID if GHL ID missing
                 contactName: c.contact.name || "Unknown",
@@ -146,52 +147,10 @@ export async function fetchMessages(conversationId: string) {
         await ensureConversationHistory(conversation.contactId, location.id, location.ghlAccessToken!);
     }
 
-    // [Evolution History Fetch] Pull messages from Evolution API if connected
-    if (location.evolutionInstanceId && conversation.contact?.phone) {
-        try {
-            const { evolutionClient } = await import("@/lib/evolution/client");
-            const { processNormalizedMessage } = await import("@/lib/whatsapp/sync");
+    // [Evolution History Fetch] Removed automatic fetch on read to improve performance.
+    // Use syncWhatsAppHistory(conversationId) for manual sync.
 
-            const phoneNumber = conversation.contact.phone.replace(/\D/g, '');
-            const remoteJid = `${phoneNumber}@s.whatsapp.net`;
 
-            console.log(`[History Fetch] Fetching messages for ${remoteJid}...`);
-            const evolutionMessages = await evolutionClient.fetchMessages(location.evolutionInstanceId, remoteJid, 50);
-
-            let synced = 0;
-            for (const msg of evolutionMessages) {
-                try {
-                    const key = msg.key;
-                    const messageContent = msg.message;
-                    if (!messageContent || !key?.id) continue;
-
-                    const isFromMe = key.fromMe;
-                    const normalized: any = {
-                        from: isFromMe ? location.id : phoneNumber,
-                        to: isFromMe ? phoneNumber : location.id,
-                        body: messageContent.conversation || messageContent.extendedTextMessage?.text || '[Media]',
-                        type: 'text',
-                        wamId: key.id,
-                        timestamp: new Date(msg.messageTimestamp ? msg.messageTimestamp * 1000 : Date.now()),
-                        direction: isFromMe ? 'outbound' : 'inbound',
-                        source: 'whatsapp_evolution',
-                        locationId: location.id,
-                        contactName: msg.pushName
-                    };
-
-                    await processNormalizedMessage(normalized);
-                    synced++;
-                } catch (msgErr) {
-                    // Skip individual message errors
-                }
-            }
-            if (synced > 0) {
-                console.log(`[History Fetch] Synced ${synced} messages for conversation ${conversationId}`);
-            }
-        } catch (e) {
-            console.error("[History Fetch] Error fetching Evolution messages:", e);
-        }
-    }
 
     // 4. Fetch messages from DB
     const messages = await db.message.findMany({
@@ -201,7 +160,8 @@ export async function fetchMessages(conversationId: string) {
 
     console.log(`[DB Read] Fetched ${messages.length} messages from local database for conversation ${conversation.ghlConversationId}`);
 
-    return messages.map(m => ({
+
+    return messages.map((m: any) => ({
         id: m.ghlMessageId,
         conversationId: m.conversationId,
         contactId: conversation.contact.ghlContactId || '',
@@ -214,6 +174,80 @@ export async function fetchMessages(conversationId: string) {
         // Hydrated fields for UI
         html: m.body?.includes('<') ? m.body : undefined // Simple check
     }));
+}
+
+export async function syncWhatsAppHistory(conversationId: string, limit: number = 20) {
+    const location = await getAuthenticatedLocation();
+
+    const conversation = await db.conversation.findUnique({
+        where: { ghlConversationId: conversationId },
+        include: { contact: true }
+    });
+
+    if (!conversation) return { success: false, error: "Conversation not found" };
+    if (!location.evolutionInstanceId) return { success: false, error: "WhatsApp not connected" };
+    if (!conversation.contact?.phone) return { success: false, error: "Contact has no phone number" };
+
+    try {
+        const { evolutionClient } = await import("@/lib/evolution/client");
+        const { processNormalizedMessage } = await import("@/lib/whatsapp/sync");
+
+        const phone = conversation.contact.phone.replace(/\D/g, '');
+        const remoteJid = `${phone}@s.whatsapp.net`;
+
+        const fetchLimit = limit || 50;
+        console.log(`[Sync] Fetching messages for ${remoteJid} (Limit: ${fetchLimit})...`);
+        const evolutionMessages = await evolutionClient.fetchMessages(location.evolutionInstanceId, remoteJid, fetchLimit);
+
+        let synced = 0;
+        let skipped = 0;
+        let consecutiveDuplicates = 0;
+        const STOP_ON_DUPLICATES = 5;
+
+        for (const msg of evolutionMessages) {
+            try {
+                const key = msg.key;
+                const messageContent = msg.message;
+                if (!messageContent || !key?.id) continue;
+
+                const isFromMe = key.fromMe;
+                const normalized: any = {
+                    from: isFromMe ? location.id : phone,
+                    to: isFromMe ? phone : location.id,
+                    body: messageContent.conversation || messageContent.extendedTextMessage?.text || '[Media]',
+                    type: 'text',
+                    wamId: key.id,
+                    timestamp: new Date(msg.messageTimestamp ? msg.messageTimestamp * 1000 : Date.now()),
+                    direction: isFromMe ? 'outbound' : 'inbound',
+                    source: 'whatsapp_evolution',
+                    locationId: location.id,
+                    contactName: msg.pushName
+                };
+
+                const result = await processNormalizedMessage(normalized);
+
+                if (result?.status === 'skipped') {
+                    skipped++;
+                    consecutiveDuplicates++;
+                } else {
+                    synced++;
+                    consecutiveDuplicates = 0;
+                }
+
+                if (consecutiveDuplicates >= STOP_ON_DUPLICATES) {
+                    console.log(`[Sync] Stopped after ${consecutiveDuplicates} consecutive duplicates.`);
+                    break;
+                }
+            } catch (msgErr) {
+                // Skip
+            }
+        }
+
+        return { success: true, count: synced, skipped };
+    } catch (e: any) {
+        console.error("Manual sync failed:", e);
+        return { success: false, error: e.message };
+    }
 }
 
 export async function sendReply(conversationId: string, contactId: string, messageBody: string, type: 'SMS' | 'Email' | 'WhatsApp') {
@@ -589,7 +623,7 @@ export async function createDealContext(title: string, conversationIds: string[]
             });
 
             // 3. Extract unique Property IDs
-            const allPropIds = contacts.flatMap(c => c.propertyRoles.map(r => r.propertyId));
+            const allPropIds = contacts.flatMap((c: any) => c.propertyRoles.map((r: any) => r.propertyId));
             propertyIds = Array.from(new Set(allPropIds));
         }
     } catch (e) {
@@ -718,7 +752,7 @@ export async function getContactContext(contactId: string) {
 
     return {
         contact,
-        leadSources: leadSources.map(s => s.name)
+        leadSources: leadSources.map((s: any) => s.name)
     };
 }
 
@@ -790,7 +824,7 @@ export async function getEvolutionStatus() {
                 await db.location.update({
                     where: { id: location.id },
                     data: { evolutionConnectionStatus: status }
-                }).catch(err => console.error("Failed to sync evolution status to DB:", err));
+                }).catch((err: any) => console.error("Failed to sync evolution status to DB:", err));
             }
         } else {
             console.log(`[getEvolutionStatus] Skipped DB update for status '${status}' (Local Dev Mode)`);
@@ -938,44 +972,242 @@ export async function resendMessage(messageId: string) {
     return { success: false, error: "Unsupported message type or transport unavailable" };
 }
 
-// --- AI Autonomous Agent Action ---
-export async function runAgentAction(conversationId: string, contactId: string) {
+
+// --- AI Planner Actions ---
+
+export async function generatePlanAction(conversationId: string, contactId: string, goal: string) {
     const location = await getAuthenticatedLocation();
 
-    // 1. Fetch conversation history
+    // 1. Fetch History
     const conversation = await db.conversation.findFirst({
-        where: {
-            ghlConversationId: conversationId,
-            locationId: location.id,
-            contactId
-        },
+        where: { ghlConversationId: conversationId, locationId: location.id },
         include: { messages: { orderBy: { createdAt: 'asc' }, take: 30 } }
     });
 
-    if (!conversation) {
-        return { success: false, error: "Conversation not found" };
-    }
+    if (!conversation) return { success: false, error: "Conversation not found" };
 
-    // 2. Format history for Agent
-    const historyText = conversation.messages.map(m =>
+    const historyText = conversation.messages.map((m: any) =>
         `${m.direction === 'outbound' ? 'Agent' : 'Lead'}: ${m.body}`
     ).join("\n");
 
-    // 3. Run Agent
     try {
-        const { runAgent } = await import('@/lib/ai/agent');
-        const result = await runAgent(contactId, location.id, historyText);
+        const { generateAgentPlan } = await import('@/lib/ai/agent');
+        const result = await generateAgentPlan(contactId, location.id, historyText, goal);
 
-        return {
-            success: result.success,
-            thought: result.thought,
-            draft: result.draft,
-            actions: result.actions,
-            error: result.message
-        };
+        if (result.success && result.plan) {
+            // Save Plan to DB
+            await db.conversation.update({
+                where: { id: conversation.id },
+                data: { agentPlan: result.plan } as any
+            });
+            return { success: true, plan: result.plan, thought: result.thought };
+        } else {
+            return { success: false, error: "Failed to generate plan" };
+        }
     } catch (e: any) {
-        console.error("[runAgentAction] Failed:", e);
+        console.error("Plan Action Failed", e);
         return { success: false, error: e.message };
     }
 }
 
+export async function executeNextTaskAction(conversationId: string, contactId: string) {
+    const location = await getAuthenticatedLocation();
+
+    // 1. Fetch Plan
+    const conversation = await db.conversation.findFirst({
+        where: { ghlConversationId: conversationId, locationId: location.id },
+        include: { messages: { orderBy: { createdAt: 'asc' }, take: 30 } }
+    });
+
+    if (!conversation || !(conversation as any).agentPlan) return { success: false, error: "No plan found" };
+
+    const plan = (conversation as any).agentPlan as any[];
+    const nextTask = plan.find(t => t.status === 'pending');
+
+    if (!nextTask) return { success: false, message: "All tasks completed!" };
+
+    // 2. Mark In-Progress
+    nextTask.status = 'in-progress';
+    await db.conversation.update({
+        where: { id: conversation.id },
+        data: { agentPlan: plan } as any
+    });
+
+    const historyText = conversation.messages.map((m: any) =>
+        `${m.direction === 'outbound' ? 'Agent' : 'Lead'}: ${m.body}`
+    ).join("\n");
+
+    // 3. Execute
+    try {
+        const { executeAgentTask } = await import('@/lib/ai/agent');
+        const result = await executeAgentTask(contactId, location.id, historyText, nextTask, plan);
+
+        if (result.success) {
+            // 4. Update Task Status
+            if (result.taskCompleted) {
+                nextTask.status = 'done';
+                nextTask.result = result.taskResult || "Completed";
+            } else {
+                nextTask.status = 'pending';
+                nextTask.result = "Partial: " + result.taskResult;
+            }
+
+            const runCost = calculateRunCost(
+                result.usage?.model || 'default',
+                result.usage?.promptTokenCount || 0,
+                result.usage?.candidatesTokenCount || 0
+            );
+
+            let updatedConversation = await db.conversation.update({
+                where: { id: conversation.id },
+                data: {
+                    agentPlan: plan,
+                    promptTokens: { increment: result.usage?.promptTokenCount || 0 },
+                    completionTokens: { increment: result.usage?.candidatesTokenCount || 0 },
+                    totalTokens: { increment: result.usage?.totalTokenCount || 0 },
+                    totalCost: { increment: runCost }
+                } as any
+            });
+
+            // Self-healing: If totals were 0 (pre-tracking) but we have history, recalculate everything
+            if (conversation.totalTokens === 0) {
+                const allExecs = await db.agentExecution.findMany({
+                    where: { conversationId: conversation.id }
+                });
+
+                const totalPrompt = allExecs.reduce((acc, e) => acc + (e.promptTokens || 0), 0) + (result.usage?.promptTokenCount || 0);
+                const totalCompletion = allExecs.reduce((acc, e) => acc + (e.completionTokens || 0), 0) + (result.usage?.candidatesTokenCount || 0);
+                const totalToks = totalPrompt + totalCompletion;
+
+                // Recalculate cost (approximate for old runs if model not saved, assume default/current)
+                // For new run we have exact cost. For old runs, we might not have cost saved.
+                // But we can try to estimate if we had model, or just leave it as is.
+                // Actually, let's just sum up tokens properly.
+
+                // If we want to backfill cost for old runs:
+                let historicalCost = 0;
+                for (const ex of allExecs) {
+                    // If cost already saved, use it. Else calculate.
+                    if (ex.cost) {
+                        historicalCost += ex.cost;
+                    } else if (ex.promptTokens || ex.completionTokens) {
+                        historicalCost += calculateRunCost(ex.model || 'default', ex.promptTokens || 0, ex.completionTokens || 0);
+                    }
+                }
+                historicalCost += runCost; // Add current run
+
+                updatedConversation = await db.conversation.update({
+                    where: { id: conversation.id },
+                    data: {
+                        promptTokens: totalPrompt,
+                        completionTokens: totalCompletion,
+                        totalTokens: totalToks,
+                        totalCost: historicalCost
+                    }
+                });
+            }
+
+            // Save execution to history
+            await db.agentExecution.create({
+                data: {
+                    conversationId: conversation.id,
+                    taskId: nextTask.id,
+                    taskTitle: nextTask.title,
+                    taskStatus: nextTask.status,
+                    thoughtSummary: result.thoughtSummary,
+                    thoughtSteps: result.thoughtSteps,
+                    toolCalls: result.actions,
+                    draftReply: result.draft,
+                    promptTokens: result.usage?.promptTokenCount,
+                    completionTokens: result.usage?.candidatesTokenCount,
+                    totalTokens: result.usage?.totalTokenCount,
+                    model: result.usage?.model,
+                    cost: runCost
+                }
+            });
+
+            return {
+                success: true,
+                task: nextTask,
+                draft: result.draft,
+                thoughtSummary: result.thoughtSummary,
+                thoughtSteps: result.thoughtSteps,
+                actions: result.actions,
+                usage: result.usage,
+                conversationUsage: {
+                    promptTokens: updatedConversation.promptTokens,
+                    completionTokens: updatedConversation.completionTokens,
+                    totalTokens: updatedConversation.totalTokens,
+                    totalCost: updatedConversation.totalCost
+                }
+            };
+        } else {
+            nextTask.status = 'failed';
+            await db.conversation.update({
+                where: { id: conversation.id },
+                data: { agentPlan: plan } as any
+            });
+            return { success: false, error: result.message };
+        }
+
+    } catch (e: any) {
+        return { success: false, error: e.message };
+    }
+}
+
+export async function getAgentPlan(conversationId: string) {
+    const location = await getAuthenticatedLocation();
+    const conversation = await db.conversation.findFirst({
+        where: { ghlConversationId: conversationId, locationId: location.id },
+        select: {
+            agentPlan: true,
+            promptTokens: true,
+            completionTokens: true,
+            totalTokens: true
+        } as any
+    });
+
+    if (!conversation) return null;
+
+    return {
+        plan: (conversation as any).agentPlan,
+        usage: {
+            promptTokens: (conversation as any).promptTokens || 0,
+            completionTokens: (conversation as any).completionTokens || 0,
+            totalTokens: (conversation as any).totalTokens || 0
+        }
+    };
+}
+
+export async function getAgentExecutions(conversationId: string) {
+    const location = await getAuthenticatedLocation();
+    const conversation = await db.conversation.findFirst({
+        where: { ghlConversationId: conversationId, locationId: location.id },
+        select: { id: true }
+    });
+
+    if (!conversation) return [];
+
+    const executions = await db.agentExecution.findMany({
+        where: { conversationId: conversation.id },
+        orderBy: { createdAt: 'desc' },
+        take: 20
+    });
+
+    return executions.map(e => ({
+        id: e.id,
+        taskId: e.taskId,
+        taskTitle: e.taskTitle,
+        taskStatus: e.taskStatus,
+        thoughtSummary: e.thoughtSummary,
+        thoughtSteps: e.thoughtSteps,
+        toolCalls: e.toolCalls,
+        draftReply: e.draftReply,
+        usage: {
+            promptTokenCount: e.promptTokens,
+            candidatesTokenCount: e.completionTokens,
+            totalTokenCount: e.totalTokens
+        },
+        createdAt: e.createdAt.toISOString()
+    }));
+}
