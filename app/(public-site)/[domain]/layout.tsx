@@ -12,6 +12,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { HeaderProvider } from "./_components/header-context";
 import { currentUser } from "@clerk/nextjs/server";
 import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
+import { CLERK_DEV_FAPI } from "@/lib/auth/clerk-config";
 
 // Force dynamic rendering as domains vary
 export const dynamic = "force-dynamic";
@@ -146,7 +147,7 @@ export default async function PublicSiteLayout(props: Props) {
         providerProps.signInUrl = "/sign-in";
         providerProps.signUpUrl = "/sign-up";
         // Dev FAPI (change to "clerk.estio.co" for production)
-        providerProps.domain = "magnetic-squirrel-16.clerk.accounts.dev";
+        providerProps.domain = CLERK_DEV_FAPI;
     } else if (isSatellite) {
         // ANONYMOUS: Public sites (No redirect loop)
         // Keep relative paths so the button links to the local sign-in page

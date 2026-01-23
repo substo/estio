@@ -2,6 +2,7 @@ import { ReactNode } from 'react';
 import { ClerkProvider } from '@clerk/nextjs';
 import config from '@/config';
 import { headers } from 'next/headers';
+import { CLERK_DEV_FAPI } from '@/lib/auth/clerk-config';
 
 interface AuthWrapperProps {
   children: ReactNode;
@@ -24,6 +25,10 @@ const AuthWrapper = async ({ children }: AuthWrapperProps) => {
         currentDomain,
         'https://estio.co',
       ]}
+      // CRITICAL: Ensure we point to the correct Dev Instance even when on estio.co
+      // This prevents the "500 Internal Server Error" caused by missing instance context
+      domain={CLERK_DEV_FAPI}
+      isSatellite={false} // estio.co is the primary (or gateway to FAPI)
     >
       {children}
     </ClerkProvider>
