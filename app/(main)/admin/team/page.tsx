@@ -52,7 +52,7 @@ export default async function TeamPage() {
                     ghlUserId: true,
                     locationRoles: {
                         where: { locationId },
-                        select: { role: true }
+                        select: { role: true, invitedById: true }
                     }
                 }
             }

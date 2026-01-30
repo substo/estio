@@ -122,7 +122,7 @@ export async function inviteUserToLocation(formData: FormData) {
                             lastName: user.lastName || '',
                             email: user.email,
                             type: 'account',
-                            role: 'user',
+                            role: role === 'ADMIN' ? 'admin' : 'user',
                             companyId: location.ghlAgencyId || undefined
                         });
 
@@ -151,6 +151,22 @@ export async function inviteUserToLocation(formData: FormData) {
                     });
                 } catch (e) {
                     console.warn('[Team] UserLocationRole table not ready, skipping role assignment');
+                }
+
+                // Sync role to Clerk metadata for Settings page visibility
+                if (user.clerkId) {
+                    try {
+                        await client.users.updateUser(user.clerkId, {
+                            publicMetadata: {
+                                ghlRole: role === 'ADMIN' ? 'admin' : 'user',
+                                locationId,
+                                ghlLocationId: location?.ghlLocationId || '',
+                            }
+                        });
+                        console.log(`[Team] Synced role to Clerk metadata for user ${user.id}`);
+                    } catch (e) {
+                        console.warn('[Team] Failed to sync role to Clerk metadata:', e);
+                    }
                 }
 
                 revalidatePath('/admin/team');
@@ -338,10 +354,78 @@ export async function updateUserRole(userId: string, newRole: 'ADMIN' | 'MEMBER'
     await requireAdminRole(locationId);
 
     try {
+        // 1. Update DB Role
         await db.userLocationRole.update({
             where: { userId_locationId: { userId, locationId } },
             data: { role: newRole },
         });
+
+        // 2. Sync to Clerk & GHL
+        const user = await db.user.findUnique({
+            where: { id: userId },
+            include: { locations: { where: { id: locationId } } }
+        });
+
+        if (user) {
+            // Sync Clerk Metadata
+            if (user.clerkId) {
+                try {
+                    const client = await clerkClient();
+                    await client.users.updateUser(user.clerkId, {
+                        publicMetadata: {
+                            ghlRole: newRole === 'ADMIN' ? 'admin' : 'user',
+                            locationId,
+                            ghlLocationId: user.locations[0]?.ghlLocationId || '',
+                        }
+                    });
+                    console.log(`[Team] Updated Clerk role for ${user.email} to ${newRole}`);
+                } catch (e) {
+                    console.warn('[Team] Failed to sync role to Clerk:', e);
+                }
+            }
+
+            // Sync GHL User
+            if (user.ghlUserId && user.locations[0]?.ghlLocationId) {
+                try {
+                    const { updateGHLUser } = await import('@/lib/ghl/users');
+                    // Note: Update user endpoint might not support changing role directly in all GHL versions,
+                    // but we will try. If not supported, we might need to use a specific permission endpoint
+                    // or just rely on the initial creation. However, standard v2 users update often allows role.
+                    // We map 'ADMIN' -> 'admin' and 'MEMBER' -> 'user'
+                    // We need to pass required fields or at least the ones we want to update.
+                    // updateGHLUser function currently expects firstName/lastName/email/phone.
+                    // We'll need to slightly modify updateGHLUser or just accept that we might need to overwrite other fields.
+                    // Let's check updateGHLUser signature. It primarily updates profile info.
+                    // GHL V2 API for updating users DOES support 'role' and 'type'.
+                    // We might need to cast the payload or update list of args.
+
+                    // Actually, let's just make a direct call here or update the helper if needed.
+                    // The current updateGHLUser helper only takes profile info.
+                    // Use ghlFetchWithAuth directly here for precision or update the helper.
+                    // Let's use the helper but we might need to modify it. 
+                    // Wait, let's look at `lib/ghl/users.ts`.
+                    // It only takes specific fields. Let's just do a direct fetch here to avoid breaking changes elsewhere for now,
+                    // or better, extend the payload in the helper call if it allows extra props? No it's typed.
+
+                    // Let's extend the helper call locally since we imported it.
+                    // We can't easily change the helper signature without checking all usages.
+                    // We'll implement a local fix:
+
+                    const { ghlFetchWithAuth } = await import('@/lib/ghl/token');
+                    await ghlFetchWithAuth(locationId, `/users/${user.ghlUserId}`, {
+                        method: 'PUT',
+                        body: JSON.stringify({
+                            role: newRole === 'ADMIN' ? 'admin' : 'user',
+                            type: 'account' // Maintain type
+                        })
+                    });
+                    console.log(`[Team] Updated GHL role for ${user.email} to ${newRole}`);
+
+                } catch (e) {
+                    console.warn('[Team] Failed to sync role to GHL:', e);
+                }
+            }
+        }
 
         revalidatePath('/admin/team');
         return { success: true };

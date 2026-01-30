@@ -174,7 +174,7 @@ export async function POST(req: Request) {
                                     firstName: first_name || 'New',
                                     lastName: last_name || 'User',
                                     email: email,
-                                    type: 'employee',
+                                    type: 'account',
                                     role: role === 'ADMIN' ? 'admin' : 'user'
                                 });
                                 ghlUserId = newGhlUser.id;

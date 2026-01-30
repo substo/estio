@@ -23,7 +23,7 @@ import {
     AlertDialogTitle,
     AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import { updateUserCalendar, removeUserFromLocation } from '../actions';
+import { updateUserCalendar, removeUserFromLocation, updateUserRole } from '../actions';
 import { CreateCalendarDialog } from './create-calendar-dialog';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
@@ -43,7 +43,7 @@ interface TeamMemberCardProps {
         createdAt: Date;
         ghlCalendarId: string | null;
         ghlUserId: string | null;
-        locationRoles?: { role: 'ADMIN' | 'MEMBER' }[];
+        locationRoles?: { role: 'ADMIN' | 'MEMBER'; invitedById: string | null }[];
     };
     calendars: Calendar[];
     isAdmin: boolean;
@@ -65,7 +65,11 @@ export function TeamMemberCard({ user, calendars, isAdmin, isCurrentUser }: Team
     const [loading, setLoading] = useState(false);
     const [selectedCalendar, setSelectedCalendar] = useState(user.ghlCalendarId || "none");
 
-    const role = user.locationRoles?.[0]?.role || 'MEMBER';
+    const roleData = user.locationRoles?.[0];
+    const role = roleData?.role || 'MEMBER';
+    // If invitedById is null, they are the creator/owner (came via OAuth)
+    const isOwner = roleData?.invitedById === null;
+
     const isProfileComplete = !!(user.firstName && user.lastName);
 
     const handleCalendarChange = async (value: string) => {
@@ -80,6 +84,19 @@ export function TeamMemberCard({ user, calendars, isAdmin, isCurrentUser }: Team
         } else {
             toast.error("Failed to update calendar");
             setSelectedCalendar(user.ghlCalendarId || "none");
+        }
+        setLoading(false);
+    };
+
+    const handleRoleChange = async (value: 'ADMIN' | 'MEMBER') => {
+        if (isOwner) return;
+        setLoading(true);
+        const result = await updateUserRole(user.id, value);
+        if (result.success) {
+            toast.success(`Role updated to ${value}`);
+            router.refresh();
+        } else {
+            toast.error("Failed to update role");
         }
         setLoading(false);
     };
@@ -107,43 +124,68 @@ export function TeamMemberCard({ user, calendars, isAdmin, isCurrentUser }: Team
                         <CardTitle className="text-base font-medium flex items-center gap-2">
                             {getDisplayName(user)}
                             {isCurrentUser && <Badge variant="outline" className="text-xs">You</Badge>}
-                            {role === 'ADMIN' && <Badge className="bg-purple-100 text-purple-700 hover:bg-purple-200 border-none text-xs">Admin</Badge>}
-                            {!isProfileComplete && <Badge variant="destructive" className="bg-amber-100 text-amber-700 hover:bg-amber-200 border-none text-xs">Profile Incomplete</Badge>}
+                            {isOwner && (
+                                <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-200 border-none text-xs flex items-center gap-1">
+                                    <Crown className="w-3 h-3" /> Owner
+                                </Badge>
+                            )}
+                            {!isOwner && role === 'ADMIN' && <Badge className="bg-purple-100 text-purple-700 hover:bg-purple-200 border-none text-xs">Admin</Badge>}
+                            {!isProfileComplete && <Badge variant="destructive" className="bg-red-100 text-red-700 hover:bg-red-200 border-none text-xs">Profile Incomplete</Badge>}
                         </CardTitle>
                         <div className="text-sm text-muted-foreground">{user.email}</div>
                     </div>
                 </div>
-                {isAdmin && !isCurrentUser && (
-                    <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                            <Button
-                                variant="ghost"
-                                size="icon"
-                                className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                                disabled={loading}
-                            >
-                                <Trash2 className="h-4 w-4" />
-                            </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                            <AlertDialogHeader>
-                                <AlertDialogTitle>Remove team member?</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                    This will remove {getDisplayName(user)}'s access to this location.
-                                </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction
-                                    onClick={handleRemove}
-                                    className="bg-red-600 hover:bg-red-700"
+
+                <div className="flex items-center gap-2">
+                    {/* Role Dropdown - Only for Admins editing OTHERS, and NOT editing the Owner */}
+                    {isAdmin && !isCurrentUser && !isOwner && (
+                        <Select
+                            value={role}
+                            onValueChange={(val: 'ADMIN' | 'MEMBER') => handleRoleChange(val)}
+                            disabled={loading}
+                        >
+                            <SelectTrigger className="w-[100px] h-8 text-xs">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="ADMIN">Admin</SelectItem>
+                                <SelectItem value="MEMBER">Member</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    )}
+
+                    {isAdmin && !isCurrentUser && !isOwner && (
+                        <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                    disabled={loading}
                                 >
-                                    Remove
-                                </AlertDialogAction>
-                            </AlertDialogFooter>
-                        </AlertDialogContent>
-                    </AlertDialog>
-                )}
+                                    <Trash2 className="h-4 w-4" />
+                                </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                                <AlertDialogHeader>
+                                    <AlertDialogTitle>Remove team member?</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                        This will remove {getDisplayName(user)}'s access to this location.
+                                    </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction
+                                        onClick={handleRemove}
+                                        className="bg-red-600 hover:bg-red-700"
+                                    >
+                                        Remove
+                                    </AlertDialogAction>
+                                </AlertDialogFooter>
+                            </AlertDialogContent>
+                        </AlertDialog>
+                    )}
+                </div>
             </CardHeader>
             <CardContent>
                 <div className="flex items-center justify-between">

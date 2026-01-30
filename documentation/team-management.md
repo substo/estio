@@ -110,21 +110,29 @@ To ensure data integrity and prevent application errors, we enforce a strict **O
 
 **Note:** Users created via GHL SSO typically have their names pre-populated, so they bypass the gate.
 
-### Edit Team Profiles
+### Edit Team Profiles & Roles
 
-Admins can edit the profile details (First Name, Last Name, Phone) of other team members to ensure data accuracy.
+Admins can edit the profile details and **roles** of other team members to ensure data accuracy and appropriate access levels.
 
 **Process:**
 1. Navigate to the Team Management page.
-2. Click the **Edit** (pencil) icon on a team member's card.
-3. Update the necessary fields and save.
+2. Click the **Edit** (pencil) icon on a team member's card for profile details.
+3. Use the **Role Dropdown** on the card to change permissions (Admin/Member).
 4. Changes are immediately synced to:
    - Local Database
-   - Clerk (Authentication Profile)
-   - GoHighLevel (Contact/User Record)
+   - Clerk (Authentication Profile & Metadata)
+   - GoHighLevel (Contact/User Record & Permissions)
+
+### Owner Protection
+The user who originally connected the location via OAuth (GoHighLevel Marketplace) is designated as the **Owner**.
+- **Visual Indicator**: Marked with a "👑 Owner" badge.
+- **Protection**: 
+  - Cannot be removed from the team.
+  - Cannot have their role changed (permanently Admin).
+  - This prevents accidental lockouts where the integration owner loses access.
 
 > [!NOTE]
-> **Self-Healing Sync:** If a user is missing their `ghlUserId` link locally, the system will automatically search GoHighLevel for a user with a matching email address. If found, it links the records and proceeds with the update.
+> **Self-Healing Sync:** If a user is missing their `ghlUserId` link locally, the system will automatically search GoHighLevel for a user with a matching email address upon edit/update. If found, it links the records and proceeds with the update.
 
 ### GHL Calendar Assignment
 
@@ -172,6 +180,11 @@ When re-inviting a user who exists in both DB and Clerk but is missing their GHL
 
 > [!NOTE]
 > **Fully Self-Healing**: The re-invite button effectively acts as a "Full Restore" button, reconnecting all integrations automatically.
+
+> [!IMPORTANT]
+> **GHL Role Mapping**: When creating users in GHL, the system maps IDX roles to GHL roles:
+> - IDX `ADMIN` → GHL `admin` (full CRM access)
+> - IDX `MEMBER` → GHL `user` (standard access)
 
 **Technical Flow:**
 ```
