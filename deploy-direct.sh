@@ -163,7 +163,7 @@ else
 fi
 
 # Migration + Build
-BUILD_CMD="$BUILD_CMD && npx prisma generate && npx prisma db push --skip-generate && NODE_ENV=production npm run build"
+BUILD_CMD="$BUILD_CMD && npx prisma@6.19.0 generate && npx prisma@6.19.0 db push --skip-generate && NODE_ENV=production npm run build"
 
 ssh $SSH_OPTS $SERVER "$BUILD_CMD"
 
