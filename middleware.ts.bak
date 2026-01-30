@@ -1,0 +1,222 @@
+import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+
+const isProtectedRoute = createRouteMatcher(["/admin(.*)"]);
+const isPublicRoute = createRouteMatcher([
+  "/",
+  "/sign-in(.*)",
+  "/sign-up(.*)",
+  "/api/oauth(.*)",
+  "/api/clerk(.*)",
+  "/api/auth-proxy(.*)",
+  "/sso(.*)",
+  "/setup(.*)",
+  "/(public-site)(.*)",
+  "/v1/oauth_callback(.*)", // Add explicit exclusion for Clerk's OAuth callback if it hits this server
+  "/api/webhooks(.*)"
+]);
+
+// Define your system domains (Dashboard/Admin access)
+// Include 127.0.0.1 for when Caddy proxies to local Next.js (without port in Host header)
+const SYSTEM_DOMAINS = ["localhost:3000", "localhost", "127.0.0.1", "estio.co"];
+
+export default clerkMiddleware(async (auth, req: NextRequest) => {
+  const { userId } = await auth();
+  const url = req.nextUrl;
+
+  // 0. Global WWW Redirect
+  // Ensure strict cannonical domain (non-www) for SEO and consistency.
+  // We check the Host header directly because req.nextUrl.hostname can sometimes represent the internal proxy hostname (localhost)
+  // depending on Next.js configuration.
+  const host = req.headers.get("host");
+  if (host && host.startsWith("www.") && host !== "localhost") {
+    const newHostname = host.replace(/^www\./, "");
+    const newUrl = new URL(req.url);
+    newUrl.hostname = newHostname;
+    newUrl.protocol = "https:";
+    newUrl.port = ""; // Remove internal port (3000)
+    return NextResponse.redirect(newUrl);
+  }
+
+  let hostname = req.headers.get("host");
+
+  // Remove port if present (for localhost testing)
+  hostname = hostname ? hostname.replace(":3000", "") : "";
+  console.log(`[Middleware] Incoming Request: ${req.url} | Host Header: ${req.headers.get("host")} | Resolved Hostname: ${hostname}`);
+
+  const searchParams = req.nextUrl.searchParams.toString();
+  // Construct the path (e.g. /search)
+  const path = `${url.pathname}${searchParams.length > 0 ? `?${searchParams}` : ""
+    }`;
+
+  // 1. System/Admin Domain Logic (Existing Dashboard)
+  // If accessing via localhost (base), main app domain, or Clerk's OAuth domain.
+  if (SYSTEM_DOMAINS.includes(hostname || "") || hostname === "localhost" || hostname === "clerk.estio.co") {
+
+    // Allow public routes without any auth
+    if (isPublicRoute(req)) {
+      console.log(`[Middleware] System Domain Public Route matched: ${path} for host ${hostname}`);
+      return NextResponse.next();
+    }
+
+    // Protect dashboard and other private routes with Clerk
+    if (isProtectedRoute(req)) {
+      await auth.protect();
+    }
+
+    const response = NextResponse.next();
+
+    // FORCE CSP HEADER: Allow iframe embedding for GHL
+    response.headers.set(
+      'Content-Security-Policy',
+      "frame-ancestors 'self' https://*.gohighlevel.com https://*.leadconnectorhq.com https://app.gohighlevel.com https://estio.co;"
+    );
+
+    return response;
+  }
+
+  // 2. Tenant Domain Logic (Public Website)
+
+  // Custom Domain Admin & Auth Access:
+  // If a user goes to website.com/admin, or auth pages, we want to show them the main app.
+  // We rewrite this request to the path (removing the mapped domain logic essentially).
+
+  const isSystemPath =
+    url.pathname.startsWith("/admin") ||
+    // url.pathname.startsWith("/sign-in") || // Allow tenant sign-in to fall through to tenant pages
+    // url.pathname.startsWith("/sign-up") || // Allow tenant sign-up to fall through to tenant pages
+    url.pathname.startsWith("/sso") ||
+    url.pathname.startsWith("/setup") ||
+    url.pathname.startsWith("/api"); // API routes should be global and not rewritten to tenant folder
+
+  // Create success response
+  let response;
+
+  if (isSystemPath) {
+    // NOTE: Sign-up and sign-in are allowed directly on tenant domains for public users
+    // (e.g., users saving favorite properties). Admin access still triggers SSO handshake.
+
+    // SSO HANDSHAKE: If user is NOT logged in on this custom domain, try to handshake with primary domain.
+    // Exception: Do not redirect for auth pages (sign-in/sign-up), SSO paths, or API routes
+    const isHandshakePath =
+      url.pathname.startsWith("/sso") ||
+      url.pathname.startsWith("/api/clerk") ||
+      url.pathname.startsWith("/api/auth-proxy") ||
+      url.pathname.startsWith("/v1/oauth_callback") ||
+      url.pathname.startsWith("/api/webhooks");
+
+    // Auth pages should NOT trigger handshake - allow direct sign-up/sign-in on tenant domains
+    // Note: Since we removed sign-in/sign-up from isSystemPath, this check might be redundant for those paths,
+    // but kept just in case of future changes or other auth paths.
+    const isAuthPage =
+      url.pathname.startsWith("/sign-in") ||
+      url.pathname.startsWith("/sign-up");
+
+    if (!userId && !isHandshakePath && !isAuthPage) {
+      // HYBRID ADMIN ACCESS MODEL:
+      // - Signed-out users on /admin → Show tenant sign-in page with redirect
+      // - SSO handshake only for /setup and other system paths that require primary domain auth
+
+      if (url.pathname.startsWith("/admin")) {
+        // Redirect to tenant's sign-in page with redirect back to /admin
+        // This allows admins to log in on the tenant domain directly
+        // Role checking happens server-side in admin pages (redirects public users to home)
+        const signInUrl = new URL("/sign-in", `https://${hostname}`);
+        signInUrl.searchParams.set("redirect_url", url.pathname + url.search);
+        return NextResponse.redirect(signInUrl);
+      }
+
+      // For other system paths (like /setup), use SSO handshake with primary domain
+      // These require the user to be logged into estio.co first
+      const handshakeUrl = new URL("https://estio.co/sso/handshake");
+
+      // Construct public URL using the hostname header to avoid 'localhost' in the redirect_url
+      const publicUrl = new URL(url.pathname + url.search, `https://${hostname}`);
+      handshakeUrl.searchParams.set("redirect_url", publicUrl.toString());
+
+      return NextResponse.redirect(handshakeUrl);
+    }
+
+    // Ensure it's protected if needed (for /admin)
+    if (isProtectedRoute(req)) {
+      await auth.protect();
+    }
+
+    // REWRITE to the internal path (White Label behavior)
+    // This allows the admin dashboard to be served under the custom domain (e.g. downtowncyprus.site/admin)
+
+    // LAZY SATELLITE MODE DETECTION
+    // We only want to enable Clerk Satellite Mode (which causes a redirect handshake) if:
+    // 1. User is on an admin path (needs strict auth)
+    // 2. User is on an auth path (sign-in/sign-up)
+    // 3. User is returning from a sign-in (has a ticket)
+    // 4. User is already authenticated (has a session cookie)
+    // 5. User is on a favorites page (needs auth check)
+    const hasSession = req.cookies.has("__session");
+    const hasClientUat = req.cookies.has("__client_uat");
+    const hasTicket = req.nextUrl.searchParams.has("__clerk_ticket");
+    const isAuthPath =
+      url.pathname.startsWith("/admin") ||
+      url.pathname.startsWith("/favorites") ||
+      url.pathname.startsWith("/sign-in") ||
+      url.pathname.startsWith("/sign-up");
+
+    // DEBUG: Log trigger conditions for troubleshooting
+    if (hostname !== "localhost" && !SYSTEM_DOMAINS.includes(hostname || "")) {
+      // Only log on tenant domains to reduce noise
+      console.log(`[Middleware] Satellite Check for ${hostname}: Session=${hasSession}, UAT=${hasClientUat}, Ticket=${hasTicket}, AuthPath=${isAuthPath}`);
+    }
+
+    if (hasSession || hasClientUat || hasTicket || isAuthPath) {
+      // Signal to layout.tsx to enable isSatellite=true
+      const requestHeaders = new Headers(req.headers);
+      requestHeaders.set("x-enable-satellite", "true");
+
+      // Pass updated headers to the rewrite
+      const rewriteUrl = new URL(path, req.url);
+      if ((rewriteUrl.hostname === 'localhost' || rewriteUrl.hostname === '127.0.0.1') && rewriteUrl.port === '3000') {
+        rewriteUrl.protocol = 'http:';
+      }
+
+      response = NextResponse.rewrite(rewriteUrl, {
+        request: {
+          headers: requestHeaders,
+        },
+      });
+    } else {
+      // Standard rewrite without enabling satellite mode
+      const rewriteUrl = new URL(path, req.url);
+      if ((rewriteUrl.hostname === 'localhost' || rewriteUrl.hostname === '127.0.0.1') && rewriteUrl.port === '3000') {
+        rewriteUrl.protocol = 'http:';
+      }
+      response = NextResponse.rewrite(rewriteUrl);
+    }
+
+  } else {
+    const rewriteUrl = new URL(`/${hostname}${path}`, req.url);
+    if ((rewriteUrl.hostname === 'localhost' || rewriteUrl.hostname === '127.0.0.1') && rewriteUrl.port === '3000') {
+      rewriteUrl.protocol = 'http:';
+    }
+    response = NextResponse.rewrite(rewriteUrl);
+  }
+
+  // FORCE CSP HEADER: Allow iframe embedding for GHL
+  // This is critical because next.config.js headers can sometimes be lost in middleware responses/rewrites
+  response.headers.set(
+    'Content-Security-Policy',
+    "frame-ancestors 'self' https://*.gohighlevel.com https://*.leadconnectorhq.com https://app.gohighlevel.com https://estio.co;"
+  );
+
+  return response;
+});
+
+export const config = {
+  matcher: [
+    // Skip Next.js internals and all static files, unless found in search params
+    // Skip Next.js internals and all static files, unless found in search params
+    '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
+    // Always run for API routes
+    '/(api|trpc)(.*)',
+  ],
+};

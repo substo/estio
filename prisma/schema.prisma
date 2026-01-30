@@ -1,0 +1,820 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Location {
+  id                String         @id @default(cuid())
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  ghlAgencyId       String?        @unique
+  ghlLocationId     String?        @unique
+  ghlInstallId      String?        @unique
+  ghlAccessToken    String?
+  ghlRefreshToken   String?
+  ghlTokenType      String?
+  ghlExpiresAt      DateTime?
+  ghlScopes         String?        // Space-separated list of granted OAuth scopes
+  name              String?
+  domain            String?
+  lastSsoValidation DateTime?
+  lastSsoUserId     String?
+  companies         Company[]
+  contacts          Contact[]
+  properties        Property[]
+  projects          Project[]
+  siteConfig        SiteConfig?
+  swipeSessions     SwipeSession[]
+  users             User[]         @relation("LocationToUser")
+  userRoles         UserLocationRole[]
+  contentPages      ContentPage[]
+  blogPosts         BlogPost[]
+  leadSources       LeadSource[]
+  dealContexts      DealContext[]
+  conversations     Conversation[]
+
+  // WhatsApp Integration (Native)
+  whatsappBusinessAccountId String?
+  whatsappPhoneNumberId     String?
+  whatsappAccessToken       String? @db.Text // Long-lived system user token
+  whatsappWebhookSecret     String?
+
+  // Twilio Integration
+  twilioAccountSid    String?
+  twilioAuthToken     String? // Encrypted
+  twilioWhatsAppFrom  String?
+
+  // Evolution API (Shadow WhatsApp)
+  evolutionInstanceId       String?
+  evolutionApiToken         String?
+  evolutionConnectionStatus String? // "open", "connecting", "close"
+  
+  whatsappImportSessions WhatsAppImportSession[]
+}
+
+model LeadSource {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  
+  name      String
+  isActive  Boolean  @default(true)
+  
+  @@unique([locationId, name])
+  @@index([locationId])
+}
+
+model ContentPage {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  locationId  String
+  
+  title       String
+  slug        String   // e.g. "about-us", "sellers-guide"
+  content     String?  @db.Text   // Storing raw HTML for simplicity
+  blocks      Json?    // Structured content blocks (Hero, Features, Form, etc.)
+  headerStyle String?  // "transparent" | "solid"
+  heroImage   String?  // Cloudflare Image ID or URL for transparent header hero
+  metaTitle   String?  // SEO title (overrides Page Title)
+  metaDescription String? // SEO description for SERP snippets
+  
+  // AI Tracking
+  aiImportSourceUrl String?
+  aiModelUsed       String?
+  
+  published   Boolean  @default(false)
+  
+  location    Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([locationId, slug]) // Slugs must be unique per tenant
+}
+
+model BlogPost {
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  locationId    String
+  
+  title         String
+  slug          String   // e.g. "market-update-q1"
+  excerpt       String?
+  content       String?  @db.Text
+  coverImage    String?  // Cloudflare Image ID or URL
+  published     Boolean  @default(false)
+  publishedAt   DateTime?
+  
+  authorName    String?
+  
+  location      Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([locationId, slug])
+}
+
+model User {
+  id        String     @id @default(cuid())
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  email     String     @unique
+  name      String?    // Legacy - kept for backward compatibility
+  firstName String?
+  lastName  String?
+  phone     String?
+  clerkId   String?    @unique
+  ghlUserId String?
+  ghlCalendarId String?
+  
+  // CRM Integration
+  crmUrl      String?
+  crmUsername String?
+  crmPassword String?
+  crmSchema   Json?
+  crmEditUrlPattern String?
+
+  locations Location[] @relation("LocationToUser")
+  locationRoles     UserLocationRole[]
+  
+  createdProperties Property[] @relation("PropertyCreator")
+  updatedProperties Property[] @relation("PropertyUpdater")
+  viewings          Viewing[]
+  contactHistory    ContactHistory[]
+
+  // Google Contact Sync Credentials
+  googleAccessToken  String?  @db.Text
+  googleRefreshToken String?  @db.Text
+  googleSyncToken    String?  // To track the last sync point
+  googleSyncEnabled  Boolean  @default(false)
+}
+
+model Property {
+  id                     String                @id @default(cuid())
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+  locationId             String
+  title                  String
+  slug                   String                @unique
+  description            String?
+  reference              String?               @unique
+  status                 PropertyStatus        @default(ACTIVE)
+  type                   String?
+  price                  Int?
+  currency               String?
+  bedrooms               Int?
+  bathrooms              Int?
+  areaSqm                Int?
+  addressLine1           String?
+  addressLine2           String?
+  city                   String?
+  country                String?
+  postalCode             String?
+  latitude               Float?
+  longitude              Float?
+  featured               Boolean               @default(false)
+  category               String?
+  features               String[]              @default([])
+  condition              String?
+  source                 String                @default("IDX")
+  buildYear              Int?
+  plotAreaSqm            Int?
+  goal                   ListingGoal           @default(SALE)
+  publicationStatus      PublicationStatus     @default(PUBLISHED)
+  propertyArea           String?
+  propertyLocation       String?
+  communalFees           Int?
+  metaDescription        String?
+  metaKeywords           String?
+  metaTitle              String?
+  rentalPeriod           String?
+  metadata               Json?    // For dynamic schema expansion
+
+  // Extended Area Details
+  coveredAreaSqm         Int?      // "Internal Covered"
+  coveredVerandaSqm      Int?
+  uncoveredVerandaSqm    Int?
+  basementSqm            Int?
+  sortOrder              Int                   @default(0)
+  floor                  Int?
+  agentRef               String?
+  agentUrl               String?
+  estimatedValue         Int?
+  internalNotes          String?
+  keyHolder              String?
+  landSurveyValue        Int?
+  lawyer                 String?
+  loanDetails            String?
+  lowestOffer            Int?
+  managementCompany      String?
+  occupancyStatus        String?
+  projectName            String?
+  projectId              String?
+  project                Project?              @relation(fields: [projectId], references: [id])
+  purchasePrice          Int?
+  unitNumber             String?
+  viewingContact         String?
+  viewingDirections      String?
+  viewingNotes           String?
+
+  agencyAgreement        String?
+  commission             String?
+  agreementDate          DateTime?
+  agreementNotes         String?
+  deposit                String?
+  depositValue           Int?
+
+  billsTransferable        Boolean?              @default(false)
+  priceIncludesCommunalFees Boolean?             @default(false)
+  keyBoxCode               String?
+  officeKeyNumber          String?
+
+  ghlPropertyObjectId    String?               @unique
+  companyRoles           CompanyPropertyRole[]
+
+  contactRoles           ContactPropertyRole[]
+  location               Location              @relation(fields: [locationId], references: [id])
+  media                  PropertyMedia[]
+  swipes                 PropertySwipe[]
+  viewings               Viewing[]
+
+  createdById            String?
+  creator                User?                 @relation("PropertyCreator", fields: [createdById], references: [id])
+  updatedById            String?
+  updater                User?                 @relation("PropertyUpdater", fields: [updatedById], references: [id])
+
+  // Original CRM Import Details
+  originalCreatorName    String?
+  originalCreatorEmail   String?
+  originalCreatedAt      DateTime?
+  originalUpdatedAt      DateTime?
+
+  // Feed Integration
+  feedId                 String?
+  feed                   PropertyFeed?         @relation(fields: [feedId], references: [id])
+  feedReferenceId        String?               // External ID from the feed
+  feedHash               String?               // Hash to detect changes
+  
+  @@unique([feedId, feedReferenceId])
+}
+
+
+
+model PropertyMedia {
+  id         String    @id @default(cuid())
+  createdAt  DateTime  @default(now())
+  propertyId String
+  url        String
+  kind       MediaKind @default(IMAGE)
+  sortOrder  Int       @default(0)
+  title      String?
+  cloudflareImageId String?
+  property   Property  @relation(fields: [propertyId], references: [id])
+}
+
+model SiteConfig {
+  id             String   @id @default(cuid())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  locationId     String   @unique
+  
+  // New Fields
+  domain         String?  @unique
+  theme          Json?
+  navLinks       Json?
+  footerLinks    Json?  // Footer Menu (New)
+  socialLinks    Json?  // Social Media Links (New)
+  legalLinks     Json?  // Legal/Bottom Menu (New)
+  footerDisclaimer String? // Custom license/disclaimer text (New)
+  footerBio      String? // Custom biography/description text under logo (New)
+  heroContent    Json?
+  contactInfo    Json?  // Address, Phone, Email
+  googleAiApiKey String? // Google Gemini AI API Key
+  googleAiModel  String? @default("gemini-1.5-pro") // Default / Legacy
+  googleAiModelExtraction String? @default("gemini-1.5-flash") // Stage 1: Fast Scraper
+  googleAiModelDesign     String? @default("gemini-1.5-pro")   // Stage 2: High-End Designer
+  brandVoice     String? // Custom instructions for AI Brand Voice
+  homeSections   Json?   // Configuration for Home Page Sections (order, visibility)
+  favoritesConfig Json?  // { title, emptyTitle, emptyBody, headerStyle, heroImage }
+  searchConfig   Json?   // { metaTitle, metaDescription, emptyTitle, emptyBody }
+  submissionsConfig Json? // { title, emptyTitle, emptyBody, headerStyle, heroImage }
+  
+  outreachConfig Json?    // AI Outreach Assistant Configuration (Prompts, Enabled status)
+    
+  publicListingEnabled Boolean @default(true) // Feature Flag for "List Your Property"
+
+  // Existing Fields
+  primaryColor   String?
+  secondaryColor String?
+  accentColor    String?
+  minPrice       Int?
+  maxPrice       Int?
+  defaultCity    String?
+  defaultRegion  String?
+  allowedTypes   String?
+  
+  location       Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@map("SearchConfig")
+}
+
+model Contact {
+  id                  String                @id @default(cuid())
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @default(now()) @updatedAt
+  locationId          String
+
+  name                String?
+  email               String?
+  phone               String?
+  message             String?
+  clerkUserId         String?               @unique // Links this Contact to an authenticated Clerk User (Public Login)
+  ghlContactId        String?               @unique
+  ghlCompanyId        String?
+  ghlPropertyObjectId String?
+  ghlOppId            String?
+  interestedCount     Int                   @default(0)
+  maybeCount          Int                   @default(0)
+  notCount            Int                   @default(0)
+  heatScore           Int                   @default(0)
+  payload             Json?
+  status              String
+  contactType         String                @default("Lead") // Lead, Agent, Partner, Owner, Associate, Contact, Tenant
+  error               String?
+  location            Location              @relation(fields: [locationId], references: [id])
+
+  companyRoles        ContactCompanyRole[]
+  propertyRoles       ContactPropertyRole[]
+  swipes              PropertySwipe[]
+  swipeSessions       SwipeSession[]
+
+  // Lead Details
+  leadGoal            String? // "To Buy", "To Rent", "To List", "Other"
+  leadPriority        String   @default("Medium") // "Low", "Medium", "High"
+  leadStage           String   @default("Unassigned")
+  leadSource          String?
+  leadNextAction      String?
+  leadFollowUpDate    DateTime?
+  leadAssignedToAgent String?
+
+  // Requirements
+  requirementStatus            String   @default("For Sale") // "For Sale", "For Rent"
+  requirementDistrict          String   @default("Any District")
+  requirementBedrooms          String   @default("Any Bedrooms")
+  requirementMinPrice          String   @default("Any")
+  requirementMaxPrice          String   @default("Any")
+  requirementCondition         String   @default("Any Condition")
+  requirementPropertyTypes     String[] @default([])
+  requirementPropertyLocations String[] @default([])
+  requirementOtherDetails      String?
+
+  // Property Matching
+  matchingPropertiesToMatch       String    @default("Updated and New")
+  matchingEmailMatchedProperties  String    @default("Yes - Automatic")
+  matchingNotificationFrequency   String    @default("Weekly")
+  matchingLastMatchDate           DateTime?
+
+  // Properties Tab
+  propertiesInterested    String[] @default([])
+  propertiesInspected     String[] @default([])
+  propertiesEmailed       String[] @default([])
+  propertiesMatched       String[] @default([])
+  // Property Won Details
+  propertyWonValue        Int?
+  wonCommission           Int?
+  propertyWonReference    String?
+  propertyWonDate         DateTime?
+  viewings                Viewing[]
+  history                 ContactHistory[]
+  conversations           Conversation[]
+
+  // Google Sync
+  googleContactId         String?
+  lastGoogleSync          DateTime?
+}
+
+model Company {
+  id            String                @id @default(cuid())
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  locationId    String
+  name          String
+  email         String?
+  phone         String?
+  website       String?
+  type          String?
+  ghlCompanyId  String?               @unique
+  location      Location              @relation(fields: [locationId], references: [id])
+  propertyRoles CompanyPropertyRole[]
+  contactRoles  ContactCompanyRole[]
+  
+  feeds         PropertyFeed[]
+}
+
+model ContactPropertyRole {
+  id                String   @id @default(cuid())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  contactId         String
+  propertyId        String
+  role              String
+  source            String?
+  stage             String?
+  interestedSwipes  Int      @default(0)
+  maybeSwipes       Int      @default(0)
+  notSwipes         Int      @default(0)
+  propertyHeatScore Int      @default(0)
+  notes             String?
+  contact           Contact  @relation(fields: [contactId], references: [id])
+  property          Property @relation(fields: [propertyId], references: [id])
+
+  @@unique([contactId, propertyId, role])
+  @@index([propertyId, role])
+  @@index([contactId, role])
+}
+
+model CompanyPropertyRole {
+  id         String   @id @default(cuid())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  companyId  String
+  propertyId String
+  role       String
+  notes      String?
+  company    Company  @relation(fields: [companyId], references: [id])
+  property   Property @relation(fields: [propertyId], references: [id])
+
+  @@unique([companyId, propertyId, role])
+  @@index([propertyId, role])
+}
+
+model ContactCompanyRole {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  contactId String
+  companyId String
+  role      String
+  notes     String?
+  company   Company  @relation(fields: [companyId], references: [id])
+  contact   Contact  @relation(fields: [contactId], references: [id])
+
+  @@unique([contactId, companyId, role])
+  @@index([companyId, role])
+}
+
+model SwipeSession {
+  id           String          @id @default(cuid())
+  contactId    String?
+  anonymousKey String?
+  locationId   String?
+  startedAt    DateTime        @default(now())
+  endedAt      DateTime?
+  totalSwipes  Int             @default(0)
+  swipes       PropertySwipe[]
+  contact      Contact?        @relation(fields: [contactId], references: [id])
+  location     Location?       @relation(fields: [locationId], references: [id])
+
+  @@index([contactId])
+  @@index([anonymousKey])
+}
+
+model PropertySwipe {
+  id         String       @id @default(cuid())
+  sessionId  String
+  contactId  String?
+  propertyId String
+  choice     String
+  score      Int
+  createdAt  DateTime     @default(now())
+  contact    Contact?     @relation(fields: [contactId], references: [id])
+  property   Property     @relation(fields: [propertyId], references: [id])
+  session    SwipeSession @relation(fields: [sessionId], references: [id])
+
+  @@index([sessionId])
+  @@index([contactId])
+  @@index([propertyId])
+}
+
+enum PropertyStatus {
+  ACTIVE
+  RESERVED
+  SOLD
+  RENTED
+  WITHDRAWN
+}
+
+enum ListingGoal {
+  SALE
+  RENT
+}
+
+enum PublicationStatus {
+  PUBLISHED
+  DRAFT
+  UNLISTED
+  PENDING
+}
+
+enum MediaKind {
+  IMAGE
+  FLOORPLAN
+  VIDEO
+  MATTERPORT
+  DOCUMENT
+}
+
+enum UserRole {
+  ADMIN   // Full access, can manage other users
+  MEMBER  // Standard access
+}
+
+model UserLocationRole {
+  id         String   @id @default(cuid())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  
+  role       UserRole @default(MEMBER)
+  
+  invitedById String?  // userId who invited this user
+  invitedAt   DateTime?
+  
+  @@unique([userId, locationId])
+  @@index([locationId, role])
+}
+
+model Project {
+  id              String    @id @default(cuid())
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  locationId      String
+  name            String
+  description     String?
+  developer       String?
+  completionDate  DateTime?
+  totalUnits      Int?
+  features        String[]  @default([])
+  projectLocation String?
+  website         String?
+  brochure        String?
+  source          String    @default("IDX") // IDX, GHL, GHL_WEBHOOK
+  ghlProjectId    String?   @unique
+
+  location        Location  @relation(fields: [locationId], references: [id])
+  properties      Property[]
+}
+
+
+model Viewing {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  contactId   String
+  contact     Contact  @relation(fields: [contactId], references: [id])
+  
+  propertyId  String
+  property    Property @relation(fields: [propertyId], references: [id])
+  
+  userId      String   // Agent who conducted the viewing
+  user        User     @relation(fields: [userId], references: [id])
+  
+  date        DateTime
+  notes       String?
+
+  ghlAppointmentId String? @unique
+  status           String  @default("scheduled") // scheduled, cancelled, completed, no_show
+  
+  @@index([contactId])
+  @@index([propertyId])
+  @@index([userId])
+}
+
+model ScrapeRule {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  domain    String
+  pattern   String   // URL pattern (regex or wildcard)
+  instructions String // The "System Prompt" hint for the AI
+  
+  isActive  Boolean  @default(true)
+  
+  interactionSelector String? // CSS selector to click before scraping (e.g. #view-gallery)
+
+  @@index([domain])
+}
+
+model PropertyFeed {
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  companyId     String
+  company       Company  @relation(fields: [companyId], references: [id])
+  
+  url           String
+  format        FeedFormat @default(GENERIC)
+  mappingConfig Json?    // Custom field mapping override
+  
+  lastSyncAt    DateTime?
+  isActive      Boolean  @default(true)
+  
+  properties    Property[]
+
+  @@index([companyId])
+}
+
+enum FeedFormat {
+  GENERIC
+  ALTIA
+  KYERO
+}
+
+model Subscriber {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  email     String   @unique
+  source    String   @default("footer_subscription")
+  
+  // Sync Status
+  ghlContactId String?
+  syncedAt     DateTime?
+  syncError    String?
+}
+
+model ContactHistory {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  contactId String
+  userId    String?  // Optional, null for System/GHL updates
+  action    String   // CREATED, UPDATED, VIEWING_ADDED, etc.
+  changes   Json?    // Array of { field, old, new } or similar structure
+
+  contact   Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  user      User?    @relation(fields: [userId], references: [id])
+
+  @@index([contactId])
+  @@index([createdAt])
+}
+
+model DealContext {
+  id              String   @id @default(cuid())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  title           String   // e.g. "Sale of Sea Caves Villa"
+  locationId      String
+  
+  // Linked References (Stored as ID arrays to avoid complex relations with non-DB GHL objects)
+  conversationIds String[] 
+  propertyIds     String[]
+  viewingIds      String[]
+  
+  // Metadata
+  stage           String   @default("DRAFT") // DRAFT, ACTIVE, CLOSED, PAUSED
+  lastActivityAt  DateTime @default(now())
+  metadata        Json?    // For AI summary ("State of the Deal") and active agent thoughts
+
+  location        Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  @@index([locationId])
+  @@index([lastActivityAt])
+}
+
+model Conversation {
+  id                String   @id @default(cuid())
+  locationId        String
+  contactId         String
+  ghlConversationId String   @unique 
+  
+  status            String   @default("open")
+  lastMessageBody   String?  @db.Text
+  lastMessageAt     DateTime @default(now())
+  lastMessageType   String?  // TYPE_SMS, TYPE_EMAIL, TYPE_WHATSAPP
+  unreadCount       Int      @default(0)
+  suggestedActions  String[] @default([])
+  
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  // AI Agent Planner
+  agentPlan         Json?    // Stores the structured task list [ { id, title, status, result } ]
+  
+  // Accumulated Usage Stats
+  // Accumulated Usage Stats
+  promptTokens      Int      @default(0)
+  completionTokens  Int      @default(0)
+  totalTokens       Int      @default(0)
+  totalCost         Float    @default(0)
+  
+  // Relations
+  location          Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  contact           Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  messages          Message[]
+  executions        AgentExecution[]
+
+  @@index([locationId])
+  @@index([contactId])
+  @@index([lastMessageAt])
+}
+
+// AI Agent Execution History - stores complete trace of each agent action
+model AgentExecution {
+  id              String   @id @default(cuid())
+  conversationId  String
+  
+  // Task Info
+  taskId          String?  // ID from the plan
+  taskTitle       String?  // Title of the executed task
+  taskStatus      String?  // Result status: done, failed
+  
+  // Thinking Trace
+  thoughtSummary  String?  @db.Text
+  thoughtSteps    Json?    // Array of { step, description, conclusion }
+  
+  // Tool Execution Results
+  toolCalls       Json?    // Array of { tool, arguments, result, error }
+  
+  // Output
+  draftReply      String?  @db.Text
+  
+  // Token Usage Stats
+  promptTokens     Int?
+  completionTokens Int?
+  totalTokens      Int?
+  model            String?
+  cost             Float?
+  
+  createdAt       DateTime @default(now())
+  
+  // Relations
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  
+  @@index([conversationId])
+  @@index([createdAt])
+}
+
+model Message {
+  id              String   @id @default(cuid())
+  conversationId  String
+  ghlMessageId    String   @unique
+  
+  type            String   // SMS, Email, WhatsApp
+  direction       String   // inbound, outbound
+  status          String   // sent, delivered, read, failed
+  
+  body            String?  @db.Text
+  subject         String?  // For emails
+  
+  // Metadata for Sync/Direction
+  emailFrom       String?
+  emailTo         String?
+  userId          String?
+  source          String?
+
+  createdAt       DateTime // The actual time the message was sent/received
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  
+  // WhatsApp Integration
+  wamId           String?      @unique // WhatsApp Message ID (for dedup)
+
+  @@index([conversationId])
+  @@index([createdAt])
+}
+
+model WhatsAppImportSession {
+  id              String   @id @default(cuid())
+  locationId      String
+  fileName        String
+  status          String   @default("pending") // pending, mapping, importing, complete, failed
+  rawContent      String   @db.Text
+  parsedData      Json?    // Parsed messages before final import
+  contactMappings Json?    // { "Display Name": "contactId" }
+  uniqueAuthors   String[] @default([]) // List of unique sender names for easy mapping UI
+  messageCount    Int      @default(0)
+  errorMessage    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  location        Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  
+  @@index([locationId])
+  @@index([status])
+}
+

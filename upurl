@@ -1,0 +1,33 @@
+#!/bin/bash
+
+# Check if an ID was provided
+if [ -z "$1" ]; then
+  echo "Usage: ./upurl <new_id>"
+  echo "Example: ./upurl 7c2a5c6044a1"
+  exit 1
+fi
+
+NEW_ID="$1"
+TARGET_URL="https://${NEW_ID}.ngrok-free.app"
+# Regex to match: https://[any-alphanumeric-dash].ngrok-free.app
+# We escape . as \.
+REGEX="https:\/\/[a-zA-Z0-9-]*\.ngrok-free\.app"
+
+echo "Updating ngrok URLs to: $TARGET_URL"
+
+update_file() {
+  local file="$1"
+  if [ -f "$file" ]; then
+    # Use sed with backup extension '' for macOS compatibility (no backup)
+    # Using | as delimiter to avoid escaping slashes in replacement
+    sed -i '' "s|$REGEX|$TARGET_URL|g" "$file"
+    echo "Updated $file"
+  else
+    echo "Skipped $file (not found)"
+  fi
+}
+
+update_file ".env"
+update_file ".env.local"
+
+echo "Done!"
