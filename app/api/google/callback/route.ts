@@ -34,11 +34,11 @@ export async function GET(req: NextRequest) {
         }
 
         // Exchange for tokens
-        await handleGoogleCallback(code, user.id);
+        const origin = req.nextUrl.origin;
+        await handleGoogleCallback(code, user.id, origin);
 
         // Redirect to settings or dashboard
-        const baseUrl = process.env.APP_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://estio.co';
-        return NextResponse.redirect(`${baseUrl}/admin/settings/integrations/google?google_connected=true`);
+        return NextResponse.redirect(`${origin}/admin/settings/integrations/google?google_connected=true`);
 
     } catch (error) {
         console.error('Google Callback Error:', error);

@@ -31,9 +31,9 @@ export default async function GoogleIntegrationPage({
     return (
         <div className="space-y-6">
             <div>
-                <h1 className="text-2xl font-bold tracking-tight">Google Contacts Sync</h1>
+                <h1 className="text-2xl font-bold tracking-tight">Google Workspace Sync</h1>
                 <p className="text-muted-foreground">
-                    Two-way synchronization with your Google Contacts.
+                    Connect your Google account to sync Contacts and Gmail.
                 </p>
             </div>
 
@@ -70,8 +70,8 @@ export default async function GoogleIntegrationPage({
                                     <p className="font-medium">{isConnected ? 'Connected' : 'Not Connected'}</p>
                                     <p className="text-sm text-muted-foreground">
                                         {isConnected
-                                            ? 'Your Google Contacts are being synced.'
-                                            : 'Connect to start syncing contacts.'}
+                                            ? 'Contacts and Gmail are being synced.'
+                                            : 'Connect to start syncing.'}
                                     </p>
                                 </div>
                             </div>
@@ -86,9 +86,14 @@ export default async function GoogleIntegrationPage({
                         ) : (
                             <Button variant="outline" className="w-full" asChild>
                                 <Link href="/api/google/auth">
-                                    Reconnect Account
+                                    Reconnect / Update Permissions
                                 </Link>
                             </Button>
+                        )}
+                        {isConnected && (
+                            <p className="text-xs text-center text-muted-foreground mt-2">
+                                Reconnect to grant new Gmail permissions if you haven't yet.
+                            </p>
                         )}
                     </CardContent>
                 </Card>
@@ -97,16 +102,16 @@ export default async function GoogleIntegrationPage({
                     <CardHeader>
                         <CardTitle>Sync Settings</CardTitle>
                         <CardDescription>
-                            Configure how your contacts are synchronized.
+                            Configure how your data is synchronized.
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
                         <div className="space-y-2">
                             <h4 className="font-medium text-sm">Features</h4>
                             <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
+                                <li><strong>Gmail Sync:</strong> Two-way email sync (Desktop & Mobile).</li>
                                 <li><strong>Caller ID:</strong> Company field shows "Lead [Rent/Sale]..."</li>
-                                <li><strong>Two-Way:</strong> Updates in Estio push to Google.</li>
-                                <li><strong>Notes:</strong> Lead requirements stored in Notes.</li>
+                                <li><strong>Contact Sync:</strong> Updates in Estio push to Google Contacts.</li>
                             </ul>
                         </div>
 

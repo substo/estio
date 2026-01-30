@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
             return new NextResponse('Unauthorized', { status: 401 });
         }
 
-        const url = getGoogleAuthUrl();
+        const url = getGoogleAuthUrl(req.nextUrl.origin);
 
         return NextResponse.redirect(url);
     } catch (error) {

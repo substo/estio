@@ -4,21 +4,30 @@ import db from '@/lib/db';
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
-const REDIRECT_URI = `${process.env.APP_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://estio.co'}/api/google/callback`;
+const DEFAULT_BASE_URL = process.env.APP_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://estio.co';
 
-export const createOAuth2Client = () => new google.auth.OAuth2(
-    CLIENT_ID,
-    CLIENT_SECRET,
-    REDIRECT_URI
-);
+export const createOAuth2Client = (baseUrl?: string) => {
+    const root = baseUrl || DEFAULT_BASE_URL;
+    // Ensure no double slash if root ends with /
+    const cleanRoot = root.replace(/\/$/, "");
+    return new google.auth.OAuth2(
+        CLIENT_ID,
+        CLIENT_SECRET,
+        `${cleanRoot}/api/google/callback`
+    );
+};
 
-export function getGoogleAuthUrl() {
+export function getGoogleAuthUrl(baseUrl?: string) {
     const scopes = [
         'https://www.googleapis.com/auth/contacts',
         'https://www.googleapis.com/auth/userinfo.email',
+        'https://www.googleapis.com/auth/gmail.readonly',
+        'https://www.googleapis.com/auth/gmail.send',
+        'https://www.googleapis.com/auth/gmail.labels',
+        'https://www.googleapis.com/auth/gmail.modify',
     ];
 
-    const client = createOAuth2Client();
+    const client = createOAuth2Client(baseUrl);
     return client.generateAuthUrl({
         access_type: 'offline', // Crucial for refresh token
         scope: scopes,
@@ -26,8 +35,8 @@ export function getGoogleAuthUrl() {
     });
 }
 
-export async function handleGoogleCallback(code: string, userId: string) {
-    const client = createOAuth2Client();
+export async function handleGoogleCallback(code: string, userId: string, baseUrl?: string) {
+    const client = createOAuth2Client(baseUrl);
     const { tokens } = await client.getToken(code);
 
     if (!tokens.access_token) throw new Error('Failed to retrieve access token');
@@ -43,6 +52,22 @@ export async function handleGoogleCallback(code: string, userId: string) {
     });
 
     client.setCredentials(tokens);
+    client.setCredentials(tokens);
+
+    // Start Watching immediately
+    // Import dynamically to avoid circular dep if needed, or just import at top if clean.
+    // Assuming circular dep might exist if gmail-sync imports auth. 
+    // Let's retry lazy import.
+    try {
+        const { watchGmail, syncRecentMessages } = await import('./gmail-sync');
+        // Run initial sync to populate historyId and Email Address
+        await syncRecentMessages(userId);
+        // Then Start Watch
+        await watchGmail(userId);
+    } catch (e) {
+        console.error("Failed to initialize Gmail Sync on callback:", e);
+    }
+
     return tokens;
 }
 
@@ -56,6 +81,9 @@ export async function getValidAccessToken(userId: string) {
         throw new Error('User not connected to Google');
     }
 
+    // Refresh uses the same client creds, redirect URI doesn't matter as much for refresh
+    // but best to keep it consistent if possible, though we don't know the original Base URL here easily.
+    // For refresh, Redirect URI is not sent.
     const client = createOAuth2Client();
     client.setCredentials({
         access_token: user.googleAccessToken,

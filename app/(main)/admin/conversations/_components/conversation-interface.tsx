@@ -283,6 +283,27 @@ export function ConversationInterface({ initialConversations }: ConversationInte
                                 loading={loadingMessages}
                                 onSendMessage={handleSendMessage}
                                 onSync={handleSync}
+                                onFetchHistory={async () => {
+                                    setLoadingMessages(true);
+                                    try {
+                                        toast({ title: "Fetching History", description: "Checking Gmail for recent messages..." });
+                                        // Dynamic import or passed prop action
+                                        const { fetchContactHistory } = await import('@/lib/google/actions');
+                                        const res = await fetchContactHistory(activeConversation.contactId);
+
+                                        if (res.success) {
+                                            toast({ title: "History Fetched", description: `Found ${res.count} messages.` });
+                                            const msgs = await fetchMessages(activeConversation.id);
+                                            setMessages(msgs);
+                                        } else {
+                                            toast({ title: "Fetch Failed", description: res.error, variant: "destructive" });
+                                        }
+                                    } catch (e: any) {
+                                        toast({ title: "Error", description: e.message, variant: "destructive" });
+                                    } finally {
+                                        setLoadingMessages(false);
+                                    }
+                                }}
                                 suggestions={[...(activeConversation?.suggestedActions || []), ...suggestions]}
                                 onGenerateDraft={async (instruction?: string, model?: string) => {
                                     try {

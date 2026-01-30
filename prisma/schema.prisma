@@ -152,6 +152,7 @@ model User {
   googleRefreshToken String?  @db.Text
   googleSyncToken    String?  // To track the last sync point
   googleSyncEnabled  Boolean  @default(false)
+  gmailSyncState     GmailSyncState?
 }
 
 model Property {
@@ -729,6 +730,7 @@ model Conversation {
   @@index([locationId])
   @@index([contactId])
   @@index([lastMessageAt])
+  @@unique([locationId, contactId])
 }
 
 // AI Agent Execution History - stores complete trace of each agent action
@@ -770,7 +772,7 @@ model AgentExecution {
 model Message {
   id              String   @id @default(cuid())
   conversationId  String
-  ghlMessageId    String   @unique
+  ghlMessageId    String?   @unique
   
   type            String   // SMS, Email, WhatsApp
   direction       String   // inbound, outbound
@@ -788,14 +790,45 @@ model Message {
   createdAt       DateTime // The actual time the message was sent/received
   updatedAt       DateTime @updatedAt
   
+  // Native Gmail Fields
+  emailThreadId   String?
+  emailMessageId  String?  @unique
+  emailHeaders    Json?    // References, In-Reply-To
+  
   // Relations
   conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  attachments     MessageAttachment[]
   
   // WhatsApp Integration
   wamId           String?      @unique // WhatsApp Message ID (for dedup)
 
   @@index([conversationId])
   @@index([createdAt])
+  @@index([emailThreadId])
+}
+
+model GmailSyncState {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  emailAddress    String?  @unique // The Gmail address being synced (for webhook lookup)
+  historyId       String?
+  lastSyncedAt    DateTime @default(now())
+  watchExpiration DateTime? // When the push notification subscription expires
+  
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model MessageAttachment {
+  id          String   @id @default(cuid())
+  messageId   String
+  fileName    String
+  contentType String
+  size        Int
+  url         String
+  
+  message     Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
 }
 
 model WhatsAppImportSession {

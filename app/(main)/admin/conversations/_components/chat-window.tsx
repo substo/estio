@@ -13,6 +13,7 @@ interface ChatWindowProps {
     loading: boolean;
     onSendMessage: (text: string, type: 'SMS' | 'Email' | 'WhatsApp') => void;
     onSync?: () => void;
+    onFetchHistory?: () => void;
     onGenerateDraft?: (instruction?: string, model?: string) => Promise<string | null>; // Returns draft text or null if failed
 }
 
@@ -53,7 +54,7 @@ import { Sparkles, Loader2 as Spinner } from "lucide-react"; // Import Sparkles 
 
 import { getAvailableAiModelsAction } from "@/app/(main)/admin/conversations/actions";
 
-export function ChatWindow({ conversation, messages, loading, onSendMessage, onSync, onGenerateDraft, suggestions = [] }: ChatWindowProps & { suggestions?: string[] }) {
+export function ChatWindow({ conversation, messages, loading, onSendMessage, onSync, onGenerateDraft, onFetchHistory, suggestions = [] }: ChatWindowProps & { suggestions?: string[] }) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const [draft, setDraft] = useState("");
     const [sending, setSending] = useState(false);
@@ -131,6 +132,11 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
                 <div className="flex items-center gap-2">
                     {conversation.lastMessageType === 'TYPE_WHATSAPP' && onSync && (
                         <Button variant="ghost" size="icon" onClick={onSync} title="Sync WhatsApp History">
+                            <RefreshCw className="h-4 w-4 text-gray-500" />
+                        </Button>
+                    )}
+                    {(conversation.type === 'Email' || conversation.lastMessageType === 'TYPE_EMAIL') && onFetchHistory && (
+                        <Button variant="ghost" size="icon" onClick={onFetchHistory} title="Fetch Gmail History">
                             <RefreshCw className="h-4 w-4 text-gray-500" />
                         </Button>
                     )}
@@ -260,6 +266,6 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
                     </div>
                 </div>
             </div>
-        </div >
+        </div>
     );
 }

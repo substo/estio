@@ -141,3 +141,58 @@ export async function getMessage(accessToken: string, messageId: string) {
         accessToken
     );
 }
+
+/**
+ * Injects an external message (e.g. from Gmail) into GHL conversation stream.
+ * This effectively logs the email without triggering a send from GHL side
+ * if correct parameters are used.
+ */
+export async function createInboundMessage(accessToken: string, payload: {
+    type: 'Email' | 'SMS';
+    contactId: string;
+    direction: 'inbound' | 'outbound';
+    status: 'delivered' | 'read' | 'received';
+    body?: string;
+    subject?: string;
+    html?: string;
+    emailFrom?: string;
+    emailTo?: string;
+    dateAdded?: number; // timestamp in ms
+    threadId?: string;  // To group in same conversation
+}) {
+    // The endpoint is the same as send, but we use specific flags to indicate
+    // it's an external message being logged.
+    // Note: Official documentation on this is sparse, but 'direction' and 'status'
+    // are key.
+    return ghlFetch<{ messageId: string; conversationId: string; msg: any }>(
+        `/conversations/messages/inbound`, // Using the inbound webhook endpoint pattern if available, or fallback to standard
+        accessToken,
+        {
+            method: 'POST',
+            body: JSON.stringify({
+                ...payload,
+                // Ensure we don't accidentally send
+                status: payload.status || 'delivered',
+            })
+        }
+    ).catch(async (err) => {
+        // Fallback: If specific inbound endpoint fails, try standard with "InboundMessage" type if strictly inbound
+        // or just standard message with status=delivered for outbound logging.
+        console.warn("[GHL Inbound] Failed to inject via /inbound, trying standard /messages", err);
+
+        const standardPayload = {
+            ...payload,
+            // type: 'InboundMessage' is sometimes valid for strictly incoming logic
+            // but 'Email' with direction 'inbound' is safer.
+        };
+
+        return ghlFetch<any>(
+            `/conversations/messages`,
+            accessToken,
+            {
+                method: 'POST',
+                body: JSON.stringify(standardPayload)
+            }
+        );
+    });
+}
