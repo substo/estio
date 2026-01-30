@@ -116,6 +116,7 @@ export interface GHLListResponse<T> {
 export interface GHLLocation {
     id: string;
     name: string;
+    companyId?: string; // The parent company/agency ID
     email?: string;
     phone?: string;
     address?: string;

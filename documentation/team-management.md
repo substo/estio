@@ -137,12 +137,55 @@ Each user can be assigned a GHL Calendar for viewing synchronization:
 
 Admins can remove users from a location by clicking the trash icon. This performs a **Secure Offboarding**:
 
-1.  **GHL Offboarding**: Attempt to remove the user from the connected GoHighLevel sub-account to revoke CRM access.
-2.  **Google Sync Revocation**: Immediately clears `googleAccessToken`, `googleRefreshToken`, and disables `googleSyncEnabled` to stop any background contact syncing.
+1.  **GHL Offboarding**: Removes the user from the connected GoHighLevel sub-account (`DELETE /users/{ghlUserId}`), revoking CRM access.
+2.  **Google Sync Revocation**: Clears `googleAccessToken`, `googleRefreshToken`, and disables `googleSyncEnabled` to stop background contact syncing.
 3.  **Local Access Revocation**:
     *   Removes their `UserLocationRole` record.
     *   Disconnects them from the `Location`.
+    *   Clears `ghlUserId` from the User record (to enable clean restoration on re-invite).
     *   **Note**: The User record itself is *not* deleted to preserve the audit trail (e.g., "Created By" history on properties).
+
+### Re-Invite Users (Self-Healing Flow)
+
+When a previously removed user is re-invited, the system automatically restores their access and integrations:
+
+**Invitation Conflict Handling:**
+- Before sending a new Clerk invitation, the system checks for any **pending invitations** for that email.
+- If found, the old invitation is **automatically revoked** to prevent 422 "already invited" errors.
+- A fresh invitation is then created with updated metadata.
+
+**Smart User Detection:**
+The system uses a multi-step check to determine user status:
+1. **Check local DB** for existing user record.
+2. **Check Clerk by stored ID** (may fail if user was deleted from Clerk).
+3. **Fallback: Check Clerk by email** — catches users who re-registered with a new Clerk account.
+4. If found by email, the user's `clerkId` is **auto-updated** in the database.
+
+**GHL Integration Restoration:**
+When re-inviting a user who exists in both DB and Clerk but is missing their GHL User ID:
+1. System detects `ghlUserId` is null (was cleared during offboarding).
+2. Automatically creates a new user in GHL via `POST /users/` with:
+   - `companyId`: Dynamically fetched from GHL Location API.
+   - `type: 'account'` (required by GHL API).
+   - `locationIds`: The target location.
+3. Saves the new `ghlUserId` to the database.
+
+> [!NOTE]
+> **Fully Self-Healing**: The re-invite button effectively acts as a "Full Restore" button, reconnecting all integrations automatically.
+
+**Technical Flow:**
+```
+Re-Invite Clicked
+    ├─▶ Check for pending Clerk invitations → Revoke if found
+    ├─▶ Check if user exists in Clerk (ID then Email fallback)
+    │       └─▶ If found by email → Auto-update clerkId in DB
+    ├─▶ Reconnect user to Location in DB
+    ├─▶ Check if ghlUserId is missing
+    │       └─▶ Fetch companyId from GHL Location API
+    │       └─▶ Create user in GHL (type: 'account')
+    │       └─▶ Save new ghlUserId to DB
+    └─▶ Upsert UserLocationRole with new role
+```
 
 ## Technical Details
 
@@ -156,6 +199,7 @@ Admins can remove users from a location by clicking the trash icon. This perform
 | `app/api/webhooks/clerk/route.ts` | Handles `user.created` to link accepted invites to locations |
 | `app/(main)/admin/team/_components/team-member-card.tsx` | User card with calendar assignment |
 | `app/(main)/admin/team/_components/edit-team-member-dialog.tsx` | Modal for admin editing of team member profiles |
+| `lib/ghl/users.ts` | GHL User API functions (`createGHLUser`, `removeGHLUserFromLocation`) |
 | `lib/auth/sync-user.ts` | Syncs Clerk user data to local DB, includes helper functions |
 
 ### Database Tables

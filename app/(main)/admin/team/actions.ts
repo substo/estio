@@ -7,7 +7,7 @@ import { auth } from '@clerk/nextjs/server';
 import { revalidatePath } from 'next/cache';
 import { getLocationContext } from '@/lib/auth/location-context';
 import { getCalendars, createCalendarService } from '@/lib/ghl/calendars';
-import { updateGHLUser, searchGHLUsers, removeGHLUserFromLocation } from '@/lib/ghl/users';
+import { updateGHLUser, searchGHLUsers, removeGHLUserFromLocation, createGHLUser } from '@/lib/ghl/users';
 
 async function getCurrentLocationId(): Promise<string> {
     const cookieStore = await cookies();
@@ -82,13 +82,24 @@ export async function inviteUserToLocation(formData: FormData) {
 
             let clerkUserExists = false;
             try {
+                let foundClerkUser = null;
                 if (user.clerkId) {
-                    const u = await client.users.getUser(user.clerkId).catch(() => null);
-                    if (u) clerkUserExists = true;
+                    foundClerkUser = await client.users.getUser(user.clerkId).catch(() => null);
+                }
+
+                if (foundClerkUser) {
+                    clerkUserExists = true;
                 } else {
-                    // No clerkId? Check by email
+                    // Clerk ID invalid/missing? Check by email (they might have re-registered)
                     const clerkUsers = await client.users.getUserList({ emailAddress: [normalizedEmail] });
-                    if (clerkUsers.data.length > 0) clerkUserExists = true;
+                    if (clerkUsers.data.length > 0) {
+                        clerkUserExists = true;
+                        // Correction: Update our DB with the new Clerk ID so we don't have this issue again
+                        await db.user.update({
+                            where: { id: user.id },
+                            data: { clerkId: clerkUsers.data[0].id }
+                        });
+                    }
                 }
             } catch (e) {
                 console.warn('[Team] Failed to check Clerk status for existing DB user, assuming reset needed');
@@ -100,6 +111,30 @@ export async function inviteUserToLocation(formData: FormData) {
                     where: { id: user.id },
                     data: { locations: { connect: { id: locationId } } }
                 });
+
+                // Restore GHL User if missing (was offboarded)
+                const location = await db.location.findUnique({ where: { id: locationId } });
+                if (location?.ghlLocationId && !user.ghlUserId) {
+                    try {
+                        console.log(`[Team] Restoring GHL User for ${user.email}...`);
+                        const ghlUser = await createGHLUser(location.ghlLocationId, {
+                            firstName: user.firstName || '',
+                            lastName: user.lastName || '',
+                            email: user.email,
+                            type: 'account',
+                            role: 'user',
+                            companyId: location.ghlAgencyId || undefined
+                        });
+
+                        await db.user.update({
+                            where: { id: user.id },
+                            data: { ghlUserId: ghlUser.id }
+                        });
+                        console.log(`[Team] GHL User Restored: ${ghlUser.id}`);
+                    } catch (e) {
+                        console.error('[Team] Failed to restore GHL user on re-invite:', e);
+                    }
+                }
 
                 // Create role
                 try {
@@ -183,6 +218,19 @@ export async function inviteUserToLocation(formData: FormData) {
         const redirectUrl = `${protocol}://${domain}/sign-up?email_address=${encodeURIComponent(normalizedEmail)}`;
 
         const sourceUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+
+        // Fix: Check for existing pending invitations and revoke them to prevent 422 Error
+        try {
+            const pendingInvites = await client.invitations.getInvitationList({ status: 'pending' });
+            const existingInvite = pendingInvites.data.find(inv => inv.emailAddress === normalizedEmail);
+
+            if (existingInvite) {
+                console.log(`[Team] Found pending invitation for ${normalizedEmail}, revoking to send fresh one.`);
+                await client.invitations.revokeInvitation(existingInvite.id);
+            }
+        } catch (e) {
+            console.warn('[Team] Failed to check/revoke pending invitations, proceeding anyway:', e);
+        }
 
         await client.invitations.createInvitation({
             emailAddress: normalizedEmail,

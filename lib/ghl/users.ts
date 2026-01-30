@@ -11,19 +11,39 @@ export async function createGHLUser(
         lastName: string;
         email: string;
         password?: string;
-        type?: 'employee' | 'account_admin' | 'agency_admin' | 'agency_user';
+        type?: 'account' | 'agency'; // GHL API only accepts these values
         role?: 'user' | 'admin';
+        companyId?: string; // Required by GHL API
     }
 ): Promise<GHLUser> {
-    const payload = {
+    const payload: any = {
         firstName: userData.firstName,
         lastName: userData.lastName,
         email: userData.email,
         password: userData.password || 'TempPass123!',
-        type: userData.type || 'account_user', // Changed from 'employee' to 'account_user'
+        type: userData.type || 'account',
         role: userData.role || 'user',
         locationIds: [locationId]
     };
+
+    // GHL API requires companyId when creating users
+    if (userData.companyId) {
+        payload.companyId = userData.companyId;
+    } else {
+        // Fetch companyId from GHL location endpoint if not provided
+        try {
+            const locationResponse = await ghlFetchWithAuth<{ location: { companyId?: string } }>(
+                locationId,
+                `/locations/${locationId}`
+            );
+            if (locationResponse.location?.companyId) {
+                payload.companyId = locationResponse.location.companyId;
+                console.log(`[GHL Create User] Fetched companyId from location: ${payload.companyId}`);
+            }
+        } catch (e) {
+            console.warn('[GHL Create User] Failed to fetch companyId from location:', e);
+        }
+    }
 
     console.log('[GHL Create User] Sending payload:', JSON.stringify(payload, null, 2));
 
