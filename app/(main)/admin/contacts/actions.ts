@@ -799,6 +799,121 @@ const createCompanySchema = z.object({
   type: z.string().optional(),
 });
 
+// --- Conflict Resolution Actions ---
+
+export async function searchGoogleContactsAction(query: string) {
+  const { userId } = await auth();
+  if (!userId) return { success: false, message: 'Unauthorized' };
+
+  // Get user with google token
+  const user = await db.user.findUnique({
+    where: { clerkId: userId },
+    select: { id: true, googleSyncEnabled: true }
+  });
+
+  if (!user || !user.googleSyncEnabled) return { success: false, message: 'Google Sync not enabled' };
+
+  const { searchGoogleContacts } = await import('@/lib/google/people');
+  const results = await searchGoogleContacts(user.id, query);
+  return { success: true, data: results };
+}
+
+export async function resolveSyncConflict(
+  contactId: string,
+  resolution: 'use_google' | 'use_local' | 'link_only',
+  googleData?: {
+    resourceName: string,
+    name?: string | null,
+    email?: string | null,
+    phone?: string | null,
+    etag?: string,
+    updateTime?: Date
+  }
+) {
+  const { userId } = await auth();
+  if (!userId) return { success: false, message: 'Unauthorized' };
+
+  try {
+    // Get internal user ID
+    const user = await db.user.findUnique({ where: { clerkId: userId } });
+    if (!user) return { success: false, message: 'User not found' };
+
+    const contact = await db.contact.findUnique({ where: { id: contactId } });
+    if (!contact) return { success: false, message: 'Contact not found' };
+
+    // 1. USE GOOGLE (Overwrite Local)
+    if (resolution === 'use_google' && googleData?.resourceName) {
+      console.log(`[Resolve Conflict] Overwriting Local Contact ${contactId} with Google Data`);
+
+      await db.contact.update({
+        where: { id: contactId },
+        data: {
+          name: googleData.name || contact.name,
+          email: googleData.email || contact.email,
+          phone: googleData.phone || contact.phone,
+          googleContactId: googleData.resourceName,
+          googleContactUpdatedAt: googleData.updateTime,
+          lastGoogleSync: new Date(),
+          error: null // Clear Error
+        }
+      });
+
+      revalidatePath('/admin/contacts');
+      return { success: true, message: 'Resolved: Updated local contact from Google.' };
+    }
+
+    // 2. USE LOCAL (Overwrite Google - Force Push)
+    if (resolution === 'use_local') {
+      console.log(`[Resolve Conflict] Overwriting Google Contact with Local Data`);
+
+      // If we have a target Google ID (e.g. selected from search), link it first
+      if (googleData?.resourceName) {
+        await db.contact.update({
+          where: { id: contactId },
+          data: { googleContactId: googleData.resourceName, error: null }
+        });
+      } else {
+        // No Google ID provided? Then we are creating NEW or re-using existing if failed?
+        // If existing was 404, we cleared it. So this is effectively "Create New".
+        await db.contact.update({
+          where: { id: contactId },
+          data: { error: null }
+        });
+      }
+
+      // Trigger Sync
+      const { syncContactToGoogle } = await import('@/lib/google/people');
+      // We don't await this to keep UI snappy? No, for resolution we should await to ensure success
+      await syncContactToGoogle(user.id, contactId);
+
+      revalidatePath('/admin/contacts');
+      return { success: true, message: 'Resolved: Pushing local changes to Google.' };
+    }
+
+    // 3. LINK ONLY
+    if (resolution === 'link_only' && googleData?.resourceName) {
+      console.log(`[Resolve Conflict] Relinking only.`);
+      await db.contact.update({
+        where: { id: contactId },
+        data: {
+          googleContactId: googleData.resourceName,
+          googleContactUpdatedAt: googleData.updateTime,
+          lastGoogleSync: new Date(),
+          error: null
+        }
+      });
+      revalidatePath('/admin/contacts');
+      return { success: true, message: 'Resolved: Link restored.' };
+    }
+
+    return { success: false, message: 'Invalid resolution parameters.' };
+
+  } catch (error: any) {
+    console.error('[resolveSyncConflict] Error:', error);
+    return { success: false, message: 'Failed to resolve conflict: ' + error.message };
+  }
+}
+
 export type CreateCompanyState = {
   errors?: Record<string, string[] | undefined>;
   message?: string;

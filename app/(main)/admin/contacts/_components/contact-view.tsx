@@ -251,7 +251,7 @@ export default function ContactView({
             {variant === 'modal' && (
                 <div className="pt-4 border-t bg-background mt-auto">
                     <DialogFooter>
-                        <Button onClick={() => router.push(`/admin/contacts/${contact.id}/edit`)}>
+                        <Button type="button" onClick={() => router.push(`/admin/contacts/${contact.id}/edit`)}>
                             <Pencil className="mr-2 h-4 w-4" />
                             Edit Contact
                         </Button>

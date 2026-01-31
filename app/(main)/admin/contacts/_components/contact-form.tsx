@@ -89,6 +89,7 @@ export type ContactData = {
     wonCommission?: number | null;
     propertyWonReference?: string | null;
     propertyWonDate?: Date | null;
+    error?: string | null; // Sync Error
 };
 
 // Helper to safely display values
@@ -141,7 +142,7 @@ interface ContactFormProps {
     leadSources?: string[];
 }
 
-function SubmitButton({ isEditing, isCreating, toggler }: { isEditing: boolean, isCreating: boolean, toggler: () => void }) {
+function SubmitButton({ isEditing, isCreating, toggler }: { isEditing: boolean, isCreating: boolean, toggler: (e: React.MouseEvent) => void }) {
     const { pending } = useFormStatus();
 
     if (!isEditing) {
@@ -175,6 +176,8 @@ export function ContactForm({ initialMode = 'create', contact, locationId, onSuc
     const [isEditing, setIsEditing] = useState(initialMode !== 'view');
     const isCreating = initialMode === 'create';
 
+    // ... (rest of hook calls)
+
     const action = isCreating ? createContact : updateContact;
     const [state, formAction] = useActionState(action, {
         message: '',
@@ -184,7 +187,11 @@ export function ContactForm({ initialMode = 'create', contact, locationId, onSuc
     const { toast } = useToast();
     const [isPending, startTransition] = useTransition();
 
-    const toggleEdit = () => {
+    const toggleEdit = (e?: React.MouseEvent) => {
+        if (e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
         if (isCreating) return;
         setIsEditing(!isEditing);
     };
@@ -194,8 +201,8 @@ export function ContactForm({ initialMode = 'create', contact, locationId, onSuc
 
     // Contact Type State
     const [contactType, setContactType] = useState<ContactType>(initialContactType);
-    // If not editing, we shouldn't show the type selector unless specifically asked? 
-    // Actually we can just show it as DisplayField or Selector.
+
+    // ...
 
     const currentConfig = CONTACT_TYPE_CONFIG[contactType];
 
@@ -339,6 +346,16 @@ export function ContactForm({ initialMode = 'create', contact, locationId, onSuc
             <input type="hidden" name="contactType" value={contactType} />
 
             <div className={`flex-1 overflow-y-auto px-1 py-2 ${!isEditing ? 'bg-muted/10' : ''}`}>
+
+                {/* SYNC ERROR BANNER */}
+                {contact?.error && (
+                    <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded relative" role="alert">
+                        <strong className="font-bold block">Sync Issue Detected</strong>
+                        <span className="block sm:inline text-sm">{contact.error}</span>
+                        <p className="text-xs mt-1">Please try saving this contact to re-attempt synchronization.</p>
+                    </div>
+                )}
+
                 {/* AI Analyzer moved to Conversations > AI Coordinator Panel */}
 
                 {/* Contact Type Selector */}
