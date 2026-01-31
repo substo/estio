@@ -36,6 +36,7 @@ This guarantees that on iOS/Android, the incoming call screen shows the Name (bi
 -   **Contact Model**:
     -   `googleContactId`: Maps 1:1 to a Google Person `resourceName`.
     -   `lastGoogleSync`: Timestamp of last successful push.
+    -   `googleContactUpdatedAt`: Timestamp from Google's metadata for "last write wins" comparison.
 
 ### 2. Synchronization Logic (3-Way Sync)
 
@@ -46,6 +47,8 @@ This guarantees that on iOS/Android, the incoming call screen shows the Name (bi
 | **Create Contact** (via admin page) | ✅ | ✅ | `app/(main)/admin/contacts/actions.ts` → `createContact()` |
 | **Update Contact** (via admin page) | ✅ | ✅ | `app/(main)/admin/contacts/actions.ts` → `updateContact()` |
 | **New WhatsApp Message** (from unknown) | ✅ | ✅ | `lib/whatsapp/sync.ts` → `processNormalizedMessage()` |
+| **New Email** (from unknown) | ✅ | ✅ | `lib/google/gmail-sync.ts` → `processMessage()` |
+| **Contact Changed on Mobile** | — | ✅ (inbound) | `lib/google/people.ts` → `syncContactsFromGoogle()` |
 
 #### A. Outbound (Estio → Google + GHL)
 *   **Trigger**: Contact Creation or Update from any source.
@@ -224,6 +227,36 @@ Updates must specify exactly which fields are being changed via the `updatePerso
 
 ---
 
+### 3. Inbound Sync (Google → Estio) — "Last Write Wins"
+
+**Implemented**: January 2026
+
+Bidirectional sync ensures that contact edits made on mobile (Google Contacts app) are reflected in Estio, and vice versa. The newest change always wins.
+
+#### A. Inbound Sync Logic (`lib/google/people.ts` → `syncContactsFromGoogle()`)
+1.  Uses Google's `syncToken` for efficient delta sync (only changed contacts).
+2.  For each changed contact:
+    -   Compares `metadata.sources[].updateTime` from Google with local `Contact.updatedAt`.
+    -   **If Google is newer**: Updates local contact with Google's Name/Email/Phone.
+    -   **If Estio is newer**: Skips (outbound sync will handle it).
+3.  Creates new contacts from Google Contacts if not in CRM (as "Lead").
+
+#### B. "Last Write Wins" on Outbound
+-   Before pushing to Google, `syncContactToGoogle()` checks if Google's version is newer.
+-   If yes, it **skips the push** to avoid overwriting mobile edits.
+
+#### C. Auto-Create Contacts from Gmail
+When an email arrives from an unknown sender (`lib/google/gmail-sync.ts`):
+1.  Extracts display name from email header (e.g., "John Doe" from "John Doe <john@example.com>").
+2.  Looks up sender in Google Contacts for richer data.
+3.  Creates new Lead contact automatically.
+
+#### D. Scheduled Inbound Sync
+-   `api/cron/gmail-sync` runs every 5 minutes.
+-   After Gmail sync, it also runs `syncContactsFromGoogle()` for each user.
+-   This ensures mobile edits are pulled within 5 minutes.
+
+---
+
 ## Future Improvements
--   **Inbound Sync**: Currently, we overwrite Google data with Estio data (Master). Future versions could allow pulling changes (e.g. phone number updates) from Google back to Estio.
 -   **AI Extraction**: Currently, `Visual ID` is rule-based. We plan to add an AI step to extract intent/budget from the *first* WhatsApp message to populate the fields immediately, making the Visual ID rich from the very first second.

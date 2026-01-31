@@ -397,6 +397,7 @@ model Contact {
   // Google Sync
   googleContactId         String?
   lastGoogleSync          DateTime?
+  googleContactUpdatedAt  DateTime?  // Timestamp from Google's metadata for "last write wins"
 }
 
 model Company {

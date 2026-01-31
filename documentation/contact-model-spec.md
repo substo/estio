@@ -84,6 +84,11 @@ model Contact {
    history         ContactHistory[]
    swipes          PropertySwipe[]
    swipeSessions   SwipeSession[]
+ 
+   // Google Contact Sync (see google-contact-sync.md)
+   googleContactId         String?   // Maps to Google Person resourceName (e.g., "people/c12345")
+   lastGoogleSync          DateTime? // When we last pushed to Google
+   googleContactUpdatedAt  DateTime? // Google's metadata.updateTime for "last write wins" comparison
  }
  
  model ContactHistory {
@@ -127,6 +132,16 @@ model Contact {
     -   **Context**: Associates and external agents often register clients with masked numbers (e.g., `+35796***`) to protect their commission/intro fee.
     -   **Handling**: The system MUST preserve these masks (asterisks) and NOT strip them during normalization.
     -   **Client Registration**: Matching logic must account for masked numbers to prevent duplicate entries while acknowledging that a masked number is not a unique identifier on its own.
+
+### 1.1 Google Contact Sync (Bidirectional)
+Contacts sync bidirectionally with Google Contacts using a **"last write wins"** strategy:
+-   **`googleContactId`**: Maps to Google Person `resourceName` (e.g., `people/c12345`).
+-   **`googleContactUpdatedAt`**: Stores Google's metadata timestamp for conflict resolution.
+-   **Outbound (Estio → Google)**: When a contact is created/updated, it pushes to Google via `syncContactToGoogle()`.
+-   **Inbound (Google → Estio)**: The system pulls changes from Google Contacts every 5 minutes via `syncContactsFromGoogle()`. If Google's timestamp is newer, local data is updated.
+-   **Visual ID**: The organization field in Google Contacts is populated with a summary (e.g., "Lead Rent DT4012 Paphos €750") for caller ID.
+
+> See [Google Contact Sync](./google-contact-sync.md) for full implementation details.
 
 ### 2. Comprehensive Lead Tracking
 The model now includes extensive fields locally to track the full lifecycle of a lead without solely relying on external CRM fields:

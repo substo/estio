@@ -168,9 +168,57 @@ export async function processMessage(gmail: gmail_v1.Gmail, userId: string, mess
             // This is complex because User -> Locations -> Contacts.
             // Simplified: Find ANY contact with this email in a location the user has access to.
             // For now, let's look for a contact globally or in primary location.
-            const contact = await db.contact.findFirst({
+            let contact = await db.contact.findFirst({
                 where: { email: targetEmail }
             });
+
+            // AUTO-CREATE: If no contact found, create one from email header
+            if (!contact) {
+                // Get user's primary location
+                const user = await db.user.findUnique({
+                    where: { id: userId },
+                    include: { locations: { take: 1 } }
+                });
+
+                if (user?.locations?.[0]) {
+                    const locationId = user.locations[0].id;
+
+                    // Extract display name from email header (e.g. "John Doe <john@example.com>")
+                    const displayName = extractDisplayName(isOutbound ? to : from);
+
+                    // Try to look up in Google Contacts for richer data
+                    let contactName = displayName || 'Email Contact';
+                    let googleContactId: string | undefined;
+
+                    if (user.googleSyncEnabled) {
+                        try {
+                            const { lookupGoogleContactByEmail } = await import('./people');
+                            const googleContact = await lookupGoogleContactByEmail(userId, targetEmail);
+                            if (googleContact) {
+                                contactName = googleContact.name || contactName;
+                                googleContactId = googleContact.resourceName;
+                                console.log(`[Gmail Sync] Found contact in Google: ${contactName}`);
+                            }
+                        } catch (e) {
+                            console.log(`[Gmail Sync] Could not lookup Google Contact for ${targetEmail}:`, e);
+                        }
+                    }
+
+                    console.log(`[Gmail Sync] Auto-creating contact: ${contactName} <${targetEmail}>`);
+
+                    contact = await db.contact.create({
+                        data: {
+                            locationId,
+                            name: contactName,
+                            email: targetEmail,
+                            status: 'new',
+                            contactType: 'Lead',
+                            leadSource: 'Email',
+                            googleContactId: googleContactId
+                        }
+                    });
+                }
+            }
 
             if (contact) {
                 contactId = contact.id;
@@ -269,5 +317,16 @@ function extractEmail(text: string): string | null {
     const match = text.match(/<(.+)>/);
     if (match) return match[1];
     if (text.includes('@')) return text.trim();
+    return null;
+}
+
+// Helper to extract display name from email header like "John Doe <john@example.com>"
+function extractDisplayName(text: string): string | null {
+    // Pattern: "Display Name <email@example.com>"
+    const match = text.match(/^(.+?)\s*<.+>$/);
+    if (match && match[1]) {
+        // Remove quotes if present
+        return match[1].replace(/^["']|["']$/g, '').trim();
+    }
     return null;
 }
