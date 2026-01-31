@@ -1349,3 +1349,23 @@ export async function getContactDetails(contactId: string) {
 }
 
 
+
+export async function unlinkGoogleContact(contactId: string) {
+  const { userId } = await auth();
+  if (!userId) return { success: false, message: 'Unauthorized' };
+
+  try {
+    await db.contact.update({
+      where: { id: contactId },
+      data: {
+        googleContactId: null,
+        googleContactUpdatedAt: null,
+        error: null
+      }
+    });
+    revalidatePath('/admin/contacts');
+    return { success: true, message: 'Contact unlinked from Google.' };
+  } catch (error: any) {
+    return { success: false, message: 'Failed to unlink: ' + error.message };
+  }
+}

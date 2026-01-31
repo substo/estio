@@ -4,21 +4,20 @@ import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Loader2, Search, ArrowLeft, ArrowRight, RefreshCw, AlertTriangle, Link as LinkIcon } from "lucide-react";
-import { searchGoogleContactsAction, resolveSyncConflict } from "../actions";
+import { Loader2, Search, ArrowLeft, ArrowRight, Link2, AlertTriangle, Link as LinkIcon, Unlink, CheckCircle, RefreshCw } from "lucide-react";
+import { searchGoogleContactsAction, resolveSyncConflict, unlinkGoogleContact } from "../actions";
 import { useToast } from "@/components/ui/use-toast";
 import { ContactData } from "./contact-form";
 
-interface SyncConflictModalProps {
-    contact: ContactData & { error?: string | null };
+interface GoogleSyncManagerProps {
+    contact: ContactData & { error?: string | null; googleContactId?: string | null; lastGoogleSync?: Date | null };
     open: boolean;
     onOpenChange: (open: boolean) => void;
 }
 
-export function SyncConflictModal({ contact, open, onOpenChange }: SyncConflictModalProps) {
+export function GoogleSyncManager({ contact, open, onOpenChange }: GoogleSyncManagerProps) {
     const { toast } = useToast();
-    const [step, setStep] = useState<'compare' | 'search'>('compare');
+    const [step, setStep] = useState<'view' | 'search'>('view');
     const [loading, setLoading] = useState(false);
     const [resolving, setResolving] = useState(false);
 
@@ -27,26 +26,42 @@ export function SyncConflictModal({ contact, open, onOpenChange }: SyncConflictM
     const [searchQuery, setSearchQuery] = useState(contact.email || contact.name || "");
     const [searchResults, setSearchResults] = useState<any[]>([]);
 
-    // Initial Fetch (Auto-search by email)
-    useEffect(() => {
-        if (open && contact.email && !googleData) {
-            handleSearch(contact.email);
-        }
-    }, [open, contact.email]);
+    const isLinked = !!contact.googleContactId;
+    const hasError = !!contact.error;
 
-    const handleSearch = async (query: string) => {
+    // Initial Fetch (Auto-search logic)
+    useEffect(() => {
+        if (!open) return;
+
+        // If linked, we supposedly have data, but we might want to fetch fresh google data to compare?
+        // Ideally we'd have a 'getGoogleContact' action, but 'search' by email effectively does this if unique.
+        // For now, if linked, we search by the known ID or email to get fresh comparison data.
+
+        if (contact.email) {
+            handleSearch(contact.email, true); // true = auto-fetch for comparison
+        } else {
+            // No email, and unlinked -> Go to search mode
+            if (!isLinked) setStep('search');
+        }
+    }, [open, contact.email, isLinked]);
+
+    const handleSearch = async (query: string, isAutoFetch = false) => {
         setLoading(true);
         try {
             const res = await searchGoogleContactsAction(query);
             if (res.success && res.data) {
                 setSearchResults(res.data);
-                // If exact email match found, set it as default googleData
-                const exactMatch = res.data.find((p: any) => p.email === contact.email);
-                if (exactMatch && !googleData) {
+
+                // Logic to auto-select if we are just fetching for comparison
+                const exactMatch = res.data.find((p: any) =>
+                    p.resourceName === contact.googleContactId ||
+                    p.email === contact.email
+                );
+
+                if (exactMatch) {
                     setGoogleData(exactMatch);
-                } else if (!googleData && res.data.length > 0) {
-                    // Default to first result if safe? Maybe not. Let user choose.
-                    // setGoogleData(res.data[0]); 
+                } else if (!isLinked && res.data.length > 0 && isAutoFetch) {
+                    // Don't auto-select for unlinked if multiple results, let user choose
                 }
             } else {
                 setSearchResults([]);
@@ -58,18 +73,24 @@ export function SyncConflictModal({ contact, open, onOpenChange }: SyncConflictM
         }
     };
 
-    const handleResolve = async (resolution: 'use_google' | 'use_local' | 'link_only') => {
+    const handleAction = async (action: 'use_google' | 'use_local' | 'link_only' | 'unlink') => {
         setResolving(true);
         try {
-            const res = await resolveSyncConflict(contact.id, resolution, googleData);
+            let res;
+            if (action === 'unlink') {
+                res = await unlinkGoogleContact(contact.id);
+            } else {
+                res = await resolveSyncConflict(contact.id, action, googleData);
+            }
+
             if (res.success) {
-                toast({ title: "Resolved", description: res.message });
+                toast({ title: "Success", description: res.message });
                 onOpenChange(false);
             } else {
                 toast({ title: "Error", description: res.message, variant: "destructive" });
             }
         } catch (e) {
-            toast({ title: "Error", description: "Failed to resolve.", variant: "destructive" });
+            toast({ title: "Error", description: "Action failed.", variant: "destructive" });
         } finally {
             setResolving(false);
         }
@@ -91,25 +112,54 @@ export function SyncConflictModal({ contact, open, onOpenChange }: SyncConflictM
         );
     };
 
+    const getStatusHeader = () => {
+        if (hasError) return (
+            <div className="flex items-center gap-2 text-yellow-700 bg-yellow-50 p-3 rounded-md mb-4 border border-yellow-200">
+                <AlertTriangle className="h-5 w-5" />
+                <div className="text-sm">
+                    <span className="font-semibold block">Sync Error Detected</span>
+                    {contact.error}
+                </div>
+            </div>
+        );
+        if (isLinked) return (
+            <div className="flex items-center gap-2 text-green-700 bg-green-50 p-3 rounded-md mb-4 border border-green-200">
+                <CheckCircle className="h-5 w-5" />
+                <div className="text-sm">
+                    <span className="font-semibold block">Contact Synced</span>
+                    Linked to Google Contact.
+                </div>
+            </div>
+        );
+        return (
+            <div className="flex items-center gap-2 text-gray-700 bg-gray-50 p-3 rounded-md mb-4 border border-gray-200">
+                <Link2 className="h-5 w-5" />
+                <div className="text-sm">
+                    <span className="font-semibold block">Not Linked</span>
+                    Search to link or create a new contact in Google.
+                </div>
+            </div>
+        );
+    };
+
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="sm:max-w-[800px]">
                 <DialogHeader>
-                    <DialogTitle className="flex items-center gap-2">
-                        <AlertTriangle className="h-5 w-5 text-yellow-600" />
-                        Resolve Sync Conflict
-                    </DialogTitle>
+                    <DialogTitle>Google Sync Manager</DialogTitle>
                     <DialogDescription>
-                        There is a sync issue with this contact. Please review the data below and choose the source of truth.
+                        Manage synchronization between Estio CRM and Google Contacts.
                     </DialogDescription>
                 </DialogHeader>
+
+                {getStatusHeader()}
 
                 <div className="grid grid-cols-2 gap-4 border rounded-md p-4 bg-muted/10">
                     <div className="font-semibold text-center border-b pb-2 text-blue-700">Estio CRM (Local)</div>
                     <div className="font-semibold text-center border-b pb-2 text-green-700 flex justify-between items-center">
                         <span>Google Contacts</span>
                         <Button variant="ghost" size="sm" onClick={() => setStep('search')} className="h-6">
-                            <Search className="h-3 w-3 mr-1" /> Find
+                            <Search className="h-3 w-3 mr-1" /> {googleData ? 'Find Different' : 'Find Match'}
                         </Button>
                     </div>
 
@@ -124,16 +174,16 @@ export function SyncConflictModal({ contact, open, onOpenChange }: SyncConflictM
                         ) : (
                             <div className="text-center py-8 text-muted-foreground">
                                 {loading ? <Loader2 className="h-6 w-6 animate-spin mx-auto" /> :
-                                    "No Google Contact selected. Search to find a match."}
+                                    "No Google Contact selected."}
                             </div>
                         )}
                     </div>
                 </div>
 
-                {/* Search Area (Overlay or separate section) */}
+                {/* Search Area */}
                 {step === 'search' && (
                     <div className="border rounded-md p-4 bg-white dark:bg-gray-900 mt-4">
-                        <h4 className="text-sm font-semibold mb-2">Find Matching Google Contact</h4>
+                        <h4 className="text-sm font-semibold mb-2">Search Google Contacts</h4>
                         <div className="flex gap-2 mb-4">
                             <Input
                                 value={searchQuery}
@@ -147,7 +197,7 @@ export function SyncConflictModal({ contact, open, onOpenChange }: SyncConflictM
                         <div className="max-h-[200px] overflow-y-auto space-y-2">
                             {searchResults.map((res: any) => (
                                 <div key={res.resourceName} className="flex justify-between items-center p-2 border rounded hover:bg-gray-50 cursor-pointer"
-                                    onClick={() => { setGoogleData(res); setStep('compare'); }}>
+                                    onClick={() => { setGoogleData(res); setStep('view'); }}>
                                     <div>
                                         <div className="font-medium">{res.name}</div>
                                         <div className="text-xs text-muted-foreground">{res.email}</div>
@@ -155,6 +205,9 @@ export function SyncConflictModal({ contact, open, onOpenChange }: SyncConflictM
                                     <Button size="sm" variant="secondary">Select</Button>
                                 </div>
                             ))}
+                            {searchResults.length === 0 && !loading && (
+                                <p className="text-sm text-muted-foreground text-center py-2">No results found.</p>
+                            )}
                         </div>
                     </div>
                 )}
@@ -162,42 +215,57 @@ export function SyncConflictModal({ contact, open, onOpenChange }: SyncConflictM
                 <DialogFooter className="gap-2 sm:justify-center mt-6">
                     <div className="flex flex-col gap-2 w-full">
                         <div className="flex gap-2 w-full justify-between">
-                            {/* Use Local */}
+                            {/* Push Local */}
                             <Button
                                 variant="outline"
                                 className="flex-1 border-blue-200 hover:bg-blue-50 text-blue-700"
-                                onClick={() => handleResolve('use_local')}
+                                onClick={() => handleAction('use_local')}
                                 disabled={resolving}
                             >
                                 {resolving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <ArrowRight className="h-4 w-4 mr-2" />}
-                                Push Local to Google
+                                Push Local {'>'} Google
                             </Button>
 
-                            {/* Link Only */}
-                            <Button
-                                variant="outline"
-                                className="flex-1"
-                                onClick={() => handleResolve('link_only')}
-                                disabled={resolving || !googleData}
-                            >
-                                <LinkIcon className="h-4 w-4 mr-2" />
-                                Link Only (No Data Change)
-                            </Button>
-
-                            {/* Use Google */}
+                            {/* Pull Google */}
                             <Button
                                 variant="outline"
                                 className="flex-1 border-green-200 hover:bg-green-50 text-green-700"
-                                onClick={() => handleResolve('use_google')}
+                                onClick={() => handleAction('use_google')}
                                 disabled={resolving || !googleData}
                             >
                                 <ArrowLeft className="h-4 w-4 mr-2" />
-                                Pull Google to Local
+                                Google {'>'} Local
                             </Button>
                         </div>
-                        <p className="text-xs text-center text-muted-foreground mt-2">
-                            "Push Local" will create a new contact in Google if none is selected.
-                        </p>
+
+                        <div className="flex gap-2 w-full justify-center mt-2">
+                            {/* Unlink */}
+                            {isLinked && (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleAction('unlink')}
+                                    disabled={resolving}
+                                    className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                                >
+                                    <Unlink className="h-4 w-4 mr-2" />
+                                    Unlink Contact
+                                </Button>
+                            )}
+
+                            {/* Link / Relink */}
+                            {googleData && (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleAction('link_only')}
+                                    disabled={resolving}
+                                >
+                                    <LinkIcon className="h-4 w-4 mr-2" />
+                                    {isLinked ? 'Relink Only' : 'Link Only'}
+                                </Button>
+                            )}
+                        </div>
                     </div>
                 </DialogFooter>
             </DialogContent>

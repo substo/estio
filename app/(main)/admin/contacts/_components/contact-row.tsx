@@ -4,8 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
-import { AlertTriangle } from "lucide-react";
-import { SyncConflictModal } from "./sync-conflict-modal";
+import { AlertTriangle, Link as LinkIcon, Link2, CheckCircle } from "lucide-react";
+import { GoogleSyncManager } from "./google-sync-manager";
 import { EditContactDialog } from "./edit-contact-dialog";
 import { ContactData } from "./contact-form";
 
@@ -16,13 +16,15 @@ interface ContactRowProps {
         companyRoles: any[];
         heatScore: number;
         status: string;
+        googleContactId?: string | null;
+        error?: string | null;
     };
     leadSources: string[];
 }
 
 export function ContactRow({ contact, leadSources }: ContactRowProps) {
     const router = useRouter();
-    const [conflictOpen, setConflictOpen] = useState(false);
+    const [managerOpen, setManagerOpen] = useState(false);
 
     const handleRowClick = (e: React.MouseEvent) => {
         // Prevent navigation if clicking buttons or interactions
@@ -31,6 +33,9 @@ export function ContactRow({ contact, leadSources }: ContactRowProps) {
         }
         router.push(`/admin/contacts/${contact.id}/view`);
     };
+
+    const isLinked = !!contact.googleContactId;
+    const hasError = !!contact.error;
 
     return (
         <>
@@ -75,17 +80,28 @@ export function ContactRow({ contact, leadSources }: ContactRowProps) {
                         <span className={`px-2 py-1 rounded text-xs ${contact.status === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                             {contact.status}
                         </span>
-                        {contact.error && (
-                            <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-6 w-6 text-yellow-600 hover:text-yellow-700 hover:bg-yellow-50"
-                                onClick={(e) => { e.stopPropagation(); setConflictOpen(true); }}
-                                title={contact.error}
-                            >
+
+                        {/* Google Sync Status Icon */}
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className={`h-6 w-6 ${hasError
+                                ? "text-yellow-600 hover:text-yellow-700 hover:bg-yellow-50"
+                                : isLinked
+                                    ? "text-green-600 hover:text-green-700 hover:bg-green-50"
+                                    : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                                }`}
+                            onClick={(e) => { e.stopPropagation(); setManagerOpen(true); }}
+                            title={hasError ? contact.error! : isLinked ? "Linked to Google" : "Not Linked"}
+                        >
+                            {hasError ? (
                                 <AlertTriangle className="h-4 w-4" />
-                            </Button>
-                        )}
+                            ) : isLinked ? (
+                                <LinkIcon className="h-4 w-4" />
+                            ) : (
+                                <Link2 className="h-4 w-4" />
+                            )}
+                        </Button>
                     </div>
                 </td>
                 <td className="p-4" onClick={(e) => e.stopPropagation()} >
@@ -93,12 +109,12 @@ export function ContactRow({ contact, leadSources }: ContactRowProps) {
                     <EditContactDialog contact={contact} leadSources={leadSources} />
                 </td>
             </tr>
-            {/* Render Modal outside of tr to avoid DOM nesting issues if possible, or use Portal (Dialog uses portal) */}
-            {conflictOpen && (
-                <SyncConflictModal
+            {/* Render Manager outside of tr */}
+            {managerOpen && (
+                <GoogleSyncManager
                     contact={contact}
-                    open={conflictOpen}
-                    onOpenChange={setConflictOpen}
+                    open={managerOpen}
+                    onOpenChange={setManagerOpen}
                 />
             )}
         </>

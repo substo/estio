@@ -21,6 +21,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { createContact, updateContact, deleteContactRole } from '../actions';
 import { useToast } from '@/components/ui/use-toast';
+import { GoogleSyncManager } from './google-sync-manager';
+import { RefreshCw } from 'lucide-react';
 import { getPropertiesForSelect, getCompaniesForSelect, getUsersForSelect } from '../fetch-helpers';
 import { LocationFilter } from '@/components/properties/location-filter';
 import { PROPERTY_LOCATIONS } from '@/lib/properties/locations';
@@ -90,6 +92,8 @@ export type ContactData = {
     propertyWonReference?: string | null;
     propertyWonDate?: Date | null;
     error?: string | null; // Sync Error
+    googleContactId?: string | null;
+    lastGoogleSync?: Date | null;
 };
 
 // Helper to safely display values
@@ -172,6 +176,7 @@ function formatDate(date: Date | null | undefined) {
 
 export function ContactForm({ initialMode = 'create', contact, locationId, onSuccess, additionalTabs, additionalTabContent, additionalFooter, additionalTabCount = 0, leadSources = [] }: ContactFormProps) {
     const router = useRouter();
+    const [managerOpen, setManagerOpen] = useState(false);
 
     const [isEditing, setIsEditing] = useState(initialMode !== 'view');
     const isCreating = initialMode === 'create';
@@ -833,9 +838,29 @@ export function ContactForm({ initialMode = 'create', contact, locationId, onSuc
             </div>
 
             <div className={`pt-4 border-t flex items-center justify-between ${!isEditing ? 'bg-background p-2' : ''}`}>
-                {isEditing ? additionalFooter : <div />}
+                <div className="flex gap-2">
+                    {isEditing ? additionalFooter : (
+                        <div className="flex gap-2">
+                            {/* Manage Sync Button (Only in View Mode) */}
+                            {contact && !isCreating && (
+                                <Button type="button" variant="outline" size="sm" onClick={() => setManagerOpen(true)}>
+                                    <RefreshCw className="mr-2 h-4 w-4" />
+                                    Manage Sync
+                                </Button>
+                            )}
+                        </div>
+                    )}
+                </div>
                 <SubmitButton isEditing={isEditing} isCreating={isCreating} toggler={toggleEdit} />
             </div>
+
+            {contact && (
+                <GoogleSyncManager
+                    contact={contact}
+                    open={managerOpen}
+                    onOpenChange={setManagerOpen}
+                />
+            )}
         </form >
     );
 }
