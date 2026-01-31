@@ -801,6 +801,27 @@ const createCompanySchema = z.object({
 
 // --- Conflict Resolution Actions ---
 
+
+
+export async function getGoogleContactAction(resourceName: string) {
+  const { userId } = await auth();
+  if (!userId) return { success: false, message: 'Unauthorized' };
+
+  // Get user with google token
+  const user = await db.user.findUnique({
+    where: { clerkId: userId },
+    select: { id: true, googleSyncEnabled: true }
+  });
+
+  if (!user || !user.googleSyncEnabled) return { success: false, message: 'Google Sync not enabled' };
+
+  const { getGoogleContact } = await import('@/lib/google/people');
+  const result = await getGoogleContact(user.id, resourceName);
+
+  if (!result) return { success: false, message: 'Contact not found in Google' };
+  return { success: true, data: result };
+}
+
 export async function searchGoogleContactsAction(query: string) {
   const { userId } = await auth();
   if (!userId) return { success: false, message: 'Unauthorized' };

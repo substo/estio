@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Loader2, Search, ArrowLeft, ArrowRight, Link2, AlertTriangle, Link as LinkIcon, Unlink, CheckCircle, RefreshCw } from "lucide-react";
-import { searchGoogleContactsAction, resolveSyncConflict, unlinkGoogleContact } from "../actions";
+import { searchGoogleContactsAction, resolveSyncConflict, unlinkGoogleContact, getGoogleContactAction } from "../actions";
 import { useToast } from "@/components/ui/use-toast";
 import { ContactData } from "./contact-form";
 
@@ -29,21 +29,39 @@ export function GoogleSyncManager({ contact, open, onOpenChange }: GoogleSyncMan
     const isLinked = !!contact.googleContactId;
     const hasError = !!contact.error;
 
-    // Initial Fetch (Auto-search logic)
+    // Initial Fetch logic
     useEffect(() => {
         if (!open) return;
 
-        // If linked, we supposedly have data, but we might want to fetch fresh google data to compare?
-        // Ideally we'd have a 'getGoogleContact' action, but 'search' by email effectively does this if unique.
-        // For now, if linked, we search by the known ID or email to get fresh comparison data.
-
-        if (contact.email) {
+        // If linked, fetch specific contact by ID (definitive source)
+        if (isLinked && contact.googleContactId) {
+            fetchLinkedContact(contact.googleContactId);
+        }
+        // Not linked? Try auto-search if we have an email
+        else if (contact.email) {
             handleSearch(contact.email, true); // true = auto-fetch for comparison
         } else {
             // No email, and unlinked -> Go to search mode
-            if (!isLinked) setStep('search');
+            setStep('search');
         }
-    }, [open, contact.email, isLinked]);
+    }, [open, isLinked, contact.googleContactId]); // removed contact.email dependency to avoid flapping
+
+    const fetchLinkedContact = async (resourceName: string) => {
+        setLoading(true);
+        try {
+            const res = await getGoogleContactAction(resourceName);
+            if (res.success && res.data) {
+                setGoogleData(res.data);
+            } else {
+                // 404 or error - The link is technically broken or permissions issue
+                setGoogleData(null);
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const handleSearch = async (query: string, isAutoFetch = false) => {
         setLoading(true);

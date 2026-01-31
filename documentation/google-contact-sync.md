@@ -258,5 +258,32 @@ When an email arrives from an unknown sender (`lib/google/gmail-sync.ts`):
 
 ---
 
+### 4. Conflict Resolution & Self-Healing
+**Implemented**: January 2026
+
+To prevent "Sync Death Loops" where a deleted contact in Google causes perpetual errors in Estio, we implemented a robust Self-Healing and Conflict Resolution strategy.
+
+#### A. The "Invalidate & Flag" Strategy
+When the system encounters a **404 Not Found** (Stale ID) error during an outbound sync:
+1.  **Invalidate**: The `googleContactId` is immediately set to `null`.
+2.  **Flag**: The `error` field is set to `\"Google Link Broken. Save to re-sync.\"`
+3.  **Result**: The contact becomes "Unlinked" but with an error flag, alerting the user to take action.
+
+#### B. Google Sync Manager (UI)
+We replaced the simple "Conflict Modal" with a comprehensive **Google Sync Manager** accessible from:
+-   **Contact List**: Status Icon (🟢 Linked, ⚪ Unlinked, ⚠️ Error).
+-   **Contact Profile**: "Manage Sync" button in the header.
+
+**Capabilities:**
+-   **Healthy State**: View live side-by-side comparison of Estio vs Google data.
+    -   Actions: *Push Local -> Google*, *Pull Google -> Local*, *Unlink*.
+-   **Unlinked State**: Search Google Contacts to manually link to an existing record, or Create a new one.
+-   **Conflict State**: Resolve data mismatches or broken links.
+
+#### C. Manual "Link Only"
+The Sync Manager supports a **"Link Only"** action. This connects an Estio Contact to a Google Contact **without overwriting data** on either side. This is useful when you know they are the same person but want to preserve distinct data on each platform (e.g., maintaining a specific "Visual ID" company name in Google while keeping role data in Estio).
+
+---
+
 ## Future Improvements
 -   **AI Extraction**: Currently, `Visual ID` is rule-based. We plan to add an AI step to extract intent/budget from the *first* WhatsApp message to populate the fields immediately, making the Visual ID rich from the very first second.

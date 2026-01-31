@@ -403,6 +403,36 @@ export async function searchGoogleContacts(userId: string, query: string) {
 }
 
 /**
+ * Fetch a single Google Contact by Resource Name
+ */
+export async function getGoogleContact(userId: string, resourceName: string) {
+    try {
+        const auth = await getValidAccessToken(userId);
+        const people = google.people({ version: 'v1', auth });
+
+        const response = await people.people.get({
+            resourceName: resourceName,
+            personFields: 'names,emailAddresses,phoneNumbers,photos,metadata'
+        });
+
+        const p = response.data;
+        return {
+            resourceName: p.resourceName,
+            name: p.names?.[0]?.displayName,
+            email: p.emailAddresses?.[0]?.value,
+            phone: p.phoneNumbers?.[0]?.value,
+            photo: p.photos?.[0]?.url,
+            etag: p.etag,
+            updateTime: extractGoogleUpdateTime(p)
+        };
+
+    } catch (e) {
+        console.error('[getGoogleContact] Failed:', e);
+        return null;
+    }
+}
+
+/**
  * Look up a contact in Google Contacts by email
  * Returns the full name if found
  */

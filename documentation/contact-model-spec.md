@@ -141,7 +141,7 @@ Contacts sync bidirectionally with Google Contacts using a **"last write wins"**
 -   **Inbound (Google → Estio)**: The system pulls changes from Google Contacts every 5 minutes via `syncContactsFromGoogle()`. If Google's timestamp is newer, local data is updated.
 -   **Visual ID**: The organization field in Google Contacts is populated with a summary (e.g., "Lead Rent DT4012 Paphos €750") for caller ID.
 
-> See [Google Contact Sync](./google-contact-sync.md) for full implementation details.
+> See [Google Contact Sync](./google-contact-sync.md) for full implementation details, including the **Google Sync Manager** for manual conflict resolution.
 
 ### 2. Comprehensive Lead Tracking
 The model now includes extensive fields locally to track the full lifecycle of a lead without solely relying on external CRM fields:
