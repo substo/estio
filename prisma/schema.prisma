@@ -153,6 +153,21 @@ model User {
   googleSyncToken    String?  // To track the last sync point
   googleSyncEnabled  Boolean  @default(false)
   gmailSyncState     GmailSyncState?
+
+  // Outlook / Microsoft Sync Credentials (OAuth method)
+  outlookAccessToken       String?  @db.Text
+  outlookRefreshToken      String?  @db.Text
+  outlookSyncEnabled       Boolean  @default(false)
+  outlookSubscriptionId    String?  // Webhook Subscription ID
+  outlookSubscriptionExpiry DateTime? // Webhook Expiry
+  outlookSyncState         OutlookSyncState?
+  
+  // Outlook Puppeteer Auth (Alternative when OAuth blocked)
+  outlookAuthMethod         String?  // 'oauth' | 'puppeteer'
+  outlookEmail              String?  // User's Outlook email
+  outlookPasswordEncrypted  String?  @db.Text // AES-256 encrypted password
+  outlookSessionCookies     String?  @db.Text // Encrypted JSON of session cookies
+  outlookSessionExpiry      DateTime? // When session cookies expire
 }
 
 model Property {
@@ -398,6 +413,11 @@ model Contact {
   googleContactId         String?
   lastGoogleSync          DateTime?
   googleContactUpdatedAt  DateTime?  // Timestamp from Google's metadata for "last write wins"
+  
+  // Outlook / Microsoft Sync
+  outlookContactId        String?
+  lastOutlookSync         DateTime?
+  outlookContactUpdatedAt DateTime?
 }
 
 model Company {
@@ -795,6 +815,7 @@ model Message {
   emailThreadId   String?
   emailMessageId  String?  @unique
   emailHeaders    Json?    // References, In-Reply-To
+  internetMessageId String? @unique // Standard RFC 5322 Message-ID (for cross-provider deduplication)
   
   // Relations
   conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -815,6 +836,22 @@ model GmailSyncState {
   historyId       String?
   lastSyncedAt    DateTime @default(now())
   watchExpiration DateTime? // When the push notification subscription expires
+  
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model OutlookSyncState {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  emailAddress    String?  @unique // The Outlook address being synced
+  
+  // Delta Sync Cursors
+  deltaLinkInbox      String?  @db.Text
+  deltaLinkSentItems  String?  @db.Text
+  
+  deltaLinkContacts   String?  @db.Text
+  
+  lastSyncedAt    DateTime @default(now())
   
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

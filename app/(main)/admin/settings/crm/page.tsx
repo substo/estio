@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { saveCrmCredentials, getCrmSettings } from "./actions";
+import { saveCrmCredentials, getCrmSettings, analyzeLeadSchema } from "./actions";
 import { analyzeCrmSchema, saveCrmSchema } from "../../properties/import/actions";
 import { useEffect } from "react";
 import { LeadSourceManager } from "./_components/lead-source-manager";
@@ -23,6 +23,8 @@ export default function CrmSettingsPage() {
         crmPassword: "",
         crmEditUrlPattern: ""
     });
+    const [leadAnalysisUrl, setLeadAnalysisUrl] = useState("https://www.downtowncyprus.com/admin/leads/create");
+    const [leadAnalysisResult, setLeadAnalysisResult] = useState<any>(null);
 
     useEffect(() => {
         async function fetchSettings() {
@@ -53,6 +55,27 @@ export default function CrmSettingsPage() {
             if (result.success) {
                 setSchema(result.schema);
                 toast.success("Schema analyzed successfully");
+            } else {
+                toast.error("Analysis failed: " + result.error);
+            }
+        } catch (error: any) {
+            toast.error("An error occurred: " + error.message);
+        } finally {
+            setIsLoading(false);
+        }
+    }
+
+    async function onAnalyzeLead() {
+        if (!leadAnalysisUrl) {
+            toast.error("Please enter a URL");
+            return;
+        }
+        setIsLoading(true);
+        try {
+            const result = await analyzeLeadSchema(leadAnalysisUrl);
+            if (result.success) {
+                setLeadAnalysisResult(result.analysis);
+                toast.success("Lead page analyzed successfully");
             } else {
                 toast.error("Analysis failed: " + result.error);
             }
@@ -191,6 +214,41 @@ export default function CrmSettingsPage() {
                             >
                                 Save Schema to Database
                             </Button>
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
+
+            <Card className="mt-6">
+                <CardHeader>
+                    <CardTitle>Lead Schema Analysis (Beta)</CardTitle>
+                    <CardDescription>
+                        Analyze a specific "Edit Lead" page to discover available fields for synchronization.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                        <Label htmlFor="leadUrl">Test Lead URL</Label>
+                        <Input
+                            id="leadUrl"
+                            placeholder="https://www.downtowncyprus.com/admin/leads/create"
+                            value={leadAnalysisUrl}
+                            onChange={(e) => setLeadAnalysisUrl(e.target.value)}
+                        />
+                    </div>
+
+                    <Button onClick={onAnalyzeLead} disabled={isLoading}>
+                        {isLoading ? "Analyzing..." : "Analyze Lead Page"}
+                    </Button>
+
+                    {leadAnalysisResult && (
+                        <div className="mt-4 space-y-4">
+                            <div className="p-4 bg-muted rounded-md max-h-96 overflow-y-auto text-xs font-mono">
+                                <pre>{JSON.stringify(leadAnalysisResult, null, 2)}</pre>
+                            </div>
+                            <p className="text-sm text-muted-foreground">
+                                Review the fields above. This data will be used to map the "Pull from CRM" logic.
+                            </p>
                         </div>
                     )}
                 </CardContent>

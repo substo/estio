@@ -2,7 +2,7 @@
 
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Pencil, ExternalLink } from "lucide-react";
+import { ArrowLeft, Pencil, ExternalLink, Mail } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { DialogFooter } from "@/components/ui/dialog";
@@ -12,6 +12,8 @@ import { EditContactDialog } from "./edit-contact-dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ContactData } from "./contact-form";
 import { CONTACT_TYPE_CONFIG, ContactType, DEFAULT_CONTACT_TYPE } from "./contact-types";
+import { OutlookSyncManager } from "./outlook-sync-manager";
+
 
 // Helper to safely display values
 const DisplayField = ({ label, value, className = "" }: { label: string, value: React.ReactNode | string | number | null | undefined, className?: string }) => {
@@ -43,6 +45,7 @@ interface ContactViewProps {
     userMap?: Record<string, string>; // ID -> Name
     leadSources?: string[];
     variant?: 'page' | 'modal';
+    isOutlookConnected?: boolean;
 }
 
 export default function ContactView({
@@ -50,9 +53,11 @@ export default function ContactView({
     propertyMap = {},
     userMap = {},
     leadSources = [],
-    variant = 'page'
+    variant = 'page',
+    isOutlookConnected = false
 }: ContactViewProps) {
     const router = useRouter();
+    const [outlookOpen, setOutlookOpen] = useState(false);
 
     const resolveProperty = (id: string) => {
         return propertyMap[id] || id;
@@ -95,6 +100,12 @@ export default function ContactView({
                         </Link>
                     </Button>
                     <div className="flex gap-2">
+                        {contact.email && isOutlookConnected && (
+                            <Button variant="outline" onClick={() => setOutlookOpen(true)}>
+                                <Mail className="mr-2 h-4 w-4" />
+                                Outlook Emails
+                            </Button>
+                        )}
                         <EditContactDialog
                             contact={contact}
                             leadSources={leadSources}
@@ -257,6 +268,16 @@ export default function ContactView({
                         </Button>
                     </DialogFooter>
                 </div>
+            )}
+
+            {/* Outlook Sync Manager Dialog */}
+            {contact.email && (
+                <OutlookSyncManager
+                    contactEmail={contact.email}
+                    contactName={contact.name || 'Contact'}
+                    open={outlookOpen}
+                    onOpenChange={setOutlookOpen}
+                />
             )}
         </div>
     );

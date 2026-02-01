@@ -12,6 +12,12 @@ function SignInContent() {
     const { signIn, setActive, isLoaded } = useSignIn();
     const [isProcessingTicket, setIsProcessingTicket] = useState(false);
     const [ticketError, setTicketError] = useState<string | null>(null);
+    const [isMounted, setIsMounted] = useState(false);
+
+    // Prevent hydration mismatch by only rendering Clerk components after mount
+    useEffect(() => {
+        setIsMounted(true);
+    }, []);
 
     useEffect(() => {
         if (!config?.auth?.enabled) {
@@ -69,7 +75,11 @@ function SignInContent() {
                         {ticketError}
                     </div>
                 )}
-                <SignIn />
+                {isMounted ? (
+                    <SignIn />
+                ) : (
+                    <Loader2 className="h-8 w-8 animate-spin text-gray-300" />
+                )}
             </div>
         </PageWrapper>
     );

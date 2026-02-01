@@ -5,12 +5,12 @@ import { EditContactForm } from "../../_components/edit-contact-dialog";
 
 export const dynamic = "force-dynamic";
 
-export default async function ContactViewPage({ params, searchParams }: { params: Promise<{ id: string }>, searchParams: Promise<{ locationId?: string }> }) {
+export default async function ContactEditPage({ params, searchParams }: { params: Promise<{ id: string }>, searchParams: Promise<{ locationId?: string }> }) {
     const { id } = await params;
     const { locationId: searchLocationId } = await searchParams;
 
     if (id === "new") {
-        return <div>Cannot view a new contact. Please create it first.</div>;
+        return <div>Cannot edit here. Please create first.</div>;
     }
 
     const locationCtx = await getLocationContext();
@@ -40,8 +40,6 @@ export default async function ContactViewPage({ params, searchParams }: { params
         return <div>Contact not found.</div>;
     }
 
-    // Viewings are fetched by EditContactForm now
-
     // Fetch Lead Sources
     const leadSourcesData = await db.leadSource.findMany({
         where: { locationId },
@@ -60,7 +58,7 @@ export default async function ContactViewPage({ params, searchParams }: { params
             <EditContactForm
                 contact={contact}
                 leadSources={leadSources}
-                initialMode="view"
+                initialMode="edit"
                 isOutlookConnected={isOutlookConnected}
             />
         </div>

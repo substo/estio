@@ -74,6 +74,28 @@ export default function IntegrationsPage() {
                         </div>
                     </div>
                 </Link>
+
+                {/* Microsoft / Outlook Integration Card */}
+                <Link href="/admin/settings/integrations/microsoft" className="group block h-full">
+                    <div className="flex h-full flex-col justify-between rounded-lg border p-6 transition-colors hover:border-primary hover:bg-muted/50">
+                        <div className="space-y-4">
+                            <div className="flex items-center space-x-3">
+                                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-sky-100 text-sky-600 dark:bg-sky-900/20 dark:text-sky-400">
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6">
+                                        <path d="M2 4v16h10V4H2zm9 14H3V6h8v12zm2-14v16h9V4h-9zm8 14h-7V6h7v12z" />
+                                    </svg>
+                                </div>
+                                <h3 className="font-semibold text-lg">Microsoft Outlook</h3>
+                            </div>
+                            <p className="text-sm text-muted-foreground">
+                                Sync Emails and Contacts with Outlook (Personal or Office 365).
+                            </p>
+                        </div>
+                        <div className="mt-6 flex items-center text-sm font-medium text-primary group-hover:underline">
+                            Configure Integration &rarr;
+                        </div>
+                    </div>
+                </Link>
             </div>
         </div>
     );

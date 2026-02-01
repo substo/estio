@@ -1,5 +1,7 @@
 'use server';
 
+import { puppeteerService } from '@/lib/crm/puppeteer-service';
+
 import db from '@/lib/db';
 import { auth } from '@clerk/nextjs/server';
 import { verifyUserHasAccessToLocation } from '@/lib/auth/permissions';
@@ -148,3 +150,85 @@ export async function getCrmSettings() {
         return null;
     }
 }
+
+export async function analyzeLeadSchema(testUrl: string) {
+    try {
+        const { userId } = await auth();
+        if (!userId) return { success: false, error: "Unauthorized" };
+
+        const user = await db.user.findUnique({
+            where: { clerkId: userId },
+            select: {
+                crmUrl: true,
+                crmUsername: true,
+                crmPassword: true
+            }
+        });
+
+        if (!user || !user.crmUrl || !user.crmUsername || !user.crmPassword) {
+            return { success: false, error: "MISSING_CREDENTIALS" };
+        }
+
+        // Initialize Puppeteer
+        await puppeteerService.init();
+
+        // Login
+        await puppeteerService.login(user.crmUrl, user.crmUsername, user.crmPassword);
+
+        // Navigate to Test URL
+        const page = await puppeteerService.getPage();
+        console.log(`[Lead Analysis] Navigating to ${testUrl}...`);
+
+        await page.goto(testUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+
+        // Analyze Schema
+        const analysis = await page.evaluate(() => {
+            const fields: any[] = [];
+
+            // 1. Scrape Inputs
+            const inputs = document.querySelectorAll('input, select, textarea');
+            inputs.forEach((el: any) => {
+                // Ignore hidden internal fields often found in CMS
+                if (el.type === 'hidden' && !el.name?.includes('token') && !el.name?.includes('id')) {
+                    // Optional: skip hidden unless they look relevant
+                }
+
+                fields.push({
+                    tag: el.tagName.toLowerCase(),
+                    name: el.name || el.id || '',
+                    id: el.id || '',
+                    type: el.type || '',
+                    // Capture current value to detect data mapping
+                    value: el.value || '',
+                    label: el.closest('label')?.innerText?.trim()
+                        || el.closest('.form-group')?.querySelector('label')?.innerText?.trim()
+                        || document.querySelector(`label[for="${el.id}"]`)?.textContent?.trim()
+                        || 'Unknown'
+                });
+            });
+
+            // 2. Scrape Tables (for lists of comments, history, etc)
+            const tables = Array.from(document.querySelectorAll('table')).map((table: any) => {
+                const headers = Array.from(table.querySelectorAll('th')).map((th: any) => th.innerText?.trim());
+                return {
+                    headers,
+                    rowCount: table.querySelectorAll('tr').length - 1 // Approx
+                };
+            });
+
+            return {
+                url: window.location.href,
+                title: document.title,
+                fields,
+                tables
+            };
+        });
+
+        return { success: true, analysis };
+
+    } catch (error: any) {
+        console.error("Lead Analysis failed:", error);
+        return { success: false, error: error.message };
+    }
+}
+

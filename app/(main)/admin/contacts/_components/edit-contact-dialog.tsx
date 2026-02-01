@@ -43,7 +43,7 @@ import { HistoryTab } from './history-tab';
 import { ContactForm, type ContactData } from './contact-form';
 import { CONTACT_TYPE_CONFIG, type ContactType } from './contact-types';
 
-export function EditContactForm({ contact, onSuccess, onDelete, leadSources, initialMode = 'edit' }: { contact: ContactData; onSuccess?: () => void; onDelete?: () => void; leadSources: string[]; initialMode?: 'view' | 'edit' | 'create' }) {
+export function EditContactForm({ contact, onSuccess, onDelete, leadSources, initialMode = 'edit', isOutlookConnected = false }: { contact: ContactData; onSuccess?: () => void; onDelete?: () => void; leadSources: string[]; initialMode?: 'view' | 'edit' | 'create'; isOutlookConnected?: boolean }) {
     const { toast } = useToast();
     const [isDeleting, setIsDeleting] = useState(false);
 
@@ -197,6 +197,7 @@ export function EditContactForm({ contact, onSuccess, onDelete, leadSources, ini
             locationId={contact.locationId}
             onSuccess={onSuccess}
             leadSources={leadSources}
+            isOutlookConnected={isOutlookConnected}
             additionalTabCount={showViewings ? 2 : 1}
             additionalTabs={
                 <>
@@ -362,7 +363,7 @@ export function EditContactForm({ contact, onSuccess, onDelete, leadSources, ini
     );
 }
 
-export function EditContactDialog({ contact, leadSources = [], trigger }: { contact: ContactData; leadSources?: string[]; trigger?: React.ReactNode }) {
+export function EditContactDialog({ contact, leadSources = [], trigger, isOutlookConnected = false }: { contact: ContactData; leadSources?: string[]; trigger?: React.ReactNode; isOutlookConnected?: boolean }) {
     const [open, setOpen] = useState(false);
 
     return (
@@ -382,7 +383,7 @@ export function EditContactDialog({ contact, leadSources = [], trigger }: { cont
                         Update contact details.
                     </DialogDescription>
                 </DialogHeader>
-                <EditContactForm contact={contact} onSuccess={() => setOpen(false)} leadSources={leadSources || []} />
+                <EditContactForm contact={contact} onSuccess={() => setOpen(false)} leadSources={leadSources || []} isOutlookConnected={isOutlookConnected} />
             </DialogContent>
         </Dialog>
     );

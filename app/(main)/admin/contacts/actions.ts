@@ -119,7 +119,7 @@ async function enrichChangesWithReadableValues(changes: { field: string; old: an
 
 const createContactSchema = z.object({
   name: z.string().min(1, 'Name is required'),
-  email: z.string().email('Invalid email address').optional().or(z.literal('')),
+  email: z.string().regex(/^[\w\-\.\+=]+@[\w\-\.]+\.[a-zA-Z]{2,}$/, 'Invalid email address').optional().or(z.literal('')),
   phone: z.string().optional().transform(normalizePhone),
   locationId: z.string().min(1, 'Location ID is required'),
   message: z.string().optional(),
@@ -1353,6 +1353,11 @@ export async function getContactDetails(contactId: string) {
     });
   }
 
+  // Check Outlook Connection
+  const { getOutlookStatusAction } = await import('./outlook-actions');
+  const outlookStatus = await getOutlookStatusAction();
+  const isOutlookConnected = outlookStatus.connected;
+
   return {
     contact: {
       ...contact,
@@ -1365,7 +1370,8 @@ export async function getContactDetails(contactId: string) {
     },
     propertyMap,
     userMap,
-    leadSources: leadSources.map(s => s.name)
+    leadSources: leadSources.map(s => s.name),
+    isOutlookConnected
   };
 }
 

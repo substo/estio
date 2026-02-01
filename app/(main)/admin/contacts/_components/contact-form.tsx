@@ -22,7 +22,8 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { createContact, updateContact, deleteContactRole } from '../actions';
 import { useToast } from '@/components/ui/use-toast';
 import { GoogleSyncManager } from './google-sync-manager';
-import { RefreshCw } from 'lucide-react';
+import { OutlookSyncManager } from './outlook-sync-manager';
+import { RefreshCw, Mail } from 'lucide-react';
 import { getPropertiesForSelect, getCompaniesForSelect, getUsersForSelect } from '../fetch-helpers';
 import { LocationFilter } from '@/components/properties/location-filter';
 import { PROPERTY_LOCATIONS } from '@/lib/properties/locations';
@@ -144,6 +145,7 @@ interface ContactFormProps {
     /** Number of additional tabs passed (for grid calculation) */
     additionalTabCount?: number;
     leadSources?: string[];
+    isOutlookConnected?: boolean;
 }
 
 function SubmitButton({ isEditing, isCreating, toggler }: { isEditing: boolean, isCreating: boolean, toggler: (e: React.MouseEvent) => void }) {
@@ -174,9 +176,10 @@ function formatDate(date: Date | null | undefined) {
     }
 }
 
-export function ContactForm({ initialMode = 'create', contact, locationId, onSuccess, additionalTabs, additionalTabContent, additionalFooter, additionalTabCount = 0, leadSources = [] }: ContactFormProps) {
+export function ContactForm({ initialMode = 'create', contact, locationId, onSuccess, additionalTabs, additionalTabContent, additionalFooter, additionalTabCount = 0, leadSources = [], isOutlookConnected = false }: ContactFormProps) {
     const router = useRouter();
     const [managerOpen, setManagerOpen] = useState(false);
+    const [outlookOpen, setOutlookOpen] = useState(false);
 
     const [isEditing, setIsEditing] = useState(initialMode !== 'view');
     const isCreating = initialMode === 'create';
@@ -843,10 +846,18 @@ export function ContactForm({ initialMode = 'create', contact, locationId, onSuc
                         <div className="flex gap-2">
                             {/* Manage Sync Button (Only in View Mode) */}
                             {contact && !isCreating && (
-                                <Button type="button" variant="outline" size="sm" onClick={() => setManagerOpen(true)}>
-                                    <RefreshCw className="mr-2 h-4 w-4" />
-                                    Manage Sync
-                                </Button>
+                                <>
+                                    <Button type="button" variant="outline" size="sm" onClick={() => setManagerOpen(true)}>
+                                        <RefreshCw className="mr-2 h-4 w-4" />
+                                        Manage Sync
+                                    </Button>
+                                    {contact.email && isOutlookConnected && (
+                                        <Button type="button" variant="outline" size="sm" onClick={() => setOutlookOpen(true)}>
+                                            <Mail className="mr-2 h-4 w-4" />
+                                            Outlook Emails
+                                        </Button>
+                                    )}
+                                </>
                             )}
                         </div>
                     )}
@@ -859,6 +870,15 @@ export function ContactForm({ initialMode = 'create', contact, locationId, onSuc
                     contact={contact}
                     open={managerOpen}
                     onOpenChange={setManagerOpen}
+                />
+            )}
+
+            {contact && contact.email && (
+                <OutlookSyncManager
+                    contactEmail={contact.email}
+                    contactName={contact.name || 'Contact'}
+                    open={outlookOpen}
+                    onOpenChange={setOutlookOpen}
                 />
             )}
         </form >
