@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Pencil, Trash } from 'lucide-react';
+import { Pencil, Trash, RefreshCw, UploadCloud } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { pullLead } from '@/app/(main)/admin/settings/crm/actions';
 import {
     Dialog,
     DialogContent,
@@ -61,6 +62,11 @@ export function EditContactForm({ contact, onSuccess, onDelete, leadSources, ini
     const [pastViewings, setPastViewings] = useState<any[]>([]);
     const [history, setHistory] = useState<any[]>([]);
     const [viewingModalOpen, setViewingModalOpen] = useState(false);
+
+    // CRM Pull State
+    const [pullModalOpen, setPullModalOpen] = useState(false);
+    const [crmLeadId, setCrmLeadId] = useState('');
+    const [isPulling, setIsPulling] = useState(false);
 
     // Fetch data for Viewings and Modal
     useEffect(() => {
@@ -171,6 +177,29 @@ export function EditContactForm({ contact, onSuccess, onDelete, leadSources, ini
         setOwnerNotification(null);
         setEditingViewingId(null);
         setViewingModalOpen(false);
+    };
+
+    const handlePullFromCrm = async () => {
+        if (!crmLeadId) {
+            toast({ title: "Error", description: "Please enter a CRM Lead ID", variant: "destructive" });
+            return;
+        }
+        setIsPulling(true);
+        try {
+            const result = await pullLead(crmLeadId);
+            if (result.success) {
+                toast({ title: "Success", description: "Lead data pulled successfully. Refreshing..." });
+                setPullModalOpen(false);
+                setCrmLeadId('');
+                if (onSuccess) onSuccess(); // Will close modal or refresh data
+            } else {
+                toast({ title: "Error", description: result.error || "Failed to pull lead", variant: "destructive" });
+            }
+        } catch (e) {
+            toast({ title: "Error", description: "An unexpected error occurred", variant: "destructive" });
+        } finally {
+            setIsPulling(false);
+        }
     };
 
     const handleDeleteContact = async () => {
@@ -337,27 +366,64 @@ export function EditContactForm({ contact, onSuccess, onDelete, leadSources, ini
                 </>
             )}
             additionalFooter={
-                <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                        <Button type="button" variant="destructive" disabled={isDeleting}>
-                            <Trash className="mr-2 h-4 w-4" /> Delete Contact
-                        </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                        <AlertDialogHeader>
-                            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                                This action cannot be undone. This will permanently delete the contact and all associated data.
-                            </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction onClick={handleDeleteContact} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                                {isDeleting ? "Deleting..." : "Delete"}
-                            </AlertDialogAction>
-                        </AlertDialogFooter>
-                    </AlertDialogContent>
-                </AlertDialog>
+                <div className="flex justify-between w-full">
+                    <div className="flex gap-2">
+                        <Dialog open={pullModalOpen} onOpenChange={setPullModalOpen}>
+                            <DialogTrigger asChild>
+                                <Button variant="outline" type="button">
+                                    <UploadCloud className="mr-2 h-4 w-4" /> Pull from CRM
+                                </Button>
+                            </DialogTrigger>
+                            <DialogContent>
+                                <DialogHeader>
+                                    <DialogTitle>Pull from Old CRM</DialogTitle>
+                                    <DialogDescription>
+                                        Enter the numeric Lead ID from the old CRM to pull data. This will update this contact.
+                                    </DialogDescription>
+                                </DialogHeader>
+                                <div className="space-y-4 py-4">
+                                    <div className="space-y-2">
+                                        <Label>CRM Lead ID</Label>
+                                        <Input
+                                            value={crmLeadId}
+                                            onChange={(e) => setCrmLeadId(e.target.value)}
+                                            placeholder="e.g. 12345"
+                                        />
+                                    </div>
+                                </div>
+                                <DialogFooter>
+                                    <Button variant="outline" onClick={() => setPullModalOpen(false)}>Cancel</Button>
+                                    <Button onClick={handlePullFromCrm} disabled={isPulling}>
+                                        {isPulling && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}
+                                        {isPulling ? 'Pulling...' : 'Pull Data'}
+                                    </Button>
+                                </DialogFooter>
+                            </DialogContent>
+                        </Dialog>
+                    </div>
+
+                    <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                            <Button type="button" variant="destructive" disabled={isDeleting}>
+                                <Trash className="mr-2 h-4 w-4" /> Delete Contact
+                            </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                            <AlertDialogHeader>
+                                <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                    This action cannot be undone. This will permanently delete the contact and all associated data.
+                                </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={handleDeleteContact} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                                    {isDeleting ? "Deleting..." : "Delete"}
+                                </AlertDialogAction>
+                            </AlertDialogFooter>
+                        </AlertDialogContent>
+                    </AlertDialog>
+                </div>
             }
         />
     );

@@ -6,6 +6,25 @@ import db from '@/lib/db';
 import { auth } from '@clerk/nextjs/server';
 import { verifyUserHasAccessToLocation } from '@/lib/auth/permissions';
 import { revalidatePath } from 'next/cache';
+import { pullLeadFromCrm } from '@/lib/crm/crm-lead-puller';
+
+export async function pullLead(crmLeadId: string) {
+    console.log("[Action] pullLead called for ID:", crmLeadId);
+    try {
+        const { userId } = await auth();
+        if (!userId) return { success: false, error: "Unauthorized" };
+
+        const result = await pullLeadFromCrm(crmLeadId, userId);
+
+        revalidatePath('/contacts');
+        revalidatePath(`/contacts/${result.id}`);
+
+        return result;
+    } catch (e: any) {
+        console.error("Action pullLead failed:", e);
+        return { success: false, error: e.message };
+    }
+}
 
 export async function addLeadSource(name: string) {
     try {
@@ -106,20 +125,39 @@ export async function saveCrmCredentials(data: any) {
     if (!userId) throw new Error("Unauthorized");
 
     // Basic validation
-    if (!data.crmUrl || !data.crmUsername || !data.crmPassword) {
-        throw new Error("Missing fields");
+    if (!data.crmUsername || !data.crmPassword) {
+        throw new Error("Missing credentials");
     }
 
     try {
+        // Get user's primary location
+        const user = await db.user.findUnique({
+            where: { clerkId: userId },
+            include: { locations: { take: 1 } }
+        });
+
+        if (!user) throw new Error("User not found");
+
+        // Save credentials to User
         await db.user.update({
             where: { clerkId: userId },
             data: {
-                crmUrl: data.crmUrl,
                 crmUsername: data.crmUsername,
                 crmPassword: data.crmPassword,
-                crmEditUrlPattern: data.crmEditUrlPattern || null,
             }
         });
+
+        // Save URL and pattern to Location (if provided and user has a location)
+        if (user.locations[0] && (data.crmUrl || data.crmEditUrlPattern)) {
+            await db.location.update({
+                where: { id: user.locations[0].id },
+                data: {
+                    crmUrl: data.crmUrl || undefined,
+                    crmEditUrlPattern: data.crmEditUrlPattern || undefined,
+                    crmLeadUrlPattern: data.crmLeadUrlPattern || undefined,
+                }
+            });
+        }
 
         revalidatePath('/admin/settings/crm');
         return { success: true };
@@ -134,46 +172,111 @@ export async function getCrmSettings() {
     if (!userId) return null;
 
     try {
+        // Get user with their first location and credentials
         const user = await db.user.findUnique({
             where: { clerkId: userId },
             select: {
-                crmUrl: true,
                 crmUsername: true,
                 crmPassword: true,
-                crmEditUrlPattern: true,
-                crmSchema: true
+                locations: {
+                    take: 1,
+                    select: {
+                        id: true,
+                        crmUrl: true,
+                        crmEditUrlPattern: true,
+                        crmLeadUrlPattern: true,
+                        crmSchema: true,
+                        crmLeadSchema: true
+                    }
+                }
             }
         });
-        return user;
+
+        if (!user) return null;
+
+        const location = user.locations[0];
+
+        // Merge location config with user credentials
+        return {
+            // Location-level settings
+            locationId: location?.id || null,
+            crmUrl: location?.crmUrl || null,
+            crmEditUrlPattern: location?.crmEditUrlPattern || null,
+            crmLeadUrlPattern: location?.crmLeadUrlPattern || null,
+            crmSchema: location?.crmSchema || null,
+            crmLeadSchema: location?.crmLeadSchema || null,
+            // User-level credentials
+            crmUsername: user.crmUsername || null,
+            crmPassword: user.crmPassword || null
+        };
     } catch (error) {
         console.error("Failed to fetch settings:", error);
         return null;
     }
 }
 
-export async function analyzeLeadSchema(testUrl: string) {
+export async function saveLeadSchema(schema: any) {
     try {
         const { userId } = await auth();
+        if (!userId) throw new Error("Unauthorized");
+
+        // Get user's primary location
+        const user = await db.user.findUnique({
+            where: { clerkId: userId },
+            include: { locations: { take: 1 } }
+        });
+
+        if (!user?.locations[0]) {
+            throw new Error("No location found for user");
+        }
+
+        await db.location.update({
+            where: { id: user.locations[0].id },
+            data: { crmLeadSchema: schema },
+        });
+
+        return { success: true };
+    } catch (error: any) {
+        console.error("Failed to save lead schema:", error);
+        return { success: false, error: error.message };
+    }
+}
+
+export async function analyzeLeadSchema(testUrl: string) {
+    console.log("[Server Action] analyzeLeadSchema called for URL:", testUrl);
+    try {
+        const { userId } = await auth();
+        console.log("[Server Action] User ID:", userId);
         if (!userId) return { success: false, error: "Unauthorized" };
 
+        // Get user credentials and location config
         const user = await db.user.findUnique({
             where: { clerkId: userId },
             select: {
-                crmUrl: true,
                 crmUsername: true,
-                crmPassword: true
+                crmPassword: true,
+                locations: {
+                    take: 1,
+                    select: { crmUrl: true }
+                }
             }
         });
 
-        if (!user || !user.crmUrl || !user.crmUsername || !user.crmPassword) {
-            return { success: false, error: "MISSING_CREDENTIALS" };
+        const crmUrl = user?.locations[0]?.crmUrl;
+
+        if (!crmUrl || !user?.crmUsername || !user?.crmPassword) {
+            const missing = [];
+            if (!crmUrl) missing.push("CRM URL (set in Location)");
+            if (!user?.crmUsername) missing.push("Username");
+            if (!user?.crmPassword) missing.push("Password");
+            return { success: false, error: `MISSING_CREDENTIALS: ${missing.join(', ')}. Please save credentials first.` };
         }
 
         // Initialize Puppeteer
         await puppeteerService.init();
 
         // Login
-        await puppeteerService.login(user.crmUrl, user.crmUsername, user.crmPassword);
+        await puppeteerService.login(crmUrl, user.crmUsername, user.crmPassword);
 
         // Navigate to Test URL
         const page = await puppeteerService.getPage();
@@ -181,7 +284,32 @@ export async function analyzeLeadSchema(testUrl: string) {
 
         await page.goto(testUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-        // Analyze Schema
+        // --- Validation: Check if login failed or we're not on the expected page ---
+        const currentUrl = page.url();
+        console.log(`[Lead Analysis] Current URL after navigation: ${currentUrl}`);
+
+        // Check if we are on the login page (login failed)
+        if (currentUrl.includes('/login')) {
+            // Try to find an error message on the page
+            const errorMessage = await page.evaluate(() => {
+                const alertEl = document.querySelector('.alert-danger, .alert-error, .error-message, .callout-danger');
+                return alertEl?.textContent?.trim() || null;
+            });
+            return {
+                success: false,
+                error: `LOGIN_FAILED: ${errorMessage || 'Redirected to login page. Please check your CRM username and password.'}`
+            };
+        }
+
+        // Check if URL matches expected target (allow for minor differences like trailing slashes)
+        const normalizedTarget = testUrl.replace(/\/+$/, '').toLowerCase();
+        const normalizedCurrent = currentUrl.replace(/\/+$/, '').toLowerCase();
+        if (!normalizedCurrent.startsWith(normalizedTarget.split('?')[0])) {
+            return {
+                success: false,
+                error: `URL_MISMATCH: Expected to be on ${testUrl} but ended up on ${currentUrl}. This may indicate a login issue or redirect.`
+            };
+        }
         const analysis = await page.evaluate(() => {
             const fields: any[] = [];
 
@@ -224,11 +352,19 @@ export async function analyzeLeadSchema(testUrl: string) {
             };
         });
 
+        // Basic verification
+        if (!analysis || !analysis.fields || analysis.fields.length === 0) {
+            return { success: false, error: "NO_FIELDS_FOUND: Scraper returned empty results. Is the page structure different?" };
+        }
+
         return { success: true, analysis };
 
     } catch (error: any) {
         console.error("Lead Analysis failed:", error);
         return { success: false, error: error.message };
+    } finally {
+        // CLEANUP: Close the browser to prevent hanging instances as requested
+        console.log("[Lead Analysis] Closing browser to cleanup resources.");
+        await puppeteerService.close();
     }
 }
-

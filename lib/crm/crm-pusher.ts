@@ -18,12 +18,18 @@ export async function pushPropertyToCrm(propertyId: string, userId: string) {
 
     const user = await db.user.findUnique({
         where: { clerkId: userId },
+        include: { locations: true }
     });
 
     if (!property) throw new Error("Property not found");
     if (!user) throw new Error("User not found");
-    if (!user.crmUrl || !user.crmUsername || !user.crmPassword) {
-        throw new Error("User is missing CRM credentials");
+
+    // Get location config
+    const location = user.locations[0];
+    const crmUrl = location?.crmUrl;
+
+    if (!crmUrl || !user.crmUsername || !user.crmPassword) {
+        throw new Error("Missing CRM configuration. Check location URL and user credentials.");
     }
 
     try {
@@ -31,7 +37,7 @@ export async function pushPropertyToCrm(propertyId: string, userId: string) {
         await puppeteerService.init();
 
         // 2. Login
-        await puppeteerService.login(user.crmUrl, user.crmUsername, user.crmPassword);
+        await puppeteerService.login(crmUrl, user.crmUsername, user.crmPassword);
 
         // 3. Navigate to Create Page
         const page = await puppeteerService.getPage();

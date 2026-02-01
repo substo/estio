@@ -255,19 +255,38 @@ export async function processMessage(gmail: gmail_v1.Gmail, userId: string, mess
                 // If we found a contact, we should ensure GHL knows about this message.
                 // We do this asynchronously/independently.
                 const location = await db.location.findUnique({ where: { id: contact.locationId } });
-                if (location?.ghlAccessToken) {
-                    await createInboundMessage(location.ghlAccessToken, {
-                        type: 'Email',
-                        contactId: contact.ghlContactId || '', // Need GHL Contact ID
-                        direction: direction,
-                        status: 'delivered', // Assume delivered if in Gmail
-                        subject: subject,
-                        html: body,
-                        emailFrom: extractEmail(from) || undefined,
-                        emailTo: extractEmail(to) || undefined,
-                        dateAdded: internalDate,
-                        threadId: data.threadId || undefined // Use Gmail Thread ID for grouping
-                    }).catch(e => console.error("Failed to log to GHL:", e));
+                if (location?.ghlAccessToken && location?.ghlLocationId) {
+                    // Ensure contact exists in GHL before logging
+                    let ghlContactId = contact.ghlContactId;
+                    if (!ghlContactId) {
+                        try {
+                            const { ensureRemoteContact } = await import('@/lib/crm/contact-sync');
+                            ghlContactId = await ensureRemoteContact(contact.id, location.ghlLocationId, location.ghlAccessToken);
+                            if (ghlContactId) {
+                                console.log(`[Gmail Sync] Created/linked GHL contact: ${ghlContactId}`);
+                            }
+                        } catch (e) {
+                            console.warn(`[Gmail Sync] Could not ensure remote contact for ${contact.id}:`, e);
+                        }
+                    }
+
+                    // Only log to GHL if we have a valid contact ID
+                    if (ghlContactId) {
+                        await createInboundMessage(location.ghlAccessToken, {
+                            type: 'Email',
+                            contactId: ghlContactId,
+                            direction: direction,
+                            status: 'delivered', // Assume delivered if in Gmail
+                            subject: subject,
+                            html: body,
+                            emailFrom: extractEmail(from) || undefined,
+                            emailTo: extractEmail(to) || undefined,
+                            dateAdded: internalDate,
+                            threadId: data.threadId || undefined // Use Gmail Thread ID for grouping
+                        }).catch(e => console.error("Failed to log to GHL:", e));
+                    } else {
+                        console.log(`[Gmail Sync] Skipping GHL logging for ${targetEmail}: No GHL contact ID available`);
+                    }
                 }
             }
         }

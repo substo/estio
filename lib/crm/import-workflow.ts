@@ -61,18 +61,23 @@ async function getCrmCredentials(clerkId: string) {
     const dbUser = await db.user.findUnique({
         where: { clerkId: clerkId },
         select: {
-            crmUrl: true,
             crmUsername: true,
-            crmPassword: true
+            crmPassword: true,
+            locations: {
+                take: 1,
+                select: { crmUrl: true }
+            }
         }
     });
 
-    if (!dbUser || !dbUser.crmUrl || !dbUser.crmUsername || !dbUser.crmPassword) {
+    const crmUrl = dbUser?.locations[0]?.crmUrl;
+
+    if (!crmUrl || !dbUser?.crmUsername || !dbUser?.crmPassword) {
         return null;
     }
 
     return {
-        url: dbUser.crmUrl,
+        url: crmUrl,
         username: dbUser.crmUsername,
         password: dbUser.crmPassword
     };

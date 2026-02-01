@@ -55,6 +55,13 @@ model Location {
   evolutionConnectionStatus String? // "open", "connecting", "close"
   
   whatsappImportSessions WhatsAppImportSession[]
+
+  // CRM Integration (Location-wide settings)
+  crmUrl            String?
+  crmEditUrlPattern String?
+  crmLeadUrlPattern String?
+  crmSchema         Json?
+  crmLeadSchema     Json?
 }
 
 model LeadSource {
@@ -132,12 +139,9 @@ model User {
   ghlUserId String?
   ghlCalendarId String?
   
-  // CRM Integration
-  crmUrl      String?
+  // CRM Credentials (User-specific login)
   crmUsername String?
   crmPassword String?
-  crmSchema   Json?
-  crmEditUrlPattern String?
 
   locations Location[] @relation("LocationToUser")
   locationRoles     UserLocationRole[]
@@ -349,6 +353,8 @@ model Contact {
   email               String?
   phone               String?
   message             String?
+  preferredLang       String?   // "en", "el", etc.
+  notes               String?   // General notes ("contact_other")
   clerkUserId         String?               @unique // Links this Contact to an authenticated Clerk User (Public Login)
   ghlContactId        String?               @unique
   ghlCompanyId        String?

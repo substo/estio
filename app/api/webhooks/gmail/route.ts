@@ -7,7 +7,21 @@ import db from '@/lib/db';
 // Note: Real-world security requires verifying the JWT token sent by Google in Authorization header
 export async function POST(req: NextRequest) {
     try {
-        const body = await req.json();
+        // Handle empty body (Pub/Sub heartbeat/verification requests)
+        const text = await req.text();
+        if (!text || text.trim() === '') {
+            console.log('[Gmail Webhook] Received empty body (heartbeat/ack)');
+            return NextResponse.json({ status: 'ack' });
+        }
+
+        let body;
+        try {
+            body = JSON.parse(text);
+        } catch (parseError) {
+            console.warn('[Gmail Webhook] Invalid JSON received:', text.substring(0, 100));
+            return NextResponse.json({ status: 'ack' }); // Return 200 so Pub/Sub doesn't retry
+        }
+
         const message = body.message;
 
         if (!message || !message.data) {

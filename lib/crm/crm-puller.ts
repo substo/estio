@@ -15,24 +15,30 @@ export async function pullPropertyFromCrm(oldPropertyId: string, userId: string)
     });
 
     if (!user) throw new Error("User not found");
-    if (!user.crmUrl || !user.crmUsername || !user.crmPassword) {
-        throw new Error("User is missing CRM credentials");
+
+    // Get location config
+    const location = user.locations[0];
+    const crmUrl = location?.crmUrl;
+    const crmEditUrlPattern = location?.crmEditUrlPattern;
+
+    if (!crmUrl || !user.crmUsername || !user.crmPassword) {
+        throw new Error("Missing CRM configuration. Check location URL and user credentials.");
     }
 
     try {
         await puppeteerService.init();
-        await puppeteerService.login(user.crmUrl, user.crmUsername, user.crmPassword);
+        await puppeteerService.login(crmUrl, user.crmUsername, user.crmPassword);
 
         const page = await puppeteerService.getPage();
 
         let editUrl: string;
 
         // Use custom pattern if available
-        if (user.crmEditUrlPattern) {
-            editUrl = user.crmEditUrlPattern.replace('{id}', oldPropertyId);
+        if (crmEditUrlPattern) {
+            editUrl = crmEditUrlPattern.replace('{id}', oldPropertyId);
         } else {
             // Construct Edit URL
-            const baseUrl = user.crmUrl.endsWith('/') ? user.crmUrl.slice(0, -1) : user.crmUrl;
+            const baseUrl = crmUrl.endsWith('/') ? crmUrl.slice(0, -1) : crmUrl;
             let crmBase = baseUrl;
             if (crmBase.includes('/admin')) {
                 crmBase = crmBase.split('/admin')[0];

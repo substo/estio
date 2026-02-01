@@ -6,22 +6,23 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { saveCrmCredentials, getCrmSettings, analyzeLeadSchema } from "./actions";
+import { saveCrmCredentials, getCrmSettings, analyzeLeadSchema, saveLeadSchema } from "./actions";
 import { analyzeCrmSchema, saveCrmSchema } from "../../properties/import/actions";
 import { useEffect } from "react";
 import { LeadSourceManager } from "./_components/lead-source-manager";
-import db from "@/lib/db";
-import { auth } from "@clerk/nextjs/server";
 
 
 export default function CrmSettingsPage() {
-    const [isLoading, setIsLoading] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
+    const [isAnalyzing, setIsAnalyzing] = useState(false);
+    const [isLeadAnalyzing, setIsLeadAnalyzing] = useState(false);
     const [schema, setSchema] = useState<any>(null);
     const [defaultValues, setDefaultValues] = useState({
         crmUrl: "https://www.downtowncyprus.com/admin",
         crmUsername: "",
         crmPassword: "",
-        crmEditUrlPattern: ""
+        crmEditUrlPattern: "",
+        crmLeadUrlPattern: ""
     });
     const [leadAnalysisUrl, setLeadAnalysisUrl] = useState("https://www.downtowncyprus.com/admin/leads/create");
     const [leadAnalysisResult, setLeadAnalysisResult] = useState<any>(null);
@@ -35,10 +36,14 @@ export default function CrmSettingsPage() {
                         crmUrl: settings.crmUrl || "https://www.downtowncyprus.com/admin",
                         crmUsername: settings.crmUsername || "",
                         crmPassword: settings.crmPassword || "",
-                        crmEditUrlPattern: settings.crmEditUrlPattern || ""
+                        crmEditUrlPattern: settings.crmEditUrlPattern || "",
+                        crmLeadUrlPattern: settings.crmLeadUrlPattern || ""
                     });
                     if (settings.crmSchema) {
                         setSchema(settings.crmSchema);
+                    }
+                    if (settings.crmLeadSchema) {
+                        setLeadAnalysisResult(settings.crmLeadSchema);
                     }
                 }
             } catch (error) {
@@ -49,7 +54,7 @@ export default function CrmSettingsPage() {
     }, []);
 
     async function onAnalyze() {
-        setIsLoading(true);
+        setIsAnalyzing(true);
         try {
             const result = await analyzeCrmSchema();
             if (result.success) {
@@ -61,18 +66,22 @@ export default function CrmSettingsPage() {
         } catch (error: any) {
             toast.error("An error occurred: " + error.message);
         } finally {
-            setIsLoading(false);
+            setIsAnalyzing(false);
         }
     }
 
     async function onAnalyzeLead() {
+        console.log("Analyze Lead button clicked");
         if (!leadAnalysisUrl) {
+            console.log("No URL provided");
             toast.error("Please enter a URL");
             return;
         }
-        setIsLoading(true);
+        setIsLeadAnalyzing(true);
         try {
+            console.log("Calling server action analyzeLeadSchema with:", leadAnalysisUrl);
             const result = await analyzeLeadSchema(leadAnalysisUrl);
+            console.log("Server action result:", result);
             if (result.success) {
                 setLeadAnalysisResult(result.analysis);
                 toast.success("Lead page analyzed successfully");
@@ -80,15 +89,16 @@ export default function CrmSettingsPage() {
                 toast.error("Analysis failed: " + result.error);
             }
         } catch (error: any) {
+            console.error("Client side error calling analyzeLeadSchema:", error);
             toast.error("An error occurred: " + error.message);
         } finally {
-            setIsLoading(false);
+            setIsLeadAnalyzing(false);
         }
     }
 
     async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
         event.preventDefault();
-        setIsLoading(true);
+        setIsSaving(true);
 
         const formData = new FormData(event.currentTarget);
         const data = Object.fromEntries(formData);
@@ -100,7 +110,7 @@ export default function CrmSettingsPage() {
             toast.error("Failed to save credentials");
             console.error(error);
         } finally {
-            setIsLoading(false);
+            setIsSaving(false);
         }
     }
 
@@ -145,6 +155,21 @@ export default function CrmSettingsPage() {
                         </div>
 
                         <div className="space-y-2">
+                            <Label htmlFor="crmLeadUrlPattern">Lead Edit URL Pattern (Optional)</Label>
+                            <Input
+                                id="crmLeadUrlPattern"
+                                name="crmLeadUrlPattern"
+                                defaultValue={defaultValues.crmLeadUrlPattern}
+                                key={`pattern-lead-${defaultValues.crmLeadUrlPattern}`} // Force re-render
+                                placeholder="https://site.com/admin/leads/{id}/edit"
+                            />
+                            <p className="text-xs text-muted-foreground">
+                                Use <code>{'{id}'}</code> as a placeholder for the lead ID.
+                                Defaults to <code>{`.../leads/{id}/edit`}</code>
+                            </p>
+                        </div>
+
+                        <div className="space-y-2">
                             <Label htmlFor="crmUsername">Username</Label>
                             <Input
                                 id="crmUsername"
@@ -168,8 +193,8 @@ export default function CrmSettingsPage() {
                             />
                         </div>
 
-                        <Button type="submit" disabled={isLoading}>
-                            {isLoading ? "Saving..." : "Save Credentials"}
+                        <Button type="submit" disabled={isSaving}>
+                            {isSaving ? "Saving..." : "Save Credentials"}
                         </Button>
                     </form>
                 </CardContent>
@@ -184,8 +209,8 @@ export default function CrmSettingsPage() {
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <Button onClick={onAnalyze} disabled={isLoading}>
-                        {isLoading ? "Working..." : "Analyze Schema"}
+                    <Button onClick={onAnalyze} disabled={isAnalyzing}>
+                        {isAnalyzing ? "Working..." : "Analyze Schema"}
                     </Button>
 
                     {schema && (
@@ -195,7 +220,7 @@ export default function CrmSettingsPage() {
                             </div>
                             <Button
                                 onClick={async () => {
-                                    setIsLoading(true);
+                                    setIsAnalyzing(true);
                                     try {
                                         const result = await saveCrmSchema(schema);
                                         if (result.success) {
@@ -206,11 +231,11 @@ export default function CrmSettingsPage() {
                                     } catch (e) {
                                         toast.error("Error saving schema");
                                     } finally {
-                                        setIsLoading(false);
+                                        setIsAnalyzing(false);
                                     }
                                 }}
                                 variant="secondary"
-                                disabled={isLoading}
+                                disabled={isAnalyzing}
                             >
                                 Save Schema to Database
                             </Button>
@@ -237,8 +262,8 @@ export default function CrmSettingsPage() {
                         />
                     </div>
 
-                    <Button onClick={onAnalyzeLead} disabled={isLoading}>
-                        {isLoading ? "Analyzing..." : "Analyze Lead Page"}
+                    <Button onClick={onAnalyzeLead} disabled={isLeadAnalyzing}>
+                        {isLeadAnalyzing ? "Analyzing..." : "Analyze Lead Page"}
                     </Button>
 
                     {leadAnalysisResult && (
@@ -249,6 +274,27 @@ export default function CrmSettingsPage() {
                             <p className="text-sm text-muted-foreground">
                                 Review the fields above. This data will be used to map the "Pull from CRM" logic.
                             </p>
+                            <Button
+                                onClick={async () => {
+                                    setIsLeadAnalyzing(true);
+                                    try {
+                                        const result = await saveLeadSchema(leadAnalysisResult);
+                                        if (result.success) {
+                                            toast.success("Lead schema saved successfully!");
+                                        } else {
+                                            toast.error("Failed to save lead schema: " + result.error);
+                                        }
+                                    } catch (e) {
+                                        toast.error("Error saving lead schema");
+                                    } finally {
+                                        setIsLeadAnalyzing(false);
+                                    }
+                                }}
+                                variant="secondary"
+                                disabled={isLeadAnalyzing}
+                            >
+                                Save Lead Schema to Database
+                            </Button>
                         </div>
                     )}
                 </CardContent>
