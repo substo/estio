@@ -248,3 +248,21 @@ export async function associateGHLContactToProperty(
         return false;
     }
 }
+
+/**
+ * Deletes a contact from GoHighLevel.
+ */
+export async function deleteContactFromGHL(locationId: string, contactId: string): Promise<boolean> {
+    try {
+        console.log(`[GHL] Deleting contact ${contactId} from location ${locationId}`);
+        await ghlFetchWithAuth<{ success: boolean }>(
+            locationId,
+            `/contacts/${contactId}`,
+            { method: 'DELETE' }
+        );
+        return true;
+    } catch (error) {
+        console.error('[GHL] Failed to delete contact:', error);
+        return false;
+    }
+}

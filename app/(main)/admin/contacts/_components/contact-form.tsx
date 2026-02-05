@@ -41,12 +41,26 @@ import {
 export type ContactData = {
     id: string;
     name: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
     email: string | null;
     phone: string | null;
     locationId: string;
     contactType?: string | null;
     createdAt?: Date | string | null;
     updatedAt?: Date | string | null;
+
+    // Enhanced Demographics
+    dateOfBirth?: Date | string | null;
+    tags?: string[];
+
+    // Address
+    address1?: string | null;
+    city?: string | null;
+    state?: string | null;
+    postalCode?: string | null;
+    country?: string | null;
+
     // Roles (read-only display in edit mode)
     propertyRoles?: {
         id: string;
@@ -93,8 +107,10 @@ export type ContactData = {
     propertyWonReference?: string | null;
     propertyWonDate?: Date | null;
     error?: string | null; // Sync Error
+    ghlContactId?: string | null;
     googleContactId?: string | null;
     lastGoogleSync?: Date | null;
+    payload?: any;
 };
 
 // Helper to safely display values
@@ -146,6 +162,7 @@ interface ContactFormProps {
     additionalTabCount?: number;
     leadSources?: string[];
     isOutlookConnected?: boolean;
+    initialData?: Partial<ContactData>;
 }
 
 function SubmitButton({ isEditing, isCreating, toggler }: { isEditing: boolean, isCreating: boolean, toggler: (e: React.MouseEvent) => void }) {
@@ -167,7 +184,7 @@ function SubmitButton({ isEditing, isCreating, toggler }: { isEditing: boolean, 
     );
 }
 
-function formatDate(date: Date | null | undefined) {
+function formatDate(date: Date | string | null | undefined) {
     if (!date) return '';
     try {
         return new Date(date).toISOString().split('T')[0];
@@ -176,7 +193,10 @@ function formatDate(date: Date | null | undefined) {
     }
 }
 
-export function ContactForm({ initialMode = 'create', contact, locationId, onSuccess, additionalTabs, additionalTabContent, additionalFooter, additionalTabCount = 0, leadSources = [], isOutlookConnected = false }: ContactFormProps) {
+export function ContactForm({ initialMode = 'create', contact: initialContact, locationId, onSuccess, additionalTabs, additionalTabContent, additionalFooter, additionalTabCount = 0, leadSources = [], isOutlookConnected = false, initialData }: ContactFormProps) {
+    // For initialization, merge passed contact with initialData (prefill)
+    const contact = { ...initialData, ...initialContact } as ContactData | undefined;
+
     const router = useRouter();
     const [managerOpen, setManagerOpen] = useState(false);
     const [outlookOpen, setOutlookOpen] = useState(false);
@@ -407,8 +427,9 @@ export function ContactForm({ initialMode = 'create', contact, locationId, onSuc
                     {/* Details Tab */}
                     <TabsContent value="details" forceMount={true} className="space-y-4 pt-4 data-[state=inactive]:hidden">
                         {/* Basic Info */}
+                        {/* Basic Info */}
                         <div className="grid grid-cols-2 gap-4">
-                            <RenderField label="Name" value={contact?.name} isEditing={isEditing}>
+                            <RenderField label="Full Name" value={contact?.name} isEditing={isEditing}>
                                 <Input id="name" name="name" required placeholder="Full Name" defaultValue={contact?.name || ''} />
                                 {state.errors?.name && <p className="text-sm text-red-500">{state.errors.name.join(', ')}</p>}
                             </RenderField>
@@ -420,6 +441,46 @@ export function ContactForm({ initialMode = 'create', contact, locationId, onSuc
                                 <Input id="phone" name="phone" type="tel" placeholder="+123..." defaultValue={contact?.phone || ''} />
                                 {state.errors?.phone && <p className="text-sm text-red-500">{state.errors.phone.join(', ')}</p>}
                             </RenderField>
+                            <RenderField label="Date of Birth" value={contact?.dateOfBirth ? formatDate(contact?.dateOfBirth) : null} isEditing={isEditing}>
+                                <Input id="dateOfBirth" name="dateOfBirth" type="date" defaultValue={formatDate(contact?.dateOfBirth)} />
+                            </RenderField>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <RenderField label="First Name" value={contact?.firstName} isEditing={isEditing}>
+                                <Input id="firstName" name="firstName" placeholder="First Name" defaultValue={contact?.firstName || ''} />
+                            </RenderField>
+                            <RenderField label="Last Name" value={contact?.lastName} isEditing={isEditing}>
+                                <Input id="lastName" name="lastName" placeholder="Last Name" defaultValue={contact?.lastName || ''} />
+                            </RenderField>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-4">
+                            <RenderField label="Tags" value={contact?.tags?.join(', ')} isEditing={isEditing}>
+                                <Input id="tags" name="tags" placeholder="Tag1, Tag2 (comma separated)" defaultValue={contact?.tags?.join(', ') || ''} />
+                            </RenderField>
+                        </div>
+
+                        {/* Address Section */}
+                        <div className="border-t pt-4 mt-2">
+                            <Label className="mb-2 block font-semibold">Address</Label>
+                            <div className="grid grid-cols-2 gap-4">
+                                <RenderField label="Address Line 1" value={contact?.address1} isEditing={isEditing}>
+                                    <Input id="address1" name="address1" placeholder="Street Address" defaultValue={contact?.address1 || ''} />
+                                </RenderField>
+                                <RenderField label="City" value={contact?.city} isEditing={isEditing}>
+                                    <Input id="city" name="city" placeholder="City" defaultValue={contact?.city || ''} />
+                                </RenderField>
+                                <RenderField label="State / Region" value={contact?.state} isEditing={isEditing}>
+                                    <Input id="state" name="state" placeholder="State" defaultValue={contact?.state || ''} />
+                                </RenderField>
+                                <RenderField label="Postal Code" value={contact?.postalCode} isEditing={isEditing}>
+                                    <Input id="postalCode" name="postalCode" placeholder="Postal Code" defaultValue={contact?.postalCode || ''} />
+                                </RenderField>
+                                <RenderField label="Country" value={contact?.country} isEditing={isEditing}>
+                                    <Input id="country" name="country" placeholder="Country" defaultValue={contact?.country || ''} />
+                                </RenderField>
+                            </div>
                         </div>
 
                         {/* Lead Fields (conditional) */}

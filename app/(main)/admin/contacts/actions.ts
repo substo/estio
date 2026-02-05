@@ -14,6 +14,8 @@ import { syncContactToGoogle } from '@/lib/google/people';
 
 // --- Helpers & Zod Transforms ---
 
+
+
 /**
  * Normalizes phone numbers but preserves asterisks for masked numbers.
  * Allowed characters: digits, +, *, #, whitespace
@@ -119,11 +121,24 @@ async function enrichChangesWithReadableValues(changes: { field: string; old: an
 
 const createContactSchema = z.object({
   name: z.string().min(1, 'Name is required'),
+  firstName: z.string().optional(),
+  lastName: z.string().optional(),
   email: z.string().regex(/^[\w\-\.\+=]+@[\w\-\.]+\.[a-zA-Z]{2,}$/, 'Invalid email address').optional().or(z.literal('')),
   phone: z.string().optional().transform(normalizePhone),
   locationId: z.string().min(1, 'Location ID is required'),
   message: z.string().optional(),
   contactType: z.enum(CONTACT_TYPES).optional().default('Lead'),
+
+  // Enhanced Demographics
+  dateOfBirth: z.string().optional().transform(parseDate),
+  tags: z.string().optional().transform(parseArray),
+
+  // Address
+  address1: z.string().optional(),
+  city: z.string().optional(),
+  state: z.string().optional(),
+  postalCode: z.string().optional(),
+  country: z.string().optional(),
 
   // Role Data
   roleType: z.enum(['property', 'company']).optional(),
@@ -189,10 +204,20 @@ export type CreateContactState = {
 function prepareContactInput(data: ValidatedContactData) {
   return {
     name: data.name,
+    firstName: data.firstName,
+    lastName: data.lastName,
     email: data.email || null,
     phone: data.phone || null,
     message: data.message,
     contactType: data.contactType,
+
+    dateOfBirth: data.dateOfBirth,
+    tags: data.tags,
+    address1: data.address1,
+    city: data.city,
+    state: data.state,
+    postalCode: data.postalCode,
+    country: data.country,
 
     leadGoal: data.leadGoal,
     leadPriority: data.leadPriority,
@@ -326,6 +351,7 @@ async function logContactHistory(tx: any, contactId: string, userId: string | nu
 }
 
 
+
 // --- Main Actions ---
 
 export async function createContact(
@@ -338,6 +364,8 @@ export async function createContact(
 
   const validatedFields = createContactSchema.safeParse({
     name: formData.get('name') || undefined,
+    firstName: formData.get('firstName') || undefined,
+    lastName: formData.get('lastName') || undefined,
     email: formData.get('email') || '',
     phone: formData.get('phone') || undefined,
     message: formData.get('message') || undefined,
@@ -347,6 +375,14 @@ export async function createContact(
     entityId: formData.get('entityId') || undefined,
     roleName: formData.get('roleName') || undefined,
     entityIds: formData.get('entityIds') || undefined,
+
+    dateOfBirth: formData.get('dateOfBirth') || undefined,
+    tags: formData.get('tags') || undefined,
+    address1: formData.get('address1') || undefined,
+    city: formData.get('city') || undefined,
+    state: formData.get('state') || undefined,
+    postalCode: formData.get('postalCode') || undefined,
+    country: formData.get('country') || undefined,
 
     leadGoal: formData.get('leadGoal') || undefined,
     leadPriority: formData.get('leadPriority') || undefined,
@@ -480,13 +516,13 @@ export async function createContact(
         select: { id: true }
       });
 
-      if (googleUser) {
-        console.log('[createContact] Syncing to Google Contacts...');
-        // Fire and forget - don't block the response
-        syncContactToGoogle(googleUser.id, contact.id).catch(e =>
-          console.error('[createContact] Google Sync Failed:', e)
-        );
-      }
+      // DISABLED: Auto-sync removed. Use Google Sync Manager for manual sync.
+      // if (googleUser) {
+      //   console.log('[createContact] Syncing to Google Contacts...');
+      //   syncContactToGoogle(googleUser.id, contact.id).catch(e =>
+      //     console.error('[createContact] Google Sync Failed:', e)
+      //   );
+      // }
     } catch (googleError) {
       console.error('[createContact] Google Sync check failed:', googleError);
     }
@@ -514,82 +550,7 @@ export async function createContact(
   }
 }
 
-
-export async function updateContact(
-  prevState: CreateContactState,
-  formData: FormData
-): Promise<CreateContactState> {
-  const rawData: Record<string, any> = {};
-  formData.forEach((value, key) => { rawData[key] = value; });
-  console.log('[updateContact] RAW FormData:', rawData);
-
-  const validatedFields = updateContactSchema.safeParse({
-    contactId: formData.get('contactId'),
-    name: formData.get('name') || undefined,
-    email: formData.get('email') || '',
-    phone: formData.get('phone') || undefined,
-    message: formData.get('message') || undefined,
-    locationId: formData.get('locationId') || undefined,
-    contactType: formData.get('contactType') || undefined,
-    roleType: formData.get('roleType') || undefined,
-    entityId: formData.get('entityId') || undefined,
-    entityIds: formData.get('entityIds') || undefined,
-    roleName: formData.get('roleName') || undefined,
-
-    leadGoal: formData.get('leadGoal') || undefined,
-    leadPriority: formData.get('leadPriority') || undefined,
-    leadStage: formData.get('leadStage') || undefined,
-    leadSource: formData.get('leadSource') || undefined,
-    leadNextAction: formData.get('leadNextAction') || undefined,
-    leadFollowUpDate: formData.get('leadFollowUpDate') || undefined,
-    leadAssignedToAgent: formData.get('leadAssignedToAgent') || undefined,
-
-    requirementStatus: formData.get('requirementStatus') || undefined,
-    requirementDistrict: formData.get('requirementDistrict') || undefined,
-    requirementBedrooms: formData.get('requirementBedrooms') || undefined,
-    requirementMinPrice: formData.get('requirementMinPrice') || undefined,
-    requirementMaxPrice: formData.get('requirementMaxPrice') || undefined,
-    requirementCondition: formData.get('requirementCondition') || undefined,
-    requirementPropertyTypes: formData.get('requirementPropertyTypes') || undefined,
-    requirementPropertyLocations: formData.get('requirementPropertyLocations') || undefined,
-    requirementOtherDetails: formData.get('requirementOtherDetails') || undefined,
-
-    matchingPropertiesToMatch: formData.get('matchingPropertiesToMatch') || undefined,
-    matchingEmailMatchedProperties: formData.get('matchingEmailMatchedProperties') || undefined,
-    matchingNotificationFrequency: formData.get('matchingNotificationFrequency') || undefined,
-    matchingLastMatchDate: formData.get('matchingLastMatchDate') || undefined,
-
-    propertiesInterested: formData.get('propertiesInterested') || undefined,
-    propertiesInspected: formData.get('propertiesInspected') || undefined,
-    propertiesEmailed: formData.get('propertiesEmailed') || undefined,
-    propertiesMatched: formData.get('propertiesMatched') || undefined,
-
-    propertyWonValue: formData.get('propertyWonValue') || undefined,
-    wonCommission: formData.get('wonCommission') || undefined,
-    propertyWonReference: formData.get('propertyWonReference') || undefined,
-    propertyWonDate: formData.get('propertyWonDate') || undefined,
-  });
-
-  if (!validatedFields.success) {
-    console.log('[updateContact] Validation failed', validatedFields.error.flatten().fieldErrors);
-    return {
-      errors: validatedFields.error.flatten().fieldErrors,
-      message: 'Missing Fields. Failed to Update Contact.',
-      success: false,
-    };
-  }
-
-  const data = validatedFields.data;
-  const { userId } = await auth();
-  if (!userId) {
-    return { success: false, message: 'Unauthorized' };
-  }
-
-  const hasAccess = await verifyUserHasAccessToLocation(userId, data.locationId);
-  if (!hasAccess) {
-    return { success: false, message: 'Unauthorized: You do not have access to this location.' };
-  }
-
+async function updateContactCore(data: ValidatedContactData & { contactId: string }, userId: string): Promise<{ success: boolean; message?: string; errors?: any }> {
   // Resolve internal user ID for history logging
   const dbUser = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } });
   const internalUserId = dbUser?.id || null;
@@ -708,29 +669,149 @@ export async function updateContact(
         select: { id: true }
       });
 
-      if (googleUser) {
-        console.log('[updateContact] Syncing to Google Contacts...');
-        // Fire and forget - don't block the response
-        syncContactToGoogle(googleUser.id, data.contactId).catch(e =>
-          console.error('[updateContact] Google Sync Failed:', e)
-        );
-      }
+      // DISABLED: Auto-sync removed. Use Google Sync Manager for manual sync.
+      // if (googleUser) {
+      //   console.log('[updateContact] Syncing to Google Contacts...');
+      //   syncContactToGoogle(googleUser.id, data.contactId).catch(e =>
+      //     console.error('[updateContact] Google Sync Failed:', e)
+      //   );
+      // }
     } catch (googleError) {
       console.error('[updateContact] Google Sync check failed:', googleError);
     }
 
-  } catch (error) {
+    return { success: true, message: 'Contact updated successfully.' };
+
+  } catch (error: any) {
     console.error('[updateContact] Database Error:', error);
     return {
-      message: 'Database Error: Failed to Update Contact.',
+      message: error.message || 'Database Error: Failed to Update Contact.',
+      success: false,
+    };
+  }
+}
+
+export async function updateContactAction(contactId: string, data: Partial<ValidatedContactData>) {
+  const { userId } = await auth();
+  if (!userId) return { success: false, error: "Unauthorized" };
+
+  // We already have clean data from the UI (mostly), but we need to ensure it fits ValidatedContactData
+  // We can fetch the existing contact to fill in missing required fields if needed, 
+  // but for partial updates, we might want a partial schema.
+  // However, updateContactCore requires ValidatedContactData.
+
+  // Fetch existing validation requirements (locationId is required for core logic)
+  const existing = await db.contact.findUnique({
+    where: { id: contactId },
+    select: { locationId: true, name: true }
+  });
+
+  if (!existing) return { success: false, error: "Contact not found" };
+
+  // Construct full data object
+  const fullData: any = {
+    contactId,
+    locationId: existing.locationId,
+    name: existing.name, // Fallback
+    ...data
+  };
+
+  const res = await updateContactCore(fullData, userId);
+  revalidatePath('/admin/contacts');
+  return res.success ? { success: true } : { success: false, error: res.message };
+}
+
+export async function updateContact(
+  prevState: CreateContactState,
+  formData: FormData
+): Promise<CreateContactState> {
+  const rawData: Record<string, any> = {};
+  formData.forEach((value, key) => { rawData[key] = value; });
+  console.log('[updateContact] RAW FormData:', rawData);
+
+  const validatedFields = updateContactSchema.safeParse({
+    contactId: formData.get('contactId'),
+    name: formData.get('name') || undefined,
+    firstName: formData.get('firstName') || undefined,
+    lastName: formData.get('lastName') || undefined,
+    email: formData.get('email') || '',
+    phone: formData.get('phone') || undefined,
+    message: formData.get('message') || undefined,
+    locationId: formData.get('locationId') || undefined,
+    contactType: formData.get('contactType') || undefined,
+    roleType: formData.get('roleType') || undefined,
+    entityId: formData.get('entityId') || undefined,
+    entityIds: formData.get('entityIds') || undefined,
+    roleName: formData.get('roleName') || undefined,
+
+    dateOfBirth: formData.get('dateOfBirth') || undefined,
+    tags: formData.get('tags') || undefined,
+    address1: formData.get('address1') || undefined,
+    city: formData.get('city') || undefined,
+    state: formData.get('state') || undefined,
+    postalCode: formData.get('postalCode') || undefined,
+    country: formData.get('country') || undefined,
+
+    leadGoal: formData.get('leadGoal') || undefined,
+    leadPriority: formData.get('leadPriority') || undefined,
+    leadStage: formData.get('leadStage') || undefined,
+    leadSource: formData.get('leadSource') || undefined,
+    leadNextAction: formData.get('leadNextAction') || undefined,
+    leadFollowUpDate: formData.get('leadFollowUpDate') || undefined,
+    leadAssignedToAgent: formData.get('leadAssignedToAgent') || undefined,
+
+    requirementStatus: formData.get('requirementStatus') || undefined,
+    requirementDistrict: formData.get('requirementDistrict') || undefined,
+    requirementBedrooms: formData.get('requirementBedrooms') || undefined,
+    requirementMinPrice: formData.get('requirementMinPrice') || undefined,
+    requirementMaxPrice: formData.get('requirementMaxPrice') || undefined,
+    requirementCondition: formData.get('requirementCondition') || undefined,
+    requirementPropertyTypes: formData.get('requirementPropertyTypes') || undefined,
+    requirementPropertyLocations: formData.get('requirementPropertyLocations') || undefined,
+    requirementOtherDetails: formData.get('requirementOtherDetails') || undefined,
+
+    matchingPropertiesToMatch: formData.get('matchingPropertiesToMatch') || undefined,
+    matchingEmailMatchedProperties: formData.get('matchingEmailMatchedProperties') || undefined,
+    matchingNotificationFrequency: formData.get('matchingNotificationFrequency') || undefined,
+    matchingLastMatchDate: formData.get('matchingLastMatchDate') || undefined,
+
+    propertiesInterested: formData.get('propertiesInterested') || undefined,
+    propertiesInspected: formData.get('propertiesInspected') || undefined,
+    propertiesEmailed: formData.get('propertiesEmailed') || undefined,
+    propertiesMatched: formData.get('propertiesMatched') || undefined,
+
+    propertyWonValue: formData.get('propertyWonValue') || undefined,
+    wonCommission: formData.get('wonCommission') || undefined,
+    propertyWonReference: formData.get('propertyWonReference') || undefined,
+    propertyWonDate: formData.get('propertyWonDate') || undefined,
+  });
+
+  if (!validatedFields.success) {
+    console.log('[updateContact] Validation failed', validatedFields.error.flatten().fieldErrors);
+    return {
+      errors: validatedFields.error.flatten().fieldErrors,
+      message: 'Missing Fields. Failed to Update Contact.',
       success: false,
     };
   }
 
-  // revalidatePath('/admin/contacts');
+  const data = validatedFields.data;
+  const { userId } = await auth();
+  if (!userId) {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  const hasAccess = await verifyUserHasAccessToLocation(userId, data.locationId);
+  if (!hasAccess) {
+    return { success: false, message: 'Unauthorized: You do not have access to this location.' };
+  }
+
+  const result = await updateContactCore(data, userId);
+
   return {
-    message: 'Contact updated successfully.',
-    success: true,
+    message: result.message || (result.success ? 'Contact updated successfully.' : 'Update failed'),
+    success: result.success,
+    errors: result.errors,
     contact: {
       id: data.contactId,
       name: data.name,
@@ -807,13 +888,15 @@ export async function getGoogleContactAction(resourceName: string) {
   const { userId } = await auth();
   if (!userId) return { success: false, message: 'Unauthorized' };
 
-  // Get user with google token
+  // Check current user's Google connection
   const user = await db.user.findUnique({
     where: { clerkId: userId },
-    select: { id: true, googleSyncEnabled: true }
+    select: { id: true, googleSyncEnabled: true, googleRefreshToken: true }
   });
 
-  if (!user || !user.googleSyncEnabled) return { success: false, message: 'Google Sync not enabled' };
+  if (!user?.googleSyncEnabled || !user?.googleRefreshToken) {
+    return { success: false, message: 'GOOGLE_NOT_CONNECTED' };
+  }
 
   const { getGoogleContact } = await import('@/lib/google/people');
   const result = await getGoogleContact(user.id, resourceName);
@@ -826,13 +909,15 @@ export async function searchGoogleContactsAction(query: string) {
   const { userId } = await auth();
   if (!userId) return { success: false, message: 'Unauthorized' };
 
-  // Get user with google token
+  // Check current user's Google connection
   const user = await db.user.findUnique({
     where: { clerkId: userId },
-    select: { id: true, googleSyncEnabled: true }
+    select: { id: true, googleSyncEnabled: true, googleRefreshToken: true }
   });
 
-  if (!user || !user.googleSyncEnabled) return { success: false, message: 'Google Sync not enabled' };
+  if (!user?.googleSyncEnabled || !user?.googleRefreshToken) {
+    return { success: false, message: 'GOOGLE_NOT_CONNECTED' };
+  }
 
   const { searchGoogleContacts } = await import('@/lib/google/people');
   const results = await searchGoogleContacts(user.id, query);
@@ -855,9 +940,16 @@ export async function resolveSyncConflict(
   if (!userId) return { success: false, message: 'Unauthorized' };
 
   try {
-    // Get internal user ID
-    const user = await db.user.findUnique({ where: { clerkId: userId } });
+    // Get internal user ID and check Google connection
+    const user = await db.user.findUnique({
+      where: { clerkId: userId },
+      select: { id: true, googleSyncEnabled: true, googleRefreshToken: true }
+    });
     if (!user) return { success: false, message: 'User not found' };
+
+    if (!user.googleSyncEnabled || !user.googleRefreshToken) {
+      return { success: false, message: 'GOOGLE_NOT_CONNECTED' };
+    }
 
     const contact = await db.contact.findUnique({ where: { id: contactId } });
     if (!contact) return { success: false, message: 'Contact not found' };
@@ -883,6 +975,24 @@ export async function resolveSyncConflict(
       return { success: true, message: 'Resolved: Updated local contact from Google.' };
     }
 
+    // 3. LINK ONLY
+    if (resolution === 'link_only' && googleData?.resourceName) {
+      console.log(`[Resolve Conflict] Linking Local ${contactId} to Google ${googleData.resourceName}`);
+
+      await db.contact.update({
+        where: { id: contactId },
+        data: {
+          googleContactId: googleData.resourceName,
+          googleContactUpdatedAt: googleData.updateTime || new Date(),
+          lastGoogleSync: new Date(),
+          error: null
+        }
+      });
+
+      revalidatePath('/admin/contacts');
+      return { success: true, message: 'Linked successfully.' };
+    }
+
     // 2. USE LOCAL (Overwrite Google - Force Push)
     if (resolution === 'use_local') {
       console.log(`[Resolve Conflict] Overwriting Google Contact with Local Data`);
@@ -893,45 +1003,21 @@ export async function resolveSyncConflict(
           where: { id: contactId },
           data: { googleContactId: googleData.resourceName, error: null }
         });
-      } else {
-        // No Google ID provided? Then we are creating NEW or re-using existing if failed?
-        // If existing was 404, we cleared it. So this is effectively "Create New".
-        await db.contact.update({
-          where: { id: contactId },
-          data: { error: null }
-        });
       }
 
-      // Trigger Sync
+      // Push to Google using current user
       const { syncContactToGoogle } = await import('@/lib/google/people');
-      // We don't await this to keep UI snappy? No, for resolution we should await to ensure success
       await syncContactToGoogle(user.id, contactId);
 
       revalidatePath('/admin/contacts');
-      return { success: true, message: 'Resolved: Pushing local changes to Google.' };
+      return { success: true, message: 'Pushed local data to Google.' };
     }
 
-    // 3. LINK ONLY
-    if (resolution === 'link_only' && googleData?.resourceName) {
-      console.log(`[Resolve Conflict] Relinking only.`);
-      await db.contact.update({
-        where: { id: contactId },
-        data: {
-          googleContactId: googleData.resourceName,
-          googleContactUpdatedAt: googleData.updateTime,
-          lastGoogleSync: new Date(),
-          error: null
-        }
-      });
-      revalidatePath('/admin/contacts');
-      return { success: true, message: 'Resolved: Link restored.' };
-    }
+    return { success: false, message: 'Invalid Resolution Action' };
 
-    return { success: false, message: 'Invalid resolution parameters.' };
-
-  } catch (error: any) {
+  } catch (error) {
     console.error('[resolveSyncConflict] Error:', error);
-    return { success: false, message: 'Failed to resolve conflict: ' + error.message };
+    return { success: false, message: 'Conflict Resolution Failed' };
   }
 }
 
@@ -1064,7 +1150,7 @@ export async function createViewing(
             name: contact.name || undefined,
             email: contact.email || undefined,
             phone: contact.phone || undefined,
-          });
+          }, contact.ghlContactId);
 
           if (ghlContactId) {
             await db.contact.update({ where: { id: contact.id }, data: { ghlContactId } });
@@ -1111,6 +1197,19 @@ export async function createViewing(
     await logContactHistory(db, data.contactId, internalUserId, 'VIEWING_ADDED', { property: propertyRef, date: data.date, notes: data.notes });
 
     revalidatePath(`/admin/properties/${data.propertyId}`);
+    revalidatePath(`/admin/properties/${data.propertyId}`);
+
+    // Trigger Google Sync for Visual ID Update (only if current user has Google connected)
+    const currentUserForSync = await db.user.findUnique({
+      where: { clerkId: currentUserId },
+      select: { id: true, googleSyncEnabled: true, googleRefreshToken: true }
+    });
+    // DISABLED: Auto-sync removed. Use Google Sync Manager for manual sync.
+    // if (currentUserForSync?.googleSyncEnabled && currentUserForSync?.googleRefreshToken) {
+    //   const { syncContactToGoogle } = await import('@/lib/google/people');
+    //   syncContactToGoogle(currentUserForSync.id, contact.id).catch(e => console.error(e));
+    // }
+
     return { success: true, message: 'Viewing scheduled successfully!' };
   } catch (error) {
     console.error('Failed to create viewing:', error);
@@ -1167,6 +1266,17 @@ export async function updateViewing(
       const propertyRef = propertyForLog?.reference || propertyForLog?.title || 'Unknown Property';
 
       await logContactHistory(db, contactId, internalUserId, 'VIEWING_UPDATED', { property: propertyRef, date: validatedFields.data.date, notes: validatedFields.data.notes });
+
+      // Trigger Google Sync for Visual ID Update (only if current user has Google connected)
+      const currentUserForSync = await db.user.findUnique({
+        where: { clerkId: currentUserId },
+        select: { id: true, googleSyncEnabled: true, googleRefreshToken: true }
+      });
+      // DISABLED: Auto-sync removed. Use Google Sync Manager for manual sync.
+      // if (currentUserForSync?.googleSyncEnabled && currentUserForSync?.googleRefreshToken) {
+      //   const { syncContactToGoogle } = await import('@/lib/google/people');
+      //   syncContactToGoogle(currentUserForSync.id, contactId).catch(e => console.error(e));
+      // }
     }
 
     return { success: true, message: 'Viewing updated successfully.' };
@@ -1224,16 +1334,55 @@ export async function checkPropertyOwnerEmail(propertyId: string) {
   }
 }
 
-export async function deleteContact(contactId: string) {
+export async function deleteContact(
+  contactId: string,
+  options?: {
+    deleteFromGhl?: boolean;
+    deleteFromGoogle?: boolean;
+  }
+) {
   const { userId } = await auth();
   if (!userId) return { success: false, message: 'Unauthorized' };
 
   try {
-    const contact = await db.contact.findUnique({ where: { id: contactId }, select: { locationId: true } });
+    const contact = await db.contact.findUnique({
+      where: { id: contactId },
+      select: {
+        locationId: true,
+        ghlContactId: true,
+        googleContactId: true
+      }
+    });
     if (!contact) return { success: false, message: 'Contact not found' };
 
     const hasAccess = await verifyUserHasAccessToLocation(userId, contact.locationId);
     if (!hasAccess) return { success: false, message: 'Unauthorized' };
+
+    // 1. Delete from GoHighLevel
+    if (options?.deleteFromGhl && contact.ghlContactId) {
+      const location = await db.location.findUnique({
+        where: { id: contact.locationId },
+        select: { ghlLocationId: true }
+      });
+      if (location?.ghlLocationId) {
+        const { deleteContactFromGHL } = await import('@/lib/ghl/stakeholders');
+        await deleteContactFromGHL(location.ghlLocationId, contact.ghlContactId);
+      }
+    }
+
+    // 2. Delete from Google Contacts
+    if (options?.deleteFromGoogle && contact.googleContactId) {
+      const user = await db.user.findUnique({
+        where: { clerkId: userId },
+        select: { id: true, googleSyncEnabled: true }
+      });
+
+      // Only allow if user has Google Sync enabled (implicit auth check)
+      if (user?.googleSyncEnabled) {
+        const { deleteContactFromGoogle } = await import('@/lib/google/people');
+        await deleteContactFromGoogle(user.id, contact.googleContactId);
+      }
+    }
 
     await db.$transaction(async (tx) => {
       // Delete Roles
@@ -1394,5 +1543,26 @@ export async function unlinkGoogleContact(contactId: string) {
     return { success: true, message: 'Contact unlinked from Google.' };
   } catch (error: any) {
     return { success: false, message: 'Failed to unlink: ' + error.message };
+  }
+}
+
+export async function verifyAndHealContact(contactId: string, error: string | null) {
+  if (!error?.includes('Link broken') && !error?.includes('not found')) return;
+
+  const { userId } = await auth();
+  if (!userId) return;
+
+  // Check connection
+  const user = await db.user.findUnique({
+    where: { clerkId: userId },
+    select: { id: true, googleSyncEnabled: true, googleRefreshToken: true }
+  });
+
+  if (user?.googleSyncEnabled && user?.googleRefreshToken) {
+    console.log(`[Auto-Heal] broken link detected for contact ${contactId}. Attempting recovery...`);
+    // This sync call will trigger the self-healing logic in people.ts (search & re-link)
+    const { syncContactToGoogle } = await import('@/lib/google/people');
+    await syncContactToGoogle(user.id, contactId).catch(e => console.error('[Auto-Heal] Failed:', e));
+    revalidatePath(`/admin/contacts/${contactId}/view`);
   }
 }

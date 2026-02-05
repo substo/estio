@@ -21,7 +21,7 @@ export function OutlookSyncManager({ contactEmail, contactName, open, onOpenChan
     const [loading, setLoading] = useState(false);
     const [syncing, setSyncing] = useState(false);
     const [emails, setEmails] = useState<OutlookEmail[]>([]);
-    const [connectionStatus, setConnectionStatus] = useState<{ connected: boolean; method?: string; email?: string }>({ connected: false });
+    const [connectionStatus, setConnectionStatus] = useState<{ connected: boolean; method?: string; email?: string; lastSyncedAt?: Date }>({ connected: false });
     const [filter, setFilter] = useState<'all' | 'inbox' | 'sent'>('all');
     const [searchQuery, setSearchQuery] = useState('');
 
@@ -95,13 +95,17 @@ export function OutlookSyncManager({ contactEmail, contactName, open, onOpenChan
                 </div>
             );
         }
-
         return (
             <div className="flex items-center gap-2 text-green-700 bg-green-50 p-3 rounded-md mb-4 border border-green-200">
                 <CheckCircle className="h-5 w-5" />
                 <div className="text-sm flex-1">
                     <span className="font-semibold block">Connected</span>
                     via {connectionStatus.method === 'puppeteer' ? 'Browser Login' : 'OAuth'} ({connectionStatus.email})
+                    {connectionStatus.lastSyncedAt && (
+                        <span className="block text-xs text-green-600 mt-1">
+                            Last synced: {formatDistanceToNow(new Date(connectionStatus.lastSyncedAt), { addSuffix: true })}
+                        </span>
+                    )}
                 </div>
                 <Button size="sm" variant="outline" onClick={handleSync} disabled={syncing}>
                     {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}

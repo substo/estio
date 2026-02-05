@@ -14,6 +14,7 @@ export const CONTACT_TYPES = [
     'Associate',
     'Contact',
     'Tenant',
+    'WhatsAppGroup',
 ] as const;
 
 export type ContactType = (typeof CONTACT_TYPES)[number];
@@ -225,6 +226,15 @@ export const CONTACT_TYPE_CONFIG: Record<ContactType, ContactTypeConfig> = {
         entityRequired: true,
         entityLabel: 'Tenant of',
     },
+    WhatsAppGroup: {
+        label: 'WhatsApp Group',
+        description: 'Automated contact for a WhatsApp Group',
+        visibleTabs: ['details'],
+        showLeadFields: false,
+        impliedRole: 'lead',
+        entityType: 'none',
+        entityRequired: false
+    }
 };
 
 export const DEFAULT_CONTACT_TYPE: ContactType = 'Lead';

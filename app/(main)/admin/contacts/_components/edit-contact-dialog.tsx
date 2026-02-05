@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react';
 import { Pencil, Trash, RefreshCw, UploadCloud } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { pullLead } from '@/app/(main)/admin/settings/crm/actions';
+import { previewLeadAction } from '@/app/(main)/admin/settings/crm/actions';
+import { CrmMergeDialog } from './crm-merge-dialog';
 import {
     Dialog,
     DialogContent,
@@ -13,17 +14,6 @@ import {
     DialogTitle,
     DialogTrigger,
 } from '@/components/ui/dialog';
-import {
-    AlertDialog,
-    AlertDialogAction,
-    AlertDialogCancel,
-    AlertDialogContent,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogHeader,
-    AlertDialogTitle,
-    AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -34,12 +24,13 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { TabsContent, TabsTrigger } from "@/components/ui/tabs";
-import { createViewing, updateViewing, deleteViewing, checkPropertyOwnerEmail, deleteContact } from '../actions';
+import { createViewing, updateViewing, deleteViewing, checkPropertyOwnerEmail, deleteContact, updateContactAction } from '../actions';
 import { useToast } from '@/components/ui/use-toast';
 import { getPropertiesForSelect, getUsersForSelect, getContactViewings, getContactHistory } from '../fetch-helpers';
 
 import { SearchableSelect } from './searchable-select';
 import { HistoryTab } from './history-tab';
+import { DeleteContactDialog } from './delete-contact-dialog';
 
 import { ContactForm, type ContactData } from './contact-form';
 import { CONTACT_TYPE_CONFIG, type ContactType } from './contact-types';
@@ -67,6 +58,8 @@ export function EditContactForm({ contact, onSuccess, onDelete, leadSources, ini
     const [pullModalOpen, setPullModalOpen] = useState(false);
     const [crmLeadId, setCrmLeadId] = useState('');
     const [isPulling, setIsPulling] = useState(false);
+    const [mergeModalOpen, setMergeModalOpen] = useState(false);
+    const [remoteData, setRemoteData] = useState<any>(null);
 
     // Fetch data for Viewings and Modal
     useEffect(() => {
@@ -186,12 +179,12 @@ export function EditContactForm({ contact, onSuccess, onDelete, leadSources, ini
         }
         setIsPulling(true);
         try {
-            const result = await pullLead(crmLeadId);
+            const result = await previewLeadAction(crmLeadId);
             if (result.success) {
-                toast({ title: "Success", description: "Lead data pulled successfully. Refreshing..." });
-                setPullModalOpen(false);
+                setRemoteData(result.data?.data);
+                setPullModalOpen(false); // Close ID input dialog
+                setMergeModalOpen(true); // Open Merge Dialog
                 setCrmLeadId('');
-                if (onSuccess) onSuccess(); // Will close modal or refresh data
             } else {
                 toast({ title: "Error", description: result.error || "Failed to pull lead", variant: "destructive" });
             }
@@ -202,230 +195,233 @@ export function EditContactForm({ contact, onSuccess, onDelete, leadSources, ini
         }
     };
 
-    const handleDeleteContact = async () => {
-        setIsDeleting(true);
-        const result = await deleteContact(contact.id);
-        if (result.success) {
-            toast({ title: "Success", description: result.message });
-            if (onDelete) onDelete();
-            else if (onSuccess) onSuccess();
-        } else {
-            toast({ title: "Error", description: result.message, variant: "destructive" });
-            setIsDeleting(false);
+    const handleMergeConfirm = async (mergedData: any) => {
+        setMergeModalOpen(false);
+        const toastId = toast({ title: "Updating contact...", description: "Saving merged data." });
+
+        try {
+            const res = await updateContactAction(contact.id, mergedData);
+            if (res.success) {
+                toast({ title: "Success", description: "Contact updated successfully" });
+                if (onSuccess) onSuccess(); // Refresh data
+            } else {
+                toast({ title: "Error", description: res.error || "Update failed", variant: "destructive" });
+            }
+        } catch (e) {
+            toast({ title: "Error", description: "Server error during update", variant: "destructive" });
         }
     };
+
 
     const contactConfig = CONTACT_TYPE_CONFIG[(contact.contactType as ContactType) || 'Lead'];
     // Show Viewings only if 'properties' tab is enabled (implies property interest/seeker)
     const showViewings = contactConfig.visibleTabs.includes('properties');
 
     return (
-        <ContactForm
-            initialMode={initialMode}
-            contact={contact}
-            locationId={contact.locationId}
-            onSuccess={onSuccess}
-            leadSources={leadSources}
-            isOutlookConnected={isOutlookConnected}
-            additionalTabCount={showViewings ? 2 : 1}
-            additionalTabs={
-                <>
-                    {showViewings ? <TabsTrigger value="viewings">Viewings</TabsTrigger> : null}
-                    <TabsTrigger value="history">History</TabsTrigger>
-                </>
-            }
-            additionalTabContent={(isEditing) => (
-                <>
-                    {showViewings ? (
-                        <TabsContent value="viewings" forceMount={true} className="space-y-4 pt-4 data-[state=inactive]:hidden">
-                            <div className="space-y-4">
-                                <div className="flex justify-between items-center">
-                                    <h3 className="font-semibold">Viewings</h3>
-                                    {isEditing && (
-                                        <Button
-                                            onClick={() => {
-                                                resetViewingForm();
-                                                setViewingModalOpen(true);
-                                            }}
-                                            size="sm"
-                                            type="button"
-                                        >
-                                            Add a New Property Viewing
-                                        </Button>
-                                    )}
-                                </div>
+        <>
+            <ContactForm
+                initialMode={initialMode}
+                contact={contact}
+                locationId={contact.locationId}
+                onSuccess={onSuccess}
+                leadSources={leadSources}
+                isOutlookConnected={isOutlookConnected}
+                additionalTabCount={showViewings ? 2 : 1}
+                additionalTabs={
+                    <>
+                        {showViewings ? <TabsTrigger value="viewings">Viewings</TabsTrigger> : null}
+                        <TabsTrigger value="history">History</TabsTrigger>
+                    </>
+                }
+                additionalTabContent={(isEditing) => (
+                    <>
+                        {showViewings ? (
+                            <TabsContent value="viewings" forceMount={true} className="space-y-4 pt-4 data-[state=inactive]:hidden">
+                                <div className="space-y-4">
+                                    <div className="flex justify-between items-center">
+                                        <h3 className="font-semibold">Viewings</h3>
+                                        {isEditing && (
+                                            <Button
+                                                onClick={() => {
+                                                    resetViewingForm();
+                                                    setViewingModalOpen(true);
+                                                }}
+                                                size="sm"
+                                                type="button"
+                                            >
+                                                Add a New Property Viewing
+                                            </Button>
+                                        )}
+                                    </div>
 
-                                <Dialog open={viewingModalOpen} onOpenChange={setViewingModalOpen}>
-                                    <DialogContent className="sm:max-w-[500px]">
-                                        <DialogHeader>
-                                            <DialogTitle>{editingViewingId ? 'Edit Viewing' : 'Add a New Property Viewing'}</DialogTitle>
-                                            <DialogDescription>
-                                                {editingViewingId ? 'Update the details of the viewing below.' : 'Enter the details for the new viewing.'}
-                                            </DialogDescription>
-                                        </DialogHeader>
-                                        <div className="grid gap-4 py-4">
-                                            <div className="grid grid-cols-2 gap-4">
-                                                <div className="space-y-2">
-                                                    <Label>Date & Time</Label>
-                                                    <Input
-                                                        type="datetime-local"
-                                                        value={viewingDate}
-                                                        onChange={e => setViewingDate(e.target.value)}
-                                                    />
+                                    <Dialog open={viewingModalOpen} onOpenChange={setViewingModalOpen}>
+                                        <DialogContent className="sm:max-w-[500px]">
+                                            <DialogHeader>
+                                                <DialogTitle>{editingViewingId ? 'Edit Viewing' : 'Add a New Property Viewing'}</DialogTitle>
+                                                <DialogDescription>
+                                                    {editingViewingId ? 'Update the details of the viewing below.' : 'Enter the details for the new viewing.'}
+                                                </DialogDescription>
+                                            </DialogHeader>
+                                            <div className="grid gap-4 py-4">
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <div className="space-y-2">
+                                                        <Label>Date & Time</Label>
+                                                        <Input
+                                                            type="datetime-local"
+                                                            value={viewingDate}
+                                                            onChange={e => setViewingDate(e.target.value)}
+                                                        />
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                        <Label>Assigned Agent</Label>
+                                                        <Select value={viewingUserId} onValueChange={setViewingUserId}>
+                                                            <SelectTrigger><SelectValue placeholder="Select Agent" /></SelectTrigger>
+                                                            <SelectContent>
+                                                                {users.map(u => (
+                                                                    <SelectItem key={u.id} value={u.id}>{u.name || u.email}</SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                        {viewingUserId && users.find(u => u.id === viewingUserId)?.ghlCalendarId && (
+                                                            <div className="mt-1 text-xs text-green-600 flex items-center gap-1">
+                                                                <span>📅 GHL Calendar Connected</span>
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 </div>
                                                 <div className="space-y-2">
-                                                    <Label>Assigned Agent</Label>
-                                                    <Select value={viewingUserId} onValueChange={setViewingUserId}>
-                                                        <SelectTrigger><SelectValue placeholder="Select Agent" /></SelectTrigger>
-                                                        <SelectContent>
-                                                            {users.map(u => (
-                                                                <SelectItem key={u.id} value={u.id}>{u.name || u.email}</SelectItem>
-                                                            ))}
-                                                        </SelectContent>
-                                                    </Select>
-                                                    {viewingUserId && users.find(u => u.id === viewingUserId)?.ghlCalendarId && (
-                                                        <div className="mt-1 text-xs text-green-600 flex items-center gap-1">
-                                                            <span>📅 GHL Calendar Connected</span>
+                                                    <Label>Property</Label>
+                                                    <SearchableSelect
+                                                        name="viewingPropertyId"
+                                                        value={viewingPropertyId}
+                                                        onChange={setViewingPropertyId}
+                                                        options={properties.map(p => ({ value: p.id, label: (p as any).unitNumber ? `[${(p as any).unitNumber}] ${p.title}` : p.title }))}
+                                                        placeholder="Select Property..."
+                                                        searchPlaceholder="Search Property..."
+                                                    />
+                                                    {ownerNotification && (
+                                                        <div className="text-sm text-yellow-600 bg-yellow-50 p-2 rounded border border-yellow-200">
+                                                            {ownerNotification}
                                                         </div>
                                                     )}
                                                 </div>
-                                            </div>
-                                            <div className="space-y-2">
-                                                <Label>Property</Label>
-                                                <SearchableSelect
-                                                    name="viewingPropertyId"
-                                                    value={viewingPropertyId}
-                                                    onChange={setViewingPropertyId}
-                                                    options={properties.map(p => ({ value: p.id, label: (p as any).unitNumber ? `[${(p as any).unitNumber}] ${p.title}` : p.title }))}
-                                                    placeholder="Select Property..."
-                                                    searchPlaceholder="Search Property..."
-                                                />
-                                                {ownerNotification && (
-                                                    <div className="text-sm text-yellow-600 bg-yellow-50 p-2 rounded border border-yellow-200">
-                                                        {ownerNotification}
-                                                    </div>
-                                                )}
-                                            </div>
-                                            <div className="space-y-2">
-                                                <Label>Notes</Label>
-                                                <Input
-                                                    value={viewingNotes}
-                                                    onChange={e => setViewingNotes(e.target.value)}
-                                                    placeholder="Customer Feedback"
-                                                />
-                                            </div>
-                                        </div>
-                                        <DialogFooter>
-                                            <Button variant="ghost" type="button" onClick={() => setViewingModalOpen(false)}>Cancel</Button>
-                                            <Button type="button" onClick={handleSaveViewing} disabled={loadingData}>
-                                                {editingViewingId ? 'Update Viewing' : 'Save Viewing'}
-                                            </Button>
-                                        </DialogFooter>
-                                    </DialogContent>
-                                </Dialog>
-
-                                <div className="pt-2">
-                                    {pastViewings.length === 0 ? (
-                                        <p className="text-sm text-muted-foreground">No viewings recorded.</p>
-                                    ) : (
-                                        <div className="space-y-2 max-h-[200px] overflow-y-auto w-full">
-                                            {pastViewings.map((v) => (
-                                                <div key={v.id} className="text-sm bg-gray-50 dark:bg-gray-900 p-2 rounded border flex flex-col gap-1 w-full">
-                                                    <div className="flex justify-between items-start font-medium w-full">
-                                                        <span>{new Date(v.date).toLocaleString()} - {v.property.unitNumber || v.property.title}</span>
-                                                        <div className="flex items-center space-x-2">
-                                                            <span className="text-muted-foreground text-xs mr-2">{v.user.name}</span>
-                                                            {isEditing && (
-                                                                <>
-                                                                    <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={() => handleEditViewing(v)}>
-                                                                        <Pencil className="h-3 w-3" />
-                                                                    </Button>
-                                                                    <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-red-50" onClick={() => handleDeleteViewing(v.id)}>
-                                                                        <Trash className="h-3 w-3" />
-                                                                    </Button>
-                                                                </>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                    <div className="text-gray-600">{v.notes}</div>
+                                                <div className="space-y-2">
+                                                    <Label>Notes</Label>
+                                                    <Input
+                                                        value={viewingNotes}
+                                                        onChange={e => setViewingNotes(e.target.value)}
+                                                        placeholder="Customer Feedback"
+                                                    />
                                                 </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        </TabsContent>
-                    ) : null}
+                                            </div>
+                                            <DialogFooter>
+                                                <Button variant="ghost" type="button" onClick={() => setViewingModalOpen(false)}>Cancel</Button>
+                                                <Button type="button" onClick={handleSaveViewing} disabled={loadingData}>
+                                                    {editingViewingId ? 'Update Viewing' : 'Save Viewing'}
+                                                </Button>
+                                            </DialogFooter>
+                                        </DialogContent>
+                                    </Dialog>
 
-                    <TabsContent value="history" forceMount={true} className="space-y-4 pt-4 data-[state=inactive]:hidden">
-                        <div className="space-y-4">
-                            <h3 className="font-semibold">Audit History</h3>
-                            <HistoryTab history={history} loading={loadingData} contact={contact} />
-                        </div>
-                    </TabsContent>
-                </>
-            )}
-            additionalFooter={
-                <div className="flex justify-between w-full">
-                    <div className="flex gap-2">
-                        <Dialog open={pullModalOpen} onOpenChange={setPullModalOpen}>
-                            <DialogTrigger asChild>
-                                <Button variant="outline" type="button">
-                                    <UploadCloud className="mr-2 h-4 w-4" /> Pull from CRM
-                                </Button>
-                            </DialogTrigger>
-                            <DialogContent>
-                                <DialogHeader>
-                                    <DialogTitle>Pull from Old CRM</DialogTitle>
-                                    <DialogDescription>
-                                        Enter the numeric Lead ID from the old CRM to pull data. This will update this contact.
-                                    </DialogDescription>
-                                </DialogHeader>
-                                <div className="space-y-4 py-4">
-                                    <div className="space-y-2">
-                                        <Label>CRM Lead ID</Label>
-                                        <Input
-                                            value={crmLeadId}
-                                            onChange={(e) => setCrmLeadId(e.target.value)}
-                                            placeholder="e.g. 12345"
-                                        />
+                                    <div className="pt-2">
+                                        {pastViewings.length === 0 ? (
+                                            <p className="text-sm text-muted-foreground">No viewings recorded.</p>
+                                        ) : (
+                                            <div className="space-y-2 max-h-[200px] overflow-y-auto w-full">
+                                                {pastViewings.map((v) => (
+                                                    <div key={v.id} className="text-sm bg-gray-50 dark:bg-gray-900 p-2 rounded border flex flex-col gap-1 w-full">
+                                                        <div className="flex justify-between items-start font-medium w-full">
+                                                            <span>{new Date(v.date).toLocaleString()} - {v.property.unitNumber || v.property.title}</span>
+                                                            <div className="flex items-center space-x-2">
+                                                                <span className="text-muted-foreground text-xs mr-2">{v.user.name}</span>
+                                                                {isEditing && (
+                                                                    <>
+                                                                        <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={() => handleEditViewing(v)}>
+                                                                            <Pencil className="h-3 w-3" />
+                                                                        </Button>
+                                                                        <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-red-50" onClick={() => handleDeleteViewing(v.id)}>
+                                                                            <Trash className="h-3 w-3" />
+                                                                        </Button>
+                                                                    </>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        <div className="text-gray-600">{v.notes}</div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
-                                <DialogFooter>
-                                    <Button variant="outline" onClick={() => setPullModalOpen(false)}>Cancel</Button>
-                                    <Button onClick={handlePullFromCrm} disabled={isPulling}>
-                                        {isPulling && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}
-                                        {isPulling ? 'Pulling...' : 'Pull Data'}
-                                    </Button>
-                                </DialogFooter>
-                            </DialogContent>
-                        </Dialog>
-                    </div>
+                            </TabsContent>
+                        ) : null}
 
-                    <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                            <Button type="button" variant="destructive" disabled={isDeleting}>
-                                <Trash className="mr-2 h-4 w-4" /> Delete Contact
-                            </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                            <AlertDialogHeader>
-                                <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                    This action cannot be undone. This will permanently delete the contact and all associated data.
-                                </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction onClick={handleDeleteContact} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                                    {isDeleting ? "Deleting..." : "Delete"}
-                                </AlertDialogAction>
-                            </AlertDialogFooter>
-                        </AlertDialogContent>
-                    </AlertDialog>
-                </div>
-            }
-        />
+                        <TabsContent value="history" forceMount={true} className="space-y-4 pt-4 data-[state=inactive]:hidden">
+                            <div className="space-y-4">
+                                <h3 className="font-semibold">Audit History</h3>
+                                <HistoryTab history={history} loading={loadingData} contact={contact} />
+                            </div>
+                        </TabsContent>
+                    </>
+                )}
+                additionalFooter={
+                    <div className="flex justify-between w-full">
+                        <div className="flex gap-2">
+                            <Dialog open={pullModalOpen} onOpenChange={setPullModalOpen}>
+                                <DialogTrigger asChild>
+                                    <Button variant="outline" type="button">
+                                        <UploadCloud className="mr-2 h-4 w-4" /> Pull from CRM
+                                    </Button>
+                                </DialogTrigger>
+                                <DialogContent>
+                                    <DialogHeader>
+                                        <DialogTitle>Pull from Old CRM</DialogTitle>
+                                        <DialogDescription>
+                                            Enter the numeric Lead ID from the old CRM to pull data. This will update this contact.
+                                        </DialogDescription>
+                                    </DialogHeader>
+                                    <div className="space-y-4 py-4">
+                                        <div className="space-y-2">
+                                            <Label>CRM Lead ID</Label>
+                                            <Input
+                                                value={crmLeadId}
+                                                onChange={(e) => setCrmLeadId(e.target.value)}
+                                                placeholder="e.g. 12345"
+                                            />
+                                        </div>
+                                    </div>
+                                    <DialogFooter>
+                                        <Button variant="outline" onClick={() => setPullModalOpen(false)}>Cancel</Button>
+                                        <Button onClick={handlePullFromCrm} disabled={isPulling}>
+                                            {isPulling && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}
+                                            {isPulling ? 'Pulling...' : 'Pull Data'}
+                                        </Button>
+                                    </DialogFooter>
+                                </DialogContent>
+                            </Dialog>
+                        </div>
+
+                        <DeleteContactDialog
+                            contact={contact}
+                            onSuccess={onSuccess}
+                            onDelete={onDelete}
+                        />
+                    </div>
+                }
+            />
+
+            {/* Merge Dialog */}
+            {mergeModalOpen && remoteData && (
+                <CrmMergeDialog
+                    open={mergeModalOpen}
+                    onOpenChange={setMergeModalOpen}
+                    localContact={contact}
+                    remoteData={remoteData}
+                    duplicateOf={null}
+                    onConfirm={(data) => handleMergeConfirm(data)}
+                />
+            )}
+        </>
     );
 }
 

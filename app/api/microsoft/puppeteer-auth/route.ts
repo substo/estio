@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import db from '@/lib/db';
 import { outlookPuppeteerService } from '@/lib/microsoft/outlook-puppeteer';
+import { syncEmailsFromOWA } from '@/lib/microsoft/owa-email-sync';
+
+export const dynamic = 'force-dynamic';
 
 /**
  * POST: Initiate Puppeteer login
@@ -47,10 +50,24 @@ export async function POST(req: NextRequest) {
             await outlookPuppeteerService.saveSession(user.id, email, password, result.cookies);
         }
 
-        return NextResponse.json({
+        const response = NextResponse.json({
             success: true,
             message: 'Connected to Outlook successfully'
         });
+
+        // Fire-and-forget initial sync to populate "Last Synced" state immediately
+        // We don't await this to keep the UI responsive
+        (async () => {
+            try {
+                console.log(`[OutlookPuppeteerAuth] Triggering initial sync for user ${user.id}`);
+                // Sync inbox first to update state quickly
+                await syncEmailsFromOWA(user.id, 'inbox');
+            } catch (err) {
+                console.error('[OutlookPuppeteerAuth] Initial sync failed:', err);
+            }
+        })();
+
+        return response;
 
     } catch (error: any) {
         console.error('[OutlookPuppeteerAuth] Error:', error);
@@ -77,7 +94,12 @@ export async function GET(req: NextRequest) {
                 outlookAuthMethod: true,
                 outlookEmail: true,
                 outlookSyncEnabled: true,
-                outlookSessionExpiry: true
+                outlookSessionExpiry: true,
+                outlookSyncState: {
+                    select: {
+                        lastSyncedAt: true
+                    }
+                }
             }
         });
 
@@ -103,7 +125,9 @@ export async function GET(req: NextRequest) {
             method: 'puppeteer',
             email: user.outlookEmail,
             sessionExpiry: user.outlookSessionExpiry,
-            sessionExpired
+            sessionExpired,
+            lastSyncedAt: user.outlookSyncState?.lastSyncedAt,
+            syncEnabled: user.outlookSyncEnabled
         });
 
     } catch (error: any) {

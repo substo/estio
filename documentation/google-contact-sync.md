@@ -1,9 +1,10 @@
 # Google Contact Sync Specification
 
 ## Overview
-The Google Contact Sync feature provides a **3-way synchronization** between Estio Contacts, Google Contacts, and GoHighLevel. Its primary goal is to **solve the "Caller ID" problem**—identifying leads instantly on incoming calls without cluttering the contact's actual Name field.
+The Google Contact Sync feature provides a **Manual synchronization** mechanism between Estio Contacts, Google Contacts, and GoHighLevel. Its primary goal is to **solve the "Caller ID" problem**—identifying leads instantly on incoming calls without cluttering the contact's actual Name field.
 
-When a contact is created or updated in Estio (via the admin page or WhatsApp), it automatically syncs to both **Google Contacts** and **GoHighLevel (GHL)**, ensuring the "Visual ID" (Caller ID string) is consistent across all platforms.
+> [!IMPORTANT]
+> **Manual Control Only**: Previous logic relied on automatic background synchronization. As of Feb 2026, **all automatic syncs are disabled**. Updates ONLY occur when a user explicitly clicks "Sync", "Link", or "Import" in the Google Sync Manager.
 
 ## The "Visual ID" Strategy
 
@@ -16,11 +17,21 @@ Real estate agents need to know *exactly* who is calling (e.g., "Budget? Looking
 ### Solution Mapping
 | Platform | Field | Value | Visual Result (Incoming Call) |
 | :--- | :--- | :--- | :--- |
-| **Estio** | `name` | John Doe | **John Doe** |
+| **Estio** | `firstName` | John | **John Doe** |
+| | `lastName` | Doe | |
+| | `dateOfBirth` | 1980-01-01 | |
+| | `address` | Main St, New York | |
 | | `companyRoles` | *Internal Relations* | |
-| **Google Contacts** | `names.givenName` | John Doe | **John Doe** |
+| **Google Contacts** | `names.givenName` | John | **John Doe** |
+| | `names.familyName` | Doe | |
+| | `birthdays` | 1980-01-01 | |
+| | `addresses` | Main St, New York | |
 | | `organizations[0].name` | **Lead Rent DT1234 Paphos €750** | **Lead Rent DT1234 Paphos €750** |
-| **GoHighLevel** | `name` | John Doe | John Doe |
+| **GoHighLevel** | `firstName` | John | John Doe |
+| | `lastName` | Doe | |
+| | `dateOfBirth` | 1980-01-01 | |
+| | `address1` | Main St | |
+| | `city` | New York | |
 | | `companyName` | **Lead Rent DT1234 Paphos €750** | **Lead Rent DT1234 Paphos €750** |
 
 This guarantees that on iOS/Android, the incoming call screen shows the Name (big) and the "Company" (small, but visible), providing the context needed.
@@ -33,46 +44,69 @@ This guarantees that on iOS/Android, the incoming call screen shows the Name (bi
 -   **User Model**:
     -   `googleAccessToken`, `googleRefreshToken`: Stores OAuth credentials.
     -   `googleSyncEnabled`: Toggle for the feature.
+    -   `googleSyncDirection`: **(New)** Defines the "Source of Truth".
+        -   `ESTIO_TO_GOOGLE`: Sync pushes Estio data to Google (Overwrites Google).
+        -   `GOOGLE_TO_ESTIO`: Sync pulls Google data to Estio (Overwrites Estio).
 -   **Contact Model**:
     -   `googleContactId`: Maps 1:1 to a Google Person `resourceName`.
-    -   `lastGoogleSync`: Timestamp of last successful push.
-    -   `googleContactUpdatedAt`: Timestamp from Google's metadata for "last write wins" comparison.
+    -   `lastGoogleSync`: Timestamp of last successful manual sync.
+    -   `googleContactUpdatedAt`: Timestamp from Google's metadata for comparison.
 
-### 2. Synchronization Logic (3-Way Sync)
+### 2. Manual Synchronization Logic
 
-#### Sync Trigger Matrix
+#### Sync Trigger Matrix (Updated Feb 2026)
 
-| Trigger | GHL Sync | Google Sync | Code Location |
+| Trigger | GHL Sync | Google Sync | Notes |
 | :--- | :---: | :---: | :--- |
-| **Create Contact** (via admin page) | ✅ | ✅ | `app/(main)/admin/contacts/actions.ts` → `createContact()` |
-| **Update Contact** (via admin page) | ✅ | ✅ | `app/(main)/admin/contacts/actions.ts` → `updateContact()` |
-| **New WhatsApp Message** (from unknown) | ✅ | ✅ | `lib/whatsapp/sync.ts` → `processNormalizedMessage()` |
-| **New Email** (from unknown) | ✅ | ✅ | `lib/google/gmail-sync.ts` → `processMessage()` |
-| **Contact Changed on Mobile** | — | ✅ (inbound) | `lib/google/people.ts` → `syncContactsFromGoogle()` |
+| **Create Contact** | ✅ (Auto) | ❌ | Google Sync is NOT automatic. |
+| **Update Contact** | ✅ (Auto) | ❌ | Google Sync is NOT automatic. |
+| **New WhatsApp Message** | ✅ (Auto) | ❌ | No opportunistic sync. |
+| **Contacts Changed on Mobile**| — | ❌ | No background polling. |
+| **User Clicks "Link/Sync"** | — | ✅ | **The ONLY way to sync.** |
 
-#### A. Outbound (Estio → Google + GHL)
-*   **Trigger**: Contact Creation or Update from any source.
-*   **Google Logic**: `lib/google/people.ts` → `syncContactToGoogle(userId, contactId)`
-*   **GHL Logic**: `lib/ghl/stakeholders.ts` → `syncContactToGHL(accessToken, contactData)`
-*   **Authentication**: Uses `googleapis` with offline access (Refresh Token) to maintain connection indefinitely.
+#### Use Case: Manual Sync vs. Automatic
+We moved to manual sync to prevent data accidents where a WhatsApp message from a typo'd name overwrites a carefully curated contact in Google. Users now have full agency.
 
-#### B. WhatsApp Integration (`lib/whatsapp/sync.ts`)
+### 3. Google Sync Manager (The Control Center)
+The **Google Sync Manager** is the unified UI for managing connections.
+
+#### Features
+1.  **Source of Truth Setting**:
+    -   Configurable per-user in **Settings > Integrations > Google**.
+    -   Determines whether "Sync" means "Push" or "Pull".
+    
+2.  **Comparison View**:
+    -   Shows side-by-side data of **Estio (Local)** vs **Google Remote**.
+    -   Highlights differences.
+
+3.  **Navigation**:
+    -   **Next/Previous Buttons**: Rapidly move through the contact list without closing the modal.
+    -   **Keyboard Shortcuts**: Arrow keys (`←`, `→`) supported.
+    -   **Counter**: "Contact X of Y".
+
+4.  **Smart Linking**:
+    -   **Strict Search**: By Phone (digits) or Email.
+    -   **Fuzzy Search**: Uses Google's API to find matches by name.
+    -   **Link Only**: Joins distinct records without overwriting data.
+
+#### C. WhatsApp Integration (`lib/whatsapp/sync.ts`)
 When a new message arrives:
 1.  **Name Capture**: We capture the user's **Push Name** (Profile Name) from WhatsApp.
     -   *If available*: "Martin Green"
     -   *If missing*: "WhatsApp User +357..."
 2.  **Contact Creation**: Created locally in Estio.
-3.  **Opportunistic Sync**: The system checks if any Agent in the current Location has `googleSyncEnabled`. If yes, it immediately pushes this new lead to their Google Contacts AND syncs to GHL.
-    -   **Result**: Even unsolicited WhatsApp messages result in a saved contact on the agent's phone and in GHL.
+3.  **Auto-Sync Disabled**: We **DO NOT** automatically push this to Google Contacts. This prevents "Martin Green" in your phone from being overwritten by a casual "Martin" WhatsApp profile. Sync only happens when you manually click "Sync" in the manager.
 
 #### C. GoHighLevel Sync (`lib/ghl/stakeholders.ts`)
 *   When syncing to GHL, we inject the generated Visual ID into the GHL `companyName` field.
 *   Sync is triggered on both contact creation and update.
 
-#### D. User-Location Relationship
-*   The sync queries users via the many-to-many relation: `locations: { some: { id: locationId } }`
-*   This ensures the correct user with `googleSyncEnabled` is found for each location.
-*   **Offboarding**: When a user is removed from a team, their Google Sync credentials (`googleAccessToken`, `googleRefreshToken`) are immediately revoked/cleared to prevent unauthorized syncing.
+#### D. User-Specific Google Connection
+-   Each user/agent has their **own** Google connection (`googleSyncEnabled`, `googleRefreshToken`).
+-   Google Sync features only work when the **current logged-in user** has connected their Google account.
+-   **No Delegation**: The system does **not** borrow another user's Google connection. This prevents privacy issues (syncing to another agent's phone).
+-   **Not Connected State**: If a user tries to use Google Sync features without being connected, they see an orange banner: "Google Not Connected - Connect in Integrations".
+-   **Offboarding**: When a user is removed from a team, their Google Sync credentials (`googleAccessToken`, `googleRefreshToken`) are immediately revoked/cleared.
 
 ### 3. Visual ID Generation (`lib/google/utils.ts`)
 The string is dynamically generated based on the Contact's latest data to ensure it is always up to date.
@@ -83,7 +117,7 @@ The string is dynamically generated based on the Contact's latest data to ensure
 1.  **Prefix**: 
     -   If `status == "New"`, Prefix = "Lead New"
     -   Else, "Lead Rent" or "Lead Sale" based on `leadGoal`.
-2.  **Ref**: First property ref from `propertyRoles` (Interested/Viewing).
+2.  **Ref**: First property ref from `propertyRoles` (Interested/Viewing). Falls back to the property from the most recent **Viewing** if no explicit role exists.
 3.  **District**: From `requirementDistrict`.
 4.  **Price**: From `requirementMaxPrice`.
 
@@ -227,34 +261,19 @@ Updates must specify exactly which fields are being changed via the `updatePerso
 
 ---
 
-### 3. Inbound Sync (Google → Estio) — "Last Write Wins"
+### 3. Deprecated Features (Removed Feb 2026)
 
-**Implemented**: January 2026
+#### A. Inbound Sync (Google → Estio)
+**Status**: **Disabled**.
+Previously, a cron job pulled changes from Google Contacts every 5 minutes. This was disabled to prevent unwanted overwrites of Estio data. Users must now manually "Pull" data in the Sync Manager if they want to update Estio.
 
-Bidirectional sync ensures that contact edits made on mobile (Google Contacts app) are reflected in Estio, and vice versa. The newest change always wins.
+#### B. Auto-Create from Gmail
+**Status**: **Disabled**.
+Emails from unknown senders no longer auto-create contacts to clear up CRM noise.
 
-#### A. Inbound Sync Logic (`lib/google/people.ts` → `syncContactsFromGoogle()`)
-1.  Uses Google's `syncToken` for efficient delta sync (only changed contacts).
-2.  For each changed contact:
-    -   Compares `metadata.sources[].updateTime` from Google with local `Contact.updatedAt`.
-    -   **If Google is newer**: Updates local contact with Google's Name/Email/Phone.
-    -   **If Estio is newer**: Skips (outbound sync will handle it).
-3.  Creates new contacts from Google Contacts if not in CRM (as "Lead").
-
-#### B. "Last Write Wins" on Outbound
--   Before pushing to Google, `syncContactToGoogle()` checks if Google's version is newer.
--   If yes, it **skips the push** to avoid overwriting mobile edits.
-
-#### C. Auto-Create Contacts from Gmail
-When an email arrives from an unknown sender (`lib/google/gmail-sync.ts`):
-1.  Extracts display name from email header (e.g., "John Doe" from "John Doe <john@example.com>").
-2.  Looks up sender in Google Contacts for richer data.
-3.  Creates new Lead contact automatically.
-
-#### D. Scheduled Inbound Sync
--   `api/cron/gmail-sync` runs every 5 minutes.
--   After Gmail sync, it also runs `syncContactsFromGoogle()` for each user.
--   This ensures mobile edits are pulled within 5 minutes.
+#### C. "Last Write Wins" Logic
+**Status**: **Removed**.
+Since sync is now manual, we no longer need complex timestamp comparisons to determine the winner. The user is the winner.
 
 ---
 
@@ -263,11 +282,25 @@ When an email arrives from an unknown sender (`lib/google/gmail-sync.ts`):
 
 To prevent "Sync Death Loops" where a deleted contact in Google causes perpetual errors in Estio, we implemented a robust Self-Healing and Conflict Resolution strategy.
 
-#### A. The "Invalidate & Flag" Strategy
+#### A. Deletion Strategy (New Feb 2026)
+Deleting a contact in Estio does **not** automatically delete it from Google Contacts by default, to prevent accidental data loss.
+-   **Local Deletion**: Removes the contact from Estio database.
+-   **Smart Deletion Options**: When deleting a contact, the administrator is presented with checkboxes to optionally delete the contact from:
+    -   **Google Contacts**: If linked.
+    -   **GoHighLevel**: If linked.
+-   **Persistence**: The user's preference (e.g., "Always delete from Google") is remembered via local storage for convenience.
+
+#### B. The "Self-Healing" Strategy (Feb 2026)
 When the system encounters a **404 Not Found** (Stale ID) error during an outbound sync:
-1.  **Invalidate**: The `googleContactId` is immediately set to `null`.
-2.  **Flag**: The `error` field is set to `\"Google Link Broken. Save to re-sync.\"`
-3.  **Result**: The contact becomes "Unlinked" but with an error flag, alerting the user to take action.
+1.  **Search & Recover**: The system immediately searches Google Contacts by **Phone Number** and **Email**.
+2.  **Re-Link**: If a match is found, it automatically updates the `googleContactId` to the correct ID and pushes the update. This is seamless to the user.
+3.  **Fallback**: ONLY if no matching contact is found does it flag the error ("Google Link Broken") for manual resolution.
+
+#### E. On-View Healing (Feb 2026)
+To further ensure data integrity, the **Contact View Page** (`/admin/contacts/[id]/view`) now includes passive self-healing:
+1.  When a user opens a contact that has a "Link Broken" error.
+2.  The system triggers the Self-Healing logic **immediately** in the background.
+3.  The connection is repaired before the user even takes an action, eliminating the need to manually "Sync" or "Save".
 
 #### B. Google Sync Manager (UI)
 We replaced the simple "Conflict Modal" with a comprehensive **Google Sync Manager** accessible from:
@@ -277,11 +310,33 @@ We replaced the simple "Conflict Modal" with a comprehensive **Google Sync Manag
 **Capabilities:**
 -   **Healthy State**: View live side-by-side comparison of Estio vs Google data.
     -   Actions: *Push Local -> Google*, *Pull Google -> Local*, *Unlink*.
--   **Unlinked State**: Search Google Contacts to manually link to an existing record, or Create a new one.
+-   **Unlinked State**: 
+    -   **Auto-Search**: Automatically searches Google by phone number when opened.
+    -   **Smart Actions**: "Find Match" button auto-populates search.
+    -   **Options**: Link to existing or Create New.
+-   **Broken Link (Linked-but-Gone)**:
+    -   **Smart Recovery**: If the linked Google contact is deleted (404), the Manager automatically switches to Search Mode, pre-fills the phone number, and executes a search to find the correct contact immediately.
 -   **Conflict State**: Resolve data mismatches or broken links.
+
+#### C. Search Logic Strategy (Strict vs. Broad)
+To balance safety with usability, we use two different search strategies:
+1.  **Strict Matching (Automated Healing)**: When the system performs *background* self-healing (e.g., during a sync), it uses strict matching on Phone Number (digits) or Email. This prevents accidentally linking the wrong person automatically.
+2.  **Broad/Fuzzy Matching (Manual Search)**: When a user searches manually in the Sync Manager, we use Google's "Smart Search" which supports partial names, email prefixes, and global directory lookup. This allows users to find contacts easily even with partial information.
 
 #### C. Manual "Link Only"
 The Sync Manager supports a **"Link Only"** action. This connects an Estio Contact to a Google Contact **without overwriting data** on either side. This is useful when you know they are the same person but want to preserve distinct data on each platform (e.g., maintaining a specific "Visual ID" company name in Google while keeping role data in Estio).
+
+#### D. "Out of Sync" Indicator (Feb 2026)
+The Contact List now displays an **orange refresh icon** 🔄 when a contact has local changes that are newer than the last Google sync.
+*   **Race Condition Buffer**: Includes a 2-second tolerance buffer to prevents false positives where `updatedAt` is only milliseconds ahead of the sync timestamp.
+
+**Icon States:**
+| Icon | Color | Meaning |
+| :---: | :--- | :--- |
+| ➕ | Gray (Faded) | Not Linked (Available to Add) |
+| 🔗 | Green | Linked to Google |
+| 🔄 | Orange | Out of Sync (local changes pending) |
+| ⚠️ | Yellow | Sync Error |
 
 ---
 

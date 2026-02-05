@@ -54,8 +54,12 @@ export async function ensureLocalContactSynced(ghlContactId: string, locationId:
                 data: {
                     ghlContactId: ghlContact.id,
                     name: match.name || ghlContact.name, // Keep local name if set, else use GHL
+                    firstName: match.firstName || ghlContact.firstName,
+                    lastName: match.lastName || ghlContact.lastName,
                     phone: match.phone || ghlContact.phone,
                     email: match.email || ghlContact.email,
+                    tags: { set: [...new Set([...(match.tags || []), ...(ghlContact.tags || [])])] }, // Merge tags
+                    city: match.city || (ghlContact.customFields?.find(f => f.id === 'city')?.value) // Example mapping if GHL returns it standard
                 }
             });
         }
@@ -140,15 +144,25 @@ export async function ensureRemoteContact(contactId: string, ghlLocationId: stri
             console.log(`[JIT Sync] Creating NEW contact in GHL for ${contact.name}`);
             const payload: any = {
                 locationId: ghlLocationId, // CRITICAL: Must specify location
-                name: contact.name,
+                name: contact.name, // Keep full name as fallback
                 email: contact.email,
                 phone: contact.phone,
                 source: "Shadow WhatsApp",
-                companyName: generateVisualId(contact) // <--- SYNC VISUAL ID TO GHL
+                companyName: generateVisualId(contact), // <--- SYNC VISUAL ID TO GHL
+                tags: contact.tags,
+                address1: contact.address1,
+                city: contact.city,
+                state: contact.state,
+                country: contact.country,
+                postalCode: contact.postalCode,
+                dateOfBirth: contact.dateOfBirth?.toISOString().split('T')[0]
             };
 
-            // First Name / Last Name helper
-            if (contact.name) {
+            // Use explicit First/Last Name if available, otherwise fallback to splitting name
+            if (contact.firstName || contact.lastName) {
+                payload.firstName = contact.firstName || "";
+                payload.lastName = contact.lastName || "";
+            } else if (contact.name) {
                 const parts = contact.name.trim().split(' ');
                 if (parts.length > 1) {
                     payload.firstName = parts[0];

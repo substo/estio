@@ -205,8 +205,8 @@ Due to the schema constraint where `Conversation` must link to a single `Contact
 
 ### 2. LID (Lightweight ID) Handling
 WhatsApp increasingly uses `@lid` (an opaque UUID) instead of phone numbers for privacy.
--   **Resolution**: The webhook attempts to resolve `@lid` to a real phone number (`@s.whatsapp.net`) using payload metadata (`senderPn` or `participant`).
--   **Fallback**: If resolution fails, we may strip the suffix, but our goal is always to normalize to the E.164 phone number to ensure CRM matching works.
+-   **Resolution**: The webhook attempts to resolve `@lid` to a real phone number (`@s.whatsapp.net`) using payload metadata (`senderPn` or `participant`) in both Group and 1:1 chats.
+-   **Fallback**: If resolution fails and the resulting ID is invalid (e.g., > 14 digits), the system **blocks** certain operations (like creating a new contact) to prevent "incorrect numbers" from polluting the CRM. ES164 validation rules are applied.
 
 ### 3. Outbound Naming Fix
 -   **Issue**: Outbound messages (sent from phone) were triggering `Contact` creation using the *Sender's* PushName (the User), effectively renaming clients to "Martin".

@@ -15,6 +15,7 @@ export interface NormalizedMessage {
     direction?: "inbound" | "outbound";
     isGroup?: boolean;
     participant?: string; // Real sender phone in group chat
+    lid?: string; // WhatsApp Lightweight ID
 }
 
 // ... handleWhatsAppMessage ...
@@ -28,6 +29,16 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     if (existing) {
         console.log(`[WhatsApp Sync] Skipped existing message: ${wamId}`);
         return { status: 'skipped', id: existing.id };
+    }
+
+    // Fetch Location for Access Token
+    const locationDef = await db.location.findUnique({
+        where: { id: locationId },
+        select: { id: true, ghlLocationId: true, ghlAccessToken: true }
+    });
+    if (!locationDef) {
+        console.error(`[WhatsApp Sync] Location ${locationId} not found`);
+        return { status: 'error', reason: 'location_not_found' };
     }
 
     // Normalize Phones
@@ -61,28 +72,60 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         }
     }
 
-    console.log(`[WhatsApp Sync] Processing message ${wamId} from ${contactPhone}. Suffix: ${searchSuffix}`);
-
+    // 2. Find Existing Contact (Lookup by Phone OR LID)
     const candidates = await db.contact.findMany({
         where: {
             locationId,
-            phone: { contains: searchSuffix }
-        }
+            OR: [
+                { phone: { contains: searchSuffix } },
+                ...(msg.lid ? [{ lid: msg.lid }] : [])
+            ]
+        } as any
     });
 
-    // 3. Find the best match by comparing stripped digits
-    let contact = candidates.find(c => {
-        if (!c.phone) return false;
-        const rawDbPhone = c.phone.replace(/\D/g, '');
-
-        return (
-            rawDbPhone === rawInputPhone ||
-            (rawDbPhone.endsWith(rawInputPhone) && rawInputPhone.length >= 7) ||
-            (rawInputPhone.endsWith(rawDbPhone) && rawDbPhone.length >= 7)
-        );
-    });
+    // Strategy: Prefer LID match -> Then Phone Match
+    let contact = candidates.find((c: any) => msg.lid && c.lid === msg.lid);
 
     if (!contact) {
+        contact = candidates.find(c => {
+            if (!c.phone) return false;
+            const rawDbPhone = c.phone.replace(/\D/g, '');
+            return (
+                rawDbPhone === rawInputPhone ||
+                (rawDbPhone.endsWith(rawInputPhone) && rawInputPhone.length >= 7) ||
+                (rawInputPhone.endsWith(rawDbPhone) && rawDbPhone.length >= 7)
+            );
+        });
+    }
+
+    // Link LID if found by phone but missing LID
+    if (contact && msg.lid && contact.lid !== msg.lid) {
+        await db.contact.update({
+            where: { id: contact.id },
+            data: { lid: msg.lid } as any
+        }).catch(err => console.error("Failed to link LID:", err));
+        console.log(`[WhatsApp Sync] Linked LID ${msg.lid} to contact ${contact.phone}`);
+    }
+
+    if (!contact) {
+        // --- VALIDATION: Prevent creation of invalid contacts (e.g. unresolved LIDs) ---
+        // If we have an LID but no Phone, and the Input Phone LOOKS like an LID (>14 chars), we should be careful.
+        // BUT, if we are here, it means we have a `contactPhone` which might be the LID (if outbound fallback) OR real phone (inbound).
+        // If it looks like an LID, create it ONLY if we intend to support LID-only contacts (which we do now, to avoid split, but ideally we resolve them).
+
+        const cleanForCheck = contactPhone.replace(/\D/g, '');
+        const isInvalidUS = contactPhone.startsWith('+1') && (cleanForCheck.substring(1, 2) === '0' || cleanForCheck.substring(1, 2) === '1');
+
+        // Strict Block: >= 16 digits is almost certainly a junk/Group ID or weird artifact?
+        // LIDs are usually 15. If we have 15, we allow it IF we have an LID mapping? 
+        // No, if we are creating NEW, and it is 15 digits... it is likely an LID.
+        // If `msg.lid` is present, we save it.
+
+        if (cleanForCheck.length >= 16 || isInvalidUS) {
+            console.warn(`[WhatsApp Sync] BLOCKED (Strict): ${contactPhone}`);
+            return { status: 'skipped', reason: 'invalid_number_strict' };
+        }
+
         console.log(`[WhatsApp Sync] Contact not found for ${contactPhone}. Creating new.`);
         // Create new contact
         contact = await db.contact.create({
@@ -91,8 +134,9 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
                 phone: contactPhone,
                 name: nameToUse || `WhatsApp User ${contactPhone}`,
                 status: "New",
-                contactType: contactType
-            }
+                contactType: contactType,
+                lid: msg.lid // Persist LID
+            } as any
         });
     } else {
         console.log(`[WhatsApp Sync] Matched existing contact: ${contact.name} (${contact.id})`);
@@ -104,6 +148,8 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     }
 
     // --- Check Participant (Sender) for Groups ---
+    let pContact: any = null; // Hoisted for later use
+
     if (isGroup && participant && direction === 'inbound') {
         const pPhone = participant.startsWith('+') ? participant : `+${participant}`;
         const pRaw = pPhone.replace(/\D/g, '');
@@ -114,7 +160,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
             where: { locationId, phone: { contains: pSuffix } }
         });
 
-        let pContact = pCandidates.find(c => {
+        pContact = pCandidates.find(c => {
             if (!c.phone) return false;
             const r = c.phone.replace(/\D/g, '');
             return (r === pRaw || r.endsWith(pRaw) || pRaw.endsWith(r));
@@ -122,7 +168,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
 
         if (!pContact) {
             console.log(`[WhatsApp Sync] Creating new contact for Group Participant: ${pPhone}`);
-            await db.contact.create({
+            pContact = await db.contact.create({
                 data: {
                     locationId,
                     phone: pPhone,
@@ -130,29 +176,74 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
                     status: "New",
                     contactType: "Ref-GroupMember"
                 }
-            }).catch(e => console.error("Participant create error", e));
+            }).catch(e => {
+                console.error("Participant create error", e);
+                return null; // Ensure pContact is null on error
+            });
         }
     }
 
-    // Find or Create Conversation
-    let conversation = await db.conversation.findFirst({
-        where: { contactId: contact.id, locationId },
-    });
+    // 4. Create/Get Conversation (GHL Style)
+    // We use a synthetic GHL ID for WhatsApp native chats if not provided
+    const ghlId = msg.source === 'whatsapp_evolution' && !contact.ghlContactId
+        ? `wa_${Date.now()}_${contact.id}`
+        : contact.ghlContactId;
+
+    // Ensure conversation exists
+    // Note: upsertConversationFromGHL handles creating the Conversation record
+    const { upsertConversationFromGHL } = await import("@/lib/ghl/sync");
+
+    // Create a mock conversation object for the syncer
+    const mockConv = {
+        id: `wa_${Date.now()}_${contact.id}`, // We might need a consistent ID here if we want to update
+        contactId: contact.ghlContactId || contact.id, // Use our internal ID if GHL ID missing
+        locationId: locationId,
+        lastMessageBody: body,
+        lastMessageType: 'TYPE_WHATSAPP',
+        unreadCount: 1,
+        status: 'open',
+        type: 'WhatsApp'
+    };
+
+    // We use the "Contact" (Group or Individual) to anchor the conversation.
+    const conversation = await upsertConversationFromGHL({
+        ...mockConv,
+        contactId: contact.id
+    }, locationId, locationDef.ghlAccessToken || '');
 
     if (!conversation) {
-        conversation = await db.conversation.create({
-            data: {
-                locationId,
-                contactId: contact.id,
-                status: "open",
-                ghlConversationId: `wa_${Date.now()}_${contact.id}`, // Synthetic ID
-                lastMessageType: "TYPE_WHATSAPP"
-            }
-        });
+        console.error("[WhatsApp Sync] Failed to upsert conversation");
+        return { status: 'error', reason: 'conversation_creation_failed' };
     }
 
-    // Create Message
-    await db.message.create({
+    // 5. Group Participant Sync (New Architecture)
+    if (isGroup && participant && conversation && pContact) { // Ensure pContact is resolved
+        try {
+            await db.conversationParticipant.upsert({
+                where: {
+                    conversationId_contactId: {
+                        conversationId: conversation.id,
+                        contactId: pContact.id
+                    }
+                },
+                create: {
+                    conversationId: conversation.id,
+                    contactId: pContact.id,
+                    role: 'member',
+                    joinedAt: new Date()
+                },
+                update: {
+                    // Update joinedAt or lastActive?
+                }
+            });
+            console.log(`[WhatsApp Sync] Linked Participant ${pContact.name} to Group Conversation ${conversation.id}`);
+        } catch (err) {
+            console.error("[WhatsApp Sync] Failed to link group participant:", err);
+        }
+    }
+
+    // 6. Create Message
+    const newMessage = await db.message.create({
         data: {
             conversationId: conversation.id,
             ghlMessageId: `wa_${wamId}`,
@@ -182,11 +273,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
 
     // --- GHL 2-Way Sync ---
     try {
-        // We need to fetch the full location to get the access token
-        const locationDef = await db.location.findUnique({
-            where: { id: locationId },
-            select: { id: true, ghlLocationId: true, ghlAccessToken: true }
-        });
+        // Location already fetched as locationDef
 
         if (locationDef?.ghlAccessToken && locationDef?.ghlLocationId) {
             const { ensureRemoteContact } = await import("@/lib/crm/contact-sync");
@@ -196,19 +283,17 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
             // 1. Ensure Contact Exists in GHL (JIT)
             const remoteCid = await ensureRemoteContact(contact.id, locationDef.ghlLocationId, locationDef.ghlAccessToken);
 
-            // 2. Google Contact Sync (Opportunistic)
-            // find a user in this location who has google sync enabled
-            const googleUser = await db.user.findFirst({
-                where: {
-                    locations: { some: { id: locationId } },
-                    googleSyncEnabled: true
-                }
-            });
-
-            if (googleUser) {
-                console.log(`[WhatsApp Sync] Syncing contact ${contact.id} to Google User ${googleUser.email}...`);
-                syncContactToGoogle(googleUser.id, contact.id).catch(e => console.error("Google Sync bg error", e));
-            }
+            // 2. DISABLED: Auto-sync removed. Use Google Sync Manager for manual sync.
+            // const googleUser = await db.user.findFirst({
+            //     where: {
+            //         locations: { some: { id: locationId } },
+            //         googleSyncEnabled: true
+            //     }
+            // });
+            // if (googleUser) {
+            //     console.log(`[WhatsApp Sync] Syncing contact ${contact.id} to Google User ${googleUser.email}...`);
+            //     syncContactToGoogle(googleUser.id, contact.id).catch(e => console.error("Google Sync bg error", e));
+            // }
 
             if (remoteCid) {
                 // Dynamically import Queue to avoid circular deps if any

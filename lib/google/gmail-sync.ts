@@ -165,11 +165,12 @@ export async function processMessage(gmail: gmail_v1.Gmail, userId: string, mess
 
         if (targetEmail) {
             // Find contact by email in this user's locations? 
-            // This is complex because User -> Locations -> Contacts.
-            // Simplified: Find ANY contact with this email in a location the user has access to.
-            // For now, let's look for a contact globally or in primary location.
+            // We MUST limit to locations the user has access to.
             let contact = await db.contact.findFirst({
-                where: { email: targetEmail }
+                where: {
+                    email: targetEmail,
+                    location: { users: { some: { id: userId } } }
+                }
             });
 
             // AUTO-CREATE: If no contact found, create one from email header
@@ -255,7 +256,17 @@ export async function processMessage(gmail: gmail_v1.Gmail, userId: string, mess
                 // If we found a contact, we should ensure GHL knows about this message.
                 // We do this asynchronously/independently.
                 const location = await db.location.findUnique({ where: { id: contact.locationId } });
-                if (location?.ghlAccessToken && location?.ghlLocationId) {
+
+                // DEDUPLICATION: Check if this message (by ID) was already processed/upserted?
+                // The DB upsert happens later, but checking here prevents "looping" if sync works but DB fails or vice versa?
+                // Actually, the loop happens because syncRecentMessages is called repeatedly and blindly re-sends to GHL.
+                // We must check if the message ALREADY exists in our DB.
+                const messageExists = await db.message.findUnique({
+                    where: { emailMessageId: messageId },
+                    select: { id: true }
+                });
+
+                if (location?.ghlAccessToken && location?.ghlLocationId && !messageExists) {
                     // Ensure contact exists in GHL before logging
                     let ghlContactId = contact.ghlContactId;
                     if (!ghlContactId) {
@@ -333,7 +344,8 @@ export async function processMessage(gmail: gmail_v1.Gmail, userId: string, mess
 
 // Helper
 function extractEmail(text: string): string | null {
-    const match = text.match(/<(.+)>/);
+    // Non-greedy match for <email> to avoid capturing multiple closed brackets if malformed
+    const match = text.match(/<([^>]+)>/);
     if (match) return match[1];
     if (text.includes('@')) return text.trim();
     return null;

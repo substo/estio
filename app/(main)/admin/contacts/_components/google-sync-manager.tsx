@@ -1,60 +1,126 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Loader2, Search, ArrowLeft, ArrowRight, Link2, AlertTriangle, Link as LinkIcon, Unlink, CheckCircle, RefreshCw } from "lucide-react";
+import { Loader2, Search, ArrowLeft, ArrowRight, Link2, AlertTriangle, Link as LinkIcon, Unlink, CheckCircle, RefreshCw, ChevronLeft, ChevronRight } from "lucide-react";
 import { searchGoogleContactsAction, resolveSyncConflict, unlinkGoogleContact, getGoogleContactAction } from "../actions";
 import { useToast } from "@/components/ui/use-toast";
 import { ContactData } from "./contact-form";
 
+type ContactWithSync = ContactData & { error?: string | null; googleContactId?: string | null; lastGoogleSync?: Date | null };
+
 interface GoogleSyncManagerProps {
-    contact: ContactData & { error?: string | null; googleContactId?: string | null; lastGoogleSync?: Date | null };
+    // Single contact mode (backward compatible)
+    contact?: ContactWithSync;
+    // Multi-contact mode (for navigation)
+    contacts?: ContactWithSync[];
+    initialIndex?: number;
+    onNavigate?: (index: number) => void;
     open: boolean;
     onOpenChange: (open: boolean) => void;
 }
 
-export function GoogleSyncManager({ contact, open, onOpenChange }: GoogleSyncManagerProps) {
+export function GoogleSyncManager({ contact: singleContact, contacts, initialIndex = 0, onNavigate, open, onOpenChange }: GoogleSyncManagerProps) {
     const { toast } = useToast();
     const [step, setStep] = useState<'view' | 'search'>('view');
     const [loading, setLoading] = useState(false);
     const [resolving, setResolving] = useState(false);
 
+    // Navigation state for multi-contact mode
+    const [currentIndex, setCurrentIndex] = useState(initialIndex);
+    const isMultiMode = !!contacts && contacts.length > 0;
+    const contact = isMultiMode ? contacts[currentIndex] : singleContact!;
+    const totalContacts = isMultiMode ? contacts.length : 1;
+
     // Google Data State
     const [googleData, setGoogleData] = useState<any>(null);
-    const [searchQuery, setSearchQuery] = useState(contact.email || contact.name || "");
+    const [searchQuery, setSearchQuery] = useState(contact?.email || contact?.name || "");
     const [searchResults, setSearchResults] = useState<any[]>([]);
 
-    const isLinked = !!contact.googleContactId;
-    const hasError = !!contact.error;
+    const isLinked = !!contact?.googleContactId;
+    const hasError = !!contact?.error;
+
+    // Navigation handlers
+    const goToPrevious = useCallback(() => {
+        if (!isMultiMode || currentIndex <= 0) return;
+        const newIndex = currentIndex - 1;
+        setCurrentIndex(newIndex);
+        setGoogleData(null);
+        setSearchResults([]);
+        setStep('view');
+        onNavigate?.(newIndex);
+    }, [isMultiMode, currentIndex, onNavigate]);
+
+    const goToNext = useCallback(() => {
+        if (!isMultiMode || currentIndex >= totalContacts - 1) return;
+        const newIndex = currentIndex + 1;
+        setCurrentIndex(newIndex);
+        setGoogleData(null);
+        setSearchResults([]);
+        setStep('view');
+        onNavigate?.(newIndex);
+    }, [isMultiMode, currentIndex, totalContacts, onNavigate]);
+
+    // Keyboard navigation
+    useEffect(() => {
+        if (!open || !isMultiMode) return;
+
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                goToPrevious();
+            } else if (e.key === 'ArrowRight') {
+                e.preventDefault();
+                goToNext();
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [open, isMultiMode, goToPrevious, goToNext]);
 
     // Initial Fetch logic
     useEffect(() => {
         if (!open) return;
 
-        // If linked, fetch specific contact by ID (definitive source)
         if (isLinked && contact.googleContactId) {
             fetchLinkedContact(contact.googleContactId);
         }
-        // Not linked? Try auto-search if we have an email
-        else if (contact.email) {
-            handleSearch(contact.email, true); // true = auto-fetch for comparison
-        } else {
-            // No email, and unlinked -> Go to search mode
+        else {
+            // Not linked: Auto-search by Phone (Priority) or Email
+            const initialQuery = contact.phone || contact.email;
+            if (initialQuery) {
+                setSearchQuery(initialQuery);
+                handleSearch(initialQuery, true); // true = auto-fetch
+            }
+            // Always go to search mode if not linked
             setStep('search');
         }
     }, [open, isLinked, contact.googleContactId]); // removed contact.email dependency to avoid flapping
 
+    const [notConnected, setNotConnected] = useState(false);
+
     const fetchLinkedContact = async (resourceName: string) => {
         setLoading(true);
+        setNotConnected(false);
         try {
             const res = await getGoogleContactAction(resourceName);
             if (res.success && res.data) {
                 setGoogleData(res.data);
+            } else if (res.message === 'GOOGLE_NOT_CONNECTED') {
+                setNotConnected(true);
             } else {
-                // 404 or error - The link is technically broken or permissions issue
+                // 404 or error - Link broken. Auto-recover UI.
+                toast({ title: "Sync Issue", description: "Linked contact not found. Searching for match...", variant: "default" });
                 setGoogleData(null);
+                const fallbackQuery = contact.phone || contact.email;
+                if (fallbackQuery) {
+                    setSearchQuery(fallbackQuery);
+                    handleSearch(fallbackQuery, true);
+                    setStep('search');
+                }
             }
         } catch (e) {
             console.error(e);
@@ -65,6 +131,7 @@ export function GoogleSyncManager({ contact, open, onOpenChange }: GoogleSyncMan
 
     const handleSearch = async (query: string, isAutoFetch = false) => {
         setLoading(true);
+        setNotConnected(false);
         try {
             const res = await searchGoogleContactsAction(query);
             if (res.success && res.data) {
@@ -81,6 +148,9 @@ export function GoogleSyncManager({ contact, open, onOpenChange }: GoogleSyncMan
                 } else if (!isLinked && res.data.length > 0 && isAutoFetch) {
                     // Don't auto-select for unlinked if multiple results, let user choose
                 }
+            } else if (res.message === 'GOOGLE_NOT_CONNECTED') {
+                setNotConnected(true);
+                setSearchResults([]);
             } else {
                 setSearchResults([]);
             }
@@ -131,6 +201,16 @@ export function GoogleSyncManager({ contact, open, onOpenChange }: GoogleSyncMan
     };
 
     const getStatusHeader = () => {
+        if (notConnected) return (
+            <div className="flex items-center gap-2 text-orange-700 bg-orange-50 p-3 rounded-md mb-4 border border-orange-200">
+                <AlertTriangle className="h-5 w-5" />
+                <div className="text-sm">
+                    <span className="font-semibold block">Google Not Connected</span>
+                    <span>This feature requires Google Contacts integration. </span>
+                    <a href="/admin/integrations" className="underline font-medium hover:text-orange-900">Connect in Integrations</a>
+                </div>
+            </div>
+        );
         if (hasError) return (
             <div className="flex items-center gap-2 text-yellow-700 bg-yellow-50 p-3 rounded-md mb-4 border border-yellow-200">
                 <AlertTriangle className="h-5 w-5" />
@@ -164,11 +244,49 @@ export function GoogleSyncManager({ contact, open, onOpenChange }: GoogleSyncMan
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="sm:max-w-[800px]">
                 <DialogHeader>
-                    <DialogTitle>Google Sync Manager</DialogTitle>
-                    <DialogDescription>
-                        Manage synchronization between Estio CRM and Google Contacts.
-                    </DialogDescription>
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <DialogTitle>Google Sync Manager</DialogTitle>
+                            <DialogDescription>
+                                Manage synchronization between Estio CRM and Google Contacts.
+                            </DialogDescription>
+                        </div>
+
+                        {/* Navigation Controls */}
+                        {isMultiMode && (
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={goToPrevious}
+                                    disabled={currentIndex <= 0 || loading}
+                                    title="Previous (←)"
+                                >
+                                    <ChevronLeft className="h-4 w-4" />
+                                </Button>
+                                <span className="text-sm text-muted-foreground min-w-[80px] text-center">
+                                    {currentIndex + 1} of {totalContacts}
+                                </span>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={goToNext}
+                                    disabled={currentIndex >= totalContacts - 1 || loading}
+                                    title="Next (→)"
+                                >
+                                    <ChevronRight className="h-4 w-4" />
+                                </Button>
+                            </div>
+                        )}
+                    </div>
                 </DialogHeader>
+
+                {/* Current Contact Name */}
+                {isMultiMode && (
+                    <div className="text-sm font-medium text-center border-b pb-2 mb-2">
+                        {contact?.name || contact?.phone || contact?.email || 'Unknown Contact'}
+                    </div>
+                )}
 
                 {getStatusHeader()}
 
@@ -176,7 +294,12 @@ export function GoogleSyncManager({ contact, open, onOpenChange }: GoogleSyncMan
                     <div className="font-semibold text-center border-b pb-2 text-blue-700">Estio CRM (Local)</div>
                     <div className="font-semibold text-center border-b pb-2 text-green-700 flex justify-between items-center">
                         <span>Google Contacts</span>
-                        <Button variant="ghost" size="sm" onClick={() => setStep('search')} className="h-6">
+                        <Button variant="ghost" size="sm" onClick={() => {
+                            const defaultQuery = contact.phone || contact.email || "";
+                            setSearchQuery(defaultQuery);
+                            if (defaultQuery) handleSearch(defaultQuery);
+                            setStep('search');
+                        }} className="h-6">
                             <Search className="h-3 w-3 mr-1" /> {googleData ? 'Find Different' : 'Find Match'}
                         </Button>
                     </div>
@@ -191,8 +314,18 @@ export function GoogleSyncManager({ contact, open, onOpenChange }: GoogleSyncMan
                             </>
                         ) : (
                             <div className="text-center py-8 text-muted-foreground">
-                                {loading ? <Loader2 className="h-6 w-6 animate-spin mx-auto" /> :
-                                    "No Google Contact selected."}
+                                {loading ? (
+                                    <span>Searching Google...</span>
+                                ) : searchQuery ? (
+                                    <div className="flex flex-col items-center gap-2">
+                                        <span>No matching contact found in Google.</span>
+                                        <Button size="sm" variant="outline" onClick={() => handleAction('use_local')}>
+                                            Create New Contact
+                                        </Button>
+                                    </div>
+                                ) : (
+                                    <span>Enter a name, email or phone to search.</span>
+                                )}
                             </div>
                         )}
                     </div>

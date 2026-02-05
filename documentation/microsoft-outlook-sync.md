@@ -141,6 +141,7 @@ NEXT_PUBLIC_APP_URL=https://your-domain.com
 4. You should be redirected to Microsoft's login page
 5. After signing in, you'll be asked to consent to the permissions
 6. Upon success, you'll be redirected back to your app
+7. **New:** You should now see the **Sync Health Dashboard** displaying your "Last Inbox Sync" and "Session Status".
 
 ---
 
@@ -214,3 +215,24 @@ Outlook webhooks expire after ~3 days. The cron job at `/api/cron/outlook-sync` 
 | Callback URL | `/api/microsoft/callback` |
 | Webhook URL | `/api/webhooks/outlook` |
 | Cron URL | `/api/cron/outlook-sync` |
+
+---
+
+## Puppeteer Sync (Alternative to Graph API)
+
+For accounts that cannot use the standard Graph API (e.g., some personal Outlook accounts with strict security policies), we support a fallback using **Puppeteer**.
+
+### How it works
+1.  **Authentication**: User logs in via a controlled browser instance. Session cookies are encrypted and stored.
+2.  **Sync process**:
+    - The cron job launches a headless browser.
+    - Reuses stored cookies to access Outlook Web Access (OWA).
+    - Scrapes email data directly from the DOM or intercepts internal OWA API calls.
+3.  **GHL Integration**:
+    - Scraped emails are saved to the local database.
+    - New messages are automatically pushed to GoHighLevel (GHL) using the `createInboundMessage` utility, ensuring feature parity with the Graph API sync.
+
+### Limitations
+- Slower than Graph API (requires browser launch).
+- Depends on OWA UI structure (more brittle).
+- Requires occasional re-authentication if session expires (approx. every 7 days).

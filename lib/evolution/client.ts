@@ -382,5 +382,26 @@ export const evolutionClient = {
             console.error('Error fetching messages:', error.response?.data || error);
             return [];
         }
+    },
+
+    /**
+     * Fetch Group Metadata
+     */
+    fetchGroup: async (instanceName: string, groupJid: string) => {
+        try {
+            console.log(`[Evolution] Fetching group info for ${groupJid}...`);
+            const response = await axios.get(
+                `${EVOLUTION_API_URL}/group/findGroup/${instanceName}?groupJid=${groupJid}`,
+                {
+                    headers: {
+                        'apikey': EVOLUTION_GLOBAL_API_KEY
+                    }
+                }
+            );
+            return response.data;
+        } catch (error: any) {
+            console.error('Error fetching group info:', error.response?.data || error);
+            return null;
+        }
     }
 };

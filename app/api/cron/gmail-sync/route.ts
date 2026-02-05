@@ -71,14 +71,15 @@ export async function GET(request: NextRequest) {
                 // Run Gmail delta sync
                 await syncRecentMessages(user.id);
 
+                // DISABLED: Inbound sync removed. Use Google Sync Manager for manual sync.
                 // Run inbound contact sync (Google → Estio) for bidirectional sync
                 let userContactStats = { synced: 0, created: 0, skipped: 0 };
-                if (user.locations?.[0]?.id) {
-                    userContactStats = await syncContactsFromGoogle(user.id, user.locations[0].id);
-                    contactsStats.synced += userContactStats.synced;
-                    contactsStats.created += userContactStats.created;
-                    contactsStats.skipped += userContactStats.skipped;
-                }
+                // if (user.locations?.[0]?.id) {
+                //     userContactStats = await syncContactsFromGoogle(user.id, user.locations[0].id);
+                //     contactsStats.synced += userContactStats.synced;
+                //     contactsStats.created += userContactStats.created;
+                //     contactsStats.skipped += userContactStats.skipped;
+                // }
 
                 synced++;
                 results.push({ userId: user.id, status: 'synced', contacts: userContactStats });

@@ -2,8 +2,6 @@
 
 import db from '@/lib/db';
 import { auth } from '@clerk/nextjs/server';
-import { outlookPuppeteerService } from '@/lib/microsoft/outlook-puppeteer';
-import { decryptCookies } from '@/lib/crypto/password-encryption';
 
 export interface OutlookEmail {
     id: string;
@@ -151,6 +149,7 @@ export async function getOutlookStatusAction(): Promise<{
     connected: boolean;
     method?: 'oauth' | 'puppeteer';
     email?: string;
+    lastSyncedAt?: Date;
 }> {
     try {
         const { userId: clerkUserId } = await auth();
@@ -164,7 +163,12 @@ export async function getOutlookStatusAction(): Promise<{
                 outlookSyncEnabled: true,
                 outlookAuthMethod: true,
                 outlookEmail: true,
-                outlookAccessToken: true
+                outlookAccessToken: true,
+                outlookSyncState: {
+                    select: {
+                        lastSyncedAt: true
+                    }
+                }
             }
         });
 
@@ -178,7 +182,8 @@ export async function getOutlookStatusAction(): Promise<{
         return {
             connected,
             method: user.outlookAuthMethod as 'oauth' | 'puppeteer' | undefined,
-            email: user.outlookEmail || undefined
+            email: user.outlookEmail || undefined,
+            lastSyncedAt: user.outlookSyncState?.lastSyncedAt
         };
 
     } catch (error) {

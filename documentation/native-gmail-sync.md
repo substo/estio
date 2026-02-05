@@ -98,30 +98,26 @@ In your OAuth 2.0 Client, add these **Authorized redirect URIs**:
 1.  Google sends Push Notification -> `/api/webhooks/gmail`
 2.  Route finds User by `emailAddress`.
 3.  Calls `syncRecentMessages` (or Delta Sync logic).
-4.  Engine processes message -> `db.message.upsert`.
-5.  Engine logs to GHL.
+4.  Engine checks for existing message ID (**Deduplication Check**).
+5.  If new, Engine processes message -> `db.message.upsert`.
+6.  If new, Engine logs to GHL.
 
 ### 2. Outbound Email (Send)
 1.  User clicks Send in UI.
 2.  `actions.ts` calls `gmail.users.messages.send`.
 3.  On success, `processMessage` is called immediately to save the local copy.
 
-### 3. Contact Matching & Auto-Creation
+### 3. Contact Matching (Auto-Creation Disabled)
 - **Matching**: Incoming emails are matched to Contacts by `email`.
-- **Auto-Creation** (New in v1.2):
-    - When an email arrives from an unknown sender, a **new Lead contact** is automatically created.
-    - The display name is extracted from the email header (e.g., "John Doe" from "John Doe <john@example.com>").
-    - If Google Sync is enabled, the system also looks up the sender in **Google Contacts** for richer data (full name).
-    - Code: `lib/google/gmail-sync.ts` → `processMessage()`.
+    - **Scope Restriction**: To prevent data leakage, matching is strictly scoped to **Locations the User has access to**. Global searches are disabled.
+- **Auto-Creation**:
+    - **Status**: **Disabled (Feb 2026)**.
+    - Previously, emails from unknown senders would create a "Lead". This was disabled to prevent CRM clutter.
 - **Deduplication**:
     - We use `db.conversation.upsert` with the `[locationId, contactId]` unique constraint to ensure atomic creation.
-    - If a race condition occurs, the database throws an error, which we catch and then retrieve the existing conversation.
 
-### 4. Bidirectional Contact Sync
-The Gmail Sync cron job (`/api/cron/gmail-sync`) also performs **inbound contact sync** from Google Contacts:
-- Pulls contact changes made on mobile (Google Contacts app) into Estio.
-- Uses "last write wins" conflict resolution.
-- See [Google Contact Sync](google-contact-sync.md) for full details.
+### 4. Contact Sync (Legacy)
+The Gmail Sync cron job (`/api/cron/gmail-sync`) previously triggered a Google Contact pull. This has been **disabled**. See [Google Contact Sync](google-contact-sync.md) for details on the new manual workflow.
 
 ---
 

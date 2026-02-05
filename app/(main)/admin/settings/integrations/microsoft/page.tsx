@@ -6,8 +6,19 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { CheckCircle2, XCircle, Loader2, AlertTriangle, Eye, EyeOff } from "lucide-react";
+import { CheckCircle2, XCircle, Loader2, AlertTriangle, Eye, EyeOff, Activity, Clock, ShieldCheck } from "lucide-react";
 import Link from "next/link";
+import { formatDistanceToNow, format } from "date-fns";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 interface ConnectionStatus {
     connected: boolean;
@@ -15,6 +26,8 @@ interface ConnectionStatus {
     email?: string;
     sessionExpiry?: string;
     sessionExpired?: boolean;
+    lastSyncedAt?: string;
+    syncEnabled?: boolean;
 }
 
 export default function MicrosoftIntegrationPage() {
@@ -26,6 +39,7 @@ export default function MicrosoftIntegrationPage() {
     const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
+    const [showDisconnectDialog, setShowDisconnectDialog] = useState(false);
 
     useEffect(() => {
         checkStatus();
@@ -73,15 +87,19 @@ export default function MicrosoftIntegrationPage() {
         }
     };
 
-    const handleDisconnect = async () => {
-        if (!confirm('Are you sure you want to disconnect your Outlook account?')) return;
+    const handleDisconnectClick = () => {
+        setShowDisconnectDialog(true);
+    };
 
+    const confirmDisconnect = async () => {
         try {
             await fetch('/api/microsoft/puppeteer-auth', { method: 'DELETE' });
             setSuccess('Disconnected from Outlook');
             setStatus({ connected: false, method: null });
         } catch (err: any) {
             setError(err.message || 'Failed to disconnect');
+        } finally {
+            setShowDisconnectDialog(false);
         }
     };
 
@@ -151,7 +169,8 @@ export default function MicrosoftIntegrationPage() {
                                         }
                                     </p>
                                     {status.sessionExpired && (
-                                        <p className="text-sm text-orange-600 dark:text-orange-400">
+                                        <p className="text-sm text-orange-600 dark:text-orange-400 mt-1 flex items-center gap-1">
+                                            <AlertTriangle className="h-3 w-3" />
                                             Session expired - please reconnect
                                         </p>
                                     )}
@@ -163,7 +182,7 @@ export default function MicrosoftIntegrationPage() {
                             <Button
                                 variant="destructive"
                                 className="w-full"
-                                onClick={handleDisconnect}
+                                onClick={handleDisconnectClick}
                             >
                                 Disconnect
                             </Button>
@@ -171,100 +190,151 @@ export default function MicrosoftIntegrationPage() {
                     </CardContent>
                 </Card>
 
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Connect Account</CardTitle>
-                        <CardDescription>
-                            Choose how to connect your Microsoft account.
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <Tabs defaultValue="browser" className="w-full">
-                            <TabsList className="grid w-full grid-cols-2">
-                                <TabsTrigger value="oauth">OAuth (Standard)</TabsTrigger>
-                                <TabsTrigger value="browser">Browser Login</TabsTrigger>
-                            </TabsList>
-
-                            <TabsContent value="oauth" className="space-y-4 pt-4">
-                                <p className="text-sm text-muted-foreground">
-                                    Standard Microsoft OAuth login. Works if your organization allows app registrations.
-                                </p>
-                                <Button asChild className="w-full">
-                                    <Link href="/api/microsoft/auth">
-                                        Connect with Microsoft
-                                    </Link>
-                                </Button>
-                                <p className="text-xs text-center text-muted-foreground">
-                                    Redirects to Microsoft's secure login page.
-                                </p>
-                            </TabsContent>
-
-                            <TabsContent value="browser" className="space-y-4 pt-4">
-                                <div className="rounded-md bg-amber-50 p-3 text-amber-700 text-sm dark:bg-amber-900/10 dark:text-amber-400">
-                                    <strong>Alternative Method:</strong> Use this if your organization blocks OAuth app registrations.
-                                    Your credentials are encrypted and stored securely.
+                {/* New Sync Health Dashboard */}
+                {status.connected && (
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Sync Health</CardTitle>
+                            <CardDescription>
+                                Real-time status of your inbox synchronization.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            <div className="grid grid-cols-1 gap-4">
+                                <div className="flex items-center gap-3 p-3 bg-muted/40 rounded-lg">
+                                    <Activity className="h-5 w-5 text-blue-500" />
+                                    <div>
+                                        <p className="text-sm font-medium">Last Inbox Sync</p>
+                                        <p className="text-xs text-muted-foreground">
+                                            {status.lastSyncedAt
+                                                ? formatDistanceToNow(new Date(status.lastSyncedAt), { addSuffix: true })
+                                                : 'Pending initial sync...'}
+                                        </p>
+                                    </div>
                                 </div>
 
-                                <form onSubmit={handleBrowserLogin} className="space-y-4">
-                                    <div className="space-y-2">
-                                        <Label htmlFor="email">Microsoft Email</Label>
-                                        <Input
-                                            id="email"
-                                            type="email"
-                                            placeholder="you@outlook.com"
-                                            value={email}
-                                            onChange={(e) => setEmail(e.target.value)}
-                                            required
-                                            disabled={connecting}
-                                        />
+                                <div className="flex items-center gap-3 p-3 bg-muted/40 rounded-lg">
+                                    <ShieldCheck className="h-5 w-5 text-purple-500" />
+                                    <div>
+                                        <p className="text-sm font-medium">Session Status</p>
+                                        <p className="text-xs text-muted-foreground">
+                                            {status.sessionExpiry
+                                                ? `Expires ${formatDistanceToNow(new Date(status.sessionExpiry), { addSuffix: true })}`
+                                                : 'Unknown expiry'}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center gap-3 p-3 bg-muted/40 rounded-lg">
+                                    <Clock className="h-5 w-5 text-green-500" />
+                                    <div>
+                                        <p className="text-sm font-medium">Auto-Sync</p>
+                                        <p className="text-xs text-muted-foreground">
+                                            {status.syncEnabled ? 'Active (Every 5 mins)' : 'Paused'}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+                )}
+
+                {!status.connected && (
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Connect Account</CardTitle>
+                            <CardDescription>
+                                Choose how to connect your Microsoft account.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <Tabs defaultValue="browser" className="w-full">
+                                <TabsList className="grid w-full grid-cols-2">
+                                    <TabsTrigger value="browser">Browser Login</TabsTrigger>
+                                    <TabsTrigger value="oauth">OAuth (Standard)</TabsTrigger>
+                                </TabsList>
+
+                                <TabsContent value="oauth" className="space-y-4 pt-4">
+                                    <p className="text-sm text-muted-foreground">
+                                        Standard Microsoft OAuth login. Works if your organization allows app registrations.
+                                    </p>
+                                    <Button asChild className="w-full">
+                                        <Link href="/api/microsoft/auth">
+                                            Connect with Microsoft
+                                        </Link>
+                                    </Button>
+                                    <p className="text-xs text-center text-muted-foreground">
+                                        Redirects to Microsoft's secure login page.
+                                    </p>
+                                </TabsContent>
+
+                                <TabsContent value="browser" className="space-y-4 pt-4">
+                                    <div className="rounded-md bg-amber-50 p-3 text-amber-700 text-sm dark:bg-amber-900/10 dark:text-amber-400">
+                                        <strong>Alternative Method:</strong> Use this if your organization blocks OAuth app registrations.
+                                        Your credentials are encrypted and stored securely.
                                     </div>
 
-                                    <div className="space-y-2">
-                                        <Label htmlFor="password">Password</Label>
-                                        <div className="relative">
+                                    <form onSubmit={handleBrowserLogin} className="space-y-4">
+                                        <div className="space-y-2">
+                                            <Label htmlFor="email">Microsoft Email</Label>
                                             <Input
-                                                id="password"
-                                                type={showPassword ? "text" : "password"}
-                                                placeholder="••••••••"
-                                                value={password}
-                                                onChange={(e) => setPassword(e.target.value)}
+                                                id="email"
+                                                type="email"
+                                                placeholder="you@outlook.com"
+                                                value={email}
+                                                onChange={(e) => setEmail(e.target.value)}
                                                 required
                                                 disabled={connecting}
-                                                className="pr-10"
                                             />
-                                            <button
-                                                type="button"
-                                                onClick={() => setShowPassword(!showPassword)}
-                                                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                                            >
-                                                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                                            </button>
                                         </div>
-                                    </div>
 
-                                    <Button
-                                        type="submit"
-                                        className="w-full"
-                                        disabled={connecting || !email || !password}
-                                    >
-                                        {connecting ? (
-                                            <>
-                                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                                Connecting...
-                                            </>
-                                        ) : (
-                                            'Connect via Browser Login'
-                                        )}
-                                    </Button>
-                                </form>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="password">Password</Label>
+                                            <div className="relative">
+                                                <Input
+                                                    id="password"
+                                                    type={showPassword ? "text" : "password"}
+                                                    placeholder="••••••••"
+                                                    value={password}
+                                                    onChange={(e) => setPassword(e.target.value)}
+                                                    required
+                                                    disabled={connecting}
+                                                    className="pr-10"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowPassword(!showPassword)}
+                                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                                >
+                                                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                                </button>
+                                            </div>
+                                        </div>
 
-                                <p className="text-xs text-center text-muted-foreground">
-                                    Note: Accounts with MFA/2FA enabled are not supported.
-                                </p>
-                            </TabsContent>
-                        </Tabs>
-                    </CardContent>
-                </Card>
+                                        <Button
+                                            type="submit"
+                                            className="w-full"
+                                            disabled={connecting || !email || !password}
+                                        >
+                                            {connecting ? (
+                                                <>
+                                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                    Connecting...
+                                                </>
+                                            ) : (
+                                                'Connect via Browser Login'
+                                            )}
+                                        </Button>
+                                    </form>
+
+                                    <p className="text-xs text-center text-muted-foreground">
+                                        Note: Accounts with MFA/2FA enabled are not supported.
+                                    </p>
+                                </TabsContent>
+                            </Tabs>
+                        </CardContent>
+                    </Card>
+                )}
             </div>
 
             <Card>
@@ -282,6 +352,26 @@ export default function MicrosoftIntegrationPage() {
                     </ul>
                 </CardContent>
             </Card>
+
+            <AlertDialog open={showDisconnectDialog} onOpenChange={setShowDisconnectDialog}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Disconnect Outlook?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            Are you sure you want to disconnect your Outlook account? This will stop all email and contact synchronization. You will need to re-enter your credentials to reconnect.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={confirmDisconnect}
+                            className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+                        >
+                            Disconnect
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 }

@@ -14,10 +14,21 @@ model Contact {
   location     Location @relation(fields: [locationId], references: [id])
  
    // Person Details
-   name         String?
+   name         String?   // Full Name (Computed or entered)
+   firstName    String?   // [NEW] Direct mapping to GHL/Google
+   lastName     String?   // [NEW] Direct mapping to GHL/Google
    email        String?
    phone        String?
    message      String?
+   dateOfBirth  DateTime? // [NEW] Enhanced Demographics
+   tags         String[]  @default([]) // [NEW] GHL Tags
+
+   // Address [NEW]
+   address1     String?
+   city         String?
+   state        String?
+   postalCode   String?
+   country      String?
  
    // GHL Integration
    ghlContactId        String?  @unique
@@ -236,7 +247,7 @@ In addition to automated widget submissions, contacts can be managed manually vi
 ### 1. Add/Edit Contact Dialogs
 -   **Dynamic Interface**: The form adapts based on the **Contact Type**. Tabs and fields are conditionally shown (e.g., "Properties" tab is hidden for Owners/Agents).
 -   **Tabbed Interface**: Organized into up to four tabs (depending on configuration):
-    1.  **Lead Details**: Basic info (Name, Email) plus Goal, Priority, Stage, Source, Next Action, Assigned Agent.
+    1.  **Lead Details**: Basic info (**Full Name, First/Last Name, Email, Phone, DOB, Tags, Address**) plus Goal, Priority, Stage, Source, Next Action, Assigned Agent.
     2.  **Requirements**: Detailed criteria including Price Range, Bedrooms, District, and **Property Types**.
         -   **Property Types**: Implemented as a multi-select dropdown supporting both Categories (e.g., "House") and specific Subtypes (e.g., "Villa"). 
         -   **Storage**: Selections are stored with prefixes (`cat:` for categories, `sub:` for subtypes) to prevent ambiguity between identically named categories and subtypes.
@@ -262,7 +273,7 @@ In addition to automated widget submissions, contacts can be managed manually vi
     -   **Viewings Tab** (Edit Only): Allows scheduling and managing property viewings. **Conditionally shown** only for contacts that have the "Properties" tab enabled (Leads, Tenants).
     -   **History Tab** (Edit Only): Displays a chronological log of all changes made to the contact, including field updates and viewing activities.
     -   **Current Roles** (Edit Only): Displays active role assignments with the ability to delete them. Deletion refreshes the data without closing the dialog.
-    -   **Delete Contact**: Integrated destructive action with confirmation dialog.
+    -   **Smart Deletion**: Integrated destructive action with confirmation. **New in Feb 2026**: Users can optionally delete the contact from connected platforms (Google Contacts and GoHighLevel) simultaneously. Preferences for these options are remembered via `localStorage`.
 
 
 ### 2. View Contacts
@@ -329,9 +340,10 @@ Access to Contact data is strictly controlled based on the User's relationship t
 ### 3. Data Integrity & Cascading Deletes
 -   The Prisma schema does NOT strictly enforce cascading deletes on all Contact relationships to prevent accidental data loss.
 -   **Transactional Deletion**: The `deleteContact` server action implements a manual cascade within a database transaction:
-    1.  Deletes all **ContactRoles** (Property and Company).
-    2.  Deletes all **Viewings**.
-    3.  Deletes all **PropertySwipes**.
-    4.  Unlinks **SwipeSessions** (sets `contactId` to null).
-    5.  Deletes the **Contact**.
+    1.  **Remote Deletion (Optional)**: If requested by the user, the system first attempts to delete the contact from GoHighLevel and Google Contacts using their respective APIs.
+    2.  Deletes all **ContactRoles** (Property and Company).
+    3.  Deletes all **Viewings**.
+    4.  Deletes all **PropertySwipes**.
+    5.  Unlinks **SwipeSessions** (sets `contactId` to null).
+    6.  Deletes the **Contact**.
     This approach ensures that deleting a contact never leaves orphaned records or violates foreign key constraints.

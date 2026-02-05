@@ -348,11 +348,13 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
                                 </td>
                             </tr>
                         ) : (
-                            contacts.map((contact) => (
+                            contacts.map((contact, index) => (
                                 <ContactRow
                                     key={contact.id}
                                     contact={contact as any}
                                     leadSources={leadSourceNames}
+                                    allContacts={contacts as any}
+                                    currentIndex={index}
                                 />
                             ))
                         )}

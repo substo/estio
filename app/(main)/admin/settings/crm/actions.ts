@@ -6,7 +6,7 @@ import db from '@/lib/db';
 import { auth } from '@clerk/nextjs/server';
 import { verifyUserHasAccessToLocation } from '@/lib/auth/permissions';
 import { revalidatePath } from 'next/cache';
-import { pullLeadFromCrm } from '@/lib/crm/crm-lead-puller';
+import { pullLeadFromCrm, previewCrmLead } from '@/lib/crm/crm-lead-puller';
 
 export async function pullLead(crmLeadId: string) {
     console.log("[Action] pullLead called for ID:", crmLeadId);
@@ -22,6 +22,19 @@ export async function pullLead(crmLeadId: string) {
         return result;
     } catch (e: any) {
         console.error("Action pullLead failed:", e);
+        return { success: false, error: e.message };
+    }
+}
+
+export async function previewLeadAction(crmLeadId: string) {
+    try {
+        const { userId } = await auth();
+        if (!userId) return { success: false, error: "Unauthorized" };
+
+        const result = await previewCrmLead(crmLeadId, userId);
+        return { success: true, data: result };
+    } catch (e: any) {
+        console.error("Action previewLeadAction failed:", e);
         return { success: false, error: e.message };
     }
 }

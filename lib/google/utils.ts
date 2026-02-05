@@ -1,8 +1,8 @@
-
-import { Contact, ContactPropertyRole, Property } from "@prisma/client";
+import { Contact, ContactPropertyRole, Property, Viewing } from "@prisma/client";
 
 type ContactWithRoles = Contact & {
-    propertyRoles: (ContactPropertyRole & { property: Property })[];
+    propertyRoles?: (ContactPropertyRole & { property: Property })[];
+    viewings?: (Viewing & { property: Property })[];
 };
 
 /**
@@ -30,11 +30,18 @@ export function generateVisualId(contact: ContactWithRoles | Contact): string {
     // Try to grab the first interested property's reference
     let ref = "";
     // Check if we have property roles included
-    if ('propertyRoles' in contact && contact.propertyRoles?.length > 0) {
+    if ('propertyRoles' in contact && contact.propertyRoles && contact.propertyRoles.length > 0) {
         // Prioritize 'buyer' or 'tenant' roles
         const interest = contact.propertyRoles.find(r => r.role === 'buyer' || r.role === 'tenant' || r.role === 'viewer') || contact.propertyRoles[0];
         if (interest?.property?.reference) {
             ref = interest.property.reference;
+        }
+    }
+
+    // Fallback: Check Viewings (Last Write Wins usually, but here we just take the first one passed, which should be sorted)
+    if (!ref && 'viewings' in contact && contact.viewings && contact.viewings.length > 0) {
+        if (contact.viewings[0]?.property?.reference) {
+            ref = contact.viewings[0].property.reference;
         }
     }
 

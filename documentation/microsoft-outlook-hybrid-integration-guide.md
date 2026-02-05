@@ -22,6 +22,11 @@ This guide details the "hybrid" architecture used for Outlook integration in Est
 - **Mechanism**: Uses standard OAuth2 tokens (Graph API) to fetch contact changes via Delta Query.
 - **Trigger**: Same cron job as email sync.
 
+### State Tracking (`OutlookSyncState`)
+- **Table**: `OutlookSyncState`
+- **Purpose**: Stores the timestamp of the last successful email sync (`lastSyncedAt`) and delta links for efficient querying.
+- **Usage**: Used to populate the "Sync Health" dashboard in the UI.
+
 ---
 
 ## 2. Infrastructure & Cron Job
@@ -31,10 +36,11 @@ The synchronization is driven by a scheduled task running on the production serv
 ### Cron Job Endpoint
 - **Path**: `/api/cron/outlook-sync`
 - **Logic**:
-    1.  Fetches users with `outlookSyncEnabled` AND valid `outlookSessionCookies`.
-    2.  Iterates through users sequentially (to limit browser resource usage).
-    3.  **Step A**: Calls `syncEmailsFromOWA` for 'inbox' and 'sentitems'.
-    4.  **Step B**: Calls `syncContactsFromOutlook` (Graph API). Catches errors if the user only has Puppeteer credentials.
+    1.  Uses `export const dynamic = 'force-dynamic'` to prevent caching.
+    2.  Fetches users with `outlookSyncEnabled` AND valid `outlookSessionCookies`.
+    3.  Iterates through users sequentially (to limit browser resource usage).
+    4.  **Step A**: Calls `syncEmailsFromOWA` for 'inbox' and 'sentitems'.
+    5.  **Step B**: Calls `syncContactsFromOutlook` (Graph API). Catches errors if the user only has Puppeteer credentials.
 
 ### Server-Side Scheduling
 The cron job is managed by a robust shell script to ensure reliability (locking, logging, timeouts).
@@ -48,6 +54,36 @@ The scheduler is installed via `scripts/install-cron.sh`, which adds the followi
 ```bash
 */5 * * * * /path/to/project/scripts/cron-outlook-sync.sh
 ```
+```bash
+*/5 * * * * /path/to/project/scripts/cron-outlook-sync.sh
+```
+
+---
+
+## 3. User Interface & Monitoring
+
+The system provides real-time visibility into the sync status:
+
+### Integration Dashboard
+- **Location**: `/admin/settings/integrations/microsoft`
+- **Features**:
+    - **Sync Health Card**: Displays "Last Inbox Sync" (e.g., "5 mins ago"), "Session Status" (e.g., "Expires in 6 days"), and "Auto-Sync" status.
+    - **Connection Status**: Shows current connection method (OAuth/Puppeteer) and email.
+
+### Sync Manager Dialog
+- **Location**: Contact Mission Control -> "Outlook Emails" button.
+- **Features**:
+    - **Status Badge**: Shows "Last synced: [Time] ago" indicator.
+    - **Manual Sync**: Allows triggering an immediate sync for that specific contact/user.
+
+### Disconnecting & Data Cleanup
+When a user clicks **Disconnect**, the system performs a hard delete of all sensitive session data to ensure security:
+1.  **Cookies**: The encrypted `outlookSessionCookies` are permanently deleted.
+2.  **Credentials**: The `outlookPasswordEncrypted` and `outlookEmail` fields are set to null.
+3.  **State**: `outlookAuthMethod` and `outlookSyncEnabled` are reset.
+4.  **Tokens**: any stored OAuth tokens (`outlookAccessToken`) are wiped.
+
+This ensures that no usable credentials remain in the database. To reconnect, the user must re-enter their credentials.
 
 ---
 
@@ -56,9 +92,11 @@ The scheduler is installed via `scripts/install-cron.sh`, which adds the followi
 ### A. Puppeteer Service (`lib/microsoft/outlook-puppeteer.ts`)
 This singleton service manages the browser instance:
 - **`loadSession(userId)`**: Loads encrypted cookies from the DB and restores the session.
-- **`loginToOWA(...)`**: Handles the full login flow, including "Stay Signed In" and "Pick an Account" screens.
+- **`loginToOWA(...)`**: Handles the full login flow with **Immediate Cookie Capture**.
+    - Captures "Connected" state/cookies immediately after password verification.
+    - Gracefully handles redirects to OWA that may time out on slower servers.
 - **Stealth**: Uses various flags to mask the automation implementation.
-- **Resource Management**: Auto-closes the browser after 5 minutes of inactivity.
+- **Resource Management**: Auto-closes the browser after 5 minutes of inactivity (`IDLE_TIMEOUT_MS`).
 
 ### B. OWA Sync Logic (`lib/microsoft/owa-email-sync.ts`)
 This function orchestrates the scraping:

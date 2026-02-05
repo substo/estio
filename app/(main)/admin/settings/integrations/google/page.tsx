@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { CheckCircle2, RefreshCw, XCircle } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { SyncDirectionSettings } from "./sync-direction-settings";
 
 export default async function GoogleIntegrationPage({
     searchParams,
@@ -17,7 +18,7 @@ export default async function GoogleIntegrationPage({
 
     const user = await db.user.findUnique({
         where: { clerkId: clerkUserId },
-        select: { id: true, googleAccessToken: true, googleRefreshToken: true, googleSyncEnabled: true }
+        select: { id: true, googleAccessToken: true, googleRefreshToken: true, googleSyncEnabled: true, googleSyncDirection: true }
     });
 
     if (!user) {
@@ -98,29 +99,33 @@ export default async function GoogleIntegrationPage({
                     </CardContent>
                 </Card>
 
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Sync Settings</CardTitle>
-                        <CardDescription>
-                            Configure how your data is synchronized.
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                        <div className="space-y-2">
-                            <h4 className="font-medium text-sm">Features</h4>
-                            <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
-                                <li><strong>Gmail Sync:</strong> Two-way email sync (Desktop & Mobile).</li>
-                                <li><strong>Caller ID:</strong> Company field shows "Lead [Rent/Sale]..."</li>
-                                <li><strong>Contact Sync:</strong> Updates in Estio push to Google Contacts.</li>
-                            </ul>
-                        </div>
-
-                        <div className="rounded-md bg-amber-50 p-3 text-amber-700 text-sm dark:bg-amber-900/10 dark:text-amber-400">
-                            <strong>Note:</strong> Incoming calls will show the generated "Company" name as the Caller ID context.
-                        </div>
-                    </CardContent>
-                </Card>
+                <SyncDirectionSettings
+                    currentDirection={user.googleSyncDirection}
+                    isConnected={isConnected}
+                />
             </div>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle>Sync Features</CardTitle>
+                    <CardDescription>
+                        Available sync capabilities when connected.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                        <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
+                            <li><strong>Gmail Sync:</strong> Two-way email sync (Desktop & Mobile).</li>
+                            <li><strong>Caller ID:</strong> Company field shows "Lead [Rent/Sale]..."</li>
+                            <li><strong>Contact Sync:</strong> Manual sync via Google Sync Manager.</li>
+                        </ul>
+                    </div>
+
+                    <div className="rounded-md bg-amber-50 p-3 text-amber-700 text-sm dark:bg-amber-900/10 dark:text-amber-400">
+                        <strong>Note:</strong> Incoming calls will show the generated "Company" name as the Caller ID context.
+                    </div>
+                </CardContent>
+            </Card>
         </div>
     );
 }

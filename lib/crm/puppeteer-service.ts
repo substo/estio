@@ -14,7 +14,7 @@ export class PuppeteerService {
             console.log("PuppeteerService: Launching browser...");
             try {
                 this.browser = await puppeteer.launch({
-                    headless: false,
+                    headless: true,
                     // Args to prevent crashes in some environments
                     args: [
                         '--no-sandbox',

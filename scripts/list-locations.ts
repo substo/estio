@@ -1,7 +1,9 @@
 import db from '../lib/db';
 
 async function main() {
-    const locations = await db.location.findMany();
+    const locations = await db.location.findMany({
+        select: { id: true, name: true, ghlLocationId: true }
+    });
     console.log('Locations:', JSON.stringify(locations, null, 2));
 }
 

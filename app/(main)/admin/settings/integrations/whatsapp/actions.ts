@@ -421,7 +421,9 @@ export async function fetchConversationHistory(conversationId: string) {
 
     try {
         const phoneNumber = conversation.contact.phone.replace(/\D/g, '');
-        const remoteJid = `${phoneNumber}@s.whatsapp.net`;
+
+        const isGroup = conversation.contact.contactType === 'WhatsAppGroup' || conversation.contact.phone.includes('@g.us');
+        const remoteJid = isGroup ? `${phoneNumber}@g.us` : `${phoneNumber}@s.whatsapp.net`;
 
         console.log(`[History Fetch] Fetching messages for ${remoteJid}...`);
         const messages = await evolutionClient.fetchMessages(location.evolutionInstanceId, remoteJid, 100);
@@ -436,17 +438,24 @@ export async function fetchConversationHistory(conversationId: string) {
                 if (!messageContent || !key?.id) continue;
 
                 const isFromMe = key.fromMe;
+
+                // Participant Resolution
+                const realSenderPhone = (msg as any).senderPn || (key.participant?.includes('@s.whatsapp.net') ? key.participant.replace('@s.whatsapp.net', '') : null);
+                let participantPhone = realSenderPhone || (key.participant ? key.participant.replace('@s.whatsapp.net', '').replace('@lid', '') : undefined);
+
                 const normalized: any = {
                     from: isFromMe ? location.id : phoneNumber,
                     to: isFromMe ? phoneNumber : location.id,
                     body: messageContent.conversation || messageContent.extendedTextMessage?.text || '[Media]',
                     type: 'text',
                     wamId: key.id,
-                    timestamp: new Date(msg.messageTimestamp ? msg.messageTimestamp * 1000 : Date.now()),
+                    timestamp: new Date(msg.messageTimestamp ? (msg.messageTimestamp as number) * 1000 : Date.now()),
                     direction: isFromMe ? 'outbound' : 'inbound',
                     source: 'whatsapp_evolution',
                     locationId: location.id,
-                    contactName: msg.pushName
+                    contactName: msg.pushName || realSenderPhone,
+                    isGroup: isGroup,
+                    participant: participantPhone
                 };
 
                 await processNormalizedMessage(normalized);

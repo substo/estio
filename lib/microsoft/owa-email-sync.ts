@@ -372,7 +372,27 @@ export async function syncEmailsFromOWA(userId: string, folderId: 'inbox' | 'sen
         return emails.length;
 
     } finally {
+        // Close page first
         await page.close();
+
+        // Update Sync State (Last Synced At)
+        if (emails.length > 0 || folderId === 'inbox') {
+            try {
+                await db.outlookSyncState.upsert({
+                    where: { userId },
+                    create: {
+                        userId,
+                        emailAddress: 'puppeteer-session', // Placeholder or fetch real email if available
+                        lastSyncedAt: new Date()
+                    },
+                    update: {
+                        lastSyncedAt: new Date()
+                    }
+                });
+            } catch (e) {
+                console.error('[OWA Email Sync] Failed to update sync state:', e);
+            }
+        }
     }
 
     /**
@@ -570,6 +590,46 @@ export async function syncEmailsFromOWA(userId: string, folderId: 'inbox' | 'sen
 
             console.log(`[OWA Email Sync] Saved email: ${email.subject}`);
 
+            // --- GHL SYNC ---
+            // Push to GHL if connected
+            try {
+                // Fetch full conversation to get contactId and locationId
+                const conversation = await db.conversation.findUnique({ where: { id: conversationId } });
+
+                if (conversation) {
+                    // We need the contact's ID to sync to GHL
+                    const contact = await db.contact.findUnique({ where: { id: conversation.contactId } });
+                    const location = await db.location.findUnique({ where: { id: conversation.locationId } });
+
+                    if (contact && location?.ghlAccessToken && location?.ghlLocationId) {
+                        const { createInboundMessage } = await import('@/lib/ghl/conversations');
+                        const { ensureRemoteContact } = await import('@/lib/crm/contact-sync');
+
+                        // Ensure GHL Contact exists
+                        let ghlContactId = contact.ghlContactId;
+                        if (!ghlContactId) {
+                            ghlContactId = await ensureRemoteContact(contact.id, location.ghlLocationId, location.ghlAccessToken);
+                        }
+
+                        if (ghlContactId) {
+                            await createInboundMessage(location.ghlAccessToken, {
+                                type: 'Email',
+                                contactId: ghlContactId,
+                                direction: folderId === 'inbox' ? 'inbound' : 'outbound',
+                                status: 'delivered',
+                                subject: email.subject,
+                                html: email.preview, // OWA scraper currently only gets preview text, not full body HTML
+                                emailFrom: email.senderEmail || undefined,
+                                dateAdded: emailDate.getTime(),
+                            });
+                            console.log(`[OWA Email Sync] Synced message to GHL for contact ${contact.email}`);
+                        }
+                    }
+                }
+            } catch (ghlError) {
+                console.error('[OWA Email Sync] Failed to sync to GHL:', ghlError);
+            }
+
         } catch (error) {
             console.error(`[OWA Email Sync] Error processing email:`, error);
         }
@@ -671,8 +731,8 @@ export async function syncEmailsFromOWA(userId: string, folderId: 'inbox' | 'sen
      */
     function extractEmail(text: string): string | null {
         if (!text) return null;
-        // Try to extract from "Name <email>" format
-        const match = text.match(/<([^>]+@[^>]+)>/);
+        // Try to extract from "Name <email>" format - use non-greedy matching
+        const match = text.match(/<([^>]+)>/);
         if (match) return match[1].toLowerCase().trim();
         // If it looks like a plain email, return it
         if (text.includes('@')) return text.toLowerCase().trim();

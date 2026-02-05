@@ -194,7 +194,13 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
         const { processNormalizedMessage } = await import("@/lib/whatsapp/sync");
 
         const phone = conversation.contact.phone.replace(/\D/g, '');
-        const remoteJid = `${phone}@s.whatsapp.net`;
+
+        let remoteJid = `${phone}@s.whatsapp.net`;
+        const isGroup = conversation.contact.contactType === 'WhatsAppGroup' || conversation.contact.phone.includes('@g.us');
+
+        if (isGroup) {
+            remoteJid = `${phone}@g.us`;
+        }
 
         const fetchLimit = limit || 50;
         console.log(`[Sync] Fetching messages for ${remoteJid} (Limit: ${fetchLimit})...`);
@@ -212,17 +218,31 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
                 if (!messageContent || !key?.id) continue;
 
                 const isFromMe = key.fromMe;
+
+                // Detect group chat
+                const isGroup = key.remoteJid?.includes('@g.us') || false;
+
+                // Enhanced Participant Resolution (LID Fix)
+                const realSenderPhone = (msg as any).senderPn || (key.participant?.includes('@s.whatsapp.net') ? key.participant.replace('@s.whatsapp.net', '') : null);
+                let participantPhone = realSenderPhone || (key.participant ? key.participant.replace('@s.whatsapp.net', '').replace('@lid', '') : undefined);
+
+                // For group messages, the participant is the sender; for 1:1, it's the phone from the contact
+                // We use the Group Phone for 'from' to keep the conversation unified.
+                // The participant field identifies the actual sender.
+
                 const normalized: any = {
                     from: isFromMe ? location.id : phone,
                     to: isFromMe ? phone : location.id,
                     body: messageContent.conversation || messageContent.extendedTextMessage?.text || '[Media]',
                     type: 'text',
                     wamId: key.id,
-                    timestamp: new Date(msg.messageTimestamp ? msg.messageTimestamp * 1000 : Date.now()),
+                    timestamp: new Date(msg.messageTimestamp ? (msg.messageTimestamp as number) * 1000 : Date.now()),
                     direction: isFromMe ? 'outbound' : 'inbound',
                     source: 'whatsapp_evolution',
                     locationId: location.id,
-                    contactName: msg.pushName
+                    contactName: isGroup ? undefined : (msg.pushName || realSenderPhone), // Don't rename group to sender name
+                    isGroup: isGroup,
+                    participant: participantPhone // Pass resolved participant to sync
                 };
 
                 const result = await processNormalizedMessage(normalized);
@@ -1394,6 +1414,46 @@ export async function deleteConversations(conversationIds: string[]) {
 
     } catch (error: any) {
         console.error("deleteConversations error:", error);
+        return { success: false, error: error.message };
+    }
+}
+
+export async function getConversationParticipants(conversationId: string) {
+    try {
+        const location = await getLocationContext();
+        if (!location) throw new Error("Unauthorized");
+
+        const conversation = await db.conversation.findFirst({
+            where: {
+                OR: [
+                    { id: conversationId },
+                    { ghlConversationId: conversationId }
+                ],
+                locationId: location.id
+            }
+        });
+
+        if (!conversation) return { success: false, error: "Conversation not found" };
+
+        const participants = await db.conversationParticipant.findMany({
+            where: { conversationId: conversation.id },
+            include: {
+                contact: {
+                    select: {
+                        id: true,
+                        name: true,
+                        phone: true,
+                        email: true,
+                        contactType: true
+                    }
+                }
+            },
+            orderBy: { role: 'asc' }
+        });
+
+        return { success: true, participants };
+    } catch (error: any) {
+        console.error("Failed to fetch participants:", error);
         return { success: false, error: error.message };
     }
 }

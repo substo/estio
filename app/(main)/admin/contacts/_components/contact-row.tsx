@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
-import { AlertTriangle, Link as LinkIcon, Link2, CheckCircle } from "lucide-react";
+import { AlertTriangle, Link as LinkIcon, Link2, CheckCircle, RefreshCw } from "lucide-react";
 import { GoogleSyncManager } from "./google-sync-manager";
 import { EditContactDialog } from "./edit-contact-dialog";
 import { ContactData } from "./contact-form";
@@ -12,17 +12,22 @@ import { ContactData } from "./contact-form";
 interface ContactRowProps {
     contact: ContactData & {
         createdAt: Date;
+        updatedAt: Date;
         propertyRoles: any[];
         companyRoles: any[];
         heatScore: number;
         status: string;
         googleContactId?: string | null;
+        lastGoogleSync?: Date | null;
         error?: string | null;
     };
     leadSources: string[];
+    // For navigation in Google Sync Manager
+    allContacts?: ContactData[];
+    currentIndex?: number;
 }
 
-export function ContactRow({ contact, leadSources }: ContactRowProps) {
+export function ContactRow({ contact, leadSources, allContacts, currentIndex }: ContactRowProps) {
     const router = useRouter();
     const [managerOpen, setManagerOpen] = useState(false);
 
@@ -36,6 +41,9 @@ export function ContactRow({ contact, leadSources }: ContactRowProps) {
 
     const isLinked = !!contact.googleContactId;
     const hasError = !!contact.error;
+    // Add 2 second buffer to ignore micro-differences (race condition fixes)
+    const isOutOfSync = isLinked && !hasError && contact.lastGoogleSync &&
+        (new Date(contact.updatedAt).getTime() > new Date(contact.lastGoogleSync).getTime() + 2000);
 
     return (
         <>
@@ -87,19 +95,23 @@ export function ContactRow({ contact, leadSources }: ContactRowProps) {
                             size="icon"
                             className={`h-6 w-6 ${hasError
                                 ? "text-yellow-600 hover:text-yellow-700 hover:bg-yellow-50"
-                                : isLinked
-                                    ? "text-green-600 hover:text-green-700 hover:bg-green-50"
-                                    : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                                : isOutOfSync
+                                    ? "text-orange-500 hover:text-orange-600 hover:bg-orange-50"
+                                    : isLinked
+                                        ? "text-green-600 hover:text-green-700 hover:bg-green-50"
+                                        : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"
                                 }`}
                             onClick={(e) => { e.stopPropagation(); setManagerOpen(true); }}
-                            title={hasError ? contact.error! : isLinked ? "Linked to Google" : "Not Linked"}
+                            title={hasError ? contact.error! : isOutOfSync ? "Out of Sync (Local changes pending)" : isLinked ? "Linked to Google" : "Not Linked - Click to Add"}
                         >
                             {hasError ? (
                                 <AlertTriangle className="h-4 w-4" />
+                            ) : isOutOfSync ? (
+                                <RefreshCw className="h-4 w-4" />
                             ) : isLinked ? (
                                 <LinkIcon className="h-4 w-4" />
                             ) : (
-                                <Link2 className="h-4 w-4" />
+                                <Link2 className="h-4 w-4 opacity-50" />
                             )}
                         </Button>
                     </div>
@@ -112,7 +124,9 @@ export function ContactRow({ contact, leadSources }: ContactRowProps) {
             {/* Render Manager outside of tr */}
             {managerOpen && (
                 <GoogleSyncManager
-                    contact={contact}
+                    contact={allContacts ? undefined : contact}
+                    contacts={allContacts as any}
+                    initialIndex={currentIndex}
                     open={managerOpen}
                     onOpenChange={setManagerOpen}
                 />

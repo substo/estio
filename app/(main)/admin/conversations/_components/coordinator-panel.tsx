@@ -16,6 +16,7 @@ import { CONTACT_TYPE_CONFIG, ContactType, DEFAULT_CONTACT_TYPE } from "../../co
 import { EditContactDialog } from "../../contacts/_components/edit-contact-dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { GroupMembersList } from './group-members-list';
 
 interface CoordinatorPanelProps {
     conversation: Conversation;
@@ -279,108 +280,112 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
                 </TooltipProvider>
             </div>
 
-            {/* Contact Details Card */}
-            <Card className="shadow-none border-border/50">
-                <CardHeader className="p-3 pb-1.5">
-                    <div className="flex justify-between items-center pr-4">
-                        <CardTitle className="text-xs font-semibold">Details</CardTitle>
-                        {contactContext?.contact && (
-                            <EditContactDialog
-                                contact={contactContext.contact}
-                                leadSources={contactContext.leadSources || []}
-                            />
-                        )}
-                    </div>
-                </CardHeader>
-                <CardContent className="p-3 pt-0 text-sm space-y-2">
-                    {contactContext?.contact ? (
-                        <>
-                            <div className="flex flex-col gap-0.5">
-                                <div className="font-medium text-sm text-primary hover:underline cursor-pointer">
-                                    <EditContactDialog
-                                        contact={contactContext.contact}
-                                        leadSources={contactContext.leadSources || []}
-                                        trigger={<span>{contactContext.contact.name || "Unnamed Contact"}</span>}
-                                    />
-                                </div>
-                                <div className="text-muted-foreground text-[11px] flex flex-col gap-0.5">
-                                    {contactContext.contact.email && (
-                                        <div className="flex items-center gap-2">
-                                            <span className="w-12 opacity-70">Email:</span>
-                                            <span className="select-all text-foreground break-all">{contactContext.contact.email}</span>
-                                        </div>
-                                    )}
-                                    {contactContext.contact.phone && (
-                                        <div className="flex items-center gap-2">
-                                            <span className="w-12 opacity-70">Phone:</span>
-                                            <span className="select-all text-foreground break-all">{contactContext.contact.phone}</span>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-1.5 text-xs">
-                                <div className="bg-secondary/50 p-1.5 rounded border border-secondary">
-                                    <span className="text-muted-foreground block text-[10px] mb-0.5">Status</span>
-                                    <span className="font-medium">{contactContext.contact.leadStage || "Unassigned"}</span>
-                                </div>
-                                <div className="bg-secondary/50 p-1.5 rounded border border-secondary">
-                                    <span className="text-muted-foreground block text-[10px] mb-0.5">Type</span>
-                                    <span className="font-medium">{contactContext.contact.contactType || "Lead"}</span>
-                                </div>
-                            </div>
-
-                            {/* Interested Properties */}
-                            {contactContext.contact.propertyRoles && contactContext.contact.propertyRoles.length > 0 && (
-                                <div className="pt-1.5 border-t">
-                                    <span className="text-[10px] text-muted-foreground font-medium mb-1 block">Property Interest</span>
-                                    <div className="space-y-1">
-                                        {contactContext.contact.propertyRoles.map((role: any) => (
-                                            <div key={role.id} className="text-[11px] flex items-center gap-1.5 p-1 bg-blue-50/50 rounded border border-blue-100/50 text-foreground">
-                                                <Home className="w-3 h-3 text-blue-500" />
-                                                <span className="truncate flex-1" title={role.property.title}>
-                                                    {role.property.reference || role.property.title}
-                                                </span>
-                                                <Badge variant="secondary" className="text-[9px] h-3.5 px-1 font-normal bg-background">
-                                                    {role.role}
-                                                </Badge>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
+            {/* Contact Details / Group Members Card */}
+            {(contactContext?.contact?.contactType === 'WhatsAppGroup' || contactContext?.contact?.phone?.includes('@g.us')) ? (
+                <GroupMembersList conversationId={conversation.id} />
+            ) : (
+                <Card className="shadow-none border-border/50">
+                    <CardHeader className="p-3 pb-1.5">
+                        <div className="flex justify-between items-center pr-4">
+                            <CardTitle className="text-xs font-semibold">Details</CardTitle>
+                            {contactContext?.contact && (
+                                <EditContactDialog
+                                    contact={contactContext.contact}
+                                    leadSources={contactContext.leadSources || []}
+                                />
                             )}
-
-                            {/* Viewings (Recent) */}
-                            {contactContext.contact.viewings && contactContext.contact.viewings.length > 0 && (
-                                <div className="pt-1.5 border-t text-[11px]">
-                                    <span className="text-muted-foreground font-medium mb-1 block">Recent Viewings</span>
-                                    <div className="space-y-1">
-                                        {contactContext.contact.viewings.slice(0, 3).map((v: any) => (
-                                            <div key={v.id} className="flex justify-between items-center text-foreground/80">
-                                                <span className="truncate max-w-[120px]">{v.property.title}</span>
-                                                <span className="text-muted-foreground text-[10px]">{new Date(v.date).toLocaleDateString()}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                        </>
-                    ) : (
-                        // Fallback if context not loaded yet
-                        <div className="flex flex-col gap-2 opacity-50">
-                            <div className="flex justify-between">
-                                <span className="text-muted-foreground">Name:</span>
-                                <span>{conversation.contactName}</span>
-                            </div>
-                            <div className="flex justify-between">
-                                <span className="text-muted-foreground">Status:</span>
-                                <span>{conversation.status}</span>
-                            </div>
-                            {loadingContext && <div className="text-xs text-center text-primary mt-2">Loading full details...</div>}
                         </div>
-                    )}
-                </CardContent>
-            </Card>
+                    </CardHeader>
+                    <CardContent className="p-3 pt-0 text-sm space-y-2">
+                        {contactContext?.contact ? (
+                            <>
+                                <div className="flex flex-col gap-0.5">
+                                    <div className="font-medium text-sm text-primary hover:underline cursor-pointer">
+                                        <EditContactDialog
+                                            contact={contactContext.contact}
+                                            leadSources={contactContext.leadSources || []}
+                                            trigger={<span>{contactContext.contact.name || "Unnamed Contact"}</span>}
+                                        />
+                                    </div>
+                                    <div className="text-muted-foreground text-[11px] flex flex-col gap-0.5">
+                                        {contactContext.contact.email && (
+                                            <div className="flex items-center gap-2">
+                                                <span className="w-12 opacity-70">Email:</span>
+                                                <span className="select-all text-foreground break-all">{contactContext.contact.email}</span>
+                                            </div>
+                                        )}
+                                        {contactContext.contact.phone && (
+                                            <div className="flex items-center gap-2">
+                                                <span className="w-12 opacity-70">Phone:</span>
+                                                <span className="select-all text-foreground break-all">{contactContext.contact.phone}</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-1.5 text-xs">
+                                    <div className="bg-secondary/50 p-1.5 rounded border border-secondary">
+                                        <span className="text-muted-foreground block text-[10px] mb-0.5">Status</span>
+                                        <span className="font-medium">{contactContext.contact.leadStage || "Unassigned"}</span>
+                                    </div>
+                                    <div className="bg-secondary/50 p-1.5 rounded border border-secondary">
+                                        <span className="text-muted-foreground block text-[10px] mb-0.5">Type</span>
+                                        <span className="font-medium">{contactContext.contact.contactType || "Lead"}</span>
+                                    </div>
+                                </div>
+
+                                {/* Interested Properties */}
+                                {contactContext.contact.propertyRoles && contactContext.contact.propertyRoles.length > 0 && (
+                                    <div className="pt-1.5 border-t">
+                                        <span className="text-[10px] text-muted-foreground font-medium mb-1 block">Property Interest</span>
+                                        <div className="space-y-1">
+                                            {contactContext.contact.propertyRoles.map((role: any) => (
+                                                <div key={role.id} className="text-[11px] flex items-center gap-1.5 p-1 bg-blue-50/50 rounded border border-blue-100/50 text-foreground">
+                                                    <Home className="w-3 h-3 text-blue-500" />
+                                                    <span className="truncate flex-1" title={role.property.title}>
+                                                        {role.property.reference || role.property.title}
+                                                    </span>
+                                                    <Badge variant="secondary" className="text-[9px] h-3.5 px-1 font-normal bg-background">
+                                                        {role.role}
+                                                    </Badge>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Viewings (Recent) */}
+                                {contactContext.contact.viewings && contactContext.contact.viewings.length > 0 && (
+                                    <div className="pt-1.5 border-t text-[11px]">
+                                        <span className="text-muted-foreground font-medium mb-1 block">Recent Viewings</span>
+                                        <div className="space-y-1">
+                                            {contactContext.contact.viewings.slice(0, 3).map((v: any) => (
+                                                <div key={v.id} className="flex justify-between items-center text-foreground/80">
+                                                    <span className="truncate max-w-[120px]">{v.property.title}</span>
+                                                    <span className="text-muted-foreground text-[10px]">{new Date(v.date).toLocaleDateString()}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </>
+                        ) : (
+                            // Fallback if context not loaded yet
+                            <div className="flex flex-col gap-2 opacity-50">
+                                <div className="flex justify-between">
+                                    <span className="text-muted-foreground">Name:</span>
+                                    <span>{conversation.contactName}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span className="text-muted-foreground">Status:</span>
+                                    <span>{conversation.status}</span>
+                                </div>
+                                {loadingContext && <div className="text-xs text-center text-primary mt-2">Loading full details...</div>}
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
+            )}
 
 
             {/* PLANNER SECTION */}

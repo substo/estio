@@ -291,14 +291,12 @@ export async function syncConversationBatch(accessToken: string, locationId: str
 
     if (res.conversations) {
         for (const conv of res.conversations) {
-            for (const conv of res.conversations) {
-                await upsertConversationFromGHL(conv, internalLocationId, accessToken);
-            }
+            await upsertConversationFromGHL(conv, internalLocationId, accessToken);
         }
     }
 }
 
-async function upsertConversationFromGHL(conv: any, internalLocationId: string, accessToken: string) {
+export async function upsertConversationFromGHL(conv: any, internalLocationId: string, accessToken: string) {
     if (!conv.contactId) return;
 
     let contact = await db.contact.findUnique({
@@ -316,7 +314,7 @@ async function upsertConversationFromGHL(conv: any, internalLocationId: string, 
         if (!contact) return;
     }
 
-    await db.conversation.upsert({
+    return await db.conversation.upsert({
         where: { ghlConversationId: conv.id },
         update: {
             lastMessageBody: conv.lastMessageBody,

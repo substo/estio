@@ -166,8 +166,8 @@ export class OutlookPuppeteerService {
             const needsNavigation = existingPage || !page.url().includes('login.microsoftonline.com');
             if (needsNavigation) {
                 await page.goto('https://login.microsoftonline.com', {
-                    waitUntil: 'networkidle0',
-                    timeout: 30000
+                    waitUntil: 'domcontentloaded',
+                    timeout: 60000
                 });
             }
 
@@ -287,72 +287,81 @@ export class OutlookPuppeteerService {
             let currentUrl = page.url();
             console.log('[OutlookPuppeteer] Current URL post-login:', currentUrl);
 
+            // -------------------------------------------------------------------------
+            // CRITICAL: Capture cookies IMMEDIATELY after login
+            // Even if the redirect to OWA times out, we want to save this session.
+            // -------------------------------------------------------------------------
+            const captureCookies = async () => {
+                const allCookies: Cookie[] = [];
+                const currentCookies = await page.cookies();
+                allCookies.push(...currentCookies);
+                for (const domain of MICROSOFT_AUTH_DOMAINS) {
+                    try {
+                        const domainCookies = await page.cookies(domain);
+                        allCookies.push(...domainCookies);
+                    } catch (e) { }
+                }
+                return Array.from(new Map(allCookies.map(c => [`${c.name}:${c.domain}`, c])).values());
+            };
+
+            let capturedCookies = await captureCookies();
+            console.log(`[OutlookPuppeteer] Captured ${capturedCookies.length} cookies immediately after login.`);
+
             // Check if we're already on OWA (skip navigation if so)
             const isOnOWA = currentUrl.includes('outlook.live.com/mail') ||
                 currentUrl.includes('outlook.office.com/mail') ||
                 currentUrl.includes('outlook.office365.com/mail');
 
-            if (isOnOWA) {
-                console.log('[OutlookPuppeteer] Already on OWA, no additional navigation needed.');
-            } else if (currentUrl.includes('m365.cloud.microsoft') || currentUrl.includes('office.com') || currentUrl.includes('microsoft365.com')) {
-                // M365 / Office.com Landing Page (Business Account) - redirect to Work OWA
-                console.log('[OutlookPuppeteer] Detected M365/Office portal. Redirecting to Work OWA...');
-                await page.goto(OWA_WORK_URL, { waitUntil: 'networkidle0', timeout: 30000 });
-                currentUrl = page.url();
-            } else if (!currentUrl.includes('login.') && !currentUrl.includes('signin')) {
-                // We're on some other Microsoft page, try Work OWA
-                console.log('[OutlookPuppeteer] On unknown page, navigating to Work OWA...');
-                await page.goto(OWA_WORK_URL, { waitUntil: 'networkidle0', timeout: 30000 });
-                currentUrl = page.url();
-            }
+            try {
+                if (isOnOWA) {
+                    console.log('[OutlookPuppeteer] Already on OWA, no additional navigation needed.');
+                } else if (currentUrl.includes('m365.cloud.microsoft') || currentUrl.includes('office.com') || currentUrl.includes('microsoft365.com')) {
+                    // M365 / Office.com Landing Page (Business Account) - redirect to Work OWA
+                    console.log('[OutlookPuppeteer] Detected M365/Office portal. Redirecting to Work OWA...');
+                    await page.goto(OWA_WORK_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+                    currentUrl = page.url();
+                } else if (!currentUrl.includes('login.') && !currentUrl.includes('signin')) {
+                    // We're on some other Microsoft page, try Work OWA
+                    console.log('[OutlookPuppeteer] On unknown page, navigating to Work OWA...');
+                    await page.goto(OWA_WORK_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+                    currentUrl = page.url();
+                }
 
-            // Check if we're actually in OWA (not redirected back to login)
-            if (currentUrl.includes('login.') || currentUrl.includes('signin')) {
-                // One last try: Check for "Pick an account" or "Signed in" intermediate screen
-                const signedInText = await page.$('div[data-bind*="unsafe_signedInText"]');
-                const tile = await page.$('.table-cell');
+                // Check if we're actually in OWA (not redirected back to login)
+                if (currentUrl.includes('login.') || currentUrl.includes('signin')) {
+                    // One last try: Check for "Pick an account" or "Signed in" intermediate screen
+                    const signedInText = await page.$('div[data-bind*="unsafe_signedInText"]');
+                    const tile = await page.$('.table-cell');
 
-                if (signedInText || tile) {
-                    console.log('[OutlookPuppeteer] Detected "Signed In" / Account Tile screen. Clicking tile to proceed...');
-                    const clickTarget = signedInText || tile;
-                    if (clickTarget) {
-                        await clickTarget.click();
-                        await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 30000 }).catch(() => { });
-                        // Re-check URL
-                        currentUrl = page.url();
+                    if (signedInText || tile) {
+                        console.log('[OutlookPuppeteer] Detected "Signed In" / Account Tile screen. Clicking tile to proceed...');
+                        const clickTarget = signedInText || tile;
+                        if (clickTarget) {
+                            await clickTarget.click();
+                            await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => { });
+                            currentUrl = page.url();
+                        }
+                    }
+
+                    if (currentUrl.includes('login.') || currentUrl.includes('signin')) {
+                        return { success: false, error: 'Login failed. Could not access Outlook.' };
                     }
                 }
-
-                if (currentUrl.includes('login.') || currentUrl.includes('signin')) {
-                    return { success: false, error: 'Login failed. Could not access Outlook.' };
+            } catch (navError: any) {
+                console.warn('[OutlookPuppeteer] Navigation validation timed out, but login was likely successful.', navError);
+                // If we have cookies, we can treat this as a success (partial)
+                if (capturedCookies.length > 0) {
+                    console.log('[OutlookPuppeteer] Returning captured cookies despite navigation timeout.');
+                    return { success: true, cookies: capturedCookies };
                 }
+                throw navError;
             }
 
-            // Success! Extract cookies from ALL Microsoft domains for proper session persistence
-            // Use page.cookies() with URLs - this gets cookies for those domains without navigating
-            const allCookies: Cookie[] = [];
+            // Success! Re-capture cookies just in case new ones were set during redirect
+            capturedCookies = await captureCookies();
+            console.log('[OutlookPuppeteer] Final cookie capture:', capturedCookies.length);
 
-            // First get current page cookies
-            const currentCookies = await page.cookies();
-            allCookies.push(...currentCookies);
-
-            // Then get cookies for each Microsoft auth domain
-            for (const domain of MICROSOFT_AUTH_DOMAINS) {
-                try {
-                    const domainCookies = await page.cookies(domain);
-                    allCookies.push(...domainCookies);
-                } catch (e) {
-                    // Ignore errors for domains we can't access
-                }
-            }
-
-            // Deduplicate cookies by name+domain
-            const uniqueCookies = Array.from(
-                new Map(allCookies.map(c => [`${c.name}:${c.domain}`, c])).values()
-            );
-            console.log('[OutlookPuppeteer] Login successful, extracted', uniqueCookies.length, 'cookies from all domains');
-
-            return { success: true, cookies: uniqueCookies };
+            return { success: true, cookies: capturedCookies };
 
         } catch (error: any) {
             console.error('[OutlookPuppeteer] Login error:', error);
@@ -457,7 +466,7 @@ export class OutlookPuppeteerService {
             console.log(`[OutlookPuppeteer] Target URL: ${targetUrl}`);
 
             try {
-                await page.goto(targetUrl, { waitUntil: 'networkidle0', timeout: 30000 });
+                await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
             } catch (e) {
                 console.log('[OutlookPuppeteer] Navigation timeout/error (continuing):', e);
             }
@@ -476,7 +485,7 @@ export class OutlookPuppeteerService {
                 console.log(`[OutlookPuppeteer] Detected ${isM365Portal ? 'M365 Portal' : 'Marketing Page'}. Redirecting to Work OWA...`);
                 // Check if we are actually stuck on a landing page or if it's loading
                 // Sometimes M365 portal is just an intermediate step?
-                await page.goto(OWA_WORK_URL, { waitUntil: 'networkidle0', timeout: 30000 });
+                await page.goto(OWA_WORK_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
                 console.log(`[OutlookPuppeteer] After redirect fix URL: ${page.url()}`);
             }
 

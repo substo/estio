@@ -40,11 +40,12 @@ export async function POST(req: NextRequest) {
             let from = '';
             let to = '';
             let contactName = msg.pushName || msg.key?.remoteJid;
+            let realPhone: string | undefined;
+            let isLid = false;
 
             // --- LID Handling ---
             if (isGroup) {
-                from = remoteJid;
-                to = location.id;
+                console.log("[Evolution Debug] Group Message Payload:", JSON.stringify(msg, null, 2));
 
                 // Group Name Handling
                 // We leave contactName undefined if we don't know the Group Name yet.
@@ -52,45 +53,84 @@ export async function POST(req: NextRequest) {
                 // The pushName here is the SENDER's name, not the Group's.
                 contactName = undefined;
 
-                // Prepend Sender Name to Body
-                const senderName = msg.pushName || 'Unknown';
-                const originalBody = messageContent.conversation || messageContent.extendedTextMessage?.text || '';
+                // Try to resolve real phone from senderPn (Evolution extension) or participant JID
+                const realSenderPhone = msg.senderPn || (key.participant?.includes('@s.whatsapp.net') ? key.participant.replace('@s.whatsapp.net', '') : null);
 
-                // We mutate the body logic for display
+                // Determine the sender's identifier for contact creation
+                let senderIdentifier = realSenderPhone || '';
+                // Removed shadowed declarations
+
+                if (!senderIdentifier && participant) {
+                    // Fallback: strip LID/JID suffixes but warn this might still be an LID
+                    senderIdentifier = participant.replace('@s.whatsapp.net', '').replace('@lid', '');
+                    if (participant.includes('@lid')) {
+                        console.warn(`[Evolution] Warning: Could not resolve real phone for group participant. Using stripped LID: ${senderIdentifier}`);
+                    }
+                }
+
+                // Set from/to based on direction
+                // For Group Chats, the "Contact" is the Group JID (remoteJid).
+                // The "Participant" is the sender.
+                if (isFromMe) {
+                    from = location.id;
+                    to = remoteJid;
+                } else {
+                    from = remoteJid;
+                    to = location.id;
+                }
+
+                // Prepend Sender Name to Body for display
+                const senderName = msg.pushName || realSenderPhone || 'Unknown';
+                const originalBody = messageContent.conversation || messageContent.extendedTextMessage?.text || '';
                 const newBody = `[${senderName}]: ${originalBody}`;
                 if (messageContent.conversation) messageContent.conversation = newBody;
                 else if (messageContent.extendedTextMessage) messageContent.extendedTextMessage.text = newBody;
                 else messageContent.conversation = newBody; // Fallback
 
-                // Clean Participant JID
-                if (participant) {
-                    participant = participant.replace('@s.whatsapp.net', '').replace('@lid', '');
-                }
+                // Participant should be the cleaned phone for sync.ts to create the right Ref-GroupMember contact
+                participant = senderIdentifier || participant;
             } else {
                 // 1:1 Chat
-                // We strip @s.whatsapp.net strictly.
+                // Enhanced LID Handling
+                isLid = remoteJid.includes('@lid');
+
+                if (isLid) {
+                    // Try to resolve real number from participant if available (sometimes provided in metadata)
+                    if (participant && participant.includes('@s.whatsapp.net')) {
+                        realPhone = participant.replace('@s.whatsapp.net', '');
+                    } else {
+                        // If we can't resolve it, we unfortunately have to use the LID or ignore it.
+                        // For now, we use the LID but we should likely block contact creation for this in sync.ts
+                        // unless we can reply to LIDs (which Evolution can, but CRM might hate it).
+                        console.log(`[Evolution] LID detected without resolution: ${remoteJid}`);
+                    }
+                } else {
+                    realPhone = remoteJid.replace('@s.whatsapp.net', '');
+                }
+
                 if (isFromMe) {
                     from = location.id;
-                    to = remoteJid.replace('@s.whatsapp.net', '').replace('@lid', '');
+                    to = realPhone || remoteJid;
                 } else {
-                    from = remoteJid.replace('@s.whatsapp.net', '').replace('@lid', '');
+                    from = realPhone || remoteJid;
                     to = location.id;
                 }
             }
 
-            const normalized: NormalizedMessage = {
+            const normalized: any = {
                 from: from,
                 to: to,
-                body: messageContent.conversation || messageContent.extendedTextMessage?.text || '',
+                body: messageContent.conversation || messageContent.extendedTextMessage?.text || '[Media]',
                 type: 'text',
                 wamId: key.id,
-                timestamp: new Date(), // Evolution/Baileys usually gives timestamp, defaulting to now for simplicity
+                timestamp: new Date(msg.messageTimestamp ? (msg.messageTimestamp as number) * 1000 : Date.now()),
                 direction: isFromMe ? 'outbound' : 'inbound',
                 source: 'whatsapp_evolution',
                 locationId: location.id,
-                contactName: msg.pushName || msg.key?.remoteJid,
+                contactName: isGroup ? undefined : (msg.pushName || realPhone), // Don't rename group to sender name
                 isGroup: isGroup,
-                participant: participant
+                participant: participant, // Pass resolved participant to sync
+                lid: isLid && !isGroup ? remoteJid.replace('@lid', '') : undefined // Pass LID for mapping (1:1 only)
             };
 
             console.log(`[Evolution] Processing ${normalized.direction} message for ${location.id}`);

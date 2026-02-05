@@ -156,6 +156,7 @@ model User {
   googleRefreshToken String?  @db.Text
   googleSyncToken    String?  // To track the last sync point
   googleSyncEnabled  Boolean  @default(false)
+  googleSyncDirection String?  // "ESTIO_TO_GOOGLE" | "GOOGLE_TO_ESTIO" - Source of Truth setting
   gmailSyncState     GmailSyncState?
 
   // Outlook / Microsoft Sync Credentials (OAuth method)
@@ -350,11 +351,25 @@ model Contact {
   locationId          String
 
   name                String?
+  firstName           String?
+  lastName            String?
   email               String?
   phone               String?
   message             String?
   preferredLang       String?   // "en", "el", etc.
   notes               String?   // General notes ("contact_other")
+  
+  // Enhanced Demographics
+  dateOfBirth         DateTime?
+  tags                String[]              @default([])
+  
+  // Address Fields
+  address1            String?
+  city                String?
+  state               String?
+  postalCode          String?
+  country             String?
+
   clerkUserId         String?               @unique // Links this Contact to an authenticated Clerk User (Public Login)
   ghlContactId        String?               @unique
   ghlCompanyId        String?
@@ -424,6 +439,18 @@ model Contact {
   outlookContactId        String?
   lastOutlookSync         DateTime?
   outlookContactUpdatedAt DateTime?
+
+  conversationParticipations ConversationParticipant[]
+
+  // WhatsApp Metadata
+  lid             String?      // WhatsApp Lightweight ID (for mapping)
+  
+  @@index([locationId])
+  @@index([email])
+  @@index([phone])
+  @@index([lid])
+  @@unique([locationId, email])
+  @@unique([locationId, phone])
 }
 
 model Company {
@@ -753,11 +780,27 @@ model Conversation {
   contact           Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
   messages          Message[]
   executions        AgentExecution[]
+  participants      ConversationParticipant[]
 
   @@index([locationId])
   @@index([contactId])
   @@index([lastMessageAt])
   @@unique([locationId, contactId])
+}
+
+model ConversationParticipant {
+  id             String       @id @default(cuid())
+  conversationId String
+  contactId      String
+  role           String       @default("member") // admin, member
+  joinedAt       DateTime     @default(now())
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  contact        Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, contactId])
+  @@index([conversationId])
+  @@index([contactId])
 }
 
 // AI Agent Execution History - stores complete trace of each agent action

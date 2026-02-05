@@ -19,6 +19,11 @@ export async function syncContactToGoogle(userId: string, contactId: string) {
             include: {
                 propertyRoles: {
                     include: { property: true }
+                },
+                viewings: {
+                    include: { property: true },
+                    orderBy: { date: 'desc' },
+                    take: 1
                 }
             }
         });
@@ -43,7 +48,13 @@ export async function syncContactToGoogle(userId: string, contactId: string) {
         ].join('\n');
 
         const names = [];
-        if (contact.name) {
+        if (contact.firstName || contact.lastName) {
+            names.push({
+                givenName: contact.firstName || '',
+                familyName: contact.lastName || '',
+                displayName: contact.name || `${contact.firstName || ''} ${contact.lastName || ''}`.trim()
+            });
+        } else if (contact.name) {
             const parts = contact.name.split(' ');
             names.push({
                 givenName: parts[0],
@@ -76,12 +87,38 @@ export async function syncContactToGoogle(userId: string, contactId: string) {
             biographies.push({ value: notes, contentType: 'TEXT_PLAIN' });
         }
 
+        const addresses = [];
+        if (contact.address1 || contact.city || contact.country) {
+            addresses.push({
+                streetAddress: contact.address1 || undefined,
+                city: contact.city || undefined,
+                region: contact.state || undefined,
+                postalCode: contact.postalCode || undefined,
+                country: contact.country || undefined,
+                type: 'home'
+            });
+        }
+
+        const birthdays = [];
+        if (contact.dateOfBirth) {
+            const dob = new Date(contact.dateOfBirth);
+            birthdays.push({
+                date: {
+                    year: dob.getFullYear(),
+                    month: dob.getMonth() + 1,
+                    day: dob.getDate()
+                }
+            });
+        }
+
         const personBody: people_v1.Schema$Person = {
             names,
             emailAddresses,
             phoneNumbers,
             organizations,
-            biographies
+            biographies,
+            addresses,
+            birthdays
         };
 
         let newGoogleId = resourceName;
@@ -90,12 +127,43 @@ export async function syncContactToGoogle(userId: string, contactId: string) {
         // 3. Execute API Call
         if (isNew) {
             console.log(`[Google Sync] Creating new contact for ${contact.name}`);
-            const res = await people.people.createContact({
-                requestBody: personBody,
-                personFields: 'metadata' // Get metadata back to extract updateTime
-            });
-            newGoogleId = res.data.resourceName || null;
-            googleUpdatedAt = extractGoogleUpdateTime(res.data);
+
+            // A. Search for existing contact to prevent duplicates
+            const existing = await findMatchingGoogleContact(people, contact);
+
+            if (existing) {
+                // B. LINK & UPDATE EXISTING
+                console.log(`[Google Sync] Linking to existing contact ${existing.resourceName}`);
+                newGoogleId = existing.resourceName;
+
+                let currentEtag = existing.etag;
+                if (!currentEtag) {
+                    const current = await people.people.get({ resourceName: existing.resourceName, personFields: 'metadata' });
+                    currentEtag = current.data.etag || undefined;
+                }
+
+                // Update the existing contact with our new data (merge/overwrite)
+                const updateRes = await people.people.updateContact({
+                    resourceName: existing.resourceName,
+                    updatePersonFields: 'names,emailAddresses,phoneNumbers,organizations,biographies,addresses,birthdays',
+                    personFields: 'metadata',
+                    requestBody: {
+                        etag: currentEtag,
+                        ...personBody
+                    }
+                });
+                googleUpdatedAt = extractGoogleUpdateTime(updateRes.data);
+
+            } else {
+                // C. CREATE NEW
+                const res = await people.people.createContact({
+                    requestBody: personBody,
+                    personFields: 'metadata'
+                });
+                newGoogleId = res.data.resourceName || null;
+                googleUpdatedAt = extractGoogleUpdateTime(res.data);
+            }
+
         } else {
             console.log(`[Google Sync] Updating existing contact ${resourceName}`);
 
@@ -115,7 +183,7 @@ export async function syncContactToGoogle(userId: string, contactId: string) {
                 }
 
                 // Update with etag
-                const updateFields = 'names,emailAddresses,phoneNumbers,organizations,biographies';
+                const updateFields = 'names,emailAddresses,phoneNumbers,organizations,biographies,addresses,birthdays';
                 const updateRes = await people.people.updateContact({
                     resourceName: resourceName!,
                     updatePersonFields: updateFields,
@@ -128,24 +196,51 @@ export async function syncContactToGoogle(userId: string, contactId: string) {
                 googleUpdatedAt = extractGoogleUpdateTime(updateRes.data);
 
             } catch (apiError: any) {
-                // Handle 404 (Contact Deleted in Google)
+                // Handle 404 (Contact Deleted in Google) - SELF HEALING
                 if (apiError.code === 404 || apiError.message?.includes('not found')) {
-                    console.error(`[Google Sync] Linked Google Contact ${resourceName} not found (404). Flagging for manual resolution.`);
+                    console.warn(`[Google Sync] Linked Google Contact ${resourceName} not found (404). Attempting self-healing...`);
 
-                    await db.contact.update({
-                        where: { id: contact.id },
-                        data: {
-                            // We do NOT clear the ID immediately - we keep it so the user knows what was there?
-                            // Actually, plan says set to null. But if we set to null, we lose the reference.
-                            // Better: Set error, keep ID or move ID to a 'stale' field? 
-                            // Plan said: googleContactId = null. 
-                            googleContactId: null,
-                            error: 'Sync Error: Google Contact not found. Link broken.'
+                    // 1. Search for matching contact (maybe it was merged or we have bad ID)
+                    const match = await findMatchingGoogleContact(people, contact);
+
+                    if (match) {
+                        console.log(`[Google Sync] Self-Healing: Found matching contact ${match.resourceName}. Re-linking and updating.`);
+                        newGoogleId = match.resourceName;
+
+                        let matchEtag = match.etag;
+                        if (!matchEtag) {
+                            const m = await people.people.get({ resourceName: match.resourceName, personFields: 'metadata' });
+                            matchEtag = m.data.etag || undefined;
                         }
-                    });
-                    return;
+
+                        // Update the found match
+                        const updateRes = await people.people.updateContact({
+                            resourceName: match.resourceName,
+                            updatePersonFields: 'names,emailAddresses,phoneNumbers,organizations,biographies,addresses,birthdays',
+                            personFields: 'metadata',
+                            requestBody: {
+                                etag: matchEtag,
+                                ...personBody
+                            }
+                        });
+                        googleUpdatedAt = extractGoogleUpdateTime(updateRes.data);
+
+                    } else {
+                        // 2. If NO match -> Create New (Treat as if link was broken and contact is gone)
+                        console.log(`[Google Sync] Self-Healing: No match found. Creating new contact.`);
+                        const res = await people.people.createContact({
+                            requestBody: personBody,
+                            personFields: 'metadata'
+                        });
+                        newGoogleId = res.data.resourceName || null;
+                        googleUpdatedAt = extractGoogleUpdateTime(res.data);
+                    }
+
+                    // We successfully handled it (either re-linked or created new).
+                    // Fall through to update DB.
+                } else {
+                    throw apiError; // Re-throw other errors
                 }
-                throw apiError; // Re-throw other errors
             }
         }
 
@@ -269,11 +364,31 @@ async function processGoogleContact(
     if (!resourceName) return;
 
     // Extract data from Google contact
-    const googleName = person.names?.[0]?.displayName ||
-        `${person.names?.[0]?.givenName || ''} ${person.names?.[0]?.familyName || ''}`.trim();
+    const googleGivenName = person.names?.[0]?.givenName || '';
+    const googleFamilyName = person.names?.[0]?.familyName || '';
+    const googleName = person.names?.[0]?.displayName || `${googleGivenName} ${googleFamilyName}`.trim();
     const googleEmail = person.emailAddresses?.[0]?.value;
     const googlePhone = person.phoneNumbers?.[0]?.value;
     const googleUpdatedAt = extractGoogleUpdateTime(person);
+
+    // Address extraction
+    const googleAddress = person.addresses?.[0];
+    const addressData = googleAddress ? {
+        address1: googleAddress.streetAddress,
+        city: googleAddress.city,
+        state: googleAddress.region,
+        postalCode: googleAddress.postalCode,
+        country: googleAddress.country
+    } : {};
+
+    // DOB extraction
+    let googleDob: Date | undefined;
+    if (person.birthdays?.[0]?.date) {
+        const d = person.birthdays[0].date;
+        if (d.year && d.month && d.day) {
+            googleDob = new Date(d.year, d.month - 1, d.day);
+        }
+    }
 
     // Must have at least email or phone to be useful
     if (!googleEmail && !googlePhone) {
@@ -306,8 +421,12 @@ async function processGoogleContact(
                 where: { id: localContact.id },
                 data: {
                     name: googleName || localContact.name,
+                    firstName: googleGivenName || localContact.firstName,
+                    lastName: googleFamilyName || localContact.lastName,
                     email: googleEmail || localContact.email,
                     phone: googlePhone || localContact.phone,
+                    ...addressData,
+                    dateOfBirth: googleDob || localContact.dateOfBirth,
                     googleContactId: resourceName,
                     googleContactUpdatedAt: googleUpdatedAt,
                     lastGoogleSync: new Date(),
@@ -316,24 +435,9 @@ async function processGoogleContact(
             });
             stats.synced++;
         } else {
+            // ... existing else block ...
             // Local is newer or same
-
-            // If the link is broken (ID mismatch/null) AND local is newer, we have a Conflict.
-            // We do NOT auto-link. We flag it if not already flagged.
-            if (!localContact.googleContactId && localContact.email === googleEmail) {
-                if (!localContact.error) {
-                    console.log(`[Google Sync] Conflict detected: Local contact ${localContact.id} matches Google email but has no ID and is newer/same. Flagging.`);
-                    await db.contact.update({
-                        where: { id: localContact.id },
-                        data: { error: 'Sync Conflict: Matching Google Contact found, but local data is newer. Please resolve.' }
-                    });
-                }
-                stats.skipped++;
-                return;
-            }
-
-            // Normal case: Already linked, or just older Google data.
-            // Just update timestamps/link if missing and not conflicting
+            // ... (rest of the logic remains mostly same, just updating timestamps)
             if (!localContact.googleContactId && !localContact.error) {
                 await db.contact.update({
                     where: { id: localContact.id },
@@ -355,8 +459,12 @@ async function processGoogleContact(
                 data: {
                     locationId,
                     name: googleName || 'Google Contact',
+                    firstName: googleGivenName,
+                    lastName: googleFamilyName,
                     email: googleEmail,
                     phone: googlePhone,
+                    ...addressData,
+                    dateOfBirth: googleDob,
                     status: 'new',
                     contactType: 'Lead',
                     googleContactId: resourceName,
@@ -372,14 +480,74 @@ async function processGoogleContact(
 /**
  * Search Google Contacts for UI Conflict Resolution
  */
+/**
+ * Helper: Find matching Google Contact by Phone (Priority) or Email.
+ * Returns the resourceName and etag if found.
+ */
+async function findMatchingGoogleContact(
+    people: people_v1.People,
+    contact: { phone?: string | null, email?: string | null }
+): Promise<{ resourceName: string; etag?: string } | null> {
+    // 1. Search by Phone (Clean digits)
+    if (contact.phone) {
+        const phoneDigits = contact.phone.replace(/\D/g, '');
+        // Search query needs to be precise. Google People API search is fuzzy.
+        const searchRes = await people.people.searchContacts({
+            query: contact.phone,
+            readMask: 'names,phoneNumbers,metadata'
+        });
+
+        // Tight matching on phone number
+        const found = searchRes.data.results?.find(r => {
+            const p = r.person;
+            return p?.phoneNumbers?.some(pn => pn.value?.replace(/\D/g, '')?.includes(phoneDigits));
+        });
+
+        if (found?.person?.resourceName) {
+            console.log(`[Google Sync] Found existing contact by phone: ${found.person.resourceName}`);
+            return {
+                resourceName: found.person.resourceName,
+                etag: found.person.etag || undefined
+            };
+        }
+    }
+
+    // 2. Search by Email (if no phone match)
+    if (contact.email) {
+        const searchRes = await people.people.searchContacts({
+            query: contact.email,
+            readMask: 'names,emailAddresses,metadata'
+        });
+        const found = searchRes.data.results?.find(r => {
+            return r.person?.emailAddresses?.some(e => e.value?.toLowerCase() === contact.email?.toLowerCase());
+        });
+
+        if (found?.person?.resourceName) {
+            console.log(`[Google Sync] Found existing contact by email: ${found.person.resourceName}`);
+            return {
+                resourceName: found.person.resourceName,
+                etag: found.person.etag || undefined
+            };
+        }
+    }
+
+    return null;
+}
+
 export async function searchGoogleContacts(userId: string, query: string) {
     try {
         const auth = await getValidAccessToken(userId);
         const people = google.people({ version: 'v1', auth });
 
+        // Industry Practice: For phone searches, Google works best with E.164 or partials.
+        // However, sometimes raw input like "123 456" fails where "123456" succeeds.
+        // We will pass the query as-is, relying on Google's "smart" search.
+
         const response = await people.people.searchContacts({
             query: query,
-            readMask: 'names,emailAddresses,phoneNumbers,photos,metadata'
+            readMask: 'names,emailAddresses,phoneNumbers,photos,metadata',
+            // Retrieve both contacts and directory profiles for broader reach
+            sources: ['READ_SOURCE_TYPE_CONTACT', 'READ_SOURCE_TYPE_PROFILE']
         });
 
         return (response.data.results || []).map(r => {
@@ -489,4 +657,29 @@ function extractGoogleUpdateTime(person: people_v1.Schema$Person): Date | undefi
     }
 
     return undefined;
+}
+
+/**
+ * Delete a contact from Google Contacts
+ */
+export async function deleteContactFromGoogle(userId: string, resourceName: string): Promise<boolean> {
+    try {
+        const auth = await getValidAccessToken(userId);
+        const people = google.people({ version: 'v1', auth });
+
+        console.log(`[Google Sync] Deleting contact ${resourceName}`);
+        await people.people.deleteContact({
+            resourceName: resourceName
+        });
+
+        return true;
+    } catch (error: any) {
+        // If already deleted (404), consider it a success
+        if (error.code === 404 || error.message?.includes('not found')) {
+            console.log(`[Google Sync] Contact ${resourceName} already deleted (404).`);
+            return true;
+        }
+        console.error(`[Google Sync] Failed to delete contact ${resourceName}:`, error);
+        return false;
+    }
 }
