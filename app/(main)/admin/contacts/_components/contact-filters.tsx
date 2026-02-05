@@ -119,7 +119,8 @@ export function ContactFilters({ leadSources = [], agents = [] }: ContactFilters
         const params = new URLSearchParams(searchParams);
 
         Object.entries(updates).forEach(([key, value]) => {
-            if (value === null || value === '' || value === 'all') {
+            // Special handling for category: 'all' is a valid value we want to keep in URL
+            if (value === null || value === '' || (value === 'all' && key !== 'category')) {
                 params.delete(key);
             } else {
                 params.set(key, value);

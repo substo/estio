@@ -1507,6 +1507,20 @@ export async function getContactDetails(contactId: string) {
   const outlookStatus = await getOutlookStatusAction();
   const isOutlookConnected = outlookStatus.connected;
 
+  // Check Google connection (User-level)
+  const dbUser = await db.user.findUnique({
+    where: { clerkId: userId },
+    select: { googleAccessToken: true, googleSyncEnabled: true }
+  });
+  const isGoogleConnected = !!(dbUser?.googleAccessToken && dbUser?.googleSyncEnabled);
+
+  // Check GHL connection (Location-level)
+  const locationObj = await db.location.findUnique({
+    where: { id: contact.locationId },
+    select: { ghlAccessToken: true }
+  });
+  const isGhlConnected = !!locationObj?.ghlAccessToken;
+
   return {
     contact: {
       ...contact,
@@ -1520,7 +1534,9 @@ export async function getContactDetails(contactId: string) {
     propertyMap,
     userMap,
     leadSources: leadSources.map(s => s.name),
-    isOutlookConnected
+    isOutlookConnected,
+    isGoogleConnected,
+    isGhlConnected
   };
 }
 

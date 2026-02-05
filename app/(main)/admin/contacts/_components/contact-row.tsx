@@ -23,11 +23,14 @@ interface ContactRowProps {
     };
     leadSources: string[];
     // For navigation in Google Sync Manager
+    // For navigation in Google Sync Manager
     allContacts?: ContactData[];
     currentIndex?: number;
+    isGoogleConnected?: boolean;
+    isGhlConnected?: boolean;
 }
 
-export function ContactRow({ contact, leadSources, allContacts, currentIndex }: ContactRowProps) {
+export function ContactRow({ contact, leadSources, allContacts, currentIndex, isGoogleConnected = false, isGhlConnected = false }: ContactRowProps) {
     const router = useRouter();
     const [managerOpen, setManagerOpen] = useState(false);
 
@@ -118,7 +121,12 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex }: 
                 </td>
                 <td className="p-4" onClick={(e) => e.stopPropagation()} >
                     {/* Explicit stop propagation for the action cell */}
-                    <EditContactDialog contact={contact} leadSources={leadSources} />
+                    <EditContactDialog
+                        contact={contact}
+                        leadSources={leadSources}
+                        isGoogleConnected={isGoogleConnected}
+                        isGhlConnected={isGhlConnected}
+                    />
                 </td>
             </tr>
             {/* Render Manager outside of tr */}

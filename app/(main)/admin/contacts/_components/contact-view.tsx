@@ -46,6 +46,8 @@ interface ContactViewProps {
     leadSources?: string[];
     variant?: 'page' | 'modal';
     isOutlookConnected?: boolean;
+    isGoogleConnected?: boolean;
+    isGhlConnected?: boolean;
 }
 
 export default function ContactView({
@@ -54,7 +56,9 @@ export default function ContactView({
     userMap = {},
     leadSources = [],
     variant = 'page',
-    isOutlookConnected = false
+    isOutlookConnected = false,
+    isGoogleConnected = false,
+    isGhlConnected = false
 }: ContactViewProps) {
     const router = useRouter();
     const [outlookOpen, setOutlookOpen] = useState(false);
@@ -109,6 +113,8 @@ export default function ContactView({
                         <EditContactDialog
                             contact={contact}
                             leadSources={leadSources}
+                            isGoogleConnected={isGoogleConnected}
+                            isGhlConnected={isGhlConnected}
                             trigger={
                                 <Button>
                                     <Pencil className="mr-2 h-4 w-4" />

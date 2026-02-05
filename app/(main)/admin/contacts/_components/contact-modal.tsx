@@ -23,7 +23,15 @@ interface ContactModalProps {
 export default function ContactModal({ contactId, mode }: ContactModalProps) {
     const router = useRouter();
     const [open, setOpen] = useState(true);
-    const [data, setData] = useState<{ contact: any, leadSources: string[], propertyMap?: Record<string, string>, userMap?: Record<string, string>, isOutlookConnected?: boolean } | null>(null);
+    const [data, setData] = useState<{
+        contact: any,
+        leadSources: string[],
+        propertyMap?: Record<string, string>,
+        userMap?: Record<string, string>,
+        isOutlookConnected?: boolean,
+        isGoogleConnected?: boolean,
+        isGhlConnected?: boolean
+    } | null>(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
@@ -76,6 +84,8 @@ export default function ContactModal({ contactId, mode }: ContactModalProps) {
                             }}
                             initialMode={mode}
                             isOutlookConnected={data.isOutlookConnected}
+                            isGoogleConnected={data.isGoogleConnected}
+                            isGhlConnected={data.isGhlConnected}
                         />
                     </div>
                 ) : (

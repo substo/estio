@@ -23,9 +23,11 @@ interface DeleteContactDialogProps {
     trigger?: React.ReactNode;
     onSuccess?: () => void;
     onDelete?: () => void;
+    isGoogleConnected?: boolean;
+    isGhlConnected?: boolean;
 }
 
-export function DeleteContactDialog({ contact, trigger, onSuccess, onDelete }: DeleteContactDialogProps) {
+export function DeleteContactDialog({ contact, trigger, onSuccess, onDelete, isGoogleConnected = false, isGhlConnected = false }: DeleteContactDialogProps) {
     const { toast } = useToast();
     const [open, setOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
@@ -41,24 +43,25 @@ export function DeleteContactDialog({ contact, trigger, onSuccess, onDelete }: D
             const prefGoogle = localStorage.getItem('estio_delete_pref_google');
 
             // Default to FALSE if not set, or use user preference
-            // Only enable if the contact actually HAS a link
-            if (contact.ghlContactId) {
+            // Only enable if the contact actually HAS a link AND integration is active
+            if (contact.ghlContactId && isGhlConnected) {
                 setDeleteFromGhl(prefGhl === 'true');
             }
-            if (contact.googleContactId) {
+            if (contact.googleContactId && isGoogleConnected) {
                 setDeleteFromGoogle(prefGoogle === 'true');
             }
         }
-    }, [open, contact.ghlContactId, contact.googleContactId]);
+    }, [open, contact.ghlContactId, contact.googleContactId, isGhlConnected, isGoogleConnected]);
 
     const handleDelete = async () => {
         setIsDeleting(true);
 
-        // Save preferences for next time
-        if (contact.ghlContactId) {
+        // Save preferences for next time (even if hidden, if we set it)
+        // But only valid if connection exists
+        if (contact.ghlContactId && isGhlConnected) {
             localStorage.setItem('estio_delete_pref_ghl', String(deleteFromGhl));
         }
-        if (contact.googleContactId) {
+        if (contact.googleContactId && isGoogleConnected) {
             localStorage.setItem('estio_delete_pref_google', String(deleteFromGoogle));
         }
 
@@ -102,7 +105,7 @@ export function DeleteContactDialog({ contact, trigger, onSuccess, onDelete }: D
 
                 <div className="py-4 space-y-4">
                     {/* GHL Option */}
-                    {contact.ghlContactId && (
+                    {contact.ghlContactId && isGhlConnected && (
                         <div className="flex items-start space-x-2">
                             <Checkbox
                                 id="delete-ghl"
@@ -121,7 +124,7 @@ export function DeleteContactDialog({ contact, trigger, onSuccess, onDelete }: D
                     )}
 
                     {/* Google Option */}
-                    {contact.googleContactId && (
+                    {contact.googleContactId && isGoogleConnected && (
                         <div className="flex items-start space-x-2">
                             <Checkbox
                                 id="delete-google"

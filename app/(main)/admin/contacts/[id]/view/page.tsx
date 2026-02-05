@@ -64,6 +64,27 @@ export default async function ContactViewPage({ params, searchParams }: { params
         await verifyAndHealContact(contact.id, contact.error);
     }
 
+    // Check Google connection (User-level)
+    const { auth } = await import("@clerk/nextjs/server");
+    const { userId } = await auth();
+    let isGoogleConnected = false;
+    if (userId) {
+        const dbUser = await db.user.findUnique({
+            where: { clerkId: userId },
+            select: { googleAccessToken: true, googleSyncEnabled: true }
+        });
+        isGoogleConnected = !!(dbUser?.googleAccessToken && dbUser?.googleSyncEnabled);
+    }
+
+    // Check GHL connection (Location-level)
+    // We already have 'locationId' used to fetch contact.
+    // Fetch location details if needed to check token.
+    const locationObj = await db.location.findUnique({
+        where: { id: locationId },
+        select: { ghlAccessToken: true }
+    });
+    const isGhlConnected = !!locationObj?.ghlAccessToken;
+
     return (
         <div className="p-6 max-w-6xl mx-auto">
             <EditContactForm
@@ -71,6 +92,8 @@ export default async function ContactViewPage({ params, searchParams }: { params
                 leadSources={leadSources}
                 initialMode="view"
                 isOutlookConnected={isOutlookConnected}
+                isGoogleConnected={isGoogleConnected}
+                isGhlConnected={isGhlConnected}
             />
         </div>
     );

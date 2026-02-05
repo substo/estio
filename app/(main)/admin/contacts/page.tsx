@@ -184,6 +184,13 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
         );
     }
 
+    // Fetch full user for integration status
+    const dbUser = await db.user.findUnique({
+        where: { clerkId: userId },
+        select: { googleAccessToken: true, googleSyncEnabled: true }
+    });
+    const isGoogleConnected = !!(dbUser?.googleAccessToken && dbUser?.googleSyncEnabled);
+
     const location = await getLocationById(locationId);
     if (!location) {
         return <div>Location not found.</div>;
@@ -355,6 +362,8 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
                                     leadSources={leadSourceNames}
                                     allContacts={contacts as any}
                                     currentIndex={index}
+                                    isGoogleConnected={isGoogleConnected}
+                                    isGhlConnected={!!location.ghlAccessToken}
                                 />
                             ))
                         )}

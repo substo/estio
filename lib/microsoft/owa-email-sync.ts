@@ -378,17 +378,28 @@ export async function syncEmailsFromOWA(userId: string, folderId: 'inbox' | 'sen
         // Update Sync State (Last Synced At)
         if (emails.length > 0 || folderId === 'inbox') {
             try {
+                // Fetch user's outlook email to satisfy unique constraint
+                const user = await db.user.findUnique({
+                    where: { id: userId },
+                    select: { outlookEmail: true }
+                });
+
+                const emailToUse = user?.outlookEmail || `puppeteer-session-${userId}`;
+
                 await db.outlookSyncState.upsert({
                     where: { userId },
                     create: {
                         userId,
-                        emailAddress: 'puppeteer-session', // Placeholder or fetch real email if available
+                        emailAddress: emailToUse,
                         lastSyncedAt: new Date()
                     },
                     update: {
-                        lastSyncedAt: new Date()
+                        lastSyncedAt: new Date(),
+                        // Update email if we have a better one now
+                        ...(user?.outlookEmail ? { emailAddress: user.outlookEmail } : {})
                     }
                 });
+                console.log(`[OWA Email Sync] Updated sync state for ${userId} (Email: ${emailToUse})`);
             } catch (e) {
                 console.error('[OWA Email Sync] Failed to update sync state:', e);
             }

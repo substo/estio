@@ -25,6 +25,7 @@ This guide details the "hybrid" architecture used for Outlook integration in Est
 ### State Tracking (`OutlookSyncState`)
 - **Table**: `OutlookSyncState`
 - **Purpose**: Stores the timestamp of the last successful email sync (`lastSyncedAt`) and delta links for efficient querying.
+- **Key Logic**: Uses the user's actual `outlookEmail` (or a unique fallback) to satisfy database uniqueness constraints, ensuring reliable status updates even for Puppeteer sessions.
 - **Usage**: Used to populate the "Sync Health" dashboard in the UI.
 
 ---

@@ -35,7 +35,7 @@ import { DeleteContactDialog } from './delete-contact-dialog';
 import { ContactForm, type ContactData } from './contact-form';
 import { CONTACT_TYPE_CONFIG, type ContactType } from './contact-types';
 
-export function EditContactForm({ contact, onSuccess, onDelete, leadSources, initialMode = 'edit', isOutlookConnected = false }: { contact: ContactData; onSuccess?: () => void; onDelete?: () => void; leadSources: string[]; initialMode?: 'view' | 'edit' | 'create'; isOutlookConnected?: boolean }) {
+export function EditContactForm({ contact, onSuccess, onDelete, leadSources, initialMode = 'edit', isOutlookConnected = false, isGoogleConnected = false, isGhlConnected = false }: { contact: ContactData; onSuccess?: () => void; onDelete?: () => void; leadSources: string[]; initialMode?: 'view' | 'edit' | 'create'; isOutlookConnected?: boolean; isGoogleConnected?: boolean; isGhlConnected?: boolean }) {
     const { toast } = useToast();
     const [isDeleting, setIsDeleting] = useState(false);
 
@@ -405,6 +405,8 @@ export function EditContactForm({ contact, onSuccess, onDelete, leadSources, ini
                             contact={contact}
                             onSuccess={onSuccess}
                             onDelete={onDelete}
+                            isGoogleConnected={isGoogleConnected}
+                            isGhlConnected={isGhlConnected}
                         />
                     </div>
                 }
@@ -425,7 +427,7 @@ export function EditContactForm({ contact, onSuccess, onDelete, leadSources, ini
     );
 }
 
-export function EditContactDialog({ contact, leadSources = [], trigger, isOutlookConnected = false }: { contact: ContactData; leadSources?: string[]; trigger?: React.ReactNode; isOutlookConnected?: boolean }) {
+export function EditContactDialog({ contact, leadSources = [], trigger, isOutlookConnected = false, isGoogleConnected = false, isGhlConnected = false }: { contact: ContactData; leadSources?: string[]; trigger?: React.ReactNode; isOutlookConnected?: boolean; isGoogleConnected?: boolean; isGhlConnected?: boolean }) {
     const [open, setOpen] = useState(false);
 
     return (
@@ -445,7 +447,14 @@ export function EditContactDialog({ contact, leadSources = [], trigger, isOutloo
                         Update contact details.
                     </DialogDescription>
                 </DialogHeader>
-                <EditContactForm contact={contact} onSuccess={() => setOpen(false)} leadSources={leadSources || []} isOutlookConnected={isOutlookConnected} />
+                <EditContactForm
+                    contact={contact}
+                    onSuccess={() => setOpen(false)}
+                    leadSources={leadSources || []}
+                    isOutlookConnected={isOutlookConnected}
+                    isGoogleConnected={isGoogleConnected}
+                    isGhlConnected={isGhlConnected}
+                />
             </DialogContent>
         </Dialog>
     );
