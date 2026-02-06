@@ -34,6 +34,7 @@ export async function GET(req: NextRequest) {
                 // We run these sequentially to avoid overwhelming system resources (launching too many pages)
                 await syncEmailsFromOWA(user.id, 'inbox');
                 await syncEmailsFromOWA(user.id, 'sentitems');
+                await syncEmailsFromOWA(user.id, 'archive');
 
                 // B. Contact Sync (Inbound) - Graph API based
                 // Wrap in try-catch in case user only has Puppeteer credentials (cookies) and no Graph Token

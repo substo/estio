@@ -50,7 +50,8 @@ export class OutlookPuppeteerService {
         console.log('[OutlookPuppeteer] Launching browser...');
 
         this.browser = await puppeteer.launch({
-            headless: true,
+            headless: true, // PRODUCTION
+            // headless: false, // DEBUGGING: Visible browser for development
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',

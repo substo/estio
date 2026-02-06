@@ -227,12 +227,23 @@ For accounts that cannot use the standard Graph API (e.g., some personal Outlook
 2.  **Sync process**:
     - The cron job launches a headless browser.
     - Reuses stored cookies to access Outlook Web Access (OWA).
-    - Scrapes email data directly from the DOM or intercepts internal OWA API calls.
+    - Syncs **Inbox**, **Sent Items**, and **Archive** folders.
+    - Uses a robust "Hybrid" extraction:
+        - **Smart Wait**: Waits for skeleton loaders to vanish.
+        - **Attribute Scan**: Finds emails hidden in `aria-label` or `title`.
+        - **Hover Fallback**: Auto-hovers to reveal Persona Cards for internal users.
+    - **Incremental**: Automatically stops when it finds emails older than the last sync time.
 3.  **GHL Integration**:
     - Scraped emails are saved to the local database.
     - New messages are automatically pushed to GoHighLevel (GHL) using the `createInboundMessage` utility, ensuring feature parity with the Graph API sync.
 
 ### Limitations
-- Slower than Graph API (requires browser launch).
-- Depends on OWA UI structure (more brittle).
+- Slower than Graph API (requires browser launch), though mitigated by incremental sync.
+- Depends on OWA UI structure (more brittle, but hardened with multiple fallback strategies).
 - Requires occasional re-authentication if session expires (approx. every 7 days).
+
+### Debugging & Development
+To visually debug the sync process (e.g., to see the browser actions, solve CATCHAs, or develop new scraping features):
+1.  Open `lib/microsoft/outlook-puppeteer.ts`
+2.  Set `headless: false` in the `puppeteer.launch()` configuration.
+3.  The browser window will now appear during sync operations.

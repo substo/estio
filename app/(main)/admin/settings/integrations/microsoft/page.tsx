@@ -40,10 +40,32 @@ export default function MicrosoftIntegrationPage() {
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
     const [showDisconnectDialog, setShowDisconnectDialog] = useState(false);
+    const [syncing, setSyncing] = useState(false);
 
     useEffect(() => {
         checkStatus();
     }, []);
+
+    const handleSyncNow = async () => {
+        setSyncing(true);
+        setError(null);
+        setSuccess(null);
+        try {
+            const res = await fetch('/api/microsoft/sync', { method: 'POST' });
+            const data = await res.json();
+
+            if (data.success) {
+                setSuccess(data.message || 'Sync completed successfully!');
+                await checkStatus(); // Refresh stats
+            } else {
+                setError(data.error || 'Failed to sync');
+            }
+        } catch (err: any) {
+            setError(err.message || 'Error occurred during sync');
+        } finally {
+            setSyncing(false);
+        }
+    };
 
     const checkStatus = async () => {
         try {
@@ -193,13 +215,33 @@ export default function MicrosoftIntegrationPage() {
                 {/* New Sync Health Dashboard */}
                 {status.connected && (
                     <Card>
-                        <CardHeader>
-                            <CardTitle>Sync Health</CardTitle>
-                            <CardDescription>
-                                Real-time status of your inbox synchronization.
-                            </CardDescription>
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                            <div className="space-y-1">
+                                <CardTitle>Sync Health</CardTitle>
+                                <CardDescription>
+                                    Real-time status of your inbox synchronization.
+                                </CardDescription>
+                            </div>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={handleSyncNow}
+                                disabled={syncing || !status.syncEnabled}
+                            >
+                                {syncing ? (
+                                    <>
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        Syncing...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Activity className="mr-2 h-4 w-4" />
+                                        Sync Now
+                                    </>
+                                )}
+                            </Button>
                         </CardHeader>
-                        <CardContent className="space-y-4">
+                        <CardContent className="space-y-4 pt-4">
                             <div className="grid grid-cols-1 gap-4">
                                 <div className="flex items-center gap-3 p-3 bg-muted/40 rounded-lg">
                                     <Activity className="h-5 w-5 text-blue-500" />

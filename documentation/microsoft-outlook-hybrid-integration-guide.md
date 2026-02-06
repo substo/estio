@@ -11,11 +11,13 @@ This guide details the "hybrid" architecture used for Outlook integration in Est
 
 ### Email Sync (Puppeteer)
 - **Source**: `lib/microsoft/owa-email-sync.ts` & `lib/microsoft/outlook-puppeteer.ts`
-- **Mechanism**: Launches a headless browser (Puppeteer) to log in to Outlook Web Access (OWA), intercepts internal API responses, and scrapes the DOM as a fallback.
+- **Mechanism**: Launches a headless browser (Puppeteer) to log in to OWA. Uses a "Hybrid" extraction approach: API interception (primary) + Robust DOM Scraping (fallback).
+- **Folders**: Inbox, Sent Items, Archive.
 - **Trigger**: 
-    - **Initial**: On user connection (if chosen).
-    - **Cron**: Scheduled every 5 minutes via server cron job.
-- **Handling**: Checks for "Strict OWA" sessions, handles MFA checks (by failing gracefully), and manages session cookies.
+    - **Initial**: On user connection.
+    - **Cron**: Scheduled every 5 minutes.
+    - **Manual**: Via "Sync Now" button in settings.
+- **Incremental Sync**: The system tracks `lastSyncedAt`. The scraper automatically stops processing a folder if it encounters 5 consecutive emails older than the last sync time (with a 24h safety buffer), drastically reducing resource usage.
 
 ### Contact Sync (Graph API)
 - **Source**: `lib/microsoft/contact-sync.ts`
@@ -24,9 +26,8 @@ This guide details the "hybrid" architecture used for Outlook integration in Est
 
 ### State Tracking (`OutlookSyncState`)
 - **Table**: `OutlookSyncState`
-- **Purpose**: Stores the timestamp of the last successful email sync (`lastSyncedAt`) and delta links for efficient querying.
-- **Key Logic**: Uses the user's actual `outlookEmail` (or a unique fallback) to satisfy database uniqueness constraints, ensuring reliable status updates even for Puppeteer sessions.
-- **Usage**: Used to populate the "Sync Health" dashboard in the UI.
+- **Purpose**: Stores the timestamp of the last successful email sync (`lastSyncedAt`) and delta links.
+- **Key Logic**: Uses `outlookEmail` fallback to satisfy uniqueness. Used for "Sync Health" and incremental cutoff calculations.
 
 ---
 
@@ -37,54 +38,15 @@ The synchronization is driven by a scheduled task running on the production serv
 ### Cron Job Endpoint
 - **Path**: `/api/cron/outlook-sync`
 - **Logic**:
-    1.  Uses `export const dynamic = 'force-dynamic'` to prevent caching.
-    2.  Fetches users with `outlookSyncEnabled` AND valid `outlookSessionCookies`.
-    3.  Iterates through users sequentially (to limit browser resource usage).
-    4.  **Step A**: Calls `syncEmailsFromOWA` for 'inbox' and 'sentitems'.
-    5.  **Step B**: Calls `syncContactsFromOutlook` (Graph API). Catches errors if the user only has Puppeteer credentials.
+    1.  Uses `force-dynamic` to prevent caching.
+    2.  Fetches users with active sync.
+    3.  Iterates sequentially through users.
+    4.  **Step A**: Calls `syncEmailsFromOWA` for **'inbox'**, **'sentitems'**, and **'archive'**.
+    5.  **Step B**: Calls `syncContactsFromOutlook` (Graph API).
 
 ### Server-Side Scheduling
-The cron job is managed by a robust shell script to ensure reliability (locking, logging, timeouts).
-
 - **Script**: `scripts/cron-outlook-sync.sh`
-- **Log File**: `logs/outlook-sync-cron.log`
 - **Schedule**: Every 5 minutes (default).
-
-**Deployment**:
-The scheduler is installed via `scripts/install-cron.sh`, which adds the following entry to the system crontab:
-```bash
-*/5 * * * * /path/to/project/scripts/cron-outlook-sync.sh
-```
-```bash
-*/5 * * * * /path/to/project/scripts/cron-outlook-sync.sh
-```
-
----
-
-## 3. User Interface & Monitoring
-
-The system provides real-time visibility into the sync status:
-
-### Integration Dashboard
-- **Location**: `/admin/settings/integrations/microsoft`
-- **Features**:
-    - **Sync Health Card**: Displays "Last Inbox Sync" (e.g., "5 mins ago"), "Session Status" (e.g., "Expires in 6 days"), and "Auto-Sync" status.
-    - **Connection Status**: Shows current connection method (OAuth/Puppeteer) and email.
-
-### Sync Manager Dialog
-- **Location**: Contact Mission Control -> "Outlook Emails" button.
-- **Features**:
-    - **Status Badge**: Shows "Last synced: [Time] ago" indicator.
-    - **Manual Sync**: Allows triggering an immediate sync for that specific contact/user.
-
-### Disconnecting & Data Cleanup
-When a user clicks **Disconnect**, the system performs a hard delete of all sensitive session data to ensure security:
-1.  **Cookies**: The encrypted `outlookSessionCookies` are permanently deleted.
-2.  **Credentials**: The `outlookPasswordEncrypted` and `outlookEmail` fields are set to null.
-3.  **State**: `outlookAuthMethod` and `outlookSyncEnabled` are reset.
-4.  **Tokens**: any stored OAuth tokens (`outlookAccessToken`) are wiped.
-
-This ensures that no usable credentials remain in the database. To reconnect, the user must re-enter their credentials.
 
 ---
 
@@ -92,20 +54,19 @@ This ensures that no usable credentials remain in the database. To reconnect, th
 
 ### A. Puppeteer Service (`lib/microsoft/outlook-puppeteer.ts`)
 This singleton service manages the browser instance:
-- **`loadSession(userId)`**: Loads encrypted cookies from the DB and restores the session.
-- **`loginToOWA(...)`**: Handles the full login flow with **Immediate Cookie Capture**.
-    - Captures "Connected" state/cookies immediately after password verification.
-    - Gracefully handles redirects to OWA that may time out on slower servers.
-- **Stealth**: Uses various flags to mask the automation implementation.
-- **Resource Management**: Auto-closes the browser after 5 minutes of inactivity (`IDLE_TIMEOUT_MS`).
+- **Headless Mode**: Run in `headless: true` for production (configurable for debugging).
+- **`loadSession(userId)`**: Restores encrypted session cookies.
+- **`loginToOWA(...)`**: Handles login with "Immediate Cookie Capture" to bypass slow redirects.
+- **Auto-Cleanup**: Closes browser after 5 minutes of inactivity (`IDLE_TIMEOUT_MS`).
 
 ### B. OWA Sync Logic (`lib/microsoft/owa-email-sync.ts`)
-This function orchestrates the scraping:
-- **Session Restoration**: Ensures the page is on OWA, handling redirects or expired sessions.
-- **Data Extraction**:
-    - **Primary**: Intercepts network responses (`FindItem`, `GetItem` JSON responses).
-    - **Fallback**: Dumps the DOM (`div[role="option"]`) and parses specific selectors for sender, subject, and date.
-- **Date Parsing**: Includes a robust parser for OWA's various date formats (e.g., "Sun 01/02/2026", "14:46", "Yesterday").
+This function orchestrates the scraping with a **"World-Class" Robust Strategy**:
+
+1.  **Smart Wait**: Explicitly waits for "Skeleton" loading placeholders (`.fui-Skeleton`) to disappear before scraping, preventing race conditions.
+2.  **Aggressive Attribute Scan**: Scans the entire reading pane header for emails hidden in `aria-label`, `title`, or `href` attributes. This catches most external sender emails instantly.
+3.  **Hover-and-Reveal Fallback**: For internal users where the email is visually hidden, the script programmatically **hovers** over the sender's name to trigger the Persona Card and extracts the email from there.
+4.  **Click-to-Load**: Clicks each email in the list to load its full body content into the reading pane for accurate extraction.
+5.  **Incremental Optimization**: Bails out of the scrolling loop early if emails are older than `lastSyncedAt`.
 
 ### C. Contact Sync (`lib/microsoft/contact-sync.ts`)
 - **Direction**: Bidirectional (mostly Inbound for cron).
