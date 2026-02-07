@@ -96,6 +96,12 @@ We identified that the GHL API occasionally omits the most recent inbound messag
 3.  **Real Message Retrieval**: If truly missing, we attempt to fetch the message *individually* by its ID.
 4.  **Auto-Recovery**: If that fails, a "synthetic" message is injected to ensure data continuity.
 
+### Timestamp Sanity (New - Feb 2026)
+To prevent old messages (e.g., from history syncs) from incorrectly bumping conversations to the top of the list:
+1.  **Robust Parsing**: We use a `parseMessageDate` helper to check multiple date fields (`dateAdded`, `date_added`, `created_at`).
+2.  **Conditional Updates**: The conversation's `lastMessageAt` timestamp is ONLY updated if the incoming message has a valid, newer timestamp.
+3.  **Creation Fallback**: New conversations created from messages with missing timestamps (fallback to "Now") are initialized at **Epoch (1970)**. This ensures they appear at the bottom of the list until a valid new message arrives.
+
 ### AI Output Formatting
 To better handle the difference between Email and SMS/WhatsApp channels:
 *   **Email**: The AI is instructed to output **HTML** (e.g., `<b>`, `<br>`) and explicitly forbidden from using Markdown to ensure professional rendering.

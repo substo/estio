@@ -49,26 +49,9 @@ export async function fetchConversations(status: 'open' | 'closed' | 'all' = 'al
             }
         }
 
-        const conversations = await db.conversation.findMany({
-            where,
-            orderBy: { lastMessageAt: 'desc' },
-            take: 50,
-            include: { contact: { select: { name: true, email: true, phone: true } } }
-        });
+        // 1. Fetch Conversations from DB
+        // We fetch with ghlContactId to potentially simplify mapping
 
-        // Map to UI format matching the GHL Conversation interface
-        const mapped = conversations.map((c: any) => ({
-            id: c.ghlConversationId,
-            contactId: c.contactId, // Internal ID, UI might expect GHL contact ID? Let's check usages. 
-            // Actually `conversation.contactId` in GHL interface is GHL ID.
-            // We should probably pass GHL Contact ID to avoid confusion if UI calls GHL API.
-            // But we want to move away from GHL API.
-            // Let's inspect `Conversation` interface in `lib/ghl/conversations.ts`.
-            // It defines `contactId: string`.
-
-            // For now, let's look up the GHL contact ID from the relation?
-            // Fetching it in include.
-        }));
 
         // Re-fetch with ghlContactId
         const conversationsWithGhlId = await db.conversation.findMany({

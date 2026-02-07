@@ -85,36 +85,62 @@ export async function syncMessageFromWebhook(payload: any) {
     }
 
     const direction = payload.direction || (type === 'InboundMessage' ? 'inbound' : 'outbound');
-    const dateAdded = payload.dateAdded ? new Date(payload.dateAdded) : new Date();
+    const { date: dateAdded, isFallback } = parseMessageDate(payload);
     const body = payload.body || payload.message || '';
     const messageType = payload.messageType || payload.type || 'TYPE_SMS'; // Default fallback
 
     // 2. Upsert Conversation
-    const conversation = await db.conversation.upsert({
-        where: { ghlConversationId: ghlConversationId },
-        update: {
-            // Only update "Last Message" if this new message is newer than what we have
-            // But usually webhooks are latest.
-            lastMessageBody: body,
-            lastMessageAt: dateAdded,
-            lastMessageType: messageType,
-            unreadCount: {
-                increment: direction === 'inbound' ? 1 : 0
-            },
-            status: 'open',
-            updatedAt: new Date()
-        },
-        create: {
-            ghlConversationId: ghlConversationId,
-            locationId: location.id,
-            contactId: contact.id,
-            lastMessageBody: body,
-            lastMessageAt: dateAdded,
-            lastMessageType: messageType,
-            status: 'open',
-            unreadCount: direction === 'inbound' ? 1 : 0
-        }
+    // 2. Upsert Conversation Logic
+    // We need to fetch first to check timestamps to prevent older messages (e.g. from history syncs)
+    // from overwriting the 'lastMessageAt' of the conversation.
+
+    const existingConversation = await db.conversation.findUnique({
+        where: { ghlConversationId: ghlConversationId }
     });
+
+    let conversation;
+
+    if (existingConversation) {
+        // Only update 'lastMessageAt' if:
+        // 1. The new message has a REAL date (not a fallback) AND is newer than existing
+
+        let shouldUpdateTimestamp = false;
+
+        if (!isFallback) {
+            shouldUpdateTimestamp = dateAdded > existingConversation.lastMessageAt;
+        }
+
+        conversation = await db.conversation.update({
+            where: { ghlConversationId: ghlConversationId },
+            data: {
+                // If timestamp matches, update preview body too.
+                lastMessageBody: shouldUpdateTimestamp ? body : undefined,
+                lastMessageAt: shouldUpdateTimestamp ? dateAdded : undefined,
+                lastMessageType: shouldUpdateTimestamp ? messageType : undefined,
+                unreadCount: {
+                    increment: direction === 'inbound' ? 1 : 0
+                },
+                status: 'open',
+                updatedAt: new Date()
+            }
+        });
+    } else {
+        conversation = await db.conversation.create({
+            data: {
+                ghlConversationId: ghlConversationId,
+                locationId: location.id,
+                contactId: contact.id,
+                lastMessageBody: body,
+                // If it's a fallback date (we don't know when it happened), 
+                // set it to Epoch so it sinks to the bottom. 
+                // It will bump up when a REAL message arrives.
+                lastMessageAt: isFallback ? new Date(0) : dateAdded,
+                lastMessageType: messageType,
+                status: 'open',
+                unreadCount: direction === 'inbound' ? 1 : 0
+            }
+        });
+    }
 
     // 3. Upsert Message
 
@@ -334,4 +360,29 @@ export async function upsertConversationFromGHL(conv: any, internalLocationId: s
             status: conv.status || 'open'
         }
     });
+}
+
+function parseMessageDate(payload: any): { date: Date, isFallback: boolean } {
+    // Try all known date fields
+    const candidates = [
+        payload.dateAdded,
+        payload.date_added,
+        payload.dateCreated,
+        payload.date_created,
+        payload.createdAt,
+        payload.created_at,
+        payload.messageDate
+    ];
+
+    for (const raw of candidates) {
+        if (raw) {
+            const d = new Date(raw);
+            if (!isNaN(d.getTime())) {
+                return { date: d, isFallback: false };
+            }
+        }
+    }
+
+    // Fallback
+    return { date: new Date(), isFallback: true };
 }
