@@ -1,7 +1,7 @@
 import { Conversation } from "@/lib/ghl/conversations";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
-import { Mail, MessageSquare, MessageCircle, Layers, Link as LinkIcon, Upload, Trash2, X, CheckSquare } from "lucide-react";
+import { Mail, MessageSquare, MessageCircle, Layers, Link as LinkIcon, Upload, Trash2, X, CheckSquare, Inbox, Archive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card";
@@ -26,6 +26,9 @@ interface ConversationListProps {
     // Deals Mode Props
     viewMode?: 'chats' | 'deals';
     onViewModeChange?: (mode: 'chats' | 'deals') => void;
+    // View Filter Props
+    viewFilter?: 'active' | 'archived' | 'trash';
+    onViewFilterChange?: (filter: 'active' | 'archived' | 'trash') => void;
     deals?: any[];
     onSelectDeal?: (id: string) => void;
 }
@@ -64,6 +67,8 @@ export function ConversationList({
     onDelete,
     viewMode,
     onViewModeChange,
+    viewFilter = 'active',
+    onViewFilterChange,
     deals,
     onSelectDeal
 }: ConversationListProps) {
@@ -90,61 +95,34 @@ export function ConversationList({
                     </div>
 
                     <div className="flex items-center gap-0 shrink-0 ml-2">
+                        {/* Actions for selection mode */}
                         <TooltipProvider delayDuration={200}>
-                            {/* Bind Action (Visual only as Coordinator executes, but gives feedback/context) */}
-                            {/* In the future, this button could trigger a specific bind dialog directly */}
                             <Tooltip>
                                 <TooltipTrigger asChild>
                                     <Button
                                         variant="ghost"
                                         size="icon"
-                                        className="h-7 w-7 text-indigo-600 hover:text-indigo-700 hover:bg-indigo-100"
-                                        disabled={!selectedIds || selectedIds.size === 0}
-                                    // This is mostly visual to reassure user "Bind" is available in the right panel
-                                    // But we can also make it focus the right panel if needed
-                                    >
-                                        <Layers className="w-3.5 h-3.5" />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Bind to Deal (Use Coordinator Panel)</TooltipContent>
-                            </Tooltip>
-
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-7 w-7 text-red-600 hover:text-red-700 hover:bg-red-100"
+                                        className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
                                         onClick={() => onDelete?.(Array.from(selectedIds || []))}
-                                        disabled={!selectedIds || selectedIds.size === 0}
                                     >
-                                        <Trash2 className="w-3.5 h-3.5" />
+                                        <Trash2 className="w-4 h-4" />
                                     </Button>
                                 </TooltipTrigger>
                                 <TooltipContent>Delete Selected</TooltipContent>
                             </Tooltip>
-
-                            {/* Close Selection Mode */}
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-7 w-7 text-gray-500 hover:text-gray-900 ml-1"
-                                        onClick={() => onToggleSelectionMode?.(false)}
-                                    >
-                                        <X className="w-4 h-4" />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Cancel Selection</TooltipContent>
-                            </Tooltip>
                         </TooltipProvider>
+                    </div>
+
+                    <div className="ml-auto">
+                        <Button variant="ghost" size="sm" onClick={() => onToggleSelectionMode?.(false)}>
+                            Cancel
+                        </Button>
                     </div>
                 </div>
             );
         }
 
-        // Standard Header
+        // Standard Header with Mode Toggle + Filter + Actions
         return (
             <div className="p-2 border-b bg-slate-50 flex items-center justify-start gap-1 h-[50px] overflow-hidden">
                 {/* Segmented Control for Mode Toggle */}
@@ -161,21 +139,88 @@ export function ConversationList({
                     </Tabs>
                 )}
 
+                {/* View Filter Icon Buttons - only show in Chats mode */}
+                {effectiveViewMode === 'chats' && onViewFilterChange && (
+                    <TooltipProvider delayDuration={200}>
+                        <div className="flex gap-0 shrink-0 border rounded-md bg-white">
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        variant={viewFilter === 'active' ? 'secondary' : 'ghost'}
+                                        size="icon"
+                                        className="h-7 w-7 rounded-r-none"
+                                        onClick={() => onViewFilterChange('active')}
+                                    >
+                                        <Inbox className="w-3.5 h-3.5" />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Inbox</TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        variant={viewFilter === 'archived' ? 'secondary' : 'ghost'}
+                                        size="icon"
+                                        className="h-7 w-7 rounded-none border-x"
+                                        onClick={() => onViewFilterChange('archived')}
+                                    >
+                                        <Archive className="w-3.5 h-3.5" />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Archived</TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        variant={viewFilter === 'trash' ? 'secondary' : 'ghost'}
+                                        size="icon"
+                                        className="h-7 w-7 rounded-l-none"
+                                        onClick={() => onViewFilterChange('trash')}
+                                    >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Trash</TooltipContent>
+                            </Tooltip>
+                        </div>
+                    </TooltipProvider>
+                )}
+
                 {/* Action Buttons - only show in Chats mode */}
                 {effectiveViewMode === 'chats' && onToggleSelectionMode && (
                     <TooltipProvider delayDuration={200}>
-                        <div className="flex gap-0 shrink-0">
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button variant="ghost" size="icon" className="h-7 w-7" asChild>
-                                        <Link href="/admin/conversations/import">
-                                            <Upload className="w-3.5 h-3.5" />
-                                        </Link>
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent side="bottom">Import WhatsApp Conversation</TooltipContent>
-                            </Tooltip>
+                        <div className="flex gap-0 shrink-0 ml-auto">
+                            {/* Import & Bind - only show on Inbox */}
+                            {viewFilter === 'active' && (
+                                <>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button variant="ghost" size="icon" className="h-7 w-7" asChild>
+                                                <Link href="/admin/conversations/import">
+                                                    <Upload className="w-3.5 h-3.5" />
+                                                </Link>
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="bottom">Import WhatsApp</TooltipContent>
+                                    </Tooltip>
 
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-7 w-7"
+                                                onClick={() => onToggleSelectionMode(true)}
+                                            >
+                                                <Layers className="w-3.5 h-3.5" />
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="bottom">Bind to Deal</TooltipContent>
+                                    </Tooltip>
+                                </>
+                            )}
+
+                            {/* Select/Delete - always shown in Chats mode */}
                             <Tooltip>
                                 <TooltipTrigger asChild>
                                     <Button
@@ -187,25 +232,7 @@ export function ConversationList({
                                         <CheckSquare className="w-3.5 h-3.5" />
                                     </Button>
                                 </TooltipTrigger>
-                                <TooltipContent side="bottom">
-                                    Select / Delete Conversations
-                                </TooltipContent>
-                            </Tooltip>
-
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        variant={isSelectionMode ? "default" : "ghost"}
-                                        size="icon"
-                                        className={cn("h-7 w-7", isSelectionMode && "bg-indigo-600 hover:bg-indigo-700")}
-                                        onClick={() => onToggleSelectionMode(true)}
-                                    >
-                                        <Layers className="w-3.5 h-3.5" />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent side="bottom">
-                                    Bind to Deal
-                                </TooltipContent>
+                                <TooltipContent side="bottom">Select / Delete</TooltipContent>
                             </Tooltip>
                         </div>
                     </TooltipProvider>

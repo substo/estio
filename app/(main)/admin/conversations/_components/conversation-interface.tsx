@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Conversation, Message } from '@/lib/ghl/conversations';
-import { fetchMessages, sendReply, generateAIDraft, deleteConversations, restoreConversations, archiveConversations, unarchiveConversations, permanentlyDeleteConversations, syncWhatsAppHistory, refreshConversation } from '../actions';
+import { fetchConversations, fetchMessages, sendReply, generateAIDraft, deleteConversations, restoreConversations, archiveConversations, unarchiveConversations, permanentlyDeleteConversations, syncWhatsAppHistory, refreshConversation } from '../actions';
 import { toast } from '@/components/ui/use-toast';
 import { getDealContexts } from '../../deals/actions';
 import { UnifiedTimeline } from './unified-timeline';
@@ -60,6 +60,19 @@ export function ConversationInterface({ initialConversations }: ConversationInte
     // Multi-selection (what shows in the Context Builder)
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [isSelectionMode, setIsSelectionMode] = useState(false);
+
+    // Fetch Conversations when View Filter changes
+    useEffect(() => {
+        fetchConversations(viewFilter)
+            .then(data => {
+                setConversations(data.conversations);
+                setActiveId(null); // Deselect when switching views
+            })
+            .catch((err: any) => {
+                console.error("Failed to fetch conversations:", err);
+                toast({ title: "Error", description: "Failed to load conversations.", variant: "destructive" });
+            });
+    }, [viewFilter]);
 
     const [messages, setMessages] = useState<Message[]>([]);
     const [loadingMessages, setLoadingMessages] = useState(false);
@@ -329,6 +342,8 @@ export function ConversationInterface({ initialConversations }: ConversationInte
                         // Deal Mode Props
                         viewMode={viewMode}
                         onViewModeChange={setViewMode}
+                        viewFilter={viewFilter}
+                        onViewFilterChange={setViewFilter}
                         deals={deals}
                         onSelectDeal={setActiveDealId}
                     />
