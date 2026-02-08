@@ -109,33 +109,111 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
 
     if (!contact) {
         // --- VALIDATION: Prevent creation of invalid contacts (e.g. unresolved LIDs) ---
-        // If we have an LID but no Phone, and the Input Phone LOOKS like an LID (>14 chars), we should be careful.
-        // BUT, if we are here, it means we have a `contactPhone` which might be the LID (if outbound fallback) OR real phone (inbound).
-        // If it looks like an LID, create it ONLY if we intend to support LID-only contacts (which we do now, to avoid split, but ideally we resolve them).
-
         const cleanForCheck = contactPhone.replace(/\D/g, '');
         const isInvalidUS = contactPhone.startsWith('+1') && (cleanForCheck.substring(1, 2) === '0' || cleanForCheck.substring(1, 2) === '1');
-
-        // Strict Block: >= 16 digits is almost certainly a junk/Group ID or weird artifact?
-        // LIDs are usually 15. If we have 15, we allow it IF we have an LID mapping? 
-        // No, if we are creating NEW, and it is 15 digits... it is likely an LID.
-        // If `msg.lid` is present, we save it.
 
         if (cleanForCheck.length >= 16 || isInvalidUS) {
             console.warn(`[WhatsApp Sync] BLOCKED (Strict): ${contactPhone}`);
             return { status: 'skipped', reason: 'invalid_number_strict' };
         }
 
-        console.log(`[WhatsApp Sync] Contact not found for ${contactPhone}. Creating new.`);
+        // --- SOURCE OF TRUTH CHECK (Google > GHL) ---
+        let finalName = nameToUse || `WhatsApp User ${contactPhone}`;
+        let foundGhlId: string | undefined;
+        let foundGoogleId: string | undefined;
+        let foundEmail: string | undefined;
+        let foundTags: string[] = [];
+        let foundAddress: any = {};
+
+        // 1. Check Google Contacts (Primary Source of Truth for Name)
+        try {
+            // Find a user with Google Sync enabled for this location
+            // Webhook context: We find the first user who has enabled sync for this location.
+            const googleUser = await db.user.findFirst({
+                where: {
+                    locations: { some: { id: locationId } },
+                    googleSyncEnabled: true
+                },
+                select: { id: true }
+            });
+
+            if (googleUser) {
+                const { searchGoogleContacts } = await import("@/lib/google/people");
+                const gContacts = await searchGoogleContacts(googleUser.id, contactPhone);
+
+                if (gContacts.length > 0) {
+                    const gMatch = gContacts[0];
+                    // Ensure gMatch is not null (filter(Boolean) removes nulls but TS doesn't infer)
+                    if (gMatch) {
+                        console.log(`[WhatsApp Sync] Found existing Google Contact: ${gMatch.resourceName} (${gMatch.name})`);
+
+                        foundGoogleId = gMatch.resourceName || undefined;
+                        finalName = gMatch.name || finalName; // Google Name Wins
+                        foundEmail = gMatch.email || foundEmail;
+                    }
+                }
+            }
+        } catch (err) {
+            console.error("[WhatsApp Sync] Failed to check Google:", err);
+        }
+
+        // 2. Check GHL (Secondary / Back Layer)
+        // We still check GHL to link the ID and prevent duplicates in CRM
+        if (locationDef.ghlAccessToken && locationDef.ghlLocationId) {
+            try {
+                const { ghlFetch } = await import("@/lib/ghl/client");
+                const cleanPhone = contactPhone.replace(/\D/g, '');
+                // Search by Phone
+                const searchRes = await ghlFetch<{ contacts: any[] }>(`/contacts/?locationId=${locationDef.ghlLocationId}&query=${cleanPhone}`, locationDef.ghlAccessToken);
+
+                if (searchRes.contacts && searchRes.contacts.length > 0) {
+                    const match = searchRes.contacts.find((c: any) => {
+                        const cPhone = c.phone?.replace(/\D/g, '');
+                        return cPhone && (cPhone === cleanPhone || cPhone.endsWith(cleanPhone) || cleanPhone.endsWith(cPhone));
+                    });
+
+                    if (match) {
+                        console.log(`[WhatsApp Sync] Found existing GHL Contact: ${match.id} (${match.name})`);
+                        foundGhlId = match.id;
+
+                        // Only use GHL data if we didn't find it in Google (Google Priority)
+                        if (!foundGoogleId) {
+                            finalName = match.name || finalName;
+                            foundEmail = match.email || foundEmail;
+                        }
+
+                        // Always merge tags/address from GHL as Google might not have them
+                        foundTags = match.tags || [];
+                        foundAddress = {
+                            city: match.city || foundAddress.city,
+                            state: match.state || foundAddress.state,
+                            country: match.country || foundAddress.country,
+                            postalCode: match.postalCode || foundAddress.postalCode,
+                            address1: match.address1 || foundAddress.address1
+                        };
+                    }
+                }
+            } catch (err) {
+                console.error("[WhatsApp Sync] Failed to check GHL:", err);
+            }
+        }
+
+        console.log(`[WhatsApp Sync] Creating new contact. Name: ${finalName}, GHL: ${foundGhlId}, Google: ${foundGoogleId}`);
+
         // Create new contact
         contact = await db.contact.create({
             data: {
                 locationId,
                 phone: contactPhone,
-                name: nameToUse || `WhatsApp User ${contactPhone}`,
+                name: finalName,
+                email: foundEmail,
                 status: "New",
                 contactType: contactType,
-                lid: msg.lid // Persist LID
+                lid: msg.lid,
+                ghlContactId: foundGhlId,
+                googleContactId: foundGoogleId,
+                tags: foundTags.length > 0 ? foundTags : undefined,
+                ...foundAddress
             } as any
         });
     } else {
@@ -260,15 +338,15 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
 
     console.log(`[WhatsApp Sync] Created message ${wamId} for conversation ${conversation.id}`);
 
-    // Update Conversation
-    await db.conversation.update({
-        where: { id: conversation.id },
-        data: {
-            lastMessageBody: body,
-            lastMessageAt: timestamp,
-            lastMessageType: "TYPE_WHATSAPP",
-            unreadCount: direction === "inbound" ? { increment: 1 } : undefined // Only increment unread for inbound
-        }
+    // Unified Update Logic
+    const { updateConversationLastMessage } = await import('@/lib/conversations/update');
+    await updateConversationLastMessage({
+        conversationId: conversation.id,
+        messageBody: body,
+        messageType: 'TYPE_WHATSAPP',
+        messageDate: timestamp,
+        direction: direction,
+        // Helper handles inbound unread increment
     });
 
     // --- GHL 2-Way Sync ---

@@ -335,6 +335,17 @@ export async function processMessage(gmail: gmail_v1.Gmail, userId: string, mess
             }
         });
 
+        // Unified Update Logic
+        const { updateConversationLastMessage } = await import('@/lib/conversations/update');
+        await updateConversationLastMessage({
+            conversationId,
+            messageBody: body,
+            messageType: 'TYPE_EMAIL',
+            messageDate: new Date(internalDate),
+            direction: direction,
+            // Unread count is handled by the helper (increments on inbound)
+        });
+
         console.log(`[Gmail Sync] Synced message ${messageId} for contact ${targetEmail}`);
 
     } catch (error) {

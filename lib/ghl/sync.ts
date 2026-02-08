@@ -98,32 +98,23 @@ export async function syncMessageFromWebhook(payload: any) {
         where: { ghlConversationId: ghlConversationId }
     });
 
-    let conversation;
+    // Unified Update Logic
+    const { updateConversationLastMessage } = await import('@/lib/conversations/update');
+    let conversation: any;
 
     if (existingConversation) {
-        // Only update 'lastMessageAt' if:
-        // 1. The new message has a REAL date (not a fallback) AND is newer than existing
+        conversation = existingConversation; // Assign for later use
 
-        let shouldUpdateTimestamp = false;
-
+        // We only trigger update if it's NOT a fallback date or if it's a valid new message
         if (!isFallback) {
-            shouldUpdateTimestamp = dateAdded > existingConversation.lastMessageAt;
+            await updateConversationLastMessage({
+                conversationId: conversation.id,
+                messageBody: body,
+                messageType: messageType,
+                messageDate: dateAdded,
+                direction: direction,
+            });
         }
-
-        conversation = await db.conversation.update({
-            where: { ghlConversationId: ghlConversationId },
-            data: {
-                // If timestamp matches, update preview body too.
-                lastMessageBody: shouldUpdateTimestamp ? body : undefined,
-                lastMessageAt: shouldUpdateTimestamp ? dateAdded : undefined,
-                lastMessageType: shouldUpdateTimestamp ? messageType : undefined,
-                unreadCount: {
-                    increment: direction === 'inbound' ? 1 : 0
-                },
-                status: 'open',
-                updatedAt: new Date()
-            }
-        });
     } else {
         conversation = await db.conversation.create({
             data: {

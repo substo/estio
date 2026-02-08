@@ -21,6 +21,7 @@ export interface Conversation {
 
 export interface Message {
     id: string;
+    ghlMessageId?: string;
     conversationId: string;
     contactId: string;
     contactName?: string;

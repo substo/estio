@@ -146,7 +146,8 @@ export async function fetchMessages(conversationId: string) {
 
 
     return messages.map((m: any) => ({
-        id: m.ghlMessageId,
+        id: m.id, // Use internal CUID
+        ghlMessageId: m.ghlMessageId, // Optional
         conversationId: m.conversationId,
         contactId: conversation.contact.ghlContactId || '',
         body: m.body || '',
@@ -356,16 +357,25 @@ export async function sendReply(conversationId: string, contactId: string, messa
                             }
                         });
 
-                        // Update Conversation Last Message
-                        await db.conversation.update({
+                        // Unified Update Logic
+                        const { updateConversationLastMessage } = await import('@/lib/conversations/update');
+
+                        // We need the internal ID
+                        const internalConv = await db.conversation.findUnique({
                             where: { ghlConversationId: conversationId },
-                            data: {
-                                lastMessageBody: messageBody,
-                                lastMessageAt: new Date(),
-                                lastMessageType: 'TYPE_WHATSAPP',
-                                status: 'open'
-                            }
+                            select: { id: true }
                         });
+
+                        if (internalConv) {
+                            await updateConversationLastMessage({
+                                conversationId: internalConv.id,
+                                messageBody: messageBody,
+                                messageType: 'TYPE_WHATSAPP',
+                                messageDate: new Date(),
+                                direction: 'outbound',
+                                // Outbound does not increment unread count by default
+                            });
+                        }
 
                         // [GHL Sync] Fire-and-forget sync to GHL
                         // We now use JIT contact creation to ensure GHL ID exists

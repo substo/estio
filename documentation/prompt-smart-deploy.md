@@ -25,8 +25,8 @@ Construct a semantic commit message in the format:
 
 ### 4. Deployment (Optional)
 If the user's request implies deployment (or if unsure, ask):
--   Run `./deploy-direct.sh --quick` (or appropriate flag).
--   *Note*: The script's internal `backup.sh` check will see a clean directory and skip the "dumb" prompt, making this seamless.
+-   Run `./deploy-local-build.sh`.
+-   *Note*: This performs a local build and rsyncs the artifacts, which is significantly faster than building on the server.
 
 ## Goal
 Replace generic "Auto-save" messages with high-quality, descriptive history that documents *what* we built together.
