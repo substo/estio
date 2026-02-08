@@ -189,7 +189,7 @@ export function ConversationList({
                 {/* Action Buttons - only show in Chats mode */}
                 {effectiveViewMode === 'chats' && onToggleSelectionMode && (
                     <TooltipProvider delayDuration={200}>
-                        <div className="flex gap-0 shrink-0 ml-auto">
+                        <div className="flex gap-0 shrink-0">
                             {/* Import & Bind - only show on Inbox */}
                             {viewFilter === 'active' && (
                                 <>

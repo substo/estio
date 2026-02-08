@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { Conversation, Message } from '@/lib/ghl/conversations';
 import { fetchConversations, fetchMessages, sendReply, generateAIDraft, deleteConversations, restoreConversations, archiveConversations, unarchiveConversations, permanentlyDeleteConversations, syncWhatsAppHistory, refreshConversation } from '../actions';
 import { toast } from '@/components/ui/use-toast';
@@ -38,17 +39,67 @@ function getMessageType(conversation: Conversation): 'SMS' | 'Email' | 'WhatsApp
 }
 
 export function ConversationInterface({ initialConversations }: ConversationInterfaceProps) {
+    const router = useRouter();
+    const pathname = usePathname();
+    const searchParams = useSearchParams();
+
+    // -- Clean Helper for URL updates --
+    // We use a callback to ensure we always have the latest params
+    const updateUrl = useCallback((updates: Record<string, string | null>) => {
+        const params = new URLSearchParams(searchParams.toString());
+
+        Object.entries(updates).forEach(([key, value]) => {
+            if (value === null) {
+                params.delete(key);
+            } else {
+                params.set(key, value);
+            }
+        });
+
+        router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    }, [pathname, router, searchParams]);
+
+    // Initialize state from URL or props
+    const initialViewFilter = (searchParams.get('view') as 'active' | 'archived' | 'trash') || 'active';
+    // Map URL 'inbox' to internal 'active' if needed, but 'active' is the internal string. 
+    // Let's support 'inbox' in URL for user friendliness
+    const urlView = searchParams.get('view');
+    const normalizedViewFilter = (urlView === 'inbox' ? 'active' : urlView) as 'active' | 'archived' | 'trash' || 'active';
+
     const [conversations, setConversations] = useState<Conversation[]>(initialConversations);
-    // Primary selection (what shows in the chat window)
-    const [activeId, setActiveId] = useState<string | null>(initialConversations.length > 0 ? initialConversations[0].id : null);
+
+    // Initialize Active ID from URL
+    const initialActiveId = searchParams.get('id') || (initialConversations.length > 0 ? initialConversations[0].id : null);
+    const [activeId, setActiveId] = useState<string | null>(initialActiveId);
 
     // View Mode State (inbox, archived, trash)
-    const [viewFilter, setViewFilter] = useState<'active' | 'archived' | 'trash'>('active');
+    const [viewFilter, setViewFilter] = useState<'active' | 'archived' | 'trash'>(normalizedViewFilter);
 
     // Deal Mode State
-    const [viewMode, setViewMode] = useState<'chats' | 'deals'>('chats');
+    const initialViewMode = (searchParams.get('mode') as 'chats' | 'deals') || 'chats';
+    const [viewMode, setViewMode] = useState<'chats' | 'deals'>(initialViewMode);
+
     const [deals, setDeals] = useState<any[]>([]);
-    const [activeDealId, setActiveDealId] = useState<string | null>(null);
+
+    const initialDealId = searchParams.get('dealId');
+    const [activeDealId, setActiveDealId] = useState<string | null>(initialDealId);
+
+    // Sync View Mode & Deal ID to URL
+    useEffect(() => {
+        updateUrl({
+            mode: viewMode === 'chats' ? null : 'deals',
+            dealId: activeDealId
+        });
+    }, [viewMode, activeDealId, updateUrl]);
+
+    // Sync View Filter & Active ID to URL
+    useEffect(() => {
+        const view = viewFilter === 'active' ? null : viewFilter;
+        updateUrl({
+            view,
+            id: activeId
+        });
+    }, [viewFilter, activeId, updateUrl]);
 
     // Fetch Deals when switching mode
     useEffect(() => {
@@ -61,12 +112,20 @@ export function ConversationInterface({ initialConversations }: ConversationInte
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [isSelectionMode, setIsSelectionMode] = useState(false);
 
+    const isFirstLoad = useRef(true);
+
     // Fetch Conversations when View Filter changes
     useEffect(() => {
         fetchConversations(viewFilter)
             .then(data => {
                 setConversations(data.conversations);
-                setActiveId(null); // Deselect when switching views
+
+                if (isFirstLoad.current) {
+                    isFirstLoad.current = false;
+                    // Preserve deep linked ID on first load
+                } else {
+                    setActiveId(null); // Deselect when switching views manually
+                }
             })
             .catch((err: any) => {
                 console.error("Failed to fetch conversations:", err);

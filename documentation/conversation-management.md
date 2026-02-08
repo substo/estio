@@ -90,3 +90,4 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
 - **Tabs**: `ConversationList` header has a dropdown to switch views.
 - **Selection Mode**: Allows bulk actions (Archive, Delete, Restore).
 - **Safety**: "Delete Forever" dialog only appears when deleting items from the Trash view.
+- **URL Synchronization**: View state (`active`, `archived`, `trash`) is synced to the URL (`?view=...`), allowing for bookmarking and sharing of specific lists.

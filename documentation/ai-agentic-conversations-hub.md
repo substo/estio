@@ -131,6 +131,13 @@ The default GHL message list endpoint returns stripped-down plaintext bodies and
 *   **Smart Bubbles**: Messages are capped at 85% width with proper overflow handling.
 *   **Email Cards**: Rendered in distinct "Email Cards" with collapsible "Show More" functionality to handle long conversation threads elegantly.
 
+### URL-Based Navigation (New)
+To support direct linking, bookmarking, and browser navigation, the hub now synchronizes its state with the URL query parameters:
+*   **Deep Linking**: Navigate directly to a conversation using `?id=CONVERSATION_ID`.
+*   **View Persistence**: The active view (Inbox, Archived, Trash) is persisted via `?view=archived`.
+*   **Deal Mode**: Direct access to deal rooms via `?mode=deals&dealId=DEAL_ID`.
+*   **Browser History**: Back and Forward buttons correctly navigate through conversation selection history.
+
 ### Individual Conversation Previews
 The conversation list uses a **compact layout** by default, showing only the contact name and channel icon. To view message details without disrupting the layout:
 
