@@ -144,6 +144,17 @@ To investigate issues like duplicate conversations or "Contact not found" errors
     ```
     *Look for lines like `[WhatsApp Sync] Contact not found...` vs `Matched existing contact...`*
 
+## Manual Chat Import (Feb 2026)
+We introduced a modal-based tool to import historic chats from `.txt` exports (WhatsApp → More → Export Chat).
+
+- **Location**: Conversation Header (Upload Icon).
+- **Format**: Standard WhatsApp Export `.txt` (without media).
+- **Behavior**:
+  - Direct import into the *active* conversation.
+  - Dedupes messages against existing database records.
+  - Updates `lastMessageAt` to reflect imported history.
+  - Auto-assigns "My" messages (outbound) based on user selection in the modal.
+
 ## Production Resilience (Jan 2026)
 
 The following safeguards are in place to prevent and recover from Evolution API failures:

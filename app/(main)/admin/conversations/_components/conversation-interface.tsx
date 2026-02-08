@@ -11,6 +11,7 @@ import { ConversationList } from './conversation-list';
 import { ChatWindow } from './chat-window';
 import { CoordinatorPanel } from './coordinator-panel';
 import { UndoToast } from './undo-toast';
+import { WhatsAppImportModal } from './whatsapp-import-modal';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -142,6 +143,9 @@ export function ConversationInterface({ initialConversations }: ConversationInte
 
     // Undo Toast State
     const [undoToast, setUndoToast] = useState<{ message: string; action: () => void } | null>(null);
+
+    // WhatsApp Import Modal State
+    const [importModalOpen, setImportModalOpen] = useState(false);
 
     // Derived State
     const activeConversation = conversations.find(c => c.id === activeId);
@@ -405,6 +409,7 @@ export function ConversationInterface({ initialConversations }: ConversationInte
                         onViewFilterChange={setViewFilter}
                         deals={deals}
                         onSelectDeal={setActiveDealId}
+                        onImportClick={() => setImportModalOpen(true)}
                     />
                 </Panel>
 
@@ -552,6 +557,22 @@ export function ConversationInterface({ initialConversations }: ConversationInte
                     message={undoToast.message}
                     onUndo={undoToast.action}
                     onDismiss={() => setUndoToast(null)}
+                />
+            )}
+
+            {/* WhatsApp Import Modal */}
+            {activeConversation && (
+                <WhatsAppImportModal
+                    open={importModalOpen}
+                    onOpenChange={setImportModalOpen}
+                    conversationId={activeConversation.id}
+                    contactName={activeConversation.contactName || 'Unknown'}
+                    onImportComplete={async () => {
+                        // Refresh messages for the active conversation
+                        const msgs = await fetchMessages(activeConversation.id);
+                        setMessages(msgs);
+                        toast({ title: 'Import Complete', description: 'Messages have been imported.' });
+                    }}
                 />
             )}
         </>

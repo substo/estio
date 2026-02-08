@@ -87,7 +87,24 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
 | `emptyTrash()` | Permanently deletes all soft-deleted items > 30 days old (manual trigger). |
 
 ## UI Implementation
-- **Tabs**: `ConversationList` header has a dropdown to switch views.
-- **Selection Mode**: Allows bulk actions (Archive, Delete, Restore).
+- **View Filters**: `ConversationList` header uses icon buttons (Inbox, Archive, Trash) with a hoverable dropdown for quick switching.
+- **Selection Mode**: Allows bulk actions (Archive, Delete, Restore) with a "Cancel" button aligned next to actions.
 - **Safety**: "Delete Forever" dialog only appears when deleting items from the Trash view.
 - **URL Synchronization**: View state (`active`, `archived`, `trash`) is synced to the URL (`?view=...`), allowing for bookmarking and sharing of specific lists.
+
+## WhatsApp Import
+We support importing `.txt` chat exports from WhatsApp directly into a specific conversation.
+
+### Flow
+1. **Trigger**: User clicks "Import WhatsApp" (upload icon) in the conversation header.
+2. **Modal**: A dialog (`WhatsAppImportModal`) opens.
+3. **Upload**: User drags & drops the exported `.txt` file.
+4. **Parse & Map**: System parses messages and identifies authors. User selects "This is me" to correctly assign outbound messages.
+5. **Import**: Messages are inserted into the conversation, skipping duplicates.
+
+### Backend Action
+`executeDirectImport(conversationId, fileContent, ownerAuthor)`:
+- Validates conversation and contact.
+- Parses file using `import-parser.ts`.
+- Inserts messages mapped to `ownerAuthor` (outbound) and others (inbound).
+- Updates `lastMessageAt` for the conversation.

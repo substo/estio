@@ -296,3 +296,145 @@ export async function getImportSessions() {
 
     return sessions;
 }
+
+/**
+ * Execute a direct import into a specific conversation (for modal-based import)
+ * 
+ * @param conversationId - The GHL conversation ID to import into
+ * @param fileContent - The raw .txt file content
+ * @param ownerAuthor - Which author in the file is "me" (outbound messages)
+ */
+export async function executeDirectImport(
+    conversationId: string,
+    fileContent: string,
+    ownerAuthor: string
+) {
+    const location = await getLocation();
+
+    // 1. Find the conversation and its contact
+    const conversation = await db.conversation.findFirst({
+        where: {
+            ghlConversationId: conversationId,
+            locationId: location.id
+        },
+        include: {
+            contact: true
+        }
+    });
+
+    if (!conversation) {
+        return { success: false, error: 'Conversation not found' };
+    }
+
+    if (!conversation.contact) {
+        return { success: false, error: 'Conversation has no linked contact' };
+    }
+
+    // 2. Parse the file
+    const parseResult = await parseWhatsAppExport(fileContent);
+
+    if (parseResult.errors.length > 0 && parseResult.messageCount === 0) {
+        return {
+            success: false,
+            error: parseResult.errors.join(', ')
+        };
+    }
+
+    if (parseResult.messageCount === 0) {
+        return { success: false, error: 'No messages found in the file' };
+    }
+
+    // 3. Validate ownerAuthor exists in the file
+    if (!parseResult.uniqueAuthors.includes(ownerAuthor)) {
+        return { success: false, error: `Author "${ownerAuthor}" not found in the file` };
+    }
+
+    // 4. Import messages
+    const messages = parseResult.messages;
+    let importedCount = 0;
+    let skippedCount = 0;
+
+    // Sort by date
+    const sortedMessages = messages.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    for (const msg of sortedMessages) {
+        if (!msg.author) continue;
+
+        const isOwner = msg.author === ownerAuthor;
+
+        // Check for duplicate
+        const existingMessage = await db.message.findFirst({
+            where: {
+                conversationId: conversation.id,
+                createdAt: msg.date,
+                body: msg.message
+            }
+        });
+
+        if (existingMessage) {
+            skippedCount++;
+            continue;
+        }
+
+        // Create message
+        await db.message.create({
+            data: {
+                conversationId: conversation.id,
+                ghlMessageId: `wa_import_direct_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+                type: 'TYPE_WHATSAPP',
+                direction: isOwner ? 'outbound' : 'inbound',
+                status: 'delivered',
+                body: msg.message,
+                createdAt: msg.date
+            }
+        });
+        importedCount++;
+    }
+
+    // 5. Update conversation's lastMessageAt if we imported anything
+    if (importedCount > 0) {
+        const lastMsg = sortedMessages[sortedMessages.length - 1];
+
+        // Only update if the imported message is more recent
+        const shouldUpdate = !conversation.lastMessageAt || new Date(lastMsg.date) > conversation.lastMessageAt;
+
+        if (shouldUpdate) {
+            await db.conversation.update({
+                where: { id: conversation.id },
+                data: {
+                    lastMessageBody: lastMsg.message,
+                    lastMessageAt: lastMsg.date
+                }
+            });
+        }
+    }
+
+    return {
+        success: true,
+        importedCount,
+        skippedCount,
+        totalParsed: parseResult.messageCount,
+        authors: parseResult.uniqueAuthors
+    };
+}
+
+/**
+ * Parse a WhatsApp export file and return metadata (for modal preview)
+ */
+export async function parseWhatsAppFile(fileContent: string) {
+    const parseResult = await parseWhatsAppExport(fileContent);
+
+    if (parseResult.errors.length > 0 && parseResult.messageCount === 0) {
+        return {
+            success: false,
+            error: parseResult.errors.join(', ')
+        };
+    }
+
+    return {
+        success: true,
+        messageCount: parseResult.messageCount,
+        uniqueAuthors: parseResult.uniqueAuthors,
+        preview: parseResult.messages.slice(0, 5)
+    };
+}

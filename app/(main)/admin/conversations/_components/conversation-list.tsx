@@ -1,3 +1,4 @@
+import { useState, useRef } from 'react';
 import { Conversation } from "@/lib/ghl/conversations";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
@@ -8,6 +9,7 @@ import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/h
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ConversationPreviewCard } from "./conversation-preview-card";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { WhatsAppStatus } from './whatsapp-status';
 import Link from 'next/link';
 
@@ -31,6 +33,7 @@ interface ConversationListProps {
     onViewFilterChange?: (filter: 'active' | 'archived' | 'trash') => void;
     deals?: any[];
     onSelectDeal?: (id: string) => void;
+    onImportClick?: () => void;
 }
 
 /**
@@ -70,8 +73,27 @@ export function ConversationList({
     viewFilter = 'active',
     onViewFilterChange,
     deals,
-    onSelectDeal
+    onSelectDeal,
+    onImportClick
 }: ConversationListProps) {
+    const [isMenuOpen, setIsMenuOpen] = useState(false);
+    const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+    const handleMouseEnter = () => {
+        if (closeTimeoutRef.current) {
+            clearTimeout(closeTimeoutRef.current);
+            closeTimeoutRef.current = null;
+        }
+        setIsMenuOpen(true);
+    };
+
+    const handleMouseLeave = () => {
+        closeTimeoutRef.current = setTimeout(() => {
+            setIsMenuOpen(false);
+            closeTimeoutRef.current = null;
+        }, 150);
+    };
+
     const effectiveViewMode = viewMode || 'chats';
 
     // Unified Header Component - used in both modes
@@ -113,7 +135,7 @@ export function ConversationList({
                         </TooltipProvider>
                     </div>
 
-                    <div className="ml-auto">
+                    <div className="ml-1">
                         <Button variant="ghost" size="sm" onClick={() => onToggleSelectionMode?.(false)}>
                             Cancel
                         </Button>
@@ -142,46 +164,44 @@ export function ConversationList({
                 {/* View Filter Icon Buttons - only show in Chats mode */}
                 {effectiveViewMode === 'chats' && onViewFilterChange && (
                     <TooltipProvider delayDuration={200}>
-                        <div className="flex gap-0 shrink-0 border rounded-md bg-white">
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        variant={viewFilter === 'active' ? 'secondary' : 'ghost'}
-                                        size="icon"
-                                        className="h-7 w-7 rounded-r-none"
-                                        onClick={() => onViewFilterChange('active')}
+                        <div className="flex items-center gap-1">
+                            {/* Vertical Dropdown Toggle - Hoverable */}
+                            <div
+                                onMouseEnter={handleMouseEnter}
+                                onMouseLeave={handleMouseLeave}
+                                className="flex items-center"
+                            >
+                                <DropdownMenu open={isMenuOpen} onOpenChange={setIsMenuOpen}>
+                                    <DropdownMenuTrigger asChild>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-7 w-7 text-slate-600 hover:text-slate-900 mx-0.5"
+                                        >
+                                            {viewFilter === 'active' && <Inbox className="w-4 h-4" />}
+                                            {viewFilter === 'archived' && <Archive className="w-4 h-4" />}
+                                            {viewFilter === 'trash' && <Trash2 className="w-4 h-4" />}
+                                        </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent
+                                        align="start"
+                                        className="w-32"
+                                        onMouseEnter={handleMouseEnter}
+                                        onMouseLeave={handleMouseLeave}
                                     >
-                                        <Inbox className="w-3.5 h-3.5" />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Inbox</TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        variant={viewFilter === 'archived' ? 'secondary' : 'ghost'}
-                                        size="icon"
-                                        className="h-7 w-7 rounded-none border-x"
-                                        onClick={() => onViewFilterChange('archived')}
-                                    >
-                                        <Archive className="w-3.5 h-3.5" />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Archived</TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        variant={viewFilter === 'trash' ? 'secondary' : 'ghost'}
-                                        size="icon"
-                                        className="h-7 w-7 rounded-l-none"
-                                        onClick={() => onViewFilterChange('trash')}
-                                    >
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Trash</TooltipContent>
-                            </Tooltip>
+                                        <DropdownMenuItem onClick={() => { onViewFilterChange('active'); setIsMenuOpen(false); }} className="gap-2">
+                                            <Inbox className="w-4 h-4" /> Inbox
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => { onViewFilterChange('archived'); setIsMenuOpen(false); }} className="gap-2">
+                                            <Archive className="w-4 h-4" /> Archived
+                                        </DropdownMenuItem>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem onClick={() => { onViewFilterChange('trash'); setIsMenuOpen(false); }} className="gap-2 text-red-600 focus:text-red-600">
+                                            <Trash2 className="w-4 h-4" /> Trash
+                                        </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                            </div>
                         </div>
                     </TooltipProvider>
                 )}
@@ -195,10 +215,13 @@ export function ConversationList({
                                 <>
                                     <Tooltip>
                                         <TooltipTrigger asChild>
-                                            <Button variant="ghost" size="icon" className="h-7 w-7" asChild>
-                                                <Link href="/admin/conversations/import">
-                                                    <Upload className="w-3.5 h-3.5" />
-                                                </Link>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-7 w-7"
+                                                onClick={onImportClick}
+                                            >
+                                                <Upload className="w-3.5 h-3.5" />
                                             </Button>
                                         </TooltipTrigger>
                                         <TooltipContent side="bottom">Import WhatsApp</TooltipContent>
