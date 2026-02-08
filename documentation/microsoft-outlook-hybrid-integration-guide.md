@@ -67,6 +67,11 @@ This function orchestrates the scraping with a **"World-Class" Robust Strategy**
 3.  **Hover-and-Reveal Fallback**: For internal users where the email is visually hidden, the script programmatically **hovers** over the sender's name to trigger the Persona Card and extracts the email from there.
 4.  **Click-to-Load**: Clicks each email in the list to load its full body content into the reading pane for accurate extraction.
 5.  **Incremental Optimization**: Bails out of the scrolling loop early if emails are older than `lastSyncedAt`.
+6.  **Direction Detection**:
+    - Fetches the user's `outlookEmail` at sync start.
+    - Compares sender email against user's email: **Sender matches → Outbound**, **Sender differs → Inbound**.
+    - Fallback: If sender extraction fails (e.g., internal users), uses folder as secondary signal (`inbox` → `inbound`, `sentitems` → `outbound`).
+    - Debug logging shows: `[OWA Email Sync Debug] Sender: external@example.com, UserEmail: user@outlook.com → Direction: inbound`
 
 ### C. Contact Sync (`lib/microsoft/contact-sync.ts`)
 - **Direction**: Bidirectional (mostly Inbound for cron).

@@ -55,12 +55,18 @@ We chose to build this **internally** rather than relying on GoHighLevel's nativ
 
 ## 3. Direction Inference Engine
 
-A core challenge with the GHL API is ambiguous message direction (e.g., forwarded emails). We implemented a strict priority logic to determine "Inbound (Left)" vs "Outbound (Right)":
+A core challenge with multi-source email sync (GHL API, Gmail, Outlook) is ambiguous message direction. We implemented a strict priority logic to determine "Inbound (Left)" vs "Outbound (Right)":
 
-1.  **Contact Match**: If `emailFrom` matches the contact's email -> **INBOUND**.
+### Gmail & Outlook (Native Sync)
+1.  **Sender-Based Detection**: If `emailFrom` matches the user's authenticated email (e.g., `user.outlookEmail` or Gmail address) → **OUTBOUND**.
+2.  **Otherwise**: → **INBOUND**.
+3.  **Fallback (Outlook Puppeteer only)**: If sender email extraction fails, uses folder (`inbox` → `inbound`, `sentitems` → `outbound`).
+
+### GHL API Messages
+1.  **Contact Match**: If `emailFrom` matches the contact's email → **INBOUND**.
 2.  **Explicit Direction**: Use GHL's `direction` field if available.
-3.  **User Attribution**: If a `userId` is present -> **OUTBOUND** (Agent).
-4.  **Source Detection**: Sources like `workflow`, `api`, `mobile_app` -> **OUTBOUND**.
+3.  **User Attribution**: If a `userId` is present → **OUTBOUND** (Agent).
+4.  **Source Detection**: Sources like `workflow`, `api`, `mobile_app` → **OUTBOUND**.
 5.  **Heuristic Fallback**: Scanning body text for "On ... wrote:" patterns to catch replies.
 
 ## 4. Persistent Deal Rooms & The Unified Hub (New)

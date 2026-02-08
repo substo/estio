@@ -37,6 +37,14 @@ export async function syncEmailsFromOWA(userId: string, folderId: 'inbox' | 'sen
         throw new Error('Failed to get browser page');
     }
 
+    // Fetch user's Outlook email for direction detection
+    const user = await db.user.findUnique({
+        where: { id: userId },
+        select: { outlookEmail: true }
+    });
+    const userEmail = user?.outlookEmail?.toLowerCase();
+    console.log(`[OWA Email Sync] User email for direction check: ${userEmail || 'NOT SET'}`);
+
     const emails: OWAEmail[] = [];
 
     // Helper to setup listeners on a page
@@ -184,7 +192,7 @@ export async function syncEmailsFromOWA(userId: string, folderId: 'inbox' | 'sen
         console.log(`[OWA Email Sync] Found ${emails.length} emails`);
 
         for (const email of emails) {
-            await processOWAEmail(userId, email, folderId);
+            await processOWAEmail(userId, email, folderId, userEmail);
         }
 
         return emails.length;
@@ -635,7 +643,15 @@ export async function syncEmailsFromOWA(userId: string, folderId: 'inbox' | 'sen
         return emails;
     }
 
-    async function processOWAEmail(userId: string, email: OWAEmail, folderId: string) {
+    /**
+     * Check if senderEmail matches the user's own Outlook email
+     */
+    function isUserOwnEmail(senderEmail: string | undefined, userEmail: string | undefined): boolean {
+        if (!userEmail || !senderEmail) return false;
+        return senderEmail.toLowerCase().trim() === userEmail.toLowerCase().trim();
+    }
+
+    async function processOWAEmail(userId: string, email: OWAEmail, folderId: string, userEmail: string | undefined) {
         try {
             const conversationId = await findOrCreateConversation(userId, email.sender, email.senderEmail);
             if (!conversationId) return;
@@ -656,10 +672,19 @@ export async function syncEmailsFromOWA(userId: string, folderId: 'inbox' | 'sen
 
             if (existing) return;
 
+            // Determine direction: sender-based with folder fallback
+            const isOwnEmail = isUserOwnEmail(email.senderEmail, userEmail);
+            // If we couldn't extract sender email, use folder as fallback
+            const direction = email.senderEmail
+                ? (isOwnEmail ? 'outbound' : 'inbound')
+                : (folderId === 'inbox' ? 'inbound' : 'outbound');
+
+            console.log(`[OWA Email Sync Debug] Sender: ${email.senderEmail || 'UNKNOWN'}, UserEmail: ${userEmail || 'NOT SET'} → Direction: ${direction}`);
+
             await db.message.create({
                 data: {
                     conversationId,
-                    direction: folderId === 'inbox' ? 'inbound' : 'outbound',
+                    direction,
                     type: 'EMAIL',
                     status: 'delivered',
                     body: email.fullBody || email.preview, // Use full body!

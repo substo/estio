@@ -2,13 +2,14 @@
 
 import { useState, useEffect } from 'react';
 import { Conversation, Message } from '@/lib/ghl/conversations';
-import { fetchMessages, sendReply, generateAIDraft, deleteConversations, syncWhatsAppHistory, refreshConversation } from '../actions';
+import { fetchMessages, sendReply, generateAIDraft, deleteConversations, restoreConversations, archiveConversations, unarchiveConversations, permanentlyDeleteConversations, syncWhatsAppHistory, refreshConversation } from '../actions';
 import { toast } from '@/components/ui/use-toast';
 import { getDealContexts } from '../../deals/actions';
 import { UnifiedTimeline } from './unified-timeline';
 import { ConversationList } from './conversation-list';
 import { ChatWindow } from './chat-window';
 import { CoordinatorPanel } from './coordinator-panel';
+import { UndoToast } from './undo-toast';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -41,6 +42,9 @@ export function ConversationInterface({ initialConversations }: ConversationInte
     // Primary selection (what shows in the chat window)
     const [activeId, setActiveId] = useState<string | null>(initialConversations.length > 0 ? initialConversations[0].id : null);
 
+    // View Mode State (inbox, archived, trash)
+    const [viewFilter, setViewFilter] = useState<'active' | 'archived' | 'trash'>('active');
+
     // Deal Mode State
     const [viewMode, setViewMode] = useState<'chats' | 'deals'>('chats');
     const [deals, setDeals] = useState<any[]>([]);
@@ -61,7 +65,11 @@ export function ConversationInterface({ initialConversations }: ConversationInte
     const [loadingMessages, setLoadingMessages] = useState(false);
 
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+    const [permanentDeleteDialogOpen, setPermanentDeleteDialogOpen] = useState(false);
     const [idsToDelete, setIdsToDelete] = useState<string[]>([]);
+
+    // Undo Toast State
+    const [undoToast, setUndoToast] = useState<{ message: string; action: () => void } | null>(null);
 
     // Derived State
     const activeConversation = conversations.find(c => c.id === activeId);
@@ -132,8 +140,16 @@ export function ConversationInterface({ initialConversations }: ConversationInte
 
     const handleDelete = async (ids: string[]) => {
         if (ids.length === 0) return;
-        setIdsToDelete(ids);
-        setDeleteDialogOpen(true);
+
+        // If in trash view, prompt for permanent deletion
+        if (viewFilter === 'trash') {
+            setIdsToDelete(ids);
+            setPermanentDeleteDialogOpen(true);
+        } else {
+            // Soft delete with undo
+            setIdsToDelete(ids);
+            setDeleteDialogOpen(true);
+        }
     };
 
     const executeDelete = async () => {
@@ -143,7 +159,57 @@ export function ConversationInterface({ initialConversations }: ConversationInte
         try {
             const res = await deleteConversations(ids);
             if (res.success) {
-                toast({ title: "Deleted", description: `Successfully deleted ${res.count} conversations.` });
+                const idSet = new Set(ids);
+                const deletedConversations = conversations.filter(c => idSet.has(c.id));
+
+                // Remove from local state immediately
+                setConversations(prev => prev.filter(c => !idSet.has(c.id)));
+
+                // Clear selection
+                setSelectedIds(new Set());
+                if (ids.length === conversations.length) {
+                    setIsSelectionMode(false);
+                }
+
+                // If active ID was deleted, deselect
+                if (activeId && idSet.has(activeId)) {
+                    setActiveId(null);
+                }
+
+                // Show undo toast
+                setUndoToast({
+                    message: `Moved ${res.count} conversation${res.count !== 1 ? 's' : ''} to trash`,
+                    action: async () => {
+                        // Restore conversations
+                        const restoreRes = await restoreConversations(ids);
+                        if (restoreRes.success) {
+                            // Add back to local state
+                            setConversations(prev => [...deletedConversations, ...prev]);
+                            toast({ title: "Restored", description: `Restored ${restoreRes.count} conversation(s)` });
+                        } else {
+                            toast({ title: "Restore Failed", description: String(restoreRes.error), variant: "destructive" });
+                        }
+                    }
+                });
+            } else {
+                toast({ title: "Delete Failed", description: String(res.error), variant: "destructive" });
+            }
+        } catch (e: any) {
+            toast({ title: "Error", description: e.message, variant: "destructive" });
+        } finally {
+            setDeleteDialogOpen(false);
+            setIdsToDelete([]);
+        }
+    };
+
+    const executePermanentDelete = async () => {
+        const ids = idsToDelete;
+        if (ids.length === 0) return;
+
+        try {
+            const res = await permanentlyDeleteConversations(ids);
+            if (res.success) {
+                toast({ title: "Deleted Forever", description: `Permanently deleted ${res.count} conversation(s).` });
 
                 // Remove from local state
                 const idSet = new Set(ids);
@@ -165,10 +231,11 @@ export function ConversationInterface({ initialConversations }: ConversationInte
         } catch (e: any) {
             toast({ title: "Error", description: e.message, variant: "destructive" });
         } finally {
-            setDeleteDialogOpen(false);
+            setPermanentDeleteDialogOpen(false);
             setIdsToDelete([]);
         }
     };
+
 
     const handleSendMessage = async (text: string, type: 'SMS' | 'Email' | 'WhatsApp') => {
         if (!activeConversation) return;
@@ -375,19 +442,44 @@ export function ConversationInterface({ initialConversations }: ConversationInte
             <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
-                        <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                        <AlertDialogTitle>Move to Trash?</AlertDialogTitle>
                         <AlertDialogDescription>
-                            This action cannot be undone. This will permanently delete {idsToDelete.length} conversation{idsToDelete.length > 1 ? 's' : ''} and remove the data from our servers.
+                            {idsToDelete.length} conversation{idsToDelete.length > 1 ? 's' : ''} will be moved to trash. You can restore them within 30 days or delete them permanently.
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                         <AlertDialogCancel>Cancel</AlertDialogCancel>
-                        <AlertDialogAction onClick={executeDelete} className="bg-red-600 hover:bg-red-700">
-                            Delete
+                        <AlertDialogAction onClick={executeDelete} className="bg-orange-600 hover:bg-orange-700">
+                            Move to Trash
                         </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
+
+            <AlertDialog open={permanentDeleteDialogOpen} onOpenChange={setPermanentDeleteDialogOpen}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Delete Forever?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This action cannot be undone. {idsToDelete.length} conversation{idsToDelete.length > 1 ? 's' : ''} will be permanently deleted and cannot be recovered.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={executePermanentDelete} className="bg-red-600 hover:bg-red-700">
+                            Delete Forever
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
+            {undoToast && (
+                <UndoToast
+                    message={undoToast.message}
+                    onUndo={undoToast.action}
+                    onDismiss={() => setUndoToast(null)}
+                />
+            )}
         </>
     );
 }

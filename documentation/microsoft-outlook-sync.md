@@ -236,6 +236,10 @@ For accounts that cannot use the standard Graph API (e.g., some personal Outlook
 3.  **GHL Integration**:
     - Scraped emails are saved to the local database.
     - New messages are automatically pushed to GoHighLevel (GHL) using the `createInboundMessage` utility, ensuring feature parity with the Graph API sync.
+4.  **Email Direction Detection**:
+    - Direction is determined by comparing the sender's email against the user's `outlookEmail` stored during login.
+    - If sender matches user email → `outbound`, otherwise → `inbound`.
+    - Fallback: If sender email extraction fails (e.g., internal users behind Persona Cards), folder is used (`inbox` → `inbound`, `sentitems` → `outbound`).
 
 ### Limitations
 - Slower than Graph API (requires browser launch), though mitigated by incremental sync.

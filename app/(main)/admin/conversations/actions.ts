@@ -28,12 +28,26 @@ async function getAuthenticatedLocation() {
     }
 }
 
-export async function fetchConversations(status: 'open' | 'closed' | 'all' = 'all') {
+export async function fetchConversations(status: 'active' | 'archived' | 'trash' | 'all' = 'active') {
     try {
         const location = await getAuthenticatedLocation();
 
         const where: any = { locationId: location.id };
-        if (status !== 'all') where.status = status;
+
+        // Apply soft delete and archive filters
+        if (status === 'active') {
+            // Active conversations: not deleted and not archived
+            where.deletedAt = null;
+            where.archivedAt = null;
+        } else if (status === 'archived') {
+            // Archived conversations: not deleted but archived
+            where.deletedAt = null;
+            where.archivedAt = { not: null };
+        } else if (status === 'trash') {
+            // Trash: only deleted conversations
+            where.deletedAt = { not: null };
+        }
+        // 'all' applies no filter (shows everything)
 
         // Check if we need to bootstrap (Empty DB)
         const count = await db.conversation.count({ where: { locationId: location.id } });
@@ -1391,22 +1405,163 @@ export async function deleteConversations(conversationIds: string[]) {
     }
 
     try {
-        // Delete using deleteMany with GHL IDs
-        // Note: Prisma deleteMany doesn't support relation cascading in the same way strictly, 
-        // but since we are deleting the parent Conversation, the database foreign keys 
-        // configured with ON DELETE CASCADE (state in schema) will handle the children (Messages, Executions).
-        const result = await db.conversation.deleteMany({
+        // Soft Delete: Mark conversations as deleted instead of removing them
+        // This allows users to restore them from the trash within 30 days
+        const result = await db.conversation.updateMany({
             where: {
                 ghlConversationId: { in: conversationIds },
-                locationId: location.id // Security check to ensure ownership
+                locationId: location.id, // Security check to ensure ownership
+                deletedAt: null // Only delete non-deleted conversations (prevent double-delete)
+            },
+            data: {
+                deletedAt: new Date(),
+                // Note: deletedBy would require user context from auth
+                // For now, we'll track via deletedAt timestamp only
             }
         });
 
-        console.log(`[Delete] Deleted ${result.count} conversations.`);
+        console.log(`[Soft Delete] Moved ${result.count} conversations to trash.`);
         return { success: true, count: result.count };
 
     } catch (error: any) {
         console.error("deleteConversations error:", error);
+        return { success: false, error: error.message };
+    }
+}
+
+export async function restoreConversations(conversationIds: string[]) {
+    const location = await getAuthenticatedLocation();
+
+    if (!conversationIds || conversationIds.length === 0) {
+        return { success: false, error: "No conversations selected" };
+    }
+
+    try {
+        // Restore: Remove deletedAt timestamp to bring back from trash
+        const result = await db.conversation.updateMany({
+            where: {
+                ghlConversationId: { in: conversationIds },
+                locationId: location.id,
+                deletedAt: { not: null } // Only restore deleted conversations
+            },
+            data: {
+                deletedAt: null,
+                deletedBy: null
+            }
+        });
+
+        console.log(`[Restore] Restored ${result.count} conversations from trash.`);
+        return { success: true, count: result.count };
+
+    } catch (error: any) {
+        console.error("restoreConversations error:", error);
+        return { success: false, error: error.message };
+    }
+}
+
+export async function permanentlyDeleteConversations(conversationIds: string[]) {
+    const location = await getAuthenticatedLocation();
+
+    if (!conversationIds || conversationIds.length === 0) {
+        return { success: false, error: "No conversations selected" };
+    }
+
+    try {
+        // Hard Delete: Permanently remove from database
+        // Can only delete conversations that are already in trash (have deletedAt)
+        const result = await db.conversation.deleteMany({
+            where: {
+                ghlConversationId: { in: conversationIds },
+                locationId: location.id,
+                deletedAt: { not: null } // Security: Only allow permanent deletion of trashed items
+            }
+        });
+
+        console.log(`[Permanent Delete] Permanently deleted ${result.count} conversations.`);
+        return { success: true, count: result.count };
+
+    } catch (error: any) {
+        console.error("permanentlyDeleteConversations error:", error);
+        return { success: false, error: error.message };
+    }
+}
+
+export async function archiveConversations(conversationIds: string[]) {
+    const location = await getAuthenticatedLocation();
+
+    if (!conversationIds || conversationIds.length === 0) {
+        return { success: false, error: "No conversations selected" };
+    }
+
+    try {
+        // Archive: Hide from inbox without deleting
+        const result = await db.conversation.updateMany({
+            where: {
+                ghlConversationId: { in: conversationIds },
+                locationId: location.id,
+                archivedAt: null, // Only archive non-archived conversations
+                deletedAt: null // Don't archive deleted conversations
+            },
+            data: {
+                archivedAt: new Date()
+            }
+        });
+
+        console.log(`[Archive] Archived ${result.count} conversations.`);
+        return { success: true, count: result.count };
+
+    } catch (error: any) {
+        console.error("archiveConversations error:", error);
+        return { success: false, error: error.message };
+    }
+}
+
+export async function unarchiveConversations(conversationIds: string[]) {
+    const location = await getAuthenticatedLocation();
+
+    if (!conversationIds || conversationIds.length === 0) {
+        return { success: false, error: "No conversations selected" };
+    }
+
+    try {
+        // Unarchive: Return to inbox
+        const result = await db.conversation.updateMany({
+            where: {
+                ghlConversationId: { in: conversationIds },
+                locationId: location.id,
+                archivedAt: { not: null } // Only unarchive archived conversations
+            },
+            data: {
+                archivedAt: null
+            }
+        });
+
+        console.log(`[Unarchive] Unarchived ${result.count} conversations.`);
+        return { success: true, count: result.count };
+
+    } catch (error: any) {
+        console.error("unarchiveConversations error:", error);
+        return { success: false, error: error.message };
+    }
+}
+
+export async function emptyTrash() {
+    const location = await getAuthenticatedLocation();
+
+    try {
+        // Permanently delete all conversations in trash
+        const result = await db.conversation.deleteMany({
+            where: {
+                locationId: location.id,
+                deletedAt: { not: null }
+            }
+        });
+
+        console.log(`[Empty Trash] Permanently deleted ${result.count} conversations from trash.`);
+        return { success: true, count: result.count };
+
+    } catch (error: any) {
+        console.error("emptyTrash error:", error);
         return { success: false, error: error.message };
     }
 }

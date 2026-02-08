@@ -765,6 +765,11 @@ model Conversation {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
   
+  // Soft Delete & Archive
+  deletedAt         DateTime? // Soft delete timestamp (null = active, not null = in trash)
+  archivedAt        DateTime? // Archive timestamp (null = not archived, not null = archived)
+  deletedBy         String?   // User ID who deleted (for audit trail)
+  
   // AI Agent Planner
   agentPlan         Json?    // Stores the structured task list [ { id, title, status, result } ]
   
@@ -785,6 +790,8 @@ model Conversation {
   @@index([locationId])
   @@index([contactId])
   @@index([lastMessageAt])
+  @@index([deletedAt])
+  @@index([archivedAt])
   @@unique([locationId, contactId])
 }
 
