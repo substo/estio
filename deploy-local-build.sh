@@ -86,6 +86,9 @@ cp .env.prod .env.production.local
 
 # Run Build
 echo "⚡ Running Next.js Build..."
+# Clean previous build to prevent cache corruption
+rm -rf .next
+
 # We don't need to pass vars inline anymore; .env.production.local takes precedence
 NODE_OPTIONS='--max-old-space-size=8192' npm run build
 

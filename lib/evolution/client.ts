@@ -385,6 +385,38 @@ export const evolutionClient = {
     },
 
     /**
+     * Find a contact by ID (LID or Phone)
+     * Used to resolve LID to Phone Number
+     */
+    findContact: async (instanceName: string, jid: string) => {
+        try {
+            console.log(`[Evolution] Finding contact for ${jid}...`);
+            const response = await axios.post(
+                `${EVOLUTION_API_URL}/chat/findContacts/${instanceName}`,
+                {
+                    where: {
+                        id: jid
+                    }
+                },
+                {
+                    headers: {
+                        'apikey': EVOLUTION_GLOBAL_API_KEY
+                    }
+                }
+            );
+            // Response is usually an array of contacts
+            const data = response.data;
+            if (Array.isArray(data) && data.length > 0) {
+                return data[0];
+            }
+            return data; // Return object if single
+        } catch (error: any) {
+            console.error('Error finding contact:', error.response?.data || error);
+            return null;
+        }
+    },
+
+    /**
      * Fetch Group Metadata
      */
     fetchGroup: async (instanceName: string, groupJid: string) => {

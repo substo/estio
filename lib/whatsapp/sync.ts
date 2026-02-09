@@ -16,9 +16,11 @@ export interface NormalizedMessage {
     isGroup?: boolean;
     participant?: string; // Real sender phone in group chat
     lid?: string; // WhatsApp Lightweight ID
+    resolvedPhone?: string; // Explicitly passed resolved phone from webhook
 }
 
 // ... handleWhatsAppMessage ...
+import { evolutionClient } from "@/lib/evolution/client";
 
 export async function processNormalizedMessage(msg: NormalizedMessage) {
     console.log(`[WhatsApp Sync] processNormalizedMessage Called for ${msg.wamId} (${msg.direction})`);
@@ -47,7 +49,43 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
 
     // Determine the "Contact" phone number (The external party)
     // If inbound, Contact is "from". If outbound, Contact is "to".
-    const contactPhone = direction === "inbound" ? normalizedFrom : normalizedTo;
+    // Determine the "Contact" phone number (The external party)
+    // If inbound, Contact is "from". If outbound, Contact is "to".
+    let contactPhone = direction === "inbound" ? normalizedFrom : normalizedTo;
+
+    // --- LID RESOLUTION CHECK ---
+    // If contactPhone implies an LID (ends with @lid) AND we didn't receive a resolved phone
+    // We try to fetch it from Evolution API now.
+    if (contactPhone.endsWith('@lid') && !msg.resolvedPhone) { // resolvedPhone passed from webhook
+        console.log(`[WhatsApp Sync] Contact is LID and no phone provided. Attempting resolution for ${contactPhone}...`);
+
+        // 1. Try to fetch from API
+        // Evolution instances are named after location IDs
+        const instanceName = locationId;
+        const lookup = await evolutionClient.findContact(instanceName, msg.lid || contactPhone);
+
+        if (lookup && lookup.id) {
+            // Check if it returned a real number (JID)
+            if (lookup.id.includes('@s.whatsapp.net')) {
+                const resolved = lookup.id.replace('@s.whatsapp.net', '');
+                console.log(`[WhatsApp Sync] Resolved LID ${contactPhone} to ${resolved}`);
+                contactPhone = `+${resolved}`; // Update the phone we use for lookup/creation
+            } else if (lookup.phoneNumber) {
+                // Evolution sometimes returns phoneNumber field
+                console.log(`[WhatsApp Sync] Resolved LID ${contactPhone} to ${lookup.phoneNumber}`);
+                contactPhone = `+${lookup.phoneNumber}`;
+            }
+        } else {
+            console.warn(`[WhatsApp Sync] Failed to resolve LID ${contactPhone} via API.`);
+        }
+    } else if (msg.resolvedPhone) {
+        // Use the phone resolved by webhook
+        const p = msg.resolvedPhone.startsWith('+') ? msg.resolvedPhone : `+${msg.resolvedPhone}`;
+        if (!contactPhone.includes(p)) {
+            console.log(`[WhatsApp Sync] Using Webhook Resolved Phone: ${p} instead of ${contactPhone}`);
+            contactPhone = p;
+        }
+    }
 
     // --- Enhanced Contact Lookup ---
     // 1. Clean the input phone to raw digits
@@ -112,13 +150,21 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         const cleanForCheck = contactPhone.replace(/\D/g, '');
         const isInvalidUS = contactPhone.startsWith('+1') && (cleanForCheck.substring(1, 2) === '0' || cleanForCheck.substring(1, 2) === '1');
 
-        if (cleanForCheck.length >= 16 || isInvalidUS) {
+        // NEW: Check if this is an unresolved LID
+        const isUnresolvedLid = contactPhone.includes('@lid');
+
+        if (isUnresolvedLid) {
+            // It's an LID we couldn't resolve even after API lookup.
+            // We allow creation BUT with phone = null and lid = <value>
+            // We must skip the "cleanForCheck.length >= 16" blocking check for this specific case
+            console.warn(`[WhatsApp Sync] Creating contact for Unresolved LID: ${contactPhone}`);
+        } else if (cleanForCheck.length >= 16 || isInvalidUS) {
             console.warn(`[WhatsApp Sync] BLOCKED (Strict): ${contactPhone}`);
             return { status: 'skipped', reason: 'invalid_number_strict' };
         }
 
         // --- SOURCE OF TRUTH CHECK (Google > GHL) ---
-        let finalName = nameToUse || `WhatsApp User ${contactPhone}`;
+        let finalName = nameToUse || `WhatsApp User ${contactPhone}`; // Fallback: WhatsApp User +123... or ...@lid
         let foundGhlId: string | undefined;
         let foundGoogleId: string | undefined;
         let foundEmail: string | undefined;
@@ -204,12 +250,12 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         contact = await db.contact.create({
             data: {
                 locationId,
-                phone: contactPhone,
+                phone: isUnresolvedLid ? undefined : contactPhone,
                 name: finalName,
                 email: foundEmail,
                 status: "New",
                 contactType: contactType,
-                lid: msg.lid,
+                lid: isUnresolvedLid ? contactPhone.replace('@lid', '').replace('+', '') : msg.lid, // Use contactPhone as LID if unresolved
                 ghlContactId: foundGhlId,
                 googleContactId: foundGoogleId,
                 tags: foundTags.length > 0 ? foundTags : undefined,

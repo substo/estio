@@ -1,5 +1,5 @@
 # WhatsApp Integration: Custom Channel ("Linked Device")
-**Last Updated:** 2026-01-17
+**Last Updated:** 2026-02-09
 **Related:** [Legacy Integration](whatsapp-integration-legacy.md)
 
 ## Overview
@@ -199,6 +199,7 @@ WhatsApp sessions and data are **preserved across deployments** because they are
 No schema changes required specifically for this, but we rely on:
 -   `Location.evolutionInstanceId`
 -   `Contact.ghlContactId`
+-   `Contact.lid` — WhatsApp Lightweight ID for LID-to-phone mapping.
 -   `Message.ghlMessageId` / `Message.wamId` mapping.
 -   **CRITICAL DB ALTERATION**: `Contact` table columns `pushName` and `profilePicUrl` MUST be type `TEXT` or `VARCHAR(1000+)` to prevent crashes. Check migration history.
 
@@ -214,10 +215,21 @@ Due to the schema constraint where `Conversation` must link to a single `Contact
     -   **Format**: `[Martin]: Hello everyone`
 -   **Participant Sync**: We also extract the *actual sender's* phone number from the message metadata and ensure they exist as a distinct `Contact` in the CRM.
 
-### 2. LID (Lightweight ID) Handling
-WhatsApp increasingly uses `@lid` (an opaque UUID) instead of phone numbers for privacy.
--   **Resolution**: The webhook attempts to resolve `@lid` to a real phone number (`@s.whatsapp.net`) using payload metadata (`senderPn` or `participant`) in both Group and 1:1 chats.
--   **Fallback**: If resolution fails and the resulting ID is invalid (e.g., > 14 digits), the system **blocks** certain operations (like creating a new contact) to prevent "incorrect numbers" from polluting the CRM. ES164 validation rules are applied.
+### 2. LID (Lightweight ID) Handling (Updated Feb 2026)
+WhatsApp uses `@lid` (an opaque UUID) instead of phone numbers for privacy. Our system resolves LIDs to real phone numbers using a multi-step approach:
+
+#### Resolution Priority
+1. **Webhook Fields**: Check `msg.senderPn`, `msg.remoteJidAlt`, or `key.participant` for real phone number.
+2. **Active API Lookup**: If webhook data is incomplete, call `evolutionClient.findContact(lid)` to query Evolution API.
+3. **Fallback**: If all resolution fails, create contact with `phone: null` and `lid: <value>`. This prevents corrupting the phone field with LID values.
+
+#### Key Implementation
+- **Webhook** (`app/api/webhooks/evolution/route.ts`): Extracts phone from `senderPn`, `remoteJidAlt`, or `participant`.
+- **Evolution Client** (`lib/evolution/client.ts`): `findContact(instanceName, jid)` queries `/chat/findContacts` endpoint.
+- **Sync Logic** (`lib/whatsapp/sync.ts`): Performs active resolution, then creates contact with appropriate fields.
+
+> [!NOTE]
+> Contacts created with `phone: null` but a valid `lid` field will have their phone number automatically updated when a future message includes `senderPn`.
 
 ### 3. Outbound Naming Fix
 -   **Issue**: Outbound messages (sent from phone) were triggering `Contact` creation using the *Sender's* PushName (the User), effectively renaming clients to "Martin".

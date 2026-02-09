@@ -34,6 +34,8 @@ interface ConversationListProps {
     deals?: any[];
     onSelectDeal?: (id: string) => void;
     onImportClick?: () => void;
+    onBind?: (ids: string[]) => void;
+    onArchive?: (ids: string[]) => void;
 }
 
 /**
@@ -74,7 +76,9 @@ export function ConversationList({
     onViewFilterChange,
     deals,
     onSelectDeal,
-    onImportClick
+    onImportClick,
+    onBind,
+    onArchive
 }: ConversationListProps) {
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -118,10 +122,47 @@ export function ConversationList({
 
                     <div className="flex items-center gap-0 shrink-0 ml-2">
                         {/* Actions for selection mode */}
+                        {onBind && (
+                            <TooltipProvider delayDuration={200}>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-8 w-8 text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50"
+                                            onClick={() => onBind(Array.from(selectedIds || []))}
+                                        >
+                                            <Layers className="w-4 h-4" />
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>Bind to New Deal</TooltipContent>
+                                </Tooltip>
+                            </TooltipProvider>
+                        )}
+
+                        {onArchive && (
+                            <TooltipProvider delayDuration={200}>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-8 w-8 text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+                                            onClick={() => onArchive(Array.from(selectedIds || []))}
+                                        >
+                                            <Archive className="w-4 h-4" />
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>Archive Selected</TooltipContent>
+                                </Tooltip>
+                            </TooltipProvider>
+                        )}
+
                         <TooltipProvider delayDuration={200}>
                             <Tooltip>
                                 <TooltipTrigger asChild>
                                     <Button
+                                        // ... Delete button ...
                                         variant="ghost"
                                         size="icon"
                                         className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"

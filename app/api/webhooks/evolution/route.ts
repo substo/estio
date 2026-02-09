@@ -96,7 +96,11 @@ export async function POST(req: NextRequest) {
 
                 if (isLid) {
                     // Try to resolve real number from participant if available (sometimes provided in metadata)
-                    if (participant && participant.includes('@s.whatsapp.net')) {
+                    if (msg.senderPn) {
+                        realPhone = msg.senderPn;
+                    } else if (msg.remoteJidAlt && msg.remoteJidAlt.includes('@s.whatsapp.net')) {
+                        realPhone = msg.remoteJidAlt.replace('@s.whatsapp.net', '');
+                    } else if (participant && participant.includes('@s.whatsapp.net')) {
                         realPhone = participant.replace('@s.whatsapp.net', '');
                     } else {
                         // If we can't resolve it, we unfortunately have to use the LID or ignore it.
@@ -130,7 +134,9 @@ export async function POST(req: NextRequest) {
                 contactName: isGroup ? undefined : (msg.pushName || realPhone), // Don't rename group to sender name
                 isGroup: isGroup,
                 participant: participant, // Pass resolved participant to sync
-                lid: isLid && !isGroup ? remoteJid.replace('@lid', '') : undefined // Pass LID for mapping (1:1 only)
+                lid: isLid && !isGroup ? remoteJid.replace('@lid', '') : undefined, // Pass LID for mapping (1:1 only)
+                // Pass the real phone number explicitly if resolved, to help sync.ts do a final check if needed
+                resolvedPhone: realPhone
             };
 
             console.log(`[Evolution] Processing ${normalized.direction} message for ${location.id}`);

@@ -5,13 +5,14 @@ import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { Conversation, Message } from '@/lib/ghl/conversations';
 import { fetchConversations, fetchMessages, sendReply, generateAIDraft, deleteConversations, restoreConversations, archiveConversations, unarchiveConversations, permanentlyDeleteConversations, syncWhatsAppHistory, refreshConversation } from '../actions';
 import { toast } from '@/components/ui/use-toast';
-import { getDealContexts } from '../../deals/actions';
+import { getDealContexts, createPersistentDeal } from '../../deals/actions';
 import { UnifiedTimeline } from './unified-timeline';
 import { ConversationList } from './conversation-list';
 import { ChatWindow } from './chat-window';
 import { CoordinatorPanel } from './coordinator-panel';
 import { UndoToast } from './undo-toast';
 import { WhatsAppImportModal } from './whatsapp-import-modal';
+import { CreateDealDialog } from './create-deal-dialog';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -147,6 +148,38 @@ export function ConversationInterface({ initialConversations }: ConversationInte
     // WhatsApp Import Modal State
     const [importModalOpen, setImportModalOpen] = useState(false);
 
+    // Create Deal Modal State
+    const [createDealOpen, setCreateDealOpen] = useState(false);
+    const [creatingDeal, setCreatingDeal] = useState(false);
+
+    const handleBindClick = (ids: string[]) => {
+        if (ids.length === 0) return;
+        setCreateDealOpen(true);
+    };
+
+    const executeCreateDeal = async (title: string) => {
+        if (selectedIds.size === 0) return;
+        setCreatingDeal(true);
+        try {
+            const ids = Array.from(selectedIds);
+            const newDeal = await createPersistentDeal(title, ids);
+            toast({ title: "Deal Created", description: `Created "${newDeal.title}" with ${ids.length} conversations.` });
+
+            // Clear selection and mode
+            setSelectedIds(new Set());
+            setIsSelectionMode(false);
+            setCreateDealOpen(false);
+
+            // Optional: Switch to Deals view?
+            // setViewMode('deals');
+            // setActiveDealId(newDeal.id);
+        } catch (e: any) {
+            toast({ title: "Error", description: e.message || "Failed to create deal", variant: "destructive" });
+        } finally {
+            setCreatingDeal(false);
+        }
+    };
+
     // Derived State
     const activeConversation = conversations.find(c => c.id === activeId);
     const selectedConversations = conversations.filter(c => selectedIds.has(c.id));
@@ -225,6 +258,75 @@ export function ConversationInterface({ initialConversations }: ConversationInte
             // Soft delete with undo
             setIdsToDelete(ids);
             setDeleteDialogOpen(true);
+        }
+    };
+
+    const handleArchive = async (ids: string[]) => {
+        if (ids.length === 0) return;
+
+        try {
+            const res = await archiveConversations(ids);
+            if (res.success) {
+                const idSet = new Set(ids);
+                const archivedConversations = conversations.filter(c => idSet.has(c.id));
+
+                // Remove from local state immediately if filtering active conversations
+                if (viewFilter === 'active') {
+                    setConversations(prev => prev.filter(c => !idSet.has(c.id)));
+                }
+
+                // Clear selection
+                setSelectedIds(new Set());
+                if (ids.length === conversations.length) {
+                    setIsSelectionMode(false);
+                }
+
+                // If active ID was archived, deselect
+                if (activeId && idSet.has(activeId)) {
+                    setActiveId(null);
+                }
+
+                toast({
+                    title: "Archived",
+                    description: `Archived ${res.count} conversation${res.count !== 1 ? 's' : ''}`,
+                    action: (
+                        <UndoToast
+                            message={`Archived ${res.count} conversation${res.count !== 1 ? 's' : ''}`}
+                            onUndo={async () => {
+                                const restoreRes = await unarchiveConversations(ids);
+                                if (restoreRes.success) {
+                                    if (viewFilter === 'active') {
+                                        setConversations(prev => [...archivedConversations, ...prev]);
+                                    }
+                                    toast({ title: "Unarchived", description: `Unarchived ${restoreRes.count} conversation(s)` });
+                                } else {
+                                    toast({ title: "Unarchive Failed", description: String(restoreRes.error), variant: "destructive" });
+                                }
+                            }}
+                            onDismiss={() => { }}
+                        />
+                    ) as any // Type casting for Toast Action usage pattern if needed or just use simple undo logic
+                });
+
+                // Simplified Undo Toast Logic reusing existing state
+                setUndoToast({
+                    message: `Archived ${res.count} conversation${res.count !== 1 ? 's' : ''}`,
+                    action: async () => {
+                        const restoreRes = await unarchiveConversations(ids);
+                        if (restoreRes.success) {
+                            if (viewFilter === 'active') {
+                                setConversations(prev => [...archivedConversations, ...prev]);
+                            }
+                            toast({ title: "Unarchived", description: `Unarchived ${restoreRes.count} conversation(s)` });
+                        }
+                    }
+                });
+
+            } else {
+                toast({ title: "Archive Failed", description: String(res.error), variant: "destructive" });
+            }
+        } catch (e: any) {
+            toast({ title: "Error", description: e.message, variant: "destructive" });
         }
     };
 
@@ -410,6 +512,8 @@ export function ConversationInterface({ initialConversations }: ConversationInte
                         deals={deals}
                         onSelectDeal={setActiveDealId}
                         onImportClick={() => setImportModalOpen(true)}
+                        onBind={handleBindClick}
+                        onArchive={viewFilter === 'active' ? handleArchive : undefined}
                     />
                 </Panel>
 
@@ -575,6 +679,13 @@ export function ConversationInterface({ initialConversations }: ConversationInte
                     }}
                 />
             )}
+
+            <CreateDealDialog
+                open={createDealOpen}
+                onOpenChange={setCreateDealOpen}
+                onConfirm={executeCreateDeal}
+                loading={creatingDeal}
+            />
         </>
     );
 }
