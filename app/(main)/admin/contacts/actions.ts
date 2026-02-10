@@ -888,40 +888,56 @@ export async function getGoogleContactAction(resourceName: string) {
   const { userId } = await auth();
   if (!userId) return { success: false, message: 'Unauthorized' };
 
-  // Check current user's Google connection
-  const user = await db.user.findUnique({
-    where: { clerkId: userId },
-    select: { id: true, googleSyncEnabled: true, googleRefreshToken: true }
-  });
+  try {
+    // Check current user's Google connection
+    const user = await db.user.findUnique({
+      where: { clerkId: userId },
+      select: { id: true, googleSyncEnabled: true, googleRefreshToken: true }
+    });
 
-  if (!user?.googleSyncEnabled || !user?.googleRefreshToken) {
-    return { success: false, message: 'GOOGLE_NOT_CONNECTED' };
+    if (!user?.googleSyncEnabled || !user?.googleRefreshToken) {
+      return { success: false, message: 'GOOGLE_NOT_CONNECTED' };
+    }
+
+    const { getGoogleContact } = await import('@/lib/google/people');
+    const result = await getGoogleContact(user.id, resourceName);
+
+    if (!result) return { success: false, message: 'Contact not found in Google' };
+    return { success: true, data: result };
+  } catch (error: any) {
+    if (error.message === 'GOOGLE_AUTH_EXPIRED') {
+      return { success: false, message: 'GOOGLE_AUTH_EXPIRED' };
+    }
+    console.error('[getGoogleContactAction] Error:', error);
+    return { success: false, message: 'Failed to fetch contact' };
   }
-
-  const { getGoogleContact } = await import('@/lib/google/people');
-  const result = await getGoogleContact(user.id, resourceName);
-
-  if (!result) return { success: false, message: 'Contact not found in Google' };
-  return { success: true, data: result };
 }
 
 export async function searchGoogleContactsAction(query: string) {
   const { userId } = await auth();
   if (!userId) return { success: false, message: 'Unauthorized' };
 
-  // Check current user's Google connection
-  const user = await db.user.findUnique({
-    where: { clerkId: userId },
-    select: { id: true, googleSyncEnabled: true, googleRefreshToken: true }
-  });
+  try {
+    // Check current user's Google connection
+    const user = await db.user.findUnique({
+      where: { clerkId: userId },
+      select: { id: true, googleSyncEnabled: true, googleRefreshToken: true }
+    });
 
-  if (!user?.googleSyncEnabled || !user?.googleRefreshToken) {
-    return { success: false, message: 'GOOGLE_NOT_CONNECTED' };
+    if (!user?.googleSyncEnabled || !user?.googleRefreshToken) {
+      return { success: false, message: 'GOOGLE_NOT_CONNECTED' };
+    }
+
+    const { searchGoogleContacts } = await import('@/lib/google/people');
+    const results = await searchGoogleContacts(user.id, query);
+    return { success: true, data: results };
+  } catch (error: any) {
+    if (error.message === 'GOOGLE_AUTH_EXPIRED') {
+      return { success: false, message: 'GOOGLE_AUTH_EXPIRED' };
+    }
+    console.error('[searchGoogleContactsAction] Error:', error);
+    return { success: false, message: 'Failed to search contacts' };
   }
-
-  const { searchGoogleContacts } = await import('@/lib/google/people');
-  const results = await searchGoogleContacts(user.id, query);
-  return { success: true, data: results };
 }
 
 export async function resolveSyncConflict(
@@ -1015,7 +1031,10 @@ export async function resolveSyncConflict(
 
     return { success: false, message: 'Invalid Resolution Action' };
 
-  } catch (error) {
+  } catch (error: any) {
+    if (error.message === 'GOOGLE_AUTH_EXPIRED') {
+      return { success: false, message: 'GOOGLE_AUTH_EXPIRED' };
+    }
     console.error('[resolveSyncConflict] Error:', error);
     return { success: false, message: 'Conflict Resolution Failed' };
   }

@@ -101,6 +101,7 @@ export function GoogleSyncManager({ contact: singleContact, contacts, initialInd
     }, [open, isLinked, contact.googleContactId]); // removed contact.email dependency to avoid flapping
 
     const [notConnected, setNotConnected] = useState(false);
+    const [authExpired, setAuthExpired] = useState(false);
 
     const fetchLinkedContact = async (resourceName: string) => {
         setLoading(true);
@@ -111,6 +112,8 @@ export function GoogleSyncManager({ contact: singleContact, contacts, initialInd
                 setGoogleData(res.data);
             } else if (res.message === 'GOOGLE_NOT_CONNECTED') {
                 setNotConnected(true);
+            } else if (res.message === 'GOOGLE_AUTH_EXPIRED') {
+                setAuthExpired(true);
             } else {
                 // 404 or error - Link broken. Auto-recover UI.
                 toast({ title: "Sync Issue", description: "Linked contact not found. Searching for match...", variant: "default" });
@@ -150,6 +153,9 @@ export function GoogleSyncManager({ contact: singleContact, contacts, initialInd
                 }
             } else if (res.message === 'GOOGLE_NOT_CONNECTED') {
                 setNotConnected(true);
+                setSearchResults([]);
+            } else if (res.message === 'GOOGLE_AUTH_EXPIRED') {
+                setAuthExpired(true);
                 setSearchResults([]);
             } else {
                 setSearchResults([]);
@@ -201,6 +207,16 @@ export function GoogleSyncManager({ contact: singleContact, contacts, initialInd
     };
 
     const getStatusHeader = () => {
+        if (authExpired) return (
+            <div className="flex items-center gap-2 text-red-700 bg-red-50 p-3 rounded-md mb-4 border border-red-200">
+                <AlertTriangle className="h-5 w-5" />
+                <div className="text-sm">
+                    <span className="font-semibold block">Google Session Expired</span>
+                    <span>Your connection to Google has expired. </span>
+                    <a href="/api/google/auth" className="underline font-medium hover:text-red-900">Reconnect Account</a>
+                </div>
+            </div>
+        );
         if (notConnected) return (
             <div className="flex items-center gap-2 text-orange-700 bg-orange-50 p-3 rounded-md mb-4 border border-orange-200">
                 <AlertTriangle className="h-5 w-5" />

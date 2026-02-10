@@ -269,7 +269,11 @@ export async function syncContactToGoogle(userId: string, contactId: string) {
 
         console.log(`[Google Sync] Successfully synced ${contact.name} to Google.`);
 
-    } catch (error) {
+    } catch (error: any) {
+        if (error.code === 401 || (error.code === 400 && error.message?.includes('invalid_grant'))) {
+            console.error(`[Google Sync] Auth Expired for contact ${contactId}`);
+            throw new Error('GOOGLE_AUTH_EXPIRED');
+        }
         console.error(`[Google Sync] Failed for contact ${contactId}:`, error);
         // Optional: Flag generic errors too?
         // await db.contact.update({ where: { id: contactId }, data: { error: 'Sync Failed: ' + (error as Error).message } });
@@ -687,7 +691,10 @@ export async function searchGoogleContacts(userId: string, query: string) {
 
         return results;
 
-    } catch (e) {
+    } catch (e: any) {
+        if (e.code === 401 || (e.code === 400 && e.message?.includes('invalid_grant'))) {
+            throw new Error('GOOGLE_AUTH_EXPIRED');
+        }
         console.error('[searchGoogleContacts] Failed:', e);
         return [];
     }
@@ -717,7 +724,10 @@ export async function getGoogleContact(userId: string, resourceName: string) {
             updateTime: extractGoogleUpdateTime(p)
         };
 
-    } catch (e) {
+    } catch (e: any) {
+        if (e.code === 401 || (e.code === 400 && e.message?.includes('invalid_grant'))) {
+            throw new Error('GOOGLE_AUTH_EXPIRED');
+        }
         console.error('[getGoogleContact] Failed:', e);
         return null;
     }
