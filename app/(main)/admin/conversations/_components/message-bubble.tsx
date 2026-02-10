@@ -2,6 +2,7 @@ import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { Mail, Smartphone, Paperclip, ExternalLink, ChevronDown, ChevronUp, ArrowRight } from "lucide-react";
 import { format } from "date-fns";
+import { EmailFrame } from "./email-frame";
 
 export interface MessageBubbleProps {
     message: {
@@ -128,10 +129,7 @@ export function MessageBubble({ message, contactPhone, contactEmail, contactName
                     ) : (
                         // Full View
                         (isEmail || isRichHtml) ? (
-                            <div
-                                className="prose prose-sm max-w-full overflow-x-auto dark:prose-invert prose-p:my-1 prose-headings:my-2"
-                                dangerouslySetInnerHTML={{ __html: message.body }}
-                            />
+                            <EmailFrame html={message.body} />
                         ) : (
                             message.body
                         )

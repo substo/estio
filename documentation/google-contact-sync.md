@@ -215,6 +215,12 @@ This occurs if `NEXT_PUBLIC_APP_URL` or `APP_BASE_URL` is not set.
 ### "Google hasn't verified this app" Warning
 This is expected for apps in **Testing** mode. Click **Advanced > Go to [App Name] (unsafe)** to proceed. This warning won't appear once the app is published.
 
+### Session Expired (Re-Authentication)
+If your Google OAuth token expires (e.g., after 6 months or password change) or is revoked:
+-   **Old Behavior**: Sync would silently fail or show "No results found".
+-   **New Behavior**: The Google Sync Manager displays a **Red Alert** ("Google Session Expired").
+-   **Fix**: Click the **Reconnect Account** link in the alert to re-authorize the application.
+
 ---
 
 ## Implementation & Hardening Guide (Reference)
@@ -317,6 +323,7 @@ We replaced the simple "Conflict Modal" with a comprehensive **Google Sync Manag
 -   **Broken Link (Linked-but-Gone)**:
     -   **Smart Recovery**: If the linked Google contact is deleted (404), the Manager automatically switches to Search Mode, pre-fills the phone number, and executes a search to find the correct contact immediately.
 -   **Conflict State**: Resolve data mismatches or broken links.
+-   **Session Expired**: If the Google OAuth token is invalid (revoked/expired), the manager displays a "Session Expired" alert with a one-click "Reconnect" link.
 
 #### C. Search Logic Strategy (Strict vs. Broad)
 To balance safety with usability, we use two different search strategies:
