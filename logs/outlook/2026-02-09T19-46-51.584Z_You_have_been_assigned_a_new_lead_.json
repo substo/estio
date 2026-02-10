@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-02-09T19:46:51.582Z",
+  "step": "Post-Click Analysis",
+  "basicInfo": {
+    "id": "AAQkAGE2ZjRhMThkLWE3MzAtNGVjMi04MTA2LWM0YmY1NDk4OTQ3MgAQADPPNkWP7zZJvoLjdR4tCQ0=",
+    "sender": "info@downtowncyprus.com",
+    "subject": "You have been assigned a new lead!",
+    "preview": "Dear Martin Jarzyna, You have been assigned a new lead. Please click here to view the lead. Lead Overview Name TOMASZ ADAMSKI Tel 00485031994 Email Goal To Buy Source None Notes INTERESTED IN DT 2469, DT3517, DT3626, DT2791, DT2",
+    "dateStr": "Thu 11/12/2025 10:07",
+    "ariaLabel": "info@downtowncyprus.com You have been assigned a new lead! 11/12/2025 Dear Martin Jarzyna, You have been assigned a new lead. Please click here to view the lead. Lead Overview Name TOMASZ ADAMSKI Tel 00485031994 Email Goal To Buy Source None Notes INTERESTED IN DT 2469, DT3517, DT3626, DT2791, DT2"
+  },
+  "extracted": {
+    "senderEmail": "",
+    "subject": "You have been assigned a new lead!",
+    "bodyPreview": "<div><div class=\"g_zET\"><div class=\"NiD4s\" style=\"margin-left: 8px;\"><div class=\"fui-FluentProvider fui-FluentProviderrc8 ___p1ubi60 f19n0e5 f3rmtva fgusgyc fk6fouc fkhj508 figsok6 fytdu2e f11ysow2 fl...",
+    "fullBodyLength": 971,
+    "isDetached": false
+  },
+  "computed": {
+    "emailDate": "2025-12-11T08:07:00.000Z",
+    "direction": "inbound"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-02-09T19:46:06.715Z",
+  "step": "Post-Click Analysis",
+  "basicInfo": {
+    "id": "AAQkAGE2ZjRhMThkLWE3MzAtNGVjMi04MTA2LWM0YmY1NDk4OTQ3MgAQAH9PJrxE1ilEifjR8DiMTTM=",
+    "sender": "Dimitris Paraskevopoulos",
+    "subject": "Contract",
+    "preview": "Kind regards, Dimitris Paraskevopoulos Down Town Cyprus Sales & Rentals Tomb of the Kings 29, Panareti 1, Shop 9 8046, Paphos - Cyprus Tel: +357 26 943 999 Mob.: +357 94 000 820 Email: eliana@downtowncyprus.com Website:",
+    "dateStr": "Fri 16/01/2026 13:20",
+    "ariaLabel": "Has attachments Dimitris Paraskevopoulos Contract Fri 16/01 Kind regards, Dimitris Paraskevopoulos Down Town Cyprus Sales & Rentals Tomb of the Kings 29, Panareti 1, Shop 9 8046, Paphos - Cyprus Tel: +357 26 943 999 Mob.: +357 94 000 820 Email: eliana@downtowncyprus.com Website:"
+  },
+  "extracted": {
+    "senderEmail": "eliana@downtowncyprus.com",
+    "subject": "Contract",
+    "bodyPreview": "<div visibility=\"hidden\"><div>\n<div dir=\"ltr\">\n<div>\n<div style=\"line-break:after-white-space;\">\n<div style=\"line-break:after-white-space;\">\n<div>\n<div>\n<blockquote type=\"cite\">\n<div>On 10 Mar 2025, a...",
+    "fullBodyLength": 9394,
+    "isDetached": false
+  },
+  "computed": {
+    "emailDate": "2026-01-16T11:20:00.000Z",
+    "direction": "inbound"
+  }
+}

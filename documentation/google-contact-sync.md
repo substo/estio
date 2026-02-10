@@ -85,7 +85,7 @@ The **Google Sync Manager** is the unified UI for managing connections.
     -   **Counter**: "Contact X of Y".
 
 4.  **Smart Linking**:
-    -   **Strict Search**: By Phone (digits) or Email.
+    -   **Strict Search**: By Phone (digits) or Email. Includes automatic fallback for phone queries (see [Search Logic](#c-search-logic-strategy-strict-vs-broad)).
     -   **Fuzzy Search**: Uses Google's API to find matches by name.
     -   **Link Only**: Joins distinct records without overwriting data.
 
@@ -311,7 +311,7 @@ We replaced the simple "Conflict Modal" with a comprehensive **Google Sync Manag
 -   **Healthy State**: View live side-by-side comparison of Estio vs Google data.
     -   Actions: *Push Local -> Google*, *Pull Google -> Local*, *Unlink*.
 -   **Unlinked State**: 
-    -   **Auto-Search**: Automatically searches Google by phone number when opened.
+    -   **Auto-Search**: Automatically searches Google by phone number when opened. If `searchContacts` returns no results for a phone query, automatically falls back to `connections.list` with local filtering.
     -   **Smart Actions**: "Find Match" button auto-populates search.
     -   **Options**: Link to existing or Create New.
 -   **Broken Link (Linked-but-Gone)**:
@@ -322,6 +322,9 @@ We replaced the simple "Conflict Modal" with a comprehensive **Google Sync Manag
 To balance safety with usability, we use two different search strategies:
 1.  **Strict Matching (Automated Healing)**: When the system performs *background* self-healing (e.g., during a sync), it uses strict matching on Phone Number (digits) or Email. This prevents accidentally linking the wrong person automatically.
 2.  **Broad/Fuzzy Matching (Manual Search)**: When a user searches manually in the Sync Manager, we use Google's "Smart Search" which supports partial names, email prefixes, and global directory lookup. This allows users to find contacts easily even with partial information.
+
+> [!IMPORTANT]
+> **Phone Search Fallback**: Google People API `searchContacts` has a known bug where phone number queries return empty results. To work around this, both `searchGoogleContacts` (UI) and `findMatchingGoogleContact` (sync) detect phone-like queries and, if `searchContacts` returns nothing, fall back to `people.connections.list` with local digit-based filtering. This is transparent to the user — the Sync Manager simply finds the contact via the fallback path. See `lib/google/people.ts`: `searchByPhoneFallback()`.
 
 #### C. Manual "Link Only"
 The Sync Manager supports a **"Link Only"** action. This connects an Estio Contact to a Google Contact **without overwriting data** on either side. This is useful when you know they are the same person but want to preserve distinct data on each platform (e.g., maintaining a specific "Visual ID" company name in Google while keeping role data in Estio).

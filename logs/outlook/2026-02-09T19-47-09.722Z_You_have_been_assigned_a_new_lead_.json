@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-02-09T19:47:09.721Z",
+  "step": "Post-Click Analysis",
+  "basicInfo": {
+    "id": "AAQkAGE2ZjRhMThkLWE3MzAtNGVjMi04MTA2LWM0YmY1NDk4OTQ3MgAQAJDPoM0nYchNoXm8QmUDLBc=",
+    "sender": "info@downtowncyprus.com",
+    "subject": "You have been assigned a new lead!",
+    "preview": "Dear Martin Jarzyna, You have been assigned a new lead. Please click here to view the lead. Lead Overview Name Nico wolfschmidt Tel 99838806 Email nico.wolfschmidt@gmx.de Goal To Buy Source Abdul Follow Up 30 Oct 2024 Nex",
+    "dateStr": "Mon 15/12/2025 19:41",
+    "ariaLabel": "info@downtowncyprus.com You have been assigned a new lead! 15/12/2025 Dear Martin Jarzyna, You have been assigned a new lead. Please click here to view the lead. Lead Overview Name Nico wolfschmidt Tel 99838806 Email nico.wolfschmidt@gmx.de Goal To Buy Source Abdul Follow Up 30 Oct 2024 Nex"
+  },
+  "extracted": {
+    "senderEmail": "info@downtowncyprus.com",
+    "subject": "You have been assigned a new lead!",
+    "bodyPreview": "<div visibility=\"hidden\"><style type=\"text/css\">\n<!--\n.rps_2201 #x_outlook a\n\t{padding:0}\n.rps_2201 > div\n\t{width:100%!important}\n.rps_2201 .x_ReadMsgBody\n\t{width:100%}\n.rps_2201 .x_ExternalClass\n\t{wi...",
+    "fullBodyLength": 9098,
+    "isDetached": false
+  },
+  "computed": {
+    "emailDate": "2025-12-15T17:41:00.000Z",
+    "direction": "inbound"
+  }
+}

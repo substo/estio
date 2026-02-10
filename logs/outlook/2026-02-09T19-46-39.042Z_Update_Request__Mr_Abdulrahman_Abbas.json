@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-02-09T19:46:39.038Z",
+  "step": "Post-Click Analysis",
+  "basicInfo": {
+    "id": "AAQkAGE2ZjRhMThkLWE3MzAtNGVjMi04MTA2LWM0YmY1NDk4OTQ3MgAQAK2tDvhFoP1Ip8QhaQunuCo=",
+    "sender": "Jenny Maratheftis",
+    "subject": "Update Request: Mr Abdulrahman Abbas",
+    "preview": "Good morning Martin, Hope you are well. Please kindly send us an update regarding your client Abdulrahman Abbas. Look forward to hearing from you. BR, Jenny Maratheftis Inland Sales Administrator Aristo Developers Tel: 00357 26 8",
+    "dateStr": "Wed 14/01/2026 11:06",
+    "ariaLabel": "Collapsed Jenny Maratheftis Update Request: Mr Abdulrahman Abbas Wed 14/01 Good morning Martin, Hope you are well. Please kindly send us an update regarding your client Abdulrahman Abbas. Look forward to hearing from you. BR, Jenny Maratheftis Inland Sales Administrator Aristo Developers Tel: 00357 26 8"
+  },
+  "extracted": {
+    "senderEmail": "eliana@downtowncyprus.com",
+    "subject": "Update Request: Mr Abdulrahman Abbas",
+    "bodyPreview": "<div visibility=\"hidden\"><div>\n<div dir=\"ltr\">\n<div>\n<div style=\"line-break:after-white-space;\">\n<div style=\"line-break:after-white-space;\">\n<div>\n<div>\n<blockquote type=\"cite\">\n<div>On 10 Mar 2025, a...",
+    "fullBodyLength": 9394,
+    "isDetached": false
+  },
+  "computed": {
+    "emailDate": "2026-01-14T09:06:00.000Z",
+    "direction": "inbound"
+  }
+}

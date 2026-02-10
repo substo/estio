@@ -478,6 +478,54 @@ async function processGoogleContact(
 }
 
 /**
+ * Helper: Check if a query looks like a phone number
+ */
+function isPhoneQuery(query: string): boolean {
+    return /^[\+\d\s\-\(\)]+$/.test(query.trim()) && query.replace(/\D/g, '').length >= 6;
+}
+
+/**
+ * Fallback: Search contacts by phone using connections.list + local filtering.
+ * Google People API searchContacts has a known bug where phone number queries
+ * return empty results. This workaround fetches contacts and filters locally.
+ */
+async function searchByPhoneFallback(
+    people: people_v1.People,
+    phoneDigits: string,
+    personFields: string = 'names,phoneNumbers,metadata'
+): Promise<people_v1.Schema$Person[]> {
+    console.log(`[Google Sync] searchContacts returned no phone match, falling back to connections.list`);
+    const matches: people_v1.Schema$Person[] = [];
+    let pageToken: string | undefined;
+
+    do {
+        const res = await people.people.connections.list({
+            resourceName: 'people/me',
+            pageSize: 1000,
+            personFields,
+            pageToken
+        });
+
+        for (const person of (res.data.connections || [])) {
+            const hasMatch = person.phoneNumbers?.some(pn => {
+                const pnDigits = pn.value?.replace(/\D/g, '') || '';
+                return pnDigits.includes(phoneDigits) || phoneDigits.includes(pnDigits);
+            });
+            if (hasMatch) matches.push(person);
+        }
+
+        pageToken = res.data.nextPageToken ?? undefined;
+        // Safety: stop after first page for non-search (sync) use cases to limit API calls
+        if (matches.length > 0) break;
+    } while (pageToken);
+
+    if (matches.length > 0) {
+        console.log(`[Google Sync] Phone fallback found ${matches.length} match(es)`);
+    }
+    return matches;
+}
+
+/**
  * Search Google Contacts for UI Conflict Resolution
  */
 /**
@@ -510,6 +558,17 @@ async function findMatchingGoogleContact(
                 etag: found.person.etag || undefined
             };
         }
+
+        // FALLBACK: searchContacts has a known bug with phone numbers.
+        // Use connections.list + local filtering as workaround.
+        const fallbackMatches = await searchByPhoneFallback(people, phoneDigits);
+        if (fallbackMatches.length > 0 && fallbackMatches[0].resourceName) {
+            console.log(`[Google Sync] Found existing contact by phone (fallback): ${fallbackMatches[0].resourceName}`);
+            return {
+                resourceName: fallbackMatches[0].resourceName,
+                etag: fallbackMatches[0].etag || undefined
+            };
+        }
     }
 
     // 2. Search by Email (if no phone match)
@@ -539,18 +598,16 @@ export async function searchGoogleContacts(userId: string, query: string) {
         const auth = await getValidAccessToken(userId);
         const people = google.people({ version: 'v1', auth });
 
-        // Industry Practice: For phone searches, Google works best with E.164 or partials.
-        // However, sometimes raw input like "123 456" fails where "123456" succeeds.
-        // We will pass the query as-is, relying on Google's "smart" search.
+        const phoneQuery = isPhoneQuery(query);
 
+        // Try searchContacts first (works for names/emails, unreliable for phones)
         const response = await people.people.searchContacts({
             query: query,
             readMask: 'names,emailAddresses,phoneNumbers,photos,metadata',
-            // Retrieve both contacts and directory profiles for broader reach
             sources: ['READ_SOURCE_TYPE_CONTACT', 'READ_SOURCE_TYPE_PROFILE']
         });
 
-        return (response.data.results || []).map(r => {
+        let results = (response.data.results || []).map(r => {
             const p = r.person;
             if (!p) return null;
             return {
@@ -563,6 +620,28 @@ export async function searchGoogleContacts(userId: string, query: string) {
                 updateTime: extractGoogleUpdateTime(p)
             };
         }).filter(Boolean);
+
+        // FALLBACK: Google searchContacts has a known bug where phone number
+        // queries return empty results. Use connections.list + local filtering.
+        if (phoneQuery && results.length === 0) {
+            const phoneDigits = query.replace(/\D/g, '');
+            const fallbackMatches = await searchByPhoneFallback(
+                people, phoneDigits,
+                'names,emailAddresses,phoneNumbers,photos,metadata'
+            );
+
+            results = fallbackMatches.map(p => ({
+                resourceName: p.resourceName,
+                name: p.names?.[0]?.displayName,
+                email: p.emailAddresses?.[0]?.value,
+                phone: p.phoneNumbers?.[0]?.value,
+                photo: p.photos?.[0]?.url,
+                etag: p.etag,
+                updateTime: extractGoogleUpdateTime(p)
+            }));
+        }
+
+        return results;
 
     } catch (e) {
         console.error('[searchGoogleContacts] Failed:', e);

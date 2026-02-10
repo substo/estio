@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-02-09T19:46:24.421Z",
+  "step": "Post-Click Analysis",
+  "basicInfo": {
+    "id": "AAQkAGE2ZjRhMThkLWE3MzAtNGVjMi04MTA2LWM0YmY1NDk4OTQ3MgAQACwP1k9dM69GgLKWyRp1KtA=",
+    "sender": "info@downtowncyprus.com",
+    "subject": "You have been assigned a new lead!",
+    "preview": "Dear Martin Jarzyna, You have been assigned a new lead. Please click here to view the lead. Lead Overview Name Samuel Alexander Tel 95130370 Email Goal To Rent Source Direct Clients Follow Up 09 Jan 2026 Next Action Int",
+    "dateStr": "Thu 08/01/2026 17:18",
+    "ariaLabel": "info@downtowncyprus.com You have been assigned a new lead! 08/01/2026 Dear Martin Jarzyna, You have been assigned a new lead. Please click here to view the lead. Lead Overview Name Samuel Alexander Tel 95130370 Email Goal To Rent Source Direct Clients Follow Up 09 Jan 2026 Next Action Int"
+  },
+  "extracted": {
+    "senderEmail": "eliana@downtowncyprus.com",
+    "subject": "You have been assigned a new lead!",
+    "bodyPreview": "<div visibility=\"hidden\"><div>\n<div dir=\"ltr\">\n<div>\n<div style=\"line-break:after-white-space;\">\n<div style=\"line-break:after-white-space;\">\n<div>\n<div>\n<blockquote type=\"cite\">\n<div>On 10 Mar 2025, a...",
+    "fullBodyLength": 9394,
+    "isDetached": true
+  },
+  "computed": {
+    "emailDate": "2026-01-08T15:18:00.000Z",
+    "direction": "inbound"
+  }
+}

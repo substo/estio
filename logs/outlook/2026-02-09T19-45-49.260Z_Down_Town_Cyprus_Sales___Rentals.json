@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-02-09T19:45:49.259Z",
+  "step": "Post-Click Analysis",
+  "basicInfo": {
+    "id": "AAQkAGE2ZjRhMThkLWE3MzAtNGVjMi04MTA2LWM0YmY1NDk4OTQ3MgAQANZ0DnvYiTRJtxvArw9sabw=",
+    "sender": "Info@ccs-shipping.com",
+    "subject": "Down Town Cyprus Sales & Rentals",
+    "preview": "Good afternoon please find in copy client who is looking for a rental property. Clients requirements * ideally Peyia * walking distance to shops and restaurants etc * House / Villa with private pool * client has 1 medium dog (tha",
+    "dateStr": "Fri 23/01/2026 14:27",
+    "ariaLabel": "Collapsed Info@ccs-shipping.com; Claire Pearce Down Town Cyprus Sales & Rentals Fri 23/01 Good afternoon please find in copy client who is looking for a rental property. Clients requirements * ideally Peyia * walking distance to shops and restaurants etc * House / Villa with private pool * client has 1 medium dog (tha"
+  },
+  "extracted": {
+    "senderEmail": "info@ccs-shipping.com",
+    "subject": "Down Town Cyprus Sales & Rentals",
+    "bodyPreview": "<div visibility=\"hidden\"><div>\n<div dir=\"ltr\">\n<div style=\"color:black;font-size:12pt;font-family:Candara,Optima,sans-serif;\">Good afternoon</div>\n<div style=\"color:black;font-size:12pt;font-family:Ca...",
+    "fullBodyLength": 11113,
+    "isDetached": false
+  },
+  "computed": {
+    "emailDate": "2026-01-23T12:27:00.000Z",
+    "direction": "inbound"
+  }
+}

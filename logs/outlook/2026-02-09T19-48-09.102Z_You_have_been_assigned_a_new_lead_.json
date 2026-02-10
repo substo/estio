@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-02-09T19:48:09.082Z",
+  "step": "Post-Click Analysis",
+  "basicInfo": {
+    "id": "AAQkAGE2ZjRhMThkLWE3MzAtNGVjMi04MTA2LWM0YmY1NDk4OTQ3MgAQAI8wEQfLpUVOrdROrI+IHX0=",
+    "sender": "info@downtowncyprus.com",
+    "subject": "You have been assigned a new lead!",
+    "preview": "Dear Martin Jarzyna, You have been assigned a new lead. Please click here to view the lead. Lead Overview Name Michael Tel 0035799274376 Email mb@3cx.com Goal To Buy Source Cular Estate Notes The client is still interested but",
+    "dateStr": "Mon 15/12/2025 19:41",
+    "ariaLabel": "info@downtowncyprus.com You have been assigned a new lead! 15/12/2025 Dear Martin Jarzyna, You have been assigned a new lead. Please click here to view the lead. Lead Overview Name Michael Tel 0035799274376 Email mb@3cx.com Goal To Buy Source Cular Estate Notes The client is still interested but"
+  },
+  "extracted": {
+    "senderEmail": "info@downtowncyprus.com",
+    "subject": "You have been assigned a new lead!",
+    "bodyPreview": "<div visibility=\"hidden\"><style type=\"text/css\">\n<!--\n.rps_2201 #x_outlook a\n\t{padding:0}\n.rps_2201 > div\n\t{width:100%!important}\n.rps_2201 .x_ReadMsgBody\n\t{width:100%}\n.rps_2201 .x_ExternalClass\n\t{wi...",
+    "fullBodyLength": 8661,
+    "isDetached": false
+  },
+  "computed": {
+    "emailDate": "2025-12-15T17:41:00.000Z",
+    "direction": "inbound"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-02-09T19:47:43.413Z",
+  "step": "Post-Click Analysis",
+  "basicInfo": {
+    "id": "AAQkAGE2ZjRhMThkLWE3MzAtNGVjMi04MTA2LWM0YmY1NDk4OTQ3MgAQAHnjwJ24yzZJraRIsanxzzA=",
+    "sender": "Zain - KKMY Developers Construction Ltd",
+    "subject": "Down Town Cyprus Sales and Rentals - Client Registration Mr Abdulrahman Abbas",
+    "preview": "Hi, Client registration completed Thank you Best regards Zain Architect, Project & Communication Lead KKMY Developers & Construction Ltd",
+    "dateStr": "Wed 24/12/2025 10:40",
+    "ariaLabel": "Collapsed Zain - KKMY Developers Construction Ltd Down Town Cyprus Sales and Rentals - Client Registration Mr Abdulrahman Abbas 24/12/2025 Hi, Client registration completed Thank you Best regards Zain Architect, Project & Communication Lead KKMY Developers & Construction Ltd"
+  },
+  "extracted": {
+    "senderEmail": "zain@kkmyltd.com",
+    "subject": "Down Town Cyprus Sales and Rentals - Client Registration Mr Abdulrahman Abbas",
+    "bodyPreview": "<div visibility=\"hidden\"><div>\n<div style=\"word-wrap:break-word;\">\n<div>\n<p style=\"font-size:12pt;font-family:Aptos,sans-serif;margin:0;\"><span lang=\"en-US\">Hi,</span></p>\n<p style=\"font-size:12pt;fon...",
+    "fullBodyLength": 8164,
+    "isDetached": false
+  },
+  "computed": {
+    "emailDate": "2025-12-24T08:40:00.000Z",
+    "direction": "inbound"
+  }
+}

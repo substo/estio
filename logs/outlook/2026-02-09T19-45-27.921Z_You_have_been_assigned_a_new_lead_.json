@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-02-09T19:45:27.895Z",
+  "step": "Post-Click Analysis",
+  "basicInfo": {
+    "id": "AAQkAGE2ZjRhMThkLWE3MzAtNGVjMi04MTA2LWM0YmY1NDk4OTQ3MgAQAKvm1YhTV1pDqllHuq0G8AQ=",
+    "sender": "info@downtowncyprus.com",
+    "subject": "You have been assigned a new lead!",
+    "preview": "Dear Martin Jarzyna, You have been assigned a new lead. Please click here to view the lead. Lead Overview Name Janis Tel 0035797925725 Email Goal To Rent Source Bazaraki Notes Tombs of the Kings 29, Panareti 1, Shop 9, Paphos 804",
+    "dateStr": "Mon 09/02/2026 12:09",
+    "ariaLabel": "info@downtowncyprus.com You have been assigned a new lead! 12:09 Dear Martin Jarzyna, You have been assigned a new lead. Please click here to view the lead. Lead Overview Name Janis Tel 0035797925725 Email Goal To Rent Source Bazaraki Notes Tombs of the Kings 29, Panareti 1, Shop 9, Paphos 804"
+  },
+  "extracted": {
+    "senderEmail": "",
+    "subject": "You have been assigned a new lead!",
+    "bodyPreview": "<div><div class=\"g_zET\"><div class=\"NiD4s\" style=\"margin-left: 8px;\"><div class=\"fui-FluentProvider fui-FluentProviderrc8 ___p1ubi60 f19n0e5 f3rmtva fgusgyc fk6fouc fkhj508 figsok6 fytdu2e f11ysow2 fl...",
+    "fullBodyLength": 971,
+    "isDetached": false
+  },
+  "computed": {
+    "emailDate": "2026-02-09T10:09:00.000Z",
+    "direction": "inbound"
+  }
+}

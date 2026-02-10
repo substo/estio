@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-02-09T19:45:21.289Z",
+  "step": "Post-Click Analysis",
+  "basicInfo": {
+    "id": "AAQkAGE2ZjRhMThkLWE3MzAtNGVjMi04MTA2LWM0YmY1NDk4OTQ3MgAQAIcJ9ZFmdIdAmm3/IHqTt34=",
+    "sender": "info@downtowncyprus.com",
+    "subject": "You have been assigned a new lead!",
+    "preview": "Dear Martin Jarzyna, You have been assigned a new lead. Please click here to view the lead. Lead Overview Name Panagiotis Avgoustopoulos Tel 00306982038098 Email paugust1998@gmail.com Goal To Rent Source Meinhard Notes propert",
+    "dateStr": "Mon 09/02/2026 18:48",
+    "ariaLabel": "info@downtowncyprus.com You have been assigned a new lead! 18:48 Dear Martin Jarzyna, You have been assigned a new lead. Please click here to view the lead. Lead Overview Name Panagiotis Avgoustopoulos Tel 00306982038098 Email paugust1998@gmail.com Goal To Rent Source Meinhard Notes propert"
+  },
+  "extracted": {
+    "senderEmail": "",
+    "subject": "You have been assigned a new lead!",
+    "bodyPreview": "<div><div class=\"g_zET\"><div class=\"NiD4s\" style=\"margin-left: 8px;\"><div class=\"fui-FluentProvider fui-FluentProviderrc8 ___p1ubi60 f19n0e5 f3rmtva fgusgyc fk6fouc fkhj508 figsok6 fytdu2e f11ysow2 fl...",
+    "fullBodyLength": 971,
+    "isDetached": false
+  },
+  "computed": {
+    "emailDate": "2026-02-09T16:48:00.000Z",
+    "direction": "inbound"
+  }
+}

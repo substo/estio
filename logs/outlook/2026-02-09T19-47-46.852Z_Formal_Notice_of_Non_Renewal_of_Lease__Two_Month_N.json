@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-02-09T19:47:46.850Z",
+  "step": "Post-Click Analysis",
+  "basicInfo": {
+    "id": "AAQkAGE2ZjRhMThkLWE3MzAtNGVjMi04MTA2LWM0YmY1NDk4OTQ3MgAQAMmjrV9Xu2dKpbtq7S3siMI=",
+    "sender": "Abdul Tareel",
+    "subject": "Formal Notice of Non-Renewal of Lease (Two-Month Notice)",
+    "preview": "Forwarded message - من: Vincent Beaini <vbeaini@gmail.com> ‪Date: الثلاثاء، ٢٣ ديسمبر ٢٠٢٥، ١٢:٢٩ م‬ Subject: Re: Formal Notice of Non-Renewal of Lease (Two-Month Notice) To: brada norbert <brada-n@hotmail.com> Cc: Abdul Tareel",
+    "dateStr": "Wed 24/12/2025 02:22",
+    "ariaLabel": "Abdul Tareel Formal Notice of Non-Renewal of Lease (Two-Month Notice) 24/12/2025 Forwarded message - من: Vincent Beaini <vbeaini@gmail.com> ‪Date: الثلاثاء، ٢٣ ديسمبر ٢٠٢٥، ١٢:٢٩ م‬ Subject: Re: Formal Notice of Non-Renewal of Lease (Two-Month Notice) To: brada norbert <brada-n@hotmail.com> Cc: Abdul Tareel"
+  },
+  "extracted": {
+    "senderEmail": "brada-n@hotmail.com",
+    "subject": "Formal Notice of Non-Renewal of Lease (Two-Month Notice)",
+    "bodyPreview": "<div visibility=\"hidden\"><div>\n<div>\n<div dir=\"auto\">\n<div>\n<div>\n<div>\n<div dir=\"ltr\">On Tue, Dec 23, 2025 at 1:20 PM brada norbert &lt;<a rel=\"noreferrer\" href=\"mailto:brada-n@hotmail.com\" data-link...",
+    "fullBodyLength": 2144,
+    "isDetached": false
+  },
+  "computed": {
+    "emailDate": "2025-12-24T00:22:00.000Z",
+    "direction": "inbound"
+  }
+}

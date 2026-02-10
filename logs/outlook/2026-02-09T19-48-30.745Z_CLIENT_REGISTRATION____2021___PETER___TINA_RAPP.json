@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-02-09T19:48:30.745Z",
+  "step": "Post-Click Analysis",
+  "basicInfo": {
+    "id": "AAQkAGE2ZjRhMThkLWE3MzAtNGVjMi04MTA2LWM0YmY1NDk4OTQ3MgAQAHmwHavP5txNg+OJTB4jT80=",
+    "sender": "Abdul Tareel",
+    "subject": "CLIENT REGISTRATION - (2021#) PETER & TINA RAPP",
+    "preview": "Registration confirmed Dimitri please help Always at your disposal Abdul Tareel Managing Director Down Town Cyprus Sales & Rentals Mob.: +357 96 926 123 Tel.: +357 26 943 999 Email: abdul@downtowncyprus.com Web: www.dow",
+    "dateStr": "Thu 11/12/2025 11:12",
+    "ariaLabel": "Abdul Tareel CLIENT REGISTRATION - (2021#) PETER & TINA RAPP 11/12/2025 Registration confirmed Dimitri please help Always at your disposal Abdul Tareel Managing Director Down Town Cyprus Sales & Rentals Mob.: +357 96 926 123 Tel.: +357 26 943 999 Email: abdul@downtowncyprus.com Web: www.dow"
+  },
+  "extracted": {
+    "senderEmail": "sarah@atpehomescyprus.com",
+    "subject": "CLIENT REGISTRATION - (2021#) PETER & TINA RAPP",
+    "bodyPreview": "<div visibility=\"hidden\"><div>\n<div dir=\"ltr\">\n<div id=\"x_divRplyFwdMsg\" dir=\"ltr\"><font style=\"font-size:11pt;\" face=\"Calibri,sans-serif\" color=\"black\"><b>From:</b> sarah@atpehomescyprus.com &lt;sara...",
+    "fullBodyLength": 2124,
+    "isDetached": false
+  },
+  "computed": {
+    "emailDate": "2025-12-11T09:12:00.000Z",
+    "direction": "inbound"
+  }
+}

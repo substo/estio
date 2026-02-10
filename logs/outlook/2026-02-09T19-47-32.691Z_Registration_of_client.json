@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-02-09T19:47:32.690Z",
+  "step": "Post-Click Analysis",
+  "basicInfo": {
+    "id": "AAQkAGE2ZjRhMThkLWE3MzAtNGVjMi04MTA2LWM0YmY1NDk4OTQ3MgAQANqaqeJVjWlChqFz0yHHDzE=",
+    "sender": "Rebecca Papatheodoulou",
+    "subject": "Registration of client",
+    "preview": "Thank you, Merry Christmas and Happy New Year to you all too. Thank you Rebecca Papatheodoulou Sales Representative Amathus Avenue, Renanda Complex, Shop 3, P.O.Box 54415, 3724, Limassol, Cyprus T: + 357 25 313135 f: + 357 25 314557 E: www.ch",
+    "dateStr": "Wed 24/12/2025 11:31",
+    "ariaLabel": "Collapsed Rebecca Papatheodoulou; Abdul Tareel Registration of client 24/12/2025 Thank you, Merry Christmas and Happy New Year to you all too. Thank you Rebecca Papatheodoulou Sales Representative Amathus Avenue, Renanda Complex, Shop 3, P.O.Box 54415, 3724, Limassol, Cyprus T: + 357 25 313135 f: + 357 25 314557 E: www.ch"
+  },
+  "extracted": {
+    "senderEmail": "rebecca@chris-michael.com.cy",
+    "subject": "Registration of client",
+    "bodyPreview": "<div visibility=\"hidden\"><div>\n<div dir=\"ltr\">\n<div id=\"x_x_divRplyFwdMsg\">\n<div style=\"color:black;font-size:11pt;font-family:Calibri,sans-serif;direction:ltr;\"><b>From:</b>&nbsp;Rebecca Papatheodoul...",
+    "fullBodyLength": 3603,
+    "isDetached": false
+  },
+  "computed": {
+    "emailDate": "2025-12-24T09:31:00.000Z",
+    "direction": "inbound"
+  }
+}

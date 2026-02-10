@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-02-09T19:48:00.323Z",
+  "step": "Post-Click Analysis",
+  "basicInfo": {
+    "id": "AAQkAGE2ZjRhMThkLWE3MzAtNGVjMi04MTA2LWM0YmY1NDk4OTQ3MgAQAIszNxVQethDtmNGktlF7Yw=",
+    "sender": "Abdul Tareel",
+    "subject": "CLIENT REGISTRATION - ZUZANNA WINIARSKA PERSONAL ASSISTANT TO CEZARY SMORSZCZEEWSKI",
+    "preview": "Dimitri please check the name Always at your disposal Abdul Tareel Managing Director Down Town Cyprus Sales & Rentals Mob.: +357 96 926 123 Tel.: +357 26 943 999 Email: abdul@downtowncyprus.com Web: www.downtowncyprus.co",
+    "dateStr": "Wed 17/12/2025 11:30",
+    "ariaLabel": "Abdul Tareel CLIENT REGISTRATION - ZUZANNA WINIARSKA PERSONAL ASSISTANT TO CEZARY SMORSZCZEEWSKI 17/12/2025 Dimitri please check the name Always at your disposal Abdul Tareel Managing Director Down Town Cyprus Sales & Rentals Mob.: +357 96 926 123 Tel.: +357 26 943 999 Email: abdul@downtowncyprus.com Web: www.downtowncyprus.co"
+  },
+  "extracted": {
+    "senderEmail": "",
+    "subject": "CLIENT REGISTRATION - ZUZANNA WINIARSKA PERSONAL ASSISTANT TO CEZARY SMORSZCZEEWSKI",
+    "bodyPreview": "<div visibility=\"hidden\"><div>\n<div dir=\"ltr\">\n<div id=\"x_divRplyFwdMsg\" dir=\"ltr\"><font style=\"font-size:11pt;\" face=\"Calibri,sans-serif\" color=\"black\"><b>From:</b> sarah@atpehomescyprus.com &lt;sara...",
+    "fullBodyLength": 2672,
+    "isDetached": false
+  },
+  "computed": {
+    "emailDate": "2025-12-17T09:30:00.000Z",
+    "direction": "inbound"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-02-09T19:48:34.090Z",
+  "step": "Post-Click Analysis",
+  "basicInfo": {
+    "id": "AAQkAGE2ZjRhMThkLWE3MzAtNGVjMi04MTA2LWM0YmY1NDk4OTQ3MgAQAAC/pnw7XEZCumYLPLP1F+4=",
+    "sender": "Claire Pearce",
+    "subject": "apartment purchase agreement and power of attorney",
+    "preview": "Kind regards Claire Pearce Sales and Listings Department Down Town Cyprus Sales & Rentals Tombs-of-the-Kings 29, Panareti 1, Shop 9, Paphos 8046, Cyprus Tel: +357 26 943 999 Mob: +357 99 917191 Email: claire@downtowncyprus.com Web:",
+    "dateStr": "Thu 11/12/2025 10:11",
+    "ariaLabel": "Claire Pearce apartment purchase agreement and power of attorney 11/12/2025 Kind regards Claire Pearce Sales and Listings Department Down Town Cyprus Sales & Rentals Tombs-of-the-Kings 29, Panareti 1, Shop 9, Paphos 8046, Cyprus Tel: +357 26 943 999 Mob: +357 99 917191 Email: claire@downtowncyprus.com Web:"
+  },
+  "extracted": {
+    "senderEmail": "julia.biskupska@growhub.pl",
+    "subject": "apartment purchase agreement and power of attorney",
+    "bodyPreview": "<div visibility=\"hidden\"><div>\n<div dir=\"ltr\">\n<div dir=\"ltr\">\n<div id=\"x_x_divRplyFwdMsg\" dir=\"ltr\"><font style=\"font-size:11pt;\" face=\"Calibri,sans-serif\" color=\"black\"><b>From:</b> Julia Biskupska ...",
+    "fullBodyLength": 12431,
+    "isDetached": false
+  },
+  "computed": {
+    "emailDate": "2025-12-11T08:11:00.000Z",
+    "direction": "inbound"
+  }
+}

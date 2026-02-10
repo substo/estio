@@ -55,14 +55,7 @@ export default async function ContactViewPage({ params, searchParams }: { params
     const outlookStatus = await getOutlookStatusAction();
     const isOutlookConnected = outlookStatus.connected;
 
-    // Self-Healing: Check for broken Google link
-    if (contact.error && (contact.error.includes('Link broken') || contact.error.includes('not found'))) {
-        const { verifyAndHealContact } = await import("../../actions");
-        // We fire and forget this check to avoid blocking the UI, OR we await if we want to show the fixed state immediately.
-        // Awaiting ensures the user sees the fix, but might add latency. 
-        // Given the user specifically wants to fix this "on view", awaiting is safer.
-        await verifyAndHealContact(contact.id, contact.error);
-    }
+
 
     // Check Google connection (User-level)
     const { auth } = await import("@clerk/nextjs/server");

@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-02-09T19:48:23.675Z",
+  "step": "Post-Click Analysis",
+  "basicInfo": {
+    "id": "AAQkAGE2ZjRhMThkLWE3MzAtNGVjMi04MTA2LWM0YmY1NDk4OTQ3MgAQAEJbW4OXy1NJhy+NHOEqLQ0=",
+    "sender": "Abdul Tareel",
+    "subject": "(No subject)",
+    "preview": "Dear Yiannis Registration confirmed Martin please follow up Always at your disposal Abdul Tareel Managing Director Down Town Cyprus Sales & Rentals Mob.: +357 96 926 123 Tel.: +357 26 943 999 Email: abdul@downtowncyprus.com",
+    "dateStr": "Fri 12/12/2025 20:20",
+    "ariaLabel": "Collapsed Abdul Tareel; info (No subject) 12/12/2025 Dear Yiannis Registration confirmed Martin please follow up Always at your disposal Abdul Tareel Managing Director Down Town Cyprus Sales & Rentals Mob.: +357 96 926 123 Tel.: +357 26 943 999 Email: abdul@downtowncyprus.com"
+  },
+  "extracted": {
+    "senderEmail": "info@realtyconnect.cy",
+    "subject": "(No subject)",
+    "bodyPreview": "<div visibility=\"hidden\"><div>\n<div dir=\"ltr\">\n<div style=\"color:#174E86;font-size:14pt;font-family:Aptos,Aptos_EmbeddedFont,Aptos_MSFontService,Calibri,Helvetica,sans-serif;\">Dear Yiannis&nbsp;</div>...",
+    "fullBodyLength": 3589,
+    "isDetached": false
+  },
+  "computed": {
+    "emailDate": "2025-12-12T18:20:00.000Z",
+    "direction": "inbound"
+  }
+}

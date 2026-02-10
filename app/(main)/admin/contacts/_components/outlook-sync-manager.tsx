@@ -26,10 +26,12 @@ export function OutlookSyncManager({ contactEmail, contactName, open, onOpenChan
     const [searchQuery, setSearchQuery] = useState('');
 
     useEffect(() => {
+        console.log('[OutlookSyncManager] Effect Triggered', { open, contactEmail });
         if (open) {
             checkConnection();
             fetchEmails();
         }
+        return () => console.log('[OutlookSyncManager] Unmounting or Dep Change');
     }, [open, contactEmail]);
 
     const checkConnection = async () => {

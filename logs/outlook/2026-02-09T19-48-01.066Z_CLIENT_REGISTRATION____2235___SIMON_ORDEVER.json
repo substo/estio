@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-02-09T19:48:01.065Z",
+  "step": "Post-Click Analysis",
+  "basicInfo": {
+    "id": "AAQkAGE2ZjRhMThkLWE3MzAtNGVjMi04MTA2LWM0YmY1NDk4OTQ3MgAQAJ0fcke8i85MgY2wDiuZVEM=",
+    "sender": "sarah@atpehomescyprus.com",
+    "subject": "CLIENT REGISTRATION - (2235#) SIMON ORDEVER",
+    "preview": "Hello Martin, Can you please see the email below and confirm that you will be meeting me tomorrow to view the listing referenced? Also, please forward me the property coordinates and your mobile number so I can contact you if needed. Name: Simon",
+    "dateStr": "Mon 15/12/2025 20:38",
+    "ariaLabel": "Collapsed sarah@atpehomescyprus.com; Abdul Tareel CLIENT REGISTRATION - (2235#) SIMON ORDEVER 15/12/2025 Hello Martin, Can you please see the email below and confirm that you will be meeting me tomorrow to view the listing referenced? Also, please forward me the property coordinates and your mobile number so I can contact you if needed. Name: Simon"
+  },
+  "extracted": {
+    "senderEmail": "sarah@atpehomescyprus.com",
+    "subject": "CLIENT REGISTRATION - (2235#) SIMON ORDEVER",
+    "bodyPreview": "<div visibility=\"hidden\"><div>\n<div dir=\"ltr\">\n<div style=\"line-break:after-white-space;\">\n<div>\n<div>\n<div>\n<div><font color=\"#0433FF\">On 29 Nov 2025, at 20:10, sarah@atpehomescyprus.com wrote:</font...",
+    "fullBodyLength": 4794,
+    "isDetached": false
+  },
+  "computed": {
+    "emailDate": "2025-12-15T18:38:00.000Z",
+    "direction": "inbound"
+  }
+}

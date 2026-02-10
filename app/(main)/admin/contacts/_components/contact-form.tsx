@@ -19,7 +19,7 @@ import {
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { createContact, updateContact, deleteContactRole } from '../actions';
+import { createContact, updateContact, deleteContactRole, verifyAndHealContact } from '../actions';
 import { useToast } from '@/components/ui/use-toast';
 import { GoogleSyncManager } from './google-sync-manager';
 import { OutlookSyncManager } from './outlook-sync-manager';
@@ -329,6 +329,22 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
             });
         }
     }, [state, toast, onSuccess, isCreating]);
+
+    // Auto-Heal Broken Links (Client Side to prevent render loops)
+    const [hasAttemptedHeal, setHasAttemptedHeal] = useState(false);
+
+    useEffect(() => {
+        if (!contact || !contact.id || !contact.error || hasAttemptedHeal) return;
+
+        if (contact.error.includes('Link broken') || contact.error.includes('not found')) {
+            console.log('[Auto-Heal] broken link detected. Attempting recovery...');
+            setHasAttemptedHeal(true); // Prevent infinite loops
+
+            verifyAndHealContact(contact.id, contact.error).then(() => {
+                router.refresh(); // Refresh to clear error if fixed
+            });
+        }
+    }, [contact, hasAttemptedHeal, router]);
 
     // Fetch data when form is rendered
     const hasPropertiesTab = currentConfig.visibleTabs.includes('properties');
