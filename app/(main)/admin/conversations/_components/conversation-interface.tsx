@@ -13,6 +13,8 @@ import { CoordinatorPanel } from './coordinator-panel';
 import { UndoToast } from './undo-toast';
 import { WhatsAppImportModal } from './whatsapp-import-modal';
 import { CreateDealDialog } from './create-deal-dialog';
+import { SyncAllChatsDialog } from './sync-all-chats-dialog';
+import { NewConversationDialog } from './new-conversation-dialog';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -151,6 +153,10 @@ export function ConversationInterface({ initialConversations }: ConversationInte
     // Create Deal Modal State
     const [createDealOpen, setCreateDealOpen] = useState(false);
     const [creatingDeal, setCreatingDeal] = useState(false);
+
+    // Sync All & New Conversation Dialog State
+    const [syncAllOpen, setSyncAllOpen] = useState(false);
+    const [newConversationOpen, setNewConversationOpen] = useState(false);
 
     const handleBindClick = (ids: string[]) => {
         if (ids.length === 0) return;
@@ -514,6 +520,8 @@ export function ConversationInterface({ initialConversations }: ConversationInte
                         onImportClick={() => setImportModalOpen(true)}
                         onBind={handleBindClick}
                         onArchive={viewFilter === 'active' ? handleArchive : undefined}
+                        onNewConversationClick={() => setNewConversationOpen(true)}
+                        onSyncAllClick={() => setSyncAllOpen(true)}
                     />
                 </Panel>
 
@@ -685,6 +693,31 @@ export function ConversationInterface({ initialConversations }: ConversationInte
                 onOpenChange={setCreateDealOpen}
                 onConfirm={executeCreateDeal}
                 loading={creatingDeal}
+            />
+
+            {/* Sync All WhatsApp Chats Dialog */}
+            <SyncAllChatsDialog
+                open={syncAllOpen}
+                onOpenChange={setSyncAllOpen}
+                onComplete={async () => {
+                    // Refresh conversations list after sync
+                    const data = await fetchConversations(viewFilter);
+                    setConversations(data.conversations);
+                }}
+            />
+
+            {/* New Conversation Dialog */}
+            <NewConversationDialog
+                open={newConversationOpen}
+                onOpenChange={setNewConversationOpen}
+                onConversationCreated={async (conversationId) => {
+                    // Refresh conversations list
+                    const data = await fetchConversations(viewFilter);
+                    setConversations(data.conversations);
+                    // Select the new conversation
+                    setActiveId(conversationId);
+                    toast({ title: "Conversation Created", description: "You can now send messages." });
+                }}
             />
         </>
     );

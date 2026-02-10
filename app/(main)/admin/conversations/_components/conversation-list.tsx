@@ -2,7 +2,7 @@ import { useState, useRef } from 'react';
 import { Conversation } from "@/lib/ghl/conversations";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
-import { Mail, MessageSquare, MessageCircle, Layers, Link as LinkIcon, Upload, Trash2, X, CheckSquare, Inbox, Archive } from "lucide-react";
+import { Mail, MessageSquare, MessageCircle, Layers, Link as LinkIcon, Upload, Trash2, X, CheckSquare, Inbox, Archive, Plus, CloudDownload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card";
@@ -36,6 +36,8 @@ interface ConversationListProps {
     onImportClick?: () => void;
     onBind?: (ids: string[]) => void;
     onArchive?: (ids: string[]) => void;
+    onNewConversationClick?: () => void;
+    onSyncAllClick?: () => void;
 }
 
 /**
@@ -78,7 +80,9 @@ export function ConversationList({
     onSelectDeal,
     onImportClick,
     onBind,
-    onArchive
+    onArchive,
+    onNewConversationClick,
+    onSyncAllClick
 }: ConversationListProps) {
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -251,7 +255,7 @@ export function ConversationList({
                 {effectiveViewMode === 'chats' && onToggleSelectionMode && (
                     <TooltipProvider delayDuration={200}>
                         <div className="flex gap-0 shrink-0">
-                            {/* Import & Bind - only show on Inbox */}
+                            {/* Action buttons - only show on Inbox */}
                             {viewFilter === 'active' && (
                                 <>
                                     <Tooltip>
@@ -259,13 +263,27 @@ export function ConversationList({
                                             <Button
                                                 variant="ghost"
                                                 size="icon"
-                                                className="h-7 w-7"
-                                                onClick={onImportClick}
+                                                className="h-7 w-7 text-green-600 hover:text-green-700 hover:bg-green-50"
+                                                onClick={onNewConversationClick}
                                             >
-                                                <Upload className="w-3.5 h-3.5" />
+                                                <Plus className="w-4 h-4" />
                                             </Button>
                                         </TooltipTrigger>
-                                        <TooltipContent side="bottom">Import WhatsApp</TooltipContent>
+                                        <TooltipContent side="bottom">New Conversation</TooltipContent>
+                                    </Tooltip>
+
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-7 w-7"
+                                                onClick={onSyncAllClick}
+                                            >
+                                                <CloudDownload className="w-3.5 h-3.5" />
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="bottom">Sync All WhatsApp Chats</TooltipContent>
                                     </Tooltip>
 
                                     <Tooltip>

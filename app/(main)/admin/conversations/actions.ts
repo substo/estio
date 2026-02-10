@@ -1606,3 +1606,413 @@ export async function getConversationParticipants(conversationId: string) {
     }
 }
 
+// =============================================
+// WhatsApp Chat Sync & New Conversation Actions
+// =============================================
+
+/**
+ * Bulk-sync all WhatsApp chats from Evolution API into local DB.
+ * Safe to call multiple times — dedup handled at message, conversation, and contact levels.
+ */
+export async function syncAllEvolutionChats() {
+    const location = await getAuthenticatedLocation();
+    if (!location.evolutionInstanceId) {
+        return { success: false, error: "WhatsApp not connected. Please connect via Settings." };
+    }
+
+    try {
+        const { evolutionClient } = await import("@/lib/evolution/client");
+        const { processNormalizedMessage } = await import("@/lib/whatsapp/sync");
+
+        // 1. Health check
+        const health = await evolutionClient.healthCheck();
+        if (!health.ok) {
+            return { success: false, error: "Evolution API is unreachable. Please check the server." };
+        }
+
+        // 2. Fetch all chats from the phone
+        const allChats = await evolutionClient.fetchChats(location.evolutionInstanceId);
+        if (!allChats || allChats.length === 0) {
+            return { success: true, chatsProcessed: 0, messagesImported: 0, messagesSkipped: 0, errors: 0 };
+        }
+
+        // 3. Filter to valid WhatsApp chats only (1:1 and groups)
+        const validChats = allChats.filter((chat: any) => {
+            const jid = chat.id || chat.remoteJid || chat.jid;
+            if (!jid) return false;
+            return jid.endsWith('@s.whatsapp.net') || jid.endsWith('@g.us');
+        });
+
+        console.log(`[SyncAll] Found ${validChats.length} valid chats (filtered from ${allChats.length} total)`);
+
+        let chatsProcessed = 0;
+        let totalImported = 0;
+        let totalSkipped = 0;
+        let totalErrors = 0;
+
+        // 4. Process each chat
+        const MESSAGES_PER_CHAT = 30;
+        const STOP_ON_DUPLICATES = 5;
+
+        for (const chat of validChats) {
+            const remoteJid = chat.id || chat.remoteJid || chat.jid;
+            const isGroup = remoteJid.endsWith('@g.us');
+            const phone = remoteJid.replace('@s.whatsapp.net', '').replace('@g.us', '');
+
+            try {
+                // Fetch recent messages for this chat
+                const messages = await evolutionClient.fetchMessages(
+                    location.evolutionInstanceId,
+                    remoteJid,
+                    MESSAGES_PER_CHAT
+                );
+
+                if (!messages || messages.length === 0) {
+                    chatsProcessed++;
+                    continue;
+                }
+
+                let consecutiveDuplicates = 0;
+
+                for (const msg of messages) {
+                    try {
+                        const key = msg.key;
+                        const messageContent = msg.message;
+                        if (!messageContent || !key?.id) continue;
+
+                        const isFromMe = key.fromMe;
+
+                        // Enhanced Participant Resolution (same as syncWhatsAppHistory)
+                        const realSenderPhone = (msg as any).senderPn ||
+                            (key.participant?.includes('@s.whatsapp.net') ? key.participant.replace('@s.whatsapp.net', '') : null);
+                        let participantPhone = realSenderPhone ||
+                            (key.participant ? key.participant.replace('@s.whatsapp.net', '').replace('@lid', '') : undefined);
+
+                        const normalized: any = {
+                            from: isFromMe ? location.id : phone,
+                            to: isFromMe ? phone : location.id,
+                            body: messageContent.conversation || messageContent.extendedTextMessage?.text || '[Media]',
+                            type: 'text',
+                            wamId: key.id,
+                            timestamp: new Date(msg.messageTimestamp ? (msg.messageTimestamp as number) * 1000 : Date.now()),
+                            direction: isFromMe ? 'outbound' : 'inbound',
+                            source: 'whatsapp_evolution',
+                            locationId: location.id,
+                            contactName: isGroup ? (chat.name || chat.subject) : (isFromMe ? undefined : (msg.pushName || realSenderPhone)),
+                            isGroup: isGroup,
+                            participant: participantPhone
+                        };
+
+                        const result = await processNormalizedMessage(normalized);
+
+                        if (result?.status === 'skipped') {
+                            totalSkipped++;
+                            consecutiveDuplicates++;
+                        } else if (result?.status === 'processed') {
+                            totalImported++;
+                            consecutiveDuplicates = 0;
+                        } else {
+                            totalErrors++;
+                            consecutiveDuplicates = 0;
+                        }
+
+                        // Early stop if we hit known history
+                        if (consecutiveDuplicates >= STOP_ON_DUPLICATES) {
+                            console.log(`[SyncAll] Chat ${remoteJid}: stopped after ${STOP_ON_DUPLICATES} consecutive dupes`);
+                            break;
+                        }
+                    } catch (msgErr) {
+                        totalErrors++;
+                    }
+                }
+
+                chatsProcessed++;
+            } catch (chatErr) {
+                console.error(`[SyncAll] Error processing chat ${remoteJid}:`, chatErr);
+                totalErrors++;
+                chatsProcessed++;
+            }
+        }
+
+        console.log(`[SyncAll] Complete: ${chatsProcessed} chats, ${totalImported} imported, ${totalSkipped} skipped, ${totalErrors} errors`);
+
+        return {
+            success: true,
+            chatsProcessed,
+            totalChats: validChats.length,
+            messagesImported: totalImported,
+            messagesSkipped: totalSkipped,
+            errors: totalErrors
+        };
+    } catch (e: any) {
+        console.error("[SyncAll] Failed:", e);
+        return { success: false, error: e.message };
+    }
+}
+
+/**
+ * Fetch the list of WhatsApp chats from Evolution API for the picker UI.
+ * Cross-references with existing DB conversations to mark "already synced".
+ */
+export async function fetchEvolutionChats() {
+    const location = await getAuthenticatedLocation();
+    if (!location.evolutionInstanceId) {
+        return { success: false, error: "WhatsApp not connected", chats: [] };
+    }
+
+    try {
+        const { evolutionClient } = await import("@/lib/evolution/client");
+
+        const health = await evolutionClient.healthCheck();
+        if (!health.ok) {
+            return { success: false, error: "Evolution API unreachable", chats: [] };
+        }
+
+        const allChats = await evolutionClient.fetchChats(location.evolutionInstanceId);
+        if (!allChats || allChats.length === 0) {
+            return { success: true, chats: [] };
+        }
+
+        // Filter to valid chats
+        const validChats = allChats.filter((chat: any) => {
+            const jid = chat.id || chat.remoteJid || chat.jid;
+            if (!jid) return false;
+            return jid.endsWith('@s.whatsapp.net') || jid.endsWith('@g.us');
+        });
+
+        // Cross-reference with existing contacts/conversations in DB
+        const existingContacts = await db.contact.findMany({
+            where: { locationId: location.id, phone: { not: null } },
+            select: { phone: true, name: true }
+        });
+
+        const existingConversations = await db.conversation.findMany({
+            where: { locationId: location.id },
+            include: { contact: { select: { phone: true } } }
+        });
+
+        // Build a set of normalized phones that already have conversations
+        const syncedPhones = new Set(
+            existingConversations
+                .map((c: any) => c.contact?.phone?.replace(/\D/g, ''))
+                .filter(Boolean)
+        );
+
+        const formatted = validChats.map((chat: any) => {
+            const jid = chat.id || chat.remoteJid || chat.jid;
+            const isGroup = jid.endsWith('@g.us');
+            const phone = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
+            const rawPhone = phone.replace(/\D/g, '');
+
+            // Check if already synced
+            const alreadySynced = syncedPhones.has(rawPhone) ||
+                Array.from(syncedPhones).some(p => p?.endsWith(rawPhone) || rawPhone.endsWith(p || ''));
+
+            // Try to find a name from existing contacts
+            const matchedContact = existingContacts.find(c => {
+                const cp = c.phone?.replace(/\D/g, '') || '';
+                return cp === rawPhone || cp.endsWith(rawPhone) || rawPhone.endsWith(cp);
+            });
+
+            return {
+                jid,
+                phone: `+${phone}`,
+                name: chat.name || chat.subject || chat.pushName || matchedContact?.name || `+${phone}`,
+                isGroup,
+                alreadySynced,
+                lastMessageTimestamp: chat.conversationTimestamp || chat.lastMessageTimestamp || null
+            };
+        });
+
+        // Sort: non-synced first, then by last message
+        formatted.sort((a: any, b: any) => {
+            if (a.alreadySynced !== b.alreadySynced) return a.alreadySynced ? 1 : -1;
+            return (b.lastMessageTimestamp || 0) - (a.lastMessageTimestamp || 0);
+        });
+
+        return { success: true, chats: formatted };
+    } catch (e: any) {
+        console.error("[FetchChats] Failed:", e);
+        return { success: false, error: e.message, chats: [] };
+    }
+}
+
+/**
+ * Create a new conversation for a phone number, with history backfill from Evolution.
+ */
+export async function startNewConversation(phone: string) {
+    const location = await getAuthenticatedLocation();
+
+    // Normalize phone to E.164
+    let normalizedPhone = phone.replace(/\s+/g, '').replace(/[-()]/g, '');
+    if (!normalizedPhone.startsWith('+')) {
+        normalizedPhone = `+${normalizedPhone}`;
+    }
+
+    const rawDigits = normalizedPhone.replace(/\D/g, '');
+    if (rawDigits.length < 7) {
+        return { success: false, error: "Phone number is too short. Please include the country code." };
+    }
+
+    try {
+        // 1. Find or create contact
+        const searchSuffix = rawDigits.length > 2 ? rawDigits.slice(-2) : rawDigits;
+        const candidates = await db.contact.findMany({
+            where: {
+                locationId: location.id,
+                phone: { contains: searchSuffix }
+            }
+        });
+
+        let contact = candidates.find(c => {
+            if (!c.phone) return false;
+            const cp = c.phone.replace(/\D/g, '');
+            return cp === rawDigits ||
+                (cp.endsWith(rawDigits) && rawDigits.length >= 7) ||
+                (rawDigits.endsWith(cp) && cp.length >= 7);
+        });
+
+        if (!contact) {
+            // Create new contact
+            contact = await db.contact.create({
+                data: {
+                    locationId: location.id,
+                    phone: normalizedPhone,
+                    name: `WhatsApp ${normalizedPhone}`,
+                    status: "New",
+                    contactType: "Lead"
+                }
+            });
+            console.log(`[NewConversation] Created new contact: ${contact.id} for ${normalizedPhone}`);
+        } else {
+            console.log(`[NewConversation] Found existing contact: ${contact.name} (${contact.id})`);
+        }
+
+        // 2. Check if conversation already exists for this contact
+        const existingConv = await db.conversation.findFirst({
+            where: {
+                locationId: location.id,
+                contactId: contact.id
+            }
+        });
+
+        if (existingConv) {
+            console.log(`[NewConversation] Existing conversation found: ${existingConv.ghlConversationId}`);
+
+            // Still try to backfill recent messages if Evolution is connected
+            if (location.evolutionInstanceId) {
+                try {
+                    const { evolutionClient } = await import("@/lib/evolution/client");
+                    const { processNormalizedMessage } = await import("@/lib/whatsapp/sync");
+
+                    const whatsappPhone = rawDigits;
+                    const remoteJid = `${whatsappPhone}@s.whatsapp.net`;
+                    const messages = await evolutionClient.fetchMessages(location.evolutionInstanceId, remoteJid, 30);
+
+                    let imported = 0;
+                    for (const msg of (messages || [])) {
+                        const key = msg.key;
+                        const messageContent = msg.message;
+                        if (!messageContent || !key?.id) continue;
+
+                        const isFromMe = key.fromMe;
+                        const normalized: any = {
+                            from: isFromMe ? location.id : whatsappPhone,
+                            to: isFromMe ? whatsappPhone : location.id,
+                            body: messageContent.conversation || messageContent.extendedTextMessage?.text || '[Media]',
+                            type: 'text',
+                            wamId: key.id,
+                            timestamp: new Date(msg.messageTimestamp ? (msg.messageTimestamp as number) * 1000 : Date.now()),
+                            direction: isFromMe ? 'outbound' : 'inbound',
+                            source: 'whatsapp_evolution',
+                            locationId: location.id,
+                            contactName: isFromMe ? undefined : msg.pushName
+                        };
+
+                        const result = await processNormalizedMessage(normalized);
+                        if (result?.status === 'processed') imported++;
+                    }
+
+                    console.log(`[NewConversation] Backfilled ${imported} messages for existing conversation`);
+                } catch (backfillErr) {
+                    console.warn("[NewConversation] History backfill failed:", backfillErr);
+                }
+            }
+
+            return {
+                success: true,
+                conversationId: existingConv.ghlConversationId,
+                isNew: false,
+                contactName: contact.name
+            };
+        }
+
+        // 3. Create new conversation
+        const syntheticId = `wa_${Date.now()}_${contact.id}`;
+        const conversation = await db.conversation.create({
+            data: {
+                ghlConversationId: syntheticId,
+                locationId: location.id,
+                contactId: contact.id,
+                lastMessageBody: null,
+                lastMessageAt: new Date(0), // Epoch — will sort to bottom until a real message arrives
+                lastMessageType: 'TYPE_WHATSAPP',
+                unreadCount: 0,
+                status: 'open'
+            }
+        });
+
+        console.log(`[NewConversation] Created conversation: ${conversation.ghlConversationId}`);
+
+        // 4. Try to backfill history from Evolution
+        let messagesImported = 0;
+        if (location.evolutionInstanceId) {
+            try {
+                const { evolutionClient } = await import("@/lib/evolution/client");
+                const { processNormalizedMessage } = await import("@/lib/whatsapp/sync");
+
+                const whatsappPhone = rawDigits;
+                const remoteJid = `${whatsappPhone}@s.whatsapp.net`;
+                const messages = await evolutionClient.fetchMessages(location.evolutionInstanceId, remoteJid, 30);
+
+                for (const msg of (messages || [])) {
+                    const key = msg.key;
+                    const messageContent = msg.message;
+                    if (!messageContent || !key?.id) continue;
+
+                    const isFromMe = key.fromMe;
+                    const normalized: any = {
+                        from: isFromMe ? location.id : whatsappPhone,
+                        to: isFromMe ? whatsappPhone : location.id,
+                        body: messageContent.conversation || messageContent.extendedTextMessage?.text || '[Media]',
+                        type: 'text',
+                        wamId: key.id,
+                        timestamp: new Date(msg.messageTimestamp ? (msg.messageTimestamp as number) * 1000 : Date.now()),
+                        direction: isFromMe ? 'outbound' : 'inbound',
+                        source: 'whatsapp_evolution',
+                        locationId: location.id,
+                        contactName: isFromMe ? undefined : msg.pushName
+                    };
+
+                    const result = await processNormalizedMessage(normalized);
+                    if (result?.status === 'processed') messagesImported++;
+                }
+
+                console.log(`[NewConversation] Backfilled ${messagesImported} messages for new conversation`);
+            } catch (backfillErr) {
+                console.warn("[NewConversation] History backfill failed:", backfillErr);
+            }
+        }
+
+        return {
+            success: true,
+            conversationId: conversation.ghlConversationId,
+            isNew: true,
+            contactName: contact.name,
+            messagesImported
+        };
+    } catch (e: any) {
+        console.error("[NewConversation] Failed:", e);
+        return { success: false, error: e.message };
+    }
+}
