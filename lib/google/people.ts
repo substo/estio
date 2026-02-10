@@ -485,6 +485,26 @@ function isPhoneQuery(query: string): boolean {
 }
 
 /**
+ * Helper: robustly check if two phone numbers match.
+ * Handles +Prefix vs Local (0) differences by comparing the last N digits.
+ */
+function arePhoneNumbersEquivalent(p1: string, p2: string): boolean {
+    const d1 = p1.replace(/\D/g, '');
+    const d2 = p2.replace(/\D/g, '');
+
+    // If either is too short, require exact match
+    if (d1.length < 7 || d2.length < 7) {
+        return d1 === d2;
+    }
+
+    // Match if they share the last 7 digits
+    // (7 is chosen as a safe minimum for mobile/landline uniqueness in most countries)
+    const suffix1 = d1.slice(-7);
+    const suffix2 = d2.slice(-7);
+    return suffix1 === suffix2;
+}
+
+/**
  * Fallback: Search contacts by phone using connections.list + local filtering.
  * Google People API searchContacts has a known bug where phone number queries
  * return empty results. This workaround fetches contacts and filters locally.
@@ -494,9 +514,10 @@ async function searchByPhoneFallback(
     phoneDigits: string,
     personFields: string = 'names,phoneNumbers,metadata'
 ): Promise<people_v1.Schema$Person[]> {
-    console.log(`[Google Sync] searchContacts returned no phone match, falling back to connections.list`);
+    console.log(`[Google Sync] Running fallback phone search for digits: ${phoneDigits} (using suffix match)`);
     const matches: people_v1.Schema$Person[] = [];
     let pageToken: string | undefined;
+    let pages = 0;
 
     do {
         const res = await people.people.connections.list({
@@ -506,21 +527,29 @@ async function searchByPhoneFallback(
             pageToken
         });
 
+        pages++;
+
         for (const person of (res.data.connections || [])) {
             const hasMatch = person.phoneNumbers?.some(pn => {
-                const pnDigits = pn.value?.replace(/\D/g, '') || '';
-                return pnDigits.includes(phoneDigits) || phoneDigits.includes(pnDigits);
+                if (!pn.value) return false;
+                return arePhoneNumbersEquivalent(pn.value, phoneDigits);
             });
-            if (hasMatch) matches.push(person);
+            if (hasMatch) {
+                matches.push(person);
+            }
         }
 
         pageToken = res.data.nextPageToken ?? undefined;
-        // Safety: stop after first page for non-search (sync) use cases to limit API calls
+        // Safety: Limit depth to avoid scanning huge address books forever. 
+        // 3 pages = 3000 contacts, likely enough for most users.
         if (matches.length > 0) break;
+        if (pages >= 5) break;
     } while (pageToken);
 
     if (matches.length > 0) {
         console.log(`[Google Sync] Phone fallback found ${matches.length} match(es)`);
+    } else {
+        console.log(`[Google Sync] Phone fallback found NO matches.`);
     }
     return matches;
 }
@@ -545,10 +574,15 @@ async function findMatchingGoogleContact(
             readMask: 'names,phoneNumbers,metadata'
         });
 
-        // Tight matching on phone number
+        // Tight matching on phone number using same robust logic
         const found = searchRes.data.results?.find(r => {
             const p = r.person;
-            return p?.phoneNumbers?.some(pn => pn.value?.replace(/\D/g, '')?.includes(phoneDigits));
+            // First check strict substring (original logic) as fast path
+            // THEN check robust suffix match
+            return p?.phoneNumbers?.some(pn =>
+                (pn.value?.replace(/\D/g, '')?.includes(phoneDigits)) ||
+                (pn.value && arePhoneNumbersEquivalent(pn.value, contact.phone!))
+            );
         });
 
         if (found?.person?.resourceName) {
@@ -619,18 +653,20 @@ export async function searchGoogleContacts(userId: string, query: string) {
                 etag: p.etag,
                 updateTime: extractGoogleUpdateTime(p)
             };
-        }).filter(Boolean);
+        }).filter((r): r is NonNullable<typeof r> => r !== null);
 
         // FALLBACK: Google searchContacts has a known bug where phone number
-        // queries return empty results. Use connections.list + local filtering.
-        if (phoneQuery && results.length === 0) {
+        // queries return empty results. 
+        // ALWAYS run fallback for phone queries to ensure we catch format mismatches (+49 vs 0)
+        // and failures of the search API.
+        if (phoneQuery) {
             const phoneDigits = query.replace(/\D/g, '');
             const fallbackMatches = await searchByPhoneFallback(
                 people, phoneDigits,
                 'names,emailAddresses,phoneNumbers,photos,metadata'
             );
 
-            results = fallbackMatches.map(p => ({
+            const fallbackResults = fallbackMatches.map(p => ({
                 resourceName: p.resourceName,
                 name: p.names?.[0]?.displayName,
                 email: p.emailAddresses?.[0]?.value,
@@ -639,6 +675,14 @@ export async function searchGoogleContacts(userId: string, query: string) {
                 etag: p.etag,
                 updateTime: extractGoogleUpdateTime(p)
             }));
+
+            // Merge results, removing duplicates by resourceName
+            const existingIds = new Set(results.map(r => r.resourceName));
+            for (const res of fallbackResults) {
+                if (res.resourceName && !existingIds.has(res.resourceName)) {
+                    results.push(res);
+                }
+            }
         }
 
         return results;
