@@ -1,14 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { processNormalizedMessage, NormalizedMessage } from '@/lib/whatsapp/sync';
+import { logWebhookPayload } from '@/lib/logging/webhook-logger';
 
 export async function POST(req: NextRequest) {
     try {
         const body = await req.json();
+
+        const eventType = (body.event || '').toUpperCase();
+
+        // Log payload to file if enabled (for debugging)
+        logWebhookPayload(eventType, body);
+
         console.log("Evolution Webhook Payload:", JSON.stringify(body, null, 2));
         if (body.data) console.log("Evolution Webhook Data:", JSON.stringify(body.data, null, 2));
 
-        const eventType = (body.event || '').toUpperCase(); // Normalize to uppercase: CONNECTION.UPDATE
         const instanceName = body.instance;
 
         // Evolution instances are named after location IDs in our implementation
@@ -53,8 +59,10 @@ export async function POST(req: NextRequest) {
                 // The pushName here is the SENDER's name, not the Group's.
                 contactName = undefined;
 
-                // Try to resolve real phone from senderPn (Evolution extension) or participant JID
-                const realSenderPhone = msg.senderPn || (key.participant?.includes('@s.whatsapp.net') ? key.participant.replace('@s.whatsapp.net', '') : null);
+                // Try to resolve real phone from senderPn (Evolution/Baileys extension) or participant JID
+                // NOTE: senderPn can be on key OR msg depending on Evolution version
+                const senderPn = key.senderPn || msg.senderPn;
+                const realSenderPhone = senderPn ? senderPn.replace('@s.whatsapp.net', '') : (key.participant?.includes('@s.whatsapp.net') ? key.participant.replace('@s.whatsapp.net', '') : null);
 
                 // Determine the sender's identifier for contact creation
                 let senderIdentifier = realSenderPhone || '';
@@ -95,18 +103,19 @@ export async function POST(req: NextRequest) {
                 isLid = remoteJid.includes('@lid');
 
                 if (isLid) {
-                    // Try to resolve real number from participant if available (sometimes provided in metadata)
-                    if (msg.senderPn) {
-                        realPhone = msg.senderPn;
+                    // Try to resolve real number — senderPn can be on key OR msg
+                    const senderPn = key.senderPn || msg.senderPn;
+                    if (senderPn) {
+                        realPhone = senderPn.replace('@s.whatsapp.net', '');
+                        console.log(`[Evolution] LID resolved via senderPn: ${remoteJid} -> ${realPhone}`);
                     } else if (msg.remoteJidAlt && msg.remoteJidAlt.includes('@s.whatsapp.net')) {
                         realPhone = msg.remoteJidAlt.replace('@s.whatsapp.net', '');
+                        console.log(`[Evolution] LID resolved via remoteJidAlt: ${remoteJid} -> ${realPhone}`);
                     } else if (participant && participant.includes('@s.whatsapp.net')) {
                         realPhone = participant.replace('@s.whatsapp.net', '');
+                        console.log(`[Evolution] LID resolved via participant: ${remoteJid} -> ${realPhone}`);
                     } else {
-                        // If we can't resolve it, we unfortunately have to use the LID or ignore it.
-                        // For now, we use the LID but we should likely block contact creation for this in sync.ts
-                        // unless we can reply to LIDs (which Evolution can, but CRM might hate it).
-                        console.log(`[Evolution] LID detected without resolution: ${remoteJid}`);
+                        console.warn(`[Evolution] ⚠️ LID detected WITHOUT any resolution path: ${remoteJid}`);
                     }
                 } else {
                     realPhone = remoteJid.replace('@s.whatsapp.net', '');

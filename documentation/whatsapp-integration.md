@@ -144,6 +144,35 @@ To investigate issues like duplicate conversations or "Contact not found" errors
     ```
     *Look for lines like `[WhatsApp Sync] Contact not found...` vs `Matched existing contact...`*
 
+### 5. File-Based Webhook Logging (Feb 2026)
+For detailed debugging of Evolution API payloads, enable file-based logging.
+
+**Enable in `.env`**:
+```env
+ENABLE_WEBHOOK_LOGGING=true
+WEBHOOK_LOG_DIR=/home/martin/logs/evolution
+```
+
+**Files are saved as**: `{timestamp}_{eventType}.json`  
+Example: `2026-02-09T19-30-00-000Z_MESSAGES_UPSERT.json`
+
+**Search logged payloads**:
+```bash
+# Find all LID-related messages
+cat /home/martin/logs/evolution/*.json | jq '.data.key.remoteJid' | grep lid
+
+# View specific payload
+cat /home/martin/logs/evolution/2026-02-09T*.json | jq '.data'
+```
+
+**Cleanup old logs** (manual):
+```bash
+find /home/martin/logs/evolution -mtime +7 -delete
+```
+
+> [!WARNING]
+> Disable logging in production after debugging to prevent disk fill. Use `ENABLE_WEBHOOK_LOGGING=false`.
+
 ## Manual Chat Import (Feb 2026)
 We introduced a modal-based tool to import historic chats from `.txt` exports (WhatsApp → More → Export Chat).
 
@@ -193,6 +222,24 @@ WhatsApp sessions and data are **preserved across deployments** because they are
    ssh root@138.199.214.117 "docker rm -f evolution_api evolution_postgres evolution_redis && cd /home/martin/estio-app && docker compose -f docker-compose.evolution.yml up -d"
    ```
 
+## Phone Number Normalization Convention
+
+WhatsApp APIs never include the `+` prefix. We follow **E.164** as the standard for storage:
+
+| Context | Format | Example |
+|---------|--------|---------|
+| **Database / CRM** (stored) | E.164 with `+` | `+35796045511` |
+| **WhatsApp API** (send/receive) | Digits only, no `+` | `35796045511` |
+| **Search / Matching** | Digits only (strip all non-digits) | `35796045511` |
+
+**How it works in code**:
+- **Ingest** (`sync.ts`): Adds `+` on normalization → `from.startsWith('+') ? from : '+' + from`
+- **Send** (`evolutionClient.sendMessage`): Strips `+` → `phone.replace('+', '')`
+- **Match** (`sync.ts`): Compares raw digits → `contactPhone.replace(/\D/g, '')`
+
+> [!TIP]
+> Always store E.164 (with `+`), always strip for WhatsApp API calls.
+
 ## Data Model (Prisma)
 
 
@@ -215,18 +262,65 @@ Due to the schema constraint where `Conversation` must link to a single `Contact
     -   **Format**: `[Martin]: Hello everyone`
 -   **Participant Sync**: We also extract the *actual sender's* phone number from the message metadata and ensure they exist as a distinct `Contact` in the CRM.
 
-### 2. LID (Lightweight ID) Handling (Updated Feb 2026)
-WhatsApp uses `@lid` (an opaque UUID) instead of phone numbers for privacy. Our system resolves LIDs to real phone numbers using a multi-step approach:
+### 2. LID (Lightweight ID) Handling
+WhatsApp uses `@lid` (an opaque identifier) instead of phone numbers for privacy. Our system resolves LIDs to real phone numbers.
 
-#### Resolution Priority
-1. **Webhook Fields**: Check `msg.senderPn`, `msg.remoteJidAlt`, or `key.participant` for real phone number.
-2. **Active API Lookup**: If webhook data is incomplete, call `evolutionClient.findContact(lid)` to query Evolution API.
-3. **Fallback**: If all resolution fails, create contact with `phone: null` and `lid: <value>`. This prevents corrupting the phone field with LID values.
+#### Actual Payload Structure (From Production Logs)
+When an LID user sends a message, the Evolution API payload looks like this:
 
-#### Key Implementation
-- **Webhook** (`app/api/webhooks/evolution/route.ts`): Extracts phone from `senderPn`, `remoteJidAlt`, or `participant`.
-- **Evolution Client** (`lib/evolution/client.ts`): `findContact(instanceName, jid)` queries `/chat/findContacts` endpoint.
-- **Sync Logic** (`lib/whatsapp/sync.ts`): Performs active resolution, then creates contact with appropriate fields.
+```json
+{
+  "key": {
+    "remoteJid": "13473413074963@lid",
+    "fromMe": false,
+    "id": "3AC7115AAF7ED9FBF315",
+    "senderPn": "35796045511@s.whatsapp.net",
+    "previousRemoteJid": "13473413074963@lid"
+  },
+  "pushName": "Omar Hassan",
+  "message": { "conversation": "Hello" }
+}
+```
+
+> [!IMPORTANT]
+> **`senderPn` lives inside `key`, NOT at top-level `msg`!** This was the root cause of a critical bug (Feb 2026) where `msg.senderPn` was always `undefined`, causing all LID contacts to go unresolved.
+
+#### Resolution Priority (in `route.ts`)
+1. **`key.senderPn`** — Primary. Contains full JID like `35796045511@s.whatsapp.net`. Must strip `@s.whatsapp.net`.
+2. **`msg.senderPn`** — Fallback (some Evolution versions put it here).
+3. **`msg.remoteJidAlt`** — Alternative JID (Baileys 6.8+).
+4. **`key.participant`** — Sometimes contains real phone in `@s.whatsapp.net` format.
+5. **Active API Lookup** — `evolutionClient.findContact(lid)` queries Evolution's `/chat/findContacts` endpoint.
+6. **Fallback** — Create contact with `phone: null` and `lid: <value>`. Prevents corrupting the phone field.
+
+#### Key Files
+| File | Role |
+|------|------|
+| `app/api/webhooks/evolution/route.ts` | Extracts `senderPn` from `key` and `msg`, strips JID suffix |
+| `lib/evolution/client.ts` | `findContact(instance, jid)` — Active API lookup |
+| `lib/whatsapp/sync.ts` | Resolution fallback + contact creation with LID |
+
+#### Debugging LID Issues
+1. **Enable payload logging** (see Section 5 above) and search for `@lid`:
+   ```bash
+   cat /home/martin/logs/evolution/*.json | jq 'select(.data.key.remoteJid | test("@lid"))' | jq '.data.key'
+   ```
+2. **Check if `senderPn` is present**:
+   ```bash
+   cat /home/martin/logs/evolution/*.json | jq 'select(.data.key.remoteJid | test("@lid")) | .data.key.senderPn'
+   ```
+3. **Server logs** — Look for these log lines:
+   - `LID resolved via senderPn` ✅ — Working correctly
+   - `LID detected WITHOUT any resolution path` ⚠️ — No phone available in payload
+   - `Creating contact for Unresolved LID` — Fallback triggered
+   - `Failed to upsert conversation` — Downstream failure (contact has no phone)
+
+#### Past Bugs Reference
+
+| Date | Bug | Root Cause | Fix |
+|------|-----|-----------|-----|
+| Feb 9, 2026 | Contacts saved as `WhatsApp User ...@lid` | Code read `msg.senderPn` instead of `key.senderPn` | Changed to `key.senderPn \|\| msg.senderPn` |
+| Feb 9, 2026 | `resolvedPhone` had `@s.whatsapp.net` suffix | Not stripped before passing to sync | Added `.replace('@s.whatsapp.net', '')` |
 
 > [!NOTE]
 > Contacts created with `phone: null` but a valid `lid` field will have their phone number automatically updated when a future message includes `senderPn`.
