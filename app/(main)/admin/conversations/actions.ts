@@ -175,7 +175,7 @@ export async function fetchMessages(conversationId: string) {
     }));
 }
 
-export async function syncWhatsAppHistory(conversationId: string, limit: number = 20) {
+export async function syncWhatsAppHistory(conversationId: string, limit: number = 20, ignoreDuplicates: boolean = false, offset: number = 0) {
     const location = await getAuthenticatedLocation();
 
     const conversation = await db.conversation.findUnique({
@@ -201,8 +201,8 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
         }
 
         const fetchLimit = limit || 50;
-        console.log(`[Sync] Fetching messages for ${remoteJid} (Limit: ${fetchLimit})...`);
-        const evolutionMessages = await evolutionClient.fetchMessages(location.evolutionInstanceId, remoteJid, fetchLimit);
+        console.log(`[Sync] Fetching messages for ${remoteJid} (Limit: ${fetchLimit}, Offset: ${offset}, IgnoreDupes: ${ignoreDuplicates})...`);
+        const evolutionMessages = await evolutionClient.fetchMessages(location.evolutionInstanceId, remoteJid, fetchLimit, offset);
 
         let synced = 0;
         let skipped = 0;
@@ -253,7 +253,7 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
                     consecutiveDuplicates = 0;
                 }
 
-                if (consecutiveDuplicates >= STOP_ON_DUPLICATES) {
+                if (!ignoreDuplicates && consecutiveDuplicates >= STOP_ON_DUPLICATES) {
                     console.log(`[Sync] Stopped after ${consecutiveDuplicates} consecutive duplicates.`);
                     break;
                 }
@@ -1034,11 +1034,44 @@ export async function generatePlanAction(conversationId: string, contactId: stri
         const result = await generateAgentPlan(contactId, location.id, historyText, goal);
 
         if (result.success && result.plan) {
-            // Save Plan to DB
+            // Calculate Cost
+            const runCost = calculateRunCost(
+                result.usage?.model || 'default',
+                result.usage?.promptTokenCount || 0,
+                result.usage?.candidatesTokenCount || 0
+            );
+
+            // Update Conversation Stats & Save Plan
             await db.conversation.update({
                 where: { id: conversation.id },
-                data: { agentPlan: result.plan } as any
+                data: {
+                    agentPlan: result.plan,
+                    promptTokens: { increment: result.usage?.promptTokenCount || 0 },
+                    completionTokens: { increment: result.usage?.candidatesTokenCount || 0 },
+                    totalTokens: { increment: result.usage?.totalTokenCount || 0 },
+                    totalCost: { increment: runCost }
+                } as any
             });
+
+            // Log Execution Trace for History
+            await db.agentExecution.create({
+                data: {
+                    conversationId: conversation.id,
+                    taskId: 'PLANNING', // Special ID for planning phase
+                    taskTitle: "Generate Mission Plan",
+                    taskStatus: "done",
+                    thoughtSummary: result.thought || "Generated new mission plan based on goal.",
+                    thoughtSteps: [], // Planner doesn't return steps currently
+                    toolCalls: [],
+                    draftReply: null,
+                    promptTokens: result.usage?.promptTokenCount,
+                    completionTokens: result.usage?.candidatesTokenCount,
+                    totalTokens: result.usage?.totalTokenCount,
+                    model: result.usage?.model,
+                    cost: runCost
+                }
+            });
+
             return { success: true, plan: result.plan, thought: result.thought };
         } else {
             return { success: false, error: "Failed to generate plan" };

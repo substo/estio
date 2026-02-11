@@ -82,7 +82,7 @@ export interface AgentTask {
 }
 
 // --- Planner Function ---
-export async function generateAgentPlan(contactId: string, locationId: string, history: string, goal: string): Promise<{ success: boolean, plan?: AgentTask[], thought?: string }> {
+export async function generateAgentPlan(contactId: string, locationId: string, history: string, goal: string): Promise<{ success: boolean, plan?: AgentTask[], thought?: string, usage?: any }> {
     try {
         const siteConfig = await db.siteConfig.findUnique({ where: { locationId } });
         const apiKey = siteConfig?.googleAiApiKey || process.env.GOOGLE_API_KEY;
@@ -106,7 +106,11 @@ HISTORY: ${history}
         return {
             success: true,
             plan: parsed.plan,
-            thought: parsed.thought
+            thought: parsed.thought,
+            usage: {
+                ...result.response.usageMetadata,
+                model: DEFAULT_MODEL
+            }
         };
     } catch (e) {
         console.error("Plan Generation Failed", e);

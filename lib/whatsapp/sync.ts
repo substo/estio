@@ -307,37 +307,25 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         }
     }
 
-    // 4. Create/Get Conversation (GHL Style)
-    // We use a synthetic GHL ID for WhatsApp native chats if not provided
-    const ghlId = msg.source === 'whatsapp_evolution' && !contact.ghlContactId
-        ? `wa_${Date.now()}_${contact.id}`
-        : contact.ghlContactId;
-
-    // Ensure conversation exists
-    // Note: upsertConversationFromGHL handles creating the Conversation record
-    const { upsertConversationFromGHL } = await import("@/lib/ghl/sync");
-
-    // Create a mock conversation object for the syncer
-    const mockConv = {
-        id: `wa_${Date.now()}_${contact.id}`, // We might need a consistent ID here if we want to update
-        contactId: contact.ghlContactId || contact.id, // Use our internal ID if GHL ID missing
-        locationId: locationId,
-        lastMessageBody: body,
-        lastMessageType: 'TYPE_WHATSAPP',
-        unreadCount: 1,
-        status: 'open',
-        type: 'WhatsApp'
-    };
-
-    // We use the "Contact" (Group or Individual) to anchor the conversation.
-    const conversation = await upsertConversationFromGHL({
-        ...mockConv,
-        contactId: contact.id
-    }, locationId, locationDef.ghlAccessToken || '');
+    // 4. Find or Create Conversation — anchored by contactId + locationId
+    let conversation = await db.conversation.findFirst({
+        where: { contactId: contact.id, locationId }
+    });
 
     if (!conversation) {
-        console.error("[WhatsApp Sync] Failed to upsert conversation");
-        return { status: 'error', reason: 'conversation_creation_failed' };
+        conversation = await db.conversation.create({
+            data: {
+                ghlConversationId: `wa_${contact.id}`,
+                locationId,
+                contactId: contact.id,
+                lastMessageBody: body,
+                lastMessageAt: timestamp,
+                lastMessageType: 'TYPE_WHATSAPP',
+                unreadCount: direction === 'inbound' ? 1 : 0,
+                status: 'open'
+            }
+        });
+        console.log(`[WhatsApp Sync] Created conversation ${conversation.id} for contact ${contact.id}`);
     }
 
     // 5. Group Participant Sync (New Architecture)

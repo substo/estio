@@ -350,6 +350,30 @@ export const evolutionClient = {
             return response.data || [];
         } catch (error: any) {
             console.error('Error fetching chats:', error.response?.data || error);
+            throw new Error(error.response?.data?.message || error.message || "Failed to fetch chats");
+        }
+    },
+
+    /**
+     * Fetch all contacts for an instance
+     */
+    fetchContacts: async (instanceName: string) => {
+        try {
+            console.log(`[Evolution] Fetching contacts for ${instanceName}...`);
+            const response = await axios.post(
+                `${EVOLUTION_API_URL}/chat/findContacts/${instanceName}`,
+                {},
+                {
+                    headers: {
+                        'apikey': EVOLUTION_GLOBAL_API_KEY
+                    }
+                }
+            );
+            console.log(`[Evolution] Found ${response.data?.length || 0} contacts`);
+            return response.data || [];
+        } catch (error: any) {
+            console.error('Error fetching contacts:', error.response?.data || error);
+            // Don't throw, just return empty to allow graceful degradation
             return [];
         }
     },
@@ -357,9 +381,9 @@ export const evolutionClient = {
     /**
      * Fetch messages for a specific chat
      */
-    fetchMessages: async (instanceName: string, remoteJid: string, count: number = 50) => {
+    fetchMessages: async (instanceName: string, remoteJid: string, count: number = 50, offset: number = 0) => {
         try {
-            console.log(`[Evolution] Fetching messages for ${remoteJid}...`);
+            console.log(`[Evolution] Fetching messages for ${remoteJid} (Limit: ${count}, Offset: ${offset})...`);
             const response = await axios.post(
                 `${EVOLUTION_API_URL}/chat/findMessages/${instanceName}`,
                 {
@@ -368,7 +392,8 @@ export const evolutionClient = {
                             remoteJid: remoteJid
                         }
                     },
-                    limit: count
+                    limit: count,
+                    offset: offset
                 },
                 {
                     headers: {
@@ -376,10 +401,15 @@ export const evolutionClient = {
                     }
                 }
             );
-            console.log(`[Evolution] Found ${response.data?.messages?.records?.length || response.data?.length || 0} messages`);
-            return response.data?.messages?.records || response.data || [];
+            console.log(`[Evolution] Raw Response Status: ${response.status}`);
+            // console.log(`[Evolution] Raw Response Data:`, JSON.stringify(response.data, null, 2)); // Uncomment for extreme verbosity if needed
+
+            const records = response.data?.messages?.records || response.data || [];
+            console.log(`[Evolution] Found ${records.length} messages. (Is Array: ${Array.isArray(records)})`);
+
+            return records;
         } catch (error: any) {
-            console.error('Error fetching messages:', error.response?.data || error);
+            console.error('[Evolution] Error fetching messages:', error.response?.data || error.message);
             return [];
         }
     },

@@ -34,6 +34,7 @@ import { DeleteContactDialog } from './delete-contact-dialog';
 
 import { ContactForm, type ContactData } from './contact-form';
 import { CONTACT_TYPE_CONFIG, type ContactType } from './contact-types';
+import { MergeContactDialog } from './merge-contact-dialog';
 
 export function EditContactForm({ contact, onSuccess, onDelete, leadSources, initialMode = 'edit', isOutlookConnected = false, isGoogleConnected = false, isGhlConnected = false }: { contact: ContactData; onSuccess?: () => void; onDelete?: () => void; leadSources: string[]; initialMode?: 'view' | 'edit' | 'create'; isOutlookConnected?: boolean; isGoogleConnected?: boolean; isGhlConnected?: boolean }) {
     const { toast } = useToast();
@@ -399,6 +400,11 @@ export function EditContactForm({ contact, onSuccess, onDelete, leadSources, ini
                                     </DialogFooter>
                                 </DialogContent>
                             </Dialog>
+
+                            <MergeContactDialog
+                                sourceContactId={contact.id}
+                                sourceName={contact.name || contact.phone || 'Unknown'}
+                            />
                         </div>
 
                         <DeleteContactDialog
@@ -413,16 +419,18 @@ export function EditContactForm({ contact, onSuccess, onDelete, leadSources, ini
             />
 
             {/* Merge Dialog */}
-            {mergeModalOpen && remoteData && (
-                <CrmMergeDialog
-                    open={mergeModalOpen}
-                    onOpenChange={setMergeModalOpen}
-                    localContact={contact}
-                    remoteData={remoteData}
-                    duplicateOf={null}
-                    onConfirm={(data) => handleMergeConfirm(data)}
-                />
-            )}
+            {
+                mergeModalOpen && remoteData && (
+                    <CrmMergeDialog
+                        open={mergeModalOpen}
+                        onOpenChange={setMergeModalOpen}
+                        localContact={contact}
+                        remoteData={remoteData}
+                        duplicateOf={null}
+                        onConfirm={(data) => handleMergeConfirm(data)}
+                    />
+                )
+            }
         </>
     );
 }

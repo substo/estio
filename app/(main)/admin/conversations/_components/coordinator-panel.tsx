@@ -78,6 +78,14 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
 
     // Fetch Plan on Load
     useEffect(() => {
+        // Reset state immediately when conversation changes
+        setPlan([]);
+        setReasoning("");
+        setThoughtSteps([]);
+        setAgentActions([]);
+        setRawTrace(null);
+        setGoal("Qualify the lead and book a viewing"); // Reset to default goal
+
         if (conversation.id) {
             getAgentPlan(conversation.id).then((res: any) => {
                 if (res) {

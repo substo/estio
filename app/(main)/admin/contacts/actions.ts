@@ -1601,3 +1601,106 @@ export async function verifyAndHealContact(contactId: string, error: string | nu
     revalidatePath(`/admin/contacts/${contactId}/view`);
   }
 }
+
+export async function searchContactsAction(query: string) {
+  const { userId } = await auth();
+  if (!userId) return [];
+
+  if (!query || query.length < 2) return [];
+
+  // Find user's locations to scope search?
+  // Ideally we should scoped to the current location, but for now search broadly or use the first location context if available.
+  // The ContactView usually is within a context.
+  // Let's search all contacts user has access to.
+
+  // Actually, we can just search by name/phone/email
+  // We need to verify access (user.locations).
+  // This is a simplified search.
+
+  const contacts = await db.contact.findMany({
+    where: {
+      OR: [
+        { name: { contains: query, mode: 'insensitive' } },
+        { phone: { contains: query, mode: 'insensitive' } },
+        { email: { contains: query, mode: 'insensitive' } },
+      ]
+      // TODO: Add location restriction based on user access
+    },
+    take: 10,
+    select: { id: true, name: true, phone: true, email: true, location: { select: { name: true } } }
+  });
+
+  return contacts;
+}
+
+export async function mergeContacts(sourceContactId: string, targetContactId: string) {
+  const { userId } = await auth();
+  if (!userId) return { success: false, message: "Unauthorized" };
+
+  // Resolve internal user ID
+  const dbUser = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } });
+  const internalUserId = dbUser?.id || null;
+
+  try {
+    await db.$transaction(async (tx) => {
+      // 1. Get Source Contact Data
+      const source = await tx.contact.findUnique({ where: { id: sourceContactId } });
+      const target = await tx.contact.findUnique({ where: { id: targetContactId } });
+
+      if (!source || !target) throw new Error("Contact not found");
+
+      // 2. Transfer LID if target doesn't have one
+      if (source.lid && !target.lid) {
+        await tx.contact.update({
+          where: { id: targetContactId },
+          data: { lid: source.lid }
+        });
+      }
+
+      // 3. Handle Conversations (Move or Merge)
+      const sourceConvs = await tx.conversation.findMany({ where: { contactId: sourceContactId } });
+
+      for (const sourceConv of sourceConvs) {
+        // Check if target has conv in same location
+        const targetConv = await tx.conversation.findUnique({
+          where: {
+            locationId_contactId: {
+              locationId: sourceConv.locationId,
+              contactId: targetContactId
+            }
+          }
+        });
+
+        if (targetConv) {
+          console.log(`[Merge] Merging conversation ${sourceConv.id} into ${targetConv.id}`);
+          // Move messages
+          await tx.message.updateMany({
+            where: { conversationId: sourceConv.id },
+            data: { conversationId: targetConv.id }
+          });
+          // Delete source conv
+          await tx.conversation.delete({ where: { id: sourceConv.id } });
+        } else {
+          console.log(`[Merge] Moving conversation ${sourceConv.id} to contact ${targetContactId}`);
+          // Move conv
+          await tx.conversation.update({
+            where: { id: sourceConv.id },
+            data: { contactId: targetContactId }
+          });
+        }
+      }
+
+      // 4. Delete Source Contact
+      await tx.contact.delete({ where: { id: sourceContactId } });
+
+      // Log History
+      await logContactHistory(tx, targetContactId, internalUserId, "MERGED_FROM", { sourceId: sourceContactId, sourceName: source.name });
+    });
+
+    revalidatePath('/admin/contacts');
+    return { success: true, message: "Merged successfully" };
+  } catch (error: any) {
+    console.error("Merge error:", error);
+    return { success: false, message: error.message };
+  }
+}

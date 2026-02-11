@@ -440,37 +440,55 @@ export function ConversationInterface({ initialConversations }: ConversationInte
 
     const handleSync = async () => {
         if (!activeId) return;
-        // Don't clear messages, just show loading overlay if supported or just toast
-        // We set loadingMessages to true which shows spinner, consistent with initial load
         setLoadingMessages(true);
-        try {
-            toast({ title: "Syncing WhatsApp...", description: "Checking for missed messages." });
-            const res = await syncWhatsAppHistory(activeId);
+        let totalSynced = 0;
+        let offset = 0;
+        const CHUNK_SIZE = 50;
+        const MAX_LIMIT = 500; // Safety cap
+        let keepFetching = true;
 
-            if (res.success) {
-                const count = res.count || 0;
-                if (count > 0) {
-                    toast({ title: "Sync Complete", description: `Recovered ${count} messages.` });
-                    // Re-fetch to display them
-                    const msgs = await fetchMessages(activeId);
-                    setMessages(msgs);
+        try {
+            toast({ title: "Starting Deep Sync...", description: "Initializing..." });
+
+            while (keepFetching && offset < MAX_LIMIT) {
+                // Manual Sync: Force deeper check (limit 50, offset, ignore duplicates)
+                const res = await syncWhatsAppHistory(activeId, CHUNK_SIZE, true, offset);
+
+                if (res.success) {
+                    const count = res.count || 0;
+                    totalSynced += count;
+                    offset += CHUNK_SIZE;
+
+                    // Update UI with progress
+                    if (count > 0) {
+                        toast({
+                            title: "Syncing WhatsApp History...",
+                            description: `Fetched ${count} messages (Total: ${totalSynced})...`
+                        });
+                        // Re-fetch to display them as they come in
+                        const msgs = await fetchMessages(activeId);
+                        setMessages(msgs);
+                    }
+
+                    // Stop if we fetched fewer than requested (end of history)
+                    // Evolution API usually returns what it finds. If it finds 0, we stop.
+                    if (count < CHUNK_SIZE) {
+                        keepFetching = false;
+                    }
                 } else {
-                    toast({ title: "Up to date", description: "No new messages found." });
-                    // Optional: Re-fetch anyway just in case DB had updates from elsewhere?
-                    // But usually not needed if count is 0. 
-                    // However, to be safe and clear loading state correctly:
-                    const msgs = await fetchMessages(activeId);
-                    setMessages(msgs);
+                    toast({ title: "Sync Failed", description: String(res.error), variant: "destructive" });
+                    keepFetching = false;
                 }
-            } else {
-                toast({ title: "Sync Failed", description: String(res.error), variant: "destructive" });
-                // Re-fetch to reset loading state and show what we have
-                const msgs = await fetchMessages(activeId);
-                setMessages(msgs);
             }
+
+            toast({ title: "Sync Complete", description: `Total messages recovered: ${totalSynced}` });
+            const msgs = await fetchMessages(activeId);
+            setMessages(msgs);
+
         } catch (e) {
             console.error("Sync error:", e);
             toast({ title: "Sync Error", description: "An unexpected error occurred.", variant: "destructive" });
+        } finally {
             setLoadingMessages(false);
         }
     };
