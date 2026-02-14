@@ -14,12 +14,17 @@ export const ALWAYS_LOADED_TOOLS = [
     "create_viewing",         // Fairly common
     "semantic_search",        // Core searcher skill
     "recommend_similar",      // Core searcher skill
+    // Phase 4: Coordinator tools
+    "check_availability",     // Coordinator agent
+    "propose_slots",          // Coordinator agent
+    "confirm_viewing",        // Coordinator agent
+    "request_feedback",       // Post-viewing follow-up
+    "submit_feedback",        // Process feedback
 ];
 
 export const DEFERRED_TOOLS = [
     "generate_contract",      // Only in closing phase
     "send_docusign",          // Only in closing phase
-    "check_calendar",         // Only in coordinator phase
     "send_offer",             // Only in negotiation phase
     "calculate_mortgage",     // Rarely used
     "analyze_market_trends",  // Rarely used
@@ -27,3 +32,4 @@ export const DEFERRED_TOOLS = [
     "send_listing_alert",     // Only in auto-pilot
     "create_deal",            // Only at deal creation
 ];
+

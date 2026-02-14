@@ -511,16 +511,16 @@ export async function findSimilarProperties(
 model Property {
   // ... existing fields
 
-  // Vector embedding (added via raw migration)
-  // embedding vector(768)
+  // Vector embedding (added via raw migration - gemini-embedding-001 uses 3072 dims)
+  // embedding vector(3072)
 }
 ```
 
 ```sql
 -- Migration: Add embedding column to properties
-ALTER TABLE properties ADD COLUMN IF NOT EXISTS embedding vector(768);
+ALTER TABLE properties ADD COLUMN IF NOT EXISTS embedding vector(3072);
 CREATE INDEX IF NOT EXISTS idx_properties_embedding 
-  ON properties USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+  ON properties USING hnsw (embedding vector_cosine_ops);
 ```
 
 ---

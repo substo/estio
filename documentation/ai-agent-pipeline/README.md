@@ -81,7 +81,7 @@ This implementation targets **Industry Standard (Claude Opus 4.6 / GPT-5.x level
 | **Database** | PostgreSQL + Prisma | Existing stack |
 | **Vector Store** | pgvector extension | Integrated, no external service |
 | **Tool Protocol** | MCP (Model Context Protocol) | Industry standard, model-agnostic |
-| **Embeddings** | Google text-embedding-005 | Best cost/performance for English |
+| **Embeddings** | Google gemini-embedding-001 | Best cost/performance/quality (3072 dimens) |
 | **E-Signature** | DocuSign / HelloSign API | Contract signing |
 | **Observability** | Custom + Logfire | Tracing, cost, latency |
 

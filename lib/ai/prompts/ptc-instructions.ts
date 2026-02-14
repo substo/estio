@@ -37,11 +37,26 @@ ${toolSignatures}
 
 ### Example
 \`\`\`javascript
+// 1. Searcher Flow
 const properties = await search_properties({ locationId: "substo_estio", minPrice: 200000 });
 const relevant = properties.filter(p => p.bedrooms >= 3);
 if (relevant.length > 0) {
+  // Legacy single-step viewing
   await create_viewing({ contactId: context.contactId, propertyId: relevant[0].id, date: "2024-03-10" });
   console.log("Viewing created for " + relevant[0].title);
+}
+
+// 2. Coordinator Flow (Phase 4)
+const availability = await check_availability({ userId: "user_123", startDate: "2024-03-10", endDate: "2024-03-17" });
+if (availability.freeSlots.length > 0) {
+  const proposal = await propose_slots({ agentUserId: "user_123", propertyId: relevant[0]?.id });
+  // Wait for user selection... then later:
+  await confirm_viewing({ 
+    viewingId: "v_123", 
+    slotStart: proposal.slots[0].start, 
+    slotEnd: proposal.slots[0].end, 
+    attendees: [{ email: "lead@example.com", name: "Lead Name", role: "lead" }] 
+  });
 }
 return relevant.length;
 \`\`\`

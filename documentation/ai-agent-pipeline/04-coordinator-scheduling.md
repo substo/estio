@@ -2,6 +2,7 @@
 
 **Duration**: Weeks 7–8  
 **Priority**: 🟡 High  
+**Status**: ✅ Completed
 **Dependencies**: Phase 0 (MCP, Tracing), Phase 2 (Buyer Profile), Phase 3 (Search Results)
 
 ---
@@ -33,7 +34,7 @@ An autonomous coordinator that handles the full viewing lifecycle:
 Lead says "I'd like to see Property X"
     │
     ▼
-[1] Check Agent's calendar for free slots (Google/Outlook)
+[1] Check Agent's calendar for free slots (Google Calendar)
     │
     ▼
 [2] Check Owner's availability (message Owner or check shared calendar)
@@ -74,8 +75,8 @@ tools:
   - check_availability
   - propose_slots
   - confirm_viewing
-  - send_reminder
   - request_feedback
+  - submit_feedback
   - create_viewing
   - draft_reply
   - store_insight
@@ -152,7 +153,7 @@ interface AvailabilityResult {
 
 /**
  * Check calendar availability for a user.
- * Supports Google Calendar (primary) and Outlook (via MS Graph).
+ * Supports Google Calendar (primary).
  */
 export async function checkAvailability(
   userId: string,
@@ -170,11 +171,6 @@ export async function checkAvailability(
   // Try Google Calendar first
   if (user.googleAccessToken) {
     return getGoogleAvailability(user, startDate, endDate, durationMinutes);
-  }
-
-  // Fall back to Outlook
-  if (user.outlookAccessToken) {
-    return getOutlookAvailability(user, startDate, endDate, durationMinutes);
   }
 
   // No calendar connected — return all slots as available
@@ -561,8 +557,9 @@ model Viewing {
 | Action | File | Purpose |
 |:-------|:-----|:--------|
 | **NEW** | `lib/ai/skills/coordinator/SKILL.md` | Coordinator skill definition |
-| **NEW** | `lib/ai/tools/calendar.ts` | Calendar availability, slot proposal, confirmation |
+| **NEW** | `lib/ai/tools/calendar.ts` | Calendar availability, slot proposal, confirmation (Google-only) |
 | **NEW** | `lib/ai/tools/follow-up.ts` | Post-viewing follow-up and feedback |
+| **MODIFY** | `lib/ai/mcp/server.ts` | Registered 5 new tools including `submit_feedback` |
 | **MODIFY** | `prisma/schema.prisma` | Extend Viewing model with status, feedback, reminders |
 | **MODIFY** | GHL Calendar sync | Ensure bi-directional sync with new fields |
 
@@ -571,6 +568,5 @@ model Viewing {
 ## References
 
 - [Google Calendar API: Freebusy](https://developers.google.com/calendar/api/v3/reference/freebusy/query)
-- [Microsoft Graph: Find Meeting Times](https://learn.microsoft.com/en-us/graph/api/user-findmeetingtimes)
 - [GHL Calendar API](https://highlevel.stoplight.io/docs/integrations/calendar-api)
 - [Best Practices for Scheduling AI Agents](https://www.anthropic.com/research/practical-agents)

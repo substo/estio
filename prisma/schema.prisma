@@ -659,7 +659,15 @@ model Viewing {
   notes       String?
 
   ghlAppointmentId String? @unique
-  status           String  @default("scheduled") // scheduled, cancelled, completed, no_show
+  status           String  @default("scheduled") // proposed, lead_confirmed, confirmed, reminded, completed, cancelled, rescheduled, scheduled, no_show
+  
+  // Phase 4: Coordinator & Scheduling
+  scheduledAt       DateTime?
+  endAt             DateTime?
+  calendarEventId   String?        // Google Calendar event ID
+  feedbackReceived  Boolean        @default(false)
+  feedback          Json?          // { overallRating, liked, disliked, interestedInOffer, comments }
+  reminders         Json?          // Track sent reminders [{type, sentAt}]
   
   @@index([contactId])
   @@index([propertyId])

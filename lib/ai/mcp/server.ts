@@ -164,6 +164,111 @@ registerTool(
     }
 );
 
+// ── PHASE 4: COORDINATOR TOOLS ────────────────────
+
+registerTool(
+    "check_availability",
+    "Check calendar availability for a user to find free time slots.",
+    {
+        userId: z.string().describe("User ID to check availability for"),
+        startDate: z.string().describe("Start date (ISO string)"),
+        endDate: z.string().describe("End date (ISO string)"),
+        durationMinutes: z.number().optional().default(60).describe("Duration of each slot in minutes")
+    },
+    async (params: any) => {
+        const { checkAvailability } = await import("../tools/calendar");
+        const result = await checkAvailability(
+            params.userId,
+            new Date(params.startDate),
+            new Date(params.endDate),
+            params.durationMinutes
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    }
+);
+
+registerTool(
+    "propose_slots",
+    "Propose 3 diverse time slots for a property viewing.",
+    {
+        agentUserId: z.string().describe("Agent user ID"),
+        propertyId: z.string().describe("Property ID for the viewing"),
+        daysAhead: z.number().optional().default(7).describe("How many days ahead to search")
+    },
+    async (params: any) => {
+        const { proposeSlots } = await import("../tools/calendar");
+        const result = await proposeSlots(params.agentUserId, params.propertyId, params.daysAhead);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    }
+);
+
+registerTool(
+    "confirm_viewing",
+    "Confirm a viewing and send calendar invitations to all parties.",
+    {
+        viewingId: z.string().describe("Viewing ID"),
+        slotStart: z.string().describe("Selected slot start time (ISO string)"),
+        slotEnd: z.string().describe("Selected slot end time (ISO string)"),
+        attendees: z.array(z.object({
+            email: z.string(),
+            name: z.string(),
+            role: z.enum(["agent", "lead", "owner"])
+        })).describe("List of attendees to invite")
+    },
+    async (params: any) => {
+        const { confirmViewing } = await import("../tools/calendar");
+        const result = await confirmViewing({
+            viewingId: params.viewingId,
+            selectedSlot: {
+                start: new Date(params.slotStart),
+                end: new Date(params.slotEnd),
+                available: true
+            },
+            attendees: params.attendees
+        });
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    }
+);
+
+registerTool(
+    "request_feedback",
+    "Check for viewings that need post-viewing follow-up.",
+    {},
+    async () => {
+        const { checkPendingFollowUps } = await import("../tools/follow-up");
+        const result = await checkPendingFollowUps();
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    }
+);
+
+registerTool(
+    "submit_feedback",
+    "Process feedback for a completed viewing and determine next steps.",
+    {
+        viewingId: z.string().describe("The ID of the viewing"),
+        overallRating: z.number().min(1).max(5).describe("Rating from 1-5"),
+        liked: z.array(z.string()).describe("List of things the lead liked"),
+        disliked: z.array(z.string()).describe("List of things the lead disliked"),
+        interestedInOffer: z.boolean().describe("Whether the lead wants to make an offer"),
+        comments: z.string().describe("Any additional comments")
+    },
+    async (params: any) => {
+        const { processViewingFeedback } = await import("../tools/follow-up");
+        const result = await processViewingFeedback({
+            viewingId: params.viewingId,
+            overallRating: params.overallRating as 1 | 2 | 3 | 4 | 5,
+            liked: params.liked,
+            disliked: params.disliked,
+            interestedInOffer: params.interestedInOffer,
+            comments: params.comments
+        });
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    }
+);
+
+// ── OTHER TOOLS ───────────────────────────────────
+
+
 registerTool(
     "log_activity",
     "Log a general activity or note to the contact's history.",
