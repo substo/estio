@@ -2,7 +2,10 @@
 
 **Duration**: Weeks 3–4  
 **Priority**: 🔴 Critical — First customer-facing agent  
+**Duration**: Weeks 3–4  
+**Priority**: 🔴 Critical — First customer-facing agent  
 **Dependencies**: Phase 0 (Memory, MCP), Phase 1 (Orchestrator, Intent Classifier)
+**Status**: ✅ Implemented (Feb 2026)
 
 ---
 
@@ -453,12 +456,16 @@ export async function retrieveRebuttal(
 
 ### 2.7 Verification
 
-- [ ] "That's too expensive" → Retrieves price rebuttal with financing breakdown
-- [ ] "I need to think about it" → Asks clarifying question, doesn't pressure
-- [ ] "I found something cheaper" → Retrieves differentiation strategy
-- [ ] Objection stored as insight for long-term tracking
-- [ ] Lead score adjusted based on objection severity
-- [ ] Agent never argues or immediately offers discount
+- [x] "That's too expensive" → Retrieves price rebuttal with financing breakdown
+- [x] "I need to think about it" → Asks clarifying question, doesn't pressure
+- [x] "I found something cheaper" → Retrieves differentiation strategy
+- [x] Objection stored as insight for long-term tracking
+- [x] Lead score adjusted based on objection severity
+- [x] Agent never argues or immediately offers discount
+
+### 2.8 Implementation Notes (Refactor)
+- **Multi-Tenant API Keys**: The system now fetches `googleAiApiKey` from `SiteConfig` per location.
+- **Embedding Model**: Switched to `gemini-embedding-001` (3072 dimensions) due to API availability. Verify DB schema uses `vector(3072)`.
 
 ---
 

@@ -102,6 +102,7 @@ export interface SkillExecutionContext {
     sentiment: SentimentResult;
     memories: any[]; // simplified type
     dealStage?: string;
+    apiKey?: string;
 }
 
 export interface SkillExecutionResult {
@@ -186,7 +187,8 @@ You must respond with valid JSON:
                 const tool = toolRegistry.find(t => t.name === call.name);
                 if (tool) {
                     try {
-                        const result = await tool.handler(call.arguments);
+                        // Pass apiKey in context
+                        const result = await tool.handler(call.arguments, { apiKey: context.apiKey });
                         results.push({ name: call.name, args: call.arguments, result });
                     } catch (e: any) {
                         results.push({ name: call.name, args: call.arguments, error: e.message });

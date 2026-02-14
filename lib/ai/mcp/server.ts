@@ -1,17 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import * as tools from "../tools";
+import { updateLeadScore } from "../tools/lead-scoring";
+import { retrieveRebuttal } from "../tools/rebuttal";
 import { storeInsight } from "../memory";
 import { searchTools, initToolSearchIndex } from "./tool-search";
 import db from "@/lib/db";
-import { registerToolInRegistry } from "./registry";
+import { registerToolInRegistry, ToolHandlerContext } from "./registry";
 
-/**
- * Creates and configures the Estio MCP Server.
- * 
- * Defines all available tools and resources for the AI agent.
- * This is the single source of truth for tool definitions.
- */
 /**
  * Creates and configures the Estio MCP Server.
  * 
@@ -24,8 +20,14 @@ export const server = new McpServer({
 });
 
 // Helper to register tools both in MCP and our internal registry
-function registerTool(name: string, description: string, schema: any, handler: any) {
+function registerTool(
+    name: string,
+    description: string,
+    schema: any,
+    handler: (params: any, context?: ToolHandlerContext) => Promise<any>
+) {
     registerToolInRegistry(name, description, schema, handler);
+    // For external MCP clients, context will be undefined.
     server.tool(name, description, schema, handler);
 }
 
@@ -136,6 +138,33 @@ registerTool(
     async (params: any) => {
         await tools.appendLog(params.contactId, params.message);
         return { content: [{ type: "text", text: "Activity logged." }] };
+    }
+);
+
+registerTool(
+    "update_lead_score",
+    "Update the contact's lead score (1-100) and qualification stage.",
+    {
+        contactId: z.string(),
+        score: z.number().min(0).max(100),
+        reason: z.string().describe("Why the score changed")
+    },
+    async (params: any) => {
+        const result = await updateLeadScore(params.contactId, params.score, params.reason);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    }
+);
+
+registerTool(
+    "retrieve_rebuttal",
+    "Retrieve data-backed rebuttals from the Sales Playbook for a given objection.",
+    {
+        objectionText: z.string().describe("The user's objection (e.g. 'Too expensive')"),
+        category: z.enum(["PRICE", "LOCATION", "TIMING", "PROPERTY_SPECIFIC", "TRUST", "COMPETITOR"]).optional()
+    },
+    async (params: any, context?: ToolHandlerContext) => {
+        const results = await retrieveRebuttal(params.objectionText, params.category, context?.apiKey);
+        return { content: [{ type: "text", text: JSON.stringify(results) }] };
     }
 );
 

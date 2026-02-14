@@ -1,3 +1,4 @@
+import db from "@/lib/db";
 import { classifyIntent } from "./classifier";
 import { analyzeSentiment } from "./sentiment";
 import { startTrace, startSpan, endSpan, endTrace } from "./tracing";
@@ -63,6 +64,10 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
                 intent: classification.intent,
                 sentiment,
                 memories,
+                apiKey: (await db.contact.findUnique({
+                    where: { id: input.contactId },
+                    include: { location: { include: { siteConfig: true } } }
+                }))?.location?.siteConfig?.googleAiApiKey ?? undefined
             });
 
             await endSpan(skillSpan.spanId, skillSpan.startTime, skillResult.error ? "error" : "success", {

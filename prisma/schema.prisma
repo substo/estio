@@ -445,6 +445,11 @@ model Contact {
   // WhatsApp Metadata
   lid             String?      // WhatsApp Lightweight ID (for mapping)
 
+  // AI Lead Scoring (Phase 2)
+  leadScore              Int?      @default(0)
+  qualificationStage     String?   @default("unqualified")
+  buyerProfile           Json?
+
   insights        Insight[]
   
   @@index([locationId])
@@ -983,5 +988,14 @@ model Insight {
   @@index([contactId])
   @@index([conversationId])
   @@map("insights")
+}
+
+model PlaybookEntry {
+  id         String   @id @default(cuid())
+  text       String   @db.Text
+  category   String
+  createdAt  DateTime @default(now())
+
+  @@map("playbook_entries")
 }
 

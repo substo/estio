@@ -1,63 +1,30 @@
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-// Use the site config API key if available, otherwise fallback to env var
-// Note: In a real app, we should fetch this from DB, but for this utility
-// we'll assume the env var is set or passed in.
-const apiKey = process.env.GOOGLE_API_KEY;
-
-if (!apiKey) {
-    console.warn("GOOGLE_API_KEY is not set. Embeddings will fail unless key is provided.");
-}
-
-const genAI = new GoogleGenerativeAI(apiKey!);
-
 /**
  * Generate a 768-dimensional embedding for a text string.
- * Uses Google's text-embedding-005 model.
+ * Uses Google's text-embedding-004 model.
  * 
- * Cost: ~$0.00001 per embedding (negligible)
+ * @param text The text to embed
+ * @param apiKey Optional API key. If not provided, falls back to process.env.GOOGLE_API_KEY
  */
-export async function generateEmbedding(text: string): Promise<number[]> {
-    if (!text) return [];
+export async function generateEmbedding(text: string, apiKey?: string): Promise<number[]> {
+    const key = apiKey || process.env.GOOGLE_API_KEY;
 
-    // Clean text to avoid issues
-    const cleanText = text.replace(/\n/g, " ").trim();
-    if (!cleanText) return [];
-
-    const model = genAI.getGenerativeModel({ model: "text-embedding-004" }); // 005 might not be generally available yet, using 004 as stable fallback or check existing models
-    // Actually, let's use text-embedding-004 as it is the current stable one for Gemini.
-    // If 005 is available, we can switch. documenting as 004 for safety.
-
-    try {
-        const result = await model.embedContent(cleanText);
-        return result.embedding.values;
-    } catch (e) {
-        console.error("Failed to generate embedding", e);
+    if (!key) {
+        console.warn("GOOGLE_API_KEY is not set and no key provided. Embeddings will fail.");
         return [];
     }
-}
-
-/**
- * Batch embed multiple texts (more efficient for bulk operations).
- */
-export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
-    const model = genAI.getGenerativeModel({ model: "text-embedding-004" });
-
-    const validTexts = texts.map(t => t.replace(/\n/g, " ").trim()).filter(t => t.length > 0);
-    if (validTexts.length === 0) return [];
 
     try {
-        // Prepare batch request if supported, or parallel promises
-        // Gemini API supports batchEmbedContents
-        const result = await model.batchEmbedContents({
-            requests: validTexts.map(t => ({ content: { role: "user", parts: [{ text: t }] } }))
-        });
+        const genAI = new GoogleGenerativeAI(key);
+        // Using gemini-embedding-001 (3072 dimensions) since text-embedding-004 is unavailable
+        const model = genAI.getGenerativeModel({ model: "gemini-embedding-001" });
 
-        return result.embeddings.map(e => e.values);
-    } catch (e) {
-        console.error("Failed to generate batch embeddings", e);
-        // Fallback to sequential/parallel if batch fails
-        return Promise.all(validTexts.map(t => generateEmbedding(t)));
+        const result = await model.embedContent(text);
+        return result.embedding.values;
+    } catch (error) {
+        console.error("Failed to generate embedding", error);
+        return [];
     }
 }
