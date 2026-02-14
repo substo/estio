@@ -5,6 +5,8 @@ import { updateLeadScore } from "../tools/lead-scoring";
 import { retrieveRebuttal } from "../tools/rebuttal";
 import { storeInsight } from "../memory";
 import { searchTools, initToolSearchIndex } from "./tool-search";
+import { hybridPropertySearch } from "../search/hybrid-search";
+import { findSimilarProperties } from "../search/recommendations";
 import db from "@/lib/db";
 import { registerToolInRegistry, ToolHandlerContext } from "./registry";
 
@@ -74,6 +76,40 @@ registerTool(
 
         // Implementation calls existing searchProperties logic
         const results = await tools.searchProperties(locationId, mappedQuery);
+        return { content: [{ type: "text", text: JSON.stringify(results) }] };
+    }
+);
+
+registerTool(
+    "semantic_search",
+    "Search for properties using natural language to find matches based on style, vibe, and description.",
+    {
+        locationId: z.string().describe("The location ID (e.g. substo_estio)"),
+        query: z.string().describe("Natural language query (e.g. 'modern sea view villa with pool')"),
+        minPrice: z.number().optional(),
+        maxPrice: z.number().optional(),
+        district: z.string().optional(),
+    },
+    async (params: any) => {
+        const { query, ...filters } = params;
+        const results = await hybridPropertySearch({
+            ...filters,
+            naturalLanguageQuery: query,
+            limit: 5
+        });
+        return { content: [{ type: "text", text: JSON.stringify(results) }] };
+    }
+);
+
+registerTool(
+    "recommend_similar",
+    "Find properties similar to a specific property based on visual/descriptive similarity.",
+    {
+        propertyId: z.string().describe("The ID of the property the client liked"),
+        excludeIds: z.array(z.string()).optional().describe("IDs of properties to exclude (e.g. already seen)"),
+    },
+    async (params: any) => {
+        const results = await findSimilarProperties(params.propertyId, 5, params.excludeIds);
         return { content: [{ type: "text", text: JSON.stringify(results) }] };
     }
 );

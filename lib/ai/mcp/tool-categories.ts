@@ -12,6 +12,8 @@ export const ALWAYS_LOADED_TOOLS = [
     "log_activity",           // Always needed
     "retrieve_context",       // Memory retrieval — used every call
     "create_viewing",         // Fairly common
+    "semantic_search",        // Core searcher skill
+    "recommend_similar",      // Core searcher skill
 ];
 
 export const DEFERRED_TOOLS = [

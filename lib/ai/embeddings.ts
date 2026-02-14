@@ -2,8 +2,8 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 /**
- * Generate a 768-dimensional embedding for a text string.
- * Uses Google's text-embedding-004 model.
+ * Generate a 3072-dimensional embedding for a text string.
+ * Uses Google's gemini-embedding-001 model.
  * 
  * @param text The text to embed
  * @param apiKey Optional API key. If not provided, falls back to process.env.GOOGLE_API_KEY

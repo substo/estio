@@ -2,6 +2,7 @@
 
 import db from "@/lib/db";
 import { MediaKind } from "@prisma/client";
+import { updatePropertyEmbedding } from "@/lib/ai/search/property-embeddings";
 import { getLocationById, refreshGhlAccessToken } from "@/lib/location";
 import { syncToGHL } from "@/lib/properties/repository";
 import { revalidatePath } from "next/cache";
@@ -674,6 +675,11 @@ export async function upsertProperty(formData: FormData) {
                 });
             }
         }
+
+        // ── AI: Update Property Embedding (fire-and-forget) ──
+        updatePropertyEmbedding(property.id).catch(err =>
+            console.error(`Background embedding update failed for ${property.id}:`, err)
+        );
 
         // Process Stakeholders (Contact/Company Roles)
 

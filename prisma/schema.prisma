@@ -216,6 +216,9 @@ model Property {
   rentalPeriod           String?
   metadata               Json?    // For dynamic schema expansion
 
+  // Vector embedding (added via raw migration in scripts/embed-properties.ts)
+  // embedding vector(3072)
+
   // Extended Area Details
   coveredAreaSqm         Int?      // "Internal Covered"
   coveredVerandaSqm      Int?

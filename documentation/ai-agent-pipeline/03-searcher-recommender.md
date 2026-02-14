@@ -2,7 +2,10 @@
 
 **Duration**: Weeks 5–6  
 **Priority**: 🟡 High  
-**Dependencies**: Phase 0 (pgvector, MCP), Phase 2 (BuyerProfile)
+**Status**: ✅ Implemented (Feb 2026)
+
+> **Implementation Note**: While the design specified `vector(768)`, the actual implementation uses `vector(3072)` to match the `gemini-embedding-001` model currently in use. Future upgrades to `text-embedding-004` (768 dims) will require a database migration.
+
 
 ---
 
