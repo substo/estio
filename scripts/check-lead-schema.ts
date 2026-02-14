@@ -2,17 +2,18 @@ import db from '../lib/db';
 
 async function main() {
     console.log("Checking for saved lead schema...");
-    const users = await db.user.findMany({
-        select: { id: true, crmLeadSchema: true }
+    // crmLeadSchema is on Location, not User
+    const locations = await db.location.findMany({
+        select: { id: true, name: true, crmLeadSchema: true }
     });
 
-    const user = users.find(u => u.crmLeadSchema !== null);
+    const location = locations.find(l => l.crmLeadSchema !== null);
 
-    if (user) {
-        console.log("Found user with saved lead schema:", user.id);
-        console.log(JSON.stringify(user.crmLeadSchema, null, 2));
+    if (location) {
+        console.log("Found location with saved lead schema:", location.name, `(${location.id})`);
+        console.log(JSON.stringify(location.crmLeadSchema, null, 2));
     } else {
-        console.log("No user found with saved lead schema.");
+        console.log("No location found with saved lead schema.");
     }
 }
 

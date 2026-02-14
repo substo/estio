@@ -3,8 +3,9 @@ import { getLocationById } from "@/lib/location";
 import Link from "next/link";
 import ContactForm from "../../_components/contact-form";
 
-export default async function PropertyDetailPage({ params, searchParams }: { params: { slug: string }, searchParams: { location?: string } }) {
-    const locationId = searchParams.location;
+export default async function PropertyDetailPage({ params, searchParams }: { params: Promise<{ slug: string }>, searchParams: Promise<{ location?: string }> }) {
+    const { slug } = await params;
+    const { location: locationId } = await searchParams;
 
     if (!locationId) {
         return <div className="p-4 text-red-500">Location ID is required</div>;
@@ -16,7 +17,7 @@ export default async function PropertyDetailPage({ params, searchParams }: { par
     }
 
     const property = await db.property.findUnique({
-        where: { slug: params.slug },
+        where: { slug },
         include: { media: true },
     });
 

@@ -4,7 +4,8 @@ import db from "@/lib/db";
 import { getLocationById } from "@/lib/location";
 import Link from "next/link";
 
-export default async function WidgetSearchPage({ searchParams }: { searchParams: { location?: string, q?: string, minPrice?: string, maxPrice?: string, type?: string } }) {
+export default async function WidgetSearchPage({ searchParams: searchParamsPromise }: { searchParams: Promise<{ location?: string, q?: string, minPrice?: string, maxPrice?: string, type?: string }> }) {
+    const searchParams = await searchParamsPromise;
     const locationId = searchParams.location;
 
     if (!locationId) {

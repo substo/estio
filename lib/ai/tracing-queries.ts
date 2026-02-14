@@ -28,8 +28,9 @@ export async function getTrace(traceId: string): Promise<TraceNode | null> {
     let root: TraceNode | null = null;
 
     spans.forEach(span => {
+        const spanId = span.spanId ?? span.id; // Fallback to primary key if spanId is null
         const node: TraceNode = {
-            spanId: span.spanId,
+            spanId,
             name: span.taskTitle || "Unknown Task",
             type: span.intent || "unknown",
             status: span.status,
@@ -46,12 +47,13 @@ export async function getTrace(traceId: string): Promise<TraceNode | null> {
             },
             children: []
         };
-        nodeMap.set(span.spanId, node);
+        nodeMap.set(spanId, node);
     });
 
     // Build tree
     spans.forEach(span => {
-        const node = nodeMap.get(span.spanId)!;
+        const spanId = span.spanId ?? span.id;
+        const node = nodeMap.get(spanId)!;
         if (span.parentSpanId && nodeMap.has(span.parentSpanId)) {
             nodeMap.get(span.parentSpanId)!.children.push(node);
         } else {

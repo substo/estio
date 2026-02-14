@@ -88,8 +88,8 @@ export class SkillLoader {
 
 // ── EXECUTION LOGIC ─────────────────────────────────────────────────────────────
 
-import { getModelForTask } from "../model-router";
-import { callLLM } from "../llm";
+import { getModelForTask, estimateCost } from "../model-router";
+import { callLLM, callLLMWithMetadata } from "../llm";
 import { toolRegistry } from "../mcp/registry";
 import { SentimentResult } from "../sentiment";
 
@@ -170,7 +170,7 @@ You must respond with valid JSON:
 
     // 3. Call LLM
     try {
-        const response = await callLLM(
+        const { text: response, usage } = await callLLMWithMetadata(
             modelId,
             systemPrompt,
             `Conversation History:\n${context.conversationHistory}\n\nLatest User Message: "${context.message}"`,
@@ -180,16 +180,6 @@ You must respond with valid JSON:
         const parsed = JSON.parse(response);
 
         // 4. Trace Metadata construction
-        // Note: We don't execute tools here (Orchestrator handles that? Or should we?)
-        // The Phase 1 doc says "Dispatches tool calls via MCP registry (reusing logic from agent.ts)"
-        // The Orchestrator code says `skillResult = await executeSkill(...)` and then logs `actions: skillResult.toolCalls`.
-        // It implies `executeSkill` returns the *planned* tool calls, but maybe the orchestrator or this function executes them?
-        // Re-reading doc: "Step 4: Route to Skill ... executeSkill ... actions: skillResult.toolCalls".
-        // It seems Phase 1 focuses on *planning* the actions.
-        // BUT `agent.ts` executes them.
-        // If `executeSkill` is to replace `executeAgentTask`, it should probably execute them too.
-        // Let's implement execution here to be self-contained.
-
         const results = [];
         if (parsed.tool_calls) {
             for (const call of parsed.tool_calls) {
@@ -207,15 +197,17 @@ You must respond with valid JSON:
             }
         }
 
+        const cost = estimateCost(modelId, usage.promptTokens, usage.completionTokens);
+
         return {
             modelUsed: modelId,
             thoughtSummary: parsed.thought_summary || "",
             thoughtSteps: parsed.thought_steps || [],
-            toolCalls: results, // These are executed results now
+            toolCalls: results,
             draftReply: parsed.final_response,
-            promptTokens: 0, // Placeholder
-            completionTokens: 0, // Placeholder
-            cost: 0 // Placeholder
+            promptTokens: usage.promptTokens,
+            completionTokens: usage.completionTokens,
+            cost: cost
         };
 
     } catch (e: any) {

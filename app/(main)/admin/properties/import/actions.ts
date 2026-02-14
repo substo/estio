@@ -11,18 +11,21 @@ async function getCrmCredentials() {
 
     const dbUser = await db.user.findUnique({
         where: { clerkId: user.id },
+        include: { locations: true }
     });
 
-    if (!dbUser || !dbUser.crmUrl || !dbUser.crmUsername || !dbUser.crmPassword) {
+    const location = dbUser?.locations?.[0];
+    if (!location || !location.crmUrl || !dbUser.crmUsername || !dbUser.crmPassword) {
         return null;
     }
 
     return {
-        url: dbUser.crmUrl,
+        url: location.crmUrl,
         username: dbUser.crmUsername,
         password: dbUser.crmPassword
     };
 }
+
 
 export async function analyzeCrmSchema() {
     try {
@@ -182,8 +185,16 @@ export async function saveCrmSchema(schema: any) {
         const user = await currentUser();
         if (!user) throw new Error("Unauthorized");
 
-        await db.user.update({
+        const dbUser = await db.user.findUnique({
             where: { clerkId: user.id },
+            include: { locations: true }
+        });
+
+        const location = dbUser?.locations?.[0];
+        if (!location) throw new Error("No location found for user");
+
+        await db.location.update({
+            where: { id: location.id },
             data: { crmSchema: schema },
         });
 
@@ -193,6 +204,7 @@ export async function saveCrmSchema(schema: any) {
         return { success: false, error: error.message };
     }
 }
+
 
 export async function getUserLocation() {
     const user = await currentUser();

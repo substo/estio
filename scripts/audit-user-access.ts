@@ -1,4 +1,3 @@
-
 import db from '../lib/db';
 
 async function auditUserAccess() {
@@ -9,6 +8,7 @@ async function auditUserAccess() {
         where: { email },
         include: {
             locations: true,
+            locationRoles: { include: { location: true } },
             _count: { select: { locations: true } }
         }
     });
@@ -20,12 +20,11 @@ async function auditUserAccess() {
 
     console.log(`User ID: ${user.id}`);
     console.log(`Name: ${user.name}`);
-    console.log(`Role: ${user.role}`);
+    console.log(`Roles: ${user.locationRoles.map(r => `${r.role} @ ${r.location.name}`).join(', ') || 'None'}`);
     console.log(`Locations Count: ${user._count.locations}`);
 
     if (user.locations.length === 0) {
         console.log('WARNING: User has NO locations attached.');
-        // Check if there are any locations available to attach
         const allLocations = await db.location.findMany();
         console.log(`Total Locations in System: ${allLocations.length}`);
         allLocations.forEach(l => console.log(` - ${l.name} (${l.id})`));

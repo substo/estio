@@ -4,6 +4,7 @@ import * as tools from "./tools";
 import { SkillLoader } from "./skills/loader";
 import * as skillTools from "./skills/tools";
 import { calculateRunCost } from "@/lib/ai/pricing";
+export { orchestrate } from "./orchestrator"; // Re-export for backward compatibility/ease of use
 import { getModelForTask } from "./model-router";
 import { toolRegistry } from "./mcp/registry";
 import "./mcp/server"; // Import for side effects (tool registration)

@@ -22,7 +22,7 @@ interface ConversationUsage {
     id: string;
     conversationId: string;
     contactName: string;
-    contactEmail?: string;
+    contactEmail: string | null;
     totalTokens: number;
     totalCost: number;
     lastMessageAt: string;
