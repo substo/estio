@@ -341,6 +341,11 @@ STAGE: ${deal.stage}
 }
 
 // --- Orchestrator Function (Restored) ---
+
+/**
+ * Main Agent Loop
+ * @deprecated Use lib/ai/orchestrator.ts instead. Phase 1 Orchestrator replaces this.
+ */
 export async function runAgent(contactId: string, locationId: string, history: string) {
     // TRACING INTEGRATION: Start Trace
     const conv = await db.conversation.findFirst({

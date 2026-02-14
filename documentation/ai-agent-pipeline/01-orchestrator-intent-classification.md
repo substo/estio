@@ -2,7 +2,8 @@
 
 **Duration**: Week 2  
 **Priority**: 🔴 Critical  
-**Dependencies**: Phase 0 (Infrastructure Foundation)
+**Dependencies**: Phase 0 (Infrastructure Foundation)  
+> **Status**: ✅ Completed (Feb 14, 2026)
 
 ---
 
@@ -671,3 +672,8 @@ lib/ai/skills/
 - [Reflexion: Language Agents with Verbal Reinforcement (Paper)](https://arxiv.org/abs/2303.11366)
 - [OpenAI Function Calling Guide](https://platform.openai.com/docs/guides/function-calling)
 - [Google Gemini Tool Use](https://ai.google.dev/gemini-api/docs/function-calling)
+
+## Implementation Notes (Feb 14, 2026)
+- **Skills**: Placeholder skills created for `negotiator`, `closer`, `objection_handler` to prevent routing errors.
+- **Tools**: Added `tools` frontmatter to all SKILL.md files to enable proper MCP tool filtering.
+- **Observability**: Token costs are currently displayed as $0.00 in the dashboard due to limitations in the `callLLM` wrapper response format.

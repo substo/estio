@@ -617,6 +617,43 @@ export async function generateAIDraft(conversationId: string, contactId: string,
     return result;
 }
 
+export async function orchestrateAction(conversationId: string, contactId: string, dealStage?: string) {
+    const location = await getAuthenticatedLocation();
+
+    // Fetch conversation history
+    const messages = await db.message.findMany({
+        where: { conversation: { ghlConversationId: conversationId } },
+        orderBy: { createdAt: 'asc' },
+        take: 20
+    });
+
+    if (messages.length === 0) {
+        throw new Error("No messages found in conversation");
+    }
+
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage.direction !== 'inbound') {
+        // Technically we can orchestrate on our own message (e.g. auto-follow up) but usually it's responsive
+        // For Phase 1 we'll allow it but warn or maybe just use the last inbound?
+        // Let's just use the last message regardless for now.
+    }
+
+    const history = messages.map(m => `${m.direction === 'inbound' ? 'User' : 'Agent'}: ${m.body}`).join("\n");
+
+    // Dynamic import to avoid build-time circular deps if any (though standard import is likely fine)
+    const { orchestrate } = await import("@/lib/ai/orchestrator");
+
+    const result = await orchestrate({
+        conversationId,
+        contactId,
+        message: lastMessage.body || "",
+        conversationHistory: history,
+        dealStage
+    });
+
+    return result;
+}
+
 export async function createDealContext(title: string, conversationIds: string[]) {
     const location = await getAuthenticatedLocation();
     const accessToken = location.ghlAccessToken!;

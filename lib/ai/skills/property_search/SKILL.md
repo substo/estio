@@ -1,6 +1,9 @@
 ---
 name: property_search
 description: Use this skill when the intent is to find properties, check inventory, or recommend listings to a lead.
+tools:
+  - search_properties
+  - log_activity
 ---
 
 # Skill: Property Search

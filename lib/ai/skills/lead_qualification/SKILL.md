@@ -1,6 +1,10 @@
 ---
 name: lead_qualification
 description: Use this skill when the user asks to qualify a new lead, update their requirements (budget, district, etc.), or check if a lead is ready for the next stage.
+tools:
+  - update_requirements
+  - log_activity
+  - store_insight
 ---
 
 # Skill: Lead Qualification

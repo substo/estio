@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Conversation } from "@/lib/ghl/conversations";
-import { generateAIDraft, generateMultiContextDraftAction, getContactContext, generatePlanAction, executeNextTaskAction, getAgentPlan, getAgentExecutions, getTraceTreeAction, getContactInsightsAction } from "../actions";
+import { generateAIDraft, generateMultiContextDraftAction, getContactContext, generatePlanAction, executeNextTaskAction, getAgentPlan, getAgentExecutions, getTraceTreeAction, getContactInsightsAction, orchestrateAction } from "../actions";
 import { createPersistentDeal, findExistingDeal, removeConversationFromDeal } from "../../deals/actions";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -69,6 +69,10 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
     // Context Display State
     const [contactContext, setContactContext] = useState<any>(null);
     const [loadingContext, setLoadingContext] = useState(false);
+
+    // Orchestrator State (Phase 1)
+    const [orchestrating, setOrchestrating] = useState(false);
+    const [orchestrationResult, setOrchestrationResult] = useState<any>(null);
 
     // Usage Stats State
     const [conversationUsage, setConversationUsage] = useState({
@@ -173,6 +177,35 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
             .catch(err => console.error("Failed to load context", err))
             .finally(() => setLoadingContext(false));
     }, [conversation.contactId]);
+
+    const handleOrchestrate = async () => {
+        setOrchestrating(true);
+        setError(null);
+        setOrchestrationResult(null);
+        try {
+            const res = await orchestrateAction(conversation.id, conversation.contactId);
+            setOrchestrationResult(res);
+
+            if (res.draftReply) {
+                setDraft(res.draftReply);
+            }
+            if (res.reasoning) {
+                setReasoning(res.reasoning);
+            }
+
+            // Auto-refresh trace history
+            setLoadingHistory(true);
+            getAgentExecutions(conversation.id).then(history => {
+                setExecutionHistory(history);
+                setLoadingHistory(false);
+            });
+
+        } catch (e: any) {
+            setError("Orchestration failed: " + e.message);
+        } finally {
+            setOrchestrating(false);
+        }
+    };
 
     const handleGenerateDraftOnly = async () => {
         setGenerating(true);
@@ -430,6 +463,35 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
                             <Sparkles className="w-4 h-4" />
                             Initialize Agent
                         </div>
+
+                        {/* ORCHESTRATION RESULT DISPLAY */}
+                        {orchestrationResult && (
+                            <div className="mb-2 p-2 bg-indigo-50/50 border border-indigo-100 rounded text-xs space-y-1.5">
+                                <div className="flex justify-between items-center border-b border-indigo-100 pb-1">
+                                    <span className="font-semibold text-indigo-900">Analysis Complete</span>
+                                    <Badge variant={orchestrationResult.requiresHumanApproval ? "destructive" : "outline"} className="text-[10px] h-4">
+                                        {orchestrationResult.requiresHumanApproval ? "Review Req" : "Auto-Pilot"}
+                                    </Badge>
+                                </div>
+                                <div className="grid grid-cols-2 gap-1">
+                                    <div>
+                                        <span className="text-[10px] text-muted-foreground block">Intent</span>
+                                        <span className="font-medium text-indigo-700">{orchestrationResult.intent}</span>
+                                    </div>
+                                    <div>
+                                        <span className="text-[10px] text-muted-foreground block">Sentiment</span>
+                                        <span className="font-medium text-indigo-700">{orchestrationResult.sentiment?.emotion}</span>
+                                    </div>
+                                </div>
+                                {orchestrationResult.policyResult && !orchestrationResult.policyResult.approved && (
+                                    <div className="mt-1 p-1 bg-red-50 text-red-700 rounded border border-red-100 flex gap-1 items-start">
+                                        <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+                                        <span className="leading-tight">{orchestrationResult.policyResult.reason}</span>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
                         <label className="text-[11px] text-muted-foreground uppercase font-medium">Ultimate Goal</label>
                         <Textarea
                             className="bg-muted/50 min-h-[60px] text-sm resize-none"
@@ -443,6 +505,16 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
                         >
                             {planning ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
                             Generate Mission Plan
+                        </Button>
+
+                        {/* PHASE 1 ORCHESTRATOR BUTTON */}
+                        <Button
+                            onClick={handleOrchestrate}
+                            disabled={orchestrating}
+                            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white"
+                        >
+                            {orchestrating ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Brain className="w-4 h-4 mr-2" />}
+                            Orchestrate (Smart Agent)
                         </Button>
                         <Button
                             onClick={handleGenerateDraftOnly}

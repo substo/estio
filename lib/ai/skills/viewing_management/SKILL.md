@@ -1,6 +1,10 @@
 ---
 name: viewing_management
 description: Use this skill when the user wants to book a viewing, schedule an appointment, or check availability for a property.
+tools:
+  - create_viewing
+  - search_properties
+  - log_activity
 ---
 
 # Skill: Viewing Management

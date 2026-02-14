@@ -29,11 +29,15 @@ export type ModelId = keyof typeof MODELS;
 // Map valid task types to their ideal model
 export const TASK_MODEL_MAP: Record<string, ModelId> = {
     "intent_classification": "gemini_flash",
+    "sentiment_analysis": "gemini_flash",
     "simple_generation": "gemini_flash",
     "tool_selection": "gemini_flash",
 
     "property_search": "gemini_flash", // Flash is good enough for structured query gen
     "draft_reply": "gemini_pro",       // Pro for better tone/nuance
+    "qualification": "gemini_pro",
+    "negotiation": "gemini_pro",
+    "deal_coordinator": "gemini_pro",
     "negotiation_advice": "gemini_pro", // Pro allows better reasoning
 
     "complex_planning": "gemini_thinking", // Thinking model for deep reasoning

@@ -62,7 +62,7 @@ This implementation targets **Industry Standard (Claude Opus 4.6 / GPT-5.x level
 |:------|:-----|:---------|:--------------|
 | **0** | Infrastructure Foundation | Week 1 | [00-infrastructure-foundation.md](./00-infrastructure-foundation.md) |
 | **0.5-0.6** | Integration & Observability | Week 1.5 | [00b-integration-observability.md](./00b-integration-observability.md) |
-| **1** | Orchestrator & Intent Classification | Week 2 | [01-orchestrator-intent-classification.md](./01-orchestrator-intent-classification.md) |
+| **1** | Orchestrator & Intent Classification | Week 2 | [01-orchestrator-intent-classification.md](./01-orchestrator-intent-classification.md) ✅ **Completed** |
 | **2** | Qualifier & Objection Handler | Weeks 3–4 | [02-qualifier-objection-handler.md](./02-qualifier-objection-handler.md) |
 | **3** | Searcher & Recommender | Weeks 5–6 | [03-searcher-recommender.md](./03-searcher-recommender.md) |
 | **4** | Coordinator & Scheduling | Weeks 7–8 | [04-coordinator-scheduling.md](./04-coordinator-scheduling.md) |
