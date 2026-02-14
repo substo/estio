@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { getWhatsAppSettings, updateWhatsAppSettings, exchangeSystemUserToken, connectEvolutionDevice, logoutEvolutionInstance } from "./actions";
+import { getWhatsAppSettings, updateWhatsAppSettings, exchangeSystemUserToken, connectEvolutionDevice, logoutEvolutionInstance, checkInstanceHealth, repairEvolutionConnection } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, Copy, Check, Facebook, CheckCircle2, XCircle, AlertCircle, ChevronDown, Settings } from "lucide-react";
+import { Loader2, Copy, Check, Facebook, CheckCircle2, XCircle, AlertCircle, ChevronDown, Settings, RefreshCw, AlertTriangle } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { FacebookSDKScript } from "@/components/integrations/facebook-sdk-script";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -26,6 +26,7 @@ import {
 export default function WhatsAppSettingsPage() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [repairing, setRepairing] = useState(false);
     const [qrCode, setQrCode] = useState<string | null>(null);
     const [settings, setSettings] = useState({
         businessAccountId: "",
@@ -41,6 +42,13 @@ export default function WhatsAppSettingsPage() {
         evolutionInstanceId: "",
         evolutionConnectionStatus: "close",
     });
+
+    // Health Check State
+    const [healthStatus, setHealthStatus] = useState<{
+        status: 'idle' | 'checking' | 'healthy' | 'zombie' | 'disconnected' | 'syncing';
+        contacts: number;
+        chats: number;
+    }>({ status: 'idle', contacts: 0, chats: 0 });
 
     // Embedded Signup State
     const [appId, setAppId] = useState(process.env.NEXT_PUBLIC_META_APP_ID || "");
@@ -73,7 +81,61 @@ export default function WhatsAppSettingsPage() {
         setUseBridge(!isSafe);
     }, []);
 
+    const performHealthCheck = async () => {
+        if (settings.evolutionConnectionStatus !== 'open') return;
+
+        setHealthStatus(prev => ({ ...prev, status: 'checking' }));
+        try {
+            const res = await checkInstanceHealth();
+            // @ts-ignore
+            if (res && res.success) {
+                // @ts-ignore
+                setHealthStatus({
+                    // @ts-ignore
+                    status: res.status, // healthy, zombie, disconnected
+                    // @ts-ignore
+                    contacts: res.contactsCount || 0,
+                    // @ts-ignore
+                    chats: res.chatsCount || 0
+                });
+            }
+        } catch (e) {
+            console.error("Health check error", e);
+        }
+    };
+
+    // Trigger health check when connected
+    useEffect(() => {
+        if (settings.evolutionConnectionStatus === 'open') {
+            performHealthCheck();
+        } else {
+            setHealthStatus({ status: 'disconnected', contacts: 0, chats: 0 });
+        }
+    }, [settings.evolutionConnectionStatus]);
+
+    const handleRepair = async () => {
+        setRepairing(true);
+        toast({ title: "Starting Repair", description: "Disconnecting and preparing new session..." });
+
+        try {
+            const res = await repairEvolutionConnection();
+            if (res.success && res.qrCode) {
+                setSettings(prev => ({ ...prev, evolutionConnectionStatus: 'close' }));
+                setQrCode(res.qrCode);
+                setHealthStatus({ status: 'disconnected', contacts: 0, chats: 0 });
+                toast({ title: "Ready to Scan", description: "Please scan the new QR code immediately." });
+            } else {
+                toast({ title: "Repair Failed", description: res.error || "Could not generate QR", variant: "destructive" });
+            }
+        } catch (e) {
+            toast({ title: "Error", description: "Failed to repair connection.", variant: "destructive" });
+        } finally {
+            setRepairing(false);
+        }
+    };
+
     const handleLogin = async (response: any) => {
+        // ... (rest of handleLogin implementation is unchanged)
         setSaving(true);
         setConnectionStatus({ type: 'idle', message: '' });
         console.log("Facebook Login Response:", response);
@@ -351,14 +413,96 @@ export default function WhatsAppSettingsPage() {
                                 <CheckCircle2 className="h-12 w-12 text-green-500" />
                                 <div className="text-center">
                                     <h3 className="font-medium text-lg text-green-700">Device Connected</h3>
-                                    <p className="text-sm text-muted-foreground">Shadow API is active and syncing messages.</p>
+                                    <p className="text-sm text-green-600">Shadow API is active and syncing messages.</p>
                                 </div>
+
+                                {/* Health Check / Zombie Repair Section */}
+                                <div className="w-full">
+                                    {healthStatus.status === 'checking' && (
+                                        <div className="flex items-center justify-center space-x-2 text-sm text-muted-foreground p-2">
+                                            <Loader2 className="h-3 w-3 animate-spin" />
+                                            <span>Verifying sync status...</span>
+                                        </div>
+                                    )}
+
+                                    {healthStatus.status === 'syncing' && (
+                                        <Alert className="border-blue-200 bg-blue-50 dark:bg-blue-950/20 mt-2 mb-4">
+                                            <RefreshCw className="h-4 w-4 text-blue-600 animate-spin" />
+                                            <AlertTitle className="text-blue-800 dark:text-blue-200 text-sm font-bold">
+                                                Syncing Contacts...
+                                            </AlertTitle>
+                                            <AlertDescription className="text-blue-700 dark:text-blue-300 text-xs mt-1">
+                                                New connection detected. Please wait while WhatsApp syncs your contacts and chats. This may take a few minutes.
+                                                <div className="mt-2">
+                                                    <Button
+                                                        size="sm"
+                                                        variant="ghost"
+                                                        onClick={performHealthCheck}
+                                                        className="h-6 text-[10px] text-blue-700 hover:bg-blue-100"
+                                                    >
+                                                        Refresh Status
+                                                    </Button>
+                                                </div>
+                                            </AlertDescription>
+                                        </Alert>
+                                    )}
+
+                                    {healthStatus.status === 'zombie' && (
+                                        <Alert className="border-yellow-200 bg-yellow-50 dark:bg-yellow-950/20 mt-2 mb-4">
+                                            <AlertTriangle className="h-4 w-4 text-yellow-600" />
+                                            <AlertTitle className="text-yellow-800 dark:text-yellow-200 text-sm font-bold">
+                                                Connection Unhealthy (Zombie State)
+                                            </AlertTitle>
+                                            <AlertDescription className="text-yellow-700 dark:text-yellow-300 text-xs mt-1">
+                                                The device is connected but showing <strong>0 synced contacts</strong>. This can happen after updates or server restarts. Messages may not be received correctly.
+                                                <div className="mt-3">
+                                                    <Button
+                                                        size="sm"
+                                                        variant="destructive"
+                                                        onClick={handleRepair}
+                                                        disabled={repairing}
+                                                        className="w-full sm:w-auto"
+                                                    >
+                                                        {repairing ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-2 h-3 w-3" />}
+                                                        Repair Connection (Re-Scan)
+                                                    </Button>
+                                                </div>
+                                            </AlertDescription>
+                                        </Alert>
+                                    )}
+
+                                    {healthStatus.status === 'healthy' && (
+                                        <div className="text-xs text-center text-muted-foreground mt-2 border-t pt-2">
+                                            <div className="flex justify-center space-x-4">
+                                                <span>Contacts: <strong>{healthStatus.contacts}</strong></span>
+                                                <span>Chats: <strong>{healthStatus.chats}</strong></span>
+                                            </div>
+                                            <div className="flex items-center justify-center gap-2 mt-2">
+                                                <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={performHealthCheck}>
+                                                    Refresh Status
+                                                </Button>
+                                                <span className="text-muted-foreground/30">|</span>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="h-6 text-[10px] text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                                                    onClick={handleRepair}
+                                                    disabled={repairing}
+                                                >
+                                                    {repairing ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1 h-3 w-3" />}
+                                                    Force Re-scan
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
                                 <AlertDialog>
                                     <AlertDialogTrigger asChild>
                                         <Button
                                             variant="outline"
-                                            className="border-red-200 text-red-600 hover:bg-red-50"
-                                            disabled={saving}
+                                            className="border-red-200 text-red-600 hover:bg-red-50 mt-2"
+                                            disabled={saving || repairing}
                                         >
                                             {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                                             Disconnect Device
@@ -379,6 +523,7 @@ export default function WhatsAppSettingsPage() {
                                                     setSaving(true);
                                                     await logoutEvolutionInstance();
                                                     setSettings(prev => ({ ...prev, evolutionConnectionStatus: 'close' }));
+                                                    setHealthStatus({ status: 'disconnected', contacts: 0, chats: 0 });
                                                     setSaving(false);
                                                     toast({ title: "Disconnected", description: "Linked device disconnected." });
                                                 }}
@@ -413,6 +558,14 @@ export default function WhatsAppSettingsPage() {
                                         <p className="text-sm text-muted-foreground">
                                             Scan a QR code to link your phone. This works just like WhatsApp Web without disconnecting your phone.
                                         </p>
+                                        {repairing && (
+                                            <Alert className="mb-4 border-yellow-200 bg-yellow-50">
+                                                <Loader2 className="h-4 w-4 animate-spin text-yellow-600" />
+                                                <AlertDescription className="text-yellow-700 text-xs">
+                                                    Resetting connection instance...
+                                                </AlertDescription>
+                                            </Alert>
+                                        )}
                                         <Button
                                             className="bg-purple-600 hover:bg-purple-700 text-white"
                                             onClick={async () => {
@@ -435,7 +588,7 @@ export default function WhatsAppSettingsPage() {
                                                 }
                                                 setSaving(false);
                                             }}
-                                            disabled={saving}
+                                            disabled={saving || repairing}
                                         >
                                             {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                                             Connect Linked Device
@@ -680,3 +833,4 @@ export default function WhatsAppSettingsPage() {
         </div>
     );
 }
+

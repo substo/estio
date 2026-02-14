@@ -27,6 +27,15 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     const { locationId, from, to, body, type, wamId, timestamp, contactName, source, isGroup, participant } = msg;
     const direction = msg.direction || "inbound";
 
+    // --- RACE CONDITION FIX ---
+    // For outbound messages (sent from App/Phone), we delay processing by 1s.
+    // This gives the Application (actions.ts) enough time to create the Message and Contact record first.
+    // If the record exists, we skip processing and avoid creating a duplicate "LID Contact".
+    if (direction === 'outbound') {
+        const delayMs = 1500; // 1.5s delay to be safe
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+
     const existing = await db.message.findUnique({ where: { wamId } });
     if (existing) {
         console.log(`[WhatsApp Sync] Skipped existing message: ${wamId}`);
@@ -54,31 +63,8 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     let contactPhone = direction === "inbound" ? normalizedFrom : normalizedTo;
 
     // --- LID RESOLUTION CHECK ---
-    // If contactPhone implies an LID (ends with @lid) AND we didn't receive a resolved phone
-    // We try to fetch it from Evolution API now.
-    if (contactPhone.endsWith('@lid') && !msg.resolvedPhone) { // resolvedPhone passed from webhook
-        console.log(`[WhatsApp Sync] Contact is LID and no phone provided. Attempting resolution for ${contactPhone}...`);
-
-        // 1. Try to fetch from API
-        // Evolution instances are named after location IDs
-        const instanceName = locationId;
-        const lookup = await evolutionClient.findContact(instanceName, msg.lid || contactPhone);
-
-        if (lookup && lookup.id) {
-            // Check if it returned a real number (JID)
-            if (lookup.id.includes('@s.whatsapp.net')) {
-                const resolved = lookup.id.replace('@s.whatsapp.net', '');
-                console.log(`[WhatsApp Sync] Resolved LID ${contactPhone} to ${resolved}`);
-                contactPhone = `+${resolved}`; // Update the phone we use for lookup/creation
-            } else if (lookup.phoneNumber) {
-                // Evolution sometimes returns phoneNumber field
-                console.log(`[WhatsApp Sync] Resolved LID ${contactPhone} to ${lookup.phoneNumber}`);
-                contactPhone = `+${lookup.phoneNumber}`;
-            }
-        } else {
-            console.warn(`[WhatsApp Sync] Failed to resolve LID ${contactPhone} via API.`);
-        }
-    } else if (msg.resolvedPhone) {
+    // If contactPhone implies an LID (ends with @lid) but we have a resolved phone from webhook/route.ts, use it.
+    if (msg.resolvedPhone) {
         // Use the phone resolved by webhook
         const p = msg.resolvedPhone.startsWith('+') ? msg.resolvedPhone : `+${msg.resolvedPhone}`;
         if (!contactPhone.includes(p)) {
@@ -111,18 +97,24 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     }
 
     // 2. Find Existing Contact (Lookup by Phone OR LID)
+    // Normalize LID for DB lookup (strip @lid suffix for contains search)
+    const lidRaw = msg.lid ? msg.lid.replace('@lid', '') : undefined;
     const candidates = await db.contact.findMany({
         where: {
             locationId,
             OR: [
                 { phone: { contains: searchSuffix } },
-                ...(msg.lid ? [{ lid: msg.lid }] : [])
+                ...(lidRaw ? [{ lid: { contains: lidRaw } }] : [])
             ]
         } as any
     });
 
     // Strategy: Prefer LID match -> Then Phone Match
-    let contact = candidates.find((c: any) => msg.lid && c.lid === msg.lid);
+    let contact = candidates.find((c: any) => {
+        if (!msg.lid || !c.lid) return false;
+        // Normalize both for comparison (strip @lid if present)
+        return c.lid.replace('@lid', '') === msg.lid.replace('@lid', '');
+    });
 
     if (!contact) {
         contact = candidates.find(c => {
@@ -137,7 +129,9 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     }
 
     // Link LID if found by phone but missing LID
-    if (contact && msg.lid && contact.lid !== msg.lid) {
+    const contactLidNorm = contact?.lid?.replace('@lid', '');
+    const msgLidNorm = msg.lid?.replace('@lid', '');
+    if (contact && msg.lid && contactLidNorm !== msgLidNorm) {
         await db.contact.update({
             where: { id: contact.id },
             data: { lid: msg.lid } as any
@@ -255,7 +249,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
                 email: foundEmail,
                 status: "New",
                 contactType: contactType,
-                lid: isUnresolvedLid ? contactPhone.replace('@lid', '').replace('+', '') : msg.lid, // Use contactPhone as LID if unresolved
+                lid: msg.lid || undefined, // Store full LID JID for consistent matching
                 ghlContactId: foundGhlId,
                 googleContactId: foundGoogleId,
                 tags: foundTags.length > 0 ? foundTags : undefined,

@@ -635,3 +635,84 @@ export async function exchangeSystemUserToken(
         };
     }
 }
+
+export async function checkInstanceHealth() {
+    const { userId } = await auth();
+    if (!userId) throw new Error("Unauthorized");
+
+    const user = await db.user.findUnique({
+        where: { clerkId: userId },
+        include: { locations: true },
+    });
+    if (!user || !user.locations.length) return { success: false, error: "No location" };
+    const location = user.locations[0];
+
+    if (!location.evolutionInstanceId) return { success: false, status: 'disconnected' };
+
+    try {
+        // parallel fetch for speed
+        const [contacts, chats, instanceData] = await Promise.all([
+            evolutionClient.fetchContacts(location.evolutionInstanceId).catch(() => []),
+            evolutionClient.fetchChats(location.evolutionInstanceId).catch(() => []),
+            evolutionClient.fetchInstance(location.evolutionInstanceId).catch(() => null)
+        ]);
+
+        let status = 'unknown';
+        let createdAt = null;
+        if (Array.isArray(instanceData)) {
+            // V2 style
+            const ref = instanceData.find((i: any) => i.instance?.instanceName === location.evolutionInstanceId) || instanceData[0];
+            status = ref?.instance?.status || ref?.connectionStatus || 'unknown';
+            createdAt = ref?.instance?.createdAt || ref?.createdAt;
+        } else if (instanceData) {
+            status = instanceData.instance?.status || instanceData.connectionStatus || 'unknown';
+            createdAt = instanceData.instance?.createdAt || instanceData.createdAt;
+        }
+
+        const isConnected = status === 'open' || status === 'connected';
+        const hasData = contacts.length > 0 || chats.length > 0;
+
+        let health = status;
+        if (isConnected) {
+            if (hasData) {
+                health = 'healthy';
+            } else {
+                // Check if it's a new instance (created < 10 mins ago)
+                const isNew = createdAt && (Date.now() - new Date(createdAt).getTime()) < 10 * 60 * 1000;
+                health = isNew ? 'syncing' : 'zombie';
+            }
+        }
+
+        return {
+            success: true,
+            status: health,
+            contactsCount: contacts.length,
+            chatsCount: chats.length,
+            rawStatus: status
+        };
+
+    } catch (e: any) {
+        console.error("Health check failed:", e);
+        return { success: false, error: e.message };
+    }
+}
+
+export async function repairEvolutionConnection() {
+    const { userId } = await auth();
+    if (!userId) throw new Error("Unauthorized");
+
+    console.log("🛠️ Starting Repair Process...");
+
+    // 1. Logout/Delete
+    try {
+        await logoutEvolutionInstance();
+    } catch (e) {
+        console.warn("Logout failed during repair (might be already gone):", e);
+    }
+
+    // 2. Connect (Create & Get QR)
+    // Add a small delay to ensure cleanup
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    return await connectEvolutionDevice();
+}

@@ -1,12 +1,12 @@
 import { useState, useEffect } from "react";
 import { Conversation } from "@/lib/ghl/conversations";
-import { generateAIDraft, generateMultiContextDraftAction, getContactContext, generatePlanAction, executeNextTaskAction, getAgentPlan, getAgentExecutions } from "../actions";
+import { generateAIDraft, generateMultiContextDraftAction, getContactContext, generatePlanAction, executeNextTaskAction, getAgentPlan, getAgentExecutions, getTraceTreeAction, getContactInsightsAction } from "../actions";
 import { createPersistentDeal, findExistingDeal, removeConversationFromDeal } from "../../deals/actions";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { Loader2, Sparkles, Check, Info, Layers, Users, Home, Link as LinkIcon, AlertCircle, ExternalLink, X, ListTodo, Play, CheckCircle2, Circle, Brain, ChevronDown, ChevronUp, Expand, Clock, Wrench, History } from "lucide-react";
+import { Loader2, Sparkles, Check, Info, Layers, Users, Home, Link as LinkIcon, AlertCircle, ExternalLink, X, ListTodo, Play, CheckCircle2, Circle, Brain, ChevronDown, ChevronUp, Expand, Clock, Wrench, History, Database, Activity, AlertTriangle, CheckCircle, XCircle, ArrowRight } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +17,7 @@ import { EditContactDialog } from "../../contacts/_components/edit-contact-dialo
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { GroupMembersList } from './group-members-list';
+import { TraceNodeRenderer } from "./trace-node-renderer";
 
 interface CoordinatorPanelProps {
     conversation: Conversation;
@@ -54,9 +55,12 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
     const [thoughtSteps, setThoughtSteps] = useState<ThoughtStep[]>([]);
     const [thinkingExpanded, setThinkingExpanded] = useState(false);
     const [rawTrace, setRawTrace] = useState<any>(null);
+    const [traceTree, setTraceTree] = useState<any>(null); // Full hierarchical trace
+    const [insights, setInsights] = useState<any[]>([]); // Memory insights
     const [traceModalOpen, setTraceModalOpen] = useState(false);
     const [executionHistory, setExecutionHistory] = useState<any[]>([]);
     const [loadingHistory, setLoadingHistory] = useState(false);
+    const [loadingTraceDetails, setLoadingTraceDetails] = useState(false);
 
     // Context Builder State
     const [dealTitle, setDealTitle] = useState("");
@@ -84,6 +88,7 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
         setThoughtSteps([]);
         setAgentActions([]);
         setRawTrace(null);
+        setTraceTree(null);
         setGoal("Qualify the lead and book a viewing"); // Reset to default goal
 
         if (conversation.id) {
@@ -106,16 +111,37 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
                 setExecutionHistory(history);
                 // If there's no selected trace but we have history, select the latest
                 if (!rawTrace && history.length > 0) {
-                    setRawTrace(history[0]);
-                } else if (rawTrace && history.length > 0) {
-                    // Ensure rawTrace is fully populated if it was set from local execution
-                    // (sometimes local trace might miss DB fields like ID if we just passed result object)
-                    // But local trace is usually fresher.
+                    handleSelectTrace(history[0]);
                 }
                 setLoadingHistory(false);
             });
         }
     }, [traceModalOpen, conversation.id]);
+
+    const handleSelectTrace = async (trace: any) => {
+        setRawTrace(trace);
+        setTraceTree(null);
+        setInsights([]);
+        setLoadingTraceDetails(true);
+
+        try {
+            // 1. Fetch Tree
+            if (trace.traceId) {
+                const tree = await getTraceTreeAction(trace.traceId);
+                setTraceTree(tree);
+            }
+
+            // 2. Fetch Insights (Memory)
+            if (conversation.contactId) {
+                const recentInsights = await getContactInsightsAction(conversation.contactId);
+                setInsights(recentInsights);
+            }
+        } catch (e) {
+            console.error("Failed to load trace details", e);
+        } finally {
+            setLoadingTraceDetails(false);
+        }
+    };
 
     // Auto-detect existing deal on selection change
     useEffect(() => {
@@ -570,19 +596,28 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
                                         executionHistory.map((ex) => (
                                             <div
                                                 key={ex.id}
-                                                onClick={() => setRawTrace(ex)}
+                                                onClick={() => handleSelectTrace(ex)}
                                                 className={cn(
-                                                    "p-3 rounded-md text-xs cursor-pointer transition-colors border",
-                                                    rawTrace?.id === ex.id || (!rawTrace?.id && rawTrace?.timestamp === ex.createdAt)
-                                                        ? 'bg-purple-100/50 border-purple-200 text-purple-900'
+                                                    "p-3 rounded-md text-xs cursor-pointer transition-colors border relative",
+                                                    rawTrace?.id === ex.id
+                                                        ? 'bg-purple-100/50 border-purple-200 text-purple-900 ring-1 ring-purple-200'
                                                         : 'bg-card border-border hover:border-purple-200 hover:bg-muted/50'
                                                 )}
                                             >
-                                                <div className="font-medium truncate">{ex.taskTitle || "Unknown Task"}</div>
+                                                <div className="font-medium truncate pr-4">{ex.taskTitle || "Unknown Task"}</div>
                                                 <div className="flex items-center justify-between mt-1 text-muted-foreground">
                                                     <span>{new Date(ex.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                                    <Badge variant="secondary" className="text-[9px] h-4 font-normal">{ex.taskStatus}</Badge>
+                                                    <div className="flex gap-1">
+                                                        {ex.taskStatus === 'success' && <CheckCircle className="w-3 h-3 text-green-500" />}
+                                                        {ex.taskStatus === 'error' && <XCircle className="w-3 h-3 text-red-500" />}
+                                                        {ex.taskStatus === 'pending' && <Loader2 className="w-3 h-3 animate-spin text-blue-500" />}
+                                                    </div>
                                                 </div>
+                                                {ex.usage?.cost > 0 && (
+                                                    <div className="text-[10px] text-green-600/80 mt-0.5 font-mono">
+                                                        ${ex.usage.cost.toFixed(5)}
+                                                    </div>
+                                                )}
                                             </div>
                                         ))
                                     )}
@@ -602,110 +637,154 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
                                 </DialogHeader>
 
                                 {rawTrace && (
-                                    <div className="flex-1 overflow-y-auto space-y-4 p-6">
-                                        {/* Timestamp */}
-                                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                            <Clock className="h-3 w-3" />
-                                            <span>{new Date(rawTrace.timestamp || rawTrace.createdAt).toLocaleString()}</span>
-                                        </div>
-
-                                        {/* Task */}
-                                        <div className="bg-blue-50/50 border border-blue-200/60 rounded-lg p-3">
-                                            <div className="text-xs font-semibold text-blue-800 uppercase tracking-wider mb-1">Task Executed</div>
-                                            <div className="text-sm text-blue-900 font-medium">{rawTrace.task?.title || rawTrace.taskTitle}</div>
-                                            <Badge variant="secondary" className="mt-1 text-[10px] bg-white text-blue-800 border-blue-100">{rawTrace.task?.status || rawTrace.taskStatus}</Badge>
-                                        </div>
-
-                                        {/* Thought Summary */}
-                                        <div className="bg-purple-50/50 border border-purple-200/60 rounded-lg p-3">
-                                            <div className="text-xs font-semibold text-purple-800 uppercase tracking-wider mb-1">Summary</div>
-                                            <div className="text-sm text-purple-900">{rawTrace.thoughtSummary}</div>
-                                        </div>
-
-                                        {/* Detailed Steps */}
-                                        {rawTrace.thoughtSteps?.length > 0 && (
-                                            <div className="bg-card border border-border rounded-lg p-3">
-                                                <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Reasoning Steps</div>
-                                                <div className="space-y-3">
-                                                    {rawTrace.thoughtSteps.map((step: ThoughtStep) => (
-                                                        <div key={step.step} className="flex gap-3 text-sm">
-                                                            <div className="flex-shrink-0 w-6 h-6 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 text-white flex items-center justify-center font-bold text-xs mt-0.5 shadow-sm">
-                                                                {step.step}
-                                                            </div>
-                                                            <div className="flex-1 pt-0.5">
-                                                                <div className="text-foreground font-medium">{step.description}</div>
-                                                                <div className="text-muted-foreground mt-1 text-xs bg-muted/50 p-2 rounded border-l-2 border-purple-300">{step.conclusion}</div>
-                                                            </div>
-                                                        </div>
-                                                    ))}
+                                    <div className="flex-1 overflow-y-auto space-y-4 p-6 bg-slate-50/50">
+                                        {/* 1. TRACE HEADER */}
+                                        <div className="flex items-start justify-between bg-white p-4 rounded-lg border shadow-sm">
+                                            <div>
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <h2 className="text-lg font-bold text-slate-800">{rawTrace.taskTitle || "Unnamed Task"}</h2>
+                                                    {rawTrace.taskStatus === 'success' && <Badge className="bg-green-100 text-green-800 hover:bg-green-100 border-green-200"><CheckCircle className="w-3 h-3 mr-1" /> Success</Badge>}
+                                                    {rawTrace.taskStatus === 'error' && <Badge className="bg-red-100 text-red-800 hover:bg-red-100 border-red-200"><XCircle className="w-3 h-3 mr-1" /> Failed</Badge>}
+                                                    {rawTrace.taskStatus === 'pending' && <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100 border-blue-200"><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Pending</Badge>}
                                                 </div>
-                                            </div>
-                                        )}
-
-                                        {/* Tool Calls */}
-                                        {rawTrace.toolCalls?.length > 0 && (
-                                            <div className="bg-green-50/50 border border-green-200/60 rounded-lg p-3">
-                                                <div className="flex items-center gap-1 text-xs font-semibold text-green-800 uppercase tracking-wider mb-2">
-                                                    <Wrench className="h-3 w-3" />
-                                                    Tool Executions
-                                                </div>
-                                                <div className="space-y-2">
-                                                    {rawTrace.toolCalls.map((action: any, i: number) => (
-                                                        <div key={i} className="bg-card rounded border border-green-100/50 p-2">
-                                                            <div className="flex items-center gap-2">
-                                                                <Badge variant="secondary" className="text-[10px] font-mono bg-green-100/50 text-green-800">{action.tool}</Badge>
-                                                                {action.error ? (
-                                                                    <Badge variant="destructive" className="text-[10px]">Failed</Badge>
-                                                                ) : (
-                                                                    <Badge className="text-[10px] bg-green-100 text-green-800 hover:bg-green-200">Success</Badge>
-                                                                )}
-                                                            </div>
-                                                            <pre className="text-[10px] text-muted-foreground mt-1 font-mono overflow-x-auto whitespace-pre-wrap">
-                                                                {JSON.stringify(action.result || action.error, null, 2)}
-                                                            </pre>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        {/* Draft Reply */}
-                                        {rawTrace.draftReply && (
-                                            <div className="bg-amber-50/50 border border-amber-200/60 rounded-lg p-3">
-                                                <div className="text-xs font-semibold text-amber-800 uppercase tracking-wider mb-1">Generated Draft</div>
-                                                <div className="text-sm text-amber-900 whitespace-pre-wrap">{rawTrace.draftReply}</div>
-                                            </div>
-                                        )}
-
-                                        {/* Token Usage Stats */}
-                                        {(rawTrace.promptTokens || rawTrace.usage?.promptTokenCount) && (
-                                            <div className="bg-muted/30 border border-border rounded-lg p-3 grid grid-cols-2 gap-4">
-                                                <div>
-                                                    <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Prompt Tokens</div>
-                                                    <div className="text-sm font-mono text-foreground">{rawTrace.promptTokens || rawTrace.usage?.promptTokenCount}</div>
-                                                </div>
-                                                <div>
-                                                    <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Completion Tokens</div>
-                                                    <div className="text-sm font-mono text-foreground">{rawTrace.completionTokens || rawTrace.usage?.candidatesTokenCount}</div>
-                                                </div>
-                                                <div>
-                                                    <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Total Tokens</div>
-                                                    <div className="text-sm font-mono text-foreground font-bold">{rawTrace.totalTokens || rawTrace.usage?.totalTokenCount}</div>
-                                                </div>
-                                                <div>
-                                                    <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Estimated Cost</div>
-                                                    <div className="text-sm font-mono text-green-700 font-bold">
-                                                        {rawTrace.cost ? `$${rawTrace.cost.toFixed(5)}` : (rawTrace.usage?.cost ? `$${rawTrace.usage.cost.toFixed(5)}` : '-')}
+                                                <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                                                    <div className="flex items-center gap-1.5">
+                                                        <Clock className="w-3.5 h-3.5" />
+                                                        <span className="font-mono">{new Date(rawTrace.createdAt).toLocaleString()}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-1.5">
+                                                        <Activity className="w-3.5 h-3.5" />
+                                                        <span className="font-mono">{rawTrace.latencyMs ? `${rawTrace.latencyMs}ms` : 'N/A'}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-1.5">
+                                                        <div className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                                                        <span className="font-mono text-[10px]">{rawTrace.traceId?.slice(0, 8)}...</span>
                                                     </div>
                                                 </div>
-                                                {(rawTrace.model || rawTrace.usage?.model) && (
-                                                    <div className="col-span-2 border-t pt-2 mt-1">
-                                                        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Model</div>
-                                                        <div className="text-xs font-mono text-muted-foreground">{rawTrace.model || rawTrace.usage?.model}</div>
-                                                    </div>
-                                                )}
                                             </div>
-                                        )}
+                                            <div className="text-right">
+                                                <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1">Model</div>
+                                                <Badge variant="outline" className="font-mono text-xs bg-slate-100">
+                                                    {rawTrace.usage?.model || "unknown-model"}
+                                                </Badge>
+                                            </div>
+                                        </div>
+
+                                        {/* 2. SPAN WATERFALL (Hierarchical) */}
+                                        {loadingTraceDetails ? (
+                                            <div className="flex justify-center p-8 bg-white border rounded text-muted-foreground">
+                                                <Loader2 className="w-6 h-6 animate-spin mr-2" />
+                                                Loading full trace...
+                                            </div>
+                                        ) : traceTree ? (
+                                            <Card className="shadow-sm border-slate-200">
+                                                <CardHeader className="py-3 px-4 bg-slate-50/50 border-b">
+                                                    <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                                                        <Layers className="w-4 h-4 text-indigo-500" />
+                                                        Execution Trace
+                                                    </CardTitle>
+                                                </CardHeader>
+                                                <CardContent className="p-4 space-y-1">
+                                                    <TraceNodeRenderer node={traceTree} totalDuration={traceTree.latency || 1} />
+                                                </CardContent>
+                                            </Card>
+                                        ) : null}
+
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            {/* 3. MEMORY PANEL */}
+                                            <Card className="shadow-sm border-slate-200 h-full">
+                                                <CardHeader className="py-3 px-4 bg-slate-50/50 border-b">
+                                                    <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                                                        <Database className="w-4 h-4 text-amber-500" />
+                                                        Memory Context
+                                                    </CardTitle>
+                                                </CardHeader>
+                                                <CardContent className="p-0">
+                                                    <div className="max-h-[250px] overflow-y-auto p-4 space-y-3">
+                                                        <div className="space-y-2">
+                                                            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">Stored Insights</span>
+                                                            {insights.filter(i => new Date(i.createdAt) > new Date(rawTrace.createdAt)).length > 0 ? (
+                                                                insights.filter(i => new Date(i.createdAt) > new Date(rawTrace.createdAt)).map(i => (
+                                                                    <div key={i.id} className="bg-amber-50 border border-amber-100 p-2 rounded text-xs text-amber-900">
+                                                                        <div className="font-semibold mb-0.5">{i.category}</div>
+                                                                        {i.text}
+                                                                    </div>
+                                                                ))
+                                                            ) : (
+                                                                <div className="text-xs text-muted-foreground italic">No new insights stored during this trace.</div>
+                                                            )}
+                                                        </div>
+
+                                                        <div className="space-y-2 pt-2 border-t">
+                                                            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">Available Context</span>
+                                                            {insights.length > 0 ? (
+                                                                insights.slice(0, 3).map(i => (
+                                                                    <div key={i.id} className="bg-slate-50 border p-2 rounded text-xs text-slate-700">
+                                                                        <div className="flex justify-between">
+                                                                            <span className="font-semibold capitalize text-slate-900">{i.category}</span>
+                                                                            <span className="text-[10px] text-slate-400">{new Date(i.createdAt).toLocaleDateString()}</span>
+                                                                        </div>
+                                                                        {i.text}
+                                                                    </div>
+                                                                ))
+                                                            ) : (
+                                                                <div className="text-xs text-muted-foreground italic">No prior insights found.</div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </CardContent>
+                                            </Card>
+
+                                            {/* 4. REASONING & OUTPUT */}
+                                            <div className="space-y-4">
+                                                {/* Reasoning */}
+                                                <Card className="shadow-sm border-slate-200">
+                                                    <CardHeader className="py-3 px-4 bg-slate-50/50 border-b">
+                                                        <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                                                            <Brain className="w-4 h-4 text-purple-500" />
+                                                            Reasoning
+                                                        </CardTitle>
+                                                    </CardHeader>
+                                                    <CardContent className="p-4 text-xs space-y-3">
+                                                        <div className="bg-purple-50 rounded p-2 text-purple-900 border border-purple-100">
+                                                            <span className="font-bold mr-1">Goal:</span>
+                                                            {rawTrace.taskTitle}
+                                                        </div>
+                                                        <div className="text-slate-700 leading-relaxed">
+                                                            {rawTrace.thoughtSummary}
+                                                        </div>
+                                                    </CardContent>
+                                                </Card>
+
+                                                {/* Tool Usage Stats */}
+                                                <Card className="shadow-sm border-slate-200">
+                                                    <CardHeader className="py-3 px-4 bg-slate-50/50 border-b">
+                                                        <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                                                            <Wrench className="w-4 h-4 text-slate-500" />
+                                                            Performance
+                                                        </CardTitle>
+                                                    </CardHeader>
+                                                    <CardContent className="p-4 grid grid-cols-2 gap-4">
+                                                        <div>
+                                                            <div className="text-[10px] font-bold text-slate-400 uppercase">Latency</div>
+                                                            <div className="text-sm font-mono">{rawTrace.latencyMs || 0}ms</div>
+                                                        </div>
+                                                        <div>
+                                                            <div className="text-[10px] font-bold text-slate-400 uppercase">Cost</div>
+                                                            <div className="text-sm font-mono text-green-600 font-bold">${rawTrace.usage?.cost?.toFixed(5) || "0.00000"}</div>
+                                                        </div>
+                                                        <div>
+                                                            <div className="text-[10px] font-bold text-slate-400 uppercase">Tokens</div>
+                                                            <div className="text-sm font-mono">{rawTrace.usage?.totalTokenCount || 0}</div>
+                                                        </div>
+                                                        <div>
+                                                            <div className="text-[10px] font-bold text-slate-400 uppercase">Status</div>
+                                                            <div className="text-sm font-medium capitalize">{rawTrace.taskStatus}</div>
+                                                        </div>
+                                                    </CardContent>
+                                                </Card>
+                                            </div>
+                                        </div>
 
                                         {/* Raw JSON (collapsible) */}
                                         <Collapsible>

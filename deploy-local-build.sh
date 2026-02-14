@@ -123,11 +123,17 @@ rsync -avz --progress -e "ssh $SSH_OPTS" \
             ./ $SERVER:$TARGET_DIR/
 
 # Step 4: Configure Env (Use the same file we just created)
+# Step 4: Configure Env (Use the same file we just created)
 echo "🔧 Setting up environment variables..."
 # Upload the env file directly via SSH pipe (more robust with multiplexing)
-# Upload the env file directly via SSH pipe (more robust with multiplexing)
 ssh $SSH_OPTS $SERVER "cat > $TARGET_DIR/.env" < .env.prod
-# Keep local .env.prod safe
+
+# Step 4.5: Ensure Log Rotation is Configured
+echo "🔄 Verifying Log Rotation Configuration..."
+# We need to upload the script separately since we excluded scripts/ folder
+ssh $SSH_OPTS $SERVER "mkdir -p $TARGET_DIR/scripts"
+rsync -avz -e "ssh $SSH_OPTS" ./scripts/setup-log-rotation.sh $SERVER:$TARGET_DIR/scripts/setup-log-rotation.sh
+ssh $SSH_OPTS $SERVER "chmod +x $TARGET_DIR/scripts/setup-log-rotation.sh && $TARGET_DIR/scripts/setup-log-rotation.sh"
 
 # Step 5: Install Production Deps & Finalize
 echo "📦 Installing Production Dependencies on Server..."

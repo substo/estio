@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { processNormalizedMessage, NormalizedMessage } from '@/lib/whatsapp/sync';
+import { handleContactSyncEvent } from '@/lib/whatsapp/contact-sync-handler';
 import { logWebhookPayload } from '@/lib/logging/webhook-logger';
 
 export async function POST(req: NextRequest) {
@@ -26,6 +27,13 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ status: 'ignored', reason: 'Location not found' }, { status: 200 });
         }
         console.log(`[Evolution Webhook] Found Location: ${location.id}`);
+
+        if (eventType === 'CONTACTS_UPSERT' || eventType === 'CONTACTS.UPSERT' || eventType === 'CONTACTS_UPDATE' || eventType === 'CONTACTS.UPDATE') {
+            await handleContactSyncEvent(body);
+            // We don't return here because sometimes contacts update comes with message update? 
+            // Typically they are distinct events.
+            return NextResponse.json({ status: 'processed' });
+        }
 
         if (eventType === 'MESSAGES_UPSERT' || eventType === 'MESSAGES.UPSERT') {
             const msg = body.data;
@@ -116,6 +124,8 @@ export async function POST(req: NextRequest) {
                         console.log(`[Evolution] LID resolved via participant: ${remoteJid} -> ${realPhone}`);
                     } else {
                         console.warn(`[Evolution] ⚠️ LID detected WITHOUT any resolution path: ${remoteJid}`);
+                        console.warn(`[Evolution] SKIPPING message — cannot create contact from unresolved LID`);
+                        return NextResponse.json({ status: 'skipped', reason: 'unresolved_lid' });
                     }
                 } else {
                     realPhone = remoteJid.replace('@s.whatsapp.net', '');
@@ -143,7 +153,7 @@ export async function POST(req: NextRequest) {
                 contactName: isGroup ? undefined : (msg.pushName || realPhone), // Don't rename group to sender name
                 isGroup: isGroup,
                 participant: participant, // Pass resolved participant to sync
-                lid: isLid && !isGroup ? remoteJid.replace('@lid', '') : undefined, // Pass LID for mapping (1:1 only)
+                lid: isLid && !isGroup ? remoteJid : undefined, // Pass full LID JID for consistent matching
                 // Pass the real phone number explicitly if resolved, to help sync.ts do a final check if needed
                 resolvedPhone: realPhone
             };

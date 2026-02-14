@@ -360,6 +360,7 @@ export async function sendReply(conversationId: string, contactId: string, messa
                         await db.message.create({
                             data: {
                                 ghlMessageId: res.key.id,
+                                wamId: res.key.id, // CRITICAL: Store wamId so sync.ts dedup check works
                                 conversation: { connect: { ghlConversationId: conversationId } },
                                 body: messageBody,
                                 type: 'TYPE_WHATSAPP',
@@ -1251,6 +1252,7 @@ export async function getAgentPlan(conversationId: string) {
     };
 }
 
+// [Updated] Return full tracing fields
 export async function getAgentExecutions(conversationId: string) {
     const location = await getAuthenticatedLocation();
     const conversation = await db.conversation.findFirst({
@@ -1260,28 +1262,70 @@ export async function getAgentExecutions(conversationId: string) {
 
     if (!conversation) return [];
 
+    // Fetch root spans (where parentSpanId is null OR spanId == traceId)
+    // The current schema treats AgentExecution as a flattened span log. 
+    // We want the 'Root' entries which usually correspond to 'runAgent' or top-level tasks.
     const executions = await db.agentExecution.findMany({
-        where: { conversationId: conversation.id },
+        where: {
+            conversationId: conversation.id,
+            // Simple heuristic for root spans: parentSpanId is null
+            parentSpanId: null
+        },
         orderBy: { createdAt: 'desc' },
         take: 20
     });
 
     return executions.map(e => ({
         id: e.id,
+        traceId: e.traceId,
+        spanId: e.spanId,
         taskId: e.taskId,
         taskTitle: e.taskTitle,
-        taskStatus: e.taskStatus,
+        taskStatus: e.status, // generic status field
         thoughtSummary: e.thoughtSummary,
         thoughtSteps: e.thoughtSteps,
-        toolCalls: e.toolCalls,
+        toolCalls: e.toolCalls ? JSON.parse(e.toolCalls as string) : [],
         draftReply: e.draftReply,
         usage: {
             promptTokenCount: e.promptTokens,
             candidatesTokenCount: e.completionTokens,
-            totalTokenCount: e.totalTokens
+            totalTokenCount: e.totalTokens,
+            cost: e.cost,
+            model: e.model
         },
+        latencyMs: e.latencyMs,
+        errorMessage: e.errorMessage,
         createdAt: e.createdAt.toISOString()
     }));
+}
+
+import { getTrace } from "@/lib/ai/tracing-queries";
+
+export async function getTraceTreeAction(traceId: string) {
+    const location = await getAuthenticatedLocation();
+    if (!location) throw new Error("Unauthorized");
+    return getTrace(traceId);
+}
+
+export async function getContactInsightsAction(contactId: string) {
+    const location = await getAuthenticatedLocation();
+
+    // Resolve contact ID first (could be GHL ID)
+    const contact = await db.contact.findFirst({
+        where: {
+            OR: [{ id: contactId }, { ghlContactId: contactId }],
+            locationId: location.id
+        },
+        select: { id: true }
+    });
+
+    if (!contact) return [];
+
+    return db.insight.findMany({
+        where: { contactId: contact.id },
+        orderBy: { createdAt: 'desc' },
+        take: 10
+    });
 }
 
 /**

@@ -444,6 +444,8 @@ model Contact {
 
   // WhatsApp Metadata
   lid             String?      // WhatsApp Lightweight ID (for mapping)
+
+  insights        Insight[]
   
   @@index([locationId])
   @@index([email])
@@ -786,6 +788,7 @@ model Conversation {
   messages          Message[]
   executions        AgentExecution[]
   participants      ConversationParticipant[]
+  insights          Insight[]
 
   @@index([locationId])
   @@index([contactId])
@@ -811,10 +814,21 @@ model ConversationParticipant {
 }
 
 // AI Agent Execution History - stores complete trace of each agent action
+
 model AgentExecution {
   id              String   @id @default(cuid())
   conversationId  String
   
+  // Tracing & Observability
+  traceId         String?  @default(cuid())
+  spanId          String?  @default(cuid())
+  parentSpanId    String?
+  skillName       String?
+  intent          String?
+  latencyMs       Int      @default(0)
+  status          String   @default("pending")
+  errorMessage    String?
+
   // Task Info
   taskId          String?  // ID from the plan
   taskTitle       String?  // Title of the executed task
@@ -844,6 +858,7 @@ model AgentExecution {
   
   @@index([conversationId])
   @@index([createdAt])
+  @@index([traceId])
 }
 
 model Message {
@@ -925,6 +940,7 @@ model MessageAttachment {
   @@index([messageId])
 }
 
+
 model WhatsAppImportSession {
   id              String   @id @default(cuid())
   locationId      String
@@ -943,5 +959,29 @@ model WhatsAppImportSession {
   
   @@index([locationId])
   @@index([status])
+}
+
+model Insight {
+  id              String   @id @default(cuid())
+  contactId       String
+  contact         Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  conversationId  String?
+  conversation    Conversation? @relation(fields: [conversationId], references: [id])
+  dealId          String?
+
+  // Content
+  text            String   @db.Text // The raw insight text
+  category        String   // "preference", "objection", "timeline", "motivation", "relationship"
+  importance      Int      @default(5) // 1-10 scale
+  source          String   // "agent_extracted", "user_noted", "system_inferred"
+
+  // Metadata
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  expiresAt       DateTime? // Some insights are time-bound
+
+  @@index([contactId])
+  @@index([conversationId])
+  @@map("insights")
 }
 

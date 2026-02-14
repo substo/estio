@@ -919,7 +919,28 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
 
             <div className={`pt-4 border-t flex items-center justify-between ${!isEditing ? 'bg-background p-2' : ''}`}>
                 <div className="flex gap-2">
-                    {isEditing ? additionalFooter : (
+                    {isEditing ? (
+                        <div className="flex gap-2 w-full items-center">
+                            {/* Left Side: Sync Actions (Visible in Edit Mode too) */}
+                            {contact && !isCreating && (
+                                <div className="flex gap-2 mr-auto">
+                                    <Button type="button" variant="outline" size="sm" onClick={() => setManagerOpen(true)}>
+                                        <RefreshCw className="mr-2 h-4 w-4" />
+                                        Manage Sync
+                                    </Button>
+                                    {contact.email && isOutlookConnected && (
+                                        <Button type="button" variant="outline" size="sm" onClick={() => setOutlookOpen(true)}>
+                                            <Mail className="mr-2 h-4 w-4" />
+                                            Outlook Emails
+                                        </Button>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Right Side: Additional Footer Action (Delete) */}
+                            {additionalFooter}
+                        </div>
+                    ) : (
                         <div className="flex gap-2">
                             {/* Manage Sync Button (Only in View Mode) */}
                             {contact && !isCreating && (

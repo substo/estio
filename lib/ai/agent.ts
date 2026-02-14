@@ -3,7 +3,14 @@ import db from "@/lib/db";
 import * as tools from "./tools";
 import { SkillLoader } from "./skills/loader";
 import * as skillTools from "./skills/tools";
-import { DEFAULT_MODEL } from "@/lib/ai/pricing";
+import { calculateRunCost } from "@/lib/ai/pricing";
+import { getModelForTask } from "./model-router";
+import { toolRegistry } from "./mcp/registry";
+import "./mcp/server"; // Import for side effects (tool registration)
+import { startTrace, endTrace, startSpan, endSpan } from "./tracing";
+import { retrieveContext } from "./memory";
+import { shouldUsePTC } from "./ptc/config";
+import { getPtcSystemPrompt } from "./prompts/ptc-instructions";
 
 const PLANNER_SYSTEM_PROMPT = `
 You are the Estio Real Estate Planner. Your job is to break down a high-level "Ultimate Goal" into a concrete, sequential checklist of tasks.
@@ -90,8 +97,10 @@ export async function generateAgentPlan(contactId: string, locationId: string, h
 
         // Prepare Model
         const genAI = new GoogleGenerativeAI(apiKey);
+        // ROUTER INTEGRATION: Select optimal model for planning
+        const modelId = getModelForTask("complex_planning");
         const model = genAI.getGenerativeModel({
-            model: DEFAULT_MODEL,
+            model: modelId,
             generationConfig: { responseMimeType: "application/json" }
         });
 
@@ -109,7 +118,7 @@ HISTORY: ${history}
             thought: parsed.thought,
             usage: {
                 ...result.response.usageMetadata,
-                model: DEFAULT_MODEL
+                model: modelId
             }
         };
     } catch (e) {
@@ -126,7 +135,8 @@ export async function executeAgentTask(contactId: string, locationId: string, hi
         if (!apiKey) throw new Error("No AI API Key");
 
         const genAI = new GoogleGenerativeAI(apiKey);
-        const modelName = "gemini-2.5-pro";
+        // ROUTER INTEGRATION: Select optimal model for execution/drafting
+        const modelName = getModelForTask("draft_reply");
         const model = genAI.getGenerativeModel({
             model: modelName,
             generationConfig: { responseMimeType: "application/json" }
@@ -142,6 +152,12 @@ export async function executeAgentTask(contactId: string, locationId: string, hi
             include: { propertyRoles: { include: { property: true } } }
         });
 
+        // SEMANTIC MEMORY INTEGRATION: Retrieve relevant insights
+        const insights = await retrieveContext(contactId, currentTask.title, 5);
+        const memoryContext = insights.length > 0
+            ? `\nMEMORY (past insights about this client):\n${insights.map(i => `- [${i.category}] ${i.text}`).join('\n')}`
+            : "";
+
         const context = `
         CURRENT TASK: ${currentTask.title}
         FULL PLAN: ${JSON.stringify(allTasks.map(t => t.title))}
@@ -152,12 +168,20 @@ Budget: ${contact?.requirementMaxPrice}
 District: ${contact?.requirementDistrict}
 Bedrooms: ${contact?.requirementBedrooms}
 
+${memoryContext}
+
 HISTORY:
         ${history}
 `;
 
+        // PTC INTEGRATION: Conditionally append coding instructions
+        let finalSystemPrompt = SYSTEM_PROMPT;
+        if (shouldUsePTC(currentTask.title)) {
+            finalSystemPrompt += "\n\n" + getPtcSystemPrompt();
+        }
+
         const result = await model.generateContent([
-            SYSTEM_PROMPT,
+            finalSystemPrompt,
             context
         ]);
 
@@ -180,36 +204,39 @@ HISTORY:
                     let res;
                     const args = call.arguments;
 
-                    switch (call.name) {
-                        // --- Meta Tools ---
-                        case "load_skill":
-                            res = await skillTools.loadSkillTool(args.skillName || args.name);
-                            break;
-                        case "read_resource":
-                            res = await skillTools.readResourceTool(args.skillName, args.filePath);
-                            break;
-                        case "list_resources":
-                            res = await skillTools.listResourcesTool(args.skillName);
-                            break;
+                    // MCP DISPATCH: Check if tool is in registry
+                    const registeredTool = toolRegistry.find(t => t.name === call.name);
 
-                        // --- Domain Tools (Still accessible, but usually gated by instructions) ---
-                        case "update_requirements":
-                            res = await tools.updateContactRequirements(contactId, locationId, args);
-                            break;
-                        case "search_properties":
-                            res = await tools.searchProperties(locationId, args);
-                            break;
-                        case "create_viewing":
-                            res = await tools.createViewing(contactId, args.propertyId, args.date, args.notes);
-                            break;
-                        case "log_activity":
-                            res = await tools.appendLog(contactId, args.message);
-                            break;
-                        case "draft_reply":
-                            break;
-                        default:
-                            console.warn(`Unknown tool: ${call.name} `);
-                            res = { success: false, message: "Unknown tool" };
+                    if (registeredTool) {
+                        const mcpResult = await registeredTool.handler(args);
+                        // MCP returns { content: [{ type: 'text', text: '...' }] } usually
+                        // We try to unwrap JSON text if possible, or return raw
+                        res = mcpResult?.content?.[0]?.text
+                            ? (() => { try { return JSON.parse(mcpResult.content[0].text) } catch { return mcpResult.content[0].text } })()
+                            : mcpResult;
+
+                        // Special handling for store_insight (memory) and log_activity to ensure sync returns
+                    } else {
+                        // Fallback for meta-tools (Skill Loader internals)
+                        switch (call.name) {
+                            // --- Meta Tools ---
+                            case "load_skill":
+                                res = await skillTools.loadSkillTool(args.skillName || args.name);
+                                break;
+                            case "read_resource":
+                                res = await skillTools.readResourceTool(args.skillName, args.filePath);
+                                break;
+                            case "list_resources":
+                                res = await skillTools.listResourcesTool(args.skillName);
+                                break;
+
+                            // Legacy Direct Calls (should vary rarely be hit now that registry covers them)
+                            case "draft_reply":
+                                break;
+                            default:
+                                console.warn(`Unknown tool: ${call.name} `);
+                                res = { success: false, message: "Unknown tool" };
+                        }
                     }
                     actions.push({ tool: call.name, result: res });
                 } catch (err) {
@@ -263,9 +290,10 @@ export class DealAgent {
 
             if (!deal) throw new Error("Deal not found");
 
-            // Prepare Model
+            // ROUTER INTEGRATION
+            const modelId = getModelForTask("deal_coordinator");
             const model = this.genAI.getGenerativeModel({
-                model: DEFAULT_MODEL,
+                model: modelId,
                 generationConfig: { responseMimeType: "application/json" }
             });
 
@@ -314,25 +342,53 @@ STAGE: ${deal.stage}
 
 // --- Orchestrator Function (Restored) ---
 export async function runAgent(contactId: string, locationId: string, history: string) {
+    // TRACING INTEGRATION: Start Trace
+    const conv = await db.conversation.findFirst({
+        where: { contactId, locationId },
+        orderBy: { lastMessageAt: "desc" },
+        select: { id: true }
+    });
+    const conversationId = conv?.id || "unknown"; // robust fallback
+    const trace = await startTrace(conversationId, "runAgent");
+
     try {
         // 1. Generate Plan
         // Default goal for generic runs
         const goal = "Determine the most appropriate next step for this lead and execute it to move the deal forward.";
+
+        // Trace the planning span? Ideally yes, but keeping it simple for now as part of runAgent trace
         const planRes = await generateAgentPlan(contactId, locationId, history, goal);
 
         if (!planRes.success || !planRes.plan) {
+            await endTrace(trace.traceId, "error", undefined, undefined, undefined, undefined);
             return { success: false, message: "Planning failed", thought: planRes.thought };
         }
 
         // 2. Find Next Task
         const nextTask = planRes.plan.find(t => t.status === 'pending');
         if (!nextTask) {
+            await endTrace(trace.traceId, "success");
             return { success: true, message: "No pending tasks derived from analysis.", plan: planRes.plan };
         }
 
         // 3. Execute Task
         console.log(`[runAgent] Executing Task: ${nextTask.title}`);
         const execRes = await executeAgentTask(contactId, locationId, history, nextTask, planRes.plan);
+
+        // TRACING INTEGRATION: End Trace with success
+        await endTrace(
+            trace.traceId,
+            "success",
+            execRes.draft,
+            execRes.actions,
+            // Calculate cost for execution part (ignoring planning cost for now or need to sum?)
+            calculateRunCost(execRes.usage?.model || "unknown", execRes.usage?.promptTokenCount || 0, execRes.usage?.candidatesTokenCount || 0),
+            {
+                prompt: execRes.usage?.promptTokenCount || 0,
+                completion: execRes.usage?.candidatesTokenCount || 0,
+                total: execRes.usage?.totalTokenCount || 0
+            }
+        );
 
         return {
             success: true,
@@ -341,8 +397,10 @@ export async function runAgent(contactId: string, locationId: string, history: s
             execution: execRes
         };
 
-    } catch (e) {
+    } catch (e: any) {
         console.error("runAgent Orchestration Failed", e);
+        // TRACING INTEGRATION: End Trace with error
+        await endTrace(trace.traceId, "error", undefined, undefined, undefined, undefined);
         return { success: false, message: "Agent orchestration failed." };
     }
 }
