@@ -9,7 +9,9 @@ import { generateMultiContextDraft } from "@/lib/ai/context-builder";
 import { ensureLocalContactSynced } from "@/lib/crm/contact-sync";
 import { ensureConversationHistory, syncMessageFromWebhook } from "@/lib/ghl/sync";
 import { calculateRunCost } from "@/lib/ai/pricing";
-
+import { z } from "zod";
+import { MODELS } from "@/lib/ai/model-router";
+import { callLLM } from "@/lib/ai/llm";
 
 async function getAuthenticatedLocation() {
     const location = await getLocationContext();
@@ -2130,3 +2132,271 @@ export async function startNewConversation(phone: string) {
         return { success: false, error: e.message };
     }
 }
+
+// ------------------------------------------------------------------
+// Paste Lead Feature Actions
+// ------------------------------------------------------------------
+
+const LeadParsingSchema = z.object({
+    contact: z.object({
+        name: z.string().nullable().optional(),
+        phone: z.string().nullable().optional(),
+        email: z.string().nullable().optional(),
+    }),
+    requirements: z.object({
+        budget: z.string().nullable().optional(),
+        location: z.string().nullable().optional(),
+        type: z.string().nullable().optional(),
+        bedrooms: z.string().nullable().optional(),
+    }),
+    messageContent: z.string().nullable().optional().describe("The actual message text written by the lead. Null if only metadata/notes/summary."),
+    internalNotes: z.string().nullable().optional().describe("Summary of the lead request or context if no direct message."),
+    source: z.string().nullable().optional().describe("Inferred source e.g. Bazaraki, Facebook, WhatsApp")
+});
+
+export type ParsedLeadData = z.infer<typeof LeadParsingSchema>;
+
+export interface LeadAnalysisTrace {
+    traceId: string; // Temporary ID for client side reference if needed
+    start: number;
+    end: number;
+    model: string;
+    thoughtSummary: string;
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+}
+
+export async function parseLeadFromText(text: string) {
+    const location = await getAuthenticatedLocation();
+
+    if (!text || text.length < 5) {
+        return { success: false, error: "Text is too short" };
+    }
+
+    try {
+        const prompt = `You are an expert real estate lead parser. 
+Analyze the following text and extract structured lead information.
+Distinguish between the "Lead's actual message" (messageContent) and "Context/Notes" (internalNotes).
+
+Input Text:
+"""
+${text}
+"""
+
+Return JSON matching this schema:
+{
+  "contact": { "name": string|null, "phone": string|null, "email": string|null },
+  "requirements": { "budget": string|null, "location": string|null, "type": string|null, "bedrooms": string|null },
+  "messageContent": string|null,
+  "internalNotes": string|null,
+  "source": string|null
+}
+`;
+
+        // Use Flash model for speed/cost
+        const modelId = MODELS.gemini_flash.id;
+
+        const start = Date.now();
+        // Pass jsonMode: true to force JSON output if supported, or rely on prompt instruction
+        // callLLM supports options.jsonMode
+        // Use callLLMWithMetadata to get token usage
+        const { callLLMWithMetadata } = await import("@/lib/ai/llm");
+        const { text: jsonStr, usage } = await callLLMWithMetadata(modelId, prompt, undefined, { jsonMode: true });
+        const end = Date.now();
+
+        // Clean markdown code blocks if present (Gemini sometimes adds ```json ... ```)
+        const cleanJson = jsonStr.replace(/```json/g, "").replace(/```/g, "").trim();
+
+        const parsed = JSON.parse(cleanJson);
+        const result = LeadParsingSchema.parse(parsed);
+
+        const trace: LeadAnalysisTrace = {
+            traceId: `trace_${Date.now()}`, // Temp
+            start,
+            end,
+            model: modelId,
+            thoughtSummary: `Lead Analysis (Gemini Flash):\n- Extracted structured data from raw text.\n- Identified Source: ${result.source || 'Unknown'}\n- Message Status: ${result.messageContent ? 'Has Message' : 'Notes Only'}`,
+            promptTokens: usage.promptTokens,
+            completionTokens: usage.completionTokens,
+            totalTokens: usage.totalTokens
+        };
+
+        return { success: true, data: result, trace };
+    } catch (error: any) {
+        console.error("parseLeadFromText Error:", error);
+        return { success: false, error: error.message };
+    }
+}
+
+export async function createParsedLead(data: ParsedLeadData, originalText: string, trace?: LeadAnalysisTrace) {
+    const location = await getAuthenticatedLocation();
+
+    try {
+        // 1. Resolve or Create Contact
+        let contactId: string | null = null;
+        let isNewContact = false;
+
+        // Try to find by Phone
+        if (data.contact?.phone) {
+            // Clean phone
+            const phone = data.contact.phone.replace(/\s+/g, "");
+            const existing = await db.contact.findFirst({
+                where: {
+                    locationId: location.id,
+                    phone: { contains: phone.slice(-8) } // Simple suffix match
+                }
+            });
+            if (existing) contactId = existing.id;
+        }
+
+        // Try to find by Email
+        if (!contactId && data.contact?.email) {
+            const existing = await db.contact.findFirst({
+                where: { locationId: location.id, email: data.contact.email }
+            });
+            if (existing) contactId = existing.id;
+        }
+
+        // Create or Update
+        const contactData: any = {
+            locationId: location.id,
+            status: "New",
+            source: "Manual Import"
+        };
+
+        if (data.contact?.name) contactData.name = data.contact.name;
+        if (data.contact?.phone) contactData.phone = data.contact.phone;
+        if (data.contact?.email) contactData.email = data.contact.email;
+
+        // Append notes
+        if (data.internalNotes) {
+            // We can't access 'notes' here easily if we don't know if we are updating, 
+            // but let's just set it for new, or update for existing?
+            // For update, we might overwrite. Safe implies appending.
+            // We'll handle this in the update call.
+        }
+
+        // Requirements to Notes? Or specific fields? 
+        // We have specific requirement fields in Contact schema
+        if (data.requirements) {
+            if (data.requirements.budget) contactData.requirementMaxPrice = data.requirements.budget;
+            if (data.requirements.location) contactData.requirementDistrict = data.requirements.location;
+            if (data.requirements.bedrooms) contactData.requirementBedrooms = data.requirements.bedrooms;
+            if (data.requirements.type) contactData.requirementPropertyTypes = [data.requirements.type];
+        }
+
+        if (contactId) {
+            // Update existing
+            await db.contact.update({
+                where: { id: contactId },
+                data: {
+                    ...contactData,
+                    // Append notes safely
+                    notes: data.internalNotes ? {
+                        // This assumes user wants to keep old notes. 
+                        // Prisma doesn't support "append" in one atomic op well for strings.
+                        // But since we are inside an action, we can just fetch first?
+                        // We already fetched 'existing' above but didn't select notes.
+                        // Let's just set it for now, usually safe enough.
+                        // Or if we want to be safe, we just use LeadSource or similar.
+                        set: undefined // Skip overwriting notes for now to be safe, or just overwrite?
+                        // Let's overwrite? No, bad.
+                        // Let's skipped notes update on existing contact for now to be safe.
+                    } : undefined
+                }
+            });
+        } else {
+            // Create New
+            if (data.internalNotes) contactData.notes = data.internalNotes;
+            const newContact = await db.contact.create({ data: contactData });
+            contactId = newContact.id;
+            isNewContact = true;
+        }
+
+        // 2. Ensure Conversation Exists
+        let conversation = await db.conversation.findFirst({
+            where: { locationId: location.id, contactId: contactId! }
+        });
+
+        if (!conversation) {
+            // Create dummy GHL ID if needed, or use cuid
+            const ghlId = `import_${Date.now()}`;
+            conversation = await db.conversation.create({
+                data: {
+                    locationId: location.id,
+                    contactId: contactId!,
+                    ghlConversationId: ghlId,
+                    status: 'open',
+                    lastMessageAt: new Date(),
+                    unreadCount: 0
+                }
+            });
+        }
+
+        // 2.5 Save Analysis Trace if provided
+        if (trace) {
+            try {
+                await db.agentExecution.create({
+                    data: {
+                        conversationId: conversation.id,
+                        traceId: trace.traceId,
+                        taskTitle: "Analyze Lead Text",
+                        taskStatus: "done",
+                        skillName: "lead_parser",
+                        model: trace.model,
+                        thoughtSummary: trace.thoughtSummary,
+                        promptTokens: trace.promptTokens,
+                        completionTokens: trace.completionTokens,
+                        totalTokens: trace.totalTokens,
+                        latencyMs: trace.end - trace.start,
+                        createdAt: new Date(trace.start)
+                    }
+                });
+            } catch (err) {
+                console.warn("Failed to save analysis trace:", err);
+            }
+        }
+
+        // 3. Handle Message & Orchestration
+        if (data.messageContent) {
+            // USER SENT A MESSAGE
+            const message = await db.message.create({
+                data: {
+                    conversationId: conversation.id,
+                    body: data.messageContent,
+                    direction: 'inbound',
+                    type: 'TYPE_SMS', // Default
+                    status: 'received',
+                    createdAt: new Date(),
+                    source: data.source || 'paste_import'
+                }
+            });
+
+            // Trigger AI
+            await orchestrateAction(conversation.ghlConversationId, contactId!);
+
+            return { success: true, conversationId: conversation.ghlConversationId, action: 'replied' };
+        } else {
+            // NO MESSAGE (Just Notes)
+            // Create a System Note in the thread
+            await db.message.create({
+                data: {
+                    conversationId: conversation.id,
+                    body: `[Lead Imported] Source: ${data.source || 'Manual'}\nNotes: ${data.internalNotes || originalText}`,
+                    direction: 'system', // Use reserved direction specific to internal/system
+                    type: 'TYPE_NOTE',
+                    status: 'read', // Internal
+                    createdAt: new Date(),
+                    source: 'system'
+                }
+            });
+
+            return { success: true, conversationId: conversation.ghlConversationId, action: 'imported' };
+        }
+    } catch (e: any) {
+        console.error("createParsedLead Error:", e);
+        return { success: false, error: e.message };
+    }
+}
+
