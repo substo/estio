@@ -762,9 +762,48 @@ model DealContext {
   lastActivityAt  DateTime @default(now())
   metadata        Json?    // For AI summary ("State of the Deal") and active agent thoughts
 
+  // Phase 5: Negotiation & Closing
+  negotiationStage  String   @default("no_offer")
+  buyerContactId    String?
+  sellerContactId   String?
+  askingPrice       Float?
+  agreedPrice       Float?
+  commission        Float?
+  offers            Offer[]
+  documents         DealDocument[]
+
   location        Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
   @@index([locationId])
   @@index([lastActivityAt])
+}
+
+model Offer {
+  id            String   @id @default(cuid())
+  dealId        String
+  deal          DealContext @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  type          String   // "initial", "counter", "final"
+  fromRole      String   // "buyer", "seller"
+  amount        Float
+  conditions    String?
+  validUntil    DateTime?
+  status        String   @default("pending")
+  reasoning     String?
+  createdAt     DateTime @default(now())
+  @@index([dealId])
+}
+
+model DealDocument {
+  id            String   @id @default(cuid())
+  dealId        String
+  deal          DealContext @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  type          String   // "reservation", "sales_contract", "addendum"
+  name          String
+  fileUrl       String?
+  status        String   @default("draft")
+  signatureId   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  @@index([dealId])
 }
 
 model Conversation {

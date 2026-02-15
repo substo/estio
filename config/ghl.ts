@@ -37,6 +37,10 @@ export const GHL_CONFIG = {
         "conversations/reports.readonly",
         "conversations/livechat.write",
         "users.readonly",
-        "users.write"
+        "users.write",
+        "documents_contracts/list.readonly",
+        "documents_contracts/sendLink.write",
+        "documents_contracts_template/list.readonly",
+        "documents_contracts_template/sendLink.write"
     ]
 };

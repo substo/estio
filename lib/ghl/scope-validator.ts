@@ -31,6 +31,10 @@ export const REQUIRED_SCOPES = {
     ],
     media: [
         'medias.readonly'
+    ],
+    proposals: [
+        'documents_contracts_template/list.readonly',
+        'documents_contracts_template/sendLink.write'
     ]
 } as const;
 
@@ -82,6 +86,10 @@ export function describeMissingScopes(missingScopes: string[]): string {
         'objects/schema.readonly': 'read custom objects',
         'objects/record.readonly': 'read custom records',
         'medias.readonly': 'read media',
+        'documents_contracts_template/list.readonly': 'list templates',
+        'documents_contracts_template/sendLink.write': 'send templates',
+        'documents_contracts/list.readonly': 'list documents',
+        'documents_contracts/sendLink.write': 'send documents',
     };
 
     const descriptions = missingScopes.map(

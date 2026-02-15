@@ -23,12 +23,18 @@ export async function ghlFetch<T>(
 ): Promise<T> {
     const url = endpoint.startsWith('http') ? endpoint : `${GHL_CONFIG.API_BASE_URL}${endpoint}`;
 
-    const headers = {
+    const headers: Record<string, string> = {
         'Authorization': `Bearer ${accessToken}`,
         'Version': '2021-07-28',
         'Content-Type': 'application/json',
-        ...options.headers,
+        ...options.headers as any,
     };
+
+    // If Content-Type is explicitly set to undefined (for FormData), verify it's removed
+    // The spread above might keep the key with undefined value, which fetch might mishandle
+    if (options.headers && 'Content-Type' in options.headers && (options.headers as any)['Content-Type'] === undefined) {
+        delete headers['Content-Type'];
+    }
 
     // DEBUG: Scope/Auth Logging
     console.log(`[GHL DEBUG] Fetching: ${url}`);
@@ -42,14 +48,20 @@ export async function ghlFetch<T>(
     if (!response.ok) {
         let errorData;
         try {
-            errorData = await response.json();
-        } catch {
-            errorData = await response.text();
+            // Clone first if we want to try multiple reads, specifically for text() fallback
+            const clone = response.clone();
+            try {
+                errorData = await response.json();
+            } catch {
+                errorData = await clone.text();
+            }
+        } catch (e) {
+            errorData = 'Could not read error body';
         }
 
         console.error(`[GHL ERROR] Status: ${response.status} ${response.statusText}`);
         console.error(`[GHL ERROR] Endpoint: ${endpoint}`);
-        console.error(`[GHL ERROR] Data:`, JSON.stringify(errorData, null, 2));
+        console.error(`[GHL ERROR] Data:`, typeof errorData === 'object' ? JSON.stringify(errorData, null, 2) : errorData);
 
         if (response.status === 429) {
             console.warn('[GHL API] Rate limit exceeded');

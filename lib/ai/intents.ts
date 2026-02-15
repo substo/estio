@@ -15,10 +15,10 @@ export const INTENTS = {
 
     // High-risk (Always Human-in-the-Loop)
     OBJECTION: { risk: "high", skill: "objection_handler", effort: "standard" },
-    PRICE_NEGOTIATION: { risk: "high", skill: "negotiator", effort: "premium" }, // Note: Skill doesn't exist yet
+    PRICE_NEGOTIATION: { risk: "high", skill: "negotiator", effort: "premium" },
     OFFER: { risk: "high", skill: "negotiator", effort: "premium" },
     COUNTER_OFFER: { risk: "high", skill: "negotiator", effort: "premium" },
-    CONTRACT_REQUEST: { risk: "high", skill: "closer", effort: "premium" }, // Note: Skill doesn't exist yet
+    CONTRACT_REQUEST: { risk: "high", skill: "closer", effort: "premium" },
     COMPLAINT: { risk: "high", skill: null, effort: "premium" },
     LEGAL_QUESTION: { risk: "high", skill: "closer", effort: "premium" },
 

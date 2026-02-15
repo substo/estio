@@ -266,6 +266,131 @@ registerTool(
     }
 );
 
+// ── NEGOTIATION & CLOSING TOOLS (Phase 5) ─────────────────
+
+registerTool(
+    "create_offer",
+    "Create a new offer for a deal.",
+    {
+        dealId: z.string().describe("Deal Context ID"),
+        type: z.enum(["initial", "counter", "final"]).describe("Type of offer"),
+        fromRole: z.enum(["buyer", "seller"]).describe("Who is making the offer"),
+        amount: z.number().describe("Offer amount"),
+        conditions: z.string().optional().describe("Conditions (e.g., subject to survey)"),
+        reasoning: z.string().optional().describe("Justification for the offer")
+    },
+    async (params: any) => {
+        const result = await tools.createOffer(params);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    }
+);
+
+registerTool(
+    "get_offer_history",
+    "Retrieve the full offer history for a deal.",
+    {
+        dealId: z.string().describe("Deal Context ID")
+    },
+    async (params: any) => {
+        const result = await tools.getOfferHistory(params.dealId);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    }
+);
+
+registerTool(
+    "calculate_mortgage",
+    "Calculate estimated monthly mortgage payments.",
+    {
+        propertyPrice: z.number(),
+        downPaymentPercent: z.number().default(20),
+        interestRate: z.number().default(3.5),
+        termYears: z.number().default(20)
+    },
+    async (params: any) => {
+        const result = await tools.calculateMortgage(params);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    }
+);
+
+registerTool(
+    "price_comparison",
+    "Compare the target property's price against similar properties.",
+    {
+        district: z.string().describe("District name (e.g., 'Sea Caves')"),
+        propertyType: z.string().optional().describe("Property type (e.g. 'Villa', 'Apartment')"),
+        bedrooms: z.number().optional().describe("Number of bedrooms to approximate match")
+    },
+    async (params: any) => {
+        const result = await tools.priceComparison(params);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    }
+);
+
+registerTool(
+    "generate_contract",
+    "Generate a legal contract PDF.",
+    {
+        dealId: z.string(),
+        type: z.enum(["reservation", "sales_contract"]),
+        buyer: z.object({
+            name: z.string(),
+            email: z.string(),
+            address: z.string()
+        }),
+        seller: z.object({
+            name: z.string(),
+            email: z.string(),
+            address: z.string()
+        }),
+        property: z.object({
+            title: z.string(),
+            address: z.string(),
+            area: z.number()
+        }),
+        terms: z.object({
+            agreedPrice: z.number(),
+            depositAmount: z.number(),
+            completionDate: z.string().describe("Date string"),
+            conditions: z.array(z.string())
+        })
+    },
+    async (params: any) => {
+        const result = await tools.generateContract(params);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    }
+);
+
+registerTool(
+    "send_for_signature",
+    "Send a document for e-signature via GoHighLevel (Stub).",
+    {
+        documentId: z.string().describe("DealDocument ID"),
+        fileUrl: z.string().describe("URL of the PDF"),
+        signers: z.array(z.object({
+            email: z.string(),
+            name: z.string(),
+            role: z.string(),
+            order: z.number()
+        }))
+    },
+    async (params: any) => {
+        const result = await tools.sendForSignature(params);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    }
+);
+
+registerTool(
+    "check_signature_status",
+    "Check the status of an e-signature envelope.",
+    {
+        documentId: z.string()
+    },
+    async (params: any) => {
+        const result = await tools.checkSignatureStatus(params.documentId);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    }
+);
+
 // ── OTHER TOOLS ───────────────────────────────────
 
 
@@ -343,7 +468,11 @@ server.resource(
 
         const deal = await db.dealContext.findUnique({
             where: { id: dealId },
-            include: { location: true }
+            include: {
+                location: true,
+                offers: true,
+                documents: true
+            }
         });
 
         return { contents: [{ uri: uri.href, text: JSON.stringify(deal), mimeType: "application/json" }] };
