@@ -430,6 +430,33 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     // --- Smart Reply Generation (Background) ---
     if (direction === "inbound") {
         generateSmartReplies(conversation.id).catch(e => console.error("Smart Reply bg error", e));
+
+        // --- Phase 6: Semi-Auto Event Emission ---
+        // Emit event for the semi-auto prediction engine.
+        // This triggers auto-drafting if semiAuto is enabled on the conversation.
+        // Fire-and-forget to avoid slowing down webhook response.
+        Promise.all([
+            import("@/lib/ai/events/event-bus"),
+            import("@/lib/ai/events/handlers"),
+        ]).then(([{ eventBus }, { registerEventHandlers }]) => {
+            registerEventHandlers(); // Idempotent — safe to call multiple times
+            eventBus.emit({
+                type: "message.received",
+                payload: {
+                    conversationId: conversation.id,
+                    contactId: contact.id,
+                    message: body,
+                    channel: "whatsapp",
+                    direction: "inbound",
+                },
+                metadata: {
+                    timestamp: new Date(),
+                    sourceId: "evolution-webhook",
+                    conversationId: conversation.id,
+                    contactId: contact.id,
+                },
+            }).catch(e => console.error("[Semi-Auto] Event emission error:", e));
+        }).catch(e => console.error("[Semi-Auto] Event bus import error:", e));
     }
 
     return { status: 'processed' };

@@ -67,7 +67,8 @@ This implementation targets **Industry Standard (Claude Opus 4.6 / GPT-5.x level
 | **3** | Searcher & Recommender | Weeks 5–6 | [03-searcher-recommender.md](./03-searcher-recommender.md) ✅ **Completed** |
 | **4** | Coordinator & Scheduling | Weeks 7–8 | [04-coordinator-scheduling.md](./04-coordinator-scheduling.md) |
 | **5** | Negotiator & Closer | Weeks 9–12 | [05-negotiator-closer.md](./05-negotiator-closer.md) |
-| **6** | Auto-Pilot & Event-Driven | Weeks 13–14 | [06-auto-pilot-event-driven.md](./06-auto-pilot-event-driven.md) |
+| **6** | Semi-Auto & Event-Driven | Weeks 13–14 | [06-auto-pilot-event-driven.md](./06-auto-pilot-event-driven.md) ✅ **Completed** |
+| **6b** | Fully Autonomous (Future) | - | [06b-future-fully-autonomous-agent.md](./06b-future-fully-autonomous-agent.md) 🔵 Concept |
 
 ---
 

@@ -836,6 +836,11 @@ model Conversation {
   completionTokens  Int      @default(0)
   totalTokens       Int      @default(0)
   totalCost         Float    @default(0)
+
+  // Phase 6: Semi-Auto & Event-Driven
+  semiAuto          Boolean  @default(false)   // AI auto-drafts on incoming events (never auto-sends)
+  contextSummary    String?  @db.Text          // Compacted conversation context for long threads
+  lastSummarizedAt  DateTime?                  // When context was last compacted
   
   // Relations
   location          Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
@@ -1049,3 +1054,17 @@ model PlaybookEntry {
   @@map("playbook_entries")
 }
 
+// Phase 6: Event-Driven Architecture — Event Log
+model AgentEvent {
+  id              String   @id @default(cuid())
+  type            String   // EventType: message.received, lead.created, follow_up.due, etc.
+  payload         Json
+  conversationId  String?
+  contactId       String?
+  status          String   @default("processed") // processing, processed, error
+  error           String?
+  processedAt     DateTime @default(now())
+
+  @@index([type, processedAt])
+  @@map("agent_events")
+}
