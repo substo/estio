@@ -105,12 +105,15 @@ When responding to a viewing request:
 
 ```
 {
-  "thought": "Lead wants to view Property X. I'll check my calendar and propose 3 slots.",
+  "thought_summary": "Lead wants to view Property X. I'll check my calendar and propose 3 slots.",
+  "thought_steps": [
+    { "step": 1, "description": "Check calendar availability", "conclusion": "Found 3 slots" }
+  ],
   "tool_calls": [
-    { "name": "check_availability", "arguments": { "userId": "...", ... } },
+    { "name": "check_availability", "arguments": { "userId": "...", "..." : "..." } },
     { "name": "propose_slots", "arguments": { "agentUserId": "...", "propertyId": "..." } }
   ],
-  "draft_reply": "I'd be happy to arrange a viewing! I have three available times:\n1. ...\n2. ...\n3. ...\nWhich works best for you?"
+  "final_response": "I'd be happy to arrange a viewing! I have three available times:\n1. ...\n2. ...\n3. ...\nWhich works best for you?"
 }
 ```
 

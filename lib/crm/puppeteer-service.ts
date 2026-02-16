@@ -11,16 +11,17 @@ export class PuppeteerService {
         }
 
         if (!this.browser) {
-            console.log("PuppeteerService: Launching browser...");
+            console.log("PuppeteerService: Launching browser (headless: new)...");
             try {
                 this.browser = await puppeteer.launch({
-                    headless: true,
+                    headless: "new" as any, // Cast to any to support both string/boolean types across versions
                     // Args to prevent crashes in some environments
                     args: [
                         '--no-sandbox',
                         '--disable-setuid-sandbox',
                         '--disable-dev-shm-usage', // Critical for server environments (docker/linux)
-                        '--disable-features=IsolateOrigins,site-per-process'
+                        '--disable-features=IsolateOrigins,site-per-process',
+                        '--disable-blink-features=AutomationControlled' // Helps with bot detection
                     ],
                     defaultViewport: { width: 1280, height: 900 }
                 });
@@ -37,7 +38,7 @@ export class PuppeteerService {
                 throw e;
             }
         } else {
-            console.log("PuppeteerService: Browser already active.");
+            console.log("PuppeteerService: Browser instance reused.");
         }
     }
 

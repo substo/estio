@@ -180,6 +180,11 @@ You must respond with valid JSON:
 
         const parsed = JSON.parse(response);
 
+        console.log(`[SKILL:${skill.name}] LLM response keys:`, Object.keys(parsed));
+        console.log(`[SKILL:${skill.name}] final_response:`, parsed.final_response?.substring(0, 100) || 'MISSING');
+        console.log(`[SKILL:${skill.name}] draft_reply:`, parsed.draft_reply?.substring(0, 100) || 'MISSING');
+        console.log(`[SKILL:${skill.name}] Raw response (first 500 chars):`, response.substring(0, 500));
+
         // 4. Trace Metadata construction
         const results = [];
         if (parsed.tool_calls) {
@@ -206,7 +211,7 @@ You must respond with valid JSON:
             thoughtSummary: parsed.thought_summary || "",
             thoughtSteps: parsed.thought_steps || [],
             toolCalls: results,
-            draftReply: parsed.final_response,
+            draftReply: parsed.final_response || parsed.draft_reply || null,
             promptTokens: usage.promptTokens,
             completionTokens: usage.completionTokens,
             cost: cost

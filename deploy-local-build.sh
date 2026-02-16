@@ -32,24 +32,24 @@ trap cleanup EXIT
 
 # Step 0: Determine Active/Target Slots
 echo "🔍 Checking server state..."
-ssh $SSH_OPTS $SERVER bash << ENDSSH > /tmp/deploy_state.log
-    # Check if symlink
-    if [ -L "$SYMLINK_PATH" ]; then
-        TARGET=\$(readlink "$SYMLINK_PATH")
-        if [[ "\$TARGET" == *"-blue"* ]]; then
-            echo "CURRENT_COLOR=blue"
+# Check if symlink
+    if ssh $SSH_OPTS $SERVER "[ -L $SYMLINK_PATH ] && readlink $SYMLINK_PATH || echo none"; then
+        TARGET_LINK=$(ssh $SSH_OPTS $SERVER readlink "$SYMLINK_PATH")
+        if [[ "$TARGET_LINK" == *"-blue"* ]]; then
+            echo "CURRENT_COLOR=blue" > /tmp/deploy_state.log
+        elif [[ "$TARGET_LINK" == *"-green"* ]]; then
+             echo "CURRENT_COLOR=green" > /tmp/deploy_state.log
         else
-            echo "CURRENT_COLOR=green"
+             # Fallback check for directory existance if link is weird or missing
+             if ssh $SSH_OPTS $SERVER "[ -d $BLUE_DIR ]"; then
+                 echo "CURRENT_COLOR=blue" > /tmp/deploy_state.log
+             else
+                 echo "CURRENT_COLOR=none" > /tmp/deploy_state.log
+             fi
         fi
     else
-        # Fallback
-        if [ -d "$BLUE_DIR" ]; then
-             echo "CURRENT_COLOR=blue"
-        else
-             echo "CURRENT_COLOR=none"
-        fi
+         echo "CURRENT_COLOR=none" > /tmp/deploy_state.log
     fi
-ENDSSH
 
 # Read active color from log
 if grep -q "CURRENT_COLOR=blue" /tmp/deploy_state.log; then
@@ -119,7 +119,6 @@ rsync -avz --progress -e "ssh $SSH_OPTS" \
            --exclude='*.bak' \
            --exclude='tmp/' \
            --exclude='documentation/' \
-           --exclude='scripts/' \
             ./ $SERVER:$TARGET_DIR/
 
 # Step 4: Configure Env (Use the same file we just created)

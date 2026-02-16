@@ -3,6 +3,7 @@ import db from '@/lib/db';
 import { eventBus } from '@/lib/ai/events/event-bus';
 import { registerEventHandlers } from '@/lib/ai/events/handlers';
 import { checkPendingFollowUps } from '@/lib/ai/tools/follow-up';
+import { CronGuard } from '@/lib/cron/guard';
 
 /**
  * AI Agent Scheduled Tasks — Cron Job
@@ -25,6 +26,8 @@ export const maxDuration = 120; // 2 minutes max
 // Ensure handlers are registered
 registerEventHandlers();
 
+const guard = new CronGuard('scheduled-tasks');
+
 export async function GET(request: NextRequest) {
     // Security check
     const authHeader = request.headers.get('authorization');
@@ -36,6 +39,18 @@ export async function GET(request: NextRequest) {
     }
 
     console.log('[Cron AI] Starting scheduled AI tasks...');
+
+    // Concurrency & Resource Check
+    const resources = await guard.checkResources(400, 5.0);
+    if (!resources.ok) {
+        console.warn(`[Cron AI] SKIPPING run: ${resources.reason}`);
+        return NextResponse.json({ skipped: true, reason: resources.reason });
+    }
+
+    if (!(await guard.acquire())) {
+        console.warn('[Cron AI] SKIPPING run: Job is already running (locked)');
+        return NextResponse.json({ skipped: true, reason: 'locked' });
+    }
 
     const stats = {
         followUps: 0,
@@ -194,6 +209,7 @@ export async function GET(request: NextRequest) {
                         metadata: {
                             timestamp: new Date(),
                             sourceId: "cron-scheduled-tasks",
+                            contactId: matchingContacts.map(c => c.id).join(","), // Approximate meta format
                         },
                     });
                     stats.newListings++;
@@ -217,5 +233,7 @@ export async function GET(request: NextRequest) {
             success: false,
             error: error.message,
         }, { status: 500 });
+    } finally {
+        await guard.release();
     }
 }

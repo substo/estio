@@ -54,9 +54,13 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
     // ── STEP 4: Route to Skill ──
     let skillResult: any = null;
 
+    console.log(`[ORCHESTRATOR] Classification: intent=${classification.intent}, skill=${classification.suggestedSkill}, risk=${classification.risk}`);
+
     if (classification.suggestedSkill) {
         const skillSpan = await startSpan(trace, `Execute Skill: ${classification.suggestedSkill}`, "tool");
         const skill = SkillLoader.loadSkill(classification.suggestedSkill);
+        console.log(`[ORCHESTRATOR] Skill loaded: ${skill ? skill.name : 'NULL - SKILL NOT FOUND'}`);
+        if (skill) console.log(`[ORCHESTRATOR] Skill tools: ${skill.tools?.join(', ') || 'none'}`);
 
         if (skill) {
             skillResult = await executeSkill(skill, {
@@ -69,6 +73,17 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
                     include: { location: { include: { siteConfig: true } } }
                 }))?.location?.siteConfig?.googleAiApiKey ?? undefined
             });
+
+            console.log(`[ORCHESTRATOR] Skill result:`, JSON.stringify({
+                modelUsed: skillResult?.modelUsed,
+                thoughtSummary: skillResult?.thoughtSummary?.substring(0, 100),
+                draftReply: skillResult?.draftReply?.substring(0, 200) || 'NULL/EMPTY',
+                toolCalls: skillResult?.toolCalls?.length || 0,
+                error: skillResult?.error || 'none',
+                cost: skillResult?.cost,
+                promptTokens: skillResult?.promptTokens,
+                completionTokens: skillResult?.completionTokens
+            }));
 
             await endSpan(skillSpan.spanId, skillSpan.startTime, skillResult.error ? "error" : "success", {
                 output: skillResult.draftReply,
@@ -110,11 +125,15 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
     }
 
     // End Root Trace
+    const finalDraft = skillResult?.draftReply || null;
+    console.log(`[ORCHESTRATOR] Final draft being saved to trace: ${finalDraft ? finalDraft.substring(0, 200) : 'NULL'}`);
+    console.log(`[ORCHESTRATOR] skillResult exists: ${!!skillResult}, skillResult.draftReply type: ${typeof skillResult?.draftReply}, value: ${JSON.stringify(skillResult?.draftReply)?.substring(0, 200)}`);
+
     // Using endTrace signature: (traceId, status, output, toolCalls, cost, tokens)
     await endTrace(
         trace.traceId,
-        "success",
-        skillResult?.draftReply || null,
+        skillResult?.error ? "error" : "success",
+        finalDraft,
         skillResult?.toolCalls || [],
         skillResult?.cost || 0,
         undefined

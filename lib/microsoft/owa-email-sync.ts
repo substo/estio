@@ -167,6 +167,9 @@ export async function syncEmailsFromOWA(userId: string, folderId: 'inbox' | 'sen
     }
 
     async function processEmailsSequentially(page: Page, searchQuery?: string): Promise<number> {
+        const startTime = Date.now();
+        const TIMEOUT_MS = 250 * 1000; // 4 minutes 10 seconds (leave buffer for cleanup before 5m limit)
+
         let count = 0;
         const processedMap = new Map<string, boolean>();
 
@@ -210,6 +213,12 @@ export async function syncEmailsFromOWA(userId: string, folderId: 'inbox' | 'sen
         let emailsOlderThanCutoff = 0;
 
         while (scrollAttempts < maxScrolls) {
+            // TIMEOUT CHECK
+            if (Date.now() - startTime > TIMEOUT_MS) {
+                console.log(`[OWA Email Sync] Time limit reached (${(Date.now() - startTime) / 1000}s). Stopping sync to ensure cleanup.`);
+                break;
+            }
+
             // Track count before batch
             const countBeforeBatch = count;
 

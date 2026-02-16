@@ -1,61 +1,62 @@
 
+import { AI_PRICING, calculateRunCost, DEFAULT_MODEL } from "./pricing";
+
 /**
  * Model Router configuration and logic.
  * 
- * Routes tasks to the optimal model based on complexity and cost.
- * - Flash: High speed, low cost (Generation, simple classif)
- * - Pro: Balanced (Reasoning, complex tool use)
- * - Thinking/Opus: High intelligence (Planning, heavy reasoning)
+ * Routes tasks to the optimal model based on the "Single Source of Truth" in pricing.ts.
+ * 
+ * Logic:
+ * - Dynamically finds the best "Flash" or "Pro" model from AI_PRICING keys.
+ * - Prioritizes newer versions (higher numbers).
  */
 
-export const MODELS = {
-    gemini_flash: {
-        id: "gemini-2.0-flash",
-        pricing: { input: 0.10, output: 0.40 } // $ per 1M tokens (approx)
-    },
-    gemini_pro: {
-        id: "gemini-2.0-pro-exp-02-05", // Using latest stable or exp
-        pricing: { input: 1.25, output: 5.00 }
-    },
-    // Adding placeholder for Thinking model when available
-    gemini_thinking: {
-        id: "gemini-2.0-flash-thinking-exp-01-21",
-        pricing: { input: 0.10, output: 0.40 } // Flash pricing for now
-    }
-} as const;
+// Helper: Extract valid model IDs from pricing config
+const VALID_MODELS = Object.keys(AI_PRICING);
 
-export type ModelId = keyof typeof MODELS;
+// Helper: Find best model for a given tier (flash/pro)
+function getBestModelForTier(tier: 'flash' | 'pro'): string {
+    const candidates = VALID_MODELS.filter(m => m.includes(tier) && !m.includes('image'));
 
-// Map valid task types to their ideal model
-export const TASK_MODEL_MAP: Record<string, ModelId> = {
-    "intent_classification": "gemini_flash",
-    "sentiment_analysis": "gemini_flash",
-    "simple_generation": "gemini_flash",
-    "tool_selection": "gemini_flash",
+    // Sort by version (descending)
+    // Simple heuristic: extract numbers, compare. 
+    // If no numbers, alphabetical desc usually works for versions (3.0 > 2.0).
+    candidates.sort((a, b) => {
+        const vA = parseFloat(a.match(/\d+(\.\d+)?/)?.[0] || '0');
+        const vB = parseFloat(b.match(/\d+(\.\d+)?/)?.[0] || '0');
+        return vB - vA;
+    });
 
-    "property_search": "gemini_flash", // Flash is good enough for structured query gen
-    "draft_reply": "gemini_pro",       // Pro for better tone/nuance
-    "qualification": "gemini_pro",
-    "negotiation": "gemini_pro",
-    "deal_coordinator": "gemini_pro",
-    "negotiation_advice": "gemini_pro", // Pro allows better reasoning
+    return candidates[0] || DEFAULT_MODEL;
+}
 
-    "complex_planning": "gemini_thinking", // Thinking model for deep reasoning
-    "market_analysis": "gemini_thinking"
+// Cache selections to avoid re-sorting every call (optional optimization)
+const BEST_FLASH = getBestModelForTier('flash');
+const BEST_PRO = getBestModelForTier('pro');
+
+// Map valid task types to their ideal tier
+const TASK_TIER_MAP: Record<string, 'flash' | 'pro'> = {
+    "intent_classification": "flash",
+    "sentiment_analysis": "flash",
+    "simple_generation": "flash",
+    "tool_selection": "flash",
+    "property_search": "flash",
+
+    "draft_reply": "pro",
+    "qualification": "pro",
+    "negotiation": "pro",
+    "deal_coordinator": "pro",
+    "negotiation_advice": "pro",
+
+    "complex_planning": "pro", // Fallback to Pro until Thinking models are standard in pricing
+    "market_analysis": "pro"
 };
 
 export function getModelForTask(taskType: string): string {
-    const modelKey = TASK_MODEL_MAP[taskType] || "gemini_flash";
-    return MODELS[modelKey].id;
+    const tier = TASK_TIER_MAP[taskType] || 'flash';
+    return tier === 'pro' ? BEST_PRO : BEST_FLASH;
 }
 
 export function estimateCost(modelId: string, inputTokens: number, outputTokens: number): number {
-    // Reverse lookup model key from ID if needed, or just iterate
-    const modelEntry = Object.values(MODELS).find(m => m.id === modelId);
-    if (!modelEntry) return 0;
-
-    const inputCost = (inputTokens / 1_000_000) * modelEntry.pricing.input;
-    const outputCost = (outputTokens / 1_000_000) * modelEntry.pricing.output;
-
-    return inputCost + outputCost;
+    return calculateRunCost(modelId, inputTokens, outputTokens);
 }

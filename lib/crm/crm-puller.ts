@@ -49,11 +49,30 @@ export async function pullPropertyFromCrm(oldPropertyId: string, userId: string)
         console.log(`[CRM PULL] Navigating to ${editUrl}...`);
         await page.goto(editUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-        if (!page.url().includes(oldPropertyId)) {
-            throw new Error("Could not find property with this ID (redirected away).");
+        const finalUrl = page.url();
+        console.log(`[CRM PULL] Final URL after navigation: ${finalUrl}`);
+
+        if (!finalUrl.includes(oldPropertyId)) {
+            const pageTitle = await page.title();
+            const content = await page.content();
+            console.error(`[CRM PULL] ERROR: Redirected away from property page. Title: ${pageTitle}`);
+            console.log(`[CRM PULL] Page content length: ${content.length}`);
+            throw new Error(`Could not find property with this ID (redirected to ${finalUrl}). Title: ${pageTitle}`);
         }
 
         console.log(`[CRM PULL] extracting data...`);
+
+        // Debug: Check for key selectors presence
+        const debugSelectors = await page.evaluate(() => {
+            return {
+                titleInput: !!document.querySelector('input[name="en[name]"]'),
+                referenceInput: !!document.querySelector('input[name="reference"]'),
+                generalTab: !!document.querySelector('a[href="#tab_general"]'),
+                loginForm: !!document.querySelector('input[name="username"]'),
+                bodyText: document.body.innerText.substring(0, 200)
+            };
+        });
+        console.log("[CRM PULL] Debug Selectors:", JSON.stringify(debugSelectors, null, 2));
 
         const extractedData: any = {};
         const warnings: string[] = [];

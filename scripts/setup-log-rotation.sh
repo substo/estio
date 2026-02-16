@@ -8,11 +8,11 @@ if command -v pm2 &> /dev/null; then
     echo "✅ PM2 detected. Configuring pm2-logrotate..."
     
     # Check if module is installed, if not install it
-    if ! pm2 list | grep -q "pm2-logrotate"; then
+    if pm2 list | grep -q "pm2-logrotate"; then
+        echo "pm2-logrotate module already installed. Skipping installation."
+    else
         echo "Installing pm2-logrotate module..."
         pm2 install pm2-logrotate
-    else
-        echo "pm2-logrotate module already installed."
     fi
     
     # Configure settings

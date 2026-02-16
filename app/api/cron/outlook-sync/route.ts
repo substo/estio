@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { syncEmailsFromOWA } from '@/lib/microsoft/owa-email-sync';
 import { syncContactsFromOutlook } from '@/lib/microsoft/contact-sync';
+import { CronGuard } from '@/lib/cron/guard';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300; // Allow 5 minutes for cron job
+
+const guard = new CronGuard('outlook-sync');
 
 export async function GET(req: NextRequest) {
     // 1. Security Check
@@ -15,8 +18,20 @@ export async function GET(req: NextRequest) {
 
     console.log('[OutlookCron] Starting scheduled sync & maintenance');
 
+    // 2. Concurrency & Resource Check
+    const resources = await guard.checkResources(500, 4.0); // Require 500MB RAM, Load < 4
+    if (!resources.ok) {
+        console.warn(`[OutlookCron] SKIPPING run: ${resources.reason}`);
+        return NextResponse.json({ skipped: true, reason: resources.reason });
+    }
+
+    if (!(await guard.acquire())) {
+        console.warn('[OutlookCron] SKIPPING run: Job is already running (locked)');
+        return NextResponse.json({ skipped: true, reason: 'locked' });
+    }
+
     try {
-        // 2. Fetch Users with Outlook Sync Enabled and valid session
+        // 3. Fetch Users with Outlook Sync Enabled and valid session
         const users = await db.user.findMany({
             where: {
                 outlookSyncEnabled: true,
@@ -55,5 +70,7 @@ export async function GET(req: NextRequest) {
     } catch (error: any) {
         console.error('[OutlookCron] Fatal Error:', error);
         return new NextResponse(`Internal Error: ${error.message}`, { status: 500 });
+    } finally {
+        await guard.release();
     }
 }

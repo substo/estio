@@ -18,8 +18,8 @@ chmod +x "${SCRIPT_DIR}/cron-gmail-sync.sh"
 chmod +x "${SCRIPT_DIR}/cron-outlook-sync.sh"
 
 # Check if cron entry already exists (Gmail)
-CRON_ENTRY_GMAIL="*/5 * * * * ${SCRIPT_DIR}/cron-gmail-sync.sh"
-CRON_ENTRY_OUTLOOK="*/5 * * * * ${SCRIPT_DIR}/cron-outlook-sync.sh"
+CRON_ENTRY_GMAIL="*/15 * * * * ${SCRIPT_DIR}/cron-gmail-sync.sh"
+CRON_ENTRY_OUTLOOK="*/15 * * * * ${SCRIPT_DIR}/cron-outlook-sync.sh"
 
 EXISTING_GMAIL=$(crontab -l 2>/dev/null | grep -F "cron-gmail-sync.sh" || true)
 EXISTING_OUTLOOK=$(crontab -l 2>/dev/null | grep -F "cron-outlook-sync.sh" || true)

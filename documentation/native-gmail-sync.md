@@ -154,10 +154,11 @@ We use the server's native crontab instead of cloud-specific solutions for porta
 ./scripts/install-cron.sh
 ```
 
-This installs a cron job that runs every 5 minutes with:
-- **Mutual Exclusion** (`flock`) - Prevents overlapping runs
+This installs a cron job that runs every **15 minutes** (was 5m) to reduce server load:
+- **Mutual Exclusion** (`flock` + `CronGuard`) - Strictly prevents overlapping runs.
+- **Resource Checks** - Skips run if server RAM < 500MB.
 - **Logging** - Writes to `logs/gmail-sync-cron.log`
-- **Timeout** - 4 minute limit per run
+- **Timeout** - **30 minute** limit per run (allows deep syncs)
 - **Log Rotation** - Auto-cleans logs older than 7 days
 
 ### Security

@@ -622,9 +622,19 @@ export async function generateAIDraft(conversationId: string, contactId: string,
 export async function orchestrateAction(conversationId: string, contactId: string, dealStage?: string) {
     const location = await getAuthenticatedLocation();
 
+    // Resolve real conversation DB ID (AgentExecution FK requires Conversation.id, not ghlConversationId)
+    const conversation = await db.conversation.findFirst({
+        where: { ghlConversationId: conversationId },
+        select: { id: true }
+    });
+
+    if (!conversation) {
+        throw new Error(`Conversation not found for ghlConversationId: ${conversationId}`);
+    }
+
     // Fetch conversation history
     const messages = await db.message.findMany({
-        where: { conversation: { ghlConversationId: conversationId } },
+        where: { conversationId: conversation.id },
         orderBy: { createdAt: 'asc' },
         take: 20
     });
@@ -634,11 +644,6 @@ export async function orchestrateAction(conversationId: string, contactId: strin
     }
 
     const lastMessage = messages[messages.length - 1];
-    if (lastMessage.direction !== 'inbound') {
-        // Technically we can orchestrate on our own message (e.g. auto-follow up) but usually it's responsive
-        // For Phase 1 we'll allow it but warn or maybe just use the last inbound?
-        // Let's just use the last message regardless for now.
-    }
 
     const history = messages.map(m => `${m.direction === 'inbound' ? 'User' : 'Agent'}: ${m.body}`).join("\n");
 
@@ -646,7 +651,7 @@ export async function orchestrateAction(conversationId: string, contactId: strin
     const { orchestrate } = await import("@/lib/ai/orchestrator");
 
     const result = await orchestrate({
-        conversationId,
+        conversationId: conversation.id, // Use real DB ID, not ghlConversationId
         contactId,
         message: lastMessage.body || "",
         conversationHistory: history,
@@ -2262,7 +2267,7 @@ export async function createParsedLead(data: ParsedLeadData, originalText: strin
         const contactData: any = {
             locationId: location.id,
             status: "New",
-            source: "Manual Import"
+            leadSource: "Manual Import"
         };
 
         if (data.contact?.name) contactData.name = data.contact.name;
@@ -2288,22 +2293,14 @@ export async function createParsedLead(data: ParsedLeadData, originalText: strin
 
         if (contactId) {
             // Update existing
+            // Remove locationId, status, leadSource from update data to avoid overwriting existing state
+            const { locationId, status, leadSource, ...updateData } = contactData;
+
             await db.contact.update({
                 where: { id: contactId },
                 data: {
-                    ...contactData,
-                    // Append notes safely
-                    notes: data.internalNotes ? {
-                        // This assumes user wants to keep old notes. 
-                        // Prisma doesn't support "append" in one atomic op well for strings.
-                        // But since we are inside an action, we can just fetch first?
-                        // We already fetched 'existing' above but didn't select notes.
-                        // Let's just set it for now, usually safe enough.
-                        // Or if we want to be safe, we just use LeadSource or similar.
-                        set: undefined // Skip overwriting notes for now to be safe, or just overwrite?
-                        // Let's overwrite? No, bad.
-                        // Let's skipped notes update on existing contact for now to be safe.
-                    } : undefined
+                    ...updateData,
+                    // safe note update?
                 }
             });
         } else {

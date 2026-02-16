@@ -13,6 +13,7 @@ Rules:
 - If the message asks about availability or scheduling → SCHEDULE_VIEWING or AVAILABILITY_QUESTION
 - If the message is a simple "ok", "thanks", "got it" → ACKNOWLEDGMENT or THANK_YOU
 - If the message asks for property details → PROPERTY_QUESTION
+- If the message states property requirements (e.g. "I want a 2-bed in Paphos") → QUALIFICATION
 - If the message asks for more photos, floorplans, or specific data → REQUEST_INFO
 - If unsure → UNKNOWN
 

@@ -21,7 +21,7 @@ LOG_FILE="${LOG_DIR}/gmail-sync-cron.log"
 LOCK_FILE="/tmp/gmail-sync-cron.lock"
 APP_URL="${APP_BASE_URL:-https://app.estio.co}"
 CRON_SECRET="${CRON_SECRET:-}"
-TIMEOUT_SECONDS=240  # 4 minutes (less than 5min interval)
+TIMEOUT_SECONDS=1800  # 30 minutes (allow long running syncs, managed by lock file)
 
 # Ensure log directory exists
 mkdir -p "${LOG_DIR}"

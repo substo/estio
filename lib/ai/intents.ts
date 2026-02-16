@@ -7,7 +7,7 @@ export const INTENTS = {
     // Medium-risk (Assisted)
     PROPERTY_QUESTION: { risk: "medium", skill: "property_search", effort: "standard" },
     AVAILABILITY_QUESTION: { risk: "medium", skill: "viewing_management", effort: "standard" },
-    GENERAL_QUESTION: { risk: "medium", skill: null, effort: "standard" },
+    GENERAL_QUESTION: { risk: "medium", skill: "lead_qualification", effort: "standard" },
     REQUEST_INFO: { risk: "medium", skill: "property_search", effort: "standard" },
     SCHEDULE_VIEWING: { risk: "medium", skill: "viewing_management", effort: "standard" },
     FOLLOW_UP: { risk: "medium", skill: "lead_qualification", effort: "standard" }, // Qualification usually handles follow-ups
@@ -23,7 +23,7 @@ export const INTENTS = {
     LEGAL_QUESTION: { risk: "high", skill: "closer", effort: "premium" },
 
     // System
-    UNKNOWN: { risk: "medium", skill: null, effort: "standard" },
+    UNKNOWN: { risk: "medium", skill: "lead_qualification", effort: "standard" },
 } as const;
 
 export type IntentType = keyof typeof INTENTS;

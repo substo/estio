@@ -104,6 +104,19 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
                     if (Array.isArray(res)) setPlan(res);
                 }
             });
+
+            // Also check for recent Agent Execution drafts (e.g. from "Paste Lead" redirection)
+            getAgentExecutions(conversation.id).then(history => {
+                if (history && history.length > 0) {
+                    const latest = history[0];
+                    // Check if recent (< 15 mins) and has draft
+                    const isRecent = new Date().getTime() - new Date(latest.createdAt).getTime() < 15 * 60 * 1000;
+                    if (isRecent && latest.taskStatus === 'success' && latest.draftReply) {
+                        setDraft(latest.draftReply);
+                        if (latest.thoughtSummary) setReasoning(latest.thoughtSummary);
+                    }
+                }
+            });
         }
     }, [conversation.id]);
 

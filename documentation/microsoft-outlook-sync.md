@@ -233,6 +233,8 @@ For accounts that cannot use the standard Graph API (e.g., some personal Outlook
         - **Attribute Scan**: Finds emails hidden in `aria-label` or `title`.
         - **Hover Fallback**: Auto-hovers to reveal Persona Cards for internal users.
     - **Incremental**: Automatically stops when it finds emails older than the last sync time.
+    - **Schedule**: Runs every **15 minutes** (via system cron).
+    - **Safeguards**: Protected by `CronGuard` to strictly prevent overlapping runs (skips run if server load > 4.0 or RAM < 500MB).
 3.  **GHL Integration**:
     - Scraped emails are saved to the local database.
     - New messages are automatically pushed to GoHighLevel (GHL) using the `createInboundMessage` utility, ensuring feature parity with the Graph API sync.

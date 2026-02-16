@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { syncRecentMessages, watchGmail } from '@/lib/google/gmail-sync';
 import { syncContactsFromGoogle } from '@/lib/google/people';
+import { CronGuard } from '@/lib/cron/guard';
 
 /**
  * Gmail Sync Cron Job
@@ -21,6 +22,8 @@ import { syncContactsFromGoogle } from '@/lib/google/people';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300; // 5 minutes max (Vercel Pro limit)
 
+const guard = new CronGuard('gmail-sync');
+
 export async function GET(request: NextRequest) {
     // Security check
     const authHeader = request.headers.get('authorization');
@@ -32,6 +35,18 @@ export async function GET(request: NextRequest) {
     }
 
     console.log('[Cron Gmail] Starting scheduled sync job...');
+
+    // Concurrency & Resource Check
+    const resources = await guard.checkResources(400, 5.0); // Slightly focused requirements for Gmail (less heavy than Puppeteer)
+    if (!resources.ok) {
+        console.warn(`[Cron Gmail] SKIPPING run: ${resources.reason}`);
+        return NextResponse.json({ skipped: true, reason: resources.reason });
+    }
+
+    if (!(await guard.acquire())) {
+        console.warn('[Cron Gmail] SKIPPING run: Job is already running (locked)');
+        return NextResponse.json({ skipped: true, reason: 'locked' });
+    }
 
     try {
         // Find all users with Gmail sync enabled
@@ -107,5 +122,7 @@ export async function GET(request: NextRequest) {
             success: false,
             error: error.message
         }, { status: 500 });
+    } finally {
+        await guard.release();
     }
 }
