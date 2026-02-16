@@ -14,7 +14,7 @@ export class PuppeteerService {
             console.log("PuppeteerService: Launching browser (headless: new)...");
             try {
                 this.browser = await puppeteer.launch({
-                    headless: "new" as any, // Cast to any to support both string/boolean types across versions
+                    headless: true, // v24+: true is the new headless mode
                     // Args to prevent crashes in some environments
                     args: [
                         '--no-sandbox',
