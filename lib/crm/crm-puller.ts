@@ -47,7 +47,7 @@ export async function pullPropertyFromCrm(oldPropertyId: string, userId: string)
         }
 
         console.log(`[CRM PULL] Navigating to ${editUrl}...`);
-        await page.goto(editUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await page.goto(editUrl, { waitUntil: 'networkidle0', timeout: 60000 }); // Changed to networkidle0
 
         const finalUrl = page.url();
         console.log(`[CRM PULL] Final URL after navigation: ${finalUrl}`);
@@ -62,14 +62,20 @@ export async function pullPropertyFromCrm(oldPropertyId: string, userId: string)
 
         console.log(`[CRM PULL] extracting data...`);
 
-        // Debug: Check for key selectors presence
+        // Debug: Check for key selectors presence AND values
         const debugSelectors = await page.evaluate(() => {
+            const titleEl = document.querySelector('input[name="en[name]"]') as HTMLInputElement;
+            const refEl = document.querySelector('input[name="reference"]') as HTMLInputElement;
+
             return {
-                titleInput: !!document.querySelector('input[name="en[name]"]'),
-                referenceInput: !!document.querySelector('input[name="reference"]'),
+                titleInput: !!titleEl,
+                titleValue: titleEl ? titleEl.value : 'N/A',
+                titleOuterHTML: titleEl ? titleEl.outerHTML : 'N/A',
+                referenceInput: !!refEl,
+                referenceValue: refEl ? refEl.value : 'N/A',
                 generalTab: !!document.querySelector('a[href="#tab_general"]'),
                 loginForm: !!document.querySelector('input[name="username"]'),
-                bodyText: document.body.innerText.substring(0, 200)
+                bodyText: document.body.innerText.substring(0, 300)
             };
         });
         console.log("[CRM PULL] Debug Selectors:", JSON.stringify(debugSelectors, null, 2));
