@@ -465,5 +465,34 @@ export const evolutionClient = {
             console.error('Error fetching group info:', error.response?.data || error);
             return null;
         }
+    },
+
+    /**
+     * Re-set webhook URL for an existing instance.
+     * Call this after restarting ngrok or if webhook events stop arriving.
+     */
+    updateWebhook: async (instanceName: string) => {
+        try {
+            const webhookUrl = `${process.env.APP_BASE_URL || 'https://estio.co'}/api/webhooks/evolution`;
+            console.log(`[Evolution] Updating Webhook URL to: ${webhookUrl}`);
+
+            await axios.post(
+                `${EVOLUTION_API_URL}/webhook/set/${instanceName}`,
+                {
+                    webhook: {
+                        url: webhookUrl,
+                        enabled: true,
+                        events: ["QRCODE_UPDATED", "CONNECTION_UPDATE", "MESSAGES_UPSERT", "MESSAGES_UPDATE", "CHATS_UPSERT"],
+                        webhookByEvents: true,
+                        headers: { "ngrok-skip-browser-warning": "true" }
+                    }
+                },
+                { headers: { 'apikey': EVOLUTION_GLOBAL_API_KEY } }
+            );
+            return { success: true, url: webhookUrl };
+        } catch (error: any) {
+            console.error('Error updating webhook:', error.response?.data || error);
+            throw error;
+        }
     }
 };

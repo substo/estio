@@ -42,6 +42,7 @@ export interface GHLProperty {
     locationId: string;
     properties: {
         property_reference: string;
+        reference_number?: string; // Human readable reference (e.g. DT1234)
         title: string;
         status: PropertyStatus;
         goal: PropertyGoal;

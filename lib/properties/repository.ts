@@ -43,6 +43,7 @@ function mapPrismaToGHL(p: Property): GHLProperty {
         locationId: p.locationId,
         properties: {
             property_reference: p.slug, // Mapping slug to reference
+            reference_number: p.reference || undefined, // Map actual reference number
             title: p.title,
             status: mapPrismaStatusToGHL(p.status),
             goal: p.goal === 'SALE' ? 'For Sale' : 'For Rent',

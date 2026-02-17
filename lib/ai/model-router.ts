@@ -12,7 +12,8 @@ import { AI_PRICING, calculateRunCost, DEFAULT_MODEL } from "./pricing";
  */
 
 // Helper: Extract valid model IDs from pricing config
-const VALID_MODELS = Object.keys(AI_PRICING);
+export const MODELS = Object.keys(AI_PRICING);
+const VALID_MODELS = MODELS;
 
 // Helper: Find best model for a given tier (flash/pro)
 function getBestModelForTier(tier: 'flash' | 'pro'): string {

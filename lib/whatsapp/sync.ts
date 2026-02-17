@@ -36,9 +36,78 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         await new Promise(resolve => setTimeout(resolve, delayMs));
     }
 
-    const existing = await db.message.findUnique({ where: { wamId } });
+    const existing = await db.message.findUnique({
+        where: { wamId },
+        include: { conversation: { include: { contact: true } } }
+    });
     if (existing) {
         console.log(`[WhatsApp Sync] Skipped existing message: ${wamId}`);
+
+        // --- LAYER 2: Auto-Capture LID from Outbound Webhook ---
+        // If this is an outbound message we sent from the App, we already have the real contact.
+        // But the webhook provides the LID (msg.lid). We can use this to map LID -> Real Contact.
+        if (msg.lid && existing.conversation?.contact) {
+            const realContact = existing.conversation.contact;
+            const lidRaw = msg.lid.replace('@lid', '');
+            const currentLidRaw = (realContact.lid || '').replace('@lid', '');
+
+            if (lidRaw !== currentLidRaw) {
+                console.log(`[LID Capture] Found new LID ${msg.lid} for contact ${realContact.name} (${realContact.phone})`);
+
+                // 1. Update the Real Contact with the LID
+                await db.contact.update({
+                    where: { id: realContact.id },
+                    data: { lid: msg.lid }
+                }).catch(e => console.error("Failed to save LID:", e));
+                console.log(`[LID Capture] Saved LID mapping: ${msg.lid} -> ${realContact.phone}`);
+
+                // 2. Check for Placeholder Contacts to Merge
+                // If we previously received messages from this LID, a placeholder "WhatsApp User ...@lid" might exist.
+                // We should merge it now.
+                const placeholder = await db.contact.findFirst({
+                    where: {
+                        locationId: locationId,
+                        lid: { contains: lidRaw },
+                        id: { not: realContact.id }
+                    }
+                });
+
+                if (placeholder) {
+                    console.log(`[LID Capture] Found placeholder contact to merge: ${placeholder.name} (${placeholder.id})`);
+
+                    // Move conversations
+                    const placeholderConvos = await db.conversation.findMany({ where: { contactId: placeholder.id } });
+
+                    for (const convo of placeholderConvos) {
+                        const targetConvo = await db.conversation.findUnique({
+                            where: { locationId_contactId: { locationId, contactId: realContact.id } }
+                        });
+
+                        if (targetConvo) {
+                            // Move messages & delete old convo
+                            await db.message.updateMany({
+                                where: { conversationId: convo.id },
+                                data: { conversationId: targetConvo.id }
+                            });
+                            await db.conversation.delete({ where: { id: convo.id } });
+                            console.log(`[LID Capture] Merged conversation ${convo.id} -> ${targetConvo.id}`);
+                        } else {
+                            // Reassign
+                            await db.conversation.update({
+                                where: { id: convo.id },
+                                data: { contactId: realContact.id }
+                            });
+                            console.log(`[LID Capture] Reassigned conversation ${convo.id} to ${realContact.id}`);
+                        }
+                    }
+
+                    // Delete placeholder
+                    await db.contact.delete({ where: { id: placeholder.id } });
+                    console.log(`[LID Capture] Deleted placeholder contact ${placeholder.id}`);
+                }
+            }
+        }
+
         return { status: 'skipped', id: existing.id };
     }
 

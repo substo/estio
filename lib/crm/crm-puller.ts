@@ -80,6 +80,31 @@ export async function pullPropertyFromCrm(oldPropertyId: string, userId: string)
         });
         console.log("[CRM PULL] Debug Selectors:", JSON.stringify(debugSelectors, null, 2));
 
+        // ── VALIDATION: Detect non-existent property ──
+        // When a property ID doesn't exist, the old CRM redirects to a blank
+        // "Add Property" form. We detect this by checking if key fields are empty.
+        const propertyExists = await page.evaluate(() => {
+            const hiddenId = document.querySelector('input[type="hidden"][name="id"]') as HTMLInputElement;
+            const refInput = document.querySelector('input[name="reference"]') as HTMLInputElement;
+            const titleInput = document.querySelector('input[name="en[name]"]') as HTMLInputElement;
+            return {
+                hiddenId: hiddenId?.value || '',
+                reference: refInput?.value || '',
+                title: titleInput?.value || '',
+            };
+        });
+        console.log("[CRM PULL] Property Existence Check:", JSON.stringify(propertyExists));
+
+        if (!propertyExists.hiddenId && !propertyExists.reference && !propertyExists.title) {
+            const editUrl2 = finalUrl;
+            console.warn(`[CRM PULL] Property ${oldPropertyId} does NOT exist in old CRM. Aborting.`);
+            throw new Error(
+                `PROPERTY_NOT_FOUND::Property "${oldPropertyId}" was not found in the old CRM. ` +
+                `The CRM returned a blank form. Verify manually: ${editUrl2}`
+            );
+        }
+        // ── END VALIDATION ──
+
         const extractedData: any = {};
         const warnings: string[] = [];
 

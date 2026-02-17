@@ -492,6 +492,31 @@ export default function WhatsAppSettingsPage() {
                                                     {repairing ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1 h-3 w-3" />}
                                                     Force Re-scan
                                                 </Button>
+                                                <span className="text-muted-foreground/30">|</span>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="h-6 text-[10px] text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                                    onClick={async () => {
+                                                        setSaving(true);
+                                                        try {
+                                                            const { resetWebhookUrl } = await import("./actions");
+                                                            const res = await resetWebhookUrl();
+                                                            if (res.success) {
+                                                                toast({ title: "Webhook Updated", description: `Re-set to: ${res.url}` });
+                                                            } else {
+                                                                toast({ title: "Error", description: res.error, variant: "destructive" });
+                                                            }
+                                                        } catch (e) {
+                                                            toast({ title: "Error", description: "Failed to reset webhook", variant: "destructive" });
+                                                        }
+                                                        setSaving(false);
+                                                    }}
+                                                    disabled={saving}
+                                                >
+                                                    <RefreshCw className="mr-1 h-3 w-3" />
+                                                    Re-sync Webhook
+                                                </Button>
                                             </div>
                                         </div>
                                     )}

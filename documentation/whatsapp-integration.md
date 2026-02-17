@@ -262,68 +262,55 @@ Due to the schema constraint where `Conversation` must link to a single `Contact
     -   **Format**: `[Martin]: Hello everyone`
 -   **Participant Sync**: We also extract the *actual sender's* phone number from the message metadata and ensure they exist as a distinct `Contact` in the CRM.
 
-### 2. LID (Lightweight ID) Handling
-WhatsApp uses `@lid` (an opaque identifier) instead of phone numbers for privacy. Our system resolves LIDs to real phone numbers.
+### 2. LID (Lightweight ID) Handling (Enterprise Auto-Resolution)
+WhatsApp uses `@lid` (opaque identifiers) instead of phone numbers for privacy. This is 1-way: you cannot resolve a LID to a phone number via any API.
 
-#### Actual Payload Structure (From Production Logs)
-When an LID user sends a message, the Evolution API payload looks like this:
+**Problem**: When you send a message from the WhatsApp Phone App, the webhook contains *only* the LID, not the phone number.
 
-```json
-{
-  "key": {
-    "remoteJid": "13473413074963@lid",
-    "fromMe": false,
-    "id": "3AC7115AAF7ED9FBF315",
-    "senderPn": "35796045511@s.whatsapp.net",
-    "previousRemoteJid": "13473413074963@lid"
-  },
-  "pushName": "Omar Hassan",
-  "message": { "conversation": "Hello" }
-}
-```
+**Solution**: We implemented a **3-Layer "Self-Healing" Resolution System**:
 
-> [!IMPORTANT]
-> **`senderPn` lives inside `key`, NOT at top-level `msg`!** This was the root cause of a critical bug (Feb 2026) where `msg.senderPn` was always `undefined`, causing all LID contacts to go unresolved.
+#### Layer 1: DB Lookup (Immediate)
+- **Mechanism**: `route.ts` checks the `Contact` table for an existing `lid` mapping.
+- **Result**: If found, the message is resolved to the real contact immediately.
 
-#### Resolution Priority (in `route.ts`)
-1. **`key.senderPn`** — Primary. Contains full JID like `35796045511@s.whatsapp.net`. Must strip `@s.whatsapp.net`.
-2. **`msg.senderPn`** — Fallback (some Evolution versions put it here).
-3. **`msg.remoteJidAlt`** — Alternative JID (Baileys 6.8+).
-4. **`key.participant`** — Sometimes contains real phone in `@s.whatsapp.net` format.
-5. **Active API Lookup** — `evolutionClient.findContact(lid)` queries Evolution's `/chat/findContacts` endpoint.
-6. **Fallback** — Create contact with `phone: null` and `lid: <value>`. Prevents corrupting the phone field.
+#### Layer 2: App-Send Capture (Self-Healing)
+- **Mechanism**: When you send a message **from the Estio App**:
+  1. We know the destination phone number.
+  2. The resulting `MESSAGES_UPSERT` webhook confirms the message and *provides the LID*.
+  3. `processNormalizedMessage` (in `sync.ts`) detects this "outbound dedup" event.
+  4. It **captures the LID** and saves it to the real `Contact` record.
+  5. It checks for any "Placeholder Contacts" (created by previous unresolved messages) and **auto-merges** them into the real contact.
+- **Effect**: The system learns the mapping automatically as you interact with clients.
+
+#### Layer 3: Background Sync
+- **Mechanism**: `CONTACTS_UPSERT` events from WhatsApp (during initial scan or updates) contain both LID and Phone.
+- **Result**: `contact-sync-handler.ts` updates mappings in the background.
+
+#### Resolution Flow (in `route.ts`)
+1. **Check DB**: Is `Contact.lid` known?
+   - **Yes**: Resolve to Phone.
+   - **No**: Check if `senderPn` exists in payload (rare).
+2. **Fallback**: If unresolvable, let message flow through to `processNormalizedMessage`.
+   - Creates a **Placeholder Contact**: `WhatsApp User +1557...@lid`.
+   - **Auto-Fixed**: The moment you reply (Layer 2) or sync runs (Layer 3), this placeholder is merged and the LID is mapped forever.
 
 #### Key Files
 | File | Role |
 |------|------|
-| `app/api/webhooks/evolution/route.ts` | Extracts `senderPn` from `key` and `msg`, strips JID suffix |
-| `lib/evolution/client.ts` | `findContact(instance, jid)` — Active API lookup |
-| `lib/whatsapp/sync.ts` | Resolution fallback + contact creation with LID |
-
-#### Debugging LID Issues
-1. **Enable payload logging** (see Section 5 above) and search for `@lid`:
-   ```bash
-   cat /home/martin/logs/evolution/*.json | jq 'select(.data.key.remoteJid | test("@lid"))' | jq '.data.key'
-   ```
-2. **Check if `senderPn` is present**:
-   ```bash
-   cat /home/martin/logs/evolution/*.json | jq 'select(.data.key.remoteJid | test("@lid")) | .data.key.senderPn'
-   ```
-3. **Server logs** — Look for these log lines:
-   - `LID resolved via senderPn` ✅ — Working correctly
-   - `LID detected WITHOUT any resolution path` ⚠️ — No phone available in payload
-   - `Creating contact for Unresolved LID` — Fallback triggered
-   - `Failed to upsert conversation` — Downstream failure (contact has no phone)
+| `app/api/webhooks/evolution/route.ts` | Layer 1: DB Lookup & Flow-through |
+| `lib/whatsapp/sync.ts` | Layer 2: LID Capture & Auto-Merge on outbound dedup |
+| `lib/whatsapp/contact-sync-handler.ts` | Layer 3: Background Sync |
+| `scripts/merge-lid-contact.ts` | Manual utility to merge placeholders |
 
 #### Past Bugs Reference
 
 | Date | Bug | Root Cause | Fix |
 |------|-----|-----------|-----|
-| Feb 9, 2026 | Contacts saved as `WhatsApp User ...@lid` | Code read `msg.senderPn` instead of `key.senderPn` | Changed to `key.senderPn \|\| msg.senderPn` |
-| Feb 9, 2026 | `resolvedPhone` had `@s.whatsapp.net` suffix | Not stripped before passing to sync | Added `.replace('@s.whatsapp.net', '')` |
+| Feb 17, 2026 | Outbound messages skipped | Startled by LID, logic skipped message | Implemented flow-through & Layer 2 capture |
+| Feb 9, 2026 | Contacts saved as `WhatsApp User ...@lid` | Code read `msg.senderPn` instead of `key.senderPn` | Changed to `key.senderPn || msg.senderPn` |
 
 > [!NOTE]
-> Contacts created with `phone: null` but a valid `lid` field will have their phone number automatically updated when a future message includes `senderPn`.
+> The system is "Self-Healing". You typically do NOT need to run manual scripts. Just replying to a contact fixes the mapping.
 
 ### 3. Outbound Naming Fix
 -   **Issue**: Outbound messages (sent from phone) were triggering `Contact` creation using the *Sender's* PushName (the User), effectively renaming clients to "Martin".

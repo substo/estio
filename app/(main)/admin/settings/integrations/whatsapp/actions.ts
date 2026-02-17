@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import axios from "axios";
 import Cryptr from "cryptr";
 import { evolutionClient } from "@/lib/evolution/client";
+import { getLocationContext } from "@/lib/auth/location-context";
 
 // Simple encryption
 const secret = process.env.ENCRYPTION_KEY || "dev-secret-key-change-me";
@@ -646,54 +647,76 @@ export async function checkInstanceHealth() {
     });
     if (!user || !user.locations.length) return { success: false, error: "No location" };
     const location = user.locations[0];
-
-    if (!location.evolutionInstanceId) return { success: false, status: 'disconnected' };
-
     try {
-        // parallel fetch for speed
-        const [contacts, chats, instanceData] = await Promise.all([
-            evolutionClient.fetchContacts(location.evolutionInstanceId).catch(() => []),
-            evolutionClient.fetchChats(location.evolutionInstanceId).catch(() => []),
-            evolutionClient.fetchInstance(location.evolutionInstanceId).catch(() => null)
-        ]);
+        const location = await getLocationContext();
+        if (!location || !location.evolutionInstanceId) return { success: false, error: "No instance ID" };
 
-        let status = 'unknown';
-        let createdAt = null;
-        if (Array.isArray(instanceData)) {
-            // V2 style
-            const ref = instanceData.find((i: any) => i.instance?.instanceName === location.evolutionInstanceId) || instanceData[0];
-            status = ref?.instance?.status || ref?.connectionStatus || 'unknown';
-            createdAt = ref?.instance?.createdAt || ref?.createdAt;
-        } else if (instanceData) {
-            status = instanceData.instance?.status || instanceData.connectionStatus || 'unknown';
-            createdAt = instanceData.instance?.createdAt || instanceData.createdAt;
+        const { evolutionClient } = await import("@/lib/evolution/client");
+        const instance = await evolutionClient.fetchInstance(location.evolutionInstanceId);
+
+        // Fetch contacts count & chats count if supported
+        // This usually requires separate API calls unless fetchInstance returns counts
+        let contactsCount = 0;
+        let chatsCount = 0;
+
+        try {
+            // Some versions return counts in the instance object
+            // @ts-ignore
+            if (instance?.instance?._count) {
+                // @ts-ignore
+                contactsCount = instance.instance._count.Contact || 0;
+                // @ts-ignore
+                chatsCount = instance.instance._count.Chat || 0;
+            } else if (instance?._count) {
+                // @ts-ignore
+                contactsCount = instance._count.Contact || 0;
+                // @ts-ignore
+                chatsCount = instance._count.Chat || 0;
+            }
+        } catch (e) {
+            console.warn("Failed to get counts", e);
         }
 
-        const isConnected = status === 'open' || status === 'connected';
-        const hasData = contacts.length > 0 || chats.length > 0;
+        // Determine status
+        // @ts-ignore
+        const status = instance?.instance?.connectionStatus || instance?.connectionStatus || 'disconnected';
 
-        let health = status;
-        if (isConnected) {
-            if (hasData) {
-                health = 'healthy';
+        let healthState = 'disconnected';
+        if (status === 'open') {
+            if (contactsCount === 0 && chatsCount === 0) {
+                // "Zombie" state: claims open but has no data (often needs re-scan)
+                // BUT: valid new accounts also have 0. We'll warn anyway.
+                healthState = 'zombie';
             } else {
-                // Check if it's a new instance (created < 10 mins ago)
-                const isNew = createdAt && (Date.now() - new Date(createdAt).getTime()) < 10 * 60 * 1000;
-                health = isNew ? 'syncing' : 'zombie';
+                healthState = 'healthy';
             }
         }
 
         return {
             success: true,
-            status: health,
-            contactsCount: contacts.length,
-            chatsCount: chats.length,
-            rawStatus: status
+            status: healthState,
+            contactsCount,
+            chatsCount
         };
 
-    } catch (e: any) {
-        console.error("Health check failed:", e);
-        return { success: false, error: e.message };
+    } catch (error: any) {
+        console.error("Health check failed:", error);
+        return { success: false, error: error.message };
+    }
+}
+
+export async function resetWebhookUrl() {
+    try {
+        const location = await getLocationContext();
+        if (!location || !location.evolutionInstanceId) return { success: false, error: "No instance ID" };
+
+        const { evolutionClient } = await import("@/lib/evolution/client");
+        const res = await evolutionClient.updateWebhook(location.evolutionInstanceId);
+
+        return { success: true, url: res.url };
+    } catch (error: any) {
+        console.error("Reset Webhook Failed:", error);
+        return { success: false, error: error.message };
     }
 }
 

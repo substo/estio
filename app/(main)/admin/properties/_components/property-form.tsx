@@ -301,7 +301,26 @@ export default function PropertyForm({
         try {
             const res = await pullFromOldCrm(importId);
             if (!res.success) {
-                alert("Pull Failed: " + res.error);
+                // Check for "property not found" specific error
+                const errorMsg = res.error || "Unknown error";
+                if (errorMsg.includes("PROPERTY_NOT_FOUND::")) {
+                    const cleanMsg = errorMsg.replace("PROPERTY_NOT_FOUND::", "");
+                    // Extract URL if present
+                    const urlMatch = cleanMsg.match(/Verify manually: (https?:\/\/[^\s]+)/);
+                    const verifyUrl = urlMatch ? urlMatch[1] : null;
+                    toast.error(`Property "${importId}" not found in old CRM`, {
+                        description: verifyUrl
+                            ? "The property ID doesn't exist. Click below to verify manually."
+                            : "The property ID doesn't exist in the old CRM system.",
+                        duration: 10000,
+                        action: verifyUrl ? {
+                            label: "Open in Old CRM",
+                            onClick: () => window.open(verifyUrl, "_blank"),
+                        } : undefined,
+                    });
+                } else {
+                    toast.error("Pull Failed", { description: errorMsg, duration: 8000 });
+                }
                 return;
             }
 

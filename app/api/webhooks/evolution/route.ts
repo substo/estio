@@ -123,9 +123,26 @@ export async function POST(req: NextRequest) {
                         realPhone = participant.replace('@s.whatsapp.net', '');
                         console.log(`[Evolution] LID resolved via participant: ${remoteJid} -> ${realPhone}`);
                     } else {
-                        console.warn(`[Evolution] ⚠️ LID detected WITHOUT any resolution path: ${remoteJid}`);
-                        console.warn(`[Evolution] SKIPPING message — cannot create contact from unresolved LID`);
-                        return NextResponse.json({ status: 'skipped', reason: 'unresolved_lid' });
+                        // --- FALLBACK: DB Lookup ---
+                        // Check if any existing Contact has this LID mapped (from a prior CONTACTS_UPSERT)
+                        const lidRaw = remoteJid.replace('@lid', '');
+                        const dbContact = await db.contact.findFirst({
+                            where: {
+                                locationId: location.id,
+                                lid: { contains: lidRaw }
+                            },
+                            select: { phone: true }
+                        });
+
+                        if (dbContact?.phone) {
+                            realPhone = dbContact.phone.replace(/\D/g, '');
+                            console.log(`[Evolution] LID resolved via DB: ${remoteJid} -> ${realPhone}`);
+                        } else {
+                            // LID is unresolvable (WhatsApp privacy design — no API exists to reverse LIDs).
+                            // Instead of SKIPPING, let the message flow through.
+                            // processNormalizedMessage will create a placeholder contact or match by LID.
+                            console.warn(`[Evolution] ⚠️ LID unresolvable: ${remoteJid}. Passing through for placeholder handling.`);
+                        }
                     }
                 } else {
                     realPhone = remoteJid.replace('@s.whatsapp.net', '');

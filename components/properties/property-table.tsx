@@ -168,7 +168,7 @@ export function PropertyTable({
                                     onClick={() => router.push(`/admin/properties/${item.id}/view`)}
                                 >
                                     <TableCell className="font-medium hidden xl:table-cell">
-                                        {item.properties.property_reference}
+                                        {item.properties.reference_number || item.properties.property_reference}
                                     </TableCell>
                                     <TableCell>
                                         <div className="max-w-[150px] sm:max-w-[200px] truncate" title={item.properties.title}>

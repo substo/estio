@@ -342,6 +342,21 @@ export async function sendReply(conversationId: string, contactId: string, messa
 
                 try {
                     const { evolutionClient } = await import("@/lib/evolution/client");
+
+                    // Verify connection is actually alive (DB status can be stale)
+                    const instanceState = await evolutionClient.fetchInstance(location.evolutionInstanceId!);
+                    // Handle different response structures (array or object)
+                    const instanceData = Array.isArray(instanceState) ? instanceState[0] : instanceState;
+                    const connStatus = instanceData?.instance?.connectionStatus || instanceData?.connectionStatus || instanceData?.status;
+
+                    if (connStatus !== 'open') {
+                        console.warn(`[sendReply] Aborting send: WhatsApp instance ${location.evolutionInstanceId} is not connected (Status: ${connStatus})`);
+                        return {
+                            success: false,
+                            error: `WhatsApp is disconnected (Status: ${connStatus || 'unknown'}). Please reconnect in Settings → WhatsApp.`
+                        };
+                    }
+
                     console.log('[sendReply] Calling Evolution API sendMessage:', {
                         instanceId: location.evolutionInstanceId,
                         phone: normalizedPhone,
