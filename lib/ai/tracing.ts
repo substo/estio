@@ -54,9 +54,15 @@ export async function endTrace(
     output?: string,
     toolCalls?: any[],
     cost?: number,
-    tokens?: { prompt: number, completion: number, total: number }
+    tokens?: { prompt: number, completion: number, total: number },
+    metadata?: { model?: string; thoughtSummary?: string; thoughtSteps?: any }
 ) {
     const endTime = Date.now();
+    const root = await db.agentExecution.findFirst({
+        where: { traceId, spanId: traceId },
+        select: { createdAt: true }
+    });
+    const latencyMs = root ? Math.max(0, endTime - root.createdAt.getTime()) : 0;
 
     // We need to fetch start time to calc latency, or just store completedAt
     // Simplified: update with gathered data
@@ -70,8 +76,10 @@ export async function endTrace(
             promptTokens: tokens?.prompt,
             completionTokens: tokens?.completion,
             totalTokens: tokens?.total,
-            // latency calculation requires fetching creation time. 
-            // accepting 0 or approx for now until we change DB schema to have startTime/endTime
+            model: metadata?.model,
+            thoughtSummary: metadata?.thoughtSummary,
+            thoughtSteps: metadata?.thoughtSteps,
+            latencyMs,
         }
     });
 }

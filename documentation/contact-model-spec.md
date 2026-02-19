@@ -69,7 +69,10 @@ model Contact {
    requirementCondition         String   @default("Any Condition")
    requirementPropertyTypes     String[] @default([]) // Array of types with prefixes, e.g. ["cat:house", "sub:villa"]
    requirementPropertyLocations String[] @default([]) // Array of locations
-   requirementOtherDetails      String?
+   requirementOtherDetails      String?  // Manual requirement notes
+
+   // General Notes (AI Summaries)
+   notes                        String?  @map("contact_other") // Mapped to `leadOtherDetails` in UI. Used for AI Daily Summaries.
  
    // Property Matching
    matchingPropertiesToMatch       String    @default("Updated and New")
@@ -165,6 +168,7 @@ The model now includes extensive fields locally to track the full lifecycle of a
 A robust audit trail (`ContactHistory`) tracks all significant changes to a contact record:
 -   **Events Logged**: Creation, Updates, Viewing scheduling/updates.
 -   **Data Captured**: Who made the change, when it happened, and a diff of what changed (Old Value -> New Value).
+-   **AI Summaries**: Concise daily summaries of AI interactions are stored in the `notes` field (UI: "Other Details"), separate from the audit history.
 -   **UI**: Exposed via a dedicated "History" tab in the Edit Contact dialog.
 
 ### 2.3 Intelligent History Logging

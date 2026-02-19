@@ -35,6 +35,21 @@ export async function classifyIntent(
     message: string,
     conversationContext?: string
 ): Promise<ClassificationResult> {
+    // ── PRE-CHECK: Explicit property reference patterns ──
+    // Matches refs like DT3762, DT1234, VP500, etc. (2-3 letter prefix + 3-5 digits)
+    const propertyRefPattern = /\b[A-Z]{2,3}\d{3,5}\b/i;
+    if (propertyRefPattern.test(message)) {
+        console.log(`[CLASSIFIER] Property reference detected in message, forcing PROPERTY_QUESTION`);
+        const intentConfig = INTENTS.PROPERTY_QUESTION;
+        return {
+            intent: "PROPERTY_QUESTION",
+            confidence: 0.95,
+            risk: intentConfig.risk as "low" | "medium" | "high",
+            suggestedSkill: intentConfig.skill,
+            suggestedEffort: intentConfig.effort as "flash" | "standard" | "premium",
+        };
+    }
+
     const model = getModelForTask("intent_classification");
 
     const prompt = conversationContext

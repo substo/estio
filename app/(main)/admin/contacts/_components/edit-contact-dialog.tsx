@@ -437,6 +437,10 @@ export function EditContactForm({ contact, onSuccess, onDelete, leadSources, ini
 
 export function EditContactDialog({ contact, leadSources = [], trigger, isOutlookConnected = false, isGoogleConnected = false, isGhlConnected = false }: { contact: ContactData; leadSources?: string[]; trigger?: React.ReactNode; isOutlookConnected?: boolean; isGoogleConnected?: boolean; isGhlConnected?: boolean }) {
     const [open, setOpen] = useState(false);
+    const normalizedContact: ContactData = {
+        ...contact,
+        leadOtherDetails: contact.leadOtherDetails ?? contact.notes ?? undefined,
+    };
 
     return (
         <Dialog open={open} onOpenChange={setOpen}>
@@ -456,7 +460,7 @@ export function EditContactDialog({ contact, leadSources = [], trigger, isOutloo
                     </DialogDescription>
                 </DialogHeader>
                 <EditContactForm
-                    contact={contact}
+                    contact={normalizedContact}
                     onSuccess={() => setOpen(false)}
                     leadSources={leadSources || []}
                     isOutlookConnected={isOutlookConnected}

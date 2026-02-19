@@ -1,7 +1,7 @@
 # Security Implementation Guide
 
 **Version:** 1.0
-**Last Updated:** December 4, 2025
+**Last Updated:** February 19, 2026
 
 ## Overview
 
@@ -142,12 +142,59 @@ export default async function Page({ searchParams }) {
 
 ---
 
+## 3. Clerk API Efficiency & 429 Resilience
+
+For server-rendered auth checks, prefer **DB-first patterns** to avoid unnecessary Clerk Backend API calls.
+
+### Required pattern
+
+1. Use `auth()` to get `userId` (JWT-local).
+2. Query local user by `clerkId`.
+3. Resolve location from local DB relations.
+4. Use `clerkClient()` only as fallback/self-heal logic.
+5. Wrap fallback Clerk API calls with `429` handling.
+
+```typescript
+const { userId } = await auth();
+if (!userId) return null;
+
+const localUser = await db.user.findUnique({
+  where: { clerkId: userId },
+  include: { locations: { take: 1 } },
+});
+
+if (localUser?.locations?.[0]) {
+  return localUser.locations[0];
+}
+
+// Fallback only (first-time/link-repair cases)
+try {
+  const client = await clerkClient();
+  const clerkUser = await client.users.getUser(userId);
+  // ...repair logic...
+} catch (e: any) {
+  if (e?.status === 429) return null;
+  throw e;
+}
+```
+
+### Implemented references
+
+- `lib/auth/location-context.ts`
+- `app/(main)/admin/layout.tsx`
+
+> [!WARNING]
+> Avoid `currentUser()` on high-traffic server-rendered paths where `auth()` + DB lookup is sufficient.
+
+---
+
 ## Checklist for New Features
 
 - [ ] **Schema**: Does the new model have a `locationId` field? (It should).
 - [ ] **Read**: Do `findMany` queries include `where: { locationId }`?
 - [ ] **Write**: Do Server Actions call `verifyUserHasAccessToLocation`?
 - [ ] **Update/Delete**: Do you verify the target item belongs to the authorized location?
+- [ ] **Auth Efficiency**: Did you use `auth()` + local DB lookup before any `clerkClient()` call?
 
 ---
 

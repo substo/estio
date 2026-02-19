@@ -6,6 +6,7 @@ description: >
   sends invitations, reminders, and post-viewing follow-ups.
   Triggers on SCHEDULE_VIEWING or AVAILABILITY_QUESTION intents.
 tools:
+  - resolve_viewing_property_context
   - check_availability
   - propose_slots
   - confirm_viewing
@@ -42,22 +43,60 @@ Example:
 
 ## Instructions
 
-### Step 1: Check Availability First
-NEVER propose a slot without checking the agent's calendar first.
+### Step 1: Resolve Property + Back Office Logistics First
+NEVER check calendars until the property is identified and viewing logistics are confirmed.
 
 ```
-1. Call check_availability({ userId: agentId, startDate: tomorrow, endDate: nextWeek })
-2. If no slots available → ask the lead for their preferred dates
-3. If slots available → proceed to Step 2
+1. Call resolve_viewing_property_context({ contactId, conversationId, message })
+2. If resolutionStatus = not_found or ambiguous:
+   - Ask for property ref number or property URL first
+   - Do NOT call check_availability yet
+3. If property resolved:
+   - Read listingType (SALE/RENT), status, schedulePath, occupancy/key fields
+   - Answer practical questions (price, bills transferable, pets policy if available)
 ```
 
-### Step 2: Propose 3 Diverse Slots
+### Property Source Priority
+When message says "this property", resolve in this order:
+1. Explicit message ref/url (if present)
+2. Contact `Interested Properties` (`propertiesInterested`)
+3. Contact `Details / Lead Other Details` (`notes` in DB, `leadOtherDetails` in form)
+4. Contact `Requirements / Requirement Other Details` (`requirementOtherDetails`)
+5. Recent conversation context + linked property roles
+
+If exactly one strong candidate is found from these, treat it as resolved and continue.
+If multiple candidates remain, ask for ref/url confirmation.
+
+### Viewing Coordination Scenarios
+After property resolution, classify into one of these operational paths:
+1. **Office/Keybox Access**:
+   - We hold office key or keybox code
+   - Proceed with direct scheduling after agent availability check
+2. **Current Tenant Coordination**:
+   - Property occupied by tenant or tenant controls access
+   - Collect lead windows, then coordinate with tenant first
+3. **External Contact Coordination**:
+   - Owner/family member/partner agent controls access
+   - Collect lead windows, then coordinate with named contact first
+
+Always communicate the coordination dependency clearly before promising fixed times.
+
+### Step 2: Decide Scheduling Route From schedulePath
+- DIRECT_SCHEDULE:
+  - Call check_availability with agent userId
+  - Then propose 3 slots
+- OWNER_COORDINATION / TENANT_COORDINATION / EXTERNAL_AGENT_COORDINATION / MANUAL_CONFIRMATION:
+  - Collect lead's preferred date windows
+  - Tell lead you must confirm with owner/tenant/other agent first
+  - Log activity and proceed with pending confirmation workflow
+
+### Step 3: Propose 3 Diverse Slots (Only for DIRECT_SCHEDULE)
 Use `propose_slots()` to automatically select 3 slots with variety:
 - Different days (spread across the week)
 - Mix of morning (9-12) and afternoon (13-18) times
 - Minimum 24 hours advance notice
 
-### Step 3: Confirm the Viewing
+### Step 4: Confirm the Viewing
 When the lead selects a slot:
 
 ```
@@ -68,7 +107,7 @@ When the lead selects a slot:
    - Send invites to all parties with 24h and 1h reminders
 ```
 
-### Step 4: Post-Viewing Follow-Up
+### Step 5: Post-Viewing Follow-Up
 After the viewing (2+ hours later):
 
 ```
@@ -92,13 +131,17 @@ Track the viewing lifecycle:
 - `rescheduled` → Moved to a new time
 
 ## Rules
-1. **ALWAYS check calendar** before proposing slots
-2. **ALWAYS include morning AND afternoon** options in the 3 slots
-3. **Minimum 24 hours advance notice** for viewings
-4. If Owner availability unknown, propose Agent-side slots and note "pending owner confirmation"
-5. After confirmation, **ALWAYS send calendar invites** to ALL parties (use `confirm_viewing`)
-6. Schedule follow-up for **2 hours post-viewing**
-7. If Lead cancels, offer to reschedule immediately
+1. **First tool call must be `resolve_viewing_property_context`**
+2. **Do not call `check_availability` until property is resolved**
+3. **If schedulePath is not DIRECT_SCHEDULE, do not propose fixed slots yet**
+4. **ALWAYS include morning AND afternoon** options in the 3 slots (when proposing)
+5. **Minimum 24 hours advance notice** for viewings
+6. If Owner/Tenant/Other Agent coordination is required, gather lead windows and confirm externally first
+7. After confirmation, **ALWAYS send calendar invites** to ALL parties (use `confirm_viewing`)
+8. Schedule follow-up for **2 hours post-viewing**
+9. If Lead cancels, offer to reschedule immediately
+10. Use correct absolute dates. If day/month has no year and would be in the past, clarify year before final confirmation.
+11. If one property is clearly inferred from `Interested Properties` or Other Details, continue without asking unnecessary clarification.
 
 ## Output Format
 When responding to a viewing request:
@@ -107,9 +150,11 @@ When responding to a viewing request:
 {
   "thought_summary": "Lead wants to view Property X. I'll check my calendar and propose 3 slots.",
   "thought_steps": [
-    { "step": 1, "description": "Check calendar availability", "conclusion": "Found 3 slots" }
+    { "step": 1, "description": "Resolve property and access logistics", "conclusion": "Resolved and direct scheduling allowed" },
+    { "step": 2, "description": "Check calendar availability", "conclusion": "Found 3 slots" }
   ],
   "tool_calls": [
+    { "name": "resolve_viewing_property_context", "arguments": { "contactId": "...", "conversationId": "...", "message": "..." } },
     { "name": "check_availability", "arguments": { "userId": "...", "..." : "..." } },
     { "name": "propose_slots", "arguments": { "agentUserId": "...", "propertyId": "..." } }
   ],
@@ -118,6 +163,7 @@ When responding to a viewing request:
 ```
 
 ## Tools Reference
+- `resolve_viewing_property_context(contactId, conversationId?, message?, propertyReference?, propertyUrl?)` — Resolve property + back-office viewing logistics first
 - `check_availability(userId, startDate, endDate, durationMinutes?)` — Check calendar for free slots
 - `propose_slots(agentUserId, propertyId, daysAhead?)` — Get 3 diverse slot proposals
 - `confirm_viewing(viewingId, slotStart, slotEnd, attendees[])` — Confirm and send invites

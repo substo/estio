@@ -186,7 +186,7 @@ export default function ContactView({
                                     </div>
                                 </div>
                             )}
-                            <DisplayField label="Other Details" value={contact.requirementOtherDetails} className="col-span-2" />
+                            <DisplayField label="Requirement Other Details" value={contact.requirementOtherDetails} className="col-span-2" />
                         </DisplaySection>
                     )}
 

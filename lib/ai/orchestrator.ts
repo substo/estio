@@ -63,15 +63,58 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
         if (skill) console.log(`[ORCHESTRATOR] Skill tools: ${skill.tools?.join(', ') || 'none'}`);
 
         if (skill) {
+            // Fetch contact + location + siteConfig (reusing existing query, extended)
+            const contactData = await db.contact.findFirst({
+                where: {
+                    OR: [{ id: input.contactId }, { ghlContactId: input.contactId }]
+                },
+                include: { location: { include: { siteConfig: true } } }
+            });
+
+            // Fetch the agent identity.
+            // Use assigned agent first; if missing, fall back to first user on the location.
+            let agentName = "Agent";
+            let agentUserId = contactData?.leadAssignedToAgent ?? undefined;
+            let agent: { id: string; firstName: string | null; lastName: string | null; name: string | null } | null = null;
+
+            if (agentUserId) {
+                agent = await db.user.findUnique({
+                    where: { id: agentUserId },
+                    select: { id: true, firstName: true, lastName: true, name: true }
+                });
+            }
+
+            if (!agent && contactData?.locationId) {
+                agent = await db.user.findFirst({
+                    where: {
+                        locations: {
+                            some: { id: contactData.locationId }
+                        }
+                    },
+                    orderBy: { createdAt: "asc" },
+                    select: { id: true, firstName: true, lastName: true, name: true }
+                });
+            }
+
+            if (agent) {
+                agentUserId = agent.id;
+                agentName = agent.firstName
+                    ? `${agent.firstName}${agent.lastName ? ' ' + agent.lastName : ''}`
+                    : agent.name || "Agent";
+            }
+
             skillResult = await executeSkill(skill, {
                 ...input,
+                locationId: contactData?.locationId,
                 intent: classification.intent,
                 sentiment,
                 memories,
-                apiKey: (await db.contact.findUnique({
-                    where: { id: input.contactId },
-                    include: { location: { include: { siteConfig: true } } }
-                }))?.location?.siteConfig?.googleAiApiKey ?? undefined
+                apiKey: contactData?.location?.siteConfig?.googleAiApiKey ?? undefined,
+                agentName,
+                businessName: contactData?.location?.name ?? undefined,
+                websiteDomain: contactData?.location?.siteConfig?.domain ?? contactData?.location?.domain ?? undefined,
+                brandVoice: contactData?.location?.siteConfig?.brandVoice ?? undefined,
+                agentUserId,
             });
 
             console.log(`[ORCHESTRATOR] Skill result:`, JSON.stringify({
@@ -129,14 +172,35 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
     console.log(`[ORCHESTRATOR] Final draft being saved to trace: ${finalDraft ? finalDraft.substring(0, 200) : 'NULL'}`);
     console.log(`[ORCHESTRATOR] skillResult exists: ${!!skillResult}, skillResult.draftReply type: ${typeof skillResult?.draftReply}, value: ${JSON.stringify(skillResult?.draftReply)?.substring(0, 200)}`);
 
-    // Using endTrace signature: (traceId, status, output, toolCalls, cost, tokens)
+    const promptTokens = skillResult?.promptTokens ?? 0;
+    const completionTokens = skillResult?.completionTokens ?? 0;
+    const totalTokens = promptTokens + completionTokens;
+    const traceThoughtSteps = Array.isArray(skillResult?.thoughtSteps) ? [...skillResult.thoughtSteps] : [];
+    if (skillResult?.llmCall) {
+        traceThoughtSteps.push({
+            step: traceThoughtSteps.length + 1,
+            description: "LLM call debug payload",
+            details: skillResult.llmCall
+        });
+    }
+
+    // Persist root trace with usage/model/thought details so UI shows accurate data.
     await endTrace(
         trace.traceId,
         skillResult?.error ? "error" : "success",
         finalDraft,
         skillResult?.toolCalls || [],
         skillResult?.cost || 0,
-        undefined
+        {
+            prompt: promptTokens,
+            completion: completionTokens,
+            total: totalTokens
+        },
+        {
+            model: skillResult?.modelUsed,
+            thoughtSummary: skillResult?.thoughtSummary ?? `Intent: ${classification.intent}`,
+            thoughtSteps: traceThoughtSteps.length > 0 ? traceThoughtSteps : undefined
+        }
     );
 
     return {

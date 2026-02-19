@@ -8,6 +8,51 @@
 
 ---
 
+## Clerk 429 Prevention (Implemented)
+
+The authentication path was optimized to reduce Clerk Backend API usage and prevent `429 Too Many Requests`.
+
+### What changed
+
+1. **DB-first location resolution** in `lib/auth/location-context.ts`
+   - Uses `auth()` (JWT-local) + local DB lookup (`db.user` with `clerkId`) as the happy path.
+   - Only falls back to `clerkClient()` for first-time users or missing local linkage.
+   - Remaining Clerk calls are wrapped with `429` handling and graceful fallback.
+
+2. **Dashboard layout no longer uses `currentUser()`**
+   - `app/(main)/admin/layout.tsx` now uses `auth()` + local DB lookup.
+   - If local user record is missing, redirects to sign-in.
+   - Includes explicit 429 handling around auth lookup.
+
+> [!IMPORTANT]
+> `auth().userId` is a **Clerk ID**. Always query local users using `clerkId`, never the internal `id`.
+
+### Why this fixes rate limiting
+
+- `auth()` is JWT-local (no Clerk Backend API call).
+- Most admin requests now avoid `clerkClient().users.getUser(...)`.
+- Clerk API usage is limited to fallback/self-heal scenarios.
+
+### Verification commands
+
+After deployment and normal navigation in admin pages:
+
+```bash
+ssh root@138.199.214.117 "pm2 logs estio-app --lines 200 --nostream 2>&1 | grep -E '429|Too Many|Unauthorized'"
+```
+
+Expected result: no new auth-related 429 bursts.
+
+Count-only check:
+
+```bash
+ssh root@138.199.214.117 "pm2 logs estio-app --lines 500 --nostream 2>&1 | grep -c '429'"
+```
+
+Expected result: `0` (or a significantly reduced count vs pre-fix baseline).
+
+---
+
 ## Comprehensive Fix Plan
 
 ### Phase 1: Verify Environment

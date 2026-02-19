@@ -393,6 +393,11 @@ export async function runAgent(contactId: string, locationId: string, history: s
                 prompt: execRes.usage?.promptTokenCount || 0,
                 completion: execRes.usage?.candidatesTokenCount || 0,
                 total: execRes.usage?.totalTokenCount || 0
+            },
+            {
+                model: execRes.usage?.model,
+                thoughtSummary: execRes.thoughtSummary,
+                thoughtSteps: execRes.thoughtSteps
             }
         );
 

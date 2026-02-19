@@ -1,9 +1,8 @@
 import { ReactNode } from "react"
 import DashboardSideBar from "./_components/dashboard-side-bar"
 import DashboardTopNav from "./_components/dashbord-top-nav"
-import { currentUser } from "@clerk/nextjs/server"
+import { auth } from "@clerk/nextjs/server"
 import { redirect } from "next/navigation"
-import { ensureUserExists } from "@/lib/auth/sync-user"
 import { headers } from "next/headers"
 import { OnboardingWrapper } from "@/components/onboarding-wrapper"
 
@@ -13,68 +12,76 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   console.log('[DashboardLayout] START - Layout rendering');
   console.time('[DashboardLayout] Total Time');
 
-  // Ensure the user exists in our local database whenever they access the dashboard
-  console.time('[DashboardLayout] currentUser()');
-  const user = await currentUser();
-  console.timeEnd('[DashboardLayout] currentUser()');
-
-  if (user) {
-    console.log(`[DashboardLayout] User: ${user.id} (${user.emailAddresses[0]?.emailAddress})`);
-  } else {
-    console.log('[DashboardLayout] No user found via currentUser()');
+  // Use auth() (JWT-local, zero Clerk API calls) instead of currentUser() (Backend API call)
+  console.time('[DashboardLayout] auth()');
+  let userId: string | null = null;
+  try {
+    const authResult = await auth();
+    userId = authResult.userId;
+  } catch (e: any) {
+    if (e?.status === 429) {
+      console.warn('[DashboardLayout] Clerk rate limited (429). Showing error.');
+      return (
+        <div className="flex min-h-screen items-center justify-center">
+          <div className="text-center p-8 max-w-md">
+            <h2 className="text-xl font-semibold mb-2">Service Temporarily Busy</h2>
+            <p className="text-muted-foreground">Authentication service is rate-limited. Please wait a moment and refresh the page.</p>
+          </div>
+        </div>
+      );
+    }
+    throw e;
   }
+  console.timeEnd('[DashboardLayout] auth()');
 
-  if (!user) {
-    // This shouldn't happen as middleware protects /admin, but safety first
+  if (!userId) {
+    console.log('[DashboardLayout] No user found via auth()');
     redirect('/sign-in');
   }
 
-  console.time('[DashboardLayout] ensureUserExists()');
-  const localUser = await ensureUserExists(user);
-  console.timeEnd('[DashboardLayout] ensureUserExists()');
-  console.log(`[DashboardLayout] Local User ensuring complete. ID: ${localUser?.id}`);
+  console.log(`[DashboardLayout] User: ${userId}`);
 
-  // AUTHORIZATION CHECK: Verify user has access to at least one location
-  // Public users (signed up via satellite domains) won't have any location access
-  console.time('[DashboardLayout] db.user.findUnique (locations)');
+  // Look up user from local DB (no Clerk API call)
+  console.time('[DashboardLayout] db.user.findUnique');
   const userWithLocations = await db.user.findUnique({
-    where: { clerkId: user.id },
-    include: {
+    where: { clerkId: userId },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      phone: true,
       locations: {
         take: 1,
         select: { id: true }
       }
     }
   });
-  console.timeEnd('[DashboardLayout] db.user.findUnique (locations)');
-  console.log(`[DashboardLayout] Locations found: ${userWithLocations?.locations?.length || 0}`);
+  console.timeEnd('[DashboardLayout] db.user.findUnique');
 
-  if (!userWithLocations?.locations?.length) {
+  if (!userWithLocations) {
+    // User exists in Clerk but not in local DB — this can happen if webhook hasn't fired yet.
+    // The ensureUserExists() call from sign-up should have created them, but as a safety net:
+    console.log('[DashboardLayout] User not found in local DB. Redirecting to sign-in.');
+    redirect('/sign-in');
+  }
+
+  console.log(`[DashboardLayout] Local User ID: ${userWithLocations.id}, Locations: ${userWithLocations.locations?.length || 0}`);
+
+  if (!userWithLocations.locations?.length) {
     // User has no admin access - redirect to appropriate page
-    // Check if we're on a tenant domain and redirect to tenant home
     const headersList = await headers();
     const hostname = headersList.get('host') || '';
     const isSystemDomain = ['localhost:3000', 'estio.co', 'localhost'].includes(hostname.replace(':3000', ''));
 
     if (isSystemDomain) {
-      // On main domain, redirect to home
       redirect('/');
     } else {
-      // On tenant domain, redirect to favorites (Public User Dashboard)
-      // This "Soft Redirect" prevents them from seeing the Admin UI while keeping them in their allowed area
       redirect('/favorites');
     }
   }
 
-  // Check if user needs onboarding (missing firstName or lastName)
-  console.time('[DashboardLayout] db.user.findUnique (profile)');
-  const userProfile = await db.user.findUnique({
-    where: { clerkId: user.id },
-    select: { firstName: true, lastName: true, phone: true }
-  });
-  console.timeEnd('[DashboardLayout] db.user.findUnique (profile)');
-
-  const needsOnboarding = !userProfile?.firstName || !userProfile?.lastName;
+  // Profile data already fetched in the initial query above
+  const needsOnboarding = !userWithLocations.firstName || !userWithLocations.lastName;
 
   // Fetch site config to get logo
   console.time('[DashboardLayout] db.siteConfig.findFirst');
@@ -113,9 +120,9 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       <OnboardingWrapper
         needsOnboarding={needsOnboarding}
         existingData={{
-          firstName: userProfile?.firstName || '',
-          lastName: userProfile?.lastName || '',
-          phone: userProfile?.phone || ''
+          firstName: userWithLocations.firstName || '',
+          lastName: userWithLocations.lastName || '',
+          phone: userWithLocations.phone || ''
         }}
       />
     </div>

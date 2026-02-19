@@ -42,6 +42,7 @@ const TASK_TIER_MAP: Record<string, 'flash' | 'pro'> = {
     "simple_generation": "flash",
     "tool_selection": "flash",
     "property_search": "flash",
+    "lead_parsing": "flash",
 
     "draft_reply": "pro",
     "qualification": "pro",

@@ -56,7 +56,7 @@ export default async function ContactEditPage({ params, searchParams }: { params
     return (
         <div className="p-6 max-w-6xl mx-auto">
             <EditContactForm
-                contact={contact}
+                contact={{ ...contact, leadOtherDetails: contact.notes ?? undefined }}
                 leadSources={leadSources}
                 initialMode="edit"
                 isOutlookConnected={isOutlookConnected}

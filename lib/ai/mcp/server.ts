@@ -33,6 +33,55 @@ function registerTool(
     server.tool(name, description, schema, handler);
 }
 
+function resolveAgentUserId(rawValue: any, context?: ToolHandlerContext): string | undefined {
+    const fromContext = context?.agentUserId as string | undefined;
+    if (typeof rawValue !== "string") return rawValue || fromContext;
+
+    const normalized = rawValue.trim().toLowerCase();
+    const placeholders = new Set([
+        "current_user",
+        "current-agent",
+        "current_agent",
+        "agent",
+        "agent_id",
+        "assigned_agent",
+    ]);
+
+    if (placeholders.has(normalized)) return fromContext;
+    return rawValue || fromContext;
+}
+
+function normalizeDateWindow(
+    rawStart: string,
+    rawEnd: string,
+    context?: ToolHandlerContext
+): { startDate: Date; endDate: Date; normalizedToFutureYear: boolean } {
+    const startDate = new Date(rawStart);
+    const endDate = new Date(rawEnd);
+    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+        throw new Error("Invalid date format. Use ISO date strings.");
+    }
+
+    const now = new Date();
+    const latestUserMessage = typeof context?.latestUserMessage === "string" ? context.latestUserMessage : "";
+    const hasExplicitYear = /\b20\d{2}\b/.test(latestUserMessage);
+    let normalizedToFutureYear = false;
+
+    if (endDate < now) {
+        if (hasExplicitYear) {
+            throw new Error("Requested viewing dates are in the past. Ask the lead to confirm the year.");
+        }
+
+        while (endDate < now) {
+            startDate.setFullYear(startDate.getFullYear() + 1);
+            endDate.setFullYear(endDate.getFullYear() + 1);
+            normalizedToFutureYear = true;
+        }
+    }
+
+    return { startDate, endDate, normalizedToFutureYear };
+}
+
 // ── TOOLS ─────────────────────────────────────────
 
 registerTool(
@@ -69,14 +118,41 @@ registerTool(
         // propertyType: z.string().optional().describe("Type: Apartment, Villa, House, etc."), // Not yet in searchProperties impl
         dealType: z.enum(["sale", "rent"]).optional().describe("Sale or Rent"),
     },
-    async (params: any) => {
-        const { locationId, dealType, ...query } = params;
+    async (params: any, context?: ToolHandlerContext) => {
+        const locationId = params.locationId || context?.locationId;
+        if (!locationId) {
+            throw new Error("locationId is required for search_properties.");
+        }
+        const { locationId: _ignoredLocationId, dealType, ...query } = params;
         const mappedQuery: any = { ...query };
         if (dealType) mappedQuery.status = dealType;
 
         // Implementation calls existing searchProperties logic
         const results = await tools.searchProperties(locationId, mappedQuery);
         return { content: [{ type: "text", text: JSON.stringify(results) }] };
+    }
+);
+
+registerTool(
+    "resolve_viewing_property_context",
+    "Resolve which property the lead means and return viewing logistics (availability path, key access, occupancy, and rental/sale policies) before calendar scheduling.",
+    {
+        contactId: z.string().optional().describe("Contact ID (local or GHL)"),
+        conversationId: z.string().optional().describe("Conversation ID for message context"),
+        message: z.string().optional().describe("Latest lead message or text containing ref/url"),
+        propertyReference: z.string().optional().describe("Explicit property reference if already known"),
+        propertyUrl: z.string().optional().describe("Explicit property URL if already known")
+    },
+    async (params: any, context?: ToolHandlerContext) => {
+        const result = await tools.resolveViewingPropertyContext({
+            contactId: params.contactId || context?.contactId,
+            conversationId: params.conversationId || context?.conversationId,
+            locationId: context?.locationId,
+            message: params.message || context?.latestUserMessage,
+            propertyReference: params.propertyReference,
+            propertyUrl: params.propertyUrl
+        });
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
     }
 );
 
@@ -175,15 +251,27 @@ registerTool(
         endDate: z.string().describe("End date (ISO string)"),
         durationMinutes: z.number().optional().default(60).describe("Duration of each slot in minutes")
     },
-    async (params: any) => {
+    async (params: any, context?: ToolHandlerContext) => {
         const { checkAvailability } = await import("../tools/calendar");
+        const userId = resolveAgentUserId(params.userId, context);
+        if (!userId) {
+            throw new Error("Could not resolve a valid userId for check_availability.");
+        }
+        const { startDate, endDate, normalizedToFutureYear } = normalizeDateWindow(
+            params.startDate,
+            params.endDate,
+            context
+        );
         const result = await checkAvailability(
-            params.userId,
-            new Date(params.startDate),
-            new Date(params.endDate),
+            userId,
+            startDate,
+            endDate,
             params.durationMinutes
         );
-        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+        const payload = normalizedToFutureYear
+            ? { ...result, normalizedToFutureYear, normalizedStartDate: startDate.toISOString(), normalizedEndDate: endDate.toISOString() }
+            : result;
+        return { content: [{ type: "text", text: JSON.stringify(payload) }] };
     }
 );
 
@@ -195,9 +283,13 @@ registerTool(
         propertyId: z.string().describe("Property ID for the viewing"),
         daysAhead: z.number().optional().default(7).describe("How many days ahead to search")
     },
-    async (params: any) => {
+    async (params: any, context?: ToolHandlerContext) => {
         const { proposeSlots } = await import("../tools/calendar");
-        const result = await proposeSlots(params.agentUserId, params.propertyId, params.daysAhead);
+        const agentUserId = resolveAgentUserId(params.agentUserId, context);
+        if (!agentUserId) {
+            throw new Error("Could not resolve a valid agentUserId for propose_slots.");
+        }
+        const result = await proposeSlots(agentUserId, params.propertyId, params.daysAhead);
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
     }
 );
@@ -396,14 +488,17 @@ registerTool(
 
 registerTool(
     "log_activity",
-    "Log a general activity or note to the contact's history.",
+    "Log a concise CRM summary for today's interaction with this contact. Write ONE short line summarizing: intent, property refs mentioned, key decisions/preferences revealed, and next actions. Example: 'Interested in DT3762 (2bed apt, Chlorakas). Budget ~€750/mo rent. Wants viewing this week.' This entry will be visible to agents on the contact's Details tab.",
     {
-        contactId: z.string(),
-        message: z.string()
+        contactId: z.string().describe("Contact ID"),
+        message: z.string().describe("Concise one-line summary of today's interaction (no date prefix needed)")
     },
     async (params: any) => {
-        await tools.appendLog(params.contactId, params.message);
-        return { content: [{ type: "text", text: "Activity logged." }] };
+        const result = await tools.appendLog(params.contactId, params.message);
+        const success = typeof result === "object" && (result as any).success === false ? false : true;
+        return {
+            content: [{ type: "text", text: success ? "Activity logged." : JSON.stringify(result) }]
+        };
     }
 );
 

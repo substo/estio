@@ -154,6 +154,7 @@ const createContactSchema = z.object({
   leadNextAction: z.string().optional(),
   leadFollowUpDate: z.string().optional().transform(parseDate),
   leadAssignedToAgent: z.string().optional(),
+  leadOtherDetails: z.string().optional(),
 
   // Requirements
   requirementStatus: z.enum(REQUIREMENT_STATUSES).optional().default('For Sale'),
@@ -226,6 +227,7 @@ function prepareContactInput(data: ValidatedContactData) {
     leadNextAction: data.leadNextAction,
     leadFollowUpDate: data.leadFollowUpDate,
     leadAssignedToAgent: data.leadAssignedToAgent,
+    notes: data.leadOtherDetails ?? undefined,
 
     requirementStatus: data.requirementStatus,
     requirementDistrict: data.requirementDistrict,
@@ -391,6 +393,7 @@ export async function createContact(
     leadNextAction: formData.get('leadNextAction') || undefined,
     leadFollowUpDate: formData.get('leadFollowUpDate') || undefined,
     leadAssignedToAgent: formData.get('leadAssignedToAgent') || undefined,
+    leadOtherDetails: formData.get('leadOtherDetails') as string || undefined,
 
     requirementStatus: formData.get('requirementStatus') || undefined,
     requirementDistrict: formData.get('requirementDistrict') || undefined,
@@ -759,6 +762,7 @@ export async function updateContact(
     leadNextAction: formData.get('leadNextAction') || undefined,
     leadFollowUpDate: formData.get('leadFollowUpDate') || undefined,
     leadAssignedToAgent: formData.get('leadAssignedToAgent') || undefined,
+    leadOtherDetails: formData.get('leadOtherDetails') as string || undefined,
 
     requirementStatus: formData.get('requirementStatus') || undefined,
     requirementDistrict: formData.get('requirementDistrict') || undefined,

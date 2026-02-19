@@ -226,7 +226,7 @@ Users can now **View and Edit** the contact without leaving the conversation con
 | `update_requirements`      | Updates Contact requirements (status, district, budget, etc.)   |
 | `search_properties`        | Queries DB for matching properties                               |
 | `create_viewing`           | Schedules a viewing and syncs to GHL Calendar                    |
-| `log_activity`             | Appends timestamped log to Contact's "Other Details"             |
+| `log_activity`             | Writes concise daily summary to `notes` field (UI: "Other Details") |
 
 ### How It Works
 1.  Agent receives conversation history + contact context.

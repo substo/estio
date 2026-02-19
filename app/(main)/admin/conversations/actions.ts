@@ -10,7 +10,7 @@ import { ensureLocalContactSynced } from "@/lib/crm/contact-sync";
 import { ensureConversationHistory, syncMessageFromWebhook } from "@/lib/ghl/sync";
 import { calculateRunCost } from "@/lib/ai/pricing";
 import { z } from "zod";
-import { MODELS } from "@/lib/ai/model-router";
+import { getModelForTask } from "@/lib/ai/model-router";
 import { callLLM } from "@/lib/ai/llm";
 
 async function getAuthenticatedLocation() {
@@ -639,12 +639,29 @@ export async function orchestrateAction(conversationId: string, contactId: strin
 
     // Resolve real conversation DB ID (AgentExecution FK requires Conversation.id, not ghlConversationId)
     const conversation = await db.conversation.findFirst({
-        where: { ghlConversationId: conversationId },
-        select: { id: true }
+        where: {
+            ghlConversationId: conversationId,
+            locationId: location.id
+        },
+        select: { id: true, contactId: true }
     });
 
     if (!conversation) {
         throw new Error(`Conversation not found for ghlConversationId: ${conversationId}`);
+    }
+
+    // Canonicalize contact ID to local DB Contact.id.
+    // UI sometimes passes GHL contact IDs; tools and tracing require local IDs.
+    let resolvedContactId = conversation.contactId;
+    if (contactId && contactId !== conversation.contactId) {
+        const mapped = await db.contact.findFirst({
+            where: {
+                locationId: location.id,
+                OR: [{ id: contactId }, { ghlContactId: contactId }]
+            },
+            select: { id: true }
+        });
+        if (mapped?.id) resolvedContactId = mapped.id;
     }
 
     // Fetch conversation history
@@ -667,7 +684,7 @@ export async function orchestrateAction(conversationId: string, contactId: strin
 
     const result = await orchestrate({
         conversationId: conversation.id, // Use real DB ID, not ghlConversationId
-        contactId,
+        contactId: resolvedContactId,
         message: lastMessage.body || "",
         conversationHistory: history,
         dealStage
@@ -1334,6 +1351,18 @@ export async function getAgentExecutions(conversationId: string) {
         take: 20
     });
 
+    const parseJsonField = (value: any, fallback: any) => {
+        if (value == null) return fallback;
+        if (typeof value === "string") {
+            try {
+                return JSON.parse(value);
+            } catch {
+                return fallback;
+            }
+        }
+        return value;
+    };
+
     return executions.map(e => ({
         id: e.id,
         traceId: e.traceId,
@@ -1342,8 +1371,8 @@ export async function getAgentExecutions(conversationId: string) {
         taskTitle: e.taskTitle,
         taskStatus: e.status, // generic status field
         thoughtSummary: e.thoughtSummary,
-        thoughtSteps: e.thoughtSteps,
-        toolCalls: e.toolCalls ? JSON.parse(e.toolCalls as string) : [],
+        thoughtSteps: parseJsonField(e.thoughtSteps, []),
+        toolCalls: parseJsonField(e.toolCalls, []),
         draftReply: e.draftReply,
         usage: {
             promptTokenCount: e.promptTokens,
@@ -2215,7 +2244,7 @@ Return JSON matching this schema:
 `;
 
         // Use Flash model for speed/cost
-        const modelId = MODELS.gemini_flash.id;
+        const modelId = getModelForTask("lead_parsing");
 
         const start = Date.now();
         // Pass jsonMode: true to force JSON output if supported, or rely on prompt instruction
@@ -2411,4 +2440,3 @@ export async function createParsedLead(data: ParsedLeadData, originalText: strin
         return { success: false, error: e.message };
     }
 }
-

@@ -80,3 +80,33 @@ Disaster Recovery: Instructions on how to pull code from the server if this happ
 Verification
 Build: npm run dev relies on the recovered files and should now be error-free.
 Backup: The project state has been pushed to origin/main as a "Save Point".
+
+---
+
+## Clerk API Optimization (Implemented)
+
+### Goal
+Reduce Clerk Backend API usage on admin/auth paths to prevent `429 Too Many Requests` and unauthorized redirect loops.
+
+### Implemented changes
+1. `lib/auth/location-context.ts`
+   - Switched to DB-first resolution:
+     - `auth()` for session validation (JWT-local)
+     - local DB lookup by `clerkId` for user + locations
+   - Clerk API is now fallback-only for first-time sync/self-heal.
+   - Added explicit `429` handling around fallback Clerk calls.
+
+2. `app/(main)/admin/layout.tsx`
+   - Replaced `currentUser()` usage with `auth()` + DB lookup.
+   - Added graceful handling for auth rate-limit scenarios.
+   - Enforces local user existence before rendering admin shell.
+
+### Result
+- Happy path now avoids Clerk Backend API calls for location/user context resolution.
+- Remaining Clerk API calls are isolated to fallback paths and guarded against 429 failures.
+
+### Verification
+```bash
+ssh root@138.199.214.117 "pm2 logs estio-app --lines 200 --nostream 2>&1 | grep -E '429|Too Many|Unauthorized'"
+ssh root@138.199.214.117 "pm2 logs estio-app --lines 500 --nostream 2>&1 | grep -c '429'"
+```

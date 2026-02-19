@@ -69,6 +69,22 @@ If the app behaves differently when deployed via `deploy-direct.sh` vs `deploy.s
 2.  Compare the `.env` generation blocks in both files.
 3.  Compare the `npm build` sections.
 
+### Post-Deploy Auth Health Check (Clerk 429)
+
+After each deployment, run a quick auth-rate-limit check:
+
+```bash
+ssh root@138.199.214.117 "pm2 logs estio-app --lines 200 --nostream 2>&1 | grep -E '429|Too Many|Unauthorized'"
+```
+
+If you want a numeric check:
+
+```bash
+ssh root@138.199.214.117 "pm2 logs estio-app --lines 500 --nostream 2>&1 | grep -c '429'"
+```
+
+Expected: `0` (or materially lower than pre-optimization baseline).
+
 ---
 
 ## 🛠️ Server Pre-requisites & Troubleshooting
@@ -132,4 +148,3 @@ rsync -avz -e "ssh" --exclude '.git' --exclude 'node_modules' --exclude '.next' 
 ```
 > [!WARNING]
 > This overwrites local files with the server versions. Uncommitted local work will be lost.
-

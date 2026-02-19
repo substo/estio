@@ -118,7 +118,7 @@ export function MergeContactDialog({ sourceContactId, sourceName, trigger }: Mer
                 <div className="grid gap-4 py-4">
                     <div className="grid gap-2">
                         <Label>Target Contact</Label>
-                        <Popover open={searchOpen} onOpenChange={setSearchOpen}>
+                        <Popover open={searchOpen} onOpenChange={setSearchOpen} modal={true}>
                             <PopoverTrigger asChild>
                                 <Button
                                     variant="outline"
@@ -146,6 +146,7 @@ export function MergeContactDialog({ sourceContactId, sourceName, trigger }: Mer
                                                     setTargetContactId(currentValue === targetContactId ? null : currentValue)
                                                     setSearchOpen(false)
                                                 }}
+                                                className="cursor-pointer"
                                             >
                                                 <Check
                                                     className={cn(

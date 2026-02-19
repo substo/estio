@@ -81,6 +81,7 @@ export type ContactData = {
     leadFollowUpDate?: Date | null;
     leadAssignedToAgent?: string | null;
     leadOtherDetails?: string | null;
+    notes?: string | null; // DB field alias for leadOtherDetails
     // Requirements
     requirementStatus?: string;
     requirementDistrict?: string;
@@ -567,8 +568,12 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                     <Input name="leadFollowUpDate" type="date" defaultValue={formatDate(contact?.leadFollowUpDate)} />
                                 </RenderField>
                                 <div className="col-span-2">
-                                    <RenderField label="Other Details" value={contact?.leadOtherDetails} isEditing={isEditing}>
-                                        <Textarea name="leadOtherDetails" placeholder="Add any other details..." defaultValue={contact?.leadOtherDetails || ''} />
+                                    <RenderField label="Lead Other Details" value={contact?.leadOtherDetails ?? contact?.notes} isEditing={isEditing}>
+                                        <Textarea
+                                            name="leadOtherDetails"
+                                            placeholder="Add any other lead details..."
+                                            defaultValue={contact?.leadOtherDetails ?? contact?.notes ?? ''}
+                                        />
                                     </RenderField>
                                 </div>
                             </div>
@@ -766,7 +771,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                 />
                             </RenderField>
                             <div className="col-span-2">
-                                <RenderField label="Other Details" value={contact?.requirementOtherDetails} isEditing={isEditing}>
+                                <RenderField label="Requirement Other Details" value={contact?.requirementOtherDetails} isEditing={isEditing}>
                                     <Textarea name="requirementOtherDetails" placeholder="Add other specific requirements..." defaultValue={contact?.requirementOtherDetails || ''} />
                                 </RenderField>
                             </div>

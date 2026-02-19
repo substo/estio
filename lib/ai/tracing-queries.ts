@@ -23,6 +23,18 @@ export async function getTrace(traceId: string): Promise<TraceNode | null> {
 
     if (spans.length === 0) return null;
 
+    const parseJsonField = (value: any, fallback: any) => {
+        if (value == null) return fallback;
+        if (typeof value === "string") {
+            try {
+                return JSON.parse(value);
+            } catch {
+                return fallback;
+            }
+        }
+        return value;
+    };
+
     // Map to nodes
     const nodeMap = new Map<string, TraceNode>();
     let root: TraceNode | null = null;
@@ -39,7 +51,7 @@ export async function getTrace(traceId: string): Promise<TraceNode | null> {
             metadata: {
                 output: span.draftReply,
                 error: span.errorMessage,
-                toolCalls: span.toolCalls,
+                toolCalls: parseJsonField(span.toolCalls, []),
                 model: span.model,
                 cost: span.cost,
                 tokens: span.totalTokens,
