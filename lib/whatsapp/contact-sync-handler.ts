@@ -1,19 +1,34 @@
 
 import db from "@/lib/db";
 
-export async function handleContactSyncEvent(payload: any) {
+export async function handleContactSyncEvent(payload: any, locationId?: string) {
     // payload is the whole webhook body
     // expected: payload.event === 'CONTACTS_UPSERT' or 'CONTACTS_UPDATE'
     // payload.data is an array of contacts (or single object?)
     // logs suggest payload.data is the array for upsert? No, typically 'data' is the event data.
     // Let's assume payload.data is an array of ISocketContact or similar.
 
+    // Resolve tenant scope first. Contact sync must always stay inside a single location.
+    let resolvedLocationId = locationId;
+    if (!resolvedLocationId && payload.instance) {
+        const location = await db.location.findFirst({
+            where: { evolutionInstanceId: payload.instance },
+            select: { id: true }
+        });
+        resolvedLocationId = location?.id;
+    }
+
+    if (!resolvedLocationId) {
+        console.warn(`[Contact Sync] Skipping: could not resolve location for instance ${payload.instance || 'unknown'}`);
+        return;
+    }
+
     // Safety check
     const contacts = Array.isArray(payload.data) ? payload.data : [payload.data];
 
     if (!contacts || contacts.length === 0) return;
 
-    console.log(`[Contact Sync] Processing ${contacts.length} contacts from Webhook...`);
+    console.log(`[Contact Sync] Processing ${contacts.length} contacts from Webhook for location ${resolvedLocationId}...`);
 
     let updatedCount = 0;
 
@@ -60,11 +75,24 @@ export async function handleContactSyncEvent(payload: any) {
             // We'll use the same robust lookup logic as sync.ts if possible, or simple contains.
 
             try {
-                // Find contact by phone
-                const existing = await db.contact.findFirst({
+                // Find contact by phone (strictly inside the same location)
+                const phoneSuffix = phoneDigits.length > 7 ? phoneDigits.slice(-7) : phoneDigits;
+                const candidates = await db.contact.findMany({
                     where: {
-                        phone: { contains: phoneDigits.slice(-7) } // looser match
-                    }
+                        locationId: resolvedLocationId,
+                        phone: { contains: phoneSuffix }
+                    },
+                    select: { id: true, phone: true, lid: true, name: true, locationId: true }
+                });
+
+                const existing = candidates.find((candidate) => {
+                    if (!candidate.phone) return false;
+                    const candidateDigits = candidate.phone.replace(/\D/g, '');
+                    return (
+                        candidateDigits === phoneDigits ||
+                        (candidateDigits.endsWith(phoneDigits) && phoneDigits.length >= 7) ||
+                        (phoneDigits.endsWith(candidateDigits) && candidateDigits.length >= 7)
+                    );
                 });
 
                 if (existing) {
@@ -75,6 +103,7 @@ export async function handleContactSyncEvent(payload: any) {
                         // Check if we have a DUPLICATE contact for this LID
                         const duplicateLidContact = await db.contact.findFirst({
                             where: {
+                                locationId: resolvedLocationId,
                                 lid: { contains: lidRaw },
                                 id: { not: existing.id }
                             }
@@ -85,7 +114,10 @@ export async function handleContactSyncEvent(payload: any) {
 
                             // 1. Migrate Conversations & Messages
                             const sourceConvos = await db.conversation.findMany({
-                                where: { contactId: duplicateLidContact.id }
+                                where: {
+                                    contactId: duplicateLidContact.id,
+                                    locationId: resolvedLocationId
+                                }
                             });
 
                             for (const sourceConvo of sourceConvos) {
@@ -135,6 +167,7 @@ export async function handleContactSyncEvent(payload: any) {
                     // Check if we have an existing placeholder for this LID
                     const existingLidContact = await db.contact.findFirst({
                         where: {
+                            locationId: resolvedLocationId,
                             lid: { contains: lidJid.replace('@lid', '') }
                         }
                     });

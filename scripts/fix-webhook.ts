@@ -37,7 +37,10 @@ async function fixWebhook() {
                         events: [
                             "MESSAGES_UPSERT",
                             "MESSAGES_UPDATE",
+                            "CHATS_UPSERT",
                             "CONNECTION_UPDATE",
+                            "CONTACTS_UPSERT",
+                            "CONTACTS_UPDATE",
                             "SEND_MESSAGE",
                             "QRCODE_UPDATED"
                         ],

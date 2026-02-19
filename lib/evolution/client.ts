@@ -129,7 +129,9 @@ export const evolutionClient = {
                                     "CONNECTION_UPDATE",
                                     "MESSAGES_UPSERT",
                                     "MESSAGES_UPDATE",
-                                    "CHATS_UPSERT"
+                                    "CHATS_UPSERT",
+                                    "CONTACTS_UPSERT",
+                                    "CONTACTS_UPDATE"
                                 ],
                                 webhookByEvents: true,
                                 headers: {
@@ -482,7 +484,15 @@ export const evolutionClient = {
                     webhook: {
                         url: webhookUrl,
                         enabled: true,
-                        events: ["QRCODE_UPDATED", "CONNECTION_UPDATE", "MESSAGES_UPSERT", "MESSAGES_UPDATE", "CHATS_UPSERT"],
+                        events: [
+                            "QRCODE_UPDATED",
+                            "CONNECTION_UPDATE",
+                            "MESSAGES_UPSERT",
+                            "MESSAGES_UPDATE",
+                            "CHATS_UPSERT",
+                            "CONTACTS_UPSERT",
+                            "CONTACTS_UPDATE"
+                        ],
                         webhookByEvents: true,
                         headers: { "ngrok-skip-browser-warning": "true" }
                     }

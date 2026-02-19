@@ -179,22 +179,91 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     });
 
     // Strategy: Prefer LID match -> Then Phone Match
+    const phoneMatchCandidate = candidates.find(c => {
+        if (!c.phone) return false;
+        const rawDbPhone = c.phone.replace(/\D/g, '');
+        return (
+            rawDbPhone === rawInputPhone ||
+            (rawDbPhone.endsWith(rawInputPhone) && rawInputPhone.length >= 7) ||
+            (rawInputPhone.endsWith(rawDbPhone) && rawDbPhone.length >= 7)
+        );
+    });
+
+    let matchedByLid = false;
     let contact = candidates.find((c: any) => {
         if (!msg.lid || !c.lid) return false;
         // Normalize both for comparison (strip @lid if present)
         return c.lid.replace('@lid', '') === msg.lid.replace('@lid', '');
     });
+    if (contact) matchedByLid = true;
 
     if (!contact) {
-        contact = candidates.find(c => {
-            if (!c.phone) return false;
-            const rawDbPhone = c.phone.replace(/\D/g, '');
-            return (
-                rawDbPhone === rawInputPhone ||
-                (rawDbPhone.endsWith(rawInputPhone) && rawInputPhone.length >= 7) ||
-                (rawInputPhone.endsWith(rawDbPhone) && rawDbPhone.length >= 7)
-            );
-        });
+        contact = phoneMatchCandidate;
+    }
+
+    // If we matched by LID placeholder but now have a real phone (e.g. payload has previousRemoteJid),
+    // backfill phone directly or merge into existing phone contact if one already exists.
+    if (contact && matchedByLid && !isGroup && !contact.phone && !contactPhone.includes('@lid') && rawInputPhone.length >= 7) {
+        const normalizedPhone = contactPhone.startsWith('+') ? contactPhone : `+${rawInputPhone}`;
+        const shouldRename = !!nameToUse && (contact.name || '').startsWith('WhatsApp User');
+
+        try {
+            contact = await db.contact.update({
+                where: { id: contact.id },
+                data: {
+                    phone: normalizedPhone,
+                    ...(shouldRename ? { name: nameToUse } : {})
+                } as any
+            });
+            console.log(`[WhatsApp Sync] Backfilled phone ${normalizedPhone} on LID contact ${contact.id}`);
+        } catch (err: any) {
+            const targetPhoneContact = phoneMatchCandidate && phoneMatchCandidate.id !== contact.id ? phoneMatchCandidate : null;
+
+            if (!targetPhoneContact) {
+                console.error(`[WhatsApp Sync] Failed to backfill phone on LID contact ${contact.id}:`, err?.message || err);
+            } else {
+                console.log(`[WhatsApp Sync] Merging LID placeholder ${contact.id} into phone contact ${targetPhoneContact.id}`);
+
+                const sourceConvos = await db.conversation.findMany({
+                    where: { locationId, contactId: contact.id }
+                });
+
+                for (const sourceConvo of sourceConvos) {
+                    const targetConvo = await db.conversation.findUnique({
+                        where: {
+                            locationId_contactId: {
+                                locationId,
+                                contactId: targetPhoneContact.id
+                            }
+                        }
+                    });
+
+                    if (targetConvo) {
+                        await db.message.updateMany({
+                            where: { conversationId: sourceConvo.id },
+                            data: { conversationId: targetConvo.id }
+                        });
+                        await db.conversation.delete({ where: { id: sourceConvo.id } });
+                    } else {
+                        await db.conversation.update({
+                            where: { id: sourceConvo.id },
+                            data: { contactId: targetPhoneContact.id }
+                        });
+                    }
+                }
+
+                await db.contact.delete({ where: { id: contact.id } });
+
+                contact = await db.contact.update({
+                    where: { id: targetPhoneContact.id },
+                    data: {
+                        ...(msg.lid ? { lid: msg.lid } : {}),
+                        ...(shouldRename ? { name: nameToUse } : {})
+                    } as any
+                });
+                console.log(`[WhatsApp Sync] Merged placeholder and linked LID ${msg.lid || '(none)'} to ${contact.id}`);
+            }
+        }
     }
 
     // Link LID if found by phone but missing LID

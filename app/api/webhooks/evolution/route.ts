@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
         console.log(`[Evolution Webhook] Found Location: ${location.id}`);
 
         if (eventType === 'CONTACTS_UPSERT' || eventType === 'CONTACTS.UPSERT' || eventType === 'CONTACTS_UPDATE' || eventType === 'CONTACTS.UPDATE') {
-            await handleContactSyncEvent(body);
+            await handleContactSyncEvent(body, location.id);
             // We don't return here because sometimes contacts update comes with message update? 
             // Typically they are distinct events.
             return NextResponse.json({ status: 'processed' });
@@ -48,6 +48,7 @@ export async function POST(req: NextRequest) {
 
             let remoteJid = key.remoteJid || '';
             let participant = key.participant || msg.participant;
+            const previousRemoteJid = key.previousRemoteJid || msg.previousRemoteJid;
 
             // --- JID Normalization & Group Detection ---
             const isGroup = remoteJid.endsWith('@g.us');
@@ -170,7 +171,15 @@ export async function POST(req: NextRequest) {
                 contactName: isGroup ? undefined : (msg.pushName || realPhone), // Don't rename group to sender name
                 isGroup: isGroup,
                 participant: participant, // Pass resolved participant to sync
-                lid: isLid && !isGroup ? remoteJid : undefined, // Pass full LID JID for consistent matching
+                // If remoteJid is phone but Evolution includes previousRemoteJid as @lid,
+                // pass that LID so sync.ts can stitch phone<->lid to one contact.
+                lid: !isGroup
+                    ? (
+                        isLid
+                            ? remoteJid
+                            : (typeof previousRemoteJid === 'string' && previousRemoteJid.includes('@lid') ? previousRemoteJid : undefined)
+                    )
+                    : undefined,
                 // Pass the real phone number explicitly if resolved, to help sync.ts do a final check if needed
                 resolvedPhone: realPhone
             };
