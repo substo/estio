@@ -1369,7 +1369,10 @@ export async function getAgentExecutions(conversationId: string) {
         spanId: e.spanId,
         taskId: e.taskId,
         taskTitle: e.taskTitle,
-        taskStatus: e.status, // generic status field
+        taskStatus:
+            e.taskStatus === "done" ? "success" :
+                e.taskStatus === "failed" ? "error" :
+                    e.taskStatus || (e.status === "success" ? "success" : e.status === "error" ? "error" : e.status),
         thoughtSummary: e.thoughtSummary,
         thoughtSteps: parseJsonField(e.thoughtSteps, []),
         toolCalls: parseJsonField(e.toolCalls, []),
@@ -2211,6 +2214,18 @@ export interface LeadAnalysisTrace {
     end: number;
     model: string;
     thoughtSummary: string;
+    llmRequest: {
+        model: string;
+        prompt: string;
+        options: {
+            jsonMode: boolean;
+        };
+    };
+    llmResponse: {
+        rawText: string;
+        cleanJson: string;
+        parsed: ParsedLeadData;
+    };
     promptTokens: number;
     completionTokens: number;
     totalTokens: number;
@@ -2266,6 +2281,18 @@ Return JSON matching this schema:
             end,
             model: modelId,
             thoughtSummary: `Lead Analysis (Gemini Flash):\n- Extracted structured data from raw text.\n- Identified Source: ${result.source || 'Unknown'}\n- Message Status: ${result.messageContent ? 'Has Message' : 'Notes Only'}`,
+            llmRequest: {
+                model: modelId,
+                prompt,
+                options: {
+                    jsonMode: true
+                }
+            },
+            llmResponse: {
+                rawText: jsonStr,
+                cleanJson,
+                parsed: result
+            },
             promptTokens: usage.promptTokens,
             completionTokens: usage.completionTokens,
             totalTokens: usage.totalTokens
@@ -2382,11 +2409,36 @@ export async function createParsedLead(data: ParsedLeadData, originalText: strin
                     data: {
                         conversationId: conversation.id,
                         traceId: trace.traceId,
+                        spanId: trace.traceId,
                         taskTitle: "Analyze Lead Text",
-                        taskStatus: "done",
+                        status: "success",
+                        taskStatus: "success",
                         skillName: "lead_parser",
+                        intent: "analysis",
                         model: trace.model,
                         thoughtSummary: trace.thoughtSummary,
+                        thoughtSteps: [
+                            {
+                                step: 1,
+                                description: "LLM request payload",
+                                conclusion: "Captured full request sent to model",
+                                data: trace.llmRequest
+                            },
+                            {
+                                step: 2,
+                                description: "LLM response payload",
+                                conclusion: "Captured raw response and parsed JSON output",
+                                data: trace.llmResponse
+                            }
+                        ],
+                        toolCalls: [
+                            {
+                                tool: "gemini.generateContent",
+                                arguments: trace.llmRequest,
+                                result: trace.llmResponse,
+                                error: null
+                            }
+                        ],
                         promptTokens: trace.promptTokens,
                         completionTokens: trace.completionTokens,
                         totalTokens: trace.totalTokens,

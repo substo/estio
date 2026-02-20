@@ -83,6 +83,10 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
     });
 
     const isContextMode = selectedConversations && selectedConversations.length > 0;
+    const traceToolCalls = Array.isArray(rawTrace?.toolCalls) ? rawTrace.toolCalls : [];
+    const leadParserToolCall = traceToolCalls.find((c: any) => c?.tool === "gemini.generateContent") || null;
+    const leadParserRequest = leadParserToolCall?.arguments || null;
+    const leadParserResponse = leadParserToolCall?.result || null;
 
     // Fetch Plan on Load
     useEffect(() => {
@@ -840,6 +844,31 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
                                                         </div>
                                                     </CardContent>
                                                 </Card>
+
+                                                {leadParserToolCall && (
+                                                    <Card className="shadow-sm border-slate-200">
+                                                        <CardHeader className="py-3 px-4 bg-slate-50/50 border-b">
+                                                            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                                                                <Activity className="w-4 h-4 text-blue-500" />
+                                                                LLM Request/Response
+                                                            </CardTitle>
+                                                        </CardHeader>
+                                                        <CardContent className="p-4 space-y-3">
+                                                            <div>
+                                                                <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">Request</div>
+                                                                <pre className="bg-slate-950 text-slate-50 text-[10px] p-2 rounded overflow-x-auto max-h-[160px] overflow-y-auto font-mono whitespace-pre-wrap">
+                                                                    {JSON.stringify(leadParserRequest, null, 2)}
+                                                                </pre>
+                                                            </div>
+                                                            <div>
+                                                                <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">Response</div>
+                                                                <pre className="bg-slate-950 text-slate-50 text-[10px] p-2 rounded overflow-x-auto max-h-[160px] overflow-y-auto font-mono whitespace-pre-wrap">
+                                                                    {JSON.stringify(leadParserResponse, null, 2)}
+                                                                </pre>
+                                                            </div>
+                                                        </CardContent>
+                                                    </Card>
+                                                )}
 
                                                 {/* Tool Usage Stats */}
                                                 <Card className="shadow-sm border-slate-200">
