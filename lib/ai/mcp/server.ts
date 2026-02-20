@@ -82,6 +82,40 @@ function normalizeDateWindow(
     return { startDate, endDate, normalizedToFutureYear };
 }
 
+function normalizeInsightImportance(raw: any): number | undefined {
+    if (raw === null || raw === undefined || raw === "") return undefined;
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+        return Math.max(1, Math.min(10, Math.round(raw)));
+    }
+    if (typeof raw === "string") {
+        const normalized = raw.trim().toLowerCase();
+        if (!normalized) return undefined;
+
+        const asNumber = Number(normalized);
+        if (Number.isFinite(asNumber)) {
+            return Math.max(1, Math.min(10, Math.round(asNumber)));
+        }
+
+        if (normalized === "low") return 3;
+        if (normalized === "medium") return 5;
+        if (normalized === "high") return 8;
+        if (normalized === "critical") return 10;
+    }
+    return undefined;
+}
+
+function normalizeInsightCategory(raw: any): "preference" | "objection" | "timeline" | "motivation" | "relationship" {
+    const allowed = new Set(["preference", "objection", "timeline", "motivation", "relationship"]);
+    const value = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+    if (allowed.has(value)) return value as "preference" | "objection" | "timeline" | "motivation" | "relationship";
+
+    if (value === "financial") return "motivation";
+    if (value === "timing") return "timeline";
+    if (value === "trust") return "relationship";
+
+    return "preference";
+}
+
 // ── TOOLS ─────────────────────────────────────────
 
 registerTool(
@@ -111,11 +145,13 @@ registerTool(
     "Search for properties matching the given criteria. Returns a list of matching properties with key details.",
     {
         locationId: z.string().describe("The location ID (e.g. substo_estio)"), // Added required context param
+        q: z.string().optional().describe("General search text (title/reference/slug)"),
+        reference: z.string().optional().describe("Property reference like DT3762"),
         district: z.string().optional().describe("Property district/area (e.g. 'Paphos', 'Limassol')"),
         maxPrice: z.number().optional().describe("Maximum price in EUR"),
         minPrice: z.number().optional().describe("Minimum price in EUR"),
         bedrooms: z.number().optional().describe("Number of bedrooms"),
-        // propertyType: z.string().optional().describe("Type: Apartment, Villa, House, etc."), // Not yet in searchProperties impl
+        propertyType: z.string().optional().describe("Type: Apartment, Villa, House, etc."),
         dealType: z.enum(["sale", "rent"]).optional().describe("Sale or Rent"),
     },
     async (params: any, context?: ToolHandlerContext) => {
@@ -166,14 +202,50 @@ registerTool(
         maxPrice: z.number().optional(),
         district: z.string().optional(),
     },
-    async (params: any) => {
+    async (params: any, context?: ToolHandlerContext) => {
         const { query, ...filters } = params;
-        const results = await hybridPropertySearch({
-            ...filters,
-            naturalLanguageQuery: query,
-            limit: 5
-        });
-        return { content: [{ type: "text", text: JSON.stringify(results) }] };
+        const locationId = params.locationId || context?.locationId;
+        if (!locationId) {
+            throw new Error("locationId is required for semantic_search.");
+        }
+
+        try {
+            const results = await hybridPropertySearch({
+                ...filters,
+                locationId,
+                naturalLanguageQuery: query,
+                limit: 5
+            });
+            return { content: [{ type: "text", text: JSON.stringify(results) }] };
+        } catch (error: any) {
+            const message = String(error?.message || "");
+            const isEmbeddingUnavailable =
+                message.includes('column "embedding" does not exist') ||
+                message.includes("42703") ||
+                message.toLowerCase().includes("vector");
+
+            if (!isEmbeddingUnavailable) {
+                throw error;
+            }
+
+            const fallback = await tools.searchProperties(locationId, {
+                district: filters.district,
+                minPrice: filters.minPrice,
+                maxPrice: filters.maxPrice,
+                q: query,
+                reference: query
+            });
+            return {
+                content: [{
+                    type: "text",
+                    text: JSON.stringify({
+                        fallback: true,
+                        fallbackReason: "semantic_search_unavailable",
+                        ...fallback
+                    })
+                }]
+            };
+        }
     }
 );
 
@@ -216,11 +288,15 @@ registerTool(
     {
         contactId: z.string(),
         text: z.string().describe("The insight to remember"),
-        category: z.enum(["preference", "objection", "timeline", "motivation", "relationship"]),
-        importance: z.number().min(1).max(10).optional(),
+        category: z.string().describe("Insight category (preference, objection, timeline, motivation, relationship)"),
+        importance: z.union([z.number().min(1).max(10), z.string()]).optional(),
     },
     async (params: any) => {
-        await storeInsight(params);
+        await storeInsight({
+            ...params,
+            category: normalizeInsightCategory(params.category),
+            importance: normalizeInsightImportance(params.importance)
+        });
         return { content: [{ type: "text", text: "Insight stored successfully." }] };
     }
 );

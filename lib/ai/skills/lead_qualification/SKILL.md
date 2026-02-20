@@ -70,6 +70,7 @@ Include: intent, property refs, key decisions, next actions, and any new informa
 4. Update `leadScore` after each interaction
 5. When qualification reaches "qualified", suggest transitioning to property search
 6. Always call `log_activity` at the end of each interaction
+7. For `store_insight`, use numeric `importance` 1-10 (e.g. 8), never "high/medium/low"
 
 ## Lead Scoring Formula
 ```

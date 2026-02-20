@@ -2189,6 +2189,186 @@ export async function startNewConversation(phone: string) {
 // Paste Lead Feature Actions
 // ------------------------------------------------------------------
 
+const REQUIREMENT_DISTRICTS = ["Paphos", "Nicosia", "Famagusta", "Limassol", "Larnaca"] as const;
+const REQUIREMENT_PRICE_OPTIONS = [
+    200, 300, 400, 500, 600, 700, 800, 900, 1000, 1500, 2000, 3000, 5000, 50000, 75000, 100000, 125000, 150000, 175000
+] as const;
+
+function mergeUniqueText(existing?: string | null, incoming?: string | null): string | undefined {
+    const next = incoming?.trim();
+    if (!next) return existing || undefined;
+    const prev = existing?.trim();
+    if (!prev) return next;
+    if (prev.toLowerCase().includes(next.toLowerCase())) return prev;
+    return `${prev}\n${next}`;
+}
+
+function extractPropertyRefsFromLeadText(text: string): string[] {
+    const refs = new Set<string>();
+    const refRegex = /\b(?:ref(?:erence)?[.:#\s-]*)?([A-Z]{1,4}\d{2,6}|[A-Z]{2,6}-\d{2,6})\b/gi;
+    let match: RegExpExecArray | null;
+
+    while ((match = refRegex.exec(text)) !== null) {
+        refs.add(match[1].toUpperCase());
+    }
+
+    return Array.from(refs);
+}
+
+function extractPropertySlugsFromLeadUrls(text: string): string[] {
+    const slugs = new Set<string>();
+    const urlRegex = /https?:\/\/[^\s]+/gi;
+    const matches = text.match(urlRegex) || [];
+
+    for (const rawUrl of matches) {
+        try {
+            const parsed = new URL(rawUrl);
+            const parts = parsed.pathname.split("/").filter(Boolean);
+            if (parts.length === 0) continue;
+
+            const last = parts[parts.length - 1];
+            if (last) slugs.add(last.toLowerCase());
+        } catch {
+            // Ignore invalid URLs
+        }
+    }
+
+    return Array.from(slugs);
+}
+
+function parseNumericToken(token: string): number | null {
+    const cleaned = token.replace(/[, ]/g, "").toLowerCase();
+    if (!cleaned) return null;
+
+    const hasK = cleaned.endsWith("k");
+    const base = hasK ? cleaned.slice(0, -1) : cleaned;
+    const value = Number(base);
+    if (!Number.isFinite(value)) return null;
+
+    return hasK ? Math.round(value * 1000) : Math.round(value);
+}
+
+function parseBudgetRange(raw?: string | null): { min?: number; max?: number } {
+    if (!raw) return {};
+    const text = raw.toLowerCase();
+    const tokens = text.match(/\d+(?:[.,]\d+)?\s*[k]?/g) || [];
+    const values = tokens
+        .map(parseNumericToken)
+        .filter((v): v is number => Number.isFinite(v) && !!v)
+        .map(v => Math.max(0, Math.round(v)));
+
+    if (values.length === 0) return {};
+
+    if (/[–—-]|\bto\b/.test(text) && values.length >= 2) {
+        const min = Math.min(values[0], values[1]);
+        const max = Math.max(values[0], values[1]);
+        return { min, max };
+    }
+
+    return { max: values[0] };
+}
+
+function formatPriceOption(value: number): string {
+    return `€${value.toLocaleString("en-US")}`;
+}
+
+function mapToMinPriceOption(value?: number): string | null {
+    if (!value || value <= 0) return null;
+    const eligible = REQUIREMENT_PRICE_OPTIONS.filter(p => p <= value);
+    const selected = eligible.length > 0 ? eligible[eligible.length - 1] : REQUIREMENT_PRICE_OPTIONS[0];
+    return formatPriceOption(selected);
+}
+
+function mapToMaxPriceOption(value?: number): string | null {
+    if (!value || value <= 0) return null;
+    const eligible = REQUIREMENT_PRICE_OPTIONS.filter(p => p <= value);
+    const selected = eligible.length > 0 ? eligible[eligible.length - 1] : REQUIREMENT_PRICE_OPTIONS[0];
+    return formatPriceOption(selected);
+}
+
+function normalizeRequirementDistrict(raw?: string | null): string | null {
+    if (!raw) return null;
+    const text = raw.toLowerCase();
+    for (const district of REQUIREMENT_DISTRICTS) {
+        if (text.includes(district.toLowerCase())) return district;
+    }
+    return null;
+}
+
+function normalizeRequirementBedrooms(raw?: string | null): string | null {
+    if (!raw) return null;
+    const match = raw.match(/\d+/);
+    if (!match) return null;
+    const count = Number(match[0]);
+    if (!Number.isFinite(count) || count <= 0) return null;
+    if (count >= 5) return "5+ Bedrooms";
+    return `${count}+ Bedrooms`;
+}
+
+function inferRequirementStatusFromLead(rawLeadText: string, budgetText?: string | null): "For Rent" | "For Sale" | null {
+    const text = `${rawLeadText}\n${budgetText || ""}`.toLowerCase();
+    if (text.includes("for rent") || text.includes("/month") || text.includes(" per month") || text.includes("unfurnished")) {
+        return "For Rent";
+    }
+    if (text.includes("for sale")) {
+        return "For Sale";
+    }
+    return null;
+}
+
+async function resolveLeadPropertyMatch(locationId: string, rawLeadText: string) {
+    const refs = extractPropertyRefsFromLeadText(rawLeadText);
+    const slugs = extractPropertySlugsFromLeadUrls(rawLeadText);
+
+    if (refs.length === 0 && slugs.length === 0) return null;
+
+    const orClauses: any[] = [];
+    if (refs.length > 0) {
+        orClauses.push({ reference: { in: refs } });
+        for (const ref of refs) {
+            orClauses.push({ reference: { contains: ref, mode: "insensitive" } });
+            orClauses.push({ slug: { contains: ref.toLowerCase(), mode: "insensitive" } });
+            orClauses.push({ title: { contains: ref, mode: "insensitive" } });
+        }
+    }
+    if (slugs.length > 0) {
+        orClauses.push({ slug: { in: slugs } });
+    }
+
+    const candidates = await db.property.findMany({
+        where: {
+            locationId,
+            OR: orClauses
+        },
+        select: {
+            id: true,
+            reference: true,
+            slug: true,
+            title: true,
+            goal: true,
+            propertyLocation: true,
+            city: true
+        },
+        take: 10
+    });
+
+    if (candidates.length === 0) return null;
+
+    const refSet = new Set(refs.map(r => r.toUpperCase()));
+    const slugSet = new Set(slugs.map(s => s.toLowerCase()));
+
+    const exactRef = candidates.find(c => c.reference && refSet.has(c.reference.toUpperCase()));
+    if (exactRef) return exactRef;
+
+    const exactSlug = candidates.find(c => slugSet.has(c.slug.toLowerCase()));
+    if (exactSlug) return exactSlug;
+
+    const fuzzyRef = candidates.find(c => refs.some(ref => c.slug.toLowerCase().includes(ref.toLowerCase())));
+    if (fuzzyRef) return fuzzyRef;
+
+    return candidates[0];
+}
+
 const LeadParsingSchema = z.object({
     contact: z.object({
         name: z.string().nullable().optional(),
@@ -2312,11 +2492,30 @@ export async function createParsedLead(data: ParsedLeadData, originalText: strin
         // 1. Resolve or Create Contact
         let contactId: string | null = null;
         let isNewContact = false;
+        let existingContactForMerge: {
+            id: string;
+            propertiesInterested: string[];
+            requirementOtherDetails: string | null;
+            requirementPropertyLocations: string[];
+            requirementDistrict: string;
+            requirementStatus: string;
+        } | null = null;
+
+        const leadResolutionText = [
+            originalText,
+            data.internalNotes,
+            data.messageContent,
+            data.requirements?.location,
+            data.requirements?.budget,
+            data.requirements?.type
+        ]
+            .filter(Boolean)
+            .join("\n");
 
         // Try to find by Phone
         if (data.contact?.phone) {
             // Clean phone
-            const phone = data.contact.phone.replace(/\s+/g, "");
+            const phone = data.contact.phone.replace(/\D/g, "");
             const existing = await db.contact.findFirst({
                 where: {
                     locationId: location.id,
@@ -2334,6 +2533,20 @@ export async function createParsedLead(data: ParsedLeadData, originalText: strin
             if (existing) contactId = existing.id;
         }
 
+        if (contactId) {
+            existingContactForMerge = await db.contact.findUnique({
+                where: { id: contactId },
+                select: {
+                    id: true,
+                    propertiesInterested: true,
+                    requirementOtherDetails: true,
+                    requirementPropertyLocations: true,
+                    requirementDistrict: true,
+                    requirementStatus: true
+                }
+            });
+        }
+
         // Create or Update
         const contactData: any = {
             locationId: location.id,
@@ -2345,41 +2558,114 @@ export async function createParsedLead(data: ParsedLeadData, originalText: strin
         if (data.contact?.phone) contactData.phone = data.contact.phone;
         if (data.contact?.email) contactData.email = data.contact.email;
 
-        // Append notes
-        if (data.internalNotes) {
-            // We can't access 'notes' here easily if we don't know if we are updating, 
-            // but let's just set it for new, or update for existing?
-            // For update, we might overwrite. Safe implies appending.
-            // We'll handle this in the update call.
-        }
+        const normalizedDistrict = normalizeRequirementDistrict(data.requirements?.location);
+        const normalizedBedrooms = normalizeRequirementBedrooms(data.requirements?.bedrooms);
+        const parsedBudget = parseBudgetRange(data.requirements?.budget);
+        const normalizedMinPrice = mapToMinPriceOption(parsedBudget.min);
+        const normalizedMaxPrice = mapToMaxPriceOption(parsedBudget.max);
+        const inferredStatus = inferRequirementStatusFromLead(leadResolutionText, data.requirements?.budget);
 
-        // Requirements to Notes? Or specific fields? 
-        // We have specific requirement fields in Contact schema
         if (data.requirements) {
-            if (data.requirements.budget) contactData.requirementMaxPrice = data.requirements.budget;
-            if (data.requirements.location) contactData.requirementDistrict = data.requirements.location;
-            if (data.requirements.bedrooms) contactData.requirementBedrooms = data.requirements.bedrooms;
+            if (normalizedMinPrice) contactData.requirementMinPrice = normalizedMinPrice;
+            if (normalizedMaxPrice) contactData.requirementMaxPrice = normalizedMaxPrice;
+            if (normalizedDistrict) contactData.requirementDistrict = normalizedDistrict;
+            if (normalizedBedrooms) contactData.requirementBedrooms = normalizedBedrooms;
             if (data.requirements.type) contactData.requirementPropertyTypes = [data.requirements.type];
         }
+        if (normalizedDistrict) contactData.requirementPropertyLocations = [normalizedDistrict];
+        if (inferredStatus) contactData.requirementStatus = inferredStatus;
+        if (data.internalNotes) contactData.requirementOtherDetails = data.internalNotes;
 
         if (contactId) {
             // Update existing
             // Remove locationId, status, leadSource from update data to avoid overwriting existing state
             const { locationId, status, leadSource, ...updateData } = contactData;
+            if (data.internalNotes) {
+                updateData.requirementOtherDetails = mergeUniqueText(existingContactForMerge?.requirementOtherDetails, data.internalNotes);
+            }
+            if (Array.isArray(updateData.requirementPropertyLocations)) {
+                updateData.requirementPropertyLocations = Array.from(new Set([
+                    ...(existingContactForMerge?.requirementPropertyLocations || []),
+                    ...updateData.requirementPropertyLocations
+                ]));
+            }
 
             await db.contact.update({
                 where: { id: contactId },
                 data: {
                     ...updateData,
-                    // safe note update?
                 }
             });
         } else {
             // Create New
             if (data.internalNotes) contactData.notes = data.internalNotes;
+            if (data.internalNotes) contactData.requirementOtherDetails = data.internalNotes;
             const newContact = await db.contact.create({ data: contactData });
             contactId = newContact.id;
             isNewContact = true;
+        }
+
+        // Deterministic property matching/linking for paste imports (before orchestration)
+        const matchedProperty = await resolveLeadPropertyMatch(location.id, leadResolutionText);
+        if (matchedProperty && contactId) {
+            const contactForProperty = await db.contact.findUnique({
+                where: { id: contactId },
+                select: {
+                    propertiesInterested: true,
+                    requirementStatus: true,
+                    requirementDistrict: true,
+                    requirementPropertyLocations: true
+                }
+            });
+
+            const nextInterested = Array.from(new Set([
+                ...(contactForProperty?.propertiesInterested || []),
+                matchedProperty.id
+            ]));
+
+            const derivedStatus = matchedProperty.goal === "RENT" ? "For Rent" : "For Sale";
+            const role = derivedStatus === "For Rent" ? "tenant" : "buyer";
+            const propertyDistrict = normalizeRequirementDistrict(matchedProperty.propertyLocation || matchedProperty.city || null);
+
+            const propertyPatch: any = {
+                propertiesInterested: nextInterested,
+                requirementStatus: derivedStatus
+            };
+
+            if ((!contactForProperty?.requirementDistrict || contactForProperty.requirementDistrict === "Any District") && propertyDistrict) {
+                propertyPatch.requirementDistrict = propertyDistrict;
+            }
+
+            if (propertyDistrict) {
+                propertyPatch.requirementPropertyLocations = Array.from(new Set([
+                    ...(contactForProperty?.requirementPropertyLocations || []),
+                    propertyDistrict
+                ]));
+            }
+
+            await db.$transaction([
+                db.contact.update({
+                    where: { id: contactId },
+                    data: propertyPatch
+                }),
+                db.contactPropertyRole.upsert({
+                    where: {
+                        contactId_propertyId_role: {
+                            contactId,
+                            propertyId: matchedProperty.id,
+                            role
+                        }
+                    },
+                    update: {},
+                    create: {
+                        contactId,
+                        propertyId: matchedProperty.id,
+                        role,
+                        source: "paste_lead_import",
+                        notes: `Auto-linked from Paste Lead (${matchedProperty.reference || matchedProperty.slug})`
+                    }
+                })
+            ]);
         }
 
         // 2. Ensure Conversation Exists
@@ -2429,6 +2715,21 @@ export async function createParsedLead(data: ParsedLeadData, originalText: strin
                                 description: "LLM response payload",
                                 conclusion: "Captured raw response and parsed JSON output",
                                 data: trace.llmResponse
+                            },
+                            {
+                                step: 3,
+                                description: "Import enrichment",
+                                conclusion: matchedProperty
+                                    ? `Resolved property link: ${matchedProperty.reference || matchedProperty.slug}`
+                                    : "No deterministic property reference match found during import",
+                                data: matchedProperty
+                                    ? {
+                                        propertyId: matchedProperty.id,
+                                        reference: matchedProperty.reference,
+                                        slug: matchedProperty.slug,
+                                        goal: matchedProperty.goal
+                                    }
+                                    : null
                             }
                         ],
                         toolCalls: [
@@ -2436,6 +2737,22 @@ export async function createParsedLead(data: ParsedLeadData, originalText: strin
                                 tool: "gemini.generateContent",
                                 arguments: trace.llmRequest,
                                 result: trace.llmResponse,
+                                error: null
+                            },
+                            {
+                                tool: "lead_import.resolve_property",
+                                arguments: {
+                                    source: "paste_lead",
+                                    locationId: location.id
+                                },
+                                result: matchedProperty
+                                    ? {
+                                        id: matchedProperty.id,
+                                        reference: matchedProperty.reference,
+                                        slug: matchedProperty.slug,
+                                        goal: matchedProperty.goal
+                                    }
+                                    : null,
                                 error: null
                             }
                         ],

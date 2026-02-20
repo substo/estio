@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import matter from 'gray-matter';
+import { z } from "zod";
 
 // Helper to define what a Skill looks like in the registry (lightweight)
 export interface SkillRegistryEntry {
@@ -188,6 +189,32 @@ function resolveToolArguments(value: any, context: SkillExecutionContext): any {
     return value;
 }
 
+function describeZodField(field: any): any {
+    if (!field) return { type: "unknown" };
+
+    if (field instanceof z.ZodOptional || field instanceof z.ZodNullable || field instanceof z.ZodDefault) {
+        const inner = describeZodField((field as any)._def.innerType);
+        return { ...inner, optional: true };
+    }
+    if (field instanceof z.ZodString) return { type: "string" };
+    if (field instanceof z.ZodNumber) return { type: "number" };
+    if (field instanceof z.ZodBoolean) return { type: "boolean" };
+    if (field instanceof z.ZodEnum) return { type: "enum", values: field.options };
+    if (field instanceof z.ZodArray) return { type: "array", items: describeZodField(field.element) };
+    if (field instanceof z.ZodObject) return { type: "object", properties: describeToolSchema((field as any).shape) };
+    if (field instanceof z.ZodUnion) return { type: "union", options: ((field as any)._def.options || []).map(describeZodField) };
+
+    return { type: "unknown" };
+}
+
+function describeToolSchema(schema: Record<string, any>): Record<string, any> {
+    const description: Record<string, any> = {};
+    for (const [key, value] of Object.entries(schema || {})) {
+        description[key] = describeZodField(value);
+    }
+    return description;
+}
+
 /**
  * Execute a loaded skill against the current context.
  * This runs the "Specialist Agent" phase.
@@ -210,7 +237,7 @@ export async function executeSkill(
     const toolDefinitions = allowedTools.map(t => ({
         name: t.name,
         description: t.description,
-        parameters: Object.keys(t.inputSchema || {})
+        parameters: describeToolSchema(t.inputSchema || {})
     }));
 
     // 2. Build System Prompt

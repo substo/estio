@@ -33,6 +33,10 @@ Use BOTH structured and semantic search:
 - `search_properties`: Hard filters (price, bedrooms, district)
 - `semantic_search`: Soft preferences (style, lifestyle, vibe)
 
+If the lead mentions an explicit property reference (e.g. `DT3762`) or URL:
+- Call `search_properties` first with the reference/query to resolve the exact listing.
+- Use `semantic_search` only as fallback/augmentation.
+
 ### Step 3: Present with Context
 Don't just list properties. For each result, explain WHY it matches:
 - "This matches because it has the modern kitchen you mentioned"
@@ -52,6 +56,7 @@ If the client rejects a property:
 3. For each property, state the match reason
 4. If no results found, suggest broadening criteria with specific suggestions
 5. Track viewed/rejected properties to avoid showing them again
+6. For `store_insight`, pass `importance` as a number from 1-10 (not strings like "high")
 
 ## Output Format
 {

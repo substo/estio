@@ -51,32 +51,49 @@ export async function updateContactRequirements(
 export async function searchProperties(
     locationId: string,
     query: {
+        q?: string;
+        reference?: string;
         district?: string;
         minPrice?: number;
         maxPrice?: number;
         bedrooms?: number;
+        propertyType?: string;
         status?: "sale" | "rent";
     }
 ) {
-    const where: any = { locationId, status: "ACTIVE" };
+    const where: any = { locationId, status: "ACTIVE", AND: [] };
 
     if (query.status === "sale") where.goal = "SALE";
     if (query.status === "rent") where.goal = "RENT";
 
-    // Fuzzy match or exact match depending on implementation. 
-    // For now simple filters.
     if (query.district) {
-        // Try to match district field or address
-        where.OR = [
-            { propertyLocation: { contains: query.district, mode: 'insensitive' } },
-            { city: { contains: query.district, mode: 'insensitive' } },
-            { addressLine1: { contains: query.district, mode: 'insensitive' } }
-        ];
+        where.AND.push({
+            OR: [
+                { propertyLocation: { contains: query.district, mode: 'insensitive' } },
+                { city: { contains: query.district, mode: 'insensitive' } },
+                { addressLine1: { contains: query.district, mode: 'insensitive' } }
+            ]
+        });
+    }
+
+    const textLookup = query.reference || query.q;
+    if (textLookup) {
+        where.AND.push({
+            OR: [
+                { reference: { contains: textLookup, mode: 'insensitive' } },
+                { slug: { contains: textLookup, mode: 'insensitive' } },
+                { title: { contains: textLookup, mode: 'insensitive' } },
+                { propertyLocation: { contains: textLookup, mode: 'insensitive' } },
+                { city: { contains: textLookup, mode: 'insensitive' } }
+            ]
+        });
     }
 
     if (query.minPrice) where.price = { gte: query.minPrice };
     if (query.maxPrice) where.price = { ...where.price, lte: query.maxPrice };
     if (query.bedrooms) where.bedrooms = { gte: query.bedrooms };
+    if (query.propertyType) where.type = { contains: query.propertyType, mode: 'insensitive' };
+    if (where.AND.length === 0) delete where.AND;
 
     const properties = await db.property.findMany({
         where,
