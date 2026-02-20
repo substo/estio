@@ -2307,12 +2307,38 @@ function normalizeRequirementBedrooms(raw?: string | null): string | null {
 
 function inferRequirementStatusFromLead(rawLeadText: string, budgetText?: string | null): "For Rent" | "For Sale" | null {
     const text = `${rawLeadText}\n${budgetText || ""}`.toLowerCase();
-    if (text.includes("for rent") || text.includes("/month") || text.includes(" per month") || text.includes("unfurnished")) {
+    if (
+        text.includes("for rent") ||
+        text.includes("to rent") ||
+        text.includes("goal\tto rent") ||
+        text.includes("goal: to rent") ||
+        text.includes("/month") ||
+        text.includes(" per month") ||
+        text.includes("unfurnished")
+    ) {
         return "For Rent";
     }
-    if (text.includes("for sale")) {
+    if (
+        text.includes("for sale") ||
+        text.includes("to buy") ||
+        text.includes("purchase")
+    ) {
         return "For Sale";
     }
+    return null;
+}
+
+function inferRequirementStatusFromMatchedProperty(property: {
+    goal?: string | null;
+    title?: string | null;
+    slug?: string | null;
+}): "For Rent" | "For Sale" | null {
+    const text = `${property.title || ""} ${property.slug || ""}`.toLowerCase();
+    if (text.includes("for-rent") || text.includes("for rent") || text.includes("rent")) return "For Rent";
+    if (text.includes("for-sale") || text.includes("for sale") || text.includes("sale")) return "For Sale";
+
+    if (property.goal === "RENT") return "For Rent";
+    if (property.goal === "SALE") return "For Sale";
     return null;
 }
 
@@ -2623,14 +2649,17 @@ export async function createParsedLead(data: ParsedLeadData, originalText: strin
                 matchedProperty.id
             ]));
 
-            const derivedStatus = matchedProperty.goal === "RENT" ? "For Rent" : "For Sale";
-            const role = derivedStatus === "For Rent" ? "tenant" : "buyer";
+            const statusFromProperty = inferRequirementStatusFromMatchedProperty(matchedProperty);
+            const derivedStatus = inferredStatus || statusFromProperty;
             const propertyDistrict = normalizeRequirementDistrict(matchedProperty.propertyLocation || matchedProperty.city || null);
 
             const propertyPatch: any = {
-                propertiesInterested: nextInterested,
-                requirementStatus: derivedStatus
+                propertiesInterested: nextInterested
             };
+
+            if (derivedStatus) {
+                propertyPatch.requirementStatus = derivedStatus;
+            }
 
             if ((!contactForProperty?.requirementDistrict || contactForProperty.requirementDistrict === "Any District") && propertyDistrict) {
                 propertyPatch.requirementDistrict = propertyDistrict;
@@ -2643,29 +2672,12 @@ export async function createParsedLead(data: ParsedLeadData, originalText: strin
                 ]));
             }
 
-            await db.$transaction([
-                db.contact.update({
-                    where: { id: contactId },
-                    data: propertyPatch
-                }),
-                db.contactPropertyRole.upsert({
-                    where: {
-                        contactId_propertyId_role: {
-                            contactId,
-                            propertyId: matchedProperty.id,
-                            role
-                        }
-                    },
-                    update: {},
-                    create: {
-                        contactId,
-                        propertyId: matchedProperty.id,
-                        role,
-                        source: "paste_lead_import",
-                        notes: `Auto-linked from Paste Lead (${matchedProperty.reference || matchedProperty.slug})`
-                    }
-                })
-            ]);
+            // Do not auto-create ContactPropertyRole for lead imports.
+            // "Roles & Associations" is reserved for explicit relationship roles, not initial lead interest.
+            await db.contact.update({
+                where: { id: contactId },
+                data: propertyPatch
+            });
         }
 
         // 2. Ensure Conversation Exists

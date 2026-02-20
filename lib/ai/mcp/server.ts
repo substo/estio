@@ -109,6 +109,8 @@ function normalizeInsightCategory(raw: any): "preference" | "objection" | "timel
     const value = typeof raw === "string" ? raw.trim().toLowerCase() : "";
     if (allowed.has(value)) return value as "preference" | "objection" | "timeline" | "motivation" | "relationship";
 
+    if (value === "preferences") return "preference";
+    if (value === "qualification" || value === "qualifications") return "motivation";
     if (value === "financial") return "motivation";
     if (value === "timing") return "timeline";
     if (value === "trust") return "relationship";
