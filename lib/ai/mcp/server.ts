@@ -127,8 +127,8 @@ registerTool(
         query: z.string().describe("Natural language description of what you need to do"),
         maxResults: z.number().optional().default(3)
     },
-    async (params: any) => {
-        const results = await searchTools(params.query, params.maxResults);
+    async (params: any, context?: ToolHandlerContext) => {
+        const results = await searchTools(params.query, params.maxResults, context?.apiKey);
         return {
             content: [{
                 type: "text",

@@ -3,7 +3,6 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { generateEmbedding } from "../embeddings";
 import { DEFERRED_TOOLS } from "./tool-categories";
 import { toolRegistry } from "./registry";
-import { z } from "zod";
 
 interface ToolMetadata {
     name: string;
@@ -14,31 +13,17 @@ interface ToolMetadata {
 
 // Pre-computed embeddings for all deferred tool descriptions
 let toolIndex: ToolMetadata[] = [];
+let toolIndexBuiltWithApiKey: string | null = null;
 
-/**
- * Initialize the tool search index at server startup.
- * Embeds all deferred tool descriptions for semantic search.
- */
-export async function initToolSearchIndex(server: McpServer) {
-    const allTools = toolRegistry;
-    const deferredTools = allTools.filter(t => DEFERRED_TOOLS.includes(t.name));
+function getDeferredTools() {
+    return toolRegistry.filter(t => DEFERRED_TOOLS.includes(t.name));
+}
 
-    console.log(`Analyzing ${allTools.length} tools. Found ${deferredTools.length} deferred tools to index.`);
-
-    if (deferredTools.length === 0) {
-        return;
-    }
-
-    // Generate embeddings in parallel (or batch if supported by embeddings.ts)
-    const descriptions = deferredTools.map(t => t.description || t.name);
-
-    // Note: We're doing this sequentially here for simplicity and to avoid rate limits if any
-    // Optimisation: use generateEmbeddings(batch)
-
+async function buildToolIndex(deferredTools: { name: string; description: string; inputSchema: Record<string, any> }[], apiKey: string) {
     toolIndex = [];
     for (const tool of deferredTools) {
         try {
-            const embedding = await generateEmbedding(tool.description || tool.name);
+            const embedding = await generateEmbedding(tool.description || tool.name, apiKey);
             if (embedding.length > 0) {
                 toolIndex.push({
                     name: tool.name,
@@ -51,6 +36,34 @@ export async function initToolSearchIndex(server: McpServer) {
             console.error(`Failed to index tool ${tool.name}`, e);
         }
     }
+    toolIndexBuiltWithApiKey = apiKey;
+}
+
+/**
+ * Initialize the tool search index at server startup.
+ * Embeds all deferred tool descriptions for semantic search.
+ */
+export async function initToolSearchIndex(server: McpServer) {
+    const allTools = toolRegistry;
+    const deferredTools = getDeferredTools();
+
+    console.log(`Analyzing ${allTools.length} tools. Found ${deferredTools.length} deferred tools to index.`);
+
+    if (deferredTools.length === 0) {
+        return;
+    }
+
+    const bootstrapApiKey = process.env.GOOGLE_API_KEY;
+    if (!bootstrapApiKey) {
+        // Do not warn during builds/deploys; per-location key can be used lazily at runtime.
+        toolIndex = [];
+        toolIndexBuiltWithApiKey = null;
+        console.log("Tool Search Index: deferred indexing skipped (no global GOOGLE_API_KEY at bootstrap).");
+        return;
+    }
+
+    // Note: We're doing this sequentially here for simplicity and to avoid rate limits if any.
+    await buildToolIndex(deferredTools, bootstrapApiKey);
 
     console.log(`Tool Search Index: ${toolIndex.length} deferred tools indexed`);
 }
@@ -61,9 +74,17 @@ export async function initToolSearchIndex(server: McpServer) {
  */
 export async function searchTools(
     query: string,
-    maxResults: number = 3
+    maxResults: number = 3,
+    apiKey?: string
 ): Promise<ToolMetadata[]> {
-    const queryEmbedding = await generateEmbedding(query);
+    const effectiveApiKey = apiKey || process.env.GOOGLE_API_KEY;
+
+    // Lazy-build the deferred tool index with the runtime/location API key when needed.
+    if (effectiveApiKey && (toolIndex.length === 0 || toolIndexBuiltWithApiKey !== effectiveApiKey)) {
+        await buildToolIndex(getDeferredTools(), effectiveApiKey);
+    }
+
+    const queryEmbedding = await generateEmbedding(query, effectiveApiKey);
     if (queryEmbedding.length === 0) return [];
 
     // Compute cosine similarity against all deferred tools
