@@ -156,7 +156,7 @@ function scheduleDeferredLidRetry(key: string) {
     }, LID_RETRY_INTERVAL_MS);
 }
 
-function enqueueDeferredLidMessage(msg: NormalizedMessage, lidJid: string) {
+function enqueueInMemoryDeferredLidMessage(msg: NormalizedMessage, lidJid: string) {
     const key = deferredLidKey(msg);
     if (deferredLidMessages.has(key)) {
         return;
@@ -169,7 +169,7 @@ function enqueueDeferredLidMessage(msg: NormalizedMessage, lidJid: string) {
         createdAt: new Date()
     });
 
-    console.warn(`[WhatsApp Sync] Deferred unresolved inbound LID message ${msg.wamId} (${lidJid}). Waiting for mapping before creating contact.`);
+    console.warn(`[WhatsApp Sync] Deferred unresolved inbound LID message in-memory (fallback) ${msg.wamId} (${lidJid}).`);
     scheduleDeferredLidRetry(key);
 }
 
@@ -314,7 +314,16 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
                 };
             }
 
-            enqueueDeferredLidMessage(msg, lidJid);
+            try {
+                const { initWhatsAppLidResolveWorker, enqueueDeferredLidMessage } = await import('@/lib/queue/whatsapp-lid-resolve');
+                await initWhatsAppLidResolveWorker();
+                await enqueueDeferredLidMessage(msg, lidJid);
+                console.warn(`[WhatsApp Sync] Deferred unresolved inbound LID message in BullMQ ${msg.wamId} (${lidJid}).`);
+            } catch (queueErr) {
+                console.error('[WhatsApp Sync] Failed to enqueue unresolved LID message in BullMQ. Falling back to in-memory deferral:', queueErr);
+                enqueueInMemoryDeferredLidMessage(msg, lidJid);
+            }
+
             return {
                 status: 'deferred_unresolved_lid',
                 reason: 'lid_unresolved_deferred'

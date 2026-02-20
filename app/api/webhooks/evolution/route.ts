@@ -28,6 +28,15 @@ export async function POST(req: NextRequest) {
         }
         console.log(`[Evolution Webhook] Found Location: ${location.id}`);
 
+        // Ensure deferred LID worker is alive in this runtime.
+        // Safe to call repeatedly; worker init is singleton-guarded.
+        try {
+            const { initWhatsAppLidResolveWorker } = await import('@/lib/queue/whatsapp-lid-resolve');
+            await initWhatsAppLidResolveWorker();
+        } catch (err) {
+            console.error('[Evolution Webhook] Failed to initialize LID resolve worker:', err);
+        }
+
         if (eventType === 'CONTACTS_UPSERT' || eventType === 'CONTACTS.UPSERT' || eventType === 'CONTACTS_UPDATE' || eventType === 'CONTACTS.UPDATE') {
             await handleContactSyncEvent(body, location.id);
             // We don't return here because sometimes contacts update comes with message update? 
