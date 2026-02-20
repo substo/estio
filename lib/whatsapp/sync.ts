@@ -1,6 +1,9 @@
 import db from "@/lib/db";
 import { generateSmartReplies } from "@/lib/ai/smart-replies";
 
+const LID_RETRY_INTERVAL_MS = Number(process.env.WHATSAPP_LID_RETRY_INTERVAL_MS || 30000);
+const LID_RETRY_MAX_ATTEMPTS = Number(process.env.WHATSAPP_LID_MAX_ATTEMPTS || 240);
+
 export interface NormalizedMessage {
     locationId: string;
     from: string; // E.164 phone number (Sender)
@@ -17,10 +20,158 @@ export interface NormalizedMessage {
     participant?: string; // Real sender phone in group chat
     lid?: string; // WhatsApp Lightweight ID
     resolvedPhone?: string; // Explicitly passed resolved phone from webhook
+    __skipUnresolvedLidDeferral?: boolean; // Internal: avoid enqueue loop during retry
+    __deferredAttempt?: number; // Internal: deferred retry count for logging/limits
 }
 
 // ... handleWhatsAppMessage ...
 import { evolutionClient } from "@/lib/evolution/client";
+
+type DeferredLidMessage = {
+    msg: NormalizedMessage;
+    lidJid: string;
+    attempts: number;
+    createdAt: Date;
+    timer?: NodeJS.Timeout;
+};
+
+const deferredLidMessages = new Map<string, DeferredLidMessage>();
+
+function normalizeDigits(value: string | null | undefined) {
+    return String(value || '').replace(/\D/g, '');
+}
+
+function normalizePhoneCandidate(value: unknown): string | null {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+
+    const deJid = raw
+        .replace('@s.whatsapp.net', '')
+        .replace('whatsapp:', '')
+        .trim();
+    const digits = normalizeDigits(deJid);
+
+    return digits.length >= 7 ? digits : null;
+}
+
+function extractPhoneFromEvolutionContact(contact: any): string | null {
+    if (!contact) return null;
+
+    const candidates = [
+        contact.phoneNumber,
+        contact.phone,
+        contact.number,
+        contact.id,
+        contact.remoteJid,
+        contact.jid,
+        contact.participant,
+        contact.owner
+    ];
+
+    for (const candidate of candidates) {
+        const parsed = normalizePhoneCandidate(candidate);
+        if (parsed) return parsed;
+    }
+
+    return null;
+}
+
+async function tryResolveLidToPhone(locationId: string, lidJid: string, instanceName?: string | null): Promise<string | null> {
+    const lidRaw = String(lidJid || '').replace('@lid', '');
+    if (!lidRaw) return null;
+
+    // 1) Fast local DB mapping (best case)
+    const existing = await db.contact.findFirst({
+        where: {
+            locationId,
+            lid: { contains: lidRaw },
+            phone: { not: null }
+        },
+        select: { phone: true }
+    });
+
+    const dbPhone = normalizePhoneCandidate(existing?.phone);
+    if (dbPhone) {
+        return dbPhone;
+    }
+
+    // 2) Ask Evolution contact endpoint (sometimes contains phoneNumber for known contact)
+    if (instanceName) {
+        const evoContact = await evolutionClient.findContact(instanceName, lidJid);
+        const evoPhone = extractPhoneFromEvolutionContact(evoContact);
+        if (evoPhone) {
+            return evoPhone;
+        }
+    }
+
+    return null;
+}
+
+function deferredLidKey(msg: NormalizedMessage) {
+    return `${msg.locationId}:${msg.wamId}`;
+}
+
+function clearDeferredLidEntry(key: string) {
+    const existing = deferredLidMessages.get(key);
+    if (existing?.timer) clearTimeout(existing.timer);
+    deferredLidMessages.delete(key);
+}
+
+function scheduleDeferredLidRetry(key: string) {
+    const entry = deferredLidMessages.get(key);
+    if (!entry) return;
+
+    if (entry.attempts >= LID_RETRY_MAX_ATTEMPTS) {
+        console.warn(`[WhatsApp Sync] Dropping unresolved LID message after ${entry.attempts} attempts (${entry.lidJid}, wamId: ${entry.msg.wamId})`);
+        clearDeferredLidEntry(key);
+        return;
+    }
+
+    entry.timer = setTimeout(async () => {
+        const current = deferredLidMessages.get(key);
+        if (!current) return;
+
+        current.attempts += 1;
+        const attempt = current.attempts;
+        console.log(`[WhatsApp Sync] Retrying deferred LID message ${current.msg.wamId} (attempt ${attempt}/${LID_RETRY_MAX_ATTEMPTS})`);
+
+        try {
+            const result = await processNormalizedMessage({
+                ...current.msg,
+                __skipUnresolvedLidDeferral: true,
+                __deferredAttempt: attempt
+            });
+
+            if (result?.status === 'deferred_unresolved_lid') {
+                scheduleDeferredLidRetry(key);
+                return;
+            }
+
+            clearDeferredLidEntry(key);
+            console.log(`[WhatsApp Sync] Deferred LID message resolved/processed: ${current.msg.wamId}`);
+        } catch (err) {
+            console.error(`[WhatsApp Sync] Deferred LID retry failed for ${current.msg.wamId}:`, err);
+            scheduleDeferredLidRetry(key);
+        }
+    }, LID_RETRY_INTERVAL_MS);
+}
+
+function enqueueDeferredLidMessage(msg: NormalizedMessage, lidJid: string) {
+    const key = deferredLidKey(msg);
+    if (deferredLidMessages.has(key)) {
+        return;
+    }
+
+    deferredLidMessages.set(key, {
+        msg: { ...msg },
+        lidJid,
+        attempts: 0,
+        createdAt: new Date()
+    });
+
+    console.warn(`[WhatsApp Sync] Deferred unresolved inbound LID message ${msg.wamId} (${lidJid}). Waiting for mapping before creating contact.`);
+    scheduleDeferredLidRetry(key);
+}
 
 export async function processNormalizedMessage(msg: NormalizedMessage) {
     console.log(`[WhatsApp Sync] processNormalizedMessage Called for ${msg.wamId} (${msg.direction})`);
@@ -114,7 +265,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     // Fetch Location for Access Token
     const locationDef = await db.location.findUnique({
         where: { id: locationId },
-        select: { id: true, ghlLocationId: true, ghlAccessToken: true }
+        select: { id: true, ghlLocationId: true, ghlAccessToken: true, evolutionInstanceId: true }
     });
     if (!locationDef) {
         console.error(`[WhatsApp Sync] Location ${locationId} not found`);
@@ -139,6 +290,35 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         if (!contactPhone.includes(p)) {
             console.log(`[WhatsApp Sync] Using Webhook Resolved Phone: ${p} instead of ${contactPhone}`);
             contactPhone = p;
+        }
+    }
+
+    // If inbound is unresolved LID-only, defer message until mapping is known.
+    // This prevents creating a second placeholder contact/conversation immediately.
+    const isInboundUnresolvedLid = direction === 'inbound' && !isGroup && contactPhone.includes('@lid') && !msg.resolvedPhone;
+    if (isInboundUnresolvedLid) {
+        const lidJid = msg.lid || contactPhone;
+        const resolvedDigits = await tryResolveLidToPhone(locationId, lidJid, locationDef.evolutionInstanceId);
+
+        if (resolvedDigits) {
+            contactPhone = `+${resolvedDigits}`;
+            msg.resolvedPhone = resolvedDigits;
+            console.log(`[WhatsApp Sync] Resolved LID ${lidJid} -> +${resolvedDigits} before contact lookup`);
+        } else {
+            if (msg.__skipUnresolvedLidDeferral) {
+                console.warn(`[WhatsApp Sync] LID still unresolved after retry ${msg.__deferredAttempt || 0}: ${lidJid}`);
+                return {
+                    status: 'deferred_unresolved_lid',
+                    reason: 'lid_unresolved_retry',
+                    attempts: msg.__deferredAttempt || 0
+                };
+            }
+
+            enqueueDeferredLidMessage(msg, lidJid);
+            return {
+                status: 'deferred_unresolved_lid',
+                reason: 'lid_unresolved_deferred'
+            };
         }
     }
 
@@ -520,6 +700,12 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         // Location already fetched as locationDef
 
         if (locationDef?.ghlAccessToken && locationDef?.ghlLocationId) {
+            const isLidOnlyContact = !contact?.phone && !!contact?.lid;
+            if (isLidOnlyContact) {
+                console.warn(`[WhatsApp Sync] Skipping GHL sync for LID-only contact ${contact.id} (wamId: ${wamId})`);
+                return { status: 'processed' };
+            }
+
             const { ensureRemoteContact } = await import("@/lib/crm/contact-sync");
             const { sendMessage } = await import("@/lib/ghl/conversations");
             const { syncContactToGoogle } = await import("@/lib/google/people");

@@ -114,15 +114,23 @@ export async function POST(req: NextRequest) {
                 if (isLid) {
                     // Try to resolve real number — senderPn can be on key OR msg
                     const senderPn = key.senderPn || msg.senderPn;
+                    const remoteJidAlt = key.remoteJidAlt || msg.remoteJidAlt;
+                    const participantAlt = key.participantAlt || msg.participantAlt;
                     if (senderPn) {
                         realPhone = senderPn.replace('@s.whatsapp.net', '');
                         console.log(`[Evolution] LID resolved via senderPn: ${remoteJid} -> ${realPhone}`);
-                    } else if (msg.remoteJidAlt && msg.remoteJidAlt.includes('@s.whatsapp.net')) {
-                        realPhone = msg.remoteJidAlt.replace('@s.whatsapp.net', '');
+                    } else if (remoteJidAlt && remoteJidAlt.includes('@s.whatsapp.net')) {
+                        realPhone = remoteJidAlt.replace('@s.whatsapp.net', '');
                         console.log(`[Evolution] LID resolved via remoteJidAlt: ${remoteJid} -> ${realPhone}`);
+                    } else if (participantAlt && participantAlt.includes('@s.whatsapp.net')) {
+                        realPhone = participantAlt.replace('@s.whatsapp.net', '');
+                        console.log(`[Evolution] LID resolved via participantAlt: ${remoteJid} -> ${realPhone}`);
                     } else if (participant && participant.includes('@s.whatsapp.net')) {
                         realPhone = participant.replace('@s.whatsapp.net', '');
                         console.log(`[Evolution] LID resolved via participant: ${remoteJid} -> ${realPhone}`);
+                    } else if (previousRemoteJid && previousRemoteJid.includes('@s.whatsapp.net')) {
+                        realPhone = previousRemoteJid.replace('@s.whatsapp.net', '');
+                        console.log(`[Evolution] LID resolved via previousRemoteJid: ${remoteJid} -> ${realPhone}`);
                     } else {
                         // --- FALLBACK: DB Lookup ---
                         // Check if any existing Contact has this LID mapped (from a prior CONTACTS_UPSERT)
@@ -139,10 +147,9 @@ export async function POST(req: NextRequest) {
                             realPhone = dbContact.phone.replace(/\D/g, '');
                             console.log(`[Evolution] LID resolved via DB: ${remoteJid} -> ${realPhone}`);
                         } else {
-                            // LID is unresolvable (WhatsApp privacy design — no API exists to reverse LIDs).
-                            // Instead of SKIPPING, let the message flow through.
-                            // processNormalizedMessage will create a placeholder contact or match by LID.
-                            console.warn(`[Evolution] ⚠️ LID unresolvable: ${remoteJid}. Passing through for placeholder handling.`);
+                            // LID is currently unresolved (WhatsApp privacy design can omit phone metadata).
+                            // sync.ts will defer inbound processing and retry mapping before any placeholder creation.
+                            console.warn(`[Evolution] ⚠️ LID unresolved at webhook stage: ${remoteJid}. Deferral flow will retry mapping.`);
                         }
                     }
                 } else {
