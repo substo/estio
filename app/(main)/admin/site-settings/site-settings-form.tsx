@@ -32,7 +32,15 @@ function SubmitButton() {
     );
 }
 
-export function SiteSettingsForm({ initialData, locationId }: { initialData: any, locationId: string }) {
+export function SiteSettingsForm({
+    initialData,
+    locationId,
+    locationName
+}: {
+    initialData: any,
+    locationId: string,
+    locationName: string
+}) {
     const [state, action] = useActionState(updateSiteSettings, initialState);
 
     // Safe access to JSON fields
@@ -234,6 +242,18 @@ export function SiteSettingsForm({ initialData, locationId }: { initialData: any
                 {/* Domain Section */}
                 <div className="space-y-4">
                     <h3 className="text-lg font-medium">Domain Configuration</h3>
+                    <div className="grid gap-2">
+                        <Label htmlFor="locationName">Location Name</Label>
+                        <Input
+                            id="locationName"
+                            name="locationName"
+                            placeholder="e.g. Downtown Cyprus"
+                            defaultValue={locationName}
+                        />
+                        <p className="text-sm text-muted-foreground">
+                            Internal location/business name stored on the Location record.
+                        </p>
+                    </div>
                     <div className="grid gap-2">
                         <Label htmlFor="domain">Custom Domain (or Subdomain)</Label>
                         <Input

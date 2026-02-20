@@ -31,6 +31,8 @@ export async function updateSiteSettings(
     }
 
     const domain = formData.get("domain") as string;
+    const locationNameRaw = formData.get("locationName") as string;
+    const locationName = locationNameRaw?.trim() ? locationNameRaw.trim() : null;
     const primaryColor = formData.get("primaryColor") as string;
     // New Advanced Colors
     const secondaryColor = formData.get("secondaryColor") as string;
@@ -143,7 +145,10 @@ export async function updateSiteSettings(
         // Also sync the domain to the Location table for consistency
         await db.location.update({
             where: { id: locationId },
-            data: { domain: domainVal }
+            data: {
+                domain: domainVal,
+                name: locationName
+            }
         });
 
         // AUTOMATION: If a valid domain was saved, whitelist it in Clerk

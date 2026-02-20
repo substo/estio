@@ -1,5 +1,4 @@
 import db from "@/lib/db";
-import { getLocationById } from "@/lib/location";
 import { SiteSettingsForm } from "./site-settings-form";
 import { cookies } from "next/headers";
 import { DnsInstructions } from "@/components/domain/dns-instructions";
@@ -20,10 +19,16 @@ export default async function SiteSettingsPage(props: { searchParams: Promise<{ 
         return <div>No location context found.</div>;
     }
 
-    // Fetch existing config
-    const siteConfig = await db.siteConfig.findUnique({
-        where: { locationId },
-    });
+    // Fetch existing config + location details
+    const [siteConfig, location] = await Promise.all([
+        db.siteConfig.findUnique({
+            where: { locationId },
+        }),
+        db.location.findUnique({
+            where: { id: locationId },
+            select: { name: true },
+        }),
+    ]);
 
     return (
         <div className="p-6 max-w-4xl space-y-6">
@@ -35,7 +40,11 @@ export default async function SiteSettingsPage(props: { searchParams: Promise<{ 
             </div>
 
             <div className="border rounded-lg p-6 bg-card">
-                <SiteSettingsForm initialData={siteConfig} locationId={locationId} />
+                <SiteSettingsForm
+                    initialData={siteConfig}
+                    locationId={locationId}
+                    locationName={location?.name || ""}
+                />
             </div>
 
             {/* DNS Instructions - Show when a custom domain is configured */}
