@@ -157,6 +157,12 @@ model User {
   googleSyncToken    String?  // To track the last sync point
   googleSyncEnabled  Boolean  @default(false)
   googleSyncDirection String?  // "ESTIO_TO_GOOGLE" | "GOOGLE_TO_ESTIO" - Source of Truth setting
+  googleAutoSyncEnabled Boolean @default(false) // Master toggle for opt-in Google contact automation
+  googleAutoSyncLeadCapture Boolean @default(false) // New Conversation + Paste Lead
+  googleAutoSyncContactForm Boolean @default(false) // Contacts create/update form actions
+  googleAutoSyncWhatsAppInbound Boolean @default(false) // WhatsApp webhook-driven contact creation
+  googleAutoSyncMode String @default("LINK_ONLY") // "LINK_ONLY" | "LINK_OR_CREATE"
+  googleAutoSyncPushUpdates Boolean @default(false) // Push updates for already-linked contacts
   gmailSyncState     GmailSyncState?
 
   // Outlook / Microsoft Sync Credentials (OAuth method)

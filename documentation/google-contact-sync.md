@@ -191,7 +191,7 @@ If you plan to open this to the public (any Google user), you will need to submi
 3.  Grant permissions.
 4.  You will be redirected back to the integrations page with `?google_connected=true`.
 
-Once connected, sync is automatic.
+Once connected, contact sync remains manual by default. Optional per-flow automation can be enabled in **Settings > Integrations > Google > Contact Automation**.
 
 ---
 

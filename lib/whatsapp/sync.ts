@@ -386,6 +386,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     });
     if (contact) matchedByLid = true;
 
+    let isNewContact = false;
     if (!contact) {
         contact = phoneMatchCandidate;
     }
@@ -583,6 +584,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
                 ...foundAddress
             } as any
         });
+        isNewContact = true;
     } else {
         console.log(`[WhatsApp Sync] Matched existing contact: ${contact.name} (${contact.id})`);
 
@@ -590,6 +592,19 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         if (isGroup && nameToUse && contact.name !== nameToUse) {
             await db.contact.update({ where: { id: contact.id }, data: { name: nameToUse } });
         }
+    }
+
+    if (isNewContact) {
+        import("@/lib/google/automation")
+            .then(({ runGoogleAutoSyncForContact }) =>
+                runGoogleAutoSyncForContact({
+                    locationId,
+                    contactId: contact!.id,
+                    source: "WHATSAPP_INBOUND",
+                    event: "create"
+                })
+            )
+            .catch(err => console.error("[GoogleAutoSync] WhatsApp inbound sync failed:", err));
     }
 
     // --- Check Participant (Sender) for Groups ---

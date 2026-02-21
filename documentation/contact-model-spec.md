@@ -151,8 +151,8 @@ model Contact {
 Contacts sync bidirectionally with Google Contacts using a **"last write wins"** strategy:
 -   **`googleContactId`**: Maps to Google Person `resourceName` (e.g., `people/c12345`).
 -   **`googleContactUpdatedAt`**: Stores Google's metadata timestamp for conflict resolution.
--   **Outbound (Estio → Google)**: When a contact is created/updated, it pushes to Google via `syncContactToGoogle()`.
--   **Inbound (Google → Estio)**: The system pulls changes from Google Contacts every 5 minutes via `syncContactsFromGoogle()`. If Google's timestamp is newer, local data is updated.
+-   **Outbound (Estio → Google)**: Manual via Google Sync Manager by default. Optional per-flow automation can be enabled in Google Integrations settings.
+-   **Inbound (Google → Estio)**: Manual pull via Google Sync Manager by default.
 -   **Visual ID**: The organization field in Google Contacts is populated with a summary (e.g., "Lead Rent DT4012 Paphos €750") for caller ID.
 
 > See [Google Contact Sync](./google-contact-sync.md) for full implementation details, including the **Google Sync Manager** for manual conflict resolution.

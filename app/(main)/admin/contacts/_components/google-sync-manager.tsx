@@ -18,11 +18,27 @@ interface GoogleSyncManagerProps {
     contacts?: ContactWithSync[];
     initialIndex?: number;
     onNavigate?: (index: number) => void;
+    skipRevalidateOnSuccess?: boolean;
+    onSyncStateChange?: (syncState: {
+        googleContactId?: string | null;
+        lastGoogleSync?: Date | null;
+        googleContactUpdatedAt?: Date | null;
+        error?: string | null;
+    }) => void;
     open: boolean;
     onOpenChange: (open: boolean) => void;
 }
 
-export function GoogleSyncManager({ contact: singleContact, contacts, initialIndex = 0, onNavigate, open, onOpenChange }: GoogleSyncManagerProps) {
+export function GoogleSyncManager({
+    contact: singleContact,
+    contacts,
+    initialIndex = 0,
+    onNavigate,
+    skipRevalidateOnSuccess = false,
+    onSyncStateChange,
+    open,
+    onOpenChange
+}: GoogleSyncManagerProps) {
     const { toast } = useToast();
     const [step, setStep] = useState<'view' | 'search'>('view');
     const [loading, setLoading] = useState(false);
@@ -172,12 +188,15 @@ export function GoogleSyncManager({ contact: singleContact, contacts, initialInd
         try {
             let res;
             if (action === 'unlink') {
-                res = await unlinkGoogleContact(contact.id);
+                res = await unlinkGoogleContact(contact.id, { skipRevalidate: skipRevalidateOnSuccess });
             } else {
-                res = await resolveSyncConflict(contact.id, action, googleData);
+                res = await resolveSyncConflict(contact.id, action, googleData, { skipRevalidate: skipRevalidateOnSuccess });
             }
 
             if (res.success) {
+                if (res.syncState) {
+                    onSyncStateChange?.(res.syncState);
+                }
                 toast({ title: "Success", description: res.message });
                 onOpenChange(false);
             } else {
@@ -272,6 +291,7 @@ export function GoogleSyncManager({ contact: singleContact, contacts, initialInd
                         {isMultiMode && (
                             <div className="flex items-center gap-2">
                                 <Button
+                                    type="button"
                                     variant="outline"
                                     size="sm"
                                     onClick={goToPrevious}
@@ -284,6 +304,7 @@ export function GoogleSyncManager({ contact: singleContact, contacts, initialInd
                                     {currentIndex + 1} of {totalContacts}
                                 </span>
                                 <Button
+                                    type="button"
                                     variant="outline"
                                     size="sm"
                                     onClick={goToNext}
@@ -310,7 +331,7 @@ export function GoogleSyncManager({ contact: singleContact, contacts, initialInd
                     <div className="font-semibold text-center border-b pb-2 text-blue-700">Estio CRM (Local)</div>
                     <div className="font-semibold text-center border-b pb-2 text-green-700 flex justify-between items-center">
                         <span>Google Contacts</span>
-                        <Button variant="ghost" size="sm" onClick={() => {
+                        <Button type="button" variant="ghost" size="sm" onClick={() => {
                             const defaultQuery = contact.phone || contact.email || "";
                             setSearchQuery(defaultQuery);
                             if (defaultQuery) handleSearch(defaultQuery);
@@ -335,7 +356,7 @@ export function GoogleSyncManager({ contact: singleContact, contacts, initialInd
                                 ) : searchQuery ? (
                                     <div className="flex flex-col items-center gap-2">
                                         <span>No matching contact found in Google.</span>
-                                        <Button size="sm" variant="outline" onClick={() => handleAction('use_local')}>
+                                        <Button type="button" size="sm" variant="outline" onClick={() => handleAction('use_local')}>
                                             Create New Contact
                                         </Button>
                                     </div>
@@ -357,7 +378,7 @@ export function GoogleSyncManager({ contact: singleContact, contacts, initialInd
                                 onChange={e => setSearchQuery(e.target.value)}
                                 placeholder="Search by name or email..."
                             />
-                            <Button onClick={() => handleSearch(searchQuery)} disabled={loading}>
+                            <Button type="button" onClick={() => handleSearch(searchQuery)} disabled={loading}>
                                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                             </Button>
                         </div>
@@ -369,7 +390,7 @@ export function GoogleSyncManager({ contact: singleContact, contacts, initialInd
                                         <div className="font-medium">{res.name}</div>
                                         <div className="text-xs text-muted-foreground">{res.email}</div>
                                     </div>
-                                    <Button size="sm" variant="secondary">Select</Button>
+                                    <Button type="button" size="sm" variant="secondary">Select</Button>
                                 </div>
                             ))}
                             {searchResults.length === 0 && !loading && (
@@ -384,6 +405,7 @@ export function GoogleSyncManager({ contact: singleContact, contacts, initialInd
                         <div className="flex gap-2 w-full justify-between">
                             {/* Push Local */}
                             <Button
+                                type="button"
                                 variant="outline"
                                 className="flex-1 border-blue-200 hover:bg-blue-50 text-blue-700"
                                 onClick={() => handleAction('use_local')}
@@ -395,6 +417,7 @@ export function GoogleSyncManager({ contact: singleContact, contacts, initialInd
 
                             {/* Pull Google */}
                             <Button
+                                type="button"
                                 variant="outline"
                                 className="flex-1 border-green-200 hover:bg-green-50 text-green-700"
                                 onClick={() => handleAction('use_google')}
@@ -409,6 +432,7 @@ export function GoogleSyncManager({ contact: singleContact, contacts, initialInd
                             {/* Unlink */}
                             {isLinked && (
                                 <Button
+                                    type="button"
                                     variant="ghost"
                                     size="sm"
                                     onClick={() => handleAction('unlink')}
@@ -423,6 +447,7 @@ export function GoogleSyncManager({ contact: singleContact, contacts, initialInd
                             {/* Link / Relink */}
                             {googleData && (
                                 <Button
+                                    type="button"
                                     variant="ghost"
                                     size="sm"
                                     onClick={() => handleAction('link_only')}

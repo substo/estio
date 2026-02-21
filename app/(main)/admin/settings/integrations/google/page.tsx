@@ -3,10 +3,11 @@ import { auth } from "@clerk/nextjs/server";
 import db from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { CheckCircle2, RefreshCw, XCircle } from "lucide-react";
+import { CheckCircle2, XCircle } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { SyncDirectionSettings } from "./sync-direction-settings";
+import { GoogleAutomationSettings } from "./automation-settings";
 
 export default async function GoogleIntegrationPage({
     searchParams,
@@ -18,7 +19,19 @@ export default async function GoogleIntegrationPage({
 
     const user = await db.user.findUnique({
         where: { clerkId: clerkUserId },
-        select: { id: true, googleAccessToken: true, googleRefreshToken: true, googleSyncEnabled: true, googleSyncDirection: true }
+        select: {
+            id: true,
+            googleAccessToken: true,
+            googleRefreshToken: true,
+            googleSyncEnabled: true,
+            googleSyncDirection: true,
+            googleAutoSyncEnabled: true,
+            googleAutoSyncLeadCapture: true,
+            googleAutoSyncContactForm: true,
+            googleAutoSyncWhatsAppInbound: true,
+            googleAutoSyncMode: true,
+            googleAutoSyncPushUpdates: true
+        }
     });
 
     if (!user) {
@@ -71,7 +84,7 @@ export default async function GoogleIntegrationPage({
                                     <p className="font-medium">{isConnected ? 'Connected' : 'Not Connected'}</p>
                                     <p className="text-sm text-muted-foreground">
                                         {isConnected
-                                            ? 'Contacts and Gmail are being synced.'
+                                            ? 'Google account connected. Gmail sync is active; contact sync follows your automation settings.'
                                             : 'Connect to start syncing.'}
                                     </p>
                                 </div>
@@ -103,6 +116,18 @@ export default async function GoogleIntegrationPage({
                     currentDirection={user.googleSyncDirection}
                     isConnected={isConnected}
                 />
+
+                <GoogleAutomationSettings
+                    isConnected={isConnected}
+                    initialSettings={{
+                        googleAutoSyncEnabled: user.googleAutoSyncEnabled,
+                        googleAutoSyncLeadCapture: user.googleAutoSyncLeadCapture,
+                        googleAutoSyncContactForm: user.googleAutoSyncContactForm,
+                        googleAutoSyncWhatsAppInbound: user.googleAutoSyncWhatsAppInbound,
+                        googleAutoSyncMode: user.googleAutoSyncMode || "LINK_ONLY",
+                        googleAutoSyncPushUpdates: user.googleAutoSyncPushUpdates
+                    }}
+                />
             </div>
 
             <Card>
@@ -117,7 +142,7 @@ export default async function GoogleIntegrationPage({
                         <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
                             <li><strong>Gmail Sync:</strong> Two-way email sync (Desktop & Mobile).</li>
                             <li><strong>Caller ID:</strong> Company field shows "Lead [Rent/Sale]..."</li>
-                            <li><strong>Contact Sync:</strong> Manual sync via Google Sync Manager.</li>
+                            <li><strong>Contact Sync:</strong> Manual by default, with optional per-flow automation.</li>
                         </ul>
                     </div>
 

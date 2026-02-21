@@ -12,6 +12,8 @@ import { calculateRunCost } from "@/lib/ai/pricing";
 import { z } from "zod";
 import { getModelForTask } from "@/lib/ai/model-router";
 import { callLLM } from "@/lib/ai/llm";
+import { auth } from "@clerk/nextjs/server";
+import { runGoogleAutoSyncForContact } from "@/lib/google/automation";
 
 async function getAuthenticatedLocation() {
     const location = await getLocationContext();
@@ -2010,6 +2012,11 @@ export async function fetchEvolutionChats() {
  */
 export async function startNewConversation(phone: string) {
     const location = await getAuthenticatedLocation();
+    const { userId: clerkUserId } = await auth();
+    const currentUser = clerkUserId
+        ? await db.user.findUnique({ where: { clerkId: clerkUserId }, select: { id: true } })
+        : null;
+    const preferredUserId = currentUser?.id || null;
 
     // Normalize phone to E.164
     let normalizedPhone = phone.replace(/\s+/g, '').replace(/[-()]/g, '');
@@ -2039,6 +2046,7 @@ export async function startNewConversation(phone: string) {
                 (cp.endsWith(rawDigits) && rawDigits.length >= 7) ||
                 (rawDigits.endsWith(cp) && cp.length >= 7);
         });
+        let isNewContact = false;
 
         if (!contact) {
             // Create new contact
@@ -2051,9 +2059,20 @@ export async function startNewConversation(phone: string) {
                     contactType: "Lead"
                 }
             });
+            isNewContact = true;
             console.log(`[NewConversation] Created new contact: ${contact.id} for ${normalizedPhone}`);
         } else {
             console.log(`[NewConversation] Found existing contact: ${contact.name} (${contact.id})`);
+        }
+
+        if (isNewContact) {
+            await runGoogleAutoSyncForContact({
+                locationId: location.id,
+                contactId: contact.id,
+                source: 'LEAD_CAPTURE',
+                event: 'create',
+                preferredUserId
+            });
         }
 
         // 2. Check if conversation already exists for this contact
@@ -2513,6 +2532,11 @@ Return JSON matching this schema:
 
 export async function createParsedLead(data: ParsedLeadData, originalText: string, trace?: LeadAnalysisTrace) {
     const location = await getAuthenticatedLocation();
+    const { userId: clerkUserId } = await auth();
+    const currentUser = clerkUserId
+        ? await db.user.findUnique({ where: { clerkId: clerkUserId }, select: { id: true } })
+        : null;
+    const preferredUserId = currentUser?.id || null;
 
     try {
         // 1. Resolve or Create Contact
@@ -2677,6 +2701,16 @@ export async function createParsedLead(data: ParsedLeadData, originalText: strin
             await db.contact.update({
                 where: { id: contactId },
                 data: propertyPatch
+            });
+        }
+
+        if (contactId) {
+            await runGoogleAutoSyncForContact({
+                locationId: location.id,
+                contactId,
+                source: 'LEAD_CAPTURE',
+                event: isNewContact ? 'create' : 'update',
+                preferredUserId
             });
         }
 

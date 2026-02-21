@@ -201,6 +201,25 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
     const router = useRouter();
     const [managerOpen, setManagerOpen] = useState(false);
     const [outlookOpen, setOutlookOpen] = useState(false);
+    const [syncMeta, setSyncMeta] = useState<{
+        googleContactId?: string | null;
+        lastGoogleSync?: Date | null;
+        googleContactUpdatedAt?: Date | null;
+        error?: string | null;
+    }>({
+        googleContactId: contact?.googleContactId,
+        lastGoogleSync: contact?.lastGoogleSync,
+        error: contact?.error
+    });
+
+    useEffect(() => {
+        setSyncMeta({
+            googleContactId: contact?.googleContactId,
+            lastGoogleSync: contact?.lastGoogleSync,
+            googleContactUpdatedAt: undefined,
+            error: contact?.error
+        });
+    }, [contact?.id, contact?.googleContactId, contact?.lastGoogleSync, contact?.error]);
 
     const [isEditing, setIsEditing] = useState(initialMode !== 'view');
     const isCreating = initialMode === 'create';
@@ -970,9 +989,11 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
 
             {contact && (
                 <GoogleSyncManager
-                    contact={contact}
+                    contact={{ ...contact, ...syncMeta }}
                     open={managerOpen}
                     onOpenChange={setManagerOpen}
+                    skipRevalidateOnSuccess={true}
+                    onSyncStateChange={(next) => setSyncMeta((prev) => ({ ...prev, ...next }))}
                 />
             )}
 

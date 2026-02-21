@@ -10,7 +10,7 @@ import {
   REQUIREMENT_STATUSES, REQUIREMENT_CONDITIONS, CONTACT_TYPES
 } from '@/app/(main)/admin/contacts/_components/contact-types';
 import { syncContactToGHL } from '@/lib/ghl/stakeholders';
-import { syncContactToGoogle } from '@/lib/google/people';
+import { runGoogleAutoSyncForContact } from '@/lib/google/automation';
 
 // --- Helpers & Zod Transforms ---
 
@@ -508,27 +508,14 @@ export async function createContact(
       }
     }
 
-    // Sync to Google Contacts if any user in this location has it enabled
-    try {
-      const googleUser = await db.user.findFirst({
-        where: {
-          locations: { some: { id: data.locationId } },
-          googleSyncEnabled: true,
-          googleRefreshToken: { not: null }
-        },
-        select: { id: true }
-      });
-
-      // DISABLED: Auto-sync removed. Use Google Sync Manager for manual sync.
-      // if (googleUser) {
-      //   console.log('[createContact] Syncing to Google Contacts...');
-      //   syncContactToGoogle(googleUser.id, contact.id).catch(e =>
-      //     console.error('[createContact] Google Sync Failed:', e)
-      //   );
-      // }
-    } catch (googleError) {
-      console.error('[createContact] Google Sync check failed:', googleError);
-    }
+    // Optional Google auto-sync (opt-in settings)
+    await runGoogleAutoSyncForContact({
+      locationId: data.locationId,
+      contactId: contact.id,
+      source: 'CONTACT_FORM',
+      event: 'create',
+      preferredUserId: internalUserId
+    });
 
 
     revalidatePath('/admin/contacts');
@@ -661,27 +648,14 @@ async function updateContactCore(data: ValidatedContactData & { contactId: strin
       console.error('[updateContact] GHL Sync Failed:', ghlError);
     }
 
-    // 2. Sync to Google Contacts
-    try {
-      const googleUser = await db.user.findFirst({
-        where: {
-          locations: { some: { id: data.locationId } },
-          googleSyncEnabled: true,
-          googleRefreshToken: { not: null }
-        },
-        select: { id: true }
-      });
-
-      // DISABLED: Auto-sync removed. Use Google Sync Manager for manual sync.
-      // if (googleUser) {
-      //   console.log('[updateContact] Syncing to Google Contacts...');
-      //   syncContactToGoogle(googleUser.id, data.contactId).catch(e =>
-      //     console.error('[updateContact] Google Sync Failed:', e)
-      //   );
-      // }
-    } catch (googleError) {
-      console.error('[updateContact] Google Sync check failed:', googleError);
-    }
+    // 2. Optional Google auto-sync for linked contacts (opt-in settings)
+    await runGoogleAutoSyncForContact({
+      locationId: data.locationId,
+      contactId: data.contactId,
+      source: 'CONTACT_FORM',
+      event: 'update',
+      preferredUserId: internalUserId
+    });
 
     return { success: true, message: 'Contact updated successfully.' };
 
@@ -954,6 +928,9 @@ export async function resolveSyncConflict(
     phone?: string | null,
     etag?: string,
     updateTime?: Date
+  },
+  options?: {
+    skipRevalidate?: boolean;
   }
 ) {
   const { userId } = await auth();
@@ -991,8 +968,12 @@ export async function resolveSyncConflict(
         }
       });
 
-      revalidatePath('/admin/contacts');
-      return { success: true, message: 'Resolved: Updated local contact from Google.' };
+      if (!options?.skipRevalidate) revalidatePath('/admin/contacts');
+      const syncState = await db.contact.findUnique({
+        where: { id: contactId },
+        select: { googleContactId: true, lastGoogleSync: true, googleContactUpdatedAt: true, error: true }
+      });
+      return { success: true, message: 'Resolved: Updated local contact from Google.', syncState };
     }
 
     // 3. LINK ONLY
@@ -1009,8 +990,12 @@ export async function resolveSyncConflict(
         }
       });
 
-      revalidatePath('/admin/contacts');
-      return { success: true, message: 'Linked successfully.' };
+      if (!options?.skipRevalidate) revalidatePath('/admin/contacts');
+      const syncState = await db.contact.findUnique({
+        where: { id: contactId },
+        select: { googleContactId: true, lastGoogleSync: true, googleContactUpdatedAt: true, error: true }
+      });
+      return { success: true, message: 'Linked successfully.', syncState };
     }
 
     // 2. USE LOCAL (Overwrite Google - Force Push)
@@ -1029,8 +1014,12 @@ export async function resolveSyncConflict(
       const { syncContactToGoogle } = await import('@/lib/google/people');
       await syncContactToGoogle(user.id, contactId);
 
-      revalidatePath('/admin/contacts');
-      return { success: true, message: 'Pushed local data to Google.' };
+      if (!options?.skipRevalidate) revalidatePath('/admin/contacts');
+      const syncState = await db.contact.findUnique({
+        where: { id: contactId },
+        select: { googleContactId: true, lastGoogleSync: true, googleContactUpdatedAt: true, error: true }
+      });
+      return { success: true, message: 'Pushed local data to Google.', syncState };
     }
 
     return { success: false, message: 'Invalid Resolution Action' };
@@ -1565,7 +1554,7 @@ export async function getContactDetails(contactId: string) {
 
 
 
-export async function unlinkGoogleContact(contactId: string) {
+export async function unlinkGoogleContact(contactId: string, options?: { skipRevalidate?: boolean }) {
   const { userId } = await auth();
   if (!userId) return { success: false, message: 'Unauthorized' };
 
@@ -1578,8 +1567,12 @@ export async function unlinkGoogleContact(contactId: string) {
         error: null
       }
     });
-    revalidatePath('/admin/contacts');
-    return { success: true, message: 'Contact unlinked from Google.' };
+    if (!options?.skipRevalidate) revalidatePath('/admin/contacts');
+    const syncState = await db.contact.findUnique({
+      where: { id: contactId },
+      select: { googleContactId: true, lastGoogleSync: true, googleContactUpdatedAt: true, error: true }
+    });
+    return { success: true, message: 'Contact unlinked from Google.', syncState };
   } catch (error: any) {
     return { success: false, message: 'Failed to unlink: ' + error.message };
   }

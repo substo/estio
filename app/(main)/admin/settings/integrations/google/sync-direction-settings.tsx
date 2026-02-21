@@ -74,8 +74,8 @@ export function SyncDirectionSettings({ currentDirection, isConnected }: SyncDir
                 </RadioGroup>
 
                 <div className="rounded-md bg-blue-50 p-3 text-blue-700 text-sm dark:bg-blue-900/10 dark:text-blue-400">
-                    <strong>Manual Sync Only:</strong> Contacts are only synced when you use the Google Sync Manager.
-                    No automatic syncing occurs.
+                    <strong>Sync Direction applies to manual actions first:</strong> automation behavior is configured in the
+                    Contact Automation card.
                 </div>
             </CardContent>
         </Card>

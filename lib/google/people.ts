@@ -281,6 +281,65 @@ export async function syncContactToGoogle(userId: string, contactId: string) {
 }
 
 /**
+ * Search Google for an existing match and only link locally (never creates in Google).
+ */
+export async function findAndLinkExistingGoogleContact(userId: string, contactId: string): Promise<{ linked: boolean; resourceName?: string; reason?: string }> {
+    try {
+        const contact = await db.contact.findUnique({
+            where: { id: contactId },
+            select: {
+                id: true,
+                phone: true,
+                email: true,
+                googleContactId: true
+            }
+        });
+
+        if (!contact) return { linked: false, reason: 'CONTACT_NOT_FOUND' };
+        if (contact.googleContactId) return { linked: true, resourceName: contact.googleContactId, reason: 'ALREADY_LINKED' };
+        if (!contact.phone && !contact.email) return { linked: false, reason: 'NO_IDENTIFIER' };
+
+        const auth = await getValidAccessToken(userId);
+        const people = google.people({ version: 'v1', auth });
+
+        const match = await findMatchingGoogleContact(people, contact);
+        if (!match?.resourceName) {
+            return { linked: false, reason: 'NO_MATCH' };
+        }
+
+        let googleUpdatedAt: Date | undefined;
+        try {
+            const current = await people.people.get({
+                resourceName: match.resourceName,
+                personFields: 'metadata'
+            });
+            googleUpdatedAt = extractGoogleUpdateTime(current.data);
+        } catch {
+            // Metadata read is best effort; linking can still proceed.
+        }
+
+        await db.contact.update({
+            where: { id: contact.id },
+            data: {
+                googleContactId: match.resourceName,
+                googleContactUpdatedAt: googleUpdatedAt,
+                lastGoogleSync: new Date(),
+                error: null
+            }
+        });
+
+        console.log(`[Google Sync] Linked local contact ${contact.id} to existing Google ${match.resourceName}`);
+        return { linked: true, resourceName: match.resourceName };
+    } catch (error: any) {
+        if (error.code === 401 || (error.code === 400 && error.message?.includes('invalid_grant'))) {
+            throw new Error('GOOGLE_AUTH_EXPIRED');
+        }
+        console.error(`[Google Sync] findAndLinkExistingGoogleContact failed for ${contactId}:`, error);
+        return { linked: false, reason: 'FAILED' };
+    }
+}
+
+/**
  * Inbound Sync: Google → Estio
  * Pulls contact changes from Google Contacts using efficient delta sync
  */

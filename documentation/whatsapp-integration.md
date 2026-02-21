@@ -1,5 +1,5 @@
 # WhatsApp Integration: Custom Channel ("Linked Device")
-**Last Updated:** 2026-02-09
+**Last Updated:** 2026-02-20
 **Related:** [Legacy Integration](whatsapp-integration-legacy.md)
 
 ## Overview
@@ -34,21 +34,30 @@ We use a **Hybrid Approach**:
     -   Server calls GHL API `POST /conversations/messages` with `type: 'Custom'` and `conversationProviderId`.
     -   Message appears in GHL history immediately.
 
-#### B. Inbound (WhatsApp -> GHL)
+#### C. Inbound (WhatsApp -> GHL)
 1.  **Webhook**: Evolution API receives message.
 2.  **Processing**: `lib/whatsapp/sync.ts` normalizes the message.
 3.  **JIT Sync**: Server ensures the contact exists in GHL (`ensureRemoteContact`).
 4.  **GHL Push**: Server pushes the inbound message to GHL using `type: 'Custom'` and `conversationProviderId`.
 
-## Architecture V2 (Jan 2026 Updates)
+## Architecture V2 (Jan-Feb 2026 Updates)
 
 To handle high-volume sync and rate limits, we introduced a **Queue-Based Architecture**:
 
-### 1. BullMQ & Redis Queue
-- **Purpose**: Rate-limit requests to GHL API to prevent `429 Too Many Requests`.
-- **Implementation**: Messages are no longer sent directly to GHL. Instead, they are added to `ghlSyncQueue`.
-- **Worker**: A background worker processes the queue at a rate of **5 jobs per second**.
-- **Infrastructure**: Redis is required and runs on port `6379`.
+### 1. BullMQ & Redis Queues
+- **Purpose**: Use persistent background queues for both GHL rate-limiting and unresolved LID retries.
+- **Reuse**: `whatsapp-lid-resolve` reuses the same BullMQ + Redis infrastructure already used by `ghl-sync`.
+- **`ghl-sync` Queue**:
+  - Outbound sync to GHL runs through BullMQ to avoid `429 Too Many Requests`.
+  - Worker rate is limited to **5 jobs per second**.
+- **`whatsapp-lid-resolve` Queue**:
+  - Inbound 1:1 messages with unresolved `@lid` are deferred instead of immediately creating placeholder contacts.
+  - Retries run on a fixed delay until mapping is available.
+  - Jobs survive process restarts because payload is in Redis.
+- **Infrastructure**: Redis is required (`REDIS_HOST`, `REDIS_PORT`, default `127.0.0.1:6379`).
+- **Worker Bootstrap**:
+  - `instrumentation.ts` initializes the LID worker at app startup.
+  - `app/api/webhooks/evolution/route.ts` also calls init as a safety net per runtime.
 
 ### 2. Full History Sync
 - **Feature**: When a new instance is connected, we now set `syncFullHistory: true`.
@@ -106,10 +115,16 @@ To enable the "WhatsApp Linked" channel, you must create a Private Marketplace A
 5.  **Get ID**: Copy the `conversationProviderId` (e.g., `6966...`).
 
 ### 2. Configure Server
-Add the Provider ID to your `.env`:
+Add required variables to your `.env`:
 ```env
 GHL_CUSTOM_PROVIDER_ID=696637215906b847a442aa45
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+WHATSAPP_LID_RETRY_INTERVAL_MS=30000
+WHATSAPP_LID_MAX_ATTEMPTS=240
 ```
+
+`WHATSAPP_LID_RETRY_INTERVAL_MS` and `WHATSAPP_LID_MAX_ATTEMPTS` control deferred LID retry behavior.
 
 ### 3. Status Tracking & Resend Logic
 We track message delivery status (`sent`, `delivered`, `read`, `failed`) by listening to Evolution API's `messages.update` webhook event.
@@ -125,6 +140,7 @@ We track message delivery status (`sent`, `delivered`, `read`, `failed`) by list
 | **QR Code Persists after Scan** | This is usually a sync delay. **Fix**: Refresh the page. The new "Self-Healing" logic will detect the connection and remove the QR code. |
 | **Evolution API Crash Loop** | **Error P2000**: "Value too long". Occurs if a Contact name or Profile Pic URL exceeds 191 chars. **Fix**: Manually altered the Postgres `Contact` table columns (`pushName`, `profilePicUrl`) to `TEXT` (unlimited length). |
 | **Duplicate Conversations (Same Contact)** | **Issue**: Race conditions can create multiple conversations for one contact. **Fix**: Run `scripts/merge-same-contact-conversations.ts` to merge them. **Prevention**: Logic updated to search last 2 digits for robust matching (`sync.ts`). |
+| **Lead gets split into two contacts/conversations after reply** | **Issue**: Outbound uses phone identity, reply arrives as unresolved `@lid`. **Fix**: Inbound unresolved LID is now deferred (`whatsapp-lid-resolve` queue) until resolved to phone; verify Redis is up and worker logs show retries/resolution. |
 
 ### 4. Server Logging & Debugging
 To investigate issues like duplicate conversations or "Contact not found" errors for specific numbers:
@@ -143,6 +159,11 @@ To investigate issues like duplicate conversations or "Contact not found" errors
     pm2 logs estio-app --lines 1000 | grep "73"
     ```
     *Look for lines like `[WhatsApp Sync] Contact not found...` vs `Matched existing contact...`*
+4.  **Check Deferred LID Retry Logs**:
+    ```bash
+    pm2 logs estio-app --lines 2000 | grep -E "Deferred unresolved inbound LID|LID still unresolved|Resolved LID|LID Resolve Worker"
+    ```
+    *If replies are creating split contacts, these lines show whether retries are running and eventually resolving to phone.*
 
 ### 5. File-Based Webhook Logging (Feb 2026)
 For detailed debugging of Evolution API payloads, enable file-based logging.
@@ -250,7 +271,7 @@ No schema changes required specifically for this, but we rely on:
 -   `Message.ghlMessageId` / `Message.wamId` mapping.
 -   **CRITICAL DB ALTERATION**: `Contact` table columns `pushName` and `profilePicUrl` MUST be type `TEXT` or `VARCHAR(1000+)` to prevent crashes. Check migration history.
 
-## Group Chat & LID Support (Jan 27, 2026)
+## Group Chat & LID Support (Jan-Feb 2026)
 
 ### 1. Group Chat Strategy ("Group as Contact")
 Due to the schema constraint where `Conversation` must link to a single `Contact`, we model WhatsApp Groups as follows:
@@ -262,55 +283,53 @@ Due to the schema constraint where `Conversation` must link to a single `Contact
     -   **Format**: `[Martin]: Hello everyone`
 -   **Participant Sync**: We also extract the *actual sender's* phone number from the message metadata and ensure they exist as a distinct `Contact` in the CRM.
 
-### 2. LID (Lightweight ID) Handling (Enterprise Auto-Resolution)
-WhatsApp uses `@lid` (opaque identifiers) instead of phone numbers for privacy. This is 1-way: you cannot resolve a LID to a phone number via any API.
+### 2. LID (Lightweight ID) Handling (LID-First + Reconciliation, Feb 2026)
+WhatsApp can represent the same person using either:
+- phone JID (`@s.whatsapp.net`)
+- opaque LID (`@lid`)
 
-**Problem**: When you send a message from the WhatsApp Phone App, the webhook contains *only* the LID, not the phone number.
+The critical issue was split identity: outbound lead creation used phone, but inbound reply could arrive as unresolved `@lid`, producing a second contact/conversation.
 
-**Solution**: We implemented a **3-Layer "Self-Healing" Resolution System**:
+**Current strategy ("LID-first + reconciliation") in normal terms**:
+1. **Try to resolve immediately at webhook stage (`route.ts`)**:
+   - Reads `senderPn`, `remoteJidAlt`, `participantAlt`, `participant`, `previousRemoteJid`, and DB `Contact.lid`.
+   - If found, passes `resolvedPhone` into `sync.ts`.
+2. **If inbound 1:1 LID is still unresolved in `sync.ts`**:
+   - Do **not** create contact/conversation immediately.
+   - Try `tryResolveLidToPhone` (DB mapping + `evolutionClient.findContact`).
+   - If still unresolved, defer processing and return `status: 'deferred_unresolved_lid'`.
+3. **Deferred retry is persistent (BullMQ/Redis)**:
+   - Queue: `whatsapp-lid-resolve`
+   - Retry interval: `WHATSAPP_LID_RETRY_INTERVAL_MS` (default `30000`)
+   - Max attempts: `WHATSAPP_LID_MAX_ATTEMPTS` (default `240`)
+   - If queue init fails, fallback to in-memory deferral (same retry semantics, but non-persistent).
+4. **Reconciliation learns and unifies identity**:
+   - Outbound dedup path captures `msg.lid` and links it to the real phone contact.
+   - `CONTACTS_UPSERT` also links/merges phone<->LID mappings in background.
+   - Deferred inbound retries then resolve to the existing phone contact and continue normally.
 
-#### Layer 1: DB Lookup (Immediate)
-- **Mechanism**: `route.ts` checks the `Contact` table for an existing `lid` mapping.
-- **Result**: If found, the message is resolved to the real contact immediately.
-
-#### Layer 2: App-Send Capture (Self-Healing)
-- **Mechanism**: When you send a message **from the Estio App**:
-  1. We know the destination phone number.
-  2. The resulting `MESSAGES_UPSERT` webhook confirms the message and *provides the LID*.
-  3. `processNormalizedMessage` (in `sync.ts`) detects this "outbound dedup" event.
-  4. It **captures the LID** and saves it to the real `Contact` record.
-  5. It checks for any "Placeholder Contacts" (created by previous unresolved messages) and **auto-merges** them into the real contact.
-- **Effect**: The system learns the mapping automatically as you interact with clients.
-
-#### Layer 3: Background Sync
-- **Mechanism**: `CONTACTS_UPSERT` events from WhatsApp (during initial scan or updates) contain both LID and Phone.
-- **Result**: `contact-sync-handler.ts` updates mappings in the background.
-
-#### Resolution Flow (in `route.ts`)
-1. **Check DB**: Is `Contact.lid` known?
-   - **Yes**: Resolve to Phone.
-   - **No**: Check if `senderPn` exists in payload (rare).
-2. **Fallback**: If unresolvable, let message flow through to `processNormalizedMessage`.
-   - Creates a **Placeholder Contact**: `WhatsApp User +1557...@lid`.
-   - **Auto-Fixed**: The moment you reply (Layer 2) or sync runs (Layer 3), this placeholder is merged and the LID is mapped forever.
+**Key outcome**: inbound reply no longer needs to create a second placeholder contact first.
 
 #### Key Files
 | File | Role |
 |------|------|
-| `app/api/webhooks/evolution/route.ts` | Layer 1: DB Lookup & Flow-through |
-| `lib/whatsapp/sync.ts` | Layer 2: LID Capture & Auto-Merge on outbound dedup |
-| `lib/whatsapp/contact-sync-handler.ts` | Layer 3: Background Sync |
+| `app/api/webhooks/evolution/route.ts` | Initial LID normalization/resolution and fallback metadata extraction |
+| `lib/whatsapp/sync.ts` | Defers unresolved inbound LID, retries resolution, captures LID on outbound dedup |
+| `lib/queue/whatsapp-lid-resolve.ts` | Persistent BullMQ deferred retry queue for unresolved inbound LID |
+| `lib/whatsapp/contact-sync-handler.ts` | Background phone<->LID reconciliation via `CONTACTS_UPSERT` |
+| `instrumentation.ts` | Startup worker bootstrap for LID queue |
 | `scripts/merge-lid-contact.ts` | Manual utility to merge placeholders |
 
 #### Past Bugs Reference
 
 | Date | Bug | Root Cause | Fix |
 |------|-----|-----------|-----|
+| Feb 20, 2026 | Outbound lead + inbound reply created split contacts/conversations | Inbound unresolved `@lid` was being processed before mapping existed | Added persistent deferred LID queue; retry resolution before contact creation |
 | Feb 17, 2026 | Outbound messages skipped | Startled by LID, logic skipped message | Implemented flow-through & Layer 2 capture |
 | Feb 9, 2026 | Contacts saved as `WhatsApp User ...@lid` | Code read `msg.senderPn` instead of `key.senderPn` | Changed to `key.senderPn || msg.senderPn` |
 
 > [!NOTE]
-> The system is "Self-Healing". You typically do NOT need to run manual scripts. Just replying to a contact fixes the mapping.
+> The system is "Self-Healing", but now it is also **defer-first** for unresolved inbound LID. This is what prevents immediate split-contact creation.
 
 ### 3. Outbound Naming Fix
 -   **Issue**: Outbound messages (sent from phone) were triggering `Contact` creation using the *Sender's* PushName (the User), effectively renaming clients to "Martin".
