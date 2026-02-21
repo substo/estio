@@ -957,12 +957,18 @@ export default function PropertyForm({
                                             <Label className="text-xs text-muted-foreground">
                                                 Original Date
                                             </Label>
-                                            <Input
-                                                name="originalCreatedAt_display"
-                                                value={originalCreatedAt ? new Date(originalCreatedAt).toLocaleString() : ""}
-                                                readOnly
-                                                className="h-8 text-sm bg-gray-100 text-gray-500"
-                                            />
+                                            {originalCreatedAt ? (
+                                                <Input
+                                                    name="originalCreatedAt_display"
+                                                    value={new Date(originalCreatedAt).toLocaleString()}
+                                                    readOnly
+                                                    className="h-8 text-sm bg-gray-100 text-gray-500"
+                                                />
+                                            ) : property?.createdAt ? (
+                                                <div className="text-sm text-muted-foreground">System: {new Date(property.createdAt).toLocaleString()}</div>
+                                            ) : (
+                                                <div className="text-sm text-muted-foreground">Not available</div>
+                                            )}
                                             {/* Hidden input to ensure value is submitted if not changed */}
                                             <input type="hidden" name="originalCreatedAt" value={originalCreatedAt} />
                                         </div>

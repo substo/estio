@@ -97,10 +97,12 @@ export class GenericXmlParser implements FeedParser {
             return this.mapItemWithConfig(raw, this.mappingConfig);
         }
 
+        const guidValue = typeof raw.guid === 'object' ? raw.guid?.['#text'] : raw.guid;
+
         // Basic mapping heuristics
         return {
-            externalId: raw.id || raw.reference || raw['@_id'] || 'unknown',
-            title: raw.title || raw.name || raw.headline || '',
+            externalId: raw.id || raw.reference || guidValue || raw['@_id'] || 'unknown',
+            title: raw.title || raw.name || raw.headline || raw.link || '',
             description: raw.description || raw.desc || raw.summary || '',
             price: parseFloat(raw.price || raw.amount || '0'),
             currency: raw.currency || 'EUR',
@@ -116,27 +118,52 @@ export class GenericXmlParser implements FeedParser {
     private mapItemWithConfig(raw: any, config: FeedMappingConfig): FeedItem {
         const get = (path: string) => {
             if (!path) return undefined;
-            let val = this.getValueByPath(raw, path);
-            if (val === undefined && path.includes('.')) {
-                const parts = path.split('.');
-                if (parts.length > 1) {
-                    const shorterPath = parts.slice(1).join('.');
-                    val = this.getValueByPath(raw, shorterPath);
+            // Try full path first, then progressively strip leading segments.
+            // This makes absolute paths (e.g. "rss.channel.item.title") work
+            // even when `raw` is already the item node.
+            const parts = path.split('.');
+            for (let i = 0; i < parts.length; i++) {
+                const candidate = parts.slice(i).join('.');
+                const value = this.getValueByPath(raw, candidate);
+                if (value !== undefined) {
+                    return value;
                 }
             }
-            return val;
+            return undefined;
+        };
+
+        const toScalarString = (val: any): string => {
+            if (typeof val === 'string' || typeof val === 'number') {
+                return String(val);
+            }
+            if (val && typeof val === 'object') {
+                const textVal = val['#text'];
+                if (typeof textVal === 'string' || typeof textVal === 'number') {
+                    return String(textVal);
+                }
+                if (typeof val.url === 'string' || typeof val.url === 'number') {
+                    return String(val.url);
+                }
+                if (typeof val.value === 'string' || typeof val.value === 'number') {
+                    return String(val.value);
+                }
+            }
+            return '';
         };
 
         const getString = (path: string) => {
             if (!path) return '';
             const val = get(path);
-            return typeof val === 'string' || typeof val === 'number' ? String(val) : '';
+            return toScalarString(val).trim();
         };
 
         // 1. Get explicitly mapped values
-        let externalId = getString(config.fields.externalId) || 'unknown';
-        let title = getString(config.fields.title);
-        let description = getString(config.fields.description);
+        let externalId = getString(config.fields.externalId);
+        if (!externalId) externalId = toScalarString(raw.guid).trim();
+        if (!externalId) externalId = 'unknown';
+
+        let title = getString(config.fields.title) || toScalarString(raw.title).trim();
+        let description = getString(config.fields.description) || toScalarString(raw.description).trim();
 
         // Context for heuristic extraction: Title + Description + Content
         // We often find descriptions in 'content:encoded' even if not mapped
@@ -302,5 +329,4 @@ export class GenericXmlParser implements FeedParser {
         }
     }
 }
-
 

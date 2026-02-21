@@ -5,6 +5,7 @@ import { FeedFormat, PropertyFeed } from "@prisma/client";
 import { FeedItem, FeedParser } from "./parsers/base-parser";
 import { FeedMappingConfig } from "./ai-mapper";
 import { JsonValue } from "@prisma/client/runtime/library";
+import { createHash } from "crypto";
 
 export class FeedService {
 
@@ -41,6 +42,22 @@ export class FeedService {
         let skipped = 0;
 
         for (const item of items) {
+            const externalId = String(item.externalId || '').trim();
+            const title = String(item.title || '').trim();
+
+            // Guardrail: never create placeholder properties from malformed feed rows.
+            if (!title) {
+                console.warn(`[FeedService] Skipping feed item with empty title (feedId=${feed.id}, externalId=${externalId || 'n/a'})`);
+                skipped++;
+                continue;
+            }
+            if (!externalId || externalId.toLowerCase() === 'unknown') {
+                const fingerprint = createHash('sha1').update(JSON.stringify(item)).digest('hex').slice(0, 10);
+                console.warn(`[FeedService] Skipping feed item with invalid externalId (feedId=${feed.id}, title="${title}", fp=${fingerprint})`);
+                skipped++;
+                continue;
+            }
+
             // Create a hash to check for changes (naive implementation)
             const currentHash = Buffer.from(JSON.stringify(item)).toString('base64');
 
@@ -48,7 +65,7 @@ export class FeedService {
                 where: {
                     feedId_feedReferenceId: {
                         feedId: feed.id,
-                        feedReferenceId: item.externalId
+                        feedReferenceId: externalId
                     }
                 }
             });
@@ -73,7 +90,7 @@ export class FeedService {
                 const locationId = feed.company.locationId;
 
                 // Generate a slug
-                const slug = `${item.title}-${item.externalId}`
+                const slug = `${title}-${externalId}`
                     .toLowerCase()
                     .replace(/[^a-z0-9]+/g, '-')
                     .replace(/(^-|-$)/g, '');
@@ -81,7 +98,7 @@ export class FeedService {
                 await db.property.create({
                     data: {
                         locationId,
-                        title: item.title,
+                        title,
                         slug: slug + '-' + Date.now(),
                         description: item.description,
                         price: item.price,
@@ -90,7 +107,7 @@ export class FeedService {
                         publicationStatus: 'PENDING',
                         source: 'FEED',
                         feedId: feed.id,
-                        feedReferenceId: item.externalId,
+                        feedReferenceId: externalId,
                         feedHash: currentHash,
                         // Map images
                         media: {
