@@ -8,7 +8,7 @@ import db from "@/lib/db";
 import { generateMultiContextDraft } from "@/lib/ai/context-builder";
 import { ensureLocalContactSynced } from "@/lib/crm/contact-sync";
 import { ensureConversationHistory, syncMessageFromWebhook } from "@/lib/ghl/sync";
-import { calculateRunCost } from "@/lib/ai/pricing";
+import { calculateRunCost, calculateRunCostFromUsage } from "@/lib/ai/pricing";
 import { z } from "zod";
 import { getModelForTask } from "@/lib/ai/model-router";
 import { callLLM } from "@/lib/ai/llm";
@@ -2450,6 +2450,32 @@ export interface LeadAnalysisTrace {
         rawText: string;
         cleanJson: string;
         parsed: ParsedLeadData;
+        usage: {
+            promptTokens: number;
+            completionTokens: number;
+            totalTokens: number;
+            thoughtsTokens: number;
+            toolUsePromptTokens: number;
+            cachedContentTokens: number;
+            raw: string;
+        };
+    };
+    estimatedCost: {
+        usd: number;
+        method: string;
+        confidence: string;
+        breakdown: {
+            promptTokens: number;
+            completionTokens: number;
+            totalTokens: number;
+            thoughtsTokens: number;
+            toolUsePromptTokens: number;
+            inferredOutputTokens: number;
+            billableInputTokens: number;
+            billableOutputTokens: number;
+            inputRatePerMillion: number;
+            outputRatePerMillion: number;
+        };
     };
     promptTokens: number;
     completionTokens: number;
@@ -2493,6 +2519,13 @@ Return JSON matching this schema:
         const { callLLMWithMetadata } = await import("@/lib/ai/llm");
         const { text: jsonStr, usage } = await callLLMWithMetadata(modelId, prompt, undefined, { jsonMode: true });
         const end = Date.now();
+        const costEstimate = calculateRunCostFromUsage(modelId, {
+            promptTokens: usage.promptTokens,
+            completionTokens: usage.completionTokens,
+            totalTokens: usage.totalTokens,
+            thoughtsTokens: usage.thoughtsTokens,
+            toolUsePromptTokens: usage.toolUsePromptTokens
+        });
 
         // Clean markdown code blocks if present (Gemini sometimes adds ```json ... ```)
         const cleanJson = jsonStr.replace(/```json/g, "").replace(/```/g, "").trim();
@@ -2516,7 +2549,14 @@ Return JSON matching this schema:
             llmResponse: {
                 rawText: jsonStr,
                 cleanJson,
-                parsed: result
+                parsed: result,
+                usage
+            },
+            estimatedCost: {
+                usd: costEstimate.amount,
+                method: costEstimate.method,
+                confidence: costEstimate.confidence,
+                breakdown: costEstimate.breakdown
             },
             promptTokens: usage.promptTokens,
             completionTokens: usage.completionTokens,
@@ -2737,6 +2777,20 @@ export async function createParsedLead(data: ParsedLeadData, originalText: strin
         // 2.5 Save Analysis Trace if provided
         if (trace) {
             try {
+                const estimatedCost = trace.estimatedCost || (() => {
+                    const fallbackEstimate = calculateRunCostFromUsage(trace.model || 'default', {
+                        promptTokens: trace.promptTokens || 0,
+                        completionTokens: trace.completionTokens || 0,
+                        totalTokens: trace.totalTokens || 0
+                    });
+                    return {
+                        usd: fallbackEstimate.amount,
+                        method: fallbackEstimate.method,
+                        confidence: fallbackEstimate.confidence,
+                        breakdown: fallbackEstimate.breakdown
+                    };
+                })();
+
                 await db.agentExecution.create({
                     data: {
                         conversationId: conversation.id,
@@ -2764,6 +2818,12 @@ export async function createParsedLead(data: ParsedLeadData, originalText: strin
                             },
                             {
                                 step: 3,
+                                description: "Usage & cost estimate",
+                                conclusion: `Estimated run cost (${estimatedCost.confidence} confidence)`,
+                                data: estimatedCost
+                            },
+                            {
+                                step: 4,
                                 description: "Import enrichment",
                                 conclusion: matchedProperty
                                     ? `Resolved property link: ${matchedProperty.reference || matchedProperty.slug}`
@@ -2805,6 +2865,7 @@ export async function createParsedLead(data: ParsedLeadData, originalText: strin
                         promptTokens: trace.promptTokens,
                         completionTokens: trace.completionTokens,
                         totalTokens: trace.totalTokens,
+                        cost: estimatedCost.usd,
                         latencyMs: trace.end - trace.start,
                         createdAt: new Date(trace.start)
                     }

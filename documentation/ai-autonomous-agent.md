@@ -219,8 +219,10 @@ To ensure the AI's reasoning is not lost, we implemented a full persistence laye
 
 To provide transparency into AI operations, the system tracks detailed usage metrics:
 
-*   **Token Counting**: Tracks prompt and completion tokens for every execution.
-*   **Cost Estimation**: Calculates cost in USD based on the specific model used (e.g., `gemini-3-pro` vs `gemini-3-flash`) and its pricing tier.
+*   **Token Counting**: Tracks prompt and completion tokens for every execution, and captures extended Gemini usage metadata when available (thinking/tool-use/cached-content counters).
+*   **Cost Estimation**: Calculates estimated USD cost based on model pricing tiers and usage metadata.
+    *   **Primary Method**: Uses explicit usage fields (including thinking/tool-use tokens).
+    *   **Fallback Method**: If extended fields are missing but `totalTokens` is higher than known prompt/completion counts, the remainder is treated as inferred output tokens for a conservative estimate.
 *   **Data & Visibility**:
     *   **Database**: Stores `model`, `cost`, `promptTokens`, `completionTokens` in `AgentExecution`.
     *   **Pricing Engine**: `lib/ai/pricing.ts` maintains an up-to-date registry of model rates.
@@ -228,6 +230,7 @@ To provide transparency into AI operations, the system tracks detailed usage met
         *   **At a Glance**: Shows Today + This Month costs in the header
         *   **Click to Expand**: Opens detailed modal with All-Time totals and per-conversation breakdown
         *   **Top Conversations**: Lists conversations ranked by AI cost with direct navigation links
+    *   **Trace Modal Behavior**: Unknown per-run cost is displayed as `N/A` (not `$0.00000`) to avoid false-zero interpretation.
 
 ### Key Files
 

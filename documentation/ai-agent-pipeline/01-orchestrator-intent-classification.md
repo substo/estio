@@ -676,4 +676,7 @@ lib/ai/skills/
 ## Implementation Notes (Feb 14, 2026)
 - **Skills**: Placeholder skills created for `negotiator`, `closer`, `objection_handler` to prevent routing errors.
 - **Tools**: Added `tools` frontmatter to all SKILL.md files to enable proper MCP tool filtering.
-- **Observability**: Token costs are currently displayed as $0.00 in the dashboard due to limitations in the `callLLM` wrapper response format.
+- **Observability (Updated Feb 21, 2026)**:
+  - `callLLMWithMetadata` now captures extended Gemini usage fields (`thoughtsTokenCount`, `toolUsePromptTokenCount`, `cachedContentTokenCount`) in addition to prompt/completion/total tokens.
+  - Cost estimation is no longer prompt/completion-only for supported responses; the estimator now incorporates thinking/tool-use tokens when available and falls back to inference from `totalTokenCount` gaps.
+  - Trace UI now shows `N/A` when cost is unknown instead of rendering a misleading `$0.00000`.

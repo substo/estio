@@ -89,10 +89,11 @@ export class SkillLoader {
 
 // ── EXECUTION LOGIC ─────────────────────────────────────────────────────────────
 
-import { getModelForTask, estimateCost } from "../model-router";
+import { getModelForTask } from "../model-router";
 import { callLLMWithMetadata } from "../llm";
 import { toolRegistry } from "../mcp/registry";
 import { SentimentResult } from "../sentiment";
+import { calculateRunCostFromUsage } from "../pricing";
 
 export interface SkillExecutionContext {
     conversationId: string;
@@ -139,6 +140,12 @@ export interface SkillExecutionResult {
             promptTokens: number;
             completionTokens: number;
             totalTokens: number;
+            thoughtsTokens?: number;
+            toolUsePromptTokens?: number;
+        };
+        costEstimate?: {
+            method: string;
+            confidence: string;
         };
     };
     error?: string;
@@ -391,7 +398,14 @@ You must respond with valid JSON:
             }
         }
 
-        const cost = estimateCost(modelId, usage.promptTokens, usage.completionTokens);
+        const costEstimate = calculateRunCostFromUsage(modelId, {
+            promptTokens: usage.promptTokens,
+            completionTokens: usage.completionTokens,
+            totalTokens: usage.totalTokens,
+            thoughtsTokens: usage.thoughtsTokens,
+            toolUsePromptTokens: usage.toolUsePromptTokens
+        });
+        const cost = costEstimate.amount;
         const reqSystem = truncateForTrace(systemPrompt);
         const reqUser = truncateForTrace(userPrompt);
         const resRaw = truncateForTrace(response);
@@ -411,7 +425,13 @@ You must respond with valid JSON:
             usage: {
                 promptTokens: usage.promptTokens,
                 completionTokens: usage.completionTokens,
-                totalTokens: usage.totalTokens
+                totalTokens: usage.totalTokens,
+                thoughtsTokens: usage.thoughtsTokens,
+                toolUsePromptTokens: usage.toolUsePromptTokens
+            },
+            costEstimate: {
+                method: costEstimate.method,
+                confidence: costEstimate.confidence
             }
         };
 

@@ -702,7 +702,7 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
                                                         {ex.taskStatus === 'pending' && <Loader2 className="w-3 h-3 animate-spin text-blue-500" />}
                                                     </div>
                                                 </div>
-                                                {ex.usage?.cost > 0 && (
+                                                {typeof ex.usage?.cost === "number" && (
                                                     <div className="text-[10px] text-green-600/80 mt-0.5 font-mono">
                                                         ${ex.usage.cost.toFixed(5)}
                                                     </div>
@@ -885,7 +885,14 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
                                                         </div>
                                                         <div>
                                                             <div className="text-[10px] font-bold text-slate-400 uppercase">Cost</div>
-                                                            <div className="text-sm font-mono text-green-600 font-bold">${rawTrace.usage?.cost?.toFixed(5) || "0.00000"}</div>
+                                                            <div className={cn(
+                                                                "text-sm font-mono font-bold",
+                                                                typeof rawTrace.usage?.cost === "number" ? "text-green-600" : "text-slate-500"
+                                                            )}>
+                                                                {typeof rawTrace.usage?.cost === "number"
+                                                                    ? `$${rawTrace.usage.cost.toFixed(5)}`
+                                                                    : "N/A"}
+                                                            </div>
                                                         </div>
                                                         <div>
                                                             <div className="text-[10px] font-bold text-slate-400 uppercase">Tokens</div>

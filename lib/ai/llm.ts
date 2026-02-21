@@ -59,7 +59,18 @@ export async function callLLMWithMetadata(
     systemPrompt: string,
     userContent?: string,
     options: CallLLMOptions = {}
-): Promise<{ text: string; usage: { promptTokens: number; completionTokens: number; totalTokens: number } }> {
+): Promise<{
+    text: string;
+    usage: {
+        promptTokens: number;
+        completionTokens: number;
+        totalTokens: number;
+        thoughtsTokens: number;
+        toolUsePromptTokens: number;
+        cachedContentTokens: number;
+        raw: string;
+    };
+}> {
     // 1. Get API Key
     let apiKey = process.env.GOOGLE_API_KEY;
     if (!apiKey) {
@@ -83,14 +94,22 @@ export async function callLLMWithMetadata(
     const result = await model.generateContent(prompt);
 
     // Safety check for usageMetadata (it might be undefined in some cases)
-    const usage = result.response.usageMetadata || { promptTokenCount: 0, candidatesTokenCount: 0, totalTokenCount: 0 };
+    const usageMeta = (result.response.usageMetadata || {}) as Record<string, unknown>;
+    const readUsage = (key: string) => {
+        const value = Number(usageMeta[key]);
+        return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+    };
 
     return {
         text: result.response.text(),
         usage: {
-            promptTokens: usage.promptTokenCount,
-            completionTokens: usage.candidatesTokenCount,
-            totalTokens: usage.totalTokenCount
+            promptTokens: readUsage("promptTokenCount"),
+            completionTokens: readUsage("candidatesTokenCount"),
+            totalTokens: readUsage("totalTokenCount"),
+            thoughtsTokens: readUsage("thoughtsTokenCount"),
+            toolUsePromptTokens: readUsage("toolUsePromptTokenCount"),
+            cachedContentTokens: readUsage("cachedContentTokenCount"),
+            raw: JSON.stringify(usageMeta)
         }
     };
 }

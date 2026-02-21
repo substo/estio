@@ -73,42 +73,63 @@ export const AI_PRICING = {
 
 export const DEFAULT_MODEL = 'gemini-3-flash-preview';
 
-/**
- * Calculate the cost of an AI run.
- * @param model Model identifier (e.g., 'gemini-3-pro')
- * @param promptTokens Number of input tokens
- * @param completionTokens Number of output tokens
- * @returns Cost in USD
- */
-export function calculateRunCost(model: string, promptTokens: number, completionTokens: number): number {
-    // Normalize model string checks (e.g. handle versions)
-    // Simple lookup for now
-    let pricing = AI_PRICING[model as keyof typeof AI_PRICING];
+export type CostEstimateMethod =
+    | 'explicit_usage_fields'
+    | 'inferred_from_total_gap'
+    | 'prompt_completion_only';
 
-    // If exact match fails, try to find by prefix (e.g. "gemini-1.5-pro-001" -> "gemini-1.5-pro")
-    if (!pricing) {
-        const key = Object.keys(AI_PRICING).find(k => model.startsWith(k));
-        if (key) {
-            pricing = AI_PRICING[key as keyof typeof AI_PRICING];
-        } else {
-            pricing = AI_PRICING['default'];
-        }
+export type CostEstimateConfidence = 'high' | 'medium' | 'low';
+
+export interface UsageForCostEstimate {
+    promptTokens?: number | null;
+    completionTokens?: number | null;
+    totalTokens?: number | null;
+    thoughtsTokens?: number | null;
+    toolUsePromptTokens?: number | null;
+}
+
+export interface CostEstimate {
+    amount: number;
+    method: CostEstimateMethod;
+    confidence: CostEstimateConfidence;
+    breakdown: {
+        promptTokens: number;
+        completionTokens: number;
+        totalTokens: number;
+        thoughtsTokens: number;
+        toolUsePromptTokens: number;
+        inferredOutputTokens: number;
+        billableInputTokens: number;
+        billableOutputTokens: number;
+        inputRatePerMillion: number;
+        outputRatePerMillion: number;
+    };
+}
+
+type PricingEntry = (typeof AI_PRICING)[keyof typeof AI_PRICING];
+
+function sanitizeTokenCount(value: unknown): number {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) return 0;
+    return Math.floor(num);
+}
+
+function getPricingForModel(model: string): PricingEntry {
+    let pricing = AI_PRICING[model as keyof typeof AI_PRICING];
+    if (pricing) return pricing;
+
+    const key = Object.keys(AI_PRICING).find(k => model.startsWith(k));
+    if (key) {
+        return AI_PRICING[key as keyof typeof AI_PRICING];
     }
 
-    // Determine tier based on prompt length (Context Window)
-    // Gemini 3/2.5 often use 200k as the tier. 1.5 used 128k.
-    // We'll use 200k as the modern standard check, unless legacy logic needed.
-    // Simplifying: if 'inputCostPerMillionHighContext' exists, we check against a threshold.
-    // We'll assume 200k for modern, but 128k was old standard. Let's use 128k to be safe/inclusive or 200k?
-    // The search results for 3/2.5 said 200k.
-    const CONTEXT_THRESHOLD = 200_000;
+    return AI_PRICING.default;
+}
 
-    // Legacy override for 1.5 if needed, but let's stick to the pricing object structure.
-    // Note: If using 1.5, the threshold was 128k. 
-    // Let's check if model contains "1.5"
+function getRatesForModel(model: string, inputTokens: number): { inputRate: number; outputRate: number } {
+    const pricing = getPricingForModel(model);
     const threshold = model.includes('1.5') ? 128_000 : 200_000;
-
-    const isHighContext = promptTokens > threshold;
+    const isHighContext = inputTokens > threshold;
 
     let inputRate = pricing.inputCostPerMillion;
     let outputRate = pricing.outputCostPerMillion;
@@ -120,8 +141,79 @@ export function calculateRunCost(model: string, promptTokens: number, completion
         outputRate = pricing.outputCostPerMillionHighContext;
     }
 
-    const inputCost = (promptTokens / 1_000_000) * inputRate;
-    const outputCost = (completionTokens / 1_000_000) * outputRate;
+    return { inputRate, outputRate };
+}
+
+/**
+ * Calculate the cost of an AI run.
+ * @param model Model identifier (e.g., 'gemini-3-pro')
+ * @param promptTokens Number of input tokens
+ * @param completionTokens Number of output tokens
+ * @returns Cost in USD
+ */
+export function calculateRunCost(model: string, promptTokens: number, completionTokens: number): number {
+    const safePromptTokens = sanitizeTokenCount(promptTokens);
+    const safeCompletionTokens = sanitizeTokenCount(completionTokens);
+    const { inputRate, outputRate } = getRatesForModel(model, safePromptTokens);
+
+    const inputCost = (safePromptTokens / 1_000_000) * inputRate;
+    const outputCost = (safeCompletionTokens / 1_000_000) * outputRate;
 
     return inputCost + outputCost;
+}
+
+/**
+ * Cost estimator that supports modern Gemini usage fields (thoughts/tool use) and
+ * falls back safely when only prompt/completion counts are available.
+ */
+export function calculateRunCostFromUsage(model: string, usage: UsageForCostEstimate): CostEstimate {
+    const promptTokens = sanitizeTokenCount(usage.promptTokens);
+    const completionTokens = sanitizeTokenCount(usage.completionTokens);
+    const totalTokens = sanitizeTokenCount(usage.totalTokens);
+    const thoughtsTokens = sanitizeTokenCount(usage.thoughtsTokens);
+    const toolUsePromptTokens = sanitizeTokenCount(usage.toolUsePromptTokens);
+
+    const knownInputTokens = promptTokens + toolUsePromptTokens;
+    const knownOutputTokens = completionTokens + thoughtsTokens;
+    const knownTotalTokens = knownInputTokens + knownOutputTokens;
+
+    const inferredOutputTokens =
+        totalTokens > knownTotalTokens ? totalTokens - knownTotalTokens : 0;
+
+    const billableInputTokens = knownInputTokens;
+    const billableOutputTokens = knownOutputTokens + inferredOutputTokens;
+    const { inputRate, outputRate } = getRatesForModel(model, billableInputTokens);
+
+    const amount =
+        (billableInputTokens / 1_000_000) * inputRate +
+        (billableOutputTokens / 1_000_000) * outputRate;
+
+    let method: CostEstimateMethod = 'prompt_completion_only';
+    let confidence: CostEstimateConfidence = 'low';
+
+    if (inferredOutputTokens > 0) {
+        method = 'inferred_from_total_gap';
+        confidence = 'medium';
+    } else if (thoughtsTokens > 0 || toolUsePromptTokens > 0) {
+        method = 'explicit_usage_fields';
+        confidence = 'high';
+    }
+
+    return {
+        amount,
+        method,
+        confidence,
+        breakdown: {
+            promptTokens,
+            completionTokens,
+            totalTokens,
+            thoughtsTokens,
+            toolUsePromptTokens,
+            inferredOutputTokens,
+            billableInputTokens,
+            billableOutputTokens,
+            inputRatePerMillion: inputRate,
+            outputRatePerMillion: outputRate
+        }
+    };
 }

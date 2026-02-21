@@ -72,7 +72,9 @@ A dedicated panel showing:
 #### 3. Performance Metrics
 Real-time visibility into:
 - **Latency**: Total time vs. individual span time.
-- **Cost**: Estimated cost based on model & token count.
+- **Cost**: Estimated cost based on model pricing + usage metadata.
+    - Uses prompt/completion counts plus extended Gemini usage fields when available (thinking/tool-use counters).
+    - If a trace has no persisted cost, UI renders `N/A` instead of `$0.00000`.
 - **Model Badge**: Which model was used for this specific step (e.g., `gemini-1.5-pro`).
 
 ### Backend Architecture
@@ -80,6 +82,7 @@ Real-time visibility into:
 - **Data Model**: `AgentExecution` table extended with `traceId`, `spanId`, `parentSpanId`.
 - **Querying**: `getTraceTree(traceId)` server action reconstructs the flat database rows into a recursive `TraceNode` tree.
 - **Frontend**: `TraceNodeRenderer` component handles the recursive visual rendering.
+- **Paste Lead Trace Path**: `Analyze Lead Text` traces now persist `cost` on `AgentExecution` and include a dedicated "Usage & cost estimate" thought step before import enrichment.
 
 ---
 
