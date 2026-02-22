@@ -310,6 +310,51 @@ export const evolutionClient = {
     },
 
     /**
+     * Send Media Message (Image for now)
+     */
+    sendMedia: async (instanceName: string, to: string, input: {
+        mediaUrl: string;
+        caption?: string;
+        mimetype: string;
+        fileName?: string;
+        mediaType?: "image" | "document" | "video" | "audio";
+    }) => {
+        try {
+            const cleanNumber = to.replace(/\D/g, '');
+            const mediaType = input.mediaType || "image";
+
+            const response = await axios.post(
+                `${EVOLUTION_API_URL}/message/sendMedia/${instanceName}`,
+                {
+                    number: cleanNumber,
+                    mediatype: mediaType,
+                    mimetype: input.mimetype,
+                    media: input.mediaUrl,
+                    caption: input.caption || undefined,
+                    fileName: input.fileName || undefined,
+                    options: {
+                        delay: 1200,
+                        presence: "composing"
+                    }
+                },
+                {
+                    headers: {
+                        'apikey': EVOLUTION_GLOBAL_API_KEY
+                    }
+                }
+            );
+
+            return response.data;
+        } catch (error: any) {
+            console.error('Error sending evolution media:', {
+                status: error.response?.status,
+                data: JSON.stringify(error.response?.data, null, 2)
+            });
+            throw error;
+        }
+    },
+
+    /**
      * Update Instance Settings
      */
     updateSettings: async (instanceName: string, settings: any) => {
@@ -413,6 +458,30 @@ export const evolutionClient = {
         } catch (error: any) {
             console.error('[Evolution] Error fetching messages:', error.response?.data || error.message);
             return [];
+        }
+    },
+
+    /**
+     * Resolve and return media content as base64 for a previously received message.
+     * NOTE: This endpoint expects a body wrapper: { message: <full message record> }
+     * in the Evolution version currently deployed.
+     */
+    getBase64FromMediaMessage: async (instanceName: string, messageData: any) => {
+        try {
+            const response = await axios.post(
+                `${EVOLUTION_API_URL}/chat/getBase64FromMediaMessage/${instanceName}`,
+                { message: messageData },
+                {
+                    headers: { 'apikey': EVOLUTION_GLOBAL_API_KEY }
+                }
+            );
+            return response.data;
+        } catch (error: any) {
+            console.error('[Evolution] Error fetching media base64:', {
+                status: error.response?.status,
+                data: JSON.stringify(error.response?.data, null, 2)
+            });
+            throw error;
         }
     },
 

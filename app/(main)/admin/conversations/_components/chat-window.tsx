@@ -4,14 +4,15 @@ import { GOOGLE_AI_MODELS } from "@/lib/ai/models";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Send, MessageSquare, RefreshCw } from "lucide-react";
+import { Loader2, Send, MessageSquare, RefreshCw, Paperclip } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface ChatWindowProps {
     conversation: Conversation;
     messages: Message[];
     loading: boolean;
-    onSendMessage: (text: string, type: 'SMS' | 'Email' | 'WhatsApp') => void;
+    onSendMessage: (text: string, type: 'SMS' | 'Email' | 'WhatsApp') => void | Promise<void>;
+    onSendImage?: (file: File, caption: string) => void | Promise<void>;
     onSync?: () => void;
     onFetchHistory?: () => void;
     onGenerateDraft?: (instruction?: string, model?: string) => Promise<string | null>; // Returns draft text or null if failed
@@ -54,7 +55,7 @@ import { Sparkles, Loader2 as Spinner } from "lucide-react"; // Import Sparkles 
 
 import { getAvailableAiModelsAction } from "@/app/(main)/admin/conversations/actions";
 
-export function ChatWindow({ conversation, messages, loading, onSendMessage, onSync, onGenerateDraft, onFetchHistory, suggestions = [] }: ChatWindowProps & { suggestions?: string[] }) {
+export function ChatWindow({ conversation, messages, loading, onSendMessage, onSendImage, onSync, onGenerateDraft, onFetchHistory, suggestions = [] }: ChatWindowProps & { suggestions?: string[] }) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const [draft, setDraft] = useState("");
     const [sending, setSending] = useState(false);
@@ -62,6 +63,7 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
     const [selectedChannel, setSelectedChannel] = useState<'SMS' | 'Email' | 'WhatsApp'>(getInitialChannel(conversation));
     const [selectedModel, setSelectedModel] = useState("gemini-2.5-flash");
     const [availableModels, setAvailableModels] = useState<any[]>([]); // Dynamic list
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Fetch available models on mount
     useEffect(() => {
@@ -88,12 +90,36 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
         }
     }, [messages, loading]);
 
-    const handleSend = () => {
+    const handleSend = async () => {
         if (!draft.trim()) return;
         setSending(true);
-        onSendMessage(draft, selectedChannel);
-        setDraft("");
-        setSending(false);
+        try {
+            await Promise.resolve(onSendMessage(draft, selectedChannel));
+            setDraft("");
+        } finally {
+            setSending(false);
+        }
+    };
+
+    const handleImagePickClick = () => {
+        if (selectedChannel !== "WhatsApp" || !onSendImage) return;
+        fileInputRef.current?.click();
+    };
+
+    const handleImageSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file || !onSendImage) return;
+
+        setSending(true);
+        try {
+            await Promise.resolve(onSendImage(file, draft));
+            setDraft("");
+        } catch (err) {
+            console.error("Image send failed", err);
+        } finally {
+            setSending(false);
+            e.target.value = "";
+        }
     };
 
     const handleAiDraft = async (instructionOverride?: string) => {
@@ -180,6 +206,13 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
                 />
 
                 <div className="px-3 py-2 max-w-4xl mx-auto">
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleImageSelected}
+                    />
                     <div className="relative rounded-xl border bg-white shadow-sm focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-300 transition-all">
                         <Textarea
                             value={draft}
@@ -247,6 +280,19 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
 
                             <div className="flex items-center gap-1.5">
                                 <span className="text-[10px] text-slate-400 hidden sm:inline">⌘↵</span>
+                                {selectedChannel === 'WhatsApp' && onSendImage && (
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 w-7 p-0 text-slate-500 hover:text-slate-700"
+                                        onClick={handleImagePickClick}
+                                        title="Send image"
+                                        disabled={sending}
+                                    >
+                                        <Paperclip className="h-3.5 w-3.5" />
+                                    </Button>
+                                )}
                                 {selectedChannel === 'SMS' && draft.length > 0 && (
                                     <span className="text-[10px] text-slate-400">{draft.length}</span>
                                 )}

@@ -14,6 +14,14 @@ import { getModelForTask } from "@/lib/ai/model-router";
 import { callLLM } from "@/lib/ai/llm";
 import { auth } from "@clerk/nextjs/server";
 import { runGoogleAutoSyncForContact } from "@/lib/google/automation";
+import {
+    buildWhatsAppOutboundUploadKey,
+    createWhatsAppMediaReadUrl,
+    createWhatsAppMediaUploadUrl,
+    headWhatsAppMediaObject,
+    toR2Uri,
+} from "@/lib/whatsapp/media-r2";
+import { ingestEvolutionImageAttachment, parseEvolutionMessageContent } from "@/lib/whatsapp/evolution-media";
 
 async function getAuthenticatedLocation() {
     const location = await getLocationContext();
@@ -157,7 +165,8 @@ export async function fetchMessages(conversationId: string) {
     // 4. Fetch messages from DB
     const messages = await db.message.findMany({
         where: { conversationId: conversation.id },
-        orderBy: { createdAt: 'asc' }
+        orderBy: { createdAt: 'asc' },
+        include: { attachments: true }
     });
 
     console.log(`[DB Read] Fetched ${messages.length} messages from local database for conversation ${conversation.ghlConversationId}`);
@@ -174,6 +183,11 @@ export async function fetchMessages(conversationId: string) {
         status: m.status,
         dateAdded: m.createdAt.toISOString(),
         subject: m.subject || undefined,
+        attachments: (m.attachments || []).map((a: any) =>
+            String(a.url || "").startsWith("r2://")
+                ? `/api/media/attachments/${a.id}`
+                : a.url
+        ),
         // Hydrated fields for UI
         html: m.body?.includes('<') ? m.body : undefined // Simple check
     }));
@@ -232,11 +246,17 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
                 // We use the Group Phone for 'from' to keep the conversation unified.
                 // The participant field identifies the actual sender.
 
+                const parsedContent = parseEvolutionMessageContent(messageContent);
+                const senderName = msg.pushName || realSenderPhone || "Unknown";
+                const normalizedBody = isGroup && parsedContent.type !== 'text'
+                    ? `[${senderName}]: ${parsedContent.body}`
+                    : parsedContent.body;
+
                 const normalized: any = {
                     from: isFromMe ? location.id : phone,
                     to: isFromMe ? phone : location.id,
-                    body: messageContent.conversation || messageContent.extendedTextMessage?.text || '[Media]',
-                    type: 'text',
+                    body: normalizedBody,
+                    type: parsedContent.type,
                     wamId: key.id,
                     timestamp: new Date(msg.messageTimestamp ? (msg.messageTimestamp as number) * 1000 : Date.now()),
                     direction: isFromMe ? 'outbound' : 'inbound',
@@ -248,6 +268,16 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
                 };
 
                 const result = await processNormalizedMessage(normalized);
+
+                if (parsedContent.type === 'image' && location.evolutionInstanceId) {
+                    void ingestEvolutionImageAttachment({
+                        instanceName: location.evolutionInstanceId,
+                        evolutionMessageData: msg,
+                        wamId: key.id,
+                    }).catch((err) => {
+                        console.error(`[Sync] Failed to ingest image attachment for ${key.id}:`, err);
+                    });
+                }
 
                 if (result?.status === 'skipped') {
                     skipped++;
@@ -270,6 +300,299 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
     } catch (e: any) {
         console.error("Manual sync failed:", e);
         return { success: false, error: e.message };
+    }
+}
+
+const WHATSAPP_IMAGE_MIME_TYPES = new Set([
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "image/heic",
+    "image/heif",
+]);
+const MAX_WHATSAPP_IMAGE_BYTES = 16 * 1024 * 1024;
+
+type WhatsAppImageUploadRef = {
+    objectKey: string;
+    fileName: string;
+    contentType: string;
+    size: number;
+};
+
+export async function createWhatsAppImageUploadUrl(
+    conversationId: string,
+    contactId: string,
+    file: { fileName: string; contentType: string; size: number }
+) {
+    const location = await getAuthenticatedLocation();
+
+    if (!location?.evolutionInstanceId) {
+        return { success: false, error: "WhatsApp (Evolution) is not connected." };
+    }
+
+    const contentType = String(file.contentType || "").toLowerCase();
+    const size = Number(file.size || 0);
+    const fileName = String(file.fileName || "image");
+
+    if (!WHATSAPP_IMAGE_MIME_TYPES.has(contentType)) {
+        return { success: false, error: `Unsupported image type: ${contentType || "unknown"}` };
+    }
+    if (!size || size <= 0) {
+        return { success: false, error: "Invalid file size." };
+    }
+    if (size > MAX_WHATSAPP_IMAGE_BYTES) {
+        return { success: false, error: `Image is too large. Max size is ${Math.floor(MAX_WHATSAPP_IMAGE_BYTES / (1024 * 1024))}MB.` };
+    }
+
+    const conversation = await db.conversation.findUnique({
+        where: { ghlConversationId: conversationId },
+        select: { id: true, locationId: true, contactId: true }
+    });
+
+    if (!conversation || conversation.locationId !== location.id) {
+        return { success: false, error: "Conversation not found." };
+    }
+
+    const contact = await db.contact.findFirst({
+        where: {
+            OR: [{ ghlContactId: contactId }, { id: contactId }],
+            locationId: location.id
+        },
+        select: { id: true }
+    });
+
+    if (!contact) {
+        return { success: false, error: "Contact not found." };
+    }
+    if (conversation.contactId !== contact.id) {
+        return { success: false, error: "Conversation/contact mismatch." };
+    }
+
+    const key = buildWhatsAppOutboundUploadKey({
+        locationId: location.id,
+        contactId: contact.id,
+        conversationId: conversation.id,
+        fileName,
+        contentType,
+    });
+
+    const upload = await createWhatsAppMediaUploadUrl({
+        key,
+        contentType,
+        expiresInSeconds: 600,
+    });
+
+    return {
+        success: true as const,
+        uploadUrl: upload.uploadUrl,
+        upload: {
+            objectKey: key,
+            fileName,
+            contentType,
+            size,
+        },
+        headers: {
+            "Content-Type": contentType,
+        },
+    };
+}
+
+export async function sendWhatsAppImageReply(
+    conversationId: string,
+    contactId: string,
+    caption: string,
+    upload: WhatsAppImageUploadRef
+) {
+    const location = await getAuthenticatedLocation();
+    if (!location?.ghlAccessToken) {
+        throw new Error("Unauthorized");
+    }
+
+    const cleanCaption = (caption || "").trim();
+    const previewBody = cleanCaption || "[Image]";
+
+    try {
+        const hasEvolution = !!location.evolutionInstanceId;
+        if (!hasEvolution) {
+            return { success: false, error: "WhatsApp (Evolution) is not connected." };
+        }
+
+        const contentType = String(upload?.contentType || "").toLowerCase();
+        const size = Number(upload?.size || 0);
+        const objectKey = String(upload?.objectKey || "");
+        const fileName = String(upload?.fileName || "image");
+
+        const conversation = await db.conversation.findUnique({
+            where: { ghlConversationId: conversationId },
+            select: { id: true, locationId: true, contactId: true }
+        });
+        if (!conversation || conversation.locationId !== location.id) {
+            return { success: false, error: "Conversation not found." };
+        }
+
+        if (!objectKey.startsWith("whatsapp/evolution/v1/")) {
+            return { success: false, error: "Invalid upload reference." };
+        }
+        if (!objectKey.includes(`/location/${location.id}/`) || !objectKey.includes(`/conversation/${conversation.id}/`)) {
+            return { success: false, error: "Upload reference does not belong to this conversation." };
+        }
+        if (!WHATSAPP_IMAGE_MIME_TYPES.has(contentType)) {
+            return { success: false, error: `Unsupported image type: ${contentType || "unknown"}` };
+        }
+        if (!size || size > MAX_WHATSAPP_IMAGE_BYTES) {
+            return { success: false, error: "Invalid image size." };
+        }
+
+        const objectHead = await headWhatsAppMediaObject(objectKey);
+        if (!objectHead.exists) {
+            return { success: false, error: "Uploaded image not found in media storage. Please re-upload and try again." };
+        }
+
+        const contact = await db.contact.findFirst({
+            where: {
+                OR: [
+                    { ghlContactId: contactId },
+                    { id: contactId }
+                ],
+                locationId: location.id
+            },
+            select: { id: true, phone: true, ghlContactId: true, name: true }
+        });
+
+        if (!contact) {
+            return { success: false, error: "Contact not found in database." };
+        }
+        if (conversation.contactId !== contact.id) {
+            return { success: false, error: "Conversation/contact mismatch." };
+        }
+        if (!contact.phone) {
+            return { success: false, error: "Contact does not have a phone number. Please add a phone number to this contact." };
+        }
+        if (contact.phone.includes('*')) {
+            const contactName = contact.name || 'This contact';
+            return {
+                success: false,
+                error: `${contactName}'s phone number "${contact.phone}" is masked (contains ***). You cannot send WhatsApp images to masked numbers.`
+            };
+        }
+
+        const normalizedPhone = contact.phone.replace(/\D/g, '');
+        if (normalizedPhone.length < 10) {
+            const contactName = contact.name || 'This contact';
+            return {
+                success: false,
+                error: `${contactName}'s phone number "${contact.phone}" appears to be missing a country code. Please update the contact with the full international number.`
+            };
+        }
+
+        const { evolutionClient } = await import("@/lib/evolution/client");
+        const instanceState = await evolutionClient.fetchInstance(location.evolutionInstanceId!);
+        const instanceData = Array.isArray(instanceState) ? instanceState[0] : instanceState;
+        const connStatus = instanceData?.instance?.connectionStatus || instanceData?.connectionStatus || instanceData?.status;
+
+        if (connStatus !== 'open') {
+            return {
+                success: false,
+                error: `WhatsApp is disconnected (Status: ${connStatus || 'unknown'}). Please reconnect in Settings → WhatsApp.`
+            };
+        }
+
+        const signedMediaUrl = await createWhatsAppMediaReadUrl({
+            key: objectKey,
+            contentType,
+            fileName,
+            expiresInSeconds: 300,
+        });
+
+        const res = await evolutionClient.sendMedia(
+            location.evolutionInstanceId!,
+            normalizedPhone,
+            {
+                mediaType: "image",
+                mediaUrl: signedMediaUrl,
+                caption: cleanCaption || undefined,
+                mimetype: contentType,
+                fileName,
+            }
+        );
+
+        if (!res?.key?.id) {
+            return { success: false, error: "Image sent but no confirmation received." };
+        }
+
+        const created = await db.message.create({
+            data: {
+                ghlMessageId: res.key.id,
+                wamId: res.key.id,
+                conversation: { connect: { ghlConversationId: conversationId } },
+                body: previewBody,
+                type: 'TYPE_WHATSAPP',
+                direction: 'outbound',
+                status: 'sent',
+                createdAt: new Date(),
+                updatedAt: new Date(),
+                source: 'app_user',
+                attachments: {
+                    create: [{
+                        fileName,
+                        contentType,
+                        size,
+                        url: toR2Uri(objectKey),
+                    }]
+                }
+            },
+            include: { attachments: true }
+        });
+
+        const { updateConversationLastMessage } = await import('@/lib/conversations/update');
+        const internalConv = await db.conversation.findUnique({
+            where: { ghlConversationId: conversationId },
+            select: { id: true }
+        });
+
+        if (internalConv) {
+            await updateConversationLastMessage({
+                conversationId: internalConv.id,
+                messageBody: previewBody,
+                messageType: 'TYPE_WHATSAPP',
+                messageDate: new Date(),
+                direction: 'outbound',
+            });
+        }
+
+        const accessToken = location.ghlAccessToken;
+        if (accessToken) {
+            (async () => {
+                try {
+                    let targetGhlId = contact.ghlContactId;
+
+                    if (!targetGhlId && location.ghlLocationId) {
+                        const { ensureRemoteContact } = await import("@/lib/crm/contact-sync");
+                        const newId = await ensureRemoteContact(contact.id, location.ghlLocationId, accessToken);
+                        if (newId) targetGhlId = newId;
+                    }
+
+                    if (targetGhlId) {
+                        const customProviderId = process.env.GHL_CUSTOM_PROVIDER_ID;
+                        const ghlPayload: any = {
+                            contactId: targetGhlId,
+                            type: customProviderId ? 'Custom' : 'WhatsApp',
+                            message: previewBody
+                        };
+                        if (customProviderId) ghlPayload.conversationProviderId = customProviderId;
+                        await sendMessage(accessToken, ghlPayload);
+                    }
+                } catch (ghlErr) {
+                    console.error('[sendWhatsAppImageReply] GHL sync failed:', ghlErr);
+                }
+            })();
+        }
+
+        return { success: true, messageId: created.id };
+    } catch (err: any) {
+        console.error("Evolution API image send failed:", err);
+        return { success: false, error: `WhatsApp image send failed: ${err.message || 'Unknown error'}` };
     }
 }
 

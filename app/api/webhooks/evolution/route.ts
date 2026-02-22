@@ -3,6 +3,7 @@ import db from '@/lib/db';
 import { processNormalizedMessage, NormalizedMessage } from '@/lib/whatsapp/sync';
 import { handleContactSyncEvent } from '@/lib/whatsapp/contact-sync-handler';
 import { logWebhookPayload } from '@/lib/logging/webhook-logger';
+import { ingestEvolutionImageAttachment, parseEvolutionMessageContent } from '@/lib/whatsapp/evolution-media';
 
 export async function POST(req: NextRequest) {
     try {
@@ -66,6 +67,7 @@ export async function POST(req: NextRequest) {
             let contactName = msg.pushName || msg.key?.remoteJid;
             let realPhone: string | undefined;
             let isLid = false;
+            let groupSenderName: string | undefined;
 
             // --- LID Handling ---
             if (isGroup) {
@@ -107,6 +109,7 @@ export async function POST(req: NextRequest) {
 
                 // Prepend Sender Name to Body for display
                 const senderName = msg.pushName || realSenderPhone || 'Unknown';
+                groupSenderName = senderName;
                 const originalBody = messageContent.conversation || messageContent.extendedTextMessage?.text || '';
                 const newBody = `[${senderName}]: ${originalBody}`;
                 if (messageContent.conversation) messageContent.conversation = newBody;
@@ -174,11 +177,16 @@ export async function POST(req: NextRequest) {
                 }
             }
 
+            const parsedContent = parseEvolutionMessageContent(messageContent);
+            const normalizedBody = isGroup && groupSenderName && parsedContent.type !== 'text'
+                ? `[${groupSenderName}]: ${parsedContent.body}`
+                : parsedContent.body;
+
             const normalized: any = {
                 from: from,
                 to: to,
-                body: messageContent.conversation || messageContent.extendedTextMessage?.text || '[Media]',
-                type: 'text',
+                body: normalizedBody,
+                type: parsedContent.type,
                 wamId: key.id,
                 timestamp: new Date(msg.messageTimestamp ? (msg.messageTimestamp as number) * 1000 : Date.now()),
                 direction: isFromMe ? 'outbound' : 'inbound',
@@ -202,6 +210,16 @@ export async function POST(req: NextRequest) {
 
             console.log(`[Evolution] Processing ${normalized.direction} message for ${location.id}`);
             await processNormalizedMessage(normalized);
+
+            if (parsedContent.type === 'image' && location.evolutionInstanceId) {
+                void ingestEvolutionImageAttachment({
+                    instanceName: location.evolutionInstanceId,
+                    evolutionMessageData: msg,
+                    wamId: key.id,
+                }).catch((err) => {
+                    console.error(`[Evolution] Failed to ingest image attachment for ${key.id}:`, err);
+                });
+            }
 
         } else if (eventType === 'CONNECTION_UPDATE' || eventType === 'CONNECTION.UPDATE') {
             const status = body.data.status || body.data.state;

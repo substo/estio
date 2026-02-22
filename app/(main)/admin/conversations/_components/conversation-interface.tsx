@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { Conversation, Message } from '@/lib/ghl/conversations';
-import { fetchConversations, fetchMessages, sendReply, generateAIDraft, deleteConversations, restoreConversations, archiveConversations, unarchiveConversations, permanentlyDeleteConversations, syncWhatsAppHistory, refreshConversation } from '../actions';
+import { fetchConversations, fetchMessages, sendReply, createWhatsAppImageUploadUrl, sendWhatsAppImageReply, generateAIDraft, deleteConversations, restoreConversations, archiveConversations, unarchiveConversations, permanentlyDeleteConversations, syncWhatsAppHistory, refreshConversation } from '../actions';
 import { toast } from '@/components/ui/use-toast';
 import { getDealContexts, createPersistentDeal } from '../../deals/actions';
 import { UnifiedTimeline } from './unified-timeline';
@@ -437,6 +437,58 @@ export function ConversationInterface({ initialConversations }: ConversationInte
         }
     };
 
+    const handleSendImage = async (file: File, caption: string) => {
+        if (!activeConversation) return;
+
+        try {
+            const prep = await createWhatsAppImageUploadUrl(activeConversation.id, activeConversation.contactId, {
+                fileName: file.name,
+                contentType: file.type || 'application/octet-stream',
+                size: file.size,
+            });
+
+            if (!prep.success) {
+                alert('Failed to prepare image upload: ' + JSON.stringify(prep.error));
+                return;
+            }
+
+            if (!prep.uploadUrl || !prep.upload) {
+                throw new Error("Upload preparation response missing upload URL or upload reference.");
+            }
+
+            const uploadUrl = prep.uploadUrl;
+            const uploadHeaders = prep.headers || { 'Content-Type': file.type || 'application/octet-stream' };
+            const uploadRef = prep.upload;
+
+            const uploadRes = await fetch(uploadUrl, {
+                method: 'PUT',
+                headers: uploadHeaders,
+                body: file,
+            });
+
+            if (!uploadRes.ok) {
+                const errText = await uploadRes.text().catch(() => '');
+                throw new Error(`R2 upload failed (${uploadRes.status}) ${errText}`);
+            }
+
+            const sendRes = await sendWhatsAppImageReply(
+                activeConversation.id,
+                activeConversation.contactId,
+                caption,
+                uploadRef
+            );
+
+            if (sendRes.success) {
+                const newMsgs = await fetchMessages(activeConversation.id);
+                setMessages(newMsgs);
+            } else {
+                alert('Failed to send image: ' + JSON.stringify(sendRes.error));
+            }
+        } catch (e: any) {
+            alert('Failed to send image: ' + (e?.message || 'Unknown error'));
+        }
+    };
+
 
     const handleSync = async () => {
         if (!activeId) return;
@@ -558,6 +610,7 @@ export function ConversationInterface({ initialConversations }: ConversationInte
                                 messages={messages}
                                 loading={loadingMessages}
                                 onSendMessage={handleSendMessage}
+                                onSendImage={handleSendImage}
                                 onSync={handleSync}
                                 onFetchHistory={async () => {
                                     setLoadingMessages(true);
@@ -740,4 +793,3 @@ export function ConversationInterface({ initialConversations }: ConversationInte
         </>
     );
 }
-
