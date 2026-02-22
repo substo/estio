@@ -4,6 +4,12 @@ import { Mail, Smartphone, Paperclip, ExternalLink, ChevronDown, ChevronUp, Arro
 import { format } from "date-fns";
 import { EmailFrame } from "./email-frame";
 
+type MessageAttachment = string | {
+    url: string;
+    mimeType?: string | null;
+    fileName?: string | null;
+};
+
 export interface MessageBubbleProps {
     message: {
         id: string;
@@ -12,7 +18,7 @@ export interface MessageBubbleProps {
         direction: 'inbound' | 'outbound';
         dateAdded: string | Date; // Accept both for compatibility
         subject?: string;
-        attachments?: string[];
+        attachments?: MessageAttachment[];
         emailFrom?: string;
         emailTo?: string;
         contactName?: string;
@@ -43,6 +49,19 @@ export function MessageBubble({ message, contactPhone, contactEmail, contactName
     };
 
     const snippet = isEmail ? getSnippet(message.body) : "";
+    const attachments = (message.attachments || []).map((attachment) =>
+        typeof attachment === "string"
+            ? { url: attachment, mimeType: undefined, fileName: undefined }
+            : attachment
+    );
+    const imageAttachments = attachments.filter((attachment) => {
+        const mimeType = (attachment.mimeType || "").toLowerCase();
+        if (mimeType.startsWith("image/")) return true;
+
+        const target = (attachment.fileName || attachment.url || "").toLowerCase().split("?")[0];
+        return [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".svg"].some((ext) => target.endsWith(ext));
+    });
+    const fileAttachments = attachments.filter((attachment) => !imageAttachments.includes(attachment));
 
     return (
         <div
@@ -137,20 +156,37 @@ export function MessageBubble({ message, contactPhone, contactEmail, contactName
                 </div>
 
                 {/* Attachments */}
-                {message.attachments && message.attachments.length > 0 && (
+                {attachments.length > 0 && (
                     <div className={cn("px-4 pb-2 space-y-1 mt-2", isEmail && "bg-gray-50 pt-2 border-t")}>
-                        {message.attachments.map((url, i) => (
+                        {imageAttachments.map((attachment, i) => (
                             <a
-                                key={i}
-                                href={url}
+                                key={`img-${i}-${attachment.url}`}
+                                href={attachment.url}
                                 target="_blank"
+                                rel="noreferrer"
+                                className="block rounded-lg overflow-hidden border border-black/10 bg-black/5 hover:opacity-95 transition-opacity"
+                            >
+                                <img
+                                    src={attachment.url}
+                                    alt={attachment.fileName || `Image attachment ${i + 1}`}
+                                    loading="lazy"
+                                    className="block max-h-80 w-auto max-w-full object-contain bg-white"
+                                />
+                            </a>
+                        ))}
+                        {fileAttachments.map((attachment, i) => (
+                            <a
+                                key={`file-${i}-${attachment.url}`}
+                                href={attachment.url}
+                                target="_blank"
+                                rel="noreferrer"
                                 className={cn(
                                     "flex items-center gap-2 text-xs p-2 rounded hover:bg-black/5 transition-colors truncate max-w-full",
                                     isOutbound && !isEmail ? "text-blue-100 hover:bg-white/20" : "text-gray-600"
                                 )}
                             >
                                 <Paperclip className="h-3 w-3 shrink-0" />
-                                <span className="truncate">Attachment {i + 1}</span>
+                                <span className="truncate">{attachment.fileName || `Attachment ${i + 1}`}</span>
                                 <ExternalLink className="h-3 w-3 shrink-0 ml-auto opacity-50" />
                             </a>
                         ))}

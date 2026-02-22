@@ -208,17 +208,28 @@ export async function POST(req: NextRequest) {
                 resolvedPhone: realPhone
             };
 
-            console.log(`[Evolution] Processing ${normalized.direction} message for ${location.id}`);
-            await processNormalizedMessage(normalized);
-
             if (parsedContent.type === 'image' && location.evolutionInstanceId) {
-                void ingestEvolutionImageAttachment({
+                normalized.__evolutionImageAttachmentPayload = {
                     instanceName: location.evolutionInstanceId,
                     evolutionMessageData: msg,
-                    wamId: key.id,
-                }).catch((err) => {
-                    console.error(`[Evolution] Failed to ingest image attachment for ${key.id}:`, err);
-                });
+                };
+            }
+
+            console.log(`[Evolution] Processing ${normalized.direction} message for ${location.id}`);
+            const processResult = await processNormalizedMessage(normalized);
+
+            if (parsedContent.type === 'image' && location.evolutionInstanceId) {
+                if (processResult?.status === 'deferred_unresolved_lid') {
+                    console.log(`[Evolution] Delaying image attachment ingest until LID resolves (${key.id})`);
+                } else {
+                    void ingestEvolutionImageAttachment({
+                        instanceName: location.evolutionInstanceId,
+                        evolutionMessageData: msg,
+                        wamId: key.id,
+                    }).catch((err) => {
+                        console.error(`[Evolution] Failed to ingest image attachment for ${key.id}:`, err);
+                    });
+                }
             }
 
         } else if (eventType === 'CONNECTION_UPDATE' || eventType === 'CONNECTION.UPDATE') {

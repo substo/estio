@@ -30,6 +30,29 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Optional: Restart Evolution containers during this deploy?
+# Default is NO to avoid disconnecting WhatsApp sessions on app-only deploys.
+# Override non-interactively with: RESTART_EVOLUTION_CONTAINERS=true|false
+RESTART_EVOLUTION_CONTAINERS="${RESTART_EVOLUTION_CONTAINERS:-}"
+if [ -z "$RESTART_EVOLUTION_CONTAINERS" ]; then
+    if [ -t 0 ]; then
+        echo "🐳 Evolution API containers restart is optional (recommended: skip for app-only deploys)."
+        read -p "🔁 Restart Evolution API containers during this deploy? [y/N] " -r RESTART_EVOLUTION_REPLY
+        echo
+        case "$RESTART_EVOLUTION_REPLY" in
+            [Yy]|[Yy][Ee][Ss])
+                RESTART_EVOLUTION_CONTAINERS="true"
+                ;;
+            *)
+                RESTART_EVOLUTION_CONTAINERS="false"
+                ;;
+        esac
+    else
+        RESTART_EVOLUTION_CONTAINERS="false"
+        echo "🐳 Non-interactive shell detected; skipping Evolution container restart by default."
+    fi
+fi
+
 # Step 0: Determine Active/Target Slots
 echo "🔍 Checking server state..."
 # Check if symlink
@@ -138,9 +161,15 @@ ssh $SSH_OPTS $SERVER "chmod +x $TARGET_DIR/scripts/setup-log-rotation.sh && $TA
 echo "📦 Installing Production Dependencies on Server..."
 ssh $SSH_OPTS $SERVER "cd $TARGET_DIR && npm ci --omit=dev --legacy-peer-deps && npx prisma@6.19.0 generate"
 
-# Step 6: Deploy Evolution (Same as before - simplified)
-echo "🐳 Ensuring Evolution API is up..."
-ssh $SSH_OPTS $SERVER "cd $TARGET_DIR && docker rm -f evolution_api evolution_postgres evolution_redis 2>/dev/null || true && docker compose -f docker-compose.evolution.yml up -d"
+# Step 6: Evolution Containers (Optional)
+if [[ "$RESTART_EVOLUTION_CONTAINERS" == "true" ]]; then
+    echo "🐳 Restarting Evolution API containers (user requested)..."
+    ssh $SSH_OPTS $SERVER "cd $TARGET_DIR && docker rm -f evolution_api evolution_postgres evolution_redis 2>/dev/null || true && docker compose -f docker-compose.evolution.yml up -d"
+else
+    echo "⏭️  Skipping Evolution API container restart (app-only deploy)."
+    echo "   Set RESTART_EVOLUTION_CONTAINERS=true or answer 'y' to restart them."
+    ssh $SSH_OPTS $SERVER "docker ps --filter name=evolution --format 'table {{.Names}}\t{{.Status}}' || true"
+fi
 
 # Step 7: Switch Live
 echo "🔄 Switching live..."

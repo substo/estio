@@ -22,6 +22,10 @@ export interface NormalizedMessage {
     resolvedPhone?: string; // Explicitly passed resolved phone from webhook
     __skipUnresolvedLidDeferral?: boolean; // Internal: avoid enqueue loop during retry
     __deferredAttempt?: number; // Internal: deferred retry count for logging/limits
+    __evolutionImageAttachmentPayload?: {
+        instanceName: string;
+        evolutionMessageData: any;
+    }; // Internal: used to ingest image attachment after deferred LID resolution
 }
 
 // ... handleWhatsAppMessage ...
@@ -117,6 +121,28 @@ function clearDeferredLidEntry(key: string) {
     deferredLidMessages.delete(key);
 }
 
+export async function runDeferredEvolutionImageAttachmentIngest(msg: NormalizedMessage) {
+    const payload = msg.__evolutionImageAttachmentPayload;
+    if (msg.type !== "image" || !payload?.instanceName || !payload?.evolutionMessageData || !msg.wamId) {
+        return;
+    }
+
+    try {
+        const { ingestEvolutionImageAttachment } = await import("@/lib/whatsapp/evolution-media");
+        const result: any = await ingestEvolutionImageAttachment({
+            instanceName: payload.instanceName,
+            evolutionMessageData: payload.evolutionMessageData,
+            wamId: msg.wamId,
+        });
+
+        if (result?.status === "skipped" && result?.reason === "message_not_found") {
+            console.warn(`[WhatsApp Sync] Deferred image attachment still missing message row for ${msg.wamId}`);
+        }
+    } catch (err) {
+        console.error(`[WhatsApp Sync] Deferred image attachment ingest failed for ${msg.wamId}:`, err);
+    }
+}
+
 function scheduleDeferredLidRetry(key: string) {
     const entry = deferredLidMessages.get(key);
     if (!entry) return;
@@ -147,6 +173,7 @@ function scheduleDeferredLidRetry(key: string) {
                 return;
             }
 
+            await runDeferredEvolutionImageAttachmentIngest(current.msg);
             clearDeferredLidEntry(key);
             console.log(`[WhatsApp Sync] Deferred LID message resolved/processed: ${current.msg.wamId}`);
         } catch (err) {

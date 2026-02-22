@@ -5,6 +5,24 @@ The server maintains two directories: `estio-app-blue` and `estio-app-green`. A 
 
 ## 📂 The Scripts
 
+### 0. `deploy-local-build.sh` (Local Build -> Server, Recommended for Iteration)
+-   **Purpose**: Builds the app on your **local machine** (avoids server OOM / CPU thrashing), uploads pre-built artifacts, then performs a blue/green swap.
+-   **Strategy**: Blue/Green (Zero Downtime) with server-side `npm ci --omit=dev` + Prisma client generation.
+-   **Environment Behavior**:
+    -   Uses local `.env.prod` to create `.env.production.local` for the local `next build`.
+    -   Uploads local `.env.prod` to the target slot as server runtime `.env`.
+    -   **Important**: The next deploy will overwrite the server runtime `.env` with your local `.env.prod`, so keep `.env.prod` current.
+-   **Backup Prompt**:
+    -   Runs `scripts/backup.sh` first and prompts whether to commit/push local changes before deployment.
+-   **Evolution API Restart Prompt (New)**:
+    -   The script now asks whether to restart Evolution containers.
+    -   Default is **No** (recommended for app-only deploys) to avoid disconnecting/logging out WhatsApp sessions.
+    -   Optional non-interactive override: `RESTART_EVOLUTION_CONTAINERS=true` (or `false`).
+-   **Usage**:
+    -   `./deploy-local-build.sh` (interactive prompts)
+    -   `RESTART_EVOLUTION_CONTAINERS=false ./deploy-local-build.sh` (force app-only deploy)
+    -   `RESTART_EVOLUTION_CONTAINERS=true ./deploy-local-build.sh` (include Evolution restart)
+
 ### 1. `deploy-direct.sh` (Local -> Server)
 -   **Purpose**: Deploys code from your **local machine** to the server.
 -   **Strategy**: Blue/Green (Zero Downtime).
@@ -84,6 +102,20 @@ ssh root@138.199.214.117 "pm2 logs estio-app --lines 500 --nostream 2>&1 | grep 
 ```
 
 Expected: `0` (or materially lower than pre-optimization baseline).
+
+### Post-Deploy WhatsApp Session Safety Check (Evolution)
+
+If you intentionally skipped Evolution restart (recommended for app-only deploys), verify containers were not bounced:
+
+```bash
+ssh root@138.199.214.117 "docker ps --filter name=evolution --format 'table {{.Names}}\t{{.Status}}'"
+```
+
+If a WhatsApp instance disconnects unexpectedly after a deploy, check whether Evolution containers were restarted during deployment and inspect connection updates / logout logs:
+
+```bash
+ssh root@138.199.214.117 "pm2 logs estio-app --lines 300 --nostream | grep -E 'CONNECTION_UPDATE|401|logout|LOGOUT'"
+```
 
 ---
 

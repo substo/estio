@@ -94,7 +94,7 @@ export async function initWhatsAppLidResolveWorker() {
             QUEUE_NAME,
             async (job: any) => {
                 const normalized = toNormalizedMessage(job.data.msg, job.data.lidJid);
-                const { processNormalizedMessage } = await import('@/lib/whatsapp/sync');
+                const { processNormalizedMessage, runDeferredEvolutionImageAttachmentIngest } = await import('@/lib/whatsapp/sync');
 
                 const result = await processNormalizedMessage({
                     ...normalized,
@@ -105,6 +105,8 @@ export async function initWhatsAppLidResolveWorker() {
                 if (result?.status === 'deferred_unresolved_lid') {
                     throw new Error('LID_UNRESOLVED');
                 }
+
+                await runDeferredEvolutionImageAttachmentIngest(normalized);
             },
             {
                 connection: REDIS_CONNECTION,
@@ -137,4 +139,3 @@ export async function initWhatsAppLidResolveWorker() {
 
     return _workerPromise;
 }
-

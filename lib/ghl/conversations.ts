@@ -32,7 +32,11 @@ export interface Message {
     direction: 'inbound' | 'outbound';
     status: string;
     dateAdded: string; // ISO or timestamp
-    attachments?: string[];
+    attachments?: Array<string | {
+        url: string;
+        mimeType?: string | null;
+        fileName?: string | null;
+    }>;
     html?: string; // For Email content
     subject?: string; // For Email
     emailFrom?: string;
@@ -60,7 +64,11 @@ interface SendMessagePayload {
     html?: string; // For Email
     emailFrom?: string; // Custom sender email address
     emailFromName?: string; // Custom sender display name
-    attachments?: string[];
+    attachments?: Array<string | {
+        url: string;
+        mimeType?: string | null;
+        fileName?: string | null;
+    }>;
     replyMessageId?: string; // For threading
     conversationProviderId?: string; // For Custom Channels
 }

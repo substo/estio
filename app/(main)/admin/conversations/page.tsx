@@ -10,7 +10,7 @@ import Link from 'next/link';
 // Force dynamic because we fetch real-time data
 export const dynamic = 'force-dynamic';
 
-export default async function ConversationsPage() {
+export default async function ConversationsPage({ searchParams }: { searchParams?: any }) {
     const location = await getLocationContext();
 
     if (!location) {
@@ -63,8 +63,16 @@ export default async function ConversationsPage() {
         );
     }
 
-    // Initial Fetch on Server
-    const { conversations } = await fetchConversations('all');
+    const resolvedSearchParams =
+        searchParams && typeof searchParams.then === 'function'
+            ? await searchParams
+            : (searchParams || {});
+    const selectedConversationId = Array.isArray(resolvedSearchParams?.id)
+        ? resolvedSearchParams.id[0]
+        : resolvedSearchParams?.id;
+
+    // Initial Fetch on Server (include deep-linked conversation even if not in the top-50 window)
+    const { conversations } = await fetchConversations('all', selectedConversationId);
 
     return (
         <div className="h-[calc(100vh-64px)] w-full max-w-full min-w-0 overflow-hidden flex flex-col">
@@ -78,4 +86,3 @@ export default async function ConversationsPage() {
         </div>
     );
 }
-

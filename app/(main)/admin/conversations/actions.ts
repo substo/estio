@@ -40,7 +40,10 @@ async function getAuthenticatedLocation() {
     }
 }
 
-export async function fetchConversations(status: 'active' | 'archived' | 'trash' | 'all' = 'active') {
+export async function fetchConversations(
+    status: 'active' | 'archived' | 'trash' | 'all' = 'active',
+    selectedConversationId?: string | null
+) {
     try {
         const location = await getAuthenticatedLocation();
 
@@ -80,12 +83,31 @@ export async function fetchConversations(status: 'active' | 'archived' | 'trash'
 
 
         // Re-fetch with ghlContactId
-        const conversationsWithGhlId = await db.conversation.findMany({
+        let conversationsWithGhlId = await db.conversation.findMany({
             where,
             orderBy: { lastMessageAt: 'desc' },
             take: 50,
             include: { contact: { select: { name: true, email: true, phone: true, ghlContactId: true } } }
         });
+
+        // If a conversation is deep-linked via ?id=... but falls outside the top-50 window,
+        // include it so the center/right panels can still render for that selection.
+        if (
+            selectedConversationId &&
+            !conversationsWithGhlId.some((c: any) => c.ghlConversationId === selectedConversationId)
+        ) {
+            const selectedConversation = await db.conversation.findFirst({
+                where: {
+                    locationId: location.id,
+                    ghlConversationId: selectedConversationId,
+                },
+                include: { contact: { select: { name: true, email: true, phone: true, ghlContactId: true } } }
+            });
+
+            if (selectedConversation) {
+                conversationsWithGhlId = [selectedConversation, ...conversationsWithGhlId];
+            }
+        }
 
         // 2. Fetch Active Deals relevant to these conversations
         const activeDeals = await db.dealContext.findMany({
@@ -183,11 +205,13 @@ export async function fetchMessages(conversationId: string) {
         status: m.status,
         dateAdded: m.createdAt.toISOString(),
         subject: m.subject || undefined,
-        attachments: (m.attachments || []).map((a: any) =>
-            String(a.url || "").startsWith("r2://")
+        attachments: (m.attachments || []).map((a: any) => ({
+            url: String(a.url || "").startsWith("r2://")
                 ? `/api/media/attachments/${a.id}`
-                : a.url
-        ),
+                : a.url,
+            mimeType: a.mimeType || null,
+            fileName: a.fileName || null,
+        })),
         // Hydrated fields for UI
         html: m.body?.includes('<') ? m.body : undefined // Simple check
     }));
@@ -267,16 +291,27 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
                     participant: participantPhone // Pass resolved participant to sync
                 };
 
+                if (parsedContent.type === 'image' && location.evolutionInstanceId) {
+                    normalized.__evolutionImageAttachmentPayload = {
+                        instanceName: location.evolutionInstanceId,
+                        evolutionMessageData: msg,
+                    };
+                }
+
                 const result = await processNormalizedMessage(normalized);
 
                 if (parsedContent.type === 'image' && location.evolutionInstanceId) {
-                    void ingestEvolutionImageAttachment({
-                        instanceName: location.evolutionInstanceId,
-                        evolutionMessageData: msg,
-                        wamId: key.id,
-                    }).catch((err) => {
-                        console.error(`[Sync] Failed to ingest image attachment for ${key.id}:`, err);
-                    });
+                    if (result?.status === 'deferred_unresolved_lid') {
+                        console.log(`[Sync] Delaying image attachment ingest until LID resolves (${key.id})`);
+                    } else {
+                        void ingestEvolutionImageAttachment({
+                            instanceName: location.evolutionInstanceId,
+                            evolutionMessageData: msg,
+                            wamId: key.id,
+                        }).catch((err) => {
+                            console.error(`[Sync] Failed to ingest image attachment for ${key.id}:`, err);
+                        });
+                    }
                 }
 
                 if (result?.status === 'skipped') {

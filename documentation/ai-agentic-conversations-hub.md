@@ -134,6 +134,7 @@ The default GHL message list endpoint returns stripped-down plaintext bodies and
 ### URL-Based Navigation (New)
 To support direct linking, bookmarking, and browser navigation, the hub now synchronizes its state with the URL query parameters:
 *   **Deep Linking**: Navigate directly to a conversation using `?id=CONVERSATION_ID`.
+    *   The server now includes the URL-selected conversation in the initial payload even if it is older than the default top-50 list window, so the Chat/Info panels still render for valid deep links.
 *   **View Persistence**: The active view (Inbox, Archived, Trash) is persisted via `?view=archived`.
 *   **Deal Mode**: Direct access to deal rooms via `?mode=deals&dealId=DEAL_ID`.
 *   **Browser History**: Back and Forward buttons correctly navigate through conversation selection history.
@@ -160,6 +161,7 @@ Large HTML emails or long text strings (URLs, JSON) could previously cause the e
 We refactored the message display into a shared component (`_components/message-bubble.tsx`) used by both the Chat Window and the Deal Timeline. This ensures:
 *   **Consistent Visuals**: Identical styling for Headers, Timestamps, and Status indicators across all views.
 *   **Feature Parity**: One-click "Expand/Collapse" for emails and attachment rendering are available everywhere.
+*   **Inline Media Preview**: Image attachments (including WhatsApp images stored via private R2 attachment proxy URLs) render inline previews in the bubble, while non-image attachments remain click-through links.
 *   **Maintainability**: Updates to message styling now propagate instantly to all parts of the Admin Hub.
 
 ### Channel-Specific From/To Display
@@ -283,4 +285,3 @@ To reduce dependency on GHL and provide a more robust, "production-ready" experi
 3.  Copy the generated **Webhook URL** and **Verify Token**.
 4.  Configure Webhook in Meta Developer Portal.
 5.  Send a test message to verify.
-
