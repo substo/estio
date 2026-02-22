@@ -18,6 +18,14 @@ interface PageProps {
 
 import { getLocationContext } from '@/lib/auth/location-context';
 
+type PropertyView = 'inventory' | 'feed-inbox' | 'feed-managed' | 'all';
+
+const PROPERTY_VIEWS: PropertyView[] = ['inventory', 'feed-inbox', 'feed-managed', 'all'];
+
+function isPropertyView(value: string): value is PropertyView {
+    return PROPERTY_VIEWS.includes(value as PropertyView);
+}
+
 export default async function PropertiesPage(props: PageProps) {
     const searchParams = await props.searchParams;
 
@@ -38,6 +46,8 @@ export default async function PropertiesPage(props: PageProps) {
     const limit = 10;
     const skip = typeof searchParams.skip === 'string' ? parseInt(searchParams.skip) : 0;
     const q = typeof searchParams.q === 'string' ? searchParams.q : undefined;
+    const rawView = typeof searchParams.view === 'string' ? searchParams.view : undefined;
+    const view = rawView && isPropertyView(rawView) ? rawView : undefined;
 
     // Filters
     const publicationStatus = typeof searchParams.publicationStatus === 'string' ? searchParams.publicationStatus : undefined;
@@ -79,6 +89,7 @@ export default async function PropertiesPage(props: PageProps) {
                 limit,
                 skip,
                 q,
+                view,
                 publicationStatus,
                 status,
                 goal,
@@ -191,17 +202,24 @@ export default async function PropertiesPage(props: PageProps) {
                         Manage your real estate listings.
                     </p>
                 </div>
-                <Link href="/admin/properties/import">
-                    <Button variant="outline" className="mr-2">
-                        Import Property
-                    </Button>
-                </Link>
-                <Link href="/admin/properties?propertyId=new">
-                    <Button>
-                        <Plus className="mr-2 h-4 w-4" />
-                        Add Property
-                    </Button>
-                </Link>
+                <div className="flex items-center gap-2">
+                    <Link href="/admin/properties/feed-inbox">
+                        <Button variant="outline">
+                            Feed Inbox
+                        </Button>
+                    </Link>
+                    <Link href="/admin/properties/import">
+                        <Button variant="outline">
+                            Import Property
+                        </Button>
+                    </Link>
+                    <Link href="/admin/properties?propertyId=new">
+                        <Button>
+                            <Plus className="mr-2 h-4 w-4" />
+                            Add Property
+                        </Button>
+                    </Link>
+                </div>
             </div>
 
             <PropertyFilters owners={owners} />

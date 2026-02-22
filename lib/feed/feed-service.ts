@@ -1,13 +1,43 @@
 
 import db from "@/lib/db";
 import { GenericXmlParser } from "./parsers/generic-xml-parser";
-import { FeedFormat, PropertyFeed } from "@prisma/client";
-import { FeedItem, FeedParser } from "./parsers/base-parser";
+import { FeedFormat } from "@prisma/client";
+import { FeedParser } from "./parsers/base-parser";
 import { FeedMappingConfig } from "./ai-mapper";
-import { JsonValue } from "@prisma/client/runtime/library";
 import { createHash } from "crypto";
 
 export class FeedService {
+    private static buildFeedSyncMetadata(
+        metadata: unknown,
+        status: 'CREATED' | 'UPDATED' | 'UNCHANGED',
+        timestamp: Date
+    ) {
+        const metadataObject =
+            metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+                ? { ...(metadata as Record<string, any>) }
+                : {};
+
+        const existingFeedSync =
+            metadataObject.feedSync &&
+            typeof metadataObject.feedSync === 'object' &&
+            !Array.isArray(metadataObject.feedSync)
+                ? (metadataObject.feedSync as Record<string, any>)
+                : {};
+
+        const iso = timestamp.toISOString();
+
+        metadataObject.feedSync = {
+            ...existingFeedSync,
+            status,
+            lastSeenAt: iso,
+            lastSyncedAt: iso,
+            ...(status === 'CREATED' || status === 'UPDATED'
+                ? { lastChangedAt: iso }
+                : {}),
+        };
+
+        return metadataObject;
+    }
 
     static async syncFeed(feedId: string) {
         const feed = await db.propertyFeed.findUnique({
@@ -40,6 +70,7 @@ export class FeedService {
         let created = 0;
         let updated = 0;
         let skipped = 0;
+        const syncTimestamp = new Date();
 
         for (const item of items) {
             const externalId = String(item.externalId || '').trim();
@@ -78,11 +109,18 @@ export class FeedService {
                         data: {
                             price: item.price,
                             feedHash: currentHash,
+                            metadata: this.buildFeedSyncMetadata(existing.metadata, 'UPDATED', syncTimestamp),
                             // Might want to update other fields if they changed?
                         }
                     });
                     updated++;
                 } else {
+                    await db.property.update({
+                        where: { id: existing.id },
+                        data: {
+                            metadata: this.buildFeedSyncMetadata(existing.metadata, 'UNCHANGED', syncTimestamp),
+                        }
+                    });
                     skipped++;
                 }
             } else {
@@ -109,6 +147,7 @@ export class FeedService {
                         feedId: feed.id,
                         feedReferenceId: externalId,
                         feedHash: currentHash,
+                        metadata: this.buildFeedSyncMetadata(undefined, 'CREATED', syncTimestamp),
                         // Map images
                         media: {
                             create: item.images.map((url, index) => ({

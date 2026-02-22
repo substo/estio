@@ -1,7 +1,7 @@
 "use server";
 
 import db from "@/lib/db";
-import { MediaKind } from "@prisma/client";
+import { MediaKind, PropertyStatus, PublicationStatus } from "@prisma/client";
 import { updatePropertyEmbedding } from "@/lib/ai/search/property-embeddings";
 import { getLocationById, refreshGhlAccessToken } from "@/lib/location";
 import { syncToGHL } from "@/lib/properties/repository";
@@ -841,6 +841,86 @@ export async function deletePropertyAction(propertyId: string, locationId: strin
         console.error("Failed to delete property:", error);
         throw new Error("Failed to delete property");
     }
+}
+
+type FeedInboxBulkAction = 'publish' | 'draft' | 'pending' | 'withdraw';
+
+export async function bulkUpdateFeedInboxPropertiesAction(
+    params: {
+        propertyIds: string[];
+        locationId: string;
+        action: FeedInboxBulkAction;
+    }
+) {
+    const { propertyIds, locationId, action } = params;
+
+    if (!locationId) {
+        throw new Error("Location ID required");
+    }
+
+    const uniqueIds = Array.from(new Set((propertyIds || []).filter(Boolean)));
+    if (uniqueIds.length === 0) {
+        return { success: true, updatedCount: 0 };
+    }
+
+    const user = await currentUser();
+    if (!user) throw new Error("Unauthorized");
+
+    const hasAccess = await verifyUserHasAccessToLocation(user.id, locationId);
+    if (!hasAccess) {
+        throw new Error("Unauthorized: Access Denied");
+    }
+
+    const feedProps = await db.property.findMany({
+        where: {
+            id: { in: uniqueIds },
+            locationId,
+            source: 'FEED',
+        },
+        select: { id: true },
+    });
+
+    const allowedIds = feedProps.map((p) => p.id);
+    if (allowedIds.length === 0) {
+        return { success: true, updatedCount: 0 };
+    }
+
+    let data: { publicationStatus?: PublicationStatus; status?: PropertyStatus } = {};
+
+    switch (action) {
+        case 'publish':
+            data = { publicationStatus: 'PUBLISHED' };
+            break;
+        case 'draft':
+            data = { publicationStatus: 'DRAFT' };
+            break;
+        case 'pending':
+            data = { publicationStatus: 'PENDING' };
+            break;
+        case 'withdraw':
+            data = { status: 'WITHDRAWN', publicationStatus: 'UNLISTED' };
+            break;
+        default:
+            throw new Error("Unsupported action");
+    }
+
+    const result = await db.property.updateMany({
+        where: {
+            id: { in: allowedIds },
+            locationId,
+            source: 'FEED',
+        },
+        data,
+    });
+
+    revalidatePath("/admin/properties");
+    revalidatePath("/admin/properties/feed-inbox");
+
+    return {
+        success: true,
+        updatedCount: result.count,
+        ignoredCount: uniqueIds.length - allowedIds.length,
+    };
 }
 
 import { pushPropertyToCrm } from "@/lib/crm/crm-pusher";

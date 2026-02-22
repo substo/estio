@@ -8,6 +8,7 @@ const OBJECT_KEY = 'custom_object.property';
 export interface ListPropertiesParams {
     limit?: number;
     skip?: number;
+    view?: 'inventory' | 'feed-inbox' | 'feed-managed' | 'all';
     q?: string; // Search query
     status?: string;
     publicationStatus?: string; // New: Publication Status
@@ -110,6 +111,32 @@ export async function listProperties(
     // Re-implementing the 'where' construction properly:
     const finalWhere: any = { AND: [] };
     finalWhere.AND.push({ locationId });
+
+    const view = params.view || 'inventory';
+
+    switch (view) {
+        case 'inventory':
+            // Hide newly imported feed items from the default inventory list.
+            finalWhere.AND.push({
+                NOT: {
+                    AND: [
+                        { source: 'FEED' },
+                        { publicationStatus: 'PENDING' }
+                    ]
+                }
+            });
+            break;
+        case 'feed-inbox':
+            finalWhere.AND.push({ source: 'FEED' });
+            finalWhere.AND.push({ publicationStatus: 'PENDING' });
+            break;
+        case 'feed-managed':
+            finalWhere.AND.push({ source: 'FEED' });
+            break;
+        case 'all':
+        default:
+            break;
+    }
 
     if (params.q) {
         finalWhere.AND.push({

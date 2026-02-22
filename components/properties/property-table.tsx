@@ -133,6 +133,25 @@ export function PropertyTable({
         }
     };
 
+    const getSourceMeta = (source?: string) => {
+        const value = (source || '').trim();
+
+        switch (value.toUpperCase()) {
+            case 'FEED':
+                return { label: 'XML Feed', className: 'bg-amber-100 text-amber-800' };
+            case 'IDX':
+            case 'ESTIO':
+                return { label: 'Manual', className: 'bg-slate-100 text-slate-800' };
+            case 'GHL':
+                return { label: 'GHL', className: 'bg-blue-100 text-blue-800' };
+            default:
+                return {
+                    label: value || 'Unknown',
+                    className: 'bg-slate-100 text-slate-800'
+                };
+        }
+    };
+
     if (data.length === 0) {
         return (
             <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
@@ -151,6 +170,7 @@ export function PropertyTable({
                             <TableRow>
                                 <TableHead className="hidden xl:table-cell">Reference</TableHead>
                                 <TableHead>Title</TableHead>
+                                <TableHead className="hidden xl:table-cell">Source</TableHead>
                                 <TableHead>Status</TableHead>
                                 <TableHead className="hidden lg:table-cell">Publication</TableHead>
                                 <TableHead className="hidden lg:table-cell">Goal</TableHead>
@@ -171,9 +191,25 @@ export function PropertyTable({
                                         {item.properties.reference_number || item.properties.property_reference}
                                     </TableCell>
                                     <TableCell>
-                                        <div className="max-w-[150px] sm:max-w-[200px] truncate" title={item.properties.title}>
-                                            {item.properties.title}
+                                        <div className="space-y-1">
+                                            <div className="max-w-[150px] sm:max-w-[200px] truncate" title={item.properties.title}>
+                                                {item.properties.title}
+                                            </div>
+                                            <Badge
+                                                variant="secondary"
+                                                className={`xl:hidden ${getSourceMeta(item.properties.source).className}`}
+                                            >
+                                                {getSourceMeta(item.properties.source).label}
+                                            </Badge>
                                         </div>
+                                    </TableCell>
+                                    <TableCell className="hidden xl:table-cell">
+                                        <Badge
+                                            variant="secondary"
+                                            className={getSourceMeta(item.properties.source).className}
+                                        >
+                                            {getSourceMeta(item.properties.source).label}
+                                        </Badge>
                                     </TableCell>
                                     <TableCell>
                                         <Badge variant="secondary" className={getStatusColor(item.properties.status)}>

@@ -22,6 +22,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { Check, ChevronsUpDown, X, SlidersHorizontal, ChevronDown, ChevronUp } from 'lucide-react';
 
@@ -223,6 +224,41 @@ export function PropertyFilters({ owners = [] }: PropertyFiltersProps) {
     };
 
     const selectedOwner = searchParams.get('owner');
+    const rawView = searchParams.get('view');
+    const currentView = rawView && ['inventory', 'feed-inbox', 'feed-managed', 'all'].includes(rawView)
+        ? rawView
+        : 'inventory';
+
+    const handleViewChange = (nextView: string) => {
+        const params = new URLSearchParams(searchParams.toString());
+
+        params.set('view', nextView);
+        params.delete('skip');
+
+        // Keep tab semantics predictable by normalizing preset-driven filters.
+        switch (nextView) {
+            case 'feed-inbox':
+                params.set('source', 'FEED');
+                params.set('publicationStatus', 'Pending');
+                break;
+            case 'feed-managed':
+                params.set('source', 'FEED');
+                params.delete('publicationStatus');
+                break;
+            case 'all':
+                params.delete('source');
+                params.delete('publicationStatus');
+                break;
+            case 'inventory':
+            default:
+                params.delete('source');
+                params.delete('publicationStatus');
+                break;
+        }
+
+        const qs = params.toString();
+        router.push(qs ? `${pathname}?${qs}` : pathname);
+    };
 
     const activeFilterCount = [
         searchParams.get('publicationStatus'),
@@ -246,6 +282,18 @@ export function PropertyFilters({ owners = [] }: PropertyFiltersProps) {
         <Card className="mb-6">
             <CardContent className="pt-6">
                 <div className="space-y-4">
+                    <div className="flex flex-col gap-2">
+                        <div className="text-sm font-medium">Views</div>
+                        <Tabs value={currentView} onValueChange={handleViewChange}>
+                            <TabsList className="h-auto w-full justify-start flex-wrap">
+                                <TabsTrigger value="inventory">Inventory</TabsTrigger>
+                                <TabsTrigger value="feed-inbox">Feed Inbox</TabsTrigger>
+                                <TabsTrigger value="feed-managed">Feed Managed</TabsTrigger>
+                                <TabsTrigger value="all">All</TabsTrigger>
+                            </TabsList>
+                        </Tabs>
+                    </div>
+
                     {/* Primary Filters (Row 1) */}
                     <div className="flex gap-4 items-start w-full">
                         {/* Left Column: Filters & Search */}
@@ -516,9 +564,9 @@ export function PropertyFilters({ owners = [] }: PropertyFiltersProps) {
                                 </Select>
                             </div>
 
-                            {/* Created By */}
+                            {/* Source */}
                             <div className="space-y-2">
-                                <label className="text-sm font-medium">Created By</label>
+                                <label className="text-sm font-medium">Source</label>
                                 <Select
                                     value={searchParams.get('source') || 'all'}
                                     onValueChange={(val) => handleFilterChange('source', val === 'all' ? '' : val)}
