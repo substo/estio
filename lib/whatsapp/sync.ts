@@ -8,7 +8,7 @@ export interface NormalizedMessage {
     locationId: string;
     from: string; // E.164 phone number (Sender)
     to: string;   // E.164 phone number (Recipient)
-    type: "text" | "image" | "document" | "audio" | "video" | "other";
+    type: "text" | "image" | "document" | "audio" | "video" | "sticker" | "reaction" | "other";
     body: string;
     wamId: string; // Unique Message ID
     timestamp: Date;
@@ -220,6 +220,16 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     });
     if (existing) {
         console.log(`[WhatsApp Sync] Skipped existing message: ${wamId}`);
+
+        // Backfill/heal older generic placeholders when newer parsers can classify the content.
+        if ((existing.body || "").trim() === "[Media]" && (body || "").trim() && (body || "").trim() !== "[Media]") {
+            await db.message.update({
+                where: { id: existing.id },
+                data: { body }
+            }).catch((err) => {
+                console.error(`[WhatsApp Sync] Failed to heal placeholder body for ${wamId}:`, err);
+            });
+        }
 
         // --- LAYER 2: Auto-Capture LID from Outbound Webhook ---
         // If this is an outbound message we sent from the App, we already have the real contact.

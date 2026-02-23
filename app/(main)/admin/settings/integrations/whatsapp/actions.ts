@@ -7,6 +7,7 @@ import axios from "axios";
 import Cryptr from "cryptr";
 import { evolutionClient } from "@/lib/evolution/client";
 import { getLocationContext } from "@/lib/auth/location-context";
+import { parseEvolutionMessageContent } from "@/lib/whatsapp/evolution-media";
 
 // Simple encryption
 const secret = process.env.ENCRYPTION_KEY || "dev-secret-key-change-me";
@@ -443,12 +444,17 @@ export async function fetchConversationHistory(conversationId: string) {
                 // Participant Resolution
                 const realSenderPhone = (msg as any).senderPn || (key.participant?.includes('@s.whatsapp.net') ? key.participant.replace('@s.whatsapp.net', '') : null);
                 let participantPhone = realSenderPhone || (key.participant ? key.participant.replace('@s.whatsapp.net', '').replace('@lid', '') : undefined);
+                const parsedContent = parseEvolutionMessageContent(messageContent);
+                const senderName = msg.pushName || realSenderPhone || "Unknown";
+                const normalizedBody = isGroup && parsedContent.type !== 'text'
+                    ? `[${senderName}]: ${parsedContent.body}`
+                    : parsedContent.body;
 
                 const normalized: any = {
                     from: isFromMe ? location.id : phoneNumber,
                     to: isFromMe ? phoneNumber : location.id,
-                    body: messageContent.conversation || messageContent.extendedTextMessage?.text || '[Media]',
-                    type: 'text',
+                    body: normalizedBody,
+                    type: parsedContent.type,
                     wamId: key.id,
                     timestamp: new Date(msg.messageTimestamp ? (msg.messageTimestamp as number) * 1000 : Date.now()),
                     direction: isFromMe ? 'outbound' : 'inbound',

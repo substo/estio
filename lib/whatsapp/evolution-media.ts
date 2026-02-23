@@ -6,7 +6,7 @@ import {
 } from "@/lib/whatsapp/media-r2";
 
 export type ParsedEvolutionMessageContent = {
-    type: "text" | "image" | "document" | "audio" | "video" | "other";
+    type: "text" | "image" | "document" | "audio" | "video" | "sticker" | "reaction" | "other";
     body: string;
     media?: {
         kind: "image";
@@ -16,6 +16,19 @@ export type ParsedEvolutionMessageContent = {
         width?: number;
         height?: number;
         caption?: string;
+    };
+    reaction?: {
+        emoji?: string;
+        removed?: boolean;
+        targetMessageId?: string;
+        targetRemoteJid?: string;
+        targetParticipant?: string;
+    };
+    sticker?: {
+        emoji?: string;
+        mimetype?: string;
+        fileLength?: number;
+        isAnimated?: boolean;
     };
 };
 
@@ -48,14 +61,28 @@ function unwrapMessageContent(message: any) {
     return current || {};
 }
 
+function pickFirstNonEmptyString(...values: unknown[]) {
+    for (const value of values) {
+        if (typeof value !== "string") continue;
+        const trimmed = value.trim();
+        if (trimmed) return value;
+    }
+    return "";
+}
+
 export function parseEvolutionMessageContent(message: any): ParsedEvolutionMessageContent {
     const content = unwrapMessageContent(message);
 
-    const text =
-        content.conversation ||
-        content.extendedTextMessage?.text ||
-        content.imageMessage?.caption ||
-        "";
+    const text = pickFirstNonEmptyString(
+        content.conversation,
+        content.extendedTextMessage?.text,
+        content.imageMessage?.caption,
+        content.videoMessage?.caption,
+        content.documentMessage?.caption,
+        content.buttonsResponseMessage?.selectedDisplayText,
+        content.templateButtonReplyMessage?.selectedDisplayText,
+        content.listResponseMessage?.title,
+    );
 
     if (content.imageMessage) {
         const image = content.imageMessage;
@@ -82,6 +109,44 @@ export function parseEvolutionMessageContent(message: any): ParsedEvolutionMessa
     }
     if (content.videoMessage) {
         return { type: "video", body: text || "[Video]" };
+    }
+
+    if (content.stickerMessage) {
+        const sticker = content.stickerMessage;
+        const stickerEmoji = typeof sticker.emoji === "string" && sticker.emoji.trim() ? sticker.emoji : undefined;
+        return {
+            type: "sticker",
+            body: stickerEmoji ? `Sticker: ${stickerEmoji}` : "[Sticker]",
+            sticker: {
+                emoji: stickerEmoji,
+                mimetype: typeof sticker.mimetype === "string" ? sticker.mimetype : undefined,
+                fileLength: Number(String(sticker.fileLength || "0")) || undefined,
+                isAnimated: typeof sticker.isAnimated === "boolean" ? sticker.isAnimated : undefined,
+            },
+        };
+    }
+
+    if (content.reactionMessage) {
+        const reaction = content.reactionMessage;
+        const emoji = typeof reaction.text === "string" ? reaction.text.trim() : "";
+        const removed = emoji.length === 0;
+
+        return {
+            type: "reaction",
+            body: removed ? "[Reaction removed]" : `Reaction: ${emoji}`,
+            reaction: {
+                emoji: emoji || undefined,
+                removed,
+                targetMessageId: typeof reaction.key?.id === "string" ? reaction.key.id : undefined,
+                targetRemoteJid: typeof reaction.key?.remoteJid === "string" ? reaction.key.remoteJid : undefined,
+                targetParticipant: typeof reaction.key?.participant === "string" ? reaction.key.participant : undefined,
+            },
+        };
+    }
+
+    // Some versions/features may only expose the encrypted reaction wrapper.
+    if (content.encReactionMessage) {
+        return { type: "reaction", body: "[Reaction]" };
     }
 
     if (text) {
@@ -174,4 +239,3 @@ export async function ingestEvolutionImageAttachment(params: {
 
     return { status: "stored" as const, key: uploaded.key };
 }
-

@@ -2215,12 +2215,17 @@ export async function syncAllEvolutionChats() {
                             (key.participant?.includes('@s.whatsapp.net') ? key.participant.replace('@s.whatsapp.net', '') : null);
                         let participantPhone = realSenderPhone ||
                             (key.participant ? key.participant.replace('@s.whatsapp.net', '').replace('@lid', '') : undefined);
+                        const parsedContent = parseEvolutionMessageContent(messageContent);
+                        const senderName = msg.pushName || realSenderPhone || "Unknown";
+                        const normalizedBody = isGroup && parsedContent.type !== 'text'
+                            ? `[${senderName}]: ${parsedContent.body}`
+                            : parsedContent.body;
 
                         const normalized: any = {
                             from: isFromMe ? location.id : phone,
                             to: isFromMe ? phone : location.id,
-                            body: messageContent.conversation || messageContent.extendedTextMessage?.text || '[Media]',
-                            type: 'text',
+                            body: normalizedBody,
+                            type: parsedContent.type,
                             wamId: key.id,
                             timestamp: new Date(msg.messageTimestamp ? (msg.messageTimestamp as number) * 1000 : Date.now()),
                             direction: isFromMe ? 'outbound' : 'inbound',
@@ -2461,11 +2466,12 @@ export async function startNewConversation(phone: string) {
                         if (!messageContent || !key?.id) continue;
 
                         const isFromMe = key.fromMe;
+                        const parsedContent = parseEvolutionMessageContent(messageContent);
                         const normalized: any = {
                             from: isFromMe ? location.id : whatsappPhone,
                             to: isFromMe ? whatsappPhone : location.id,
-                            body: messageContent.conversation || messageContent.extendedTextMessage?.text || '[Media]',
-                            type: 'text',
+                            body: parsedContent.body,
+                            type: parsedContent.type,
                             wamId: key.id,
                             timestamp: new Date(msg.messageTimestamp ? (msg.messageTimestamp as number) * 1000 : Date.now()),
                             direction: isFromMe ? 'outbound' : 'inbound',
@@ -2526,11 +2532,12 @@ export async function startNewConversation(phone: string) {
                     if (!messageContent || !key?.id) continue;
 
                     const isFromMe = key.fromMe;
+                    const parsedContent = parseEvolutionMessageContent(messageContent);
                     const normalized: any = {
                         from: isFromMe ? location.id : whatsappPhone,
                         to: isFromMe ? whatsappPhone : location.id,
-                        body: messageContent.conversation || messageContent.extendedTextMessage?.text || '[Media]',
-                        type: 'text',
+                        body: parsedContent.body,
+                        type: parsedContent.type,
                         wamId: key.id,
                         timestamp: new Date(msg.messageTimestamp ? (msg.messageTimestamp as number) * 1000 : Date.now()),
                         direction: isFromMe ? 'outbound' : 'inbound',

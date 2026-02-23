@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLocationContext } from "@/lib/auth/location-context";
 import { evolutionClient } from "@/lib/evolution/client";
 import { processNormalizedMessage } from "@/lib/whatsapp/sync";
+import { parseEvolutionMessageContent } from "@/lib/whatsapp/evolution-media";
 import { refreshGhlAccessToken } from "@/lib/location";
 
 export const dynamic = 'force-dynamic';
@@ -201,12 +202,17 @@ export async function GET(req: NextRequest) {
                                         (key.participant?.includes('@s.whatsapp.net') ? key.participant.replace('@s.whatsapp.net', '') : null);
                                     let participantPhone = realSenderPhone ||
                                         (key.participant ? key.participant.replace('@s.whatsapp.net', '').replace('@lid', '') : undefined);
+                                    const parsedContent = parseEvolutionMessageContent(messageContent);
+                                    const senderName = msg.pushName || realSenderPhone || 'Unknown';
+                                    const normalizedBody = isGroup && parsedContent.type !== 'text'
+                                        ? `[${senderName}]: ${parsedContent.body}`
+                                        : parsedContent.body;
 
                                     const normalized: any = {
                                         from: isFromMe ? location!.id : contactIdentifier,
                                         to: isFromMe ? contactIdentifier : location!.id,
-                                        body: messageContent.conversation || messageContent.extendedTextMessage?.text || '[Media]',
-                                        type: 'text',
+                                        body: normalizedBody,
+                                        type: parsedContent.type,
                                         wamId: key.id,
                                         timestamp: new Date(msg.messageTimestamp ? (msg.messageTimestamp as number) * 1000 : Date.now()),
                                         direction: isFromMe ? 'outbound' : 'inbound',

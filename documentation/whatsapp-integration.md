@@ -1,5 +1,5 @@
 # WhatsApp Integration: Custom Channel ("Linked Device")
-**Last Updated:** 2026-02-22
+**Last Updated:** 2026-02-23
 **Related:** [Legacy Integration](whatsapp-integration-legacy.md)
 
 ## Overview
@@ -48,7 +48,7 @@ We use a **Hybrid Approach**:
 
 #### C. Inbound (WhatsApp -> GHL)
 1.  **Webhook**: Evolution API sends `MESSAGES_UPSERT` to `POST /api/webhooks/evolution`.
-2.  **Parsing**: `parseEvolutionMessageContent(...)` unwraps nested message containers (ephemeral / view-once) and detects text vs image/document/audio/video.
+2.  **Parsing**: `parseEvolutionMessageContent(...)` unwraps nested message containers (ephemeral / view-once) and normalizes text, reactions/stickers, and media message types.
 3.  **Processing**: `lib/whatsapp/sync.ts` writes the normalized message to the local DB.
 4.  **Image Attachment Ingestion (Evolution-only)**:
     -   If the message is an image, webhook/history sync triggers `ingestEvolutionImageAttachment(...)` asynchronously.
@@ -147,6 +147,25 @@ whatsapp/evolution/v1/env/{env}/location/{locationId}/contact/{contactId?}/conve
 - `fetchMessages(...)` rewrites R2-backed attachments to `/api/media/attachments/{attachmentId}` for the UI.
 - `fetchMessages(...)` now also returns attachment metadata (`url`, `mimeType`, `fileName`) so the chat UI can render **inline image previews** for image attachments while keeping non-image files as links.
 - We intentionally do **not** enable webhook base64 payloads globally. Media is fetched on demand using `getBase64FromMediaMessage(...)` to avoid oversized webhook payloads.
+
+### 7. Emoji, Reactions, and Sticker Semantics (Feb 23, 2026)
+
+To prevent emoji reactions/stickers from being mislabeled as generic media (`[Media]`), the Evolution integration now normalizes additional WhatsApp message types in **one shared parser** (`parseEvolutionMessageContent(...)`) and reuses it across:
+- `POST /api/webhooks/evolution` (live webhooks)
+- manual/smart history sync (`app/(main)/admin/conversations/actions.ts`)
+- bulk sync (`app/api/whatsapp/sync/route.ts`)
+- admin WhatsApp history fetch tools (`app/(main)/admin/settings/integrations/whatsapp/actions.ts`)
+
+#### Current behavior
+- **Emoji-only text messages** stay plain text (e.g. `👍`, `🔥🔥`).
+- **Reactions** (`reactionMessage`) are stored as readable text, e.g. `Reaction: 👍` or `[Reaction removed]`.
+- **Stickers** (`stickerMessage`) are stored as `Sticker: 😀` when WhatsApp includes a linked emoji, otherwise `[Sticker]`.
+- **Image ingestion remains image-only** (we do not attempt media attachment ingestion for reactions/stickers).
+
+#### Why this matters
+- GHL custom channels do not have native reaction objects, so we keep a human-readable text fallback for CRM sync.
+- Using one parser in all sync paths prevents webhook/history mismatches (the most common cause of "`[Media]` for emoji" regressions).
+- The parser preserves UTF-8 emoji content as text instead of coercing it into media placeholders.
 
 ## Setup Guide
 
