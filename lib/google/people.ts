@@ -4,6 +4,17 @@ import db from '@/lib/db';
 import { getValidAccessToken } from './auth';
 import { generateVisualId } from './utils';
 
+function getPrimaryGooglePhone(person?: people_v1.Schema$Person | null): string | undefined {
+    const phone = person?.phoneNumbers?.find((pn: any) => pn?.canonicalForm || pn?.value) || person?.phoneNumbers?.[0];
+    if (!phone) return undefined;
+    return (phone as any).canonicalForm || phone.value || undefined;
+}
+
+function getGooglePhoneCandidates(phoneEntry: any): string[] {
+    return [phoneEntry?.canonicalForm, phoneEntry?.value]
+        .filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
+}
+
 /**
  * Outbound Sync: Estio → Google
  * Pushes contact changes to Google Contacts
@@ -431,7 +442,7 @@ async function processGoogleContact(
     const googleFamilyName = person.names?.[0]?.familyName || '';
     const googleName = person.names?.[0]?.displayName || `${googleGivenName} ${googleFamilyName}`.trim();
     const googleEmail = person.emailAddresses?.[0]?.value;
-    const googlePhone = person.phoneNumbers?.[0]?.value;
+    const googlePhone = getPrimaryGooglePhone(person);
     const googleUpdatedAt = extractGoogleUpdateTime(person);
 
     // Address extraction
@@ -594,8 +605,9 @@ async function searchByPhoneFallback(
 
         for (const person of (res.data.connections || [])) {
             const hasMatch = person.phoneNumbers?.some(pn => {
-                if (!pn.value) return false;
-                return arePhoneNumbersEquivalent(pn.value, phoneDigits);
+                return getGooglePhoneCandidates(pn).some(candidate =>
+                    arePhoneNumbersEquivalent(candidate, phoneDigits)
+                );
             });
             if (hasMatch) {
                 matches.push(person);
@@ -643,8 +655,10 @@ async function findMatchingGoogleContact(
             // First check strict substring (original logic) as fast path
             // THEN check robust suffix match
             return p?.phoneNumbers?.some(pn =>
-                (pn.value?.replace(/\D/g, '')?.includes(phoneDigits)) ||
-                (pn.value && arePhoneNumbersEquivalent(pn.value, contact.phone!))
+                getGooglePhoneCandidates(pn).some(candidate =>
+                    candidate.replace(/\D/g, '').includes(phoneDigits) ||
+                    arePhoneNumbersEquivalent(candidate, contact.phone!)
+                )
             );
         });
 
@@ -711,7 +725,7 @@ export async function searchGoogleContacts(userId: string, query: string) {
                 resourceName: p.resourceName,
                 name: p.names?.[0]?.displayName,
                 email: p.emailAddresses?.[0]?.value,
-                phone: p.phoneNumbers?.[0]?.value,
+                phone: getPrimaryGooglePhone(p),
                 photo: p.photos?.[0]?.url,
                 etag: p.etag,
                 updateTime: extractGoogleUpdateTime(p)
@@ -733,7 +747,7 @@ export async function searchGoogleContacts(userId: string, query: string) {
                 resourceName: p.resourceName,
                 name: p.names?.[0]?.displayName,
                 email: p.emailAddresses?.[0]?.value,
-                phone: p.phoneNumbers?.[0]?.value,
+                phone: getPrimaryGooglePhone(p),
                 photo: p.photos?.[0]?.url,
                 etag: p.etag,
                 updateTime: extractGoogleUpdateTime(p)
@@ -777,7 +791,7 @@ export async function getGoogleContact(userId: string, resourceName: string) {
             resourceName: p.resourceName,
             name: p.names?.[0]?.displayName,
             email: p.emailAddresses?.[0]?.value,
-            phone: p.phoneNumbers?.[0]?.value,
+            phone: getPrimaryGooglePhone(p),
             photo: p.photos?.[0]?.url,
             etag: p.etag,
             updateTime: extractGoogleUpdateTime(p)

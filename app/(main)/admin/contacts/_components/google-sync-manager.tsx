@@ -209,8 +209,20 @@ export function GoogleSyncManager({
         }
     };
 
+    const arePhoneNumbersEquivalent = (a: any, b: any) => {
+        const d1 = String(a || '').replace(/\D/g, '');
+        const d2 = String(b || '').replace(/\D/g, '');
+        if (!d1 && !d2) return true;
+        if (!d1 || !d2) return false;
+        if (d1 === d2) return true;
+        if (d1.length >= 7 && d2.length >= 7) return d1.slice(-7) === d2.slice(-7);
+        return false;
+    };
+
     const renderComparisonRow = (label: string, localVal: any, googleVal: any) => {
-        const mismatch = String(localVal || '').trim() !== String(googleVal || '').trim();
+        const mismatch = label === 'Phone'
+            ? !arePhoneNumbersEquivalent(localVal, googleVal)
+            : String(localVal || '').trim() !== String(googleVal || '').trim();
         return (
             <div className={`grid grid-cols-2 gap-4 py-2 border-b last:border-0 ${mismatch ? 'bg-yellow-50/50' : ''}`}>
                 <div className="text-sm">
