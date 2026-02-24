@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CheckCircle2, XCircle, Loader2, AlertTriangle, Eye, EyeOff, Activity, Clock, ShieldCheck } from "lucide-react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { formatDistanceToNow, format } from "date-fns";
 import {
     AlertDialog,
@@ -31,6 +32,7 @@ interface ConnectionStatus {
 }
 
 export default function MicrosoftIntegrationPage() {
+    const searchParams = useSearchParams();
     const [status, setStatus] = useState<ConnectionStatus>({ connected: false, method: null });
     const [loading, setLoading] = useState(true);
     const [connecting, setConnecting] = useState(false);
@@ -45,6 +47,12 @@ export default function MicrosoftIntegrationPage() {
     useEffect(() => {
         checkStatus();
     }, []);
+
+    useEffect(() => {
+        if (searchParams.get('microsoft_connected') === 'true') {
+            setSuccess('Successfully connected to Outlook!');
+        }
+    }, [searchParams]);
 
     const handleSyncNow = async () => {
         setSyncing(true);

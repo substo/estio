@@ -65,9 +65,13 @@ export async function syncOutlookFolder(userId: string, folderId: string) {
                 create: {
                     userId,
                     emailAddress: 'unknown', // Todo: fetch profile to populate this if missing
+                    lastSyncedAt: new Date(),
                     ...updateData
                 },
-                update: updateData
+                update: {
+                    ...updateData,
+                    lastSyncedAt: new Date()
+                }
             });
         }
 

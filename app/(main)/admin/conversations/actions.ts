@@ -1232,6 +1232,145 @@ async function getBasicLocationContext() {
     return location;
 }
 
+export async function getEmailSyncProvidersStatus() {
+    try {
+        const { userId: clerkUserId } = await auth();
+        if (!clerkUserId) {
+            return { providers: [] as any[] };
+        }
+
+        const user = await db.user.findUnique({
+            where: { clerkId: clerkUserId },
+            select: {
+                googleAccessToken: true,
+                googleRefreshToken: true,
+                googleSyncEnabled: true,
+                gmailSyncState: {
+                    select: {
+                        emailAddress: true,
+                        lastSyncedAt: true,
+                        watchExpiration: true
+                    }
+                },
+                outlookAuthMethod: true,
+                outlookEmail: true,
+                outlookAccessToken: true,
+                outlookRefreshToken: true,
+                outlookSyncEnabled: true,
+                outlookSessionCookies: true,
+                outlookSessionExpiry: true,
+                outlookSubscriptionExpiry: true,
+                outlookSyncState: {
+                    select: {
+                        emailAddress: true,
+                        lastSyncedAt: true
+                    }
+                }
+            }
+        });
+
+        if (!user) {
+            return { providers: [] as any[] };
+        }
+
+        const now = Date.now();
+        const minutesAgo = (value?: Date | null) =>
+            value ? Math.floor((now - value.getTime()) / 60000) : null;
+
+        const gmailConnected = !!(
+            user.googleSyncEnabled &&
+            (user.googleAccessToken || user.googleRefreshToken)
+        );
+        const gmailLastSync = user.gmailSyncState?.lastSyncedAt ?? null;
+        const gmailWatchExpiry = user.gmailSyncState?.watchExpiration ?? null;
+        const gmailWatchExpired = !!(gmailWatchExpiry && gmailWatchExpiry.getTime() < now);
+        const gmailAgeMins = minutesAgo(gmailLastSync);
+
+        let gmailHealth: 'healthy' | 'warning' | 'stale' | 'error' = 'warning';
+        if (gmailConnected) {
+            if (!gmailLastSync) gmailHealth = 'warning';
+            else if ((gmailAgeMins ?? 9999) > 120) gmailHealth = 'stale';
+            else gmailHealth = 'healthy';
+
+            if (gmailWatchExpired && gmailHealth === 'healthy') {
+                gmailHealth = 'warning';
+            }
+        } else {
+            gmailHealth = 'error';
+        }
+
+        const inferredOutlookMethod =
+            (user.outlookAuthMethod as 'oauth' | 'puppeteer' | null)
+            || (user.outlookSessionCookies ? 'puppeteer' : null)
+            || ((user.outlookAccessToken || user.outlookRefreshToken) ? 'oauth' : null);
+
+        const outlookSessionExpired = inferredOutlookMethod === 'puppeteer'
+            ? (user.outlookSessionExpiry ? user.outlookSessionExpiry.getTime() < now : true)
+            : false;
+        const outlookSubscriptionExpired = inferredOutlookMethod === 'oauth'
+            ? !!(user.outlookSubscriptionExpiry && user.outlookSubscriptionExpiry.getTime() < now)
+            : false;
+
+        const outlookConnected = !!(
+            user.outlookSyncEnabled &&
+            (
+                (inferredOutlookMethod === 'puppeteer' && user.outlookSessionCookies && !outlookSessionExpired) ||
+                (inferredOutlookMethod === 'oauth' && (user.outlookAccessToken || user.outlookRefreshToken))
+            )
+        );
+
+        const outlookLastSync = user.outlookSyncState?.lastSyncedAt ?? null;
+        const outlookAgeMins = minutesAgo(outlookLastSync);
+
+        let outlookHealth: 'healthy' | 'warning' | 'stale' | 'error' = 'warning';
+        if (outlookConnected) {
+            if (!outlookLastSync) outlookHealth = 'warning';
+            else if ((outlookAgeMins ?? 9999) > 180) outlookHealth = 'stale';
+            else outlookHealth = 'healthy';
+
+            if ((outlookSessionExpired || outlookSubscriptionExpired) && outlookHealth === 'healthy') {
+                outlookHealth = 'warning';
+            }
+        } else {
+            outlookHealth = (outlookSessionExpired || outlookSubscriptionExpired) ? 'error' : 'error';
+        }
+
+        const providers = [
+            {
+                provider: 'gmail' as const,
+                connected: gmailConnected,
+                health: gmailHealth,
+                email: user.gmailSyncState?.emailAddress || null,
+                lastSyncedAt: gmailLastSync?.toISOString() || null,
+                expectedCadenceMinutes: 5,
+                watchExpiration: gmailWatchExpiry?.toISOString() || null,
+                watchExpired: gmailWatchExpired,
+                settingsPath: '/admin/settings/integrations/google'
+            },
+            {
+                provider: 'outlook' as const,
+                connected: outlookConnected,
+                health: outlookHealth,
+                method: inferredOutlookMethod,
+                email: user.outlookEmail || user.outlookSyncState?.emailAddress || null,
+                // This timestamp is treated as email sync freshness; contact sync no longer updates it.
+                lastSyncedAt: outlookLastSync?.toISOString() || null,
+                expectedCadenceMinutes: inferredOutlookMethod === 'puppeteer' ? 15 : 5,
+                sessionExpiry: user.outlookSessionExpiry?.toISOString() || null,
+                sessionExpired: outlookSessionExpired,
+                subscriptionExpiry: user.outlookSubscriptionExpiry?.toISOString() || null,
+                subscriptionExpired: outlookSubscriptionExpired,
+                settingsPath: '/admin/settings/integrations/microsoft'
+            }
+        ];
+
+        return { providers };
+    } catch (error) {
+        console.error('[getEmailSyncProvidersStatus] Error:', error);
+        return { providers: [] as any[] };
+    }
+}
+
 export async function getAvailableAiModelsAction() {
     const location = await getBasicLocationContext();
     const { getAvailableModels } = await import("@/lib/ai/fetch-models");

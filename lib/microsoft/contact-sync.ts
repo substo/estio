@@ -39,7 +39,8 @@ export async function syncContactsFromOutlook(userId: string) {
             await db.outlookSyncState.upsert({
                 where: { userId },
                 create: { userId, deltaLinkContacts: newDeltaLink },
-                update: { deltaLinkContacts: newDeltaLink, lastSyncedAt: new Date() }
+                // Keep lastSyncedAt reserved for email sync freshness in UI status badges.
+                update: { deltaLinkContacts: newDeltaLink }
             });
         }
     });

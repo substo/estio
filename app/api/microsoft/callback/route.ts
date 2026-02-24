@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
         console.log('[Microsoft Callback] Success! Redirecting...');
 
         // Redirect to settings or dashboard (Assuming existing integration page location)
-        return NextResponse.redirect(`${baseUrl}/admin/settings/integrations/google?microsoft_connected=true`);
+        return NextResponse.redirect(`${baseUrl}/admin/settings/integrations/microsoft?microsoft_connected=true`);
         // Note: We might want a dedicated /microsoft page later, but for now redirecting to the main integrations area or creating a new page is fine. 
         // Ideally, we redirect to the exact page where they started. usually /admin/settings/integrations
         // But since I saw the directory structure has `google` and `ghl`, maybe `microsoft` page doesn't exist yet. 

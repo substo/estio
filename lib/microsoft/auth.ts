@@ -90,6 +90,7 @@ export async function handleMicrosoftCallback(code: string, userId: string, base
         data: {
             outlookAccessToken: tokens.access_token,
             outlookRefreshToken: tokens.refresh_token,
+            outlookAuthMethod: 'oauth',
             outlookSyncEnabled: true,
             // We can also trigger the initial sync here or let the user do it
         }

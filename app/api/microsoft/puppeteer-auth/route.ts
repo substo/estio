@@ -94,9 +94,14 @@ export async function GET(req: NextRequest) {
                 outlookAuthMethod: true,
                 outlookEmail: true,
                 outlookSyncEnabled: true,
+                outlookAccessToken: true,
+                outlookRefreshToken: true,
+                outlookSessionCookies: true,
                 outlookSessionExpiry: true,
+                outlookSubscriptionExpiry: true,
                 outlookSyncState: {
                     select: {
+                        emailAddress: true,
                         lastSyncedAt: true
                     }
                 }
@@ -107,26 +112,47 @@ export async function GET(req: NextRequest) {
             return NextResponse.json({ error: 'User not found' }, { status: 404 });
         }
 
-        // Check if using Puppeteer method
-        if (user.outlookAuthMethod !== 'puppeteer') {
+        const inferredMethod =
+            (user.outlookAuthMethod as 'oauth' | 'puppeteer' | null)
+            || (user.outlookSessionCookies ? 'puppeteer' : null)
+            || ((user.outlookAccessToken || user.outlookRefreshToken) ? 'oauth' : null);
+
+        if (inferredMethod === 'puppeteer') {
+            const sessionExpired = user.outlookSessionExpiry
+                ? new Date() > user.outlookSessionExpiry
+                : true;
+
             return NextResponse.json({
-                connected: false,
-                method: user.outlookAuthMethod || null
+                connected: user.outlookSyncEnabled && !!user.outlookSessionCookies && !sessionExpired,
+                method: 'puppeteer',
+                email: user.outlookEmail || user.outlookSyncState?.emailAddress || null,
+                sessionExpiry: user.outlookSessionExpiry,
+                sessionExpired,
+                lastSyncedAt: user.outlookSyncState?.lastSyncedAt,
+                syncEnabled: user.outlookSyncEnabled
             });
         }
 
-        // Check session validity
-        const sessionExpired = user.outlookSessionExpiry
-            ? new Date() > user.outlookSessionExpiry
-            : true;
+        if (inferredMethod === 'oauth') {
+            const connected = user.outlookSyncEnabled && !!(user.outlookAccessToken || user.outlookRefreshToken);
+            const subscriptionExpired = user.outlookSubscriptionExpiry
+                ? new Date() > user.outlookSubscriptionExpiry
+                : false;
+
+            return NextResponse.json({
+                connected,
+                method: 'oauth',
+                email: user.outlookEmail || user.outlookSyncState?.emailAddress || null,
+                sessionExpiry: user.outlookSubscriptionExpiry,
+                sessionExpired: subscriptionExpired,
+                lastSyncedAt: user.outlookSyncState?.lastSyncedAt,
+                syncEnabled: user.outlookSyncEnabled
+            });
+        }
 
         return NextResponse.json({
-            connected: user.outlookSyncEnabled && !sessionExpired,
-            method: 'puppeteer',
-            email: user.outlookEmail,
-            sessionExpiry: user.outlookSessionExpiry,
-            sessionExpired,
-            lastSyncedAt: user.outlookSyncState?.lastSyncedAt,
+            connected: false,
+            method: user.outlookAuthMethod || null,
             syncEnabled: user.outlookSyncEnabled
         });
 
