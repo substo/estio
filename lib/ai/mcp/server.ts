@@ -327,7 +327,9 @@ registerTool(
         userId: z.string().describe("User ID to check availability for"),
         startDate: z.string().describe("Start date (ISO string)"),
         endDate: z.string().describe("End date (ISO string)"),
-        durationMinutes: z.number().optional().default(60).describe("Duration of each slot in minutes")
+        durationMinutes: z.number().optional().default(60).describe("Duration of each slot in minutes"),
+        bufferMinutes: z.number().optional().default(0).describe("Buffer to apply before/after busy appointments (minutes)"),
+        slotStepMinutes: z.number().optional().default(60).describe("Slot generation step size (minutes)")
     },
     async (params: any, context?: ToolHandlerContext) => {
         const { checkAvailability } = await import("../tools/calendar");
@@ -344,7 +346,11 @@ registerTool(
             userId,
             startDate,
             endDate,
-            params.durationMinutes
+            params.durationMinutes,
+            {
+                bufferMinutes: params.bufferMinutes,
+                slotStepMinutes: params.slotStepMinutes
+            }
         );
         const payload = normalizedToFutureYear
             ? { ...result, normalizedToFutureYear, normalizedStartDate: startDate.toISOString(), normalizedEndDate: endDate.toISOString() }
@@ -359,7 +365,9 @@ registerTool(
     {
         agentUserId: z.string().describe("Agent user ID"),
         propertyId: z.string().describe("Property ID for the viewing"),
-        daysAhead: z.number().optional().default(7).describe("How many days ahead to search")
+        daysAhead: z.number().optional().default(7).describe("How many days ahead to search"),
+        bufferMinutes: z.number().optional().describe("Buffer to apply before/after busy appointments (minutes)"),
+        slotStepMinutes: z.number().optional().describe("Slot generation step size (minutes)")
     },
     async (params: any, context?: ToolHandlerContext) => {
         const { proposeSlots } = await import("../tools/calendar");
@@ -367,7 +375,10 @@ registerTool(
         if (!agentUserId) {
             throw new Error("Could not resolve a valid agentUserId for propose_slots.");
         }
-        const result = await proposeSlots(agentUserId, params.propertyId, params.daysAhead);
+        const result = await proposeSlots(agentUserId, params.propertyId, params.daysAhead, {
+            bufferMinutes: params.bufferMinutes,
+            slotStepMinutes: params.slotStepMinutes
+        });
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
     }
 );

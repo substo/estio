@@ -17,6 +17,11 @@ interface TimeSlot {
     available: boolean;
 }
 
+interface SlotGenerationOptions {
+    bufferMinutes?: number;
+    slotStepMinutes?: number;
+}
+
 interface AvailabilityResult {
     userId: string;
     name: string;
@@ -33,7 +38,8 @@ export async function checkAvailability(
     userId: string,
     startDate: Date,
     endDate: Date,
-    durationMinutes: number = 60
+    durationMinutes: number = 60,
+    options: SlotGenerationOptions = {}
 ): Promise<AvailabilityResult> {
     const user = await db.user.findUnique({
         where: { id: userId },
@@ -52,7 +58,7 @@ export async function checkAvailability(
     // Try Google Calendar if connected
     if (user.googleAccessToken || user.googleRefreshToken) {
         try {
-            return await getGoogleAvailability(user, startDate, endDate, durationMinutes);
+            return await getGoogleAvailability(user, startDate, endDate, durationMinutes, options);
         } catch (e) {
             console.error("Google Calendar check failed, falling back to default slots:", e);
         }
@@ -60,14 +66,15 @@ export async function checkAvailability(
 
     // No calendar connected — return all slots as available
     const userName = user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || "Agent";
-    return generateDefaultSlots(userId, userName, startDate, endDate, durationMinutes);
+    return generateDefaultSlots(userId, userName, startDate, endDate, durationMinutes, options);
 }
 
 async function getGoogleAvailability(
     user: any,
     startDate: Date,
     endDate: Date,
-    durationMinutes: number
+    durationMinutes: number,
+    options: SlotGenerationOptions = {}
 ): Promise<AvailabilityResult> {
     const oauth2Client = await getValidAccessToken(user.id);
     const calendar = google.calendar({ version: "v3", auth: oauth2Client });
@@ -91,7 +98,8 @@ async function getGoogleAvailability(
         busySlots.map(b => ({
             start: new Date(b.start!),
             end: new Date(b.end!),
-        }))
+        })),
+        options
     );
 
     const userName = user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || "Agent";
@@ -116,10 +124,18 @@ export function generateAvailableSlots(
     startDate: Date,
     endDate: Date,
     durationMinutes: number,
-    busyPeriods: { start: Date; end: Date }[]
+    busyPeriods: { start: Date; end: Date }[],
+    options: SlotGenerationOptions = {}
 ): { start: Date; end: Date }[] {
     const slots: { start: Date; end: Date }[] = [];
     const current = new Date(startDate);
+    const bufferMinutes = Number.isFinite(options.bufferMinutes)
+        ? Math.max(0, Math.round(options.bufferMinutes as number))
+        : 0;
+    const slotStepMinutes = Number.isFinite(options.slotStepMinutes)
+        ? Math.max(5, Math.round(options.slotStepMinutes as number))
+        : 60;
+    const bufferMs = bufferMinutes * 60000;
 
     while (current < endDate) {
         // Working hours: 9 AM to 6 PM
@@ -141,14 +157,18 @@ export function generateAvailableSlots(
 
             // Check if slot conflicts with any busy period
             const isConflict = busyPeriods.some(
-                busy => slotStart < busy.end && slotEnd > busy.start
+                busy => {
+                    const blockedStart = new Date(busy.start.getTime() - bufferMs);
+                    const blockedEnd = new Date(busy.end.getTime() + bufferMs);
+                    return slotStart < blockedEnd && slotEnd > blockedStart;
+                }
             );
 
             if (!isConflict && slotStart > new Date()) { // Must be in the future
                 slots.push({ start: new Date(slotStart), end: new Date(slotEnd) });
             }
 
-            slotStart.setMinutes(slotStart.getMinutes() + 60); // 1-hour increments
+            slotStart.setMinutes(slotStart.getMinutes() + slotStepMinutes);
         }
 
         current.setDate(current.getDate() + 1);
@@ -162,9 +182,10 @@ function generateDefaultSlots(
     name: string,
     startDate: Date,
     endDate: Date,
-    durationMinutes: number
+    durationMinutes: number,
+    options: SlotGenerationOptions = {}
 ): AvailabilityResult {
-    const freeSlots = generateAvailableSlots(startDate, endDate, durationMinutes, []);
+    const freeSlots = generateAvailableSlots(startDate, endDate, durationMinutes, [], options);
 
     return {
         userId,
@@ -181,14 +202,21 @@ function generateDefaultSlots(
 export async function proposeSlots(
     agentUserId: string,
     propertyId: string,
-    daysAhead: number = 7
+    daysAhead: number = 7,
+    options: SlotGenerationOptions = {}
 ): Promise<{ slots: TimeSlot[]; message: string }> {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() + 1); // Minimum 24h notice
     const endDate = new Date();
     endDate.setDate(endDate.getDate() + daysAhead);
 
-    const availability = await checkAvailability(agentUserId, startDate, endDate, 60);
+    const availability = await checkAvailability(
+        agentUserId,
+        startDate,
+        endDate,
+        60,
+        { bufferMinutes: 30, ...options }
+    );
     const freeSlots = availability.freeSlots;
 
     if (freeSlots.length === 0) {

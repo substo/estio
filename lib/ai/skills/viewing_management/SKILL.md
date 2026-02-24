@@ -87,6 +87,9 @@ Always communicate the coordination dependency clearly before promising fixed ti
   - Reply with the Google Maps link (or best available location guidance) first
   - Then ask for their preferred time window (especially if they already agreed to view)
 - DIRECT_SCHEDULE:
+  - If the lead proposes a specific time (e.g. "I can come around 11am"), check that exact day first with `check_availability`
+  - Use a 30-minute buffer around appointments (`bufferMinutes: 30`) and 30-minute steps (`slotStepMinutes: 30`) when validating a proposed time
+  - If their proposed time is not available, offer the nearest available time after it and ask if that still suits them
   - Call check_availability with agent userId
   - Then propose 3 slots
 - OWNER_COORDINATION / TENANT_COORDINATION / EXTERNAL_AGENT_COORDINATION / MANUAL_CONFIRMATION:

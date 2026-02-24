@@ -167,6 +167,157 @@ function isLocationPinRequest(message: string): boolean {
         (/\b(send|share|drop|give)\b/i.test(message) || message.trim().length <= 80);
 }
 
+const WEEKDAY_TO_INDEX: Record<string, number> = {
+    sunday: 0,
+    monday: 1,
+    tuesday: 2,
+    wednesday: 3,
+    thursday: 4,
+    friday: 5,
+    saturday: 6,
+};
+
+function looksLikeViewingThread(conversationHistory: string): boolean {
+    const lower = (conversationHistory || "").toLowerCase();
+    return /\bview(?:ing)?\b/.test(lower) ||
+        /\bref\.?\s*no\b/.test(lower) ||
+        /\b[A-Z]{2,4}\d{3,6}\b/i.test(conversationHistory || "") ||
+        /\bproperty\b/.test(lower);
+}
+
+function extractProposedClockTime(message: string): { hour24: number; minute: number } | null {
+    const amPmMatch = message.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i);
+    if (amPmMatch) {
+        let hour = Number(amPmMatch[1]);
+        const minute = Number(amPmMatch[2] || "0");
+        const meridiem = amPmMatch[3].toLowerCase();
+        if (!Number.isFinite(hour) || !Number.isFinite(minute) || minute < 0 || minute > 59) return null;
+        if (hour < 1 || hour > 12) return null;
+        if (meridiem === "am") {
+            if (hour === 12) hour = 0;
+        } else if (hour !== 12) {
+            hour += 12;
+        }
+        return { hour24: hour, minute };
+    }
+
+    const twentyFourHourMatch = message.match(/\b(\d{1,2}):(\d{2})\b/);
+    if (twentyFourHourMatch) {
+        const hour = Number(twentyFourHourMatch[1]);
+        const minute = Number(twentyFourHourMatch[2]);
+        if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+        if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+        return { hour24: hour, minute };
+    }
+
+    return null;
+}
+
+function isSchedulingFollowOnMessage(message: string): boolean {
+    return /\b(i will call|will call you|i'll call|ok|okay|sure|great)\b/i.test(message || "");
+}
+
+function extractRecentUserProposedClockTime(conversationHistory: string): { hour24: number; minute: number } | null {
+    const lines = (conversationHistory || "")
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .reverse();
+
+    for (const line of lines) {
+        if (!/^user:/i.test(line)) continue;
+        const parsed = extractProposedClockTime(line);
+        if (parsed) return parsed;
+    }
+
+    return null;
+}
+
+function inferRequestedDayAnchor(context: SkillExecutionContext): { date: Date; label: "today" | "tomorrow" | null } | null {
+    const combined = `${context.message}\n${context.conversationHistory || ""}`.toLowerCase();
+    const now = new Date();
+
+    if (/\btomorrow\b/.test(combined)) {
+        const date = new Date(now);
+        date.setDate(date.getDate() + 1);
+        return { date, label: "tomorrow" };
+    }
+
+    if (/\btoday\b/.test(combined)) {
+        return { date: new Date(now), label: "today" };
+    }
+
+    let bestMatch: { index: number; weekday: number } | null = null;
+    for (const [name, weekday] of Object.entries(WEEKDAY_TO_INDEX)) {
+        const idx = combined.lastIndexOf(name);
+        if (idx >= 0 && (!bestMatch || idx > bestMatch.index)) {
+            bestMatch = { index: idx, weekday };
+        }
+    }
+
+    if (!bestMatch) return null;
+
+    const date = new Date(now);
+    const delta = (bestMatch.weekday - now.getDay() + 7) % 7;
+    date.setDate(date.getDate() + (delta === 0 ? 7 : delta));
+    return { date, label: null };
+}
+
+function isSpecificViewingTimeProposal(context: SkillExecutionContext): boolean {
+    if (!looksLikeViewingThread(context.conversationHistory || "")) return false;
+
+    const message = context.message || "";
+    const hasSpecificTime =
+        /\b\d{1,2}:\d{2}\s*(?:am|pm)?\b/i.test(message) ||
+        /\b\d{1,2}\s*(?:am|pm)\b/i.test(message);
+    if (!hasSpecificTime) return false;
+
+    const hasSchedulingLanguage =
+        /\b(come|view|see|meet|available|availability|works?)\b/i.test(message) ||
+        /\b(i can|can do|i will come|around|about|at)\b/i.test(message);
+
+    return hasSchedulingLanguage;
+}
+
+function extractRequestedViewingDateTime(context: SkillExecutionContext): { requestedAt: Date; dayLabel: "today" | "tomorrow" | null } | null {
+    let clockTime: { hour24: number; minute: number } | null = null;
+    if (isSpecificViewingTimeProposal(context)) {
+        clockTime = extractProposedClockTime(context.message);
+    } else if (looksLikeViewingThread(context.conversationHistory || "") && isSchedulingFollowOnMessage(context.message)) {
+        clockTime = extractRecentUserProposedClockTime(context.conversationHistory || "");
+    }
+    if (!clockTime) return null;
+
+    const dayAnchor = inferRequestedDayAnchor(context);
+    if (!dayAnchor) return null;
+
+    const requestedAt = new Date(dayAnchor.date);
+    requestedAt.setHours(clockTime.hour24, clockTime.minute, 0, 0);
+    return { requestedAt, dayLabel: dayAnchor.label };
+}
+
+function toDateOrNull(value: any): Date | null {
+    if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+    if (typeof value === "string" || typeof value === "number") {
+        const parsed = new Date(value);
+        if (!Number.isNaN(parsed.getTime())) return parsed;
+    }
+    return null;
+}
+
+function formatCompactTime(date: Date): string {
+    return date
+        .toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
+        .replace(/\s+/g, "")
+        .toLowerCase();
+}
+
+function isSameCalendarDay(a: Date, b: Date): boolean {
+    return a.getFullYear() === b.getFullYear() &&
+        a.getMonth() === b.getMonth() &&
+        a.getDate() === b.getDate();
+}
+
 function extractResolvedPropertyFromToolResults(toolCalls: any[]): any | null {
     const resolveCall = toolCalls.find((c: any) =>
         c?.name === "resolve_viewing_property_context" &&
@@ -246,6 +397,78 @@ function buildDeterministicLocationReply(context: SkillExecutionContext, toolCal
     return null;
 }
 
+function buildDeterministicRequestedTimeReply(context: SkillExecutionContext, toolCalls: any[]): string | null {
+    const requested = extractRequestedViewingDateTime(context);
+    if (!requested) return null;
+
+    const availabilityCall = [...toolCalls].reverse().find((c: any) =>
+        c?.name === "check_availability" &&
+        c?.result &&
+        Array.isArray(c.result.freeSlots)
+    );
+    if (!availabilityCall) return null;
+
+    const durationMinutes = Number.isFinite(availabilityCall?.args?.durationMinutes)
+        ? Math.max(15, Math.round(Number(availabilityCall.args.durationMinutes)))
+        : 60;
+    const bufferMinutes = Number.isFinite(availabilityCall?.args?.bufferMinutes)
+        ? Math.max(0, Math.round(Number(availabilityCall.args.bufferMinutes)))
+        : 0;
+
+    const requestedStart = requested.requestedAt;
+    const requestedEnd = new Date(requestedStart.getTime() + durationMinutes * 60000);
+
+    const freeSlots = (availabilityCall.result.freeSlots || [])
+        .map((slot: any) => ({
+            start: toDateOrNull(slot?.start),
+            end: toDateOrNull(slot?.end),
+        }))
+        .filter((slot: any) => slot.start && slot.end) as Array<{ start: Date; end: Date }>;
+
+    const busySlots = (availabilityCall.result.busySlots || [])
+        .map((slot: any) => ({
+            start: toDateOrNull(slot?.start),
+            end: toDateOrNull(slot?.end),
+        }))
+        .filter((slot: any) => slot.start && slot.end) as Array<{ start: Date; end: Date }>;
+
+    const sameDayFreeSlots = freeSlots
+        .filter((slot) => isSameCalendarDay(slot.start, requestedStart))
+        .sort((a, b) => a.start.getTime() - b.start.getTime());
+
+    const exactMatch = sameDayFreeSlots.find(
+        (slot) => Math.abs(slot.start.getTime() - requestedStart.getTime()) < 60_000
+    );
+    if (exactMatch) {
+        const daySuffix = requested.dayLabel ? ` ${requested.dayLabel}` : "";
+        return `${formatCompactTime(requestedStart)} works for me${daySuffix}. Does that still suit you?`;
+    }
+
+    const nextSameDaySlot = sameDayFreeSlots.find((slot) => slot.start.getTime() >= requestedStart.getTime());
+    if (!nextSameDaySlot) {
+        const daySuffix = requested.dayLabel ? ` ${requested.dayLabel}` : "";
+        return `${formatCompactTime(requestedStart)} won't work${daySuffix}. Could you send another time that suits you?`;
+    }
+
+    const bufferMs = bufferMinutes * 60000;
+    const blockingBusy = busySlots
+        .filter((busy) => {
+            const blockedStart = busy.start.getTime() - bufferMs;
+            const blockedEnd = busy.end.getTime() + bufferMs;
+            return requestedStart.getTime() < blockedEnd && requestedEnd.getTime() > blockedStart;
+        })
+        .sort((a, b) => a.end.getTime() - b.end.getTime())[0];
+
+    const daySuffix = requested.dayLabel ? ` ${requested.dayLabel}` : "";
+    const reason = blockingBusy && bufferMinutes > 0 && blockingBusy.end.getTime() <= nextSameDaySlot.start.getTime()
+        ? ` I have another appointment until ${formatCompactTime(blockingBusy.end)} and I need a ${bufferMinutes}-minute buffer after that.`
+        : bufferMinutes > 0
+            ? ` I need a ${bufferMinutes}-minute buffer around appointments.`
+            : "";
+
+    return `${formatCompactTime(requestedStart)} won't work${daySuffix}.${reason} The earliest I can do is ${formatCompactTime(nextSameDaySlot.start)}${daySuffix}. Would that still suit you?`;
+}
+
 async function synthesizeReplyFromToolResults(params: {
     modelId: string;
     skillName: string;
@@ -274,6 +497,11 @@ async function synthesizeReplyFromToolResults(params: {
         return { draft: params.initialDraft ?? null };
     }
 
+    const deterministicRequestedTimeReply = buildDeterministicRequestedTimeReply(params.context, params.toolCalls);
+    if (deterministicRequestedTimeReply) {
+        return { draft: deterministicRequestedTimeReply };
+    }
+
     const deterministicLocationReply = buildDeterministicLocationReply(params.context, params.toolCalls);
     if (deterministicLocationReply) {
         return { draft: deterministicLocationReply };
@@ -289,6 +517,7 @@ Rules:
 - Keep it conversational and practical.
 - If the user asked for a location/pin/map/address and a Google Maps link is present in tool results, send the link immediately near the top.
 - After sending a location for a viewing-related conversation, ask one short next-step scheduling question.
+- If the user proposed a specific viewing time and it is unavailable, counter-propose the nearest available time (using the tool results) and ask if it still suits them.
 - Output only the message text (no JSON, no labels).`;
 
     const toolResultsJson = JSON.stringify(params.toolCalls, null, 2);
@@ -562,6 +791,67 @@ You must respond with valid JSON:
                     }
                 } else {
                     results.push({ name: call.name, args: resolvedArgs, error: "Tool not found or not allowed for this skill" });
+                }
+            }
+        }
+
+        const hasSuccessfulAvailabilityCheck = results.some((r: any) => r?.name === "check_availability" && r?.result && !r?.error);
+        const requestedViewingTime = isViewingSkill ? extractRequestedViewingDateTime(context) : null;
+        const canAutoCheckRequestedTime =
+            isViewingSkill &&
+            !!requestedViewingTime &&
+            !!context.agentUserId &&
+            !hasSuccessfulAvailabilityCheck &&
+            viewingPrecheck?.resolutionStatus === "resolved" &&
+            viewingPrecheck?.selectedProperty?.schedulePath?.mode === "DIRECT_SCHEDULE";
+
+        if (canAutoCheckRequestedTime) {
+            const checkAvailabilityTool = toolRegistry.find(t => t.name === "check_availability");
+            if (checkAvailabilityTool) {
+                const dayStart = new Date(requestedViewingTime.requestedAt);
+                dayStart.setHours(9, 0, 0, 0);
+                const dayEnd = new Date(requestedViewingTime.requestedAt);
+                dayEnd.setHours(18, 0, 0, 0);
+                const autoArgs = {
+                    userId: context.agentUserId,
+                    startDate: dayStart.toISOString(),
+                    endDate: dayEnd.toISOString(),
+                    durationMinutes: 60,
+                    bufferMinutes: 30,
+                    slotStepMinutes: 30,
+                };
+
+                try {
+                    const result = await checkAvailabilityTool.handler(autoArgs, {
+                        apiKey: context.apiKey,
+                        contactId: context.contactId,
+                        conversationId: context.conversationId,
+                        agentUserId: context.agentUserId,
+                        locationId: context.locationId,
+                        latestUserMessage: context.message
+                    });
+                    const parsedResultText = result?.content?.[0]?.text;
+                    let parsedResult = result;
+                    if (typeof parsedResultText === "string") {
+                        try {
+                            parsedResult = JSON.parse(parsedResultText);
+                        } catch {
+                            parsedResult = parsedResultText;
+                        }
+                    }
+                    results.push({
+                        name: "check_availability",
+                        args: autoArgs,
+                        result: parsedResult,
+                        synthetic: true
+                    });
+                } catch (e: any) {
+                    results.push({
+                        name: "check_availability",
+                        args: autoArgs,
+                        error: e.message,
+                        synthetic: true
+                    });
                 }
             }
         }
