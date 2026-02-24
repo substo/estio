@@ -1,13 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
-import { AlertTriangle, Link as LinkIcon, Link2, CheckCircle, RefreshCw } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { AlertTriangle, Link as LinkIcon, Link2, MessageCircle, MessageCirclePlus, RefreshCw } from "lucide-react";
 import { GoogleSyncManager } from "./google-sync-manager";
 import { EditContactDialog } from "./edit-contact-dialog";
 import { ContactData } from "./contact-form";
+import { openOrStartConversationForContact } from "../actions";
 
 interface ContactRowProps {
     contact: ContactData & {
@@ -20,6 +23,13 @@ interface ContactRowProps {
         googleContactId?: string | null;
         lastGoogleSync?: Date | null;
         error?: string | null;
+        conversations?: Array<{
+            ghlConversationId: string;
+            unreadCount: number;
+            deletedAt?: Date | null;
+            archivedAt?: Date | null;
+            lastMessageAt?: Date | null;
+        }>;
     };
     leadSources: string[];
     // For navigation in Google Sync Manager
@@ -33,6 +43,8 @@ interface ContactRowProps {
 export function ContactRow({ contact, leadSources, allContacts, currentIndex, isGoogleConnected = false, isGhlConnected = false }: ContactRowProps) {
     const router = useRouter();
     const [managerOpen, setManagerOpen] = useState(false);
+    const [isOpeningConversation, startConversationTransition] = useTransition();
+    const [conversationError, setConversationError] = useState<string | null>(null);
 
     const handleRowClick = (e: React.MouseEvent) => {
         // Prevent navigation if clicking buttons or interactions
@@ -44,9 +56,34 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
 
     const isLinked = !!contact.googleContactId;
     const hasError = !!contact.error;
+    const conversation = contact.conversations?.[0];
+    const hasConversation = !!conversation?.ghlConversationId;
+    const canStartConversation = !!contact.phone;
     // Add 2 second buffer to ignore micro-differences (race condition fixes)
     const isOutOfSync = isLinked && !hasError && contact.lastGoogleSync &&
         (new Date(contact.updatedAt).getTime() > new Date(contact.lastGoogleSync).getTime() + 2000);
+
+    const handleConversationClick = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        setConversationError(null);
+
+        if (hasConversation && conversation?.ghlConversationId) {
+            router.push(`/admin/conversations?id=${encodeURIComponent(conversation.ghlConversationId)}`);
+            return;
+        }
+
+        if (!canStartConversation || isOpeningConversation) return;
+
+        startConversationTransition(async () => {
+            const res = await openOrStartConversationForContact(contact.id);
+            if (res?.success && res.conversationId) {
+                router.push(`/admin/conversations?id=${encodeURIComponent(res.conversationId)}`);
+                router.refresh();
+                return;
+            }
+            setConversationError(res?.error || "Failed to open conversation");
+        });
+    };
 
     return (
         <>
@@ -118,6 +155,61 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
                             )}
                         </Button>
                     </div>
+                </td>
+                <td className="p-4" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center gap-2">
+                        <TooltipProvider delayDuration={200}>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8 relative"
+                                        onClick={handleConversationClick}
+                                        disabled={isOpeningConversation || (!hasConversation && !canStartConversation)}
+                                        aria-label={hasConversation ? "Open conversation" : "Start conversation"}
+                                    >
+                                        {hasConversation ? (
+                                            <>
+                                                <MessageCircle className="h-4 w-4" />
+                                                {!!conversation?.unreadCount && conversation.unreadCount > 0 && (
+                                                    <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-1 rounded-full bg-red-600 text-white text-[10px] leading-[14px] text-center">
+                                                        {conversation.unreadCount > 9 ? "9+" : conversation.unreadCount}
+                                                    </span>
+                                                )}
+                                            </>
+                                        ) : (
+                                            <MessageCirclePlus className={`h-4 w-4 ${canStartConversation ? "text-green-600" : "text-gray-400"}`} />
+                                        )}
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent side="top">
+                                    {hasConversation
+                                        ? `Open conversation${conversation && conversation.unreadCount > 0 ? ` (${conversation.unreadCount} unread)` : ""}`
+                                        : canStartConversation
+                                            ? "Start conversation"
+                                            : "No phone number to start conversation"}
+                                </TooltipContent>
+                            </Tooltip>
+                        </TooltipProvider>
+                        {hasConversation ? (
+                            <Link
+                                href={`/admin/conversations?id=${encodeURIComponent(conversation!.ghlConversationId)}`}
+                                className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
+                                onClick={(e) => e.stopPropagation()}
+                            >
+                                Open
+                            </Link>
+                        ) : (
+                            <span className={`text-xs ${canStartConversation ? "text-muted-foreground" : "text-gray-400"}`}>
+                                {isOpeningConversation ? "Creating..." : canStartConversation ? "Start" : "No phone"}
+                            </span>
+                        )}
+                    </div>
+                    {conversationError && (
+                        <p className="mt-1 text-[11px] text-red-600">{conversationError}</p>
+                    )}
                 </td>
                 <td className="p-4" onClick={(e) => e.stopPropagation()} >
                     {/* Explicit stop propagation for the action cell */}

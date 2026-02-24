@@ -11,6 +11,28 @@ import {
 } from '@/app/(main)/admin/contacts/_components/contact-types';
 import { syncContactToGHL } from '@/lib/ghl/stakeholders';
 import { runGoogleAutoSyncForContact } from '@/lib/google/automation';
+import { getLocationContext } from '@/lib/auth/location-context';
+import { parseEvolutionMessageContent } from '@/lib/whatsapp/evolution-media';
+
+async function resolvePreferredChannelTypeForPhone(
+  location: { evolutionInstanceId?: string | null },
+  phone: string | null | undefined
+): Promise<'TYPE_WHATSAPP' | 'TYPE_SMS'> {
+  const rawDigits = String(phone || '').replace(/\D/g, '');
+  if (!location?.evolutionInstanceId || rawDigits.length < 7) {
+    return 'TYPE_SMS';
+  }
+
+  try {
+    const { evolutionClient } = await import('@/lib/evolution/client');
+    const lookup = await evolutionClient.checkWhatsAppNumber(location.evolutionInstanceId, rawDigits);
+    if (lookup.exists) return 'TYPE_WHATSAPP';
+  } catch (err) {
+    console.warn('[Contacts] WhatsApp lookup failed:', err);
+  }
+
+  return 'TYPE_SMS';
+}
 
 // --- Helpers & Zod Transforms ---
 
@@ -198,6 +220,129 @@ export type CreateContactState = {
   success?: boolean;
   contact?: { id: string; name: string; email?: string | null; phone?: string | null; message?: string | null };
 };
+
+export async function openOrStartConversationForContact(contactId: string) {
+  try {
+    const location = await getLocationContext();
+    if (!location?.id) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    const { userId } = await auth();
+    if (!userId) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    const hasAccess = await verifyUserHasAccessToLocation(userId, location.id);
+    if (!hasAccess) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    const contact = await db.contact.findFirst({
+      where: { id: contactId, locationId: location.id },
+      select: { id: true, phone: true, name: true }
+    });
+
+    if (!contact) {
+      return { success: false, error: 'Contact not found' };
+    }
+
+    const existingConversation = await db.conversation.findFirst({
+      where: { locationId: location.id, contactId: contact.id },
+      select: { ghlConversationId: true }
+    });
+
+    if (existingConversation) {
+      return {
+        success: true,
+        conversationId: existingConversation.ghlConversationId,
+        isNew: false
+      };
+    }
+
+    if (!contact.phone) {
+      return { success: false, error: 'Contact has no phone number' };
+    }
+
+    const preferredChannelType = await resolvePreferredChannelTypeForPhone(location, contact.phone);
+
+    const conversation = await db.conversation.create({
+      data: {
+        ghlConversationId: `wa_${Date.now()}_${contact.id}`,
+        locationId: location.id,
+        contactId: contact.id,
+        lastMessageBody: null,
+        lastMessageAt: new Date(0),
+        lastMessageType: preferredChannelType,
+        unreadCount: 0,
+        status: 'open'
+      },
+      select: { ghlConversationId: true }
+    });
+
+    let messagesImported = 0;
+    if (location.evolutionInstanceId && contact.phone) {
+      try {
+        const { evolutionClient } = await import('@/lib/evolution/client');
+        const { processNormalizedMessage } = await import('@/lib/whatsapp/sync');
+
+        const rawDigits = contact.phone.replace(/\D/g, '');
+        if (rawDigits.length >= 7) {
+          const remoteJid = `${rawDigits}@s.whatsapp.net`;
+          const messages = await evolutionClient.fetchMessages(location.evolutionInstanceId, remoteJid, 30);
+
+          for (const msg of (messages || [])) {
+            const key = msg.key;
+            const messageContent = msg.message;
+            if (!messageContent || !key?.id) continue;
+
+            const isFromMe = key.fromMe;
+            const parsedContent = parseEvolutionMessageContent(messageContent);
+            const normalized: any = {
+              from: isFromMe ? location.id : rawDigits,
+              to: isFromMe ? rawDigits : location.id,
+              body: parsedContent.body,
+              type: parsedContent.type,
+              wamId: key.id,
+              timestamp: new Date(msg.messageTimestamp ? (msg.messageTimestamp as number) * 1000 : Date.now()),
+              direction: isFromMe ? 'outbound' : 'inbound',
+              source: 'whatsapp_evolution',
+              locationId: location.id,
+              contactName: isFromMe ? undefined : msg.pushName
+            };
+
+            const result = await processNormalizedMessage(normalized);
+            if (result?.status === 'processed') messagesImported++;
+          }
+        }
+      } catch (backfillError) {
+        console.warn('[Contacts] Conversation backfill failed:', backfillError);
+      }
+    }
+
+    return {
+      success: true,
+      conversationId: conversation.ghlConversationId,
+      isNew: true,
+      messagesImported
+    };
+  } catch (error: any) {
+    // Prisma unique collision is possible on concurrent clicks; return the existing conversation.
+    if (String(error?.code) === 'P2002') {
+      const location = await getLocationContext();
+      if (location?.id) {
+        const existingConversation = await db.conversation.findFirst({
+          where: { locationId: location.id, contactId },
+          select: { ghlConversationId: true }
+        });
+        if (existingConversation) {
+          return { success: true, conversationId: existingConversation.ghlConversationId, isNew: false };
+        }
+      }
+    }
+    return { success: false, error: error?.message || 'Failed to open conversation' };
+  }
+}
 
 // --- Logic Helpers ---
 

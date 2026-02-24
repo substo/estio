@@ -305,6 +305,17 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
         include: {
             propertyRoles: { include: { property: true } },
             companyRoles: { include: { company: true } },
+            conversations: {
+                select: {
+                    ghlConversationId: true,
+                    unreadCount: true,
+                    deletedAt: true,
+                    archivedAt: true,
+                    lastMessageAt: true,
+                },
+                take: 1,
+                orderBy: { updatedAt: 'desc' }
+            }
         },
     });
 
@@ -344,13 +355,14 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
                             <th className="p-4">Roles & Properties</th>
                             <th className="p-4">Score</th>
                             <th className="p-4">Status</th>
+                            <th className="p-4">Conversation</th>
                             <th className="p-4">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
                         {contacts.length === 0 ? (
                             <tr>
-                                <td colSpan={7} className="p-8 text-center text-muted-foreground">
+                                <td colSpan={8} className="p-8 text-center text-muted-foreground">
                                     No contacts found matching your criteria.
                                 </td>
                             </tr>

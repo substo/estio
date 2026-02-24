@@ -137,6 +137,15 @@ model Contact {
  
  ## Key Features
 
+### 0. Conversations (Admin Messaging)
+-   **Relation**: `Contact` has a `conversations` relation (see Prisma schema) used by the Admin Conversations hub.
+-   **Current Rule**: The database enforces **one conversation per contact per location** via a unique constraint on `Conversation(locationId, contactId)`.
+-   **UI Behavior (`/admin/contacts`)**:
+    -   If a conversation exists, the contact row shows an **Open conversation** action (message icon) that deep-links to `/admin/conversations?id=<ghlConversationId>`.
+    -   If no conversation exists, the row shows **Start conversation** (when a phone exists), which creates the conversation for that exact contact and then opens it.
+    -   If the contact has no usable phone number, the action is disabled.
+-   **Why exact-contact creation matters**: The system supports masked phone numbers and phone normalization rules, so conversation creation from Contacts should use the contact's internal ID rather than heuristic phone matching whenever possible.
+
 ### 1. Identity & GHL Sync
 -   **`ghlContactId`**: The canonical identifier for the person in GoHighLevel. This field is `@unique`, ensuring that we only have one record per GHL Contact.
 -   **Upsert Logic**: When a contact is submitted via the widget:
