@@ -937,6 +937,27 @@ export async function resolveSyncConflict(
   if (!userId) return { success: false, message: 'Unauthorized' };
 
   try {
+    const getContactPatch = async () => db.contact.findUnique({
+      where: { id: contactId },
+      select: {
+        name: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phone: true,
+        dateOfBirth: true,
+        address1: true,
+        city: true,
+        state: true,
+        postalCode: true,
+        country: true,
+        googleContactId: true,
+        lastGoogleSync: true,
+        googleContactUpdatedAt: true,
+        error: true,
+      }
+    });
+
     // Get internal user ID and check Google connection
     const user = await db.user.findUnique({
       where: { clerkId: userId },
@@ -973,7 +994,8 @@ export async function resolveSyncConflict(
         where: { id: contactId },
         select: { googleContactId: true, lastGoogleSync: true, googleContactUpdatedAt: true, error: true }
       });
-      return { success: true, message: 'Resolved: Updated local contact from Google.', syncState };
+      const contactPatch = await getContactPatch();
+      return { success: true, message: 'Resolved: Updated local contact from Google.', syncState, contactPatch };
     }
 
     // 3. LINK ONLY
@@ -995,7 +1017,8 @@ export async function resolveSyncConflict(
         where: { id: contactId },
         select: { googleContactId: true, lastGoogleSync: true, googleContactUpdatedAt: true, error: true }
       });
-      return { success: true, message: 'Linked successfully.', syncState };
+      const contactPatch = await getContactPatch();
+      return { success: true, message: 'Linked successfully.', syncState, contactPatch };
     }
 
     // 2. USE LOCAL (Overwrite Google - Force Push)
@@ -1019,7 +1042,8 @@ export async function resolveSyncConflict(
         where: { id: contactId },
         select: { googleContactId: true, lastGoogleSync: true, googleContactUpdatedAt: true, error: true }
       });
-      return { success: true, message: 'Pushed local data to Google.', syncState };
+      const contactPatch = await getContactPatch();
+      return { success: true, message: 'Pushed local data to Google.', syncState, contactPatch };
     }
 
     return { success: false, message: 'Invalid Resolution Action' };

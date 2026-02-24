@@ -24,6 +24,7 @@ interface GoogleSyncManagerProps {
         lastGoogleSync?: Date | null;
         googleContactUpdatedAt?: Date | null;
         error?: string | null;
+        contactPatch?: Partial<ContactData>;
     }) => void;
     open: boolean;
     onOpenChange: (open: boolean) => void;
@@ -194,8 +195,11 @@ export function GoogleSyncManager({
             }
 
             if (res.success) {
-                if (res.syncState) {
-                    onSyncStateChange?.(res.syncState);
+                if (res.syncState || res.contactPatch) {
+                    onSyncStateChange?.({
+                        ...(res.syncState || {}),
+                        ...(res.contactPatch ? { contactPatch: res.contactPatch } : {})
+                    });
                 }
                 toast({ title: "Success", description: res.message });
                 onOpenChange(false);

@@ -196,11 +196,14 @@ function formatDate(date: Date | string | null | undefined) {
 
 export function ContactForm({ initialMode = 'create', contact: initialContact, locationId, onSuccess, additionalTabs, additionalTabContent, additionalFooter, additionalTabCount = 0, leadSources = [], isOutlookConnected = false, initialData }: ContactFormProps) {
     // For initialization, merge passed contact with initialData (prefill)
-    const contact = { ...initialData, ...initialContact } as ContactData | undefined;
+    const baseContact = { ...initialData, ...initialContact } as ContactData | undefined;
 
     const router = useRouter();
     const [managerOpen, setManagerOpen] = useState(false);
     const [outlookOpen, setOutlookOpen] = useState(false);
+    const [contactPatch, setContactPatch] = useState<Partial<ContactData>>({});
+    const [formRenderKey, setFormRenderKey] = useState(0);
+    const contact = baseContact ? ({ ...baseContact, ...contactPatch } as ContactData) : undefined;
     const [syncMeta, setSyncMeta] = useState<{
         googleContactId?: string | null;
         lastGoogleSync?: Date | null;
@@ -220,6 +223,11 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
             error: contact?.error
         });
     }, [contact?.id, contact?.googleContactId, contact?.lastGoogleSync, contact?.error]);
+
+    useEffect(() => {
+        setContactPatch({});
+        setFormRenderKey(0);
+    }, [initialContact?.id]);
 
     const [isEditing, setIsEditing] = useState(initialMode !== 'view');
     const isCreating = initialMode === 'create';
@@ -443,7 +451,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                     </div>
                 </RenderField>
 
-                <Tabs defaultValue="details" className="w-full">
+                <Tabs key={formRenderKey} defaultValue="details" className="w-full">
                     <TabsList className={`w-full grid ${gridCols[visibleTabCount] || 'grid-cols-4'}`}>
                         {currentConfig.visibleTabs.includes('details') && (
                             <TabsTrigger value="details">Details</TabsTrigger>
@@ -993,7 +1001,14 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                     open={managerOpen}
                     onOpenChange={setManagerOpen}
                     skipRevalidateOnSuccess={true}
-                    onSyncStateChange={(next) => setSyncMeta((prev) => ({ ...prev, ...next }))}
+                    onSyncStateChange={(next) => {
+                        const { contactPatch: nextContactPatch, ...nextSyncMeta } = next;
+                        setSyncMeta((prev) => ({ ...prev, ...nextSyncMeta }));
+                        if (nextContactPatch && Object.keys(nextContactPatch).length > 0) {
+                            setContactPatch((prev) => ({ ...prev, ...nextContactPatch }));
+                            setFormRenderKey((prev) => prev + 1);
+                        }
+                    }}
                 />
             )}
 
