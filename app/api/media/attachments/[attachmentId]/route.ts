@@ -6,10 +6,11 @@ import { createWhatsAppMediaReadUrl, parseR2Uri } from "@/lib/whatsapp/media-r2"
 export const runtime = "nodejs";
 
 export async function GET(
-    _req: NextRequest,
+    req: NextRequest,
     { params }: { params: Promise<{ attachmentId: string }> }
 ) {
     const { attachmentId } = await params;
+    const isDownload = req.nextUrl.searchParams.get("download") === "1";
     const location = await getLocationContext();
 
     if (!location) {
@@ -51,6 +52,7 @@ export async function GET(
             key: parsed.key,
             contentType: attachment.contentType,
             fileName: attachment.fileName,
+            disposition: isDownload ? "attachment" : "inline",
             expiresInSeconds: 300,
         });
         return NextResponse.redirect(signedUrl, { status: 302 });
@@ -59,4 +61,3 @@ export async function GET(
         return NextResponse.json({ error: "Failed to fetch attachment" }, { status: 500 });
     }
 }
-

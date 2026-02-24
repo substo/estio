@@ -212,17 +212,19 @@ export async function createWhatsAppMediaReadUrl(params: {
     key: string;
     contentType?: string;
     fileName?: string;
+    disposition?: "inline" | "attachment";
     expiresInSeconds?: number;
 }) {
     const { bucketName } = getR2Config();
     const client = getR2Client();
+    const disposition = params.disposition || "inline";
     const command = new GetObjectCommand({
         Bucket: bucketName,
         Key: params.key,
         ResponseContentType: params.contentType,
         ResponseContentDisposition: params.fileName
-            ? `inline; filename="${sanitizePathSegment(params.fileName)}"`
-            : undefined,
+            ? `${disposition}; filename="${sanitizePathSegment(params.fileName)}"`
+            : disposition,
     });
 
     const url = await getSignedUrl(client, command, {
@@ -283,4 +285,3 @@ export async function headWhatsAppMediaObject(key: string) {
         throw error;
     }
 }
-
