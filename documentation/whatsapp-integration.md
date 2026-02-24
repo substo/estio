@@ -167,6 +167,20 @@ To prevent emoji reactions/stickers from being mislabeled as generic media (`[Me
 - Using one parser in all sync paths prevents webhook/history mismatches (the most common cause of "`[Media]` for emoji" regressions).
 - The parser preserves UTF-8 emoji content as text instead of coercing it into media placeholders.
 
+### 8. New Conversation / Paste Lead Channel Detection (Feb 24, 2026)
+
+To avoid defaulting every manually-created lead/thread to WhatsApp when the number is not actually registered, the app now performs an Evolution API lookup before deciding the conversation channel default:
+
+- **Endpoint**: `POST /chat/whatsappNumbers/{instanceName}` (Evolution "Check is WhatsApp")
+- **Used by**:
+  - `startNewConversation(phone)` (New Conversation dialog)
+  - `createParsedLead(...)` (Paste Lead import)
+- **Behavior**:
+  - If the phone is confirmed on WhatsApp, the conversation defaults to `TYPE_WHATSAPP`.
+  - If not confirmed (or lookup fails / Evolution unavailable), it falls back to `TYPE_SMS`.
+
+This only affects the **default channel selection** for newly created/imported conversations; it does not force-convert established email threads.
+
 ## Setup Guide
 
 ### 1. Create GHL Marketplace App (Once per Agency)

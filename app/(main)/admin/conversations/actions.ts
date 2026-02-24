@@ -5,6 +5,7 @@ import { getConversations, getMessages, getConversation, sendMessage, getMessage
 import { generateDraft } from "@/lib/ai/coordinator";
 import { refreshGhlAccessToken } from "@/lib/location";
 import db from "@/lib/db";
+import { updateConversationLastMessage } from "@/lib/conversations/update";
 import { generateMultiContextDraft } from "@/lib/ai/context-builder";
 import { ensureLocalContactSynced } from "@/lib/crm/contact-sync";
 import { ensureConversationHistory, syncMessageFromWebhook } from "@/lib/ghl/sync";
@@ -2277,6 +2278,29 @@ export async function getConversationParticipants(conversationId: string) {
 // WhatsApp Chat Sync & New Conversation Actions
 // =============================================
 
+async function resolvePreferredChannelTypeForPhone(
+    location: { evolutionInstanceId?: string | null },
+    phone: string | null | undefined
+): Promise<'TYPE_WHATSAPP' | 'TYPE_SMS'> {
+    const rawDigits = String(phone || '').replace(/\D/g, '');
+    if (!location?.evolutionInstanceId || rawDigits.length < 7) {
+        return 'TYPE_SMS';
+    }
+
+    try {
+        const { evolutionClient } = await import("@/lib/evolution/client");
+        const lookup = await evolutionClient.checkWhatsAppNumber(location.evolutionInstanceId, rawDigits);
+        if (lookup.exists) {
+            console.log(`[ChannelDetect] WhatsApp confirmed for ${rawDigits}`);
+            return 'TYPE_WHATSAPP';
+        }
+    } catch (err) {
+        console.warn(`[ChannelDetect] WhatsApp lookup failed for ${rawDigits}:`, err);
+    }
+
+    return 'TYPE_SMS';
+}
+
 /**
  * Bulk-sync all WhatsApp chats from Evolution API into local DB.
  * Safe to call multiple times — dedup handled at message, conversation, and contact levels.
@@ -2531,6 +2555,8 @@ export async function startNewConversation(phone: string) {
         return { success: false, error: "Phone number is too short. Please include the country code." };
     }
 
+    const preferredChannelType = await resolvePreferredChannelTypeForPhone(location, rawDigits);
+
     try {
         // 1. Find or create contact
         const searchSuffix = rawDigits.length > 2 ? rawDigits.slice(-2) : rawDigits;
@@ -2646,7 +2672,7 @@ export async function startNewConversation(phone: string) {
                 contactId: contact.id,
                 lastMessageBody: null,
                 lastMessageAt: new Date(0), // Epoch — will sort to bottom until a real message arrives
-                lastMessageType: 'TYPE_WHATSAPP',
+                lastMessageType: preferredChannelType,
                 unreadCount: 0,
                 status: 'open'
             }
@@ -3106,6 +3132,8 @@ export async function createParsedLead(data: ParsedLeadData, originalText: strin
             .filter(Boolean)
             .join("\n");
 
+        const preferredChannelType = await resolvePreferredChannelTypeForPhone(location, data.contact?.phone);
+
         // Try to find by Phone
         if (data.contact?.phone) {
             // Clean phone
@@ -3262,6 +3290,7 @@ export async function createParsedLead(data: ParsedLeadData, originalText: strin
         let conversation = await db.conversation.findFirst({
             where: { locationId: location.id, contactId: contactId! }
         });
+        let conversationWasCreated = false;
 
         if (!conversation) {
             // Create dummy GHL ID if needed, or use cuid
@@ -3273,8 +3302,19 @@ export async function createParsedLead(data: ParsedLeadData, originalText: strin
                     ghlConversationId: ghlId,
                     status: 'open',
                     lastMessageAt: new Date(),
+                    lastMessageType: preferredChannelType,
                     unreadCount: 0
                 }
+            });
+            conversationWasCreated = true;
+        } else if (
+            preferredChannelType === 'TYPE_WHATSAPP' &&
+            (!conversation.lastMessageType || String(conversation.lastMessageType).toUpperCase().includes('SMS'))
+        ) {
+            // Upgrade default composer channel for imported leads without overriding email threads.
+            conversation = await db.conversation.update({
+                where: { id: conversation.id },
+                data: { lastMessageType: preferredChannelType }
             });
         }
 
@@ -3382,16 +3422,25 @@ export async function createParsedLead(data: ParsedLeadData, originalText: strin
         // 3. Handle Message & Orchestration
         if (data.messageContent) {
             // USER SENT A MESSAGE
+            const messageCreatedAt = new Date();
             const message = await db.message.create({
                 data: {
                     conversationId: conversation.id,
                     body: data.messageContent,
                     direction: 'inbound',
-                    type: 'TYPE_SMS', // Default
+                    type: preferredChannelType,
                     status: 'received',
-                    createdAt: new Date(),
+                    createdAt: messageCreatedAt,
                     source: data.source || 'paste_import'
                 }
+            });
+
+            await updateConversationLastMessage({
+                conversationId: conversation.id,
+                messageBody: data.messageContent,
+                messageType: preferredChannelType,
+                messageDate: messageCreatedAt,
+                direction: 'inbound'
             });
 
             // Trigger AI
@@ -3412,6 +3461,13 @@ export async function createParsedLead(data: ParsedLeadData, originalText: strin
                     source: 'system'
                 }
             });
+
+            if (conversationWasCreated && preferredChannelType === 'TYPE_WHATSAPP' && conversation.lastMessageType !== 'TYPE_WHATSAPP') {
+                await db.conversation.update({
+                    where: { id: conversation.id },
+                    data: { lastMessageType: 'TYPE_WHATSAPP' }
+                });
+            }
 
             return { success: true, conversationId: conversation.ghlConversationId, action: 'imported' };
         }

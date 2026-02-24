@@ -21,6 +21,80 @@ interface EvolutionInstance {
     };
 }
 
+interface EvolutionWhatsAppNumberLookup {
+    number: string;
+    exists: boolean;
+    jid: string | null;
+    raw: any;
+}
+
+function toBoolean(value: any): boolean | null {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value !== 0;
+    if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        if (['true', '1', 'yes', 'valid', 'exists', 'registered'].includes(normalized)) return true;
+        if (['false', '0', 'no', 'invalid', 'not_found', 'not found'].includes(normalized)) return false;
+    }
+    return null;
+}
+
+function normalizeWhatsAppLookupItem(item: any, requestedNumber: string): EvolutionWhatsAppNumberLookup {
+    if (typeof item === 'string') {
+        const jid = item.includes('@') ? item : null;
+        const number = (jid ? jid.replace(/\D/g, '') : item.replace(/\D/g, '')) || requestedNumber;
+        const exists = jid ? jid.endsWith('@s.whatsapp.net') || jid.endsWith('@lid') : false;
+        return { number, exists, jid, raw: item };
+    }
+
+    if (typeof item === 'boolean') {
+        return { number: requestedNumber, exists: item, jid: null, raw: item };
+    }
+
+    const jidCandidate = item?.jid || item?.id || item?.wid || item?.remoteJid || null;
+    const numberCandidate = item?.number || item?.phone || item?.input || item?.participant || item?.user || requestedNumber;
+    const normalizedNumber = String(numberCandidate || requestedNumber).replace(/\D/g, '') || requestedNumber;
+
+    const explicitExists =
+        toBoolean(item?.exists) ??
+        toBoolean(item?.isWhatsapp) ??
+        toBoolean(item?.isWhatsApp) ??
+        toBoolean(item?.registered) ??
+        toBoolean(item?.valid) ??
+        toBoolean(item?.status);
+
+    const inferredFromJid = typeof jidCandidate === 'string'
+        ? (jidCandidate.endsWith('@s.whatsapp.net') || jidCandidate.endsWith('@lid'))
+        : null;
+
+    return {
+        number: normalizedNumber,
+        exists: explicitExists ?? inferredFromJid ?? false,
+        jid: typeof jidCandidate === 'string' ? jidCandidate : null,
+        raw: item,
+    };
+}
+
+function extractWhatsAppLookupCandidates(payload: any, requestedNumber: string): any[] {
+    if (Array.isArray(payload)) return payload;
+    if (Array.isArray(payload?.numbers)) return payload.numbers;
+    if (Array.isArray(payload?.data)) return payload.data;
+    if (Array.isArray(payload?.result)) return payload.result;
+    if (Array.isArray(payload?.response)) return payload.response;
+
+    if (payload && typeof payload === 'object') {
+        const direct = payload[requestedNumber];
+        if (direct !== undefined) {
+            if (typeof direct === 'object' && direct !== null) return [{ number: requestedNumber, ...direct }];
+            return [{ number: requestedNumber, exists: direct }];
+        }
+        return [payload];
+    }
+
+    if (payload !== undefined && payload !== null) return [payload];
+    return [];
+}
+
 export const evolutionClient = {
     /**
      * Check if Evolution API is reachable
@@ -515,6 +589,63 @@ export const evolutionClient = {
             console.error('Error finding contact:', error.response?.data || error);
             return null;
         }
+    },
+
+    /**
+     * Check whether one or more phone numbers are registered on WhatsApp.
+     * Evolution API v2 endpoint (docs: "Check is WhatsApp")
+     */
+    checkWhatsAppNumbers: async (instanceName: string, numbers: string[]) => {
+        const normalizedNumbers = Array.from(
+            new Set(
+                (numbers || [])
+                    .map(n => String(n || '').replace(/\D/g, ''))
+                    .filter(n => n.length > 0)
+            )
+        );
+
+        if (!instanceName || normalizedNumbers.length === 0) {
+            return [];
+        }
+
+        try {
+            const response = await axios.post(
+                `${EVOLUTION_API_URL}/chat/whatsappNumbers/${instanceName}`,
+                { numbers: normalizedNumbers },
+                {
+                    headers: {
+                        'apikey': EVOLUTION_GLOBAL_API_KEY
+                    }
+                }
+            );
+            return response.data;
+        } catch (error: any) {
+            console.error('Error checking WhatsApp numbers:', error.response?.data || error);
+            return [];
+        }
+    },
+
+    /**
+     * Check whether a single phone number is registered on WhatsApp.
+     * Returns a normalized result and tolerates version-specific response shapes.
+     */
+    checkWhatsAppNumber: async (instanceName: string, number: string): Promise<EvolutionWhatsAppNumberLookup> => {
+        const requestedNumber = String(number || '').replace(/\D/g, '');
+        if (!instanceName || !requestedNumber) {
+            return { number: requestedNumber, exists: false, jid: null, raw: null };
+        }
+
+        const payload = await evolutionClient.checkWhatsAppNumbers(instanceName, [requestedNumber]);
+        const candidates = extractWhatsAppLookupCandidates(payload, requestedNumber);
+
+        const normalized = candidates.map(item => normalizeWhatsAppLookupItem(item, requestedNumber));
+        const exactMatch = normalized.find(r =>
+            r.number === requestedNumber ||
+            r.number.endsWith(requestedNumber) ||
+            requestedNumber.endsWith(r.number)
+        );
+
+        return exactMatch || normalized[0] || { number: requestedNumber, exists: false, jid: null, raw: payload };
     },
 
     /**
