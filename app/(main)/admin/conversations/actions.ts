@@ -982,12 +982,28 @@ export async function generateAIDraft(conversationId: string, contactId: string,
         await ensureLocalContactSynced(contactId, location.id, location.ghlAccessToken);
     }
 
+    // Resolve current agent display name (DB-first; no extra Clerk API calls).
+    const { userId } = await auth();
+    let agentName: string | undefined;
+    if (userId) {
+        const agentUser = await db.user.findUnique({
+            where: { clerkId: userId },
+            select: { name: true, firstName: true, lastName: true, email: true }
+        });
+        if (agentUser) {
+            const fullName = [agentUser.firstName, agentUser.lastName].filter(Boolean).join(" ").trim();
+            agentName = agentUser.name || fullName || agentUser.email || undefined;
+        }
+    }
+
     // Use internal location.id (for SiteConfig lookup), not ghlLocationId (external GHL ID)
     const result = await generateDraft({
         conversationId,
         contactId,
         locationId: location.id, // CRITICAL: SiteConfig uses internal Location.id
         accessToken: location.ghlAccessToken,
+        agentName,
+        businessName: location.name || undefined,
         instruction,
         model
     });
