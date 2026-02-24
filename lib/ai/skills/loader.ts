@@ -162,6 +162,171 @@ function truncateForTrace(text: string): { value: string; truncated: boolean } {
     return { value: `${text.slice(0, SAFE_TRACE_TEXT_LIMIT)}\n...[truncated]`, truncated: true };
 }
 
+function isLocationPinRequest(message: string): boolean {
+    return /\b(location|address|pin|map)\b/i.test(message) &&
+        (/\b(send|share|drop|give)\b/i.test(message) || message.trim().length <= 80);
+}
+
+function extractResolvedPropertyFromToolResults(toolCalls: any[]): any | null {
+    const resolveCall = toolCalls.find((c: any) =>
+        c?.name === "resolve_viewing_property_context" &&
+        c?.result?.resolutionStatus === "resolved" &&
+        c?.result?.selectedProperty
+    );
+    return resolveCall?.result?.selectedProperty || null;
+}
+
+function extractSearchPropertyFromToolResults(toolCalls: any[]): any | null {
+    const searchCall = toolCalls.find((c: any) =>
+        c?.name === "search_properties" &&
+        c?.result?.count > 0 &&
+        Array.isArray(c?.result?.properties) &&
+        c.result.properties.length > 0
+    );
+    return searchCall?.result?.properties?.[0] || null;
+}
+
+function inferViewingFollowUpQuestion(context: SkillExecutionContext): string | null {
+    const history = context.conversationHistory || "";
+    const lower = history.toLowerCase();
+    const looksLikeViewingThread = /\bview(?:ing)?\b/.test(lower) || /\bavailable\b/.test(lower);
+    if (!looksLikeViewingThread) return null;
+
+    if (/\btomorrow\b/.test(lower)) {
+        return "What time works best for you tomorrow to go and see it?";
+    }
+
+    return "What time works best for you to go and see it?";
+}
+
+function buildDeterministicLocationReply(context: SkillExecutionContext, toolCalls: any[]): string | null {
+    if (!isLocationPinRequest(context.message)) return null;
+
+    const resolvedProperty = extractResolvedPropertyFromToolResults(toolCalls);
+    const searchedProperty = extractSearchPropertyFromToolResults(toolCalls);
+
+    const googleMapsLink =
+        resolvedProperty?.googleMapsLink ||
+        resolvedProperty?.schedulingContext?.googleMapsLink ||
+        searchedProperty?.googleMapsLink ||
+        null;
+
+    const fallbackLocationText =
+        resolvedProperty?.locationAddress ||
+        resolvedProperty?.location ||
+        searchedProperty?.locationAddress ||
+        searchedProperty?.propertyLocation ||
+        searchedProperty?.city ||
+        null;
+
+    const followUpQuestion = inferViewingFollowUpQuestion(context);
+
+    if (googleMapsLink) {
+        const lines = [
+            "Here's the location:",
+            "",
+            googleMapsLink
+        ];
+        if (followUpQuestion) {
+            lines.push("", followUpQuestion);
+        }
+        return lines.join("\n");
+    }
+
+    if (fallbackLocationText) {
+        const lines = [
+            `It's in ${fallbackLocationText}.`
+        ];
+        if (followUpQuestion) {
+            lines.push("", followUpQuestion);
+        }
+        return lines.join("\n");
+    }
+
+    return null;
+}
+
+async function synthesizeReplyFromToolResults(params: {
+    modelId: string;
+    skillName: string;
+    context: SkillExecutionContext;
+    initialDraft: string | null;
+    thoughtSummary: string;
+    toolCalls: any[];
+}): Promise<{ draft: string | null; usage?: { promptTokens: number; completionTokens: number; totalTokens: number; thoughtsTokens: number; toolUsePromptTokens: number; cachedContentTokens: number; raw: string; } }> {
+    const successfulToolCalls = params.toolCalls.filter((c: any) => c?.result && !c?.error);
+    if (successfulToolCalls.length === 0) {
+        return { draft: params.initialDraft ?? null };
+    }
+
+    const replyChangingTools = new Set([
+        "search_properties",
+        "resolve_viewing_property_context",
+        "semantic_search",
+        "recommend_similar",
+        "check_availability",
+        "propose_slots",
+        "confirm_viewing",
+        "create_viewing",
+    ]);
+    const hasReplyChangingToolResult = successfulToolCalls.some((c: any) => replyChangingTools.has(c?.name));
+    if (!hasReplyChangingToolResult) {
+        return { draft: params.initialDraft ?? null };
+    }
+
+    const deterministicLocationReply = buildDeterministicLocationReply(params.context, params.toolCalls);
+    if (deterministicLocationReply) {
+        return { draft: deterministicLocationReply };
+    }
+
+    const synthesisSystemPrompt = `You are a real estate CRM reply synthesizer.
+Write the FINAL outbound message for the agent using the tool results that were just executed.
+
+Rules:
+- Answer the latest user message directly using the tool results.
+- Do NOT say you are about to look something up if the tool results are already available.
+- Do NOT repeat greetings or the contact's name in an ongoing thread unless this is clearly the first outbound message.
+- Keep it conversational and practical.
+- If the user asked for a location/pin/map/address and a Google Maps link is present in tool results, send the link immediately near the top.
+- After sending a location for a viewing-related conversation, ask one short next-step scheduling question.
+- Output only the message text (no JSON, no labels).`;
+
+    const toolResultsJson = JSON.stringify(params.toolCalls, null, 2);
+    const toolResultsTrimmed = toolResultsJson.length > 12000
+        ? `${toolResultsJson.slice(0, 12000)}\n...[truncated tool results]`
+        : toolResultsJson;
+
+    const synthesisUserPrompt = `Skill: ${params.skillName}
+Thought Summary: ${params.thoughtSummary || "N/A"}
+
+Conversation History:
+${params.context.conversationHistory}
+
+Latest User Message:
+"${params.context.message}"
+
+Initial Draft (pre-tool; may be incomplete):
+${params.initialDraft || "null"}
+
+Executed Tool Results:
+${toolResultsTrimmed}
+
+Write the final message the agent should send now.`;
+
+    try {
+        const { text, usage } = await callLLMWithMetadata(
+            params.modelId,
+            synthesisSystemPrompt,
+            synthesisUserPrompt,
+            { jsonMode: false }
+        );
+        return { draft: text?.trim() || params.initialDraft || null, usage };
+    } catch (e) {
+        console.warn(`[SKILL:${params.skillName}] Post-tool synthesis failed, falling back to initial draft`, e);
+        return { draft: params.initialDraft ?? null };
+    }
+}
+
 function resolvePlaceholderString(value: string, context: SkillExecutionContext): string {
     const normalized = value.trim().toLowerCase();
     const agentPlaceholders = new Set([
@@ -263,7 +428,10 @@ ${context.memories.map((m: any) => `- [${m.category}] ${m.text}`).join("\n")}
 ${context.websiteDomain ? `- Website: https://${context.websiteDomain}` : ""}
 ${context.brandVoice ? `- Brand Voice: ${context.brandVoice}` : ""}
 
-You are "${context.agentName ?? "Agent"}" from "${context.businessName ?? "the agency"}". Always introduce yourself by name and business in your first message to a new lead.
+You are "${context.agentName ?? "Agent"}" from "${context.businessName ?? "the agency"}".
+Introduce yourself by name and business only in your first outbound message to a new lead.
+In ongoing conversations, do NOT repeat your introduction or the contact's name in every message.
+Always answer the latest user message first before adding extra context.
 
 ## Current Context
 - Contact ID: ${context.contactId}
@@ -398,12 +566,35 @@ You must respond with valid JSON:
             }
         }
 
+        const synthesized = await synthesizeReplyFromToolResults({
+            modelId,
+            skillName: skill.name,
+            context,
+            initialDraft: parsed.final_response || parsed.draft_reply || null,
+            thoughtSummary: parsed.thought_summary || "",
+            toolCalls: results
+        });
+
+        const initialDraft = parsed.final_response || parsed.draft_reply || null;
+        const finalDraft = synthesized.draft ?? initialDraft;
+        if (finalDraft && finalDraft !== initialDraft) {
+            parsed.post_tool_final_response = finalDraft;
+        }
+
+        const aggregatedUsage = {
+            promptTokens: usage.promptTokens + (synthesized.usage?.promptTokens || 0),
+            completionTokens: usage.completionTokens + (synthesized.usage?.completionTokens || 0),
+            totalTokens: usage.totalTokens + (synthesized.usage?.totalTokens || 0),
+            thoughtsTokens: (usage.thoughtsTokens || 0) + (synthesized.usage?.thoughtsTokens || 0),
+            toolUsePromptTokens: (usage.toolUsePromptTokens || 0) + (synthesized.usage?.toolUsePromptTokens || 0)
+        };
+
         const costEstimate = calculateRunCostFromUsage(modelId, {
-            promptTokens: usage.promptTokens,
-            completionTokens: usage.completionTokens,
-            totalTokens: usage.totalTokens,
-            thoughtsTokens: usage.thoughtsTokens,
-            toolUsePromptTokens: usage.toolUsePromptTokens
+            promptTokens: aggregatedUsage.promptTokens,
+            completionTokens: aggregatedUsage.completionTokens,
+            totalTokens: aggregatedUsage.totalTokens,
+            thoughtsTokens: aggregatedUsage.thoughtsTokens,
+            toolUsePromptTokens: aggregatedUsage.toolUsePromptTokens
         });
         const cost = costEstimate.amount;
         const reqSystem = truncateForTrace(systemPrompt);
@@ -423,11 +614,11 @@ You must respond with valid JSON:
                 truncated: resRaw.truncated
             },
             usage: {
-                promptTokens: usage.promptTokens,
-                completionTokens: usage.completionTokens,
-                totalTokens: usage.totalTokens,
-                thoughtsTokens: usage.thoughtsTokens,
-                toolUsePromptTokens: usage.toolUsePromptTokens
+                promptTokens: aggregatedUsage.promptTokens,
+                completionTokens: aggregatedUsage.completionTokens,
+                totalTokens: aggregatedUsage.totalTokens,
+                thoughtsTokens: aggregatedUsage.thoughtsTokens,
+                toolUsePromptTokens: aggregatedUsage.toolUsePromptTokens
             },
             costEstimate: {
                 method: costEstimate.method,
@@ -440,9 +631,9 @@ You must respond with valid JSON:
             thoughtSummary: parsed.thought_summary || "",
             thoughtSteps: parsed.thought_steps || [],
             toolCalls: results,
-            draftReply: parsed.final_response || parsed.draft_reply || null,
-            promptTokens: usage.promptTokens,
-            completionTokens: usage.completionTokens,
+            draftReply: finalDraft,
+            promptTokens: aggregatedUsage.promptTokens,
+            completionTokens: aggregatedUsage.completionTokens,
             cost: cost,
             llmCall
         };

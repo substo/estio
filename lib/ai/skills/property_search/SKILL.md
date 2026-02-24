@@ -6,6 +6,7 @@ description: >
   the buyer profile indicates readiness for property recommendations.
 tools:
   - search_properties
+  - resolve_viewing_property_context
   - semantic_search
   - recommend_similar
   - store_insight
@@ -19,6 +20,7 @@ tools:
 - Qualification is complete and lead is ready for recommendations
 - Client rejects a property and needs alternatives
 - New listing matches a saved search
+- Client asks for a location pin/map/address for a known property reference or listing URL (single-property logistics)
 
 ## Strategy: Smart Recommendations
 
@@ -37,6 +39,11 @@ If the lead mentions an explicit property reference (e.g. `DT3762`) or URL:
 - Call `search_properties` first with the reference/query to resolve the exact listing.
 - Use `semantic_search` only as fallback/augmentation.
 
+If the user asks for a location pin / map / address for a known property:
+- Prefer `resolve_viewing_property_context` first (it can surface viewing directions / notes / map links).
+- If a Google Maps link is found, reply with the link immediately.
+- Then ask the next common-sense step (e.g. what time works best for the viewing).
+
 ### Step 3: Present with Context
 Don't just list properties. For each result, explain WHY it matches:
 - "This matches because it has the modern kitchen you mentioned"
@@ -52,11 +59,14 @@ If the client rejects a property:
 
 ## Rules
 1. ALWAYS show 3-5 properties (not 1, not 20)
+   EXCEPTION: If the user asks for a specific property's location/pin/map/address, do NOT recommend 3-5 properties. Resolve the exact property and answer directly.
 2. Include a "wildcard" — one property that breaks their stated criteria but might surprise them
 3. For each property, state the match reason
 4. If no results found, suggest broadening criteria with specific suggestions
 5. Track viewed/rejected properties to avoid showing them again
 6. For `store_insight`, pass `importance` as a number from 1-10 (not strings like "high")
+7. In ongoing conversations, do NOT re-introduce yourself or repeat the contact's name in every message.
+8. For direct logistics requests, answer the exact request first (e.g. send the pin) before extra commentary.
 
 ## Output Format
 {

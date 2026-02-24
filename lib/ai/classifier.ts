@@ -11,6 +11,7 @@ Rules:
 - If the message mentions a price, offer, or counter-offer → PRICE_NEGOTIATION or OFFER or COUNTER_OFFER
 - If the message expresses dissatisfaction or pushback → OBJECTION
 - If the message asks about availability or scheduling → SCHEDULE_VIEWING or AVAILABILITY_QUESTION
+- If the message asks for a property location/pin/map/address for a specific listing (especially after viewing interest) → AVAILABILITY_QUESTION
 - If the message is a simple "ok", "thanks", "got it" → ACKNOWLEDGMENT or THANK_YOU
 - If the message asks for property details → PROPERTY_QUESTION
 - If the message states property requirements (e.g. "I want a 2-bed in Paphos") → QUALIFICATION
@@ -35,6 +36,27 @@ export async function classifyIntent(
     message: string,
     conversationContext?: string
 ): Promise<ClassificationResult> {
+    const normalizedMessage = message.toLowerCase();
+    const asksForLocationPin =
+        /\b(location|address|pin|map)\b/i.test(message) &&
+        (/\b(send|share|drop|give)\b/i.test(message) || /\?$/.test(message) || message.length < 80);
+    const contextMentionsPropertyRef = /\b[A-Z]{2,4}\d{3,6}\b/i.test(conversationContext || "");
+    const contextMentionsViewing = /\bview(?:ing)?\b/i.test(conversationContext || "");
+
+    // Location/pin requests in an active property/viewing thread are operational viewing messages,
+    // not recommendation searches. Route to viewing_management so it can resolve logistics first.
+    if (asksForLocationPin && (contextMentionsPropertyRef || contextMentionsViewing || /\bthis property\b/i.test(normalizedMessage))) {
+        console.log(`[CLASSIFIER] Location/pin request in property context, forcing AVAILABILITY_QUESTION`);
+        const intentConfig = INTENTS.AVAILABILITY_QUESTION;
+        return {
+            intent: "AVAILABILITY_QUESTION",
+            confidence: 0.94,
+            risk: intentConfig.risk as "low" | "medium" | "high",
+            suggestedSkill: intentConfig.skill,
+            suggestedEffort: intentConfig.effort as "flash" | "standard" | "premium",
+        };
+    }
+
     // ── PRE-CHECK: Explicit property reference patterns ──
     // Matches refs like DT3762, DT1234, VP500, etc. (2-3 letter prefix + 3-5 digits)
     const propertyRefPattern = /\b[A-Z]{2,3}\d{3,5}\b/i;

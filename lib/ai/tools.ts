@@ -4,6 +4,121 @@ import { syncContactToGHL } from "@/lib/ghl/stakeholders";
 import { createAppointment } from "@/lib/ghl/calendars";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
+type GoogleMapsLinkResult = {
+    url: string | null;
+    source: "metadata" | "coordinates" | "viewingDirections" | "viewingNotes" | "internalNotes" | null;
+};
+
+function toGoogleMapsSearchLink(latitude?: number | null, longitude?: number | null): string | null {
+    if (typeof latitude !== "number" || typeof longitude !== "number") return null;
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+    return `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
+}
+
+function extractGoogleMapsLinkFromText(...texts: Array<string | null | undefined>): GoogleMapsLinkResult {
+    const urlRegex = /https?:\/\/[^\s)]+/gi;
+    const candidates: Array<{ text: string; source: GoogleMapsLinkResult["source"] }> = [
+        { text: String(texts[0] || ""), source: "viewingDirections" },
+        { text: String(texts[1] || ""), source: "viewingNotes" },
+        { text: String(texts[2] || ""), source: "internalNotes" },
+    ];
+
+    for (const candidate of candidates) {
+        const matches = candidate.text.match(urlRegex) || [];
+        for (const rawUrl of matches) {
+            try {
+                const parsed = new URL(rawUrl);
+                const host = parsed.hostname.toLowerCase();
+                const pathname = parsed.pathname.toLowerCase();
+                const isGoogleMaps =
+                    host === "maps.app.goo.gl" ||
+                    host === "goo.gl" && pathname.startsWith("/maps") ||
+                    host.includes("google.") && pathname.includes("/maps");
+                if (isGoogleMaps) {
+                    return { url: parsed.toString(), source: candidate.source };
+                }
+            } catch {
+                // Ignore invalid URLs in free text.
+            }
+        }
+    }
+
+    return { url: null, source: null };
+}
+
+function deriveGoogleMapsLink(property: {
+    latitude?: number | null;
+    longitude?: number | null;
+    viewingDirections?: string | null;
+    viewingNotes?: string | null;
+    internalNotes?: string | null;
+    metadata?: any;
+}): GoogleMapsLinkResult {
+    const metadata = property.metadata && typeof property.metadata === "object" ? property.metadata : null;
+    const metadataCandidates = [
+        metadata?.googleMapsLink,
+        metadata?.google_maps_link,
+        metadata?.googleMapUrl,
+        metadata?.google_map_url,
+        metadata?.mapLink,
+        metadata?.mapsLink,
+        metadata?.locationPin,
+    ];
+    const metadataUrl = metadataCandidates.find(v => typeof v === "string" && /^https?:\/\//i.test(v));
+    if (typeof metadataUrl === "string") {
+        return { url: metadataUrl.trim(), source: "metadata" };
+    }
+
+    const fromText = extractGoogleMapsLinkFromText(
+        property.viewingDirections,
+        property.viewingNotes,
+        property.internalNotes
+    );
+    if (fromText.url) return fromText;
+
+    const fromCoords = toGoogleMapsSearchLink(property.latitude, property.longitude);
+    if (fromCoords) return { url: fromCoords, source: "coordinates" };
+
+    return { url: null, source: null };
+}
+
+function buildPropertyAddressLabel(property: {
+    addressLine1?: string | null;
+    addressLine2?: string | null;
+    city?: string | null;
+    propertyLocation?: string | null;
+    postalCode?: string | null;
+    country?: string | null;
+}): string | null {
+    const parts = [
+        property.addressLine1,
+        property.addressLine2,
+        property.city,
+        property.propertyLocation,
+        property.postalCode,
+        property.country
+    ]
+        .map(v => (typeof v === "string" ? v.trim() : ""))
+        .filter(Boolean);
+
+    if (parts.length === 0) return null;
+    return Array.from(new Set(parts)).join(", ");
+}
+
+async function getPropertyPublicBaseUrl(locationId: string): Promise<string | null> {
+    const siteConfig = await db.siteConfig.findUnique({
+        where: { locationId },
+        select: { domain: true }
+    });
+    if (siteConfig?.domain) {
+        const normalized = siteConfig.domain.replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+        if (normalized) return `https://${normalized}`;
+    }
+
+    if (locationId === "substo_estio") return "https://estio.co";
+    return null;
+}
+
 /**
  * AI Tool: Update Contact Requirements
  * Updates structured fields like status, budget, district.
@@ -95,8 +210,8 @@ export async function searchProperties(
     if (query.propertyType) where.type = { contains: query.propertyType, mode: 'insensitive' };
     if (where.AND.length === 0) delete where.AND;
 
-    const properties = await db.property.findMany({
-        where,
+    const runSearch = (whereClause: any) => db.property.findMany({
+        where: whereClause,
         take: 5,
         select: {
             id: true,
@@ -105,15 +220,49 @@ export async function searchProperties(
             price: true,
             bedrooms: true,
             propertyLocation: true,
+            city: true,
+            addressLine1: true,
+            addressLine2: true,
+            postalCode: true,
+            country: true,
+            latitude: true,
+            longitude: true,
+            viewingDirections: true,
+            viewingNotes: true,
+            internalNotes: true,
+            metadata: true,
             slug: true
         }
     });
 
+    let properties = await runSearch(where);
+
+    // Exact property lookups should not fail just because goal was mismatched/incomplete in imported data.
+    if (properties.length === 0 && query.reference && query.status) {
+        const relaxedWhere = { ...where };
+        delete relaxedWhere.goal;
+        properties = await runSearch(relaxedWhere);
+    }
+
+    const publicBaseUrl = await getPropertyPublicBaseUrl(locationId);
+
     return {
         count: properties.length,
         properties: properties.map(p => ({
-            ...p,
-            url: `https://${locationId === 'substo_estio' ? 'estio.co' : '...'}/property/${p.slug}` // Just a placeholder for now
+            id: p.id,
+            reference: p.reference,
+            title: p.title,
+            price: p.price,
+            bedrooms: p.bedrooms,
+            propertyLocation: p.propertyLocation,
+            city: p.city,
+            addressLine1: p.addressLine1,
+            slug: p.slug,
+            latitude: p.latitude,
+            longitude: p.longitude,
+            locationAddress: buildPropertyAddressLabel(p),
+            googleMapsLink: deriveGoogleMapsLink(p).url,
+            url: publicBaseUrl ? `${publicBaseUrl}/property/${p.slug}` : null
         }))
     };
 }
@@ -137,7 +286,13 @@ const PROPERTY_VIEWING_SELECT = {
     currency: true,
     bedrooms: true,
     city: true,
+    addressLine1: true,
+    addressLine2: true,
+    postalCode: true,
+    country: true,
     propertyLocation: true,
+    latitude: true,
+    longitude: true,
     occupancyStatus: true,
     keyHolder: true,
     keyBoxCode: true,
@@ -372,6 +527,8 @@ function deriveSchedulePath(property: {
 function mapPropertyForViewing(property: any) {
     const schedulePath = deriveSchedulePath(property);
     const petsPolicy = inferPetsPolicy(property);
+    const maps = deriveGoogleMapsLink(property);
+    const locationAddress = buildPropertyAddressLabel(property);
 
     const schedulingContext = compactObject({
         listingType: property.goal,
@@ -385,6 +542,9 @@ function mapPropertyForViewing(property: any) {
         },
         occupancyStatus: property.occupancyStatus || null,
         coordinationContact: property.viewingContact || null,
+        locationAddress,
+        googleMapsLink: maps.url,
+        googleMapsLinkSource: maps.source,
         viewingDirections: property.viewingDirections || null,
         viewingNotes: property.viewingNotes || null,
         rentalPolicies: {
@@ -404,7 +564,16 @@ function mapPropertyForViewing(property: any) {
         price: property.price,
         currency: property.currency,
         bedrooms: property.bedrooms,
+        addressLine1: property.addressLine1 || null,
+        addressLine2: property.addressLine2 || null,
+        postalCode: property.postalCode || null,
+        country: property.country || null,
         location: property.propertyLocation || property.city || null,
+        locationAddress,
+        latitude: property.latitude ?? null,
+        longitude: property.longitude ?? null,
+        googleMapsLink: maps.url,
+        googleMapsLinkSource: maps.source,
         occupancyStatus: property.occupancyStatus || null,
         keyHolder: property.keyHolder || null,
         keyBoxCode: property.keyBoxCode || null,

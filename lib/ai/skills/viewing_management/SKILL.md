@@ -54,6 +54,7 @@ NEVER check calendars until the property is identified and viewing logistics are
 3. If property resolved:
    - Read listingType (SALE/RENT), status, schedulePath, occupancy/key fields
    - Answer practical questions (price, bills transferable, pets policy if available)
+   - If the lead asks for the location/pin/map/address and `googleMapsLink` is available, send it immediately before discussing scheduling
 ```
 
 ### Property Source Priority
@@ -82,6 +83,9 @@ After property resolution, classify into one of these operational paths:
 Always communicate the coordination dependency clearly before promising fixed times.
 
 ### Step 2: Decide Scheduling Route From schedulePath
+- If the lead asked for the location pin/map:
+  - Reply with the Google Maps link (or best available location guidance) first
+  - Then ask for their preferred time window (especially if they already agreed to view)
 - DIRECT_SCHEDULE:
   - Call check_availability with agent userId
   - Then propose 3 slots
@@ -142,6 +146,10 @@ Track the viewing lifecycle:
 9. If Lead cancels, offer to reschedule immediately
 10. Use correct absolute dates. If day/month has no year and would be in the past, clarify year before final confirmation.
 11. If one property is clearly inferred from `Interested Properties` or Other Details, continue without asking unnecessary clarification.
+12. Do not repeat greetings or the contact's name in every follow-up message. Keep logistics replies short and direct.
+13. For explicit location/pin requests, prefer a concise reply format:
+    - Link first
+    - One short scheduling question next
 
 ## Output Format
 When responding to a viewing request:
