@@ -30,6 +30,10 @@ import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'reac
 
 interface ConversationInterfaceProps {
     initialConversations: Conversation[];
+    initialConversationListPageInfo?: {
+        hasMore: boolean;
+        nextCursor: string | null;
+    };
 }
 
 /**
@@ -42,7 +46,7 @@ function getMessageType(conversation: Conversation): 'SMS' | 'Email' | 'WhatsApp
     return 'SMS'; // Default fallback
 }
 
-export function ConversationInterface({ initialConversations }: ConversationInterfaceProps) {
+export function ConversationInterface({ initialConversations, initialConversationListPageInfo }: ConversationInterfaceProps) {
     const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();
@@ -71,10 +75,15 @@ export function ConversationInterface({ initialConversations }: ConversationInte
     const normalizedViewFilter = (urlView === 'inbox' ? 'active' : urlView) as 'active' | 'archived' | 'trash' || 'active';
 
     const [conversations, setConversations] = useState<Conversation[]>(initialConversations);
+    const [conversationListHasMore, setConversationListHasMore] = useState<boolean>(!!initialConversationListPageInfo?.hasMore);
+    const [conversationListNextCursor, setConversationListNextCursor] = useState<string | null>(initialConversationListPageInfo?.nextCursor || null);
+    const [loadingMoreConversations, setLoadingMoreConversations] = useState(false);
+    const loadingMoreConversationsRef = useRef(false);
 
     // Initialize Active ID from URL
     const initialActiveId = searchParams.get('id') || (initialConversations.length > 0 ? initialConversations[0].id : null);
     const [activeId, setActiveId] = useState<string | null>(initialActiveId);
+    const activeIdRef = useRef<string | null>(initialActiveId);
 
     // View Mode State (inbox, archived, trash)
     const [viewFilter, setViewFilter] = useState<'active' | 'archived' | 'trash'>(normalizedViewFilter);
@@ -105,6 +114,10 @@ export function ConversationInterface({ initialConversations }: ConversationInte
         });
     }, [viewFilter, activeId, updateUrl]);
 
+    useEffect(() => {
+        activeIdRef.current = activeId;
+    }, [activeId]);
+
     // Fetch Deals when switching mode
     useEffect(() => {
         if (viewMode === 'deals' && deals.length === 0) {
@@ -118,11 +131,36 @@ export function ConversationInterface({ initialConversations }: ConversationInte
 
     const isFirstLoad = useRef(true);
 
+    const mergeConversationLists = useCallback((existing: Conversation[], incoming: Conversation[]) => {
+        const seen = new Set<string>();
+        const merged: Conversation[] = [];
+        for (const item of [...existing, ...incoming]) {
+            if (!item?.id || seen.has(item.id)) continue;
+            seen.add(item.id);
+            merged.push(item);
+        }
+        return merged;
+    }, []);
+
+    const replaceConversationListFromResponse = useCallback((data: any) => {
+        setConversations(Array.isArray(data?.conversations) ? data.conversations : []);
+        setConversationListHasMore(!!data?.hasMore);
+        setConversationListNextCursor(typeof data?.nextCursor === 'string' ? data.nextCursor : null);
+    }, []);
+
+    const appendConversationPageFromResponse = useCallback((data: any) => {
+        setConversations(prev => mergeConversationLists(prev, Array.isArray(data?.conversations) ? data.conversations : []));
+        setConversationListHasMore(!!data?.hasMore);
+        setConversationListNextCursor(typeof data?.nextCursor === 'string' ? data.nextCursor : null);
+    }, [mergeConversationLists]);
+
     // Fetch Conversations when View Filter changes
     useEffect(() => {
-        fetchConversations(viewFilter)
+        // Preserve a deep-linked/off-window selection during the initial hydration fetch and view switches.
+        // fetchConversations() can include the selected conversation even if it falls outside the top list window.
+        fetchConversations(viewFilter, activeIdRef.current || undefined)
             .then(data => {
-                setConversations(data.conversations);
+                replaceConversationListFromResponse(data);
 
                 if (isFirstLoad.current) {
                     isFirstLoad.current = false;
@@ -135,7 +173,36 @@ export function ConversationInterface({ initialConversations }: ConversationInte
                 console.error("Failed to fetch conversations:", err);
                 toast({ title: "Error", description: "Failed to load conversations.", variant: "destructive" });
             });
-    }, [viewFilter]);
+    }, [viewFilter, replaceConversationListFromResponse]);
+
+    const loadMoreConversations = useCallback(async () => {
+        if (viewMode !== 'chats') return;
+        if (loadingMoreConversationsRef.current) return;
+        if (!conversationListHasMore || !conversationListNextCursor) return;
+
+        loadingMoreConversationsRef.current = true;
+        setLoadingMoreConversations(true);
+        try {
+            const data = await fetchConversations(viewFilter, activeId || undefined, {
+                cursor: conversationListNextCursor,
+                limit: 50,
+            });
+            appendConversationPageFromResponse(data);
+        } catch (err: any) {
+            console.error("Failed to load more conversations:", err);
+            toast({ title: "Error", description: "Failed to load more conversations.", variant: "destructive" });
+        } finally {
+            loadingMoreConversationsRef.current = false;
+            setLoadingMoreConversations(false);
+        }
+    }, [
+        viewMode,
+        conversationListHasMore,
+        conversationListNextCursor,
+        viewFilter,
+        activeId,
+        appendConversationPageFromResponse,
+    ]);
 
     const [messages, setMessages] = useState<Message[]>([]);
     const [loadingMessages, setLoadingMessages] = useState(false);
@@ -565,6 +632,9 @@ export function ConversationInterface({ initialConversations }: ConversationInte
                         conversations={conversations}
                         selectedId={viewMode === 'chats' ? activeId : activeDealId}
                         onSelect={handleSelect}
+                        hasMore={viewMode === 'chats' ? conversationListHasMore : false}
+                        isLoadingMore={viewMode === 'chats' ? loadingMoreConversations : false}
+                        onLoadMore={viewMode === 'chats' ? loadMoreConversations : undefined}
 
                         // Selection / Generic Mode Props
                         isSelectionMode={isSelectionMode}
@@ -772,8 +842,8 @@ export function ConversationInterface({ initialConversations }: ConversationInte
                 onOpenChange={setSyncAllOpen}
                 onComplete={async () => {
                     // Refresh conversations list after sync
-                    const data = await fetchConversations(viewFilter);
-                    setConversations(data.conversations);
+                    const data = await fetchConversations(viewFilter, activeId || undefined);
+                    replaceConversationListFromResponse(data);
                 }}
             />
 
@@ -783,8 +853,8 @@ export function ConversationInterface({ initialConversations }: ConversationInte
                 onOpenChange={setNewConversationOpen}
                 onConversationCreated={async (conversationId) => {
                     // Refresh conversations list
-                    const data = await fetchConversations(viewFilter);
-                    setConversations(data.conversations);
+                    const data = await fetchConversations(viewFilter, conversationId);
+                    replaceConversationListFromResponse(data);
                     // Select the new conversation
                     setActiveId(conversationId);
                     toast({ title: "Conversation Created", description: "You can now send messages." });

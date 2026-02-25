@@ -59,6 +59,19 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
     const conversation = contact.conversations?.[0];
     const hasConversation = !!conversation?.ghlConversationId;
     const canStartConversation = !!contact.phone;
+    const getConversationHref = (ghlConversationId: string) => {
+        const params = new URLSearchParams({
+            id: ghlConversationId,
+        });
+
+        if (conversation?.deletedAt) {
+            params.set("view", "trash");
+        } else if (conversation?.archivedAt) {
+            params.set("view", "archived");
+        }
+
+        return `/admin/conversations?${params.toString()}`;
+    };
     // Add 2 second buffer to ignore micro-differences (race condition fixes)
     const isOutOfSync = isLinked && !hasError && contact.lastGoogleSync &&
         (new Date(contact.updatedAt).getTime() > new Date(contact.lastGoogleSync).getTime() + 2000);
@@ -68,7 +81,7 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
         setConversationError(null);
 
         if (hasConversation && conversation?.ghlConversationId) {
-            router.push(`/admin/conversations?id=${encodeURIComponent(conversation.ghlConversationId)}`);
+            router.push(getConversationHref(conversation.ghlConversationId));
             return;
         }
 
@@ -195,7 +208,7 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
                         </TooltipProvider>
                         {hasConversation ? (
                             <Link
-                                href={`/admin/conversations?id=${encodeURIComponent(conversation!.ghlConversationId)}`}
+                                href={getConversationHref(conversation!.ghlConversationId)}
                                 className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
                                 onClick={(e) => e.stopPropagation()}
                             >

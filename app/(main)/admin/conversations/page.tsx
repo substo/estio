@@ -70,9 +70,15 @@ export default async function ConversationsPage({ searchParams }: { searchParams
     const selectedConversationId = Array.isArray(resolvedSearchParams?.id)
         ? resolvedSearchParams.id[0]
         : resolvedSearchParams?.id;
+    const initialViewFilterParam = Array.isArray(resolvedSearchParams?.view)
+        ? resolvedSearchParams.view[0]
+        : resolvedSearchParams?.view;
+    const initialConversationStatus = (initialViewFilterParam === 'archived' || initialViewFilterParam === 'trash')
+        ? initialViewFilterParam
+        : 'active';
 
     // Initial Fetch on Server (include deep-linked conversation even if not in the top-50 window)
-    const { conversations } = await fetchConversations('all', selectedConversationId);
+    const initialConversationsData = await fetchConversations(initialConversationStatus, selectedConversationId);
 
     return (
         <div className="h-[calc(100vh-64px)] w-full max-w-full min-w-0 overflow-hidden flex flex-col">
@@ -80,7 +86,13 @@ export default async function ConversationsPage({ searchParams }: { searchParams
 
             <main className="flex-1 overflow-hidden relative">
                 <Suspense fallback={<div>Loading Interface...</div>}>
-                    <ConversationInterface initialConversations={conversations} />
+                    <ConversationInterface
+                        initialConversations={initialConversationsData.conversations}
+                        initialConversationListPageInfo={{
+                            hasMore: !!initialConversationsData.hasMore,
+                            nextCursor: initialConversationsData.nextCursor || null,
+                        }}
+                    />
                 </Suspense>
             </main>
         </div>

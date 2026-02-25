@@ -43,9 +43,37 @@ async function getAuthenticatedLocation() {
 
 export async function fetchConversations(
     status: 'active' | 'archived' | 'trash' | 'all' = 'active',
-    selectedConversationId?: string | null
+    selectedConversationId?: string | null,
+    options?: { cursor?: string | null; limit?: number | null }
 ) {
     try {
+        const DEFAULT_PAGE_SIZE = 50;
+        const MAX_PAGE_SIZE = 200;
+        const pageSize = Math.min(
+            Math.max(Number(options?.limit || DEFAULT_PAGE_SIZE) || DEFAULT_PAGE_SIZE, 1),
+            MAX_PAGE_SIZE
+        );
+
+        const decodeCursor = (raw?: string | null): { id: string; lastMessageAtMs: number } | null => {
+            if (!raw) return null;
+            try {
+                const parsed = JSON.parse(Buffer.from(raw, 'base64').toString('utf8'));
+                const id = String(parsed?.id || '');
+                const lastMessageAtMs = Number(parsed?.lastMessageAtMs);
+                if (!id || !Number.isFinite(lastMessageAtMs)) return null;
+                return { id, lastMessageAtMs };
+            } catch {
+                return null;
+            }
+        };
+
+        const encodeCursor = (input: { id: string; lastMessageAt: Date }) =>
+            Buffer.from(JSON.stringify({
+                id: input.id,
+                lastMessageAtMs: input.lastMessageAt.getTime(),
+            }), 'utf8').toString('base64');
+
+        const cursor = decodeCursor(options?.cursor);
         const location = await getAuthenticatedLocation();
 
         const where: any = { locationId: location.id };
@@ -84,16 +112,41 @@ export async function fetchConversations(
 
 
         // Re-fetch with ghlContactId
-        let conversationsWithGhlId = await db.conversation.findMany({
-            where,
-            orderBy: { lastMessageAt: 'desc' },
-            take: 50,
+        const paginatedWhere: any = cursor
+            ? {
+                ...where,
+                OR: [
+                    { lastMessageAt: { lt: new Date(cursor.lastMessageAtMs) } },
+                    {
+                        AND: [
+                            { lastMessageAt: { equals: new Date(cursor.lastMessageAtMs) } },
+                            { id: { lt: cursor.id } }
+                        ]
+                    }
+                ]
+            }
+            : where;
+
+        const fetchedRows = await db.conversation.findMany({
+            where: paginatedWhere,
+            orderBy: [{ lastMessageAt: 'desc' }, { id: 'desc' }],
+            take: pageSize + 1,
             include: { contact: { select: { name: true, email: true, phone: true, ghlContactId: true } } }
         });
+
+        const hasMore = fetchedRows.length > pageSize;
+        const pageRows = hasMore ? fetchedRows.slice(0, pageSize) : fetchedRows;
+        const lastRowForCursor = pageRows.length > 0 ? pageRows[pageRows.length - 1] : null;
+        const nextCursor = hasMore && lastRowForCursor
+            ? encodeCursor({ id: lastRowForCursor.id, lastMessageAt: lastRowForCursor.lastMessageAt })
+            : null;
+
+        let conversationsWithGhlId = pageRows;
 
         // If a conversation is deep-linked via ?id=... but falls outside the top-50 window,
         // include it so the center/right panels can still render for that selection.
         if (
+            !cursor &&
             selectedConversationId &&
             !conversationsWithGhlId.some((c: any) => c.ghlConversationId === selectedConversationId)
         ) {
@@ -180,11 +233,14 @@ export async function fetchConversations(
                 activeDealTitle: dealMap.get(c.ghlConversationId)?.title,
                 suggestedActions: c.suggestedActions || []
             })),
-            total: conversationsWithGhlId.length
+            total: conversationsWithGhlId.length,
+            hasMore,
+            nextCursor,
+            pageSize,
         };
     } catch (error: any) {
         console.error("fetchConversations error:", error);
-        return { conversations: [], total: 0 };
+        return { conversations: [], total: 0, hasMore: false, nextCursor: null, pageSize: 0 };
     }
 }
 

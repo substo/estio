@@ -1,8 +1,8 @@
-import { useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Conversation } from "@/lib/ghl/conversations";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
-import { Mail, MessageSquare, MessageCircle, Layers, Link as LinkIcon, Upload, Trash2, X, CheckSquare, Inbox, Archive, Plus, CloudDownload } from "lucide-react";
+import { Mail, MessageSquare, MessageCircle, Layers, Link as LinkIcon, Upload, Trash2, X, CheckSquare, Inbox, Archive, Plus, CloudDownload, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card";
@@ -17,6 +17,9 @@ interface ConversationListProps {
     conversations: Conversation[];
     selectedId: string | null;
     onSelect: (id: string) => void;
+    hasMore?: boolean;
+    isLoadingMore?: boolean;
+    onLoadMore?: () => void;
     // Selection Mode Props
     isSelectionMode?: boolean;
     onToggleSelectionMode?: (enabled: boolean) => void;
@@ -66,6 +69,9 @@ export function ConversationList({
     conversations,
     selectedId,
     onSelect,
+    hasMore = false,
+    isLoadingMore = false,
+    onLoadMore,
     isSelectionMode = false,
     onToggleSelectionMode,
     selectedIds,
@@ -86,6 +92,8 @@ export function ConversationList({
 }: ConversationListProps) {
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const listScrollRef = useRef<HTMLDivElement | null>(null);
+    const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
 
     const handleMouseEnter = () => {
         if (closeTimeoutRef.current) {
@@ -103,6 +111,28 @@ export function ConversationList({
     };
 
     const effectiveViewMode = viewMode || 'chats';
+
+    useEffect(() => {
+        if (effectiveViewMode !== 'chats') return;
+        if (!hasMore || isLoadingMore || !onLoadMore) return;
+        if (!listScrollRef.current || !loadMoreSentinelRef.current) return;
+
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (entries.some((entry) => entry.isIntersecting)) {
+                    onLoadMore();
+                }
+            },
+            {
+                root: listScrollRef.current,
+                rootMargin: '200px 0px',
+                threshold: 0.01,
+            }
+        );
+
+        observer.observe(loadMoreSentinelRef.current);
+        return () => observer.disconnect();
+    }, [effectiveViewMode, hasMore, isLoadingMore, onLoadMore, conversations.length]);
 
     // Unified Header Component - used in both modes
     const UnifiedHeader = () => {
@@ -382,7 +412,7 @@ export function ConversationList({
             {/* Unified Header with Mode Toggle + Action Buttons */}
             <UnifiedHeader />
 
-            <div className="flex-1 overflow-y-auto">
+            <div ref={listScrollRef} className="flex-1 overflow-y-auto">
                 {conversations.map((c) => {
                     const channel = getChannelInfo(c.lastMessageType || c.type);
                     const isChecked = selectedIds?.has(c.id);
@@ -454,9 +484,32 @@ export function ConversationList({
                         </div>
                     );
                 })}
+
+                {(hasMore || isLoadingMore) && (
+                    <div className="px-3 py-3 border-t bg-white/80">
+                        <div ref={loadMoreSentinelRef} className="h-1 w-full" aria-hidden="true" />
+                        <div className="mt-2 flex items-center justify-center">
+                            {isLoadingMore ? (
+                                <div className="inline-flex items-center gap-2 text-xs text-slate-500">
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    Loading more conversations...
+                                </div>
+                            ) : hasMore ? (
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 text-xs text-slate-600"
+                                    onClick={() => onLoadMore?.()}
+                                >
+                                    Load more
+                                </Button>
+                            ) : null}
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );
 }
-
 
