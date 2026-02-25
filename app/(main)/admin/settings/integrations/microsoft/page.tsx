@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CheckCircle2, XCircle, Loader2, AlertTriangle, Eye, EyeOff, Activity, Clock, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { formatDistanceToNow, format } from "date-fns";
+import { formatDistanceToNow } from "date-fns";
 import {
     AlertDialog,
     AlertDialogAction,
@@ -28,8 +28,35 @@ interface ConnectionStatus {
     sessionExpiry?: string;
     sessionExpired?: boolean;
     recoverableSession?: boolean;
+    renewing?: boolean;
+    autoRenewThrottled?: boolean;
+    autoRenewRetryAt?: string | null;
+    autoRenewLastAttemptAt?: string | null;
+    autoRenewLastAttemptMode?: 'auto' | 'manual' | null;
+    autoRenewLastSuccessAt?: string | null;
+    autoRenewLastError?: string | null;
+    autoRenewLastErrorAt?: string | null;
     lastSyncedAt?: string;
     syncEnabled?: boolean;
+}
+
+async function parseApiResponse<T = any>(res: Response): Promise<T> {
+    const contentType = res.headers.get('content-type') || '';
+    const raw = await res.text();
+
+    if (!contentType.toLowerCase().includes('application/json')) {
+        const snippet = raw.replace(/\s+/g, ' ').trim().slice(0, 180);
+        const htmlHint = raw.trimStart().startsWith('<')
+            ? 'The server returned an HTML error page (often a proxy timeout while a long sync is still running).'
+            : (snippet || `HTTP ${res.status}`);
+        throw new Error(`Unexpected non-JSON response (HTTP ${res.status}). ${htmlHint}`);
+    }
+
+    try {
+        return JSON.parse(raw) as T;
+    } catch {
+        throw new Error(`Invalid JSON response from server (HTTP ${res.status}).`);
+    }
 }
 
 export default function MicrosoftIntegrationPage() {
@@ -50,6 +77,14 @@ export default function MicrosoftIntegrationPage() {
     }, []);
 
     useEffect(() => {
+        if (!status.renewing) return;
+        const timer = window.setTimeout(() => {
+            checkStatus({ showLoading: false });
+        }, 4000);
+        return () => window.clearTimeout(timer);
+    }, [status.renewing]);
+
+    useEffect(() => {
         if (searchParams.get('microsoft_connected') === 'true') {
             setSuccess('Successfully connected to Outlook!');
         }
@@ -61,13 +96,13 @@ export default function MicrosoftIntegrationPage() {
         setSuccess(null);
         try {
             const res = await fetch('/api/microsoft/sync', { method: 'POST' });
-            const data = await res.json();
+            const data = await parseApiResponse<any>(res);
 
-            if (data.success) {
+            if (res.ok && data.success) {
                 setSuccess(data.message || 'Sync completed successfully!');
                 await checkStatus(); // Refresh stats
             } else {
-                setError(data.error || 'Failed to sync');
+                setError(data.error || `Failed to sync (HTTP ${res.status})`);
             }
         } catch (err: any) {
             setError(err.message || 'Error occurred during sync');
@@ -76,16 +111,47 @@ export default function MicrosoftIntegrationPage() {
         }
     };
 
-    const checkStatus = async () => {
+    const handleRenewSession = async () => {
+        setSyncing(true);
+        setError(null);
+        setSuccess(null);
         try {
-            setLoading(true);
-            const res = await fetch('/api/microsoft/puppeteer-auth');
-            const data = await res.json();
-            setStatus(data);
+            const res = await fetch('/api/microsoft/renew-session', { method: 'POST' });
+            const data = await parseApiResponse<any>(res);
+
+            if (res.ok && data.success) {
+                setSuccess(data.message || 'Outlook session renewed successfully!');
+                await checkStatus();
+            } else if (res.status === 202 && data.renewing) {
+                setSuccess(data.message || 'Outlook session renewal is already in progress...');
+                await checkStatus({ showLoading: false });
+            } else {
+                setError(data.error || `Failed to renew session (HTTP ${res.status})`);
+            }
+        } catch (err: any) {
+            setError(err.message || 'Failed to renew Outlook session');
+        } finally {
+            setSyncing(false);
+        }
+    };
+
+    const checkStatus = async (options?: { showLoading?: boolean }) => {
+        try {
+            if (options?.showLoading !== false) {
+                setLoading(true);
+            }
+            const res = await fetch('/api/microsoft/puppeteer-auth', { cache: 'no-store' });
+            const data = await parseApiResponse<ConnectionStatus | { error?: string }>(res);
+            if (!res.ok) {
+                throw new Error((data as any)?.error || `Failed to check status (HTTP ${res.status})`);
+            }
+            setStatus(data as ConnectionStatus);
         } catch (err) {
             console.error('Failed to check status:', err);
         } finally {
-            setLoading(false);
+            if (options?.showLoading !== false) {
+                setLoading(false);
+            }
         }
     };
 
@@ -102,14 +168,14 @@ export default function MicrosoftIntegrationPage() {
                 body: JSON.stringify({ email, password })
             });
 
-            const data = await res.json();
+            const data = await parseApiResponse<any>(res);
 
-            if (data.success) {
+            if (res.ok && data.success) {
                 setSuccess('Successfully connected to Outlook!');
                 setPassword(''); // Clear password from form
                 await checkStatus();
             } else {
-                setError(data.error || 'Failed to connect');
+                setError(data.error || `Failed to connect (HTTP ${res.status})`);
             }
         } catch (err: any) {
             setError(err.message || 'Failed to connect');
@@ -124,7 +190,11 @@ export default function MicrosoftIntegrationPage() {
 
     const confirmDisconnect = async () => {
         try {
-            await fetch('/api/microsoft/puppeteer-auth', { method: 'DELETE' });
+            const res = await fetch('/api/microsoft/puppeteer-auth', { method: 'DELETE' });
+            const data = await parseApiResponse<any>(res);
+            if (!res.ok || !data.success) {
+                throw new Error(data.error || `Failed to disconnect (HTTP ${res.status})`);
+            }
             setSuccess('Disconnected from Outlook');
             setStatus({ connected: false, method: null });
         } catch (err: any) {
@@ -180,7 +250,11 @@ export default function MicrosoftIntegrationPage() {
                     <CardContent className="space-y-4">
                         <div className="flex items-center justify-between rounded-lg border p-4">
                             <div className="flex items-center space-x-3">
-                                {status.connected ? (
+                                {status.renewing ? (
+                                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/20">
+                                        <Loader2 className="h-6 w-6 animate-spin" />
+                                    </div>
+                                ) : status.connected ? (
                                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-100 text-green-600 dark:bg-green-900/20">
                                         <CheckCircle2 className="h-6 w-6" />
                                     </div>
@@ -191,20 +265,38 @@ export default function MicrosoftIntegrationPage() {
                                 )}
                                 <div>
                                     <p className="font-medium">
-                                        {status.connected ? 'Connected' : 'Not Connected'}
+                                        {status.renewing ? 'Renewing Session' : (status.connected ? 'Connected' : 'Not Connected')}
                                     </p>
                                     <p className="text-sm text-muted-foreground">
-                                        {status.connected
+                                        {status.renewing
+                                            ? 'Attempting automatic Outlook session renewal in the background...'
+                                            : status.connected
                                             ? `Connected as ${status.email || 'Unknown'} (${status.method})`
                                             : 'Connect to start syncing.'
                                         }
                                     </p>
                                     {status.sessionExpired && (
                                         <p className="text-sm text-orange-600 dark:text-orange-400 mt-1 flex items-center gap-1">
-                                            <AlertTriangle className="h-3 w-3" />
+                                            {status.renewing ? (
+                                                <Loader2 className="h-3 w-3 animate-spin" />
+                                            ) : (
+                                                <AlertTriangle className="h-3 w-3" />
+                                            )}
                                             {status.method === 'puppeteer' && status.recoverableSession
-                                                ? 'Session expired - auto-renew can be attempted'
+                                                ? status.renewing
+                                                    ? 'Session expired - renewing automatically...'
+                                                    : status.autoRenewThrottled && status.autoRenewRetryAt
+                                                        ? `Session expired - next auto-renew retry ${formatDistanceToNow(new Date(status.autoRenewRetryAt), { addSuffix: true })}`
+                                                        : 'Session expired - auto-renew can be attempted'
                                                 : 'Session expired - please reconnect'}
+                                        </p>
+                                    )}
+                                    {!status.renewing && status.autoRenewLastError && status.sessionExpired && (
+                                        <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                                            Last auto-renew attempt failed
+                                            {status.autoRenewLastErrorAt
+                                                ? ` ${formatDistanceToNow(new Date(status.autoRenewLastErrorAt), { addSuffix: true })}`
+                                                : ''}.
                                         </p>
                                     )}
                                 </div>
@@ -237,7 +329,7 @@ export default function MicrosoftIntegrationPage() {
                                 variant="outline"
                                 size="sm"
                                 onClick={handleSyncNow}
-                                disabled={syncing || !status.syncEnabled}
+                                disabled={syncing || status.renewing || !status.syncEnabled}
                             >
                                 {syncing ? (
                                     <>
@@ -271,7 +363,9 @@ export default function MicrosoftIntegrationPage() {
                                     <div>
                                         <p className="text-sm font-medium">Session Status</p>
                                         <p className="text-xs text-muted-foreground">
-                                            {status.sessionExpiry
+                                            {status.renewing
+                                                ? 'Automatic session renewal in progress...'
+                                                : status.sessionExpiry
                                                 ? `Expires ${formatDistanceToNow(new Date(status.sessionExpiry), { addSuffix: true })}`
                                                 : 'Unknown expiry'}
                                         </p>
@@ -303,21 +397,33 @@ export default function MicrosoftIntegrationPage() {
                         <CardContent>
                             {status.method === 'puppeteer' && status.sessionExpired && status.recoverableSession && (
                                 <div className="mb-4 rounded-md bg-amber-50 p-3 text-amber-700 text-sm dark:bg-amber-900/10 dark:text-amber-400">
-                                    Your stored Outlook credentials are available. You can try a sync to renew the session automatically before reconnecting manually.
+                                    {status.renewing
+                                        ? 'Automatic session renewal is in progress. This page will refresh status automatically.'
+                                        : 'Your stored Outlook credentials are available. Automatic renewal is attempted in the background before reconnecting manually.'}
+                                    {status.autoRenewThrottled && status.autoRenewRetryAt && !status.renewing && (
+                                        <div className="mt-2 text-xs">
+                                            Next automatic retry {formatDistanceToNow(new Date(status.autoRenewRetryAt), { addSuffix: true })}.
+                                        </div>
+                                    )}
+                                    {status.autoRenewLastError && !status.renewing && (
+                                        <div className="mt-2 text-xs">
+                                            Last auto-renew error: {status.autoRenewLastError}
+                                        </div>
+                                    )}
                                     <div className="mt-3">
                                         <Button
                                             variant="outline"
                                             size="sm"
-                                            onClick={handleSyncNow}
-                                            disabled={syncing}
+                                            onClick={handleRenewSession}
+                                            disabled={syncing || status.renewing}
                                         >
-                                            {syncing ? (
+                                            {syncing || status.renewing ? (
                                                 <>
                                                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                                    Renewing...
+                                                    {status.renewing ? 'Renewing automatically...' : 'Renewing...'}
                                                 </>
                                             ) : (
-                                                'Try Auto-Renew Session'
+                                                'Try Auto-Renew Now'
                                             )}
                                         </Button>
                                     </div>

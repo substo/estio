@@ -88,6 +88,22 @@ We have evolved the system from a 1:1 chat interface to a **Many-to-One Persiste
 ## 3. Channel & Sync Management (New)
 
 ### Multi-Channel Support
+
+The Conversations page header includes compact **connection/sync status indicators** for active integrations:
+
+- **WhatsApp** connection status (existing).
+- **Gmail** email sync status (shown when configured/connected).
+- **Outlook** email sync status (shown when configured, including expired/error states for Puppeteer sessions).
+
+#### Email Sync Status UX
+
+- Gmail and Outlook are rendered as provider icons with a color-coded health indicator.
+- Hovering an email provider icon opens a status popover with:
+  - health state,
+  - relative and exact `last successful sync` time,
+  - provider-specific expiry hints (for example Gmail watch expiry or Outlook session expiry),
+  - Outlook auth method (`OAuth` vs `Puppeteer`) when available.
+- Expired Outlook Puppeteer sessions are intentionally **visible** (error state) instead of hidden, so users can diagnose sync issues from `/admin/conversations` without navigating away.
 The system now treats communication channels as first-class citizens:
 *   **Dynamic Selector**: Agents can switch between SMS, Email, and WhatsApp within the same thread.
 *   **Professional Identity**: Emails are sent using the configured GHL Location Email (e.g., `info@agency.com`) rather than generic relays, ensuring better deliverability and professional appearance.

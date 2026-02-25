@@ -28,6 +28,7 @@ This guide details the "hybrid" architecture used for Outlook integration in Est
 - **Table**: `OutlookSyncState`
 - **Purpose**: Stores the timestamp of the last successful email sync (`lastSyncedAt`) and delta links.
 - **Key Logic**: Uses `outlookEmail` fallback to satisfy uniqueness. Used for "Sync Health" and incremental cutoff calculations.
+- **Current Behavior Note**: `lastSyncedAt` is now treated as the **email sync** freshness signal. Contact sync should not overwrite it, so UI health indicators better reflect email sync status.
 
 ---
 
@@ -92,7 +93,7 @@ This function orchestrates the scraping with a **"World-Class" Robust Strategy**
 
 1.  **"Session Invalid" / 401 in Logs**:
     - **Cause**: Cookies expired (usually after 7-14 days).
-    - **Fix**: User must re-authenticate via the UI to generate fresh cookies.
+    - **Fix**: First try a manual sync (`Sync Now`) or wait for cron. If encrypted Puppeteer credentials are stored, the system can auto-renew the session during sync. Re-authenticate only if renewal fails.
 
 2.  **Browser Crash / Timeout**:
     - **Cause**: Server ran out of memory or CPU.
@@ -101,6 +102,18 @@ This function orchestrates the scraping with a **"World-Class" Robust Strategy**
 3.  **Graph API Errors for Contacts**:
     - **Cause**: User authenticated via Puppeteer but didn't grant OAuth permissions (or tokens expired).
     - **Result**: Contacts won't sync, but emails will continue to work.
+
+### UI Status Indicators (Conversations + Integrations)
+
+- `/admin/conversations` shows compact status icons for **WhatsApp**, **Gmail**, and **Outlook** near the top of the conversation list.
+- Outlook is shown even when the Puppeteer session is expired (error state) if the integration is configured, so users can see the issue immediately.
+- Hovering the Gmail/Outlook icon shows sync health details such as:
+  - connection health state,
+  - last successful email sync timestamp,
+  - exact sync time,
+  - expiry hints (for example, Gmail watch or Outlook session/webhook expiry),
+  - Outlook auth method (`oauth` or `puppeteer`) when available.
+- `/admin/settings/integrations/microsoft` also surfaces expired-session messaging and can indicate when an auto-renew attempt is possible.
 
 ### Manual Verification
 You can manually trigger the sync for testing:

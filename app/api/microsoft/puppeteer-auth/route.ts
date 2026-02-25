@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import db from '@/lib/db';
 import { outlookPuppeteerService } from '@/lib/microsoft/outlook-puppeteer';
+import {
+    getOutlookSessionRenewStatus,
+    requestOutlookSessionRenew
+} from '@/lib/microsoft/outlook-session-renew-manager';
 import { syncEmailsFromOWA } from '@/lib/microsoft/owa-email-sync';
 
 export const dynamic = 'force-dynamic';
@@ -91,6 +95,7 @@ export async function GET(req: NextRequest) {
         const user = await db.user.findFirst({
             where: { clerkId: clerkUser.id },
             select: {
+                id: true,
                 outlookAuthMethod: true,
                 outlookEmail: true,
                 outlookSyncEnabled: true,
@@ -122,6 +127,14 @@ export async function GET(req: NextRequest) {
             const sessionExpired = user.outlookSessionExpiry
                 ? new Date() > user.outlookSessionExpiry
                 : true;
+            const recoverableSession = !!user.outlookPasswordEncrypted;
+
+            if (sessionExpired && recoverableSession && user.outlookSyncEnabled) {
+                // Fire-and-forget auto-renew with throttling/single-flight. This keeps GET responsive.
+                await requestOutlookSessionRenew(user.id, { mode: 'auto', awaitCompletion: false });
+            }
+
+            const renewStatus = getOutlookSessionRenewStatus(user.id);
 
             return NextResponse.json({
                 connected: user.outlookSyncEnabled && !!user.outlookSessionCookies && !sessionExpired,
@@ -129,7 +142,15 @@ export async function GET(req: NextRequest) {
                 email: user.outlookEmail || user.outlookSyncState?.emailAddress || null,
                 sessionExpiry: user.outlookSessionExpiry,
                 sessionExpired,
-                recoverableSession: !!user.outlookPasswordEncrypted,
+                recoverableSession,
+                renewing: renewStatus.inFlight,
+                autoRenewThrottled: renewStatus.throttled && !renewStatus.inFlight,
+                autoRenewRetryAt: renewStatus.nextEligibleAt,
+                autoRenewLastAttemptAt: renewStatus.lastAttemptAt,
+                autoRenewLastAttemptMode: renewStatus.lastAttemptMode,
+                autoRenewLastSuccessAt: renewStatus.lastSuccessAt,
+                autoRenewLastError: renewStatus.lastError,
+                autoRenewLastErrorAt: renewStatus.lastErrorAt,
                 lastSyncedAt: user.outlookSyncState?.lastSyncedAt,
                 syncEnabled: user.outlookSyncEnabled
             });
@@ -148,6 +169,14 @@ export async function GET(req: NextRequest) {
                 sessionExpiry: user.outlookSubscriptionExpiry,
                 sessionExpired: subscriptionExpired,
                 recoverableSession: false,
+                renewing: false,
+                autoRenewThrottled: false,
+                autoRenewRetryAt: null,
+                autoRenewLastAttemptAt: null,
+                autoRenewLastAttemptMode: null,
+                autoRenewLastSuccessAt: null,
+                autoRenewLastError: null,
+                autoRenewLastErrorAt: null,
                 lastSyncedAt: user.outlookSyncState?.lastSyncedAt,
                 syncEnabled: user.outlookSyncEnabled
             });
@@ -157,6 +186,14 @@ export async function GET(req: NextRequest) {
             connected: false,
             method: user.outlookAuthMethod || null,
             recoverableSession: false,
+            renewing: false,
+            autoRenewThrottled: false,
+            autoRenewRetryAt: null,
+            autoRenewLastAttemptAt: null,
+            autoRenewLastAttemptMode: null,
+            autoRenewLastSuccessAt: null,
+            autoRenewLastError: null,
+            autoRenewLastErrorAt: null,
             syncEnabled: user.outlookSyncEnabled
         });
 

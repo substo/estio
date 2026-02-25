@@ -246,7 +246,19 @@ For accounts that cannot use the standard Graph API (e.g., some personal Outlook
 ### Limitations
 - Slower than Graph API (requires browser launch), though mitigated by incremental sync.
 - Depends on OWA UI structure (more brittle, but hardened with multiple fallback strategies).
-- Requires occasional re-authentication if session expires (approx. every 7 days).
+- Sessions can expire periodically (commonly around every 7 days), but if the user already stored Outlook username/password in the Microsoft integration page the system can usually auto-renew the session on the next sync run.
+
+### Session Expiry & Status UX (Puppeteer)
+
+When a Puppeteer/OWA cookie session expires:
+
+- **Microsoft Integration Page** (`/admin/settings/integrations/microsoft`) shows an expired session state.
+- **Conversations Page** (`/admin/conversations`) still shows the **Outlook status icon** (red/error state) instead of hiding it.
+- The Conversations hover status explains the session is expired and indicates when auto-reconnect is available.
+- A manual **Sync Now** (or cron sync) can trigger a session refresh attempt using stored credentials.
+
+> [!NOTE]
+> The status UI does **not** launch Puppeteer automatically just by loading the page. Status endpoints report current state; session renewal is attempted during sync execution.
 
 ### Debugging & Development
 To visually debug the sync process (e.g., to see the browser actions, solve CATCHAs, or develop new scraping features):
