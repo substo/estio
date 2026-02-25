@@ -404,9 +404,12 @@ export async function fetchMessages(conversationId: string) {
             const extractedReason = extracted?.reason ? String(extracted.reason) : null;
             const sourceUpper = String(m.source || '').toUpperCase();
             const isOutlookSyncedEmail = sourceUpper.includes('OUTLOOK');
-            const showLegacyCrmBadge = !!processing || (legacyCrmDetectionEnabled && isOutlookSyncedEmail && parsed.matched);
+            // Manual processing should be available on Outlook-synced emails even before the parser
+            // positively detects a legacy CRM lead format. This lets users trigger processing on
+            // truncated/edge-case emails and inspect ignored reasons directly from the UI.
+            const showLegacyCrmUi = !!processing || isOutlookSyncedEmail;
 
-            if (!showLegacyCrmBadge) return {};
+            if (!showLegacyCrmUi) return {};
 
             return {
                 legacyCrmLead: {

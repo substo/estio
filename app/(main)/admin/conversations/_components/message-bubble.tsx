@@ -111,6 +111,10 @@ export function MessageBubble({ message, contactPhone, contactEmail, contactName
     const stopClick = (e: React.MouseEvent) => e.stopPropagation();
     const legacyStatus = String(legacyCrmLead?.status || '').toLowerCase();
     const showLegacyCrmActions = isEmail && !!legacyCrmLead;
+    const legacyCrmIsDetected = !!legacyCrmLead?.matched || !!legacyCrmLead?.classification;
+    const legacyCrmBadgeTitle = legacyCrmLead?.classification === 'follow_up'
+        ? 'Old CRM Follow-up'
+        : (legacyCrmIsDetected ? 'Old CRM Lead' : 'Old CRM Email');
     const canProcessLegacyLead = !!legacyCrmLead
         && (!!legacyCrmLead.canProcess || !legacyStatus)
         && !['processed', 'failed', 'ignored', 'processing'].includes(legacyStatus)
@@ -123,7 +127,7 @@ export function MessageBubble({ message, contactPhone, contactEmail, contactName
 
     const getLegacyStatusLabel = () => {
         if (!legacyCrmLead) return null;
-        if (!legacyCrmLead.status) return legacyCrmLead.matched ? "Detected" : "Legacy CRM";
+        if (!legacyCrmLead.status) return legacyCrmLead.matched ? "Detected" : "Manual";
         switch (legacyStatus) {
             case 'processed':
                 return "Processed";
@@ -285,7 +289,7 @@ export function MessageBubble({ message, contactPhone, contactEmail, contactName
                                 onClick={stopClick}
                             >
                                 <Badge variant="outline" className={cn("border text-[11px]", getLegacyStatusClassName())}>
-                                    Old CRM {legacyCrmLead?.classification === 'follow_up' ? 'Follow-up' : 'Lead'} • {getLegacyStatusLabel()}
+                                    {legacyCrmBadgeTitle} • {getLegacyStatusLabel()}
                                 </Badge>
 
                                 {legacyCrmLead?.error && (
