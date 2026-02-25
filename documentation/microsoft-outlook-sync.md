@@ -246,19 +246,24 @@ For accounts that cannot use the standard Graph API (e.g., some personal Outlook
 ### Limitations
 - Slower than Graph API (requires browser launch), though mitigated by incremental sync.
 - Depends on OWA UI structure (more brittle, but hardened with multiple fallback strategies).
-- Sessions can expire periodically (commonly around every 7 days), but if the user already stored Outlook username/password in the Microsoft integration page the system can usually auto-renew the session on the next sync run.
+- Sessions can expire periodically (commonly around every 7 days), but if the user already stored Outlook username/password in the Microsoft integration page the system can usually auto-renew the session automatically (background status check) or on the next sync run.
 
 ### Session Expiry & Status UX (Puppeteer)
 
 When a Puppeteer/OWA cookie session expires:
 
 - **Microsoft Integration Page** (`/admin/settings/integrations/microsoft`) shows an expired session state.
+- The Microsoft status endpoint can now trigger a **background auto-renew attempt** (Puppeteer) when credentials are stored.
 - **Conversations Page** (`/admin/conversations`) still shows the **Outlook status icon** (red/error state) instead of hiding it.
 - The Conversations hover status explains the session is expired and indicates when auto-reconnect is available.
-- A manual **Sync Now** (or cron sync) can trigger a session refresh attempt using stored credentials.
+- A manual **Auto-Renew** button is available as a fallback and now uses a dedicated renew endpoint (`/api/microsoft/renew-session`) instead of a full inbox+sent sync.
+- Cron/manual **Sync Now** can also refresh the session if needed, but it is slower because it performs a full email sync.
 
 > [!NOTE]
-> The status UI does **not** launch Puppeteer automatically just by loading the page. Status endpoints report current state; session renewal is attempted during sync execution.
+> Auto-renew attempts are **throttled** (currently 15 minutes) and use a single-flight lock per user to avoid repeated login attempts from multiple tabs/page refreshes.
+
+> [!NOTE]
+> The integration page now exposes a `renewing` state while a background renew is in progress and polls for updated status automatically.
 
 ### Debugging & Development
 To visually debug the sync process (e.g., to see the browser actions, solve CATCHAs, or develop new scraping features):

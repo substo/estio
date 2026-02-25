@@ -1,9 +1,16 @@
-import { useState } from "react";
+"use client";
+
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
-import { Mail, Smartphone, Paperclip, ExternalLink, ChevronDown, ChevronUp, ArrowRight, Download, Maximize2 } from "lucide-react";
+import { Mail, Smartphone, Paperclip, ExternalLink, ChevronDown, ChevronUp, ArrowRight, Download, Maximize2, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { EmailFrame } from "./email-frame";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import Link from "next/link";
+import { toast } from "sonner";
+import { processLegacyCrmLeadEmailAction } from "@/app/(main)/admin/conversations/actions";
 
 type MessageAttachment = string | {
     url: string;
@@ -22,7 +29,24 @@ export interface MessageBubbleProps {
         attachments?: MessageAttachment[];
         emailFrom?: string;
         emailTo?: string;
+        source?: string;
         contactName?: string;
+        legacyCrmLead?: {
+            status?: string;
+            matched?: boolean;
+            classification?: string | null;
+            senderMatchMode?: string | null;
+            reason?: string | null;
+            error?: string | null;
+            attempts?: number;
+            processedAt?: string | null;
+            processedContactId?: string | null;
+            processedConversationId?: string | null;
+            legacyLeadUrl?: string | null;
+            canProcess?: boolean;
+            canReprocess?: boolean;
+            detectionEnabled?: boolean;
+        };
     };
     contactPhone?: string;
     contactEmail?: string;
@@ -36,6 +60,12 @@ export function MessageBubble({ message, contactPhone, contactEmail, contactName
     const isWhatsApp = (message.type || '').toUpperCase().includes('WHATSAPP');
     const [isExpanded, setIsExpanded] = useState(!isEmail); // Emails collapsed by default
     const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
+    const [legacyCrmLead, setLegacyCrmLead] = useState(message.legacyCrmLead || null);
+    const [isProcessingLegacyLead, setIsProcessingLegacyLead] = useState(false);
+
+    useEffect(() => {
+        setLegacyCrmLead(message.legacyCrmLead || null);
+    }, [message.id, message.legacyCrmLead]);
 
     // Helper to detect if content is rich HTML (heuristic)
     const isRichHtml = message.body && (message.body.includes('<div') || message.body.includes('<html') || message.body.includes('<table'));
@@ -77,6 +107,109 @@ export function MessageBubble({ message, contactPhone, contactEmail, contactName
         }
         return url;
     };
+
+    const stopClick = (e: React.MouseEvent) => e.stopPropagation();
+    const legacyStatus = String(legacyCrmLead?.status || '').toLowerCase();
+    const showLegacyCrmActions = isEmail && !!legacyCrmLead;
+    const canProcessLegacyLead = !!legacyCrmLead
+        && (!!legacyCrmLead.canProcess || !legacyStatus)
+        && !['processed', 'failed', 'ignored', 'processing'].includes(legacyStatus)
+        && !isProcessingLegacyLead;
+    const canReprocessLegacyLead = !!legacyCrmLead
+        && (!!legacyCrmLead.canReprocess || ['processed', 'failed', 'ignored'].includes(legacyStatus))
+        && ['processed', 'failed', 'ignored'].includes(legacyStatus)
+        && !isProcessingLegacyLead;
+    const openLeadHref = legacyCrmLead?.processedContactId ? `/admin/contacts/${legacyCrmLead.processedContactId}/view` : null;
+
+    const getLegacyStatusLabel = () => {
+        if (!legacyCrmLead) return null;
+        if (!legacyCrmLead.status) return legacyCrmLead.matched ? "Detected" : "Legacy CRM";
+        switch (legacyStatus) {
+            case 'processed':
+                return "Processed";
+            case 'failed':
+                return "Failed";
+            case 'ignored':
+                return "Ignored";
+            case 'processing':
+                return "Processing";
+            case 'pending':
+                return "Pending";
+            default:
+                return legacyCrmLead.status;
+        }
+    };
+
+    const getLegacyStatusClassName = () => {
+        switch (legacyStatus) {
+            case 'processed':
+                return "bg-green-50 text-green-700 border-green-200";
+            case 'failed':
+                return "bg-red-50 text-red-700 border-red-200";
+            case 'ignored':
+                return "bg-slate-50 text-slate-700 border-slate-200";
+            case 'processing':
+                return "bg-amber-50 text-amber-700 border-amber-200";
+            case 'pending':
+                return "bg-blue-50 text-blue-700 border-blue-200";
+            default:
+                return "bg-orange-50 text-orange-700 border-orange-200";
+        }
+    };
+
+    async function handleProcessLegacyLead(force = false) {
+        if (!isEmail || isProcessingLegacyLead) return;
+        setIsProcessingLegacyLead(true);
+        setLegacyCrmLead((prev: any) => prev ? ({ ...prev, status: 'processing' }) : prev);
+        try {
+            const result: any = await processLegacyCrmLeadEmailAction(message.id, force ? { force: true } : undefined);
+            if (!result?.success) {
+                toast.error(result?.error || "Failed to process legacy CRM lead email");
+                setLegacyCrmLead((prev: any) => ({
+                    ...(prev || {}),
+                    status: 'failed',
+                    error: result?.error || "Processing failed",
+                    canProcess: true,
+                    canReprocess: true,
+                }));
+                return;
+            }
+
+            const processing = result?.processing || {};
+            const parsed = result?.parsed || {};
+            const extracted = processing?.extracted && typeof processing.extracted === "object" ? processing.extracted : null;
+
+            setLegacyCrmLead((prev: any) => ({
+                ...(prev || {}),
+                status: processing?.status || (result?.skipped ? 'ignored' : 'processed'),
+                matched: extracted?.matched ?? parsed?.matched ?? prev?.matched ?? true,
+                classification: processing?.classification ?? parsed?.classification ?? prev?.classification ?? null,
+                senderMatchMode: extracted?.senderMatchMode ?? parsed?.senderMatchMode ?? prev?.senderMatchMode ?? null,
+                reason: extracted?.reason ?? result?.reason ?? parsed?.reason ?? null,
+                error: processing?.error ?? null,
+                attempts: typeof processing?.attempts === 'number' ? processing.attempts : (prev?.attempts || 0),
+                processedAt: processing?.processedAt ? new Date(processing.processedAt).toISOString() : (prev?.processedAt || null),
+                processedContactId: processing?.processedContactId ?? result?.importResult?.contactId ?? prev?.processedContactId ?? null,
+                processedConversationId: processing?.processedConversationId ?? result?.importResult?.internalConversationId ?? prev?.processedConversationId ?? null,
+                legacyLeadUrl: processing?.legacyLeadUrl ?? parsed?.leadUrl ?? prev?.legacyLeadUrl ?? null,
+                canProcess: ['pending', 'failed', 'ignored', ''].includes(String(processing?.status || '').toLowerCase()),
+                canReprocess: ['processed', 'failed', 'ignored'].includes(String(processing?.status || '').toLowerCase()),
+                detectionEnabled: prev?.detectionEnabled ?? true,
+            }));
+
+            if (result?.alreadyProcessed && !force) {
+                toast.message("Legacy CRM lead email already processed");
+            } else if (processing?.status === 'ignored') {
+                toast.message(result?.reason || "Email ignored (not a recognized legacy CRM lead notification)");
+            } else {
+                toast.success(force ? "Legacy CRM lead email reprocessed" : "Legacy CRM lead email processed");
+            }
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to process legacy CRM lead email");
+        } finally {
+            setIsProcessingLegacyLead(false);
+        }
+    }
 
     return (
         <div
@@ -143,6 +276,92 @@ export function MessageBubble({ message, contactPhone, contactEmail, contactName
                                 <span className="flex items-center gap-1 max-w-[45%] truncate" title={message.emailTo}>
                                     <span className="font-medium text-gray-600">To:</span> {message.emailTo || (isOutbound ? message.contactName || "Contact" : "You")}
                                 </span>
+                            </div>
+                        )}
+
+                        {showLegacyCrmActions && (
+                            <div
+                                className="px-4 py-2 border-t border-orange-100 bg-orange-50/40 flex flex-wrap items-center gap-2"
+                                onClick={stopClick}
+                            >
+                                <Badge variant="outline" className={cn("border text-[11px]", getLegacyStatusClassName())}>
+                                    Old CRM {legacyCrmLead?.classification === 'follow_up' ? 'Follow-up' : 'Lead'} • {getLegacyStatusLabel()}
+                                </Badge>
+
+                                {legacyCrmLead?.error && (
+                                    <span
+                                        className="text-[11px] text-red-600 truncate max-w-[220px]"
+                                        title={legacyCrmLead.error}
+                                    >
+                                        {legacyCrmLead.error}
+                                    </span>
+                                )}
+
+                                {!legacyCrmLead?.error && legacyCrmLead?.reason && legacyStatus === 'ignored' && (
+                                    <span
+                                        className="text-[11px] text-slate-600 truncate max-w-[240px]"
+                                        title={legacyCrmLead.reason}
+                                    >
+                                        {legacyCrmLead.reason}
+                                    </span>
+                                )}
+
+                                <div className="ml-auto flex items-center gap-1">
+                                    {canProcessLegacyLead && (
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="outline"
+                                            className="h-7 px-2 text-[11px]"
+                                            onClick={(e) => {
+                                                stopClick(e);
+                                                handleProcessLegacyLead(false);
+                                            }}
+                                        >
+                                            {isProcessingLegacyLead ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                                            {isProcessingLegacyLead ? "Processing..." : "Process Lead"}
+                                        </Button>
+                                    )}
+
+                                    {canReprocessLegacyLead && (
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="ghost"
+                                            className="h-7 px-2 text-[11px]"
+                                            onClick={(e) => {
+                                                stopClick(e);
+                                                handleProcessLegacyLead(true);
+                                            }}
+                                        >
+                                            {isProcessingLegacyLead ? <Loader2 className="h-3 w-3 animate-spin" /> : "Reprocess"}
+                                            {!isProcessingLegacyLead ? null : " Reprocessing..."}
+                                        </Button>
+                                    )}
+
+                                    {openLeadHref && (
+                                        <Link
+                                            href={openLeadHref}
+                                            className="inline-flex h-7 items-center rounded-md border px-2 text-[11px] font-medium text-slate-700 hover:bg-white"
+                                            onClick={stopClick}
+                                        >
+                                            Open Lead
+                                        </Link>
+                                    )}
+
+                                    {legacyCrmLead?.legacyLeadUrl && (
+                                        <a
+                                            href={legacyCrmLead.legacyLeadUrl}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] font-medium text-slate-700 hover:bg-white"
+                                            onClick={stopClick}
+                                        >
+                                            Old CRM
+                                            <ExternalLink className="h-3 w-3" />
+                                        </a>
+                                    )}
+                                </div>
                             </div>
                         )}
                     </div>

@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import db from '@/lib/db';
 import { outlookPuppeteerService } from './outlook-puppeteer';
+import { updateConversationLastMessage } from '@/lib/conversations/update';
 
 interface OWAEmail {
     id: string;
@@ -593,20 +594,40 @@ export async function syncEmailsFromOWA(userId: string, folderId: 'inbox' | 'sen
 
             console.log(`[OWA Email Sync Debug] Sender: ${email.senderEmail || 'UNKNOWN'}, UserEmail: ${userEmail || 'NOT SET'} → Direction: ${direction}`);
 
-            await db.message.create({
+            const savedMessage = await db.message.create({
                 data: {
                     conversationId,
+                    emailMessageId: email.id,
                     direction,
                     type: 'EMAIL',
                     status: 'delivered',
                     body: email.fullBody || email.preview,
                     subject: email.subject,
                     emailFrom: email.senderEmail || email.sender,
-                    createdAt: emailDate
+                    createdAt: emailDate,
+                    source: 'OUTLOOK_OWA_SYNC'
                 }
             });
 
+            await updateConversationLastMessage({
+                conversationId,
+                messageBody: email.fullBody || email.preview || email.subject,
+                messageType: 'TYPE_EMAIL',
+                messageDate: emailDate,
+                direction,
+            });
+
             console.log(`[OWA Email Sync] Saved email: ${email.subject}`);
+
+            void import('@/lib/queue/legacy-crm-lead-email')
+                .then(({ enqueueLegacyCrmLeadEmailAutoProcessForMessage }) =>
+                    enqueueLegacyCrmLeadEmailAutoProcessForMessage(savedMessage.id, {
+                        triggerSource: 'outlook_owa_sync'
+                    })
+                )
+                .catch((queueError) => {
+                    console.warn('[OWA Email Sync] Failed to schedule legacy CRM lead auto-processing:', queueError);
+                });
 
             // GHL Trigger (omitted for brevity, same as before)
 

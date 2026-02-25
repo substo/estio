@@ -8,6 +8,24 @@ import { verifyUserHasAccessToLocation } from '@/lib/auth/permissions';
 import { revalidatePath } from 'next/cache';
 import { pullLeadFromCrm, previewCrmLead } from '@/lib/crm/crm-lead-puller';
 
+function parseStringList(input: unknown, { lower = false }: { lower?: boolean } = {}) {
+    if (input === null || input === undefined) return [];
+    const value = String(input);
+    const parts = value
+        .split(/\r?\n|,/g)
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+    const normalized = parts.map((s) => (lower ? s.toLowerCase() : s));
+    return Array.from(new Set(normalized));
+}
+
+function parseCheckbox(input: unknown) {
+    if (input === null || input === undefined) return false;
+    const value = String(input).toLowerCase().trim();
+    return value === 'on' || value === 'true' || value === '1' || value === 'yes';
+}
+
 export async function pullLead(crmLeadId: string) {
     console.log("[Action] pullLead called for ID:", crmLeadId);
     try {
@@ -133,6 +151,49 @@ export async function getLeadSources() {
     }
 }
 
+export async function saveLegacyCrmLeadEmailSettings(data: any) {
+    const { userId } = await auth();
+    if (!userId) throw new Error("Unauthorized");
+
+    try {
+        const user = await db.user.findUnique({
+            where: { clerkId: userId },
+            include: { locations: { take: 1 } }
+        });
+
+        const locationId = user?.locations?.[0]?.id;
+        if (!locationId) throw new Error("No location found");
+
+        const hasAccess = await verifyUserHasAccessToLocation(userId, locationId);
+        if (!hasAccess) throw new Error("Unauthorized");
+
+        const senders = parseStringList(data.legacyCrmLeadEmailSenders, { lower: true });
+        const senderDomains = parseStringList(data.legacyCrmLeadEmailSenderDomains, { lower: true }).map((d) =>
+            d.startsWith('@') ? d.slice(1) : d
+        );
+        const subjectPatterns = parseStringList(data.legacyCrmLeadEmailSubjectPatterns, { lower: true });
+
+        await db.location.update({
+            where: { id: locationId },
+            data: {
+                legacyCrmLeadEmailEnabled: parseCheckbox(data.legacyCrmLeadEmailEnabled),
+                legacyCrmLeadEmailSenders: senders,
+                legacyCrmLeadEmailSenderDomains: senderDomains,
+                legacyCrmLeadEmailSubjectPatterns: subjectPatterns,
+                legacyCrmLeadEmailPinConversation: parseCheckbox(data.legacyCrmLeadEmailPinConversation),
+                legacyCrmLeadEmailAutoProcess: parseCheckbox(data.legacyCrmLeadEmailAutoProcess),
+                legacyCrmLeadEmailAutoDraftFirstContact: parseCheckbox(data.legacyCrmLeadEmailAutoDraftFirstContact),
+            } as any
+        });
+
+        revalidatePath('/admin/settings/crm');
+        return { success: true };
+    } catch (error: any) {
+        console.error("Failed to save legacy CRM lead email settings:", error);
+        return { success: false, error: error.message || "Failed to save settings" };
+    }
+}
+
 export async function saveCrmCredentials(data: any) {
     const { userId } = await auth();
     if (!userId) throw new Error("Unauthorized");
@@ -199,8 +260,15 @@ export async function getCrmSettings() {
                         crmEditUrlPattern: true,
                         crmLeadUrlPattern: true,
                         crmSchema: true,
-                        crmLeadSchema: true
-                    }
+                        crmLeadSchema: true,
+                        legacyCrmLeadEmailEnabled: true,
+                        legacyCrmLeadEmailSenders: true,
+                        legacyCrmLeadEmailSenderDomains: true,
+                        legacyCrmLeadEmailSubjectPatterns: true,
+                        legacyCrmLeadEmailPinConversation: true,
+                        legacyCrmLeadEmailAutoProcess: true,
+                        legacyCrmLeadEmailAutoDraftFirstContact: true,
+                    } as any
                 }
             }
         });
@@ -218,6 +286,13 @@ export async function getCrmSettings() {
             crmLeadUrlPattern: location?.crmLeadUrlPattern || null,
             crmSchema: location?.crmSchema || null,
             crmLeadSchema: location?.crmLeadSchema || null,
+            legacyCrmLeadEmailEnabled: (location as any)?.legacyCrmLeadEmailEnabled ?? false,
+            legacyCrmLeadEmailSenders: (location as any)?.legacyCrmLeadEmailSenders || [],
+            legacyCrmLeadEmailSenderDomains: (location as any)?.legacyCrmLeadEmailSenderDomains || [],
+            legacyCrmLeadEmailSubjectPatterns: (location as any)?.legacyCrmLeadEmailSubjectPatterns || [],
+            legacyCrmLeadEmailPinConversation: (location as any)?.legacyCrmLeadEmailPinConversation ?? true,
+            legacyCrmLeadEmailAutoProcess: (location as any)?.legacyCrmLeadEmailAutoProcess ?? false,
+            legacyCrmLeadEmailAutoDraftFirstContact: (location as any)?.legacyCrmLeadEmailAutoDraftFirstContact ?? false,
             // User-level credentials
             crmUsername: user.crmUsername || null,
             crmPassword: user.crmPassword || null

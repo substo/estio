@@ -45,6 +45,22 @@ export interface Message {
     emailBcc?: string[]; // Although BCC usually hidden, API might return it for sender
     messageType?: string; // e.g. "TYPE_EMAIL"
     meta?: any; // e.g. { email: { messageIds: [...] } }
+    legacyCrmLead?: {
+        status?: string;
+        matched?: boolean;
+        classification?: string | null;
+        senderMatchMode?: string | null;
+        reason?: string | null;
+        error?: string | null;
+        attempts?: number;
+        processedAt?: string | null;
+        processedContactId?: string | null;
+        processedConversationId?: string | null;
+        legacyLeadUrl?: string | null;
+        canProcess?: boolean;
+        canReprocess?: boolean;
+        detectionEnabled?: boolean;
+    };
 }
 
 interface GetConversationsParams {

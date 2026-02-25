@@ -74,7 +74,17 @@ This function orchestrates the scraping with a **"World-Class" Robust Strategy**
     - Fallback: If sender extraction fails (e.g., internal users), uses folder as secondary signal (`inbox` → `inbound`, `sentitems` → `outbound`).
     - Debug logging shows: `[OWA Email Sync Debug] Sender: external@example.com, UserEmail: user@outlook.com → Direction: inbound`
 
-### C. Contact Sync (`lib/microsoft/contact-sync.ts`)
+### C. Session Auto-Renew Manager (`lib/microsoft/outlook-session-renew-manager.ts`)
+- **Purpose**: Coordinates Puppeteer session renewal attempts for expired OWA sessions using:
+  - **Single-flight locking** (prevents multiple tabs from launching parallel renewals)
+  - **Throttling** (currently 15-minute cooldown for automatic renew attempts)
+  - **Runtime status** (`renewing`, last attempt, last error, next retry time)
+- **Used by**:
+  - `GET /api/microsoft/puppeteer-auth` (status checks can trigger background auto-renew for expired recoverable sessions)
+  - `POST /api/microsoft/renew-session` (manual fallback renew button)
+- **Persistence Note**: Throttle/lock state is currently in-memory (no DB persistence), so cooldown state resets on app restart/deploy.
+
+### D. Contact Sync (`lib/microsoft/contact-sync.ts`)
 - **Direction**: Bidirectional (mostly Inbound for cron).
 - **Method**: Delta Query (`/me/contacts/delta`).
 - **Matching**: Matches incoming contacts to existing `Contact` records by Outlook ID, then Email/Phone.
@@ -93,13 +103,17 @@ This function orchestrates the scraping with a **"World-Class" Robust Strategy**
 
 1.  **"Session Invalid" / 401 in Logs**:
     - **Cause**: Cookies expired (usually after 7-14 days).
-    - **Fix**: First try a manual sync (`Sync Now`) or wait for cron. If encrypted Puppeteer credentials are stored, the system can auto-renew the session during sync. Re-authenticate only if renewal fails.
+    - **Fix**: First open `/admin/settings/integrations/microsoft` and allow the background auto-renew attempt to run (if stored credentials exist). Use **Try Auto-Renew Now** as a manual fallback. Re-authenticate only if renewal fails.
 
-2.  **Browser Crash / Timeout**:
+2.  **"Unexpected token '<'" while trying to renew**:
+    - **Cause**: The client expected JSON but received an HTML proxy/timeout page (commonly when a full sync endpoint is used for a long-running action).
+    - **Current Behavior**: The integrations page now uses a dedicated renew endpoint (`/api/microsoft/renew-session`) and handles non-JSON responses safely with a readable error.
+
+3.  **Browser Crash / Timeout**:
     - **Cause**: Server ran out of memory or CPU.
     - **Fix**: The cron job has a `flock` lock to prevent overlaps. Check server RAM.
 
-3.  **Graph API Errors for Contacts**:
+4.  **Graph API Errors for Contacts**:
     - **Cause**: User authenticated via Puppeteer but didn't grant OAuth permissions (or tokens expired).
     - **Result**: Contacts won't sync, but emails will continue to work.
 
@@ -113,7 +127,11 @@ This function orchestrates the scraping with a **"World-Class" Robust Strategy**
   - exact sync time,
   - expiry hints (for example, Gmail watch or Outlook session/webhook expiry),
   - Outlook auth method (`oauth` or `puppeteer`) when available.
-- `/admin/settings/integrations/microsoft` also surfaces expired-session messaging and can indicate when an auto-renew attempt is possible.
+- `/admin/settings/integrations/microsoft` also surfaces expired-session messaging and auto-renew state:
+  - `renewing` (background renewal in progress),
+  - throttled auto-retry messaging (`next auto-renew retry ...`),
+  - last auto-renew error (if any),
+  - manual fallback button (**Try Auto-Renew Now**).
 
 ### Manual Verification
 You can manually trigger the sync for testing:

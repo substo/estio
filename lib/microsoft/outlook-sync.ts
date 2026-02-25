@@ -2,6 +2,7 @@ import { Client, PageCollection } from '@microsoft/microsoft-graph-client';
 import { withGraphClient } from './graph-client';
 import db from '@/lib/db';
 import { Message } from '@microsoft/microsoft-graph-types';
+import { updateConversationLastMessage } from '@/lib/conversations/update';
 
 /**
  * Syncs a specific Outlook folder (Inbox, SentItems) using Delta Query
@@ -131,7 +132,7 @@ async function processOutlookMessage(userId: string, msg: Message) {
         }
 
         // 2. Upsert Message
-        await db.message.upsert({
+        const savedMessage = await db.message.upsert({
             where: { emailMessageId: msg.id },
             create: {
                 conversationId,
@@ -150,6 +151,7 @@ async function processOutlookMessage(userId: string, msg: Message) {
                 emailFrom: email,
                 emailTo: msg.toRecipients?.map(r => r.emailAddress?.address).join(', ') || '',
                 createdAt: msg.createdDateTime ? new Date(msg.createdDateTime) : new Date(),
+                source: 'OUTLOOK_GRAPH_SYNC'
             },
             update: {
                 body: bodyContent, // Update body in case of modification
@@ -157,6 +159,28 @@ async function processOutlookMessage(userId: string, msg: Message) {
                 // e.g. read status could be synced too
             }
         });
+
+        const direction = await isUserSender(userId, email) ? 'outbound' : 'inbound';
+        const messageDateRaw = msg.receivedDateTime || msg.sentDateTime || msg.createdDateTime;
+        const messageDate = messageDateRaw ? new Date(messageDateRaw) : new Date();
+
+        await updateConversationLastMessage({
+            conversationId,
+            messageBody: bodyContent || msg.subject || '',
+            messageType: 'TYPE_EMAIL',
+            messageDate,
+            direction
+        });
+
+        void import('@/lib/queue/legacy-crm-lead-email')
+            .then(({ enqueueLegacyCrmLeadEmailAutoProcessForMessage }) =>
+                enqueueLegacyCrmLeadEmailAutoProcessForMessage(savedMessage.id, {
+                    triggerSource: 'outlook_graph_sync'
+                })
+            )
+            .catch((queueError) => {
+                console.warn('[OutlookSync] Failed to schedule legacy CRM lead auto-processing:', queueError);
+            });
 
     } catch (error) {
         console.error(`[OutlookSync] Error processing message ${msg.id}:`, error);

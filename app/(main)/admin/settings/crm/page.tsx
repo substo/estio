@@ -3,10 +3,11 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { saveCrmCredentials, getCrmSettings, analyzeLeadSchema, saveLeadSchema } from "./actions";
+import { saveCrmCredentials, getCrmSettings, analyzeLeadSchema, saveLeadSchema, saveLegacyCrmLeadEmailSettings } from "./actions";
 import { analyzeCrmSchema, saveCrmSchema } from "../../properties/import/actions";
 import { useEffect } from "react";
 import { LeadSourceManager } from "./_components/lead-source-manager";
@@ -14,6 +15,7 @@ import { LeadSourceManager } from "./_components/lead-source-manager";
 
 export default function CrmSettingsPage() {
     const [isSaving, setIsSaving] = useState(false);
+    const [isSavingLegacyLeadEmail, setIsSavingLegacyLeadEmail] = useState(false);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [isLeadAnalyzing, setIsLeadAnalyzing] = useState(false);
     const [schema, setSchema] = useState<any>(null);
@@ -22,7 +24,14 @@ export default function CrmSettingsPage() {
         crmUsername: "",
         crmPassword: "",
         crmEditUrlPattern: "",
-        crmLeadUrlPattern: ""
+        crmLeadUrlPattern: "",
+        legacyCrmLeadEmailEnabled: false,
+        legacyCrmLeadEmailSenders: "info@downtowncyprus.com",
+        legacyCrmLeadEmailSenderDomains: "mg.downtowncyprus.com",
+        legacyCrmLeadEmailSubjectPatterns: "You have been assigned a new lead!\nYou need to follow up on a lead!",
+        legacyCrmLeadEmailPinConversation: true,
+        legacyCrmLeadEmailAutoProcess: false,
+        legacyCrmLeadEmailAutoDraftFirstContact: false,
     });
     const [leadAnalysisUrl, setLeadAnalysisUrl] = useState("https://www.downtowncyprus.com/admin/leads/create");
     const [leadAnalysisResult, setLeadAnalysisResult] = useState<any>(null);
@@ -30,14 +39,21 @@ export default function CrmSettingsPage() {
     useEffect(() => {
         async function fetchSettings() {
             try {
-                const settings = await getCrmSettings();
+                const settings: any = await getCrmSettings();
                 if (settings) {
                     setDefaultValues({
                         crmUrl: settings.crmUrl || "https://www.downtowncyprus.com/admin",
                         crmUsername: settings.crmUsername || "",
                         crmPassword: settings.crmPassword || "",
                         crmEditUrlPattern: settings.crmEditUrlPattern || "",
-                        crmLeadUrlPattern: settings.crmLeadUrlPattern || ""
+                        crmLeadUrlPattern: settings.crmLeadUrlPattern || "",
+                        legacyCrmLeadEmailEnabled: !!settings.legacyCrmLeadEmailEnabled,
+                        legacyCrmLeadEmailSenders: (settings.legacyCrmLeadEmailSenders || []).join("\n") || "info@downtowncyprus.com",
+                        legacyCrmLeadEmailSenderDomains: (settings.legacyCrmLeadEmailSenderDomains || []).join("\n") || "mg.downtowncyprus.com",
+                        legacyCrmLeadEmailSubjectPatterns: (settings.legacyCrmLeadEmailSubjectPatterns || []).join("\n") || "You have been assigned a new lead!\nYou need to follow up on a lead!",
+                        legacyCrmLeadEmailPinConversation: settings.legacyCrmLeadEmailPinConversation ?? true,
+                        legacyCrmLeadEmailAutoProcess: !!settings.legacyCrmLeadEmailAutoProcess,
+                        legacyCrmLeadEmailAutoDraftFirstContact: !!settings.legacyCrmLeadEmailAutoDraftFirstContact,
                     });
                     if (settings.crmSchema) {
                         setSchema(settings.crmSchema);
@@ -67,6 +83,27 @@ export default function CrmSettingsPage() {
             toast.error("An error occurred: " + error.message);
         } finally {
             setIsAnalyzing(false);
+        }
+    }
+
+    async function onSubmitLegacyCrmLeadEmail(event: React.FormEvent<HTMLFormElement>) {
+        event.preventDefault();
+        setIsSavingLegacyLeadEmail(true);
+
+        const formData = new FormData(event.currentTarget);
+        const data = Object.fromEntries(formData);
+
+        try {
+            const result = await saveLegacyCrmLeadEmailSettings(data);
+            if (result?.success) {
+                toast.success("Legacy CRM lead email settings saved");
+            } else {
+                toast.error(result?.error || "Failed to save settings");
+            }
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to save settings");
+        } finally {
+            setIsSavingLegacyLeadEmail(false);
         }
     }
 
@@ -195,6 +232,131 @@ export default function CrmSettingsPage() {
 
                         <Button type="submit" disabled={isSaving}>
                             {isSaving ? "Saving..." : "Save Credentials"}
+                        </Button>
+                    </form>
+                </CardContent>
+            </Card>
+
+            <Card className="mt-6">
+                <CardHeader>
+                    <CardTitle>Old CRM Lead Email Notifications (Outlook)</CardTitle>
+                    <CardDescription>
+                        Configure which incoming email sender/domain identifies old CRM lead notifications so they can be grouped and processed in Estio.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <form onSubmit={onSubmitLegacyCrmLeadEmail} className="space-y-4">
+                        <div className="rounded-md border p-4 space-y-3">
+                            <div className="flex items-start gap-3">
+                                <input
+                                    id="legacyCrmLeadEmailEnabled"
+                                    name="legacyCrmLeadEmailEnabled"
+                                    type="checkbox"
+                                    defaultChecked={defaultValues.legacyCrmLeadEmailEnabled}
+                                    key={`legacy-enabled-${String(defaultValues.legacyCrmLeadEmailEnabled)}`}
+                                    className="mt-1 h-4 w-4"
+                                />
+                                <div className="space-y-1">
+                                    <Label htmlFor="legacyCrmLeadEmailEnabled">Enable legacy CRM lead email detection</Label>
+                                    <p className="text-xs text-muted-foreground">
+                                        Detect old CRM lead notifications in synced Outlook emails (manual processing action in phase 3, auto-processing optional).
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label htmlFor="legacyCrmLeadEmailSenders">Sender Email(s)</Label>
+                            <Textarea
+                                id="legacyCrmLeadEmailSenders"
+                                name="legacyCrmLeadEmailSenders"
+                                defaultValue={defaultValues.legacyCrmLeadEmailSenders}
+                                key={`legacy-senders-${defaultValues.legacyCrmLeadEmailSenders}`}
+                                placeholder={"info@downtowncyprus.com\ninfo=downtowncyprus.com@mg.downtowncyprus.com"}
+                                className="min-h-[90px] font-mono text-sm"
+                            />
+                            <p className="text-xs text-muted-foreground">
+                                One sender per line. Exact address match is preferred (the actual visible From address in Outlook).
+                            </p>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label htmlFor="legacyCrmLeadEmailSenderDomains">Sender Domain(s) (Optional)</Label>
+                            <Textarea
+                                id="legacyCrmLeadEmailSenderDomains"
+                                name="legacyCrmLeadEmailSenderDomains"
+                                defaultValue={defaultValues.legacyCrmLeadEmailSenderDomains}
+                                key={`legacy-domains-${defaultValues.legacyCrmLeadEmailSenderDomains}`}
+                                placeholder={"downtowncyprus.com\nmg.downtowncyprus.com"}
+                                className="min-h-[80px] font-mono text-sm"
+                            />
+                            <p className="text-xs text-muted-foreground">
+                                Domain fallback match for Mailgun/relay patterns. Enter domains only (no @).
+                            </p>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label htmlFor="legacyCrmLeadEmailSubjectPatterns">Subject Pattern(s)</Label>
+                            <Textarea
+                                id="legacyCrmLeadEmailSubjectPatterns"
+                                name="legacyCrmLeadEmailSubjectPatterns"
+                                defaultValue={defaultValues.legacyCrmLeadEmailSubjectPatterns}
+                                key={`legacy-subjects-${defaultValues.legacyCrmLeadEmailSubjectPatterns}`}
+                                placeholder={"You have been assigned a new lead!\nYou need to follow up on a lead!"}
+                                className="min-h-[90px] font-mono text-sm"
+                            />
+                            <p className="text-xs text-muted-foreground">
+                                Case-insensitive contains match. One pattern per line.
+                            </p>
+                        </div>
+
+                        <div className="grid gap-3 sm:grid-cols-3">
+                            <label className="flex items-start gap-2 rounded-md border p-3">
+                                <input
+                                    id="legacyCrmLeadEmailPinConversation"
+                                    name="legacyCrmLeadEmailPinConversation"
+                                    type="checkbox"
+                                    defaultChecked={defaultValues.legacyCrmLeadEmailPinConversation}
+                                    key={`legacy-pin-${String(defaultValues.legacyCrmLeadEmailPinConversation)}`}
+                                    className="mt-1 h-4 w-4"
+                                />
+                                <div>
+                                    <div className="text-sm font-medium">Pin Notifier Thread</div>
+                                    <div className="text-xs text-muted-foreground">Keep the old CRM notifier conversation at the top (used by later phase).</div>
+                                </div>
+                            </label>
+                            <label className="flex items-start gap-2 rounded-md border p-3">
+                                <input
+                                    id="legacyCrmLeadEmailAutoProcess"
+                                    name="legacyCrmLeadEmailAutoProcess"
+                                    type="checkbox"
+                                    defaultChecked={defaultValues.legacyCrmLeadEmailAutoProcess}
+                                    key={`legacy-auto-${String(defaultValues.legacyCrmLeadEmailAutoProcess)}`}
+                                    className="mt-1 h-4 w-4"
+                                />
+                                <div>
+                                    <div className="text-sm font-medium">Auto Process</div>
+                                    <div className="text-xs text-muted-foreground">Reserved for next phase. Manual processing is implemented first.</div>
+                                </div>
+                            </label>
+                            <label className="flex items-start gap-2 rounded-md border p-3">
+                                <input
+                                    id="legacyCrmLeadEmailAutoDraftFirstContact"
+                                    name="legacyCrmLeadEmailAutoDraftFirstContact"
+                                    type="checkbox"
+                                    defaultChecked={defaultValues.legacyCrmLeadEmailAutoDraftFirstContact}
+                                    key={`legacy-draft-${String(defaultValues.legacyCrmLeadEmailAutoDraftFirstContact)}`}
+                                    className="mt-1 h-4 w-4"
+                                />
+                                <div>
+                                    <div className="text-sm font-medium">Auto Draft First Contact</div>
+                                    <div className="text-xs text-muted-foreground">Reserved for next phase (draft-only, no auto-send).</div>
+                                </div>
+                            </label>
+                        </div>
+
+                        <Button type="submit" disabled={isSavingLegacyLeadEmail}>
+                            {isSavingLegacyLeadEmail ? "Saving..." : "Save Lead Email Notification Settings"}
                         </Button>
                     </form>
                 </CardContent>

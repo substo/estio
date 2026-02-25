@@ -37,6 +37,7 @@ model Location {
   leadSources       LeadSource[]
   dealContexts      DealContext[]
   conversations     Conversation[]
+  legacyCrmLeadEmailProcessings LegacyCrmLeadEmailProcessing[]
 
   // WhatsApp Integration (Native)
   whatsappBusinessAccountId String?
@@ -62,6 +63,15 @@ model Location {
   crmLeadUrlPattern String?
   crmSchema         Json?
   crmLeadSchema     Json?
+
+  // Legacy CRM Lead Email Notification (Old CRM -> Outlook -> Estio)
+  legacyCrmLeadEmailEnabled              Boolean  @default(false)
+  legacyCrmLeadEmailSenders              String[] @default([])
+  legacyCrmLeadEmailSenderDomains        String[] @default([])
+  legacyCrmLeadEmailSubjectPatterns      String[] @default([])
+  legacyCrmLeadEmailPinConversation      Boolean  @default(true)
+  legacyCrmLeadEmailAutoProcess          Boolean  @default(false)
+  legacyCrmLeadEmailAutoDraftFirstContact Boolean @default(false)
 }
 
 model LeadSource {
@@ -957,6 +967,7 @@ model Message {
   // Relations
   conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   attachments     MessageAttachment[]
+  legacyCrmLeadEmailProcessing LegacyCrmLeadEmailProcessing?
   
   // WhatsApp Integration
   wamId           String?      @unique // WhatsApp Message ID (for dedup)
@@ -964,6 +975,36 @@ model Message {
   @@index([conversationId])
   @@index([createdAt])
   @@index([emailThreadId])
+}
+
+model LegacyCrmLeadEmailProcessing {
+  id                    String   @id @default(cuid())
+  messageId             String   @unique
+  locationId            String
+  status                String   @default("pending") // pending, processing, processed, failed, ignored, duplicate
+  classification        String?  // new_lead, follow_up, unknown
+  senderEmail           String?
+  subject               String?
+  legacyLeadUrl         String?
+  legacyLeadId          String?
+  extracted             Json?
+  parsedLeadPayload     Json?
+  processResult         Json?
+  processedContactId    String?
+  processedConversationId String?
+  error                 String?
+  attempts              Int      @default(0)
+  processedAt           DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  message               Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  location              Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@index([locationId, status])
+  @@index([classification])
+  @@index([legacyLeadId])
+  @@map("legacy_crm_lead_email_processing")
 }
 
 model GmailSyncState {
