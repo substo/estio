@@ -21,6 +21,7 @@ type ProviderHealth = 'healthy' | 'warning' | 'stale' | 'error';
 
 type EmailProviderStatus = {
     provider: 'gmail' | 'outlook';
+    configured?: boolean;
     connected: boolean;
     health: ProviderHealth;
     email?: string | null;
@@ -31,6 +32,7 @@ type EmailProviderStatus = {
     watchExpired?: boolean;
     sessionExpiry?: string | null;
     sessionExpired?: boolean;
+    canAutoReconnect?: boolean;
     subscriptionExpiry?: string | null;
     subscriptionExpired?: boolean;
     settingsPath: string;
@@ -132,6 +134,12 @@ function EmailProviderBadge({ provider }: { provider: EmailProviderStatus }) {
                         </div>
                     )}
 
+                    {provider.provider === 'outlook' && provider.method === 'puppeteer' && provider.sessionExpired && provider.canAutoReconnect && (
+                        <div className="text-muted-foreground">
+                            Stored credentials available. Next sync can attempt automatic re-login.
+                        </div>
+                    )}
+
                     {provider.provider === 'outlook' && provider.method === 'oauth' && subscriptionExpiryDate && (
                         <div className={provider.subscriptionExpired ? 'text-amber-700' : 'text-muted-foreground'}>
                             Webhook subscription {provider.subscriptionExpired ? 'expired' : 'expires'} {formatDistanceToNow(subscriptionExpiryDate, { addSuffix: true })}
@@ -226,7 +234,7 @@ export function WhatsAppStatus() {
 
     const isConnected = status === 'open' || status === 'connected';
     const isError = status === 'ERROR' || status === 'NOT_FOUND' || status === 'close';
-    const connectedEmailProviders = emailProviders.filter((provider) => provider.connected);
+    const visibleEmailProviders = emailProviders.filter((provider) => provider.connected || provider.configured);
 
     return (
         <div className="flex items-center gap-2 text-xs px-2 py-1 bg-slate-50 border-b">
@@ -236,9 +244,9 @@ export function WhatsAppStatus() {
                 {isConnected ? 'Online' : status === 'checking' ? 'Checking...' : 'Offline'}
             </span>
 
-            {connectedEmailProviders.length > 0 && (
+            {visibleEmailProviders.length > 0 && (
                 <div className="flex items-center gap-1 ml-1 shrink-0">
-                    {connectedEmailProviders.map((provider) => (
+                    {visibleEmailProviders.map((provider) => (
                         <EmailProviderBadge key={provider.provider} provider={provider} />
                     ))}
                 </div>

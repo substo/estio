@@ -97,6 +97,7 @@ export async function GET(req: NextRequest) {
                 outlookAccessToken: true,
                 outlookRefreshToken: true,
                 outlookSessionCookies: true,
+                outlookPasswordEncrypted: true,
                 outlookSessionExpiry: true,
                 outlookSubscriptionExpiry: true,
                 outlookSyncState: {
@@ -128,6 +129,7 @@ export async function GET(req: NextRequest) {
                 email: user.outlookEmail || user.outlookSyncState?.emailAddress || null,
                 sessionExpiry: user.outlookSessionExpiry,
                 sessionExpired,
+                recoverableSession: !!user.outlookPasswordEncrypted,
                 lastSyncedAt: user.outlookSyncState?.lastSyncedAt,
                 syncEnabled: user.outlookSyncEnabled
             });
@@ -145,6 +147,7 @@ export async function GET(req: NextRequest) {
                 email: user.outlookEmail || user.outlookSyncState?.emailAddress || null,
                 sessionExpiry: user.outlookSubscriptionExpiry,
                 sessionExpired: subscriptionExpired,
+                recoverableSession: false,
                 lastSyncedAt: user.outlookSyncState?.lastSyncedAt,
                 syncEnabled: user.outlookSyncEnabled
             });
@@ -153,6 +156,7 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({
             connected: false,
             method: user.outlookAuthMethod || null,
+            recoverableSession: false,
             syncEnabled: user.outlookSyncEnabled
         });
 

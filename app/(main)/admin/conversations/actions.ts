@@ -1275,6 +1275,7 @@ export async function getEmailSyncProvidersStatus() {
                 outlookRefreshToken: true,
                 outlookSyncEnabled: true,
                 outlookSessionCookies: true,
+                outlookPasswordEncrypted: true,
                 outlookSessionExpiry: true,
                 outlookSubscriptionExpiry: true,
                 outlookSyncState: {
@@ -1298,6 +1299,12 @@ export async function getEmailSyncProvidersStatus() {
             user.googleSyncEnabled &&
             (user.googleAccessToken || user.googleRefreshToken)
         );
+        const gmailConfigured = !!(
+            user.googleAccessToken ||
+            user.googleRefreshToken ||
+            user.googleSyncEnabled ||
+            user.gmailSyncState
+        );
         const gmailLastSync = user.gmailSyncState?.lastSyncedAt ?? null;
         const gmailWatchExpiry = user.gmailSyncState?.watchExpiration ?? null;
         const gmailWatchExpired = !!(gmailWatchExpiry && gmailWatchExpiry.getTime() < now);
@@ -1320,6 +1327,14 @@ export async function getEmailSyncProvidersStatus() {
             (user.outlookAuthMethod as 'oauth' | 'puppeteer' | null)
             || (user.outlookSessionCookies ? 'puppeteer' : null)
             || ((user.outlookAccessToken || user.outlookRefreshToken) ? 'oauth' : null);
+        const outlookConfigured = !!(
+            user.outlookSyncEnabled ||
+            user.outlookSessionCookies ||
+            user.outlookAccessToken ||
+            user.outlookRefreshToken ||
+            user.outlookAuthMethod
+        );
+        const outlookCanAutoReconnect = inferredOutlookMethod === 'puppeteer' && !!user.outlookPasswordEncrypted;
 
         const outlookSessionExpired = inferredOutlookMethod === 'puppeteer'
             ? (user.outlookSessionExpiry ? user.outlookSessionExpiry.getTime() < now : true)
@@ -1355,6 +1370,7 @@ export async function getEmailSyncProvidersStatus() {
         const providers = [
             {
                 provider: 'gmail' as const,
+                configured: gmailConfigured,
                 connected: gmailConnected,
                 health: gmailHealth,
                 email: user.gmailSyncState?.emailAddress || null,
@@ -1366,6 +1382,7 @@ export async function getEmailSyncProvidersStatus() {
             },
             {
                 provider: 'outlook' as const,
+                configured: outlookConfigured,
                 connected: outlookConnected,
                 health: outlookHealth,
                 method: inferredOutlookMethod,
@@ -1375,6 +1392,7 @@ export async function getEmailSyncProvidersStatus() {
                 expectedCadenceMinutes: inferredOutlookMethod === 'puppeteer' ? 15 : 5,
                 sessionExpiry: user.outlookSessionExpiry?.toISOString() || null,
                 sessionExpired: outlookSessionExpired,
+                canAutoReconnect: outlookCanAutoReconnect,
                 subscriptionExpiry: user.outlookSubscriptionExpiry?.toISOString() || null,
                 subscriptionExpired: outlookSubscriptionExpired,
                 settingsPath: '/admin/settings/integrations/microsoft'

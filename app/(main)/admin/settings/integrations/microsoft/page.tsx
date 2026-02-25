@@ -27,6 +27,7 @@ interface ConnectionStatus {
     email?: string;
     sessionExpiry?: string;
     sessionExpired?: boolean;
+    recoverableSession?: boolean;
     lastSyncedAt?: string;
     syncEnabled?: boolean;
 }
@@ -201,7 +202,9 @@ export default function MicrosoftIntegrationPage() {
                                     {status.sessionExpired && (
                                         <p className="text-sm text-orange-600 dark:text-orange-400 mt-1 flex items-center gap-1">
                                             <AlertTriangle className="h-3 w-3" />
-                                            Session expired - please reconnect
+                                            {status.method === 'puppeteer' && status.recoverableSession
+                                                ? 'Session expired - auto-renew can be attempted'
+                                                : 'Session expired - please reconnect'}
                                         </p>
                                     )}
                                 </div>
@@ -298,6 +301,29 @@ export default function MicrosoftIntegrationPage() {
                             </CardDescription>
                         </CardHeader>
                         <CardContent>
+                            {status.method === 'puppeteer' && status.sessionExpired && status.recoverableSession && (
+                                <div className="mb-4 rounded-md bg-amber-50 p-3 text-amber-700 text-sm dark:bg-amber-900/10 dark:text-amber-400">
+                                    Your stored Outlook credentials are available. You can try a sync to renew the session automatically before reconnecting manually.
+                                    <div className="mt-3">
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={handleSyncNow}
+                                            disabled={syncing}
+                                        >
+                                            {syncing ? (
+                                                <>
+                                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                    Renewing...
+                                                </>
+                                            ) : (
+                                                'Try Auto-Renew Session'
+                                            )}
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
+
                             <Tabs defaultValue="browser" className="w-full">
                                 <TabsList className="grid w-full grid-cols-2">
                                     <TabsTrigger value="browser">Browser Login</TabsTrigger>
