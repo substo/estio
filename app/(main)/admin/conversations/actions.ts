@@ -3892,8 +3892,25 @@ export async function createParsedLead(
         if (inferredStatus) contactData.requirementStatus = inferredStatus;
         if (data.internalNotes) contactData.requirementOtherDetails = data.internalNotes;
 
-        if (contactId) {
-            // Update existing
+        const loadExistingContactForMerge = async (id: string) => {
+            existingContactForMerge = await db.contact.findUnique({
+                where: { id },
+                select: {
+                    id: true,
+                    propertiesInterested: true,
+                    requirementOtherDetails: true,
+                    requirementPropertyLocations: true,
+                    requirementDistrict: true,
+                    requirementStatus: true
+                }
+            });
+        };
+
+        const updateExistingContact = async (id: string) => {
+            if (!existingContactForMerge || existingContactForMerge.id !== id) {
+                await loadExistingContactForMerge(id);
+            }
+
             // Remove locationId, status, leadSource from update data to avoid overwriting existing state
             const { locationId, status, leadSource, ...updateData } = contactData;
             if (data.internalNotes) {
@@ -3907,18 +3924,55 @@ export async function createParsedLead(
             }
 
             await db.contact.update({
-                where: { id: contactId },
+                where: { id },
                 data: {
                     ...updateData,
                 }
             });
+        };
+
+        if (contactId) {
+            // Update existing
+            await updateExistingContact(contactId);
         } else {
             // Create New
             if (data.internalNotes) contactData.notes = data.internalNotes;
             if (data.internalNotes) contactData.requirementOtherDetails = data.internalNotes;
-            const newContact = await db.contact.create({ data: contactData });
-            contactId = newContact.id;
-            isNewContact = true;
+            try {
+                const newContact = await db.contact.create({ data: contactData });
+                contactId = newContact.id;
+                isNewContact = true;
+            } catch (createErr: any) {
+                const isUniqueConstraint =
+                    createErr?.code === 'P2002' ||
+                    String(createErr?.message || '').includes('Unique constraint failed');
+
+                if (!isUniqueConstraint) {
+                    throw createErr;
+                }
+
+                const duplicateMatchClauses: any[] = [];
+                if (contactData.phone) duplicateMatchClauses.push({ phone: contactData.phone });
+                if (contactData.email) duplicateMatchClauses.push({ email: contactData.email });
+
+                const duplicateContact = duplicateMatchClauses.length > 0
+                    ? await db.contact.findFirst({
+                        where: {
+                            locationId: location.id,
+                            OR: duplicateMatchClauses,
+                        },
+                        select: { id: true }
+                    })
+                    : null;
+
+                if (!duplicateContact?.id) {
+                    throw createErr;
+                }
+
+                contactId = duplicateContact.id;
+                isNewContact = false;
+                await updateExistingContact(contactId);
+            }
         }
 
         // Deterministic property matching/linking for paste imports (before orchestration)
