@@ -174,8 +174,75 @@ export async function fetchConversations(
         });
 
         if ((legacyCrmPinSettings as any)?.legacyCrmLeadEmailPinConversation) {
-            const configuredSenders = ((legacyCrmPinSettings as any)?.legacyCrmLeadEmailSenders || []) as string[];
-            const configuredDomains = ((legacyCrmPinSettings as any)?.legacyCrmLeadEmailSenderDomains || []) as string[];
+            const configuredSenders = (((legacyCrmPinSettings as any)?.legacyCrmLeadEmailSenders || []) as string[])
+                .map((s) => String(s || '').trim().toLowerCase())
+                .filter(Boolean);
+            const configuredDomains = (((legacyCrmPinSettings as any)?.legacyCrmLeadEmailSenderDomains || []) as string[])
+                .map((d) => String(d || '').trim().toLowerCase().replace(/^@/, ''))
+                .filter(Boolean);
+
+            // If the pinned notifier thread falls outside the top page window, inject it so pinning
+            // still works on the default conversations page (same behavior as deep-link inclusion).
+            if (!cursor) {
+                const hasPinnedConversationInWindow = conversationsWithGhlId.some((c: any) => {
+                    const email = String(c.contact?.email || '').trim().toLowerCase();
+                    if (!email) return false;
+                    const matchMode = matchLegacyCrmLeadSender(email, {
+                        senders: configuredSenders,
+                        domains: configuredDomains,
+                    });
+                    return matchMode === 'exact' || matchMode === 'domain';
+                });
+
+                if (!hasPinnedConversationInWindow && (configuredSenders.length > 0 || configuredDomains.length > 0)) {
+                    const emailFilters: any[] = [
+                        ...configuredSenders.map((sender) => ({
+                            contact: {
+                                email: {
+                                    equals: sender,
+                                    mode: 'insensitive'
+                                }
+                            }
+                        })),
+                        ...configuredDomains.flatMap((domain) => ([
+                            {
+                                contact: {
+                                    email: {
+                                        endsWith: `@${domain}`,
+                                        mode: 'insensitive'
+                                    }
+                                }
+                            },
+                            {
+                                contact: {
+                                    email: {
+                                        endsWith: `.${domain}`,
+                                        mode: 'insensitive'
+                                    }
+                                }
+                            }
+                        ]))
+                    ];
+
+                    if (emailFilters.length > 0) {
+                        const pinnedConversationOffWindow = await db.conversation.findFirst({
+                            where: {
+                                ...where,
+                                OR: emailFilters,
+                            },
+                            orderBy: [{ lastMessageAt: 'desc' }, { id: 'desc' }],
+                            include: { contact: { select: { name: true, email: true, phone: true, ghlContactId: true } } }
+                        });
+
+                        if (
+                            pinnedConversationOffWindow &&
+                            !conversationsWithGhlId.some((c: any) => c.id === pinnedConversationOffWindow.id)
+                        ) {
+                            conversationsWithGhlId = [pinnedConversationOffWindow, ...conversationsWithGhlId];
+                        }
+                    }
+                }
+            }
 
             const pinnedIndex = conversationsWithGhlId.findIndex((c: any) => {
                 const email = String(c.contact?.email || '').trim().toLowerCase();

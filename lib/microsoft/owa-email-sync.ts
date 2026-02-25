@@ -551,6 +551,15 @@ export async function syncEmailsFromOWA(userId: string, folderId: 'inbox' | 'sen
             let emailDate = email.date;
             if (isNaN(emailDate.getTime())) emailDate = new Date();
 
+            // Determine direction: sender-based with folder fallback
+            const isOwnEmail = isUserOwnEmail(email.senderEmail, userEmail);
+            // If we couldn't extract sender email, use folder as fallback
+            const direction = email.senderEmail
+                ? (isOwnEmail ? 'outbound' : 'inbound')
+                : (folderId === 'inbox' ? 'inbound' : 'outbound');
+
+            const incomingBodyRaw = email.fullBody || email.preview || '';
+
             // Check for existing message with body comparison
             const candidates = await db.message.findMany({
                 where: {
@@ -566,7 +575,8 @@ export async function syncEmailsFromOWA(userId: string, folderId: 'inbox' | 'sen
             // Strict duplication check: Subject + Date + Body must match
             // We compare normalized bodies to be safe against minor whitespace differences
             const normalize = (s: string) => s?.replace(/\s+/g, ' ').trim() || '';
-            const newBody = normalize(email.fullBody || email.preview);
+            const looksLikeHtml = (s: string) => /<[a-z][\s\S]*>/i.test(s || '');
+            const newBody = normalize(incomingBodyRaw);
 
             const existing = candidates.find(msg => {
                 const existingBody = normalize(msg.body || '');
@@ -581,16 +591,35 @@ export async function syncEmailsFromOWA(userId: string, folderId: 'inbox' | 'sen
             });
 
             if (existing) {
+                const existingBodyRaw = existing.body || '';
+                const existingBody = normalize(existingBodyRaw);
+                const incomingContainsExisting = !!existingBody && newBody.includes(existingBody);
+                const incomingSignificantlyLonger = newBody.length > Math.max(existingBody.length + 120, Math.floor(existingBody.length * 1.4));
+                const shouldUpgradeExistingBody =
+                    !!incomingBodyRaw &&
+                    (
+                        (!existingBody && newBody.length > 0) ||
+                        (incomingContainsExisting && incomingSignificantlyLonger) ||
+                        (looksLikeHtml(incomingBodyRaw) && !looksLikeHtml(existingBodyRaw) && newBody.length > existingBody.length + 40)
+                    );
+
+                if (shouldUpgradeExistingBody) {
+                    await db.message.update({
+                        where: { id: existing.id },
+                        data: {
+                            body: incomingBodyRaw,
+                            // Backfill a missing sender if the earlier preview-only save lacked it.
+                            emailFrom: existing.emailFrom || email.senderEmail || email.sender,
+                        }
+                    });
+
+                    console.log(`[OWA Email Sync] Upgraded duplicate email body with fuller content: "${email.subject}"`);
+                    return;
+                }
+
                 console.log(`[OWA Email Sync] Skipping duplicate email (Body Match): "${email.subject}"`);
                 return;
             }
-
-            // Determine direction: sender-based with folder fallback
-            const isOwnEmail = isUserOwnEmail(email.senderEmail, userEmail);
-            // If we couldn't extract sender email, use folder as fallback
-            const direction = email.senderEmail
-                ? (isOwnEmail ? 'outbound' : 'inbound')
-                : (folderId === 'inbox' ? 'inbound' : 'outbound');
 
             console.log(`[OWA Email Sync Debug] Sender: ${email.senderEmail || 'UNKNOWN'}, UserEmail: ${userEmail || 'NOT SET'} → Direction: ${direction}`);
 
@@ -601,7 +630,7 @@ export async function syncEmailsFromOWA(userId: string, folderId: 'inbox' | 'sen
                     direction,
                     type: 'EMAIL',
                     status: 'delivered',
-                    body: email.fullBody || email.preview,
+                    body: incomingBodyRaw,
                     subject: email.subject,
                     emailFrom: email.senderEmail || email.sender,
                     createdAt: emailDate,
@@ -611,7 +640,7 @@ export async function syncEmailsFromOWA(userId: string, folderId: 'inbox' | 'sen
 
             await updateConversationLastMessage({
                 conversationId,
-                messageBody: email.fullBody || email.preview || email.subject,
+                messageBody: incomingBodyRaw || email.subject,
                 messageType: 'TYPE_EMAIL',
                 messageDate: emailDate,
                 direction,
