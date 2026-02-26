@@ -278,6 +278,8 @@ In addition to automated widget submissions, contacts can be managed manually vi
     -   **Company Role**: Select a company and role (e.g., Agent, Director). **Includes search functionality**.
 
     -   Prevents duplicate emails within the same Location.
+    -   Prevents exact duplicate phone numbers within the same Location (server-side pre-check plus DB unique constraint fallback for race conditions).
+    -   **Duplicate Phone UX**: The Phone field shows an inline validation error and an **Open Existing Contact** action so agents can jump directly to the existing record instead of re-creating it.
     -   Parses array inputs (Property Types, Locations) from both JSON and comma-separated strings for flexibility.
     -   **Graceful Handling**: Optional fields (like `message` or `phone`) are handled gracefully by server actions even if missing from the form payload.
 

@@ -232,6 +232,11 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
     const [isEditing, setIsEditing] = useState(initialMode !== 'view');
     const isCreating = initialMode === 'create';
 
+    const openDuplicateContact = (contactId: string) => {
+        if (isCreating && onSuccess) onSuccess();
+        router.push(`/admin/contacts/${contactId}/edit`);
+    };
+
     // ... (rest of hook calls)
 
     const action = isCreating ? createContact : updateContact;
@@ -484,6 +489,27 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                             <RenderField label="Phone" value={contact?.phone} isEditing={isEditing}>
                                 <Input id="phone" name="phone" type="tel" placeholder="+123..." defaultValue={contact?.phone || ''} />
                                 {state.errors?.phone && <p className="text-sm text-red-500">{state.errors.phone.join(', ')}</p>}
+                                {state.duplicateContact && state.errors?.phone && (
+                                    <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                                        <p>
+                                            This phone is already used by{' '}
+                                            <span className="font-medium">
+                                                {state.duplicateContact.name || 'an existing contact'}
+                                            </span>
+                                            {state.duplicateContact.phone ? ` (${state.duplicateContact.phone})` : ''}.
+                                        </p>
+                                        <div className="mt-2">
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => openDuplicateContact(state.duplicateContact!.id)}
+                                            >
+                                                Open Existing Contact
+                                            </Button>
+                                        </div>
+                                    </div>
+                                )}
                             </RenderField>
                             <RenderField label="Date of Birth" value={contact?.dateOfBirth ? formatDate(contact?.dateOfBirth) : null} isEditing={isEditing}>
                                 <Input id="dateOfBirth" name="dateOfBirth" type="date" defaultValue={formatDate(contact?.dateOfBirth)} />

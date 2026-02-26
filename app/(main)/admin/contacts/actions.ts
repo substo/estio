@@ -220,7 +220,24 @@ export type CreateContactState = {
   message?: string;
   success?: boolean;
   contact?: { id: string; name: string; email?: string | null; phone?: string | null; message?: string | null };
+  duplicateContact?: { id: string; name: string | null; email?: string | null; phone?: string | null };
 };
+
+function buildDuplicatePhoneState(
+  contact: { id: string; name: string | null; email?: string | null; phone?: string | null }
+): CreateContactState {
+  return {
+    errors: { phone: ['A contact with this phone already exists.'] },
+    message: 'Phone already exists. Open the existing contact instead.',
+    success: false,
+    duplicateContact: {
+      id: contact.id,
+      name: contact.name,
+      email: contact.email ?? null,
+      phone: contact.phone ?? null,
+    },
+  };
+}
 
 export async function openOrStartConversationForContact(contactId: string) {
   try {
@@ -488,6 +505,12 @@ async function checkPhoneDuplicate(locationId: string, phone: string | null | un
       locationId: locationId,
       phone: phone,
       NOT: excludeContactId ? { id: excludeContactId } : undefined
+    },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      phone: true,
     }
   });
 
@@ -628,6 +651,14 @@ export async function createContact(
       }
     }
 
+    // Check for existing contact if phone is provided
+    if (data.phone) {
+      const phoneDuplicate = await checkPhoneDuplicate(data.locationId, data.phone);
+      if (phoneDuplicate?.type === 'Exact') {
+        return buildDuplicatePhoneState(phoneDuplicate.contact);
+      }
+    }
+
     // Transaction to create contact and role
     const contact = await db.$transaction(async (tx) => {
       const contactInput = prepareContactInput(data);
@@ -699,7 +730,18 @@ export async function createContact(
       },
     };
 
-  } catch (error) {
+  } catch (error: any) {
+    if (String(error?.code) === 'P2002') {
+      const targets = Array.isArray(error?.meta?.target) ? error.meta.target.map(String) : [];
+
+      if (targets.includes('phone') && data.phone) {
+        const phoneDuplicate = await checkPhoneDuplicate(data.locationId, data.phone);
+        if (phoneDuplicate?.type === 'Exact') {
+          return buildDuplicatePhoneState(phoneDuplicate.contact);
+        }
+      }
+    }
+
     console.error('[createContact] Database Error:', error);
     return {
       message: 'Database Error: Failed to Create Contact.',
@@ -708,7 +750,10 @@ export async function createContact(
   }
 }
 
-async function updateContactCore(data: ValidatedContactData & { contactId: string }, userId: string): Promise<{ success: boolean; message?: string; errors?: any }> {
+async function updateContactCore(
+  data: ValidatedContactData & { contactId: string },
+  userId: string
+): Promise<{ success: boolean; message?: string; errors?: any; duplicateContact?: CreateContactState['duplicateContact'] }> {
   // Resolve internal user ID for history logging
   const dbUser = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } });
   const internalUserId = dbUser?.id || null;
@@ -740,6 +785,14 @@ async function updateContactCore(data: ValidatedContactData & { contactId: strin
           message: 'Contact with this email already exists.',
           success: false,
         };
+      }
+    }
+
+    // Check for existing contact with same phone (excluding current contact)
+    if (data.phone) {
+      const phoneDuplicate = await checkPhoneDuplicate(data.locationId, data.phone, data.contactId);
+      if (phoneDuplicate?.type === 'Exact') {
+        return buildDuplicatePhoneState(phoneDuplicate.contact);
       }
     }
 
@@ -828,6 +881,17 @@ async function updateContactCore(data: ValidatedContactData & { contactId: strin
     return { success: true, message: 'Contact updated successfully.' };
 
   } catch (error: any) {
+    if (String(error?.code) === 'P2002') {
+      const targets = Array.isArray(error?.meta?.target) ? error.meta.target.map(String) : [];
+
+      if (targets.includes('phone') && data.phone) {
+        const phoneDuplicate = await checkPhoneDuplicate(data.locationId, data.phone, data.contactId);
+        if (phoneDuplicate?.type === 'Exact') {
+          return buildDuplicatePhoneState(phoneDuplicate.contact);
+        }
+      }
+    }
+
     console.error('[updateContact] Database Error:', error);
     return {
       message: error.message || 'Database Error: Failed to Update Contact.',
@@ -958,6 +1022,7 @@ export async function updateContact(
     message: result.message || (result.success ? 'Contact updated successfully.' : 'Update failed'),
     success: result.success,
     errors: result.errors,
+    duplicateContact: result.duplicateContact,
     contact: {
       id: data.contactId,
       name: data.name,
