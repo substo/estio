@@ -648,15 +648,8 @@ export async function syncEmailsFromOWA(userId: string, folderId: 'inbox' | 'sen
 
             console.log(`[OWA Email Sync] Saved email: ${email.subject}`);
 
-            void import('@/lib/queue/legacy-crm-lead-email')
-                .then(({ enqueueLegacyCrmLeadEmailAutoProcessForMessage }) =>
-                    enqueueLegacyCrmLeadEmailAutoProcessForMessage(savedMessage.id, {
-                        triggerSource: 'outlook_owa_sync'
-                    })
-                )
-                .catch((queueError) => {
-                    console.warn('[OWA Email Sync] Failed to schedule legacy CRM lead auto-processing:', queueError);
-                });
+            // Legacy CRM notification email auto-processing is intentionally disabled.
+            // The current workflow uses explicit text selection actions inside the conversation UI.
 
             // GHL Trigger (omitted for brevity, same as before)
 

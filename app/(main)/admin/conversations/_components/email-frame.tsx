@@ -1,12 +1,30 @@
 import { useEffect, useRef, useState } from "react";
 
+export type EmailFrameSelection = {
+    text: string;
+    rect: {
+        top: number;
+        left: number;
+        right: number;
+        bottom: number;
+        width: number;
+        height: number;
+    };
+};
+
 interface EmailFrameProps {
     html: string;
+    onSelectionChange?: (selection: EmailFrameSelection | null) => void;
 }
 
-export function EmailFrame({ html }: EmailFrameProps) {
+export function EmailFrame({ html, onSelectionChange }: EmailFrameProps) {
     const iframeRef = useRef<HTMLIFrameElement>(null);
+    const onSelectionChangeRef = useRef<EmailFrameProps["onSelectionChange"]>(onSelectionChange);
     const [height, setHeight] = useState<number>(0);
+
+    useEffect(() => {
+        onSelectionChangeRef.current = onSelectionChange;
+    }, [onSelectionChange]);
 
     const updateHeight = () => {
         const iframe = iframeRef.current;
@@ -71,7 +89,64 @@ export function EmailFrame({ html }: EmailFrameProps) {
         // A simple interval check could be added if dynamic content is expected, but emails are usually static.
         const resizeInterval = setInterval(updateHeight, 500);
 
-        return () => clearInterval(resizeInterval);
+        const emitSelection = () => {
+            const selectionCallback = onSelectionChangeRef.current;
+            if (!selectionCallback) return;
+            try {
+                const doc = iframe.contentDocument;
+                const win = iframe.contentWindow;
+                if (!doc || !win) {
+                    selectionCallback(null);
+                    return;
+                }
+
+                const selection = win.getSelection();
+                const rawText = selection?.toString() || "";
+                const trimmedText = rawText.replace(/\u00a0/g, " ").trim();
+                if (!trimmedText || !selection || selection.rangeCount === 0) {
+                    selectionCallback(null);
+                    return;
+                }
+
+                const range = selection.getRangeAt(0);
+                const rect = range.getBoundingClientRect();
+                if (!rect || (rect.width === 0 && rect.height === 0)) {
+                    selectionCallback(null);
+                    return;
+                }
+
+                const iframeRect = iframe.getBoundingClientRect();
+                selectionCallback({
+                    text: rawText.trim(),
+                    rect: {
+                        top: iframeRect.top + rect.top,
+                        left: iframeRect.left + rect.left,
+                        right: iframeRect.left + rect.right,
+                        bottom: iframeRect.top + rect.bottom,
+                        width: rect.width,
+                        height: rect.height,
+                    }
+                });
+            } catch {
+                selectionCallback(null);
+            }
+        };
+
+        if (onSelectionChangeRef.current) {
+            doc.addEventListener("selectionchange", emitSelection);
+            doc.addEventListener("mouseup", emitSelection);
+            doc.addEventListener("keyup", emitSelection);
+        }
+
+        return () => {
+            clearInterval(resizeInterval);
+            if (onSelectionChangeRef.current) {
+                doc.removeEventListener("selectionchange", emitSelection);
+                doc.removeEventListener("mouseup", emitSelection);
+                doc.removeEventListener("keyup", emitSelection);
+                onSelectionChangeRef.current?.(null);
+            }
+        };
     }, [html]);
 
     return (

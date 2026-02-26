@@ -172,15 +172,8 @@ async function processOutlookMessage(userId: string, msg: Message) {
             direction
         });
 
-        void import('@/lib/queue/legacy-crm-lead-email')
-            .then(({ enqueueLegacyCrmLeadEmailAutoProcessForMessage }) =>
-                enqueueLegacyCrmLeadEmailAutoProcessForMessage(savedMessage.id, {
-                    triggerSource: 'outlook_graph_sync'
-                })
-            )
-            .catch((queueError) => {
-                console.warn('[OutlookSync] Failed to schedule legacy CRM lead auto-processing:', queueError);
-            });
+        // Legacy CRM notification email auto-processing is intentionally disabled.
+        // Operators now use explicit selection actions (Paste Lead / Find Contact) in the conversation UI.
 
     } catch (error) {
         console.error(`[OutlookSync] Error processing message ${msg.id}:`, error);

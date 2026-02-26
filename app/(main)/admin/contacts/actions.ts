@@ -1772,31 +1772,188 @@ export async function searchContactsAction(query: string) {
   const { userId } = await auth();
   if (!userId) return [];
 
-  if (!query || query.length < 2) return [];
+  const rawQuery = String(query || '').trim();
+  if (rawQuery.length < 2) return [];
 
-  // Find user's locations to scope search?
-  // Ideally we should scoped to the current location, but for now search broadly or use the first location context if available.
-  // The ContactView usually is within a context.
-  // Let's search all contacts user has access to.
+  const location = await getLocationContext();
+  if (!location?.id) return [];
 
-  // Actually, we can just search by name/phone/email
-  // We need to verify access (user.locations).
-  // This is a simplified search.
+  const hasAccess = await verifyUserHasAccessToLocation(userId, location.id);
+  if (!hasAccess) return [];
+
+  const queryLower = rawQuery.toLowerCase();
+  const queryDigits = rawQuery.replace(/\D/g, '');
+  const queryDigitsShort = queryDigits.length >= 7 ? queryDigits.slice(-10) : queryDigits;
+  const looksLikeEmail = rawQuery.includes('@');
+  const nameTokens = rawQuery
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+
+  const orClauses: any[] = [
+    { name: { contains: rawQuery, mode: 'insensitive' } },
+    { firstName: { contains: rawQuery, mode: 'insensitive' } },
+    { lastName: { contains: rawQuery, mode: 'insensitive' } },
+    { email: { contains: rawQuery, mode: 'insensitive' } },
+  ];
+
+  if (queryDigits.length >= 4) {
+    orClauses.push({ phone: { contains: queryDigitsShort } });
+    if (queryDigits.length >= 7) {
+      orClauses.push({ phone: { contains: queryDigits.slice(-7) } });
+    }
+  } else if (rawQuery.length >= 2) {
+    orClauses.push({ phone: { contains: rawQuery } });
+  }
+
+  if (looksLikeEmail) {
+    orClauses.push({ email: { startsWith: rawQuery, mode: 'insensitive' } });
+  }
+
+  if (nameTokens.length >= 2) {
+    const first = nameTokens[0];
+    const last = nameTokens.slice(1).join(' ');
+    orClauses.push({
+      AND: [
+        { firstName: { contains: first, mode: 'insensitive' } },
+        { lastName: { contains: last, mode: 'insensitive' } },
+      ]
+    });
+    orClauses.push({
+      AND: [
+        { firstName: { contains: last, mode: 'insensitive' } },
+        { lastName: { contains: first, mode: 'insensitive' } },
+      ]
+    });
+    orClauses.push({
+      AND: nameTokens.map((token) => ({ name: { contains: token, mode: 'insensitive' } }))
+    });
+  }
 
   const contacts = await db.contact.findMany({
     where: {
-      OR: [
-        { name: { contains: query, mode: 'insensitive' } },
-        { phone: { contains: query, mode: 'insensitive' } },
-        { email: { contains: query, mode: 'insensitive' } },
-      ]
-      // TODO: Add location restriction based on user access
+      locationId: location.id,
+      OR: orClauses,
     },
-    take: 10,
-    select: { id: true, name: true, phone: true, email: true, location: { select: { name: true } } }
+    take: 40,
+    orderBy: { updatedAt: 'desc' },
+    select: {
+      id: true,
+      name: true,
+      firstName: true,
+      lastName: true,
+      phone: true,
+      email: true,
+      updatedAt: true,
+      location: { select: { name: true } },
+      conversations: {
+        orderBy: { lastMessageAt: 'desc' },
+        take: 1,
+        select: { ghlConversationId: true, status: true }
+      }
+    }
   });
 
-  return contacts;
+  const normalizeName = (value: string | null | undefined) =>
+    String(value || '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const normalizeDigits = (value: string | null | undefined) =>
+    String(value || '').replace(/\D/g, '');
+
+  const scored = contacts
+    .map((contact) => {
+      const email = String(contact.email || '').toLowerCase();
+      const phoneDigits = normalizeDigits(contact.phone);
+      const displayName = contact.name || [contact.firstName, contact.lastName].filter(Boolean).join(' ') || null;
+      const fullName = normalizeName(displayName || [contact.firstName, contact.lastName].filter(Boolean).join(' '));
+      const firstName = normalizeName(contact.firstName);
+      const lastName = normalizeName(contact.lastName);
+
+      let score = 0;
+      let matchReason = 'Match';
+
+      if (queryDigits.length >= 7 && phoneDigits) {
+        if (phoneDigits === queryDigits) {
+          score = Math.max(score, 120);
+          matchReason = 'Exact phone';
+        } else if (phoneDigits.endsWith(queryDigits)) {
+          score = Math.max(score, 110);
+          matchReason = 'Phone suffix';
+        } else if (queryDigitsShort && phoneDigits.includes(queryDigitsShort)) {
+          score = Math.max(score, 95);
+          matchReason = 'Phone contains';
+        }
+      }
+
+      if (looksLikeEmail && email) {
+        if (email === queryLower) {
+          score = Math.max(score, 115);
+          matchReason = 'Exact email';
+        } else if (email.startsWith(queryLower)) {
+          score = Math.max(score, 92);
+          matchReason = 'Email prefix';
+        } else if (email.includes(queryLower)) {
+          score = Math.max(score, 80);
+          matchReason = 'Email contains';
+        }
+      } else if (!looksLikeEmail && email && email.includes(queryLower)) {
+        score = Math.max(score, 55);
+        matchReason = 'Email contains';
+      }
+
+      if (fullName) {
+        if (fullName === queryLower) {
+          score = Math.max(score, 105);
+          matchReason = 'Exact name';
+        } else if (fullName.startsWith(queryLower)) {
+          score = Math.max(score, 88);
+          matchReason = 'Name prefix';
+        } else if (fullName.includes(queryLower)) {
+          score = Math.max(score, 72);
+          matchReason = 'Name contains';
+        }
+      }
+
+      if (nameTokens.length >= 2) {
+        const tokenMatchCount = nameTokens.filter((token) => {
+          const t = normalizeName(token);
+          return !!t && (fullName.includes(t) || firstName.includes(t) || lastName.includes(t));
+        }).length;
+        if (tokenMatchCount === nameTokens.length) {
+          score = Math.max(score, 90);
+          matchReason = 'Full name tokens';
+        }
+      }
+
+      const latestConversation = contact.conversations?.[0] || null;
+
+      return {
+        id: contact.id,
+        name: contact.name,
+        firstName: contact.firstName,
+        lastName: contact.lastName,
+        phone: contact.phone,
+        email: contact.email,
+        location: contact.location,
+        conversationId: latestConversation?.ghlConversationId || null,
+        conversationStatus: latestConversation?.status || null,
+        matchReason,
+        _score: score,
+        _updatedAt: contact.updatedAt?.getTime?.() || 0,
+      };
+    })
+    .filter((row) => row._score > 0 || (!queryDigits && !looksLikeEmail))
+    .sort((a, b) => {
+      if (b._score !== a._score) return b._score - a._score;
+      return b._updatedAt - a._updatedAt;
+    })
+    .slice(0, 12)
+    .map(({ _score, _updatedAt, ...row }) => row);
+
+  return scored;
 }
 
 export async function mergeContacts(sourceContactId: string, targetContactId: string) {
