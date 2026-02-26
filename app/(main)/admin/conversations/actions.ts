@@ -1357,6 +1357,13 @@ export async function generateAIDraft(conversationId: string, contactId: string,
         throw new Error("Misconfigured: Location has no GHL Location ID");
     }
 
+    const explicitModel = typeof model === "string" && model.trim() ? model.trim() : undefined;
+    let resolvedDraftModel = explicitModel;
+    if (!resolvedDraftModel) {
+        const { resolveAiDraftDefaultModel } = await import("@/lib/ai/fetch-models");
+        resolvedDraftModel = await resolveAiDraftDefaultModel(location.id);
+    }
+
     // [JIT Sync] Ensure contact exists locally before asking AI
     // Resolve GHL ID if possible, otherwise rely on local data
     const existingContact = await db.contact.findFirst({
@@ -1394,7 +1401,7 @@ export async function generateAIDraft(conversationId: string, contactId: string,
         agentName,
         businessName: location.name || undefined,
         instruction,
-        model
+        model: resolvedDraftModel
     });
 
     return result;
@@ -1852,6 +1859,18 @@ export async function getAvailableAiModelsAction() {
     const location = await getBasicLocationContext();
     const { getAvailableModels } = await import("@/lib/ai/fetch-models");
     return getAvailableModels(location.id);
+}
+
+export async function getAiDraftModelPickerStateAction() {
+    const location = await getBasicLocationContext();
+    const { getAiDraftModelPickerState } = await import("@/lib/ai/fetch-models");
+    return getAiDraftModelPickerState(location.id);
+}
+
+export async function getAiModelPickerDefaultsAction() {
+    const location = await getBasicLocationContext();
+    const { getAiModelPickerDefaults } = await import("@/lib/ai/fetch-models");
+    return getAiModelPickerDefaults(location.id);
 }
 
 export async function getWhatsAppChannelEligibility(conversationId: string) {

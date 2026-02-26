@@ -4,6 +4,7 @@ import db from "@/lib/db";
 import { auth } from "@clerk/nextjs/server";
 import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
 import { revalidatePath } from "next/cache";
+import { GEMINI_FLASH_LATEST_ALIAS } from "@/lib/ai/models";
 
 interface AiSettingsState {
     message?: string;
@@ -35,9 +36,9 @@ export async function updateAiSettings(
             create: {
                 locationId,
                 googleAiApiKey: formData.get("googleAiApiKey") as string,
-                googleAiModel: formData.get("googleAiModel") as string || "gemini-2.5-flash",
-                googleAiModelExtraction: formData.get("googleAiModelExtraction") as string || "gemini-2.5-flash",
-                googleAiModelDesign: formData.get("googleAiModelDesign") as string || "gemini-2.5-flash",
+                googleAiModel: formData.get("googleAiModel") as string || GEMINI_FLASH_LATEST_ALIAS,
+                googleAiModelExtraction: formData.get("googleAiModelExtraction") as string || GEMINI_FLASH_LATEST_ALIAS,
+                googleAiModelDesign: formData.get("googleAiModelDesign") as string || GEMINI_FLASH_LATEST_ALIAS,
                 brandVoice: formData.get("brandVoice") as string,
                 outreachConfig: {
                     enabled: formData.get("outreachEnabled") === "on",
@@ -48,9 +49,9 @@ export async function updateAiSettings(
             },
             update: {
                 googleAiApiKey: formData.get("googleAiApiKey") as string,
-                googleAiModel: formData.get("googleAiModel") as string || "gemini-2.5-flash",
-                googleAiModelExtraction: formData.get("googleAiModelExtraction") as string || "gemini-2.5-flash",
-                googleAiModelDesign: formData.get("googleAiModelDesign") as string || "gemini-2.5-flash",
+                googleAiModel: formData.get("googleAiModel") as string || GEMINI_FLASH_LATEST_ALIAS,
+                googleAiModelExtraction: formData.get("googleAiModelExtraction") as string || GEMINI_FLASH_LATEST_ALIAS,
+                googleAiModelDesign: formData.get("googleAiModelDesign") as string || GEMINI_FLASH_LATEST_ALIAS,
                 brandVoice: formData.get("brandVoice") as string,
                 outreachConfig: {
                     enabled: formData.get("outreachEnabled") === "on",

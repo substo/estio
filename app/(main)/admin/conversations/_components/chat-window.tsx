@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Conversation, Message } from "@/lib/ghl/conversations";
-import { GOOGLE_AI_MODELS } from "@/lib/ai/models";
+import { GEMINI_FLASH_LATEST_ALIAS, GOOGLE_AI_MODELS } from "@/lib/ai/models";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -53,7 +53,7 @@ import { MessageBubble } from "./message-bubble";
 import { SuggestionBubbles } from "./suggestion-bubbles";
 import { Sparkles, Loader2 as Spinner } from "lucide-react"; // Import Sparkles explicitly if not already
 
-import { getAvailableAiModelsAction, getWhatsAppChannelEligibility } from "@/app/(main)/admin/conversations/actions";
+import { getAiDraftModelPickerStateAction, getWhatsAppChannelEligibility } from "@/app/(main)/admin/conversations/actions";
 
 type WhatsAppEligibilityState =
     | { status: 'checking' }
@@ -71,18 +71,22 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
     const [sending, setSending] = useState(false);
     const [generatingDraft, setGeneratingDraft] = useState(false);
     const [selectedChannel, setSelectedChannel] = useState<'SMS' | 'Email' | 'WhatsApp'>(getInitialChannel(conversation));
-    const [selectedModel, setSelectedModel] = useState("gemini-2.5-flash");
+    const [selectedModel, setSelectedModel] = useState(GEMINI_FLASH_LATEST_ALIAS);
+    const [hasUserSelectedModel, setHasUserSelectedModel] = useState(false);
     const [availableModels, setAvailableModels] = useState<any[]>([]); // Dynamic list
     const [whatsAppEligibility, setWhatsAppEligibility] = useState<WhatsAppEligibilityState>({ status: 'checking' });
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const hasUserSelectedModelRef = useRef(false);
 
     // Fetch available models on mount
     useEffect(() => {
         let mounted = true;
-        getAvailableAiModelsAction().then(models => {
+        getAiDraftModelPickerStateAction().then(({ models, defaultModel }) => {
             if (mounted && models && models.length > 0) {
                 setAvailableModels(models);
-                // Optional: Check if default selectedModel is in list, if not switch to first
+                if (!hasUserSelectedModelRef.current && defaultModel) {
+                    setSelectedModel(defaultModel);
+                }
             }
         }).catch(err => console.error("Failed to load AI models:", err));
 
@@ -176,7 +180,8 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
         try {
             // Pass instruction (override or current draft)
             const instruction = instructionOverride || draft.trim();
-            const text = await onGenerateDraft(instruction, selectedModel);
+            const modelOverride = hasUserSelectedModel ? selectedModel : undefined;
+            const text = await onGenerateDraft(instruction, modelOverride);
 
             if (text) {
                 // REPLACE content (per user request) instead of appending
@@ -304,7 +309,14 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
                                 {onGenerateDraft && (
                                     <>
                                         <div className="w-px h-4 bg-slate-200" />
-                                        <Select value={selectedModel} onValueChange={setSelectedModel}>
+                                        <Select
+                                            value={selectedModel}
+                                            onValueChange={(value) => {
+                                                hasUserSelectedModelRef.current = true;
+                                                setHasUserSelectedModel(true);
+                                                setSelectedModel(value);
+                                            }}
+                                        >
                                             <SelectTrigger className="h-7 w-[110px] text-[11px] border-0 bg-slate-50 hover:bg-slate-100 focus:ring-0 px-2">
                                                 <SelectValue />
                                             </SelectTrigger>

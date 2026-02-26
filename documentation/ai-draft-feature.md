@@ -69,14 +69,14 @@ Search server logs for the tag `[AI Draft]`.
 Users can override the default AI model directly from the Chat Window before generating a draft.
 
 ### Workflow
-1.  **Select Model**: Use the dropdown next to the "AI Draft" button (defaults to System Default `gemini-3-flash`).
+1.  **Select Model**: Use the dropdown next to the "AI Draft" button (defaults to a server-resolved Flash model: configured `googleAiModel` if set, otherwise `gemini-flash-latest` alias with pinned fallback).
 2.  **Generate**: Click "AI Draft" or a suggestion bubble.
 3.  **Backend**: The selected model ID is passed to `generateAIDraft` -> `generateDraft`.
 4.  **Cost Tracking**: `AgentExecution` records the specific model used for accurate cost calculation.
 
 ### Configuration
--   **Default Model**: Configured in **Settings > AI Agent**.
--   **Available Models**: Fetched dynamically from Google's API to support the latest models (e.g., Gemini 3.0). Falls back to `lib/ai/pricing.ts` defaults if offline.
+-   **Default Model**: Resolved server-side for AI Draft (`Settings > AI Agent` override first; else `gemini-flash-latest`; fallback to pinned Flash if alias unavailable).
+-   **Available Models**: Fetched dynamically from Google's API (paginated) and merged with curated aliases (e.g., `gemini-flash-latest`) so the dropdown stays current while preserving stable alias options.
 
 
 ## 6. Smart Replies (Auto-Suggestions)

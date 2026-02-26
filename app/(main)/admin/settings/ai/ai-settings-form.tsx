@@ -1,10 +1,10 @@
 "use client";
 
-import { useActionState, useState, useEffect } from "react";
+import { useActionState, useState, useEffect, useRef } from "react";
 import { useFormStatus } from "react-dom";
 import { updateAiSettings } from "./actions";
 import { Input } from "@/components/ui/input";
-import { GOOGLE_AI_MODELS } from "@/lib/ai/models";
+import { GEMINI_FLASH_LATEST_ALIAS, GOOGLE_AI_MODELS } from "@/lib/ai/models";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -34,17 +34,55 @@ export function AiSettingsForm({ initialData, locationId }: { initialData: any, 
     const [isGeneratingVoice, setIsGeneratingVoice] = useState(false);
 
     const [availableModels, setAvailableModels] = useState<any[]>([]);
+    const [googleAiModel, setGoogleAiModel] = useState(
+        (typeof initialData?.googleAiModel === "string" && initialData.googleAiModel.trim()) || GEMINI_FLASH_LATEST_ALIAS
+    );
+    const [googleAiModelExtraction, setGoogleAiModelExtraction] = useState(
+        (typeof initialData?.googleAiModelExtraction === "string" && initialData.googleAiModelExtraction.trim())
+        || (typeof initialData?.googleAiModel === "string" && initialData.googleAiModel.trim())
+        || GEMINI_FLASH_LATEST_ALIAS
+    );
+    const [googleAiModelDesign, setGoogleAiModelDesign] = useState(
+        (typeof initialData?.googleAiModelDesign === "string" && initialData.googleAiModelDesign.trim())
+        || (typeof initialData?.googleAiModel === "string" && initialData.googleAiModel.trim())
+        || GEMINI_FLASH_LATEST_ALIAS
+    );
+    const hasUserSelectedGeneralModelRef = useRef(false);
+    const hasUserSelectedExtractionModelRef = useRef(false);
+    const hasUserSelectedDesignModelRef = useRef(false);
+
+    const hasConfiguredGeneralModel = Boolean(
+        typeof initialData?.googleAiModel === "string" && initialData.googleAiModel.trim()
+    );
+    const hasConfiguredExtractionModel = Boolean(
+        typeof initialData?.googleAiModelExtraction === "string" && initialData.googleAiModelExtraction.trim()
+    );
+    const hasConfiguredDesignModel = Boolean(
+        typeof initialData?.googleAiModelDesign === "string" && initialData.googleAiModelDesign.trim()
+    );
 
     useEffect(() => {
         let mounted = true;
         // Dynamically import action if needed or just use import
         import("@/app/(main)/admin/conversations/actions").then(mod => {
-            mod.getAvailableAiModelsAction().then(models => {
-                if (mounted && models && models.length > 0) setAvailableModels(models);
+            mod.getAiModelPickerDefaultsAction().then(({ models, defaults }: any) => {
+                if (mounted && models && models.length > 0) {
+                    setAvailableModels(models);
+
+                    if (!hasUserSelectedGeneralModelRef.current && !hasConfiguredGeneralModel && defaults?.general) {
+                        setGoogleAiModel(defaults.general);
+                    }
+                    if (!hasUserSelectedExtractionModelRef.current && !hasConfiguredExtractionModel && defaults?.extraction) {
+                        setGoogleAiModelExtraction(defaults.extraction);
+                    }
+                    if (!hasUserSelectedDesignModelRef.current && !hasConfiguredDesignModel && defaults?.design) {
+                        setGoogleAiModelDesign(defaults.design);
+                    }
+                }
             });
         });
         return () => { mounted = false; };
-    }, []);
+    }, [hasConfiguredDesignModel, hasConfiguredExtractionModel, hasConfiguredGeneralModel]);
 
     return (
         <div className="space-y-8">
@@ -100,7 +138,11 @@ export function AiSettingsForm({ initialData, locationId }: { initialData: any, 
                                 id="googleAiModel"
                                 name="googleAiModel"
                                 className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                defaultValue={initialData?.googleAiModel || "gemini-2.5-flash"}
+                                value={googleAiModel}
+                                onChange={(e) => {
+                                    hasUserSelectedGeneralModelRef.current = true;
+                                    setGoogleAiModel(e.target.value);
+                                }}
                             >
                                 {(availableModels.length > 0 ? availableModels : GOOGLE_AI_MODELS).map((model) => (
                                     <option key={model.value} value={model.value}>
@@ -118,7 +160,11 @@ export function AiSettingsForm({ initialData, locationId }: { initialData: any, 
                                     id="googleAiModelExtraction"
                                     name="googleAiModelExtraction"
                                     className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-                                    defaultValue={initialData?.googleAiModelExtraction || "gemini-2.5-flash"}
+                                    value={googleAiModelExtraction}
+                                    onChange={(e) => {
+                                        hasUserSelectedExtractionModelRef.current = true;
+                                        setGoogleAiModelExtraction(e.target.value);
+                                    }}
                                 >
                                     {(availableModels.length > 0 ? availableModels : GOOGLE_AI_MODELS).map((model) => (
                                         <option key={model.value} value={model.value}>
@@ -136,7 +182,11 @@ export function AiSettingsForm({ initialData, locationId }: { initialData: any, 
                                     id="googleAiModelDesign"
                                     name="googleAiModelDesign"
                                     className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-                                    defaultValue={initialData?.googleAiModelDesign || "gemini-2.5-flash"}
+                                    value={googleAiModelDesign}
+                                    onChange={(e) => {
+                                        hasUserSelectedDesignModelRef.current = true;
+                                        setGoogleAiModelDesign(e.target.value);
+                                    }}
                                 >
                                     {(availableModels.length > 0 ? availableModels : GOOGLE_AI_MODELS).map((model) => (
                                         <option key={model.value} value={model.value}>

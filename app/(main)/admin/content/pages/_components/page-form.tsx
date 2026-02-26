@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useActionState, useEffect } from "react";
+import { useState, useActionState, useEffect, useRef } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -10,8 +10,8 @@ import { generateContentFromUrl } from "@/app/(main)/admin/content/ai-actions";
 import { useFormStatus } from "react-dom";
 import { Loader2, Sparkles, ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
-import { GOOGLE_AI_MODELS } from "@/lib/ai/models";
-import { getAvailableAiModelsAction } from "@/app/(main)/admin/conversations/actions";
+import { GEMINI_FLASH_LATEST_ALIAS, GOOGLE_AI_MODELS } from "@/lib/ai/models";
+import { getAiModelPickerDefaultsAction } from "@/app/(main)/admin/conversations/actions";
 import { BlockEditor } from "./block-editor";
 
 import { PublicBlockRenderer } from "@/app/(public-site)/_components/public-block-renderer";
@@ -47,14 +47,20 @@ export function PageForm({ initialData, siteConfig }: { initialData?: any; siteC
     const [importUrl, setImportUrl] = useState("");
     const [isImporting, setIsImporting] = useState(false);
     const [brandVoiceOverride, setBrandVoiceOverride] = useState("");
-    const [extractionModel, setExtractionModel] = useState("gemini-1.5-flash");
+    const [extractionModel, setExtractionModel] = useState(GEMINI_FLASH_LATEST_ALIAS);
     const [showAdvanced, setShowAdvanced] = useState(false);
     const [availableModels, setAvailableModels] = useState<any[]>([]);
+    const hasUserSelectedExtractionModelRef = useRef(false);
 
     useEffect(() => {
         let mounted = true;
-        getAvailableAiModelsAction().then(models => {
-            if (mounted && models && models.length > 0) setAvailableModels(models);
+        getAiModelPickerDefaultsAction().then(({ models, defaults }) => {
+            if (mounted && models && models.length > 0) {
+                setAvailableModels(models);
+                if (!hasUserSelectedExtractionModelRef.current && defaults?.extraction) {
+                    setExtractionModel(defaults.extraction);
+                }
+            }
         }).catch(err => console.error(err));
         return () => { mounted = false; };
     }, []);
@@ -190,7 +196,10 @@ export function PageForm({ initialData, siteConfig }: { initialData?: any; siteC
                                     <select
                                         className="flex h-8 w-full rounded-md border border-input bg-white px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                         value={extractionModel}
-                                        onChange={(e) => setExtractionModel(e.target.value)}
+                                        onChange={(e) => {
+                                            hasUserSelectedExtractionModelRef.current = true;
+                                            setExtractionModel(e.target.value);
+                                        }}
                                     >
                                         {(availableModels.length > 0 ? availableModels : GOOGLE_AI_MODELS).map((model) => (
                                             <option key={model.value} value={model.value}>

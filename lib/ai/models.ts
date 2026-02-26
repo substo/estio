@@ -1,3 +1,6 @@
+export const GEMINI_FLASH_LATEST_ALIAS = "gemini-flash-latest";
+export const GEMINI_FLASH_STABLE_FALLBACK = "gemini-2.5-flash";
+
 export const GOOGLE_AI_MODELS = [
     // --- Gemini 3.0 Series (SOTA) ---
     { value: "gemini-3-pro-preview", label: "Gemini 3.0 Pro Preview (SOTA Reasoning)" },
@@ -7,9 +10,9 @@ export const GOOGLE_AI_MODELS = [
     // --- Gemini 2.5 Series (Advanced) ---
     { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro (Advanced Coding & Reasoning)" },
     { value: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image (Optimized for Images)" },
-    { value: "gemini-flash-latest", label: "Gemini Flash Latest (2.5 Preview)" },
+    { value: GEMINI_FLASH_LATEST_ALIAS, label: "Gemini Flash Latest (Auto-updating Alias)" },
     { value: "gemini-flash-lite-latest", label: "Gemini Flash-Lite Latest" },
-    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash (Balanced 1M Context)" },
+    { value: GEMINI_FLASH_STABLE_FALLBACK, label: "Gemini 2.5 Flash (Pinned Stable Fallback)" },
     { value: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash-Lite (Cost Effective)" },
 
     // --- Gemini 2.0 Series (Previous Gen) ---

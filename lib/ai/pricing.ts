@@ -43,7 +43,7 @@ export const AI_PRICING = {
     },
 
     // --- Aliases & Previews ---
-    'gemini-flash-latest': { // Maps to 2.5 Flash
+    'gemini-flash-latest': { // Alias estimate; keep aligned with current Google target
         inputCostPerMillion: 0.30,
         outputCostPerMillion: 2.50,
     },

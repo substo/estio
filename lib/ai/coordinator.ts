@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
 import { getMessages, getConversation } from "@/lib/ghl/conversations";
+import { GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 
 // Remove global init
 // const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY || "");
@@ -18,6 +19,17 @@ interface CoordinationContext {
 }
 
 import { calculateRunCost, DEFAULT_MODEL } from "@/lib/ai/pricing";
+
+function isModelUnavailableError(error: unknown): boolean {
+    const message = (error instanceof Error ? error.message : String(error || "")).toLowerCase();
+    return (
+        message.includes("404") ||
+        message.includes("not found") ||
+        message.includes("unknown model") ||
+        message.includes("invalid model") ||
+        message.includes("unsupported model")
+    );
+}
 
 export async function generateDraft(context: CoordinationContext) {
     let modelName = DEFAULT_MODEL; // Modern default
@@ -54,9 +66,10 @@ export async function generateDraft(context: CoordinationContext) {
         }
 
         const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: modelName });
+        const requestedModelName = modelName;
+        let actualModelName = modelName;
 
-        console.log(`[AI Draft] Starting generation for Conversation: ${context.conversationId}, Model: ${modelName}`);
+        console.log(`[AI Draft] Starting generation for Conversation: ${context.conversationId}, Requested Model: ${requestedModelName}`);
 
         // 1. Fetch Conversation History & Details
         // STRATEGY: Local Database is the PRIMARY source of truth.
@@ -279,8 +292,29 @@ export async function generateDraft(context: CoordinationContext) {
         console.log(finalPrompt);
         console.log("--- [AI Draft] FULL PROMPT END ---");
 
-        // 4. Call Gemini
-        const result = await model.generateContent(finalPrompt);
+        // 4. Call Gemini (with one-time alias fallback)
+        const generateWithModel = async (candidateModel: string) => {
+            const model = genAI.getGenerativeModel({ model: candidateModel });
+            return model.generateContent(finalPrompt);
+        };
+
+        let result;
+        try {
+            result = await generateWithModel(actualModelName);
+        } catch (error) {
+            const canRetryWithPinnedFlash =
+                actualModelName === GEMINI_FLASH_LATEST_ALIAS &&
+                isModelUnavailableError(error);
+
+            if (!canRetryWithPinnedFlash) {
+                throw error;
+            }
+
+            actualModelName = GEMINI_FLASH_STABLE_FALLBACK;
+            console.warn(`[AI Draft] Requested model ${requestedModelName} unavailable; retrying with ${actualModelName}.`);
+            result = await generateWithModel(actualModelName);
+        }
+
         const response = result.response;
         const text = response.text();
 
@@ -294,7 +328,10 @@ export async function generateDraft(context: CoordinationContext) {
             completionTokens = Math.ceil(text.length / 4);
         }
 
-        const cost = calculateRunCost(modelName, promptTokens, completionTokens);
+        const cost = calculateRunCost(actualModelName, promptTokens, completionTokens);
+        const modelAuditNote = requestedModelName === actualModelName
+            ? `Model: ${actualModelName}`
+            : `Requested model: ${requestedModelName}; actual model used: ${actualModelName}`;
 
         // 6. Persist to DB
         // Determine DB conversation ID (internal)
@@ -311,12 +348,12 @@ export async function generateDraft(context: CoordinationContext) {
                     taskId: "quick-draft",
                     taskTitle: "Quick AI Draft",
                     taskStatus: "done",
-                    thoughtSummary: "Generated draft reply based on conversation context.",
+                    thoughtSummary: `Generated draft reply based on conversation context. ${modelAuditNote}.`,
                     draftReply: text,
                     promptTokens,
                     completionTokens,
                     totalTokens: promptTokens + completionTokens,
-                    model: modelName,
+                    model: actualModelName,
                     cost
                 }
             });
@@ -335,7 +372,9 @@ export async function generateDraft(context: CoordinationContext) {
 
         return {
             draft: text,
-            reasoning: "Generated based on conversation history and contact interest."
+            reasoning: requestedModelName === actualModelName
+                ? "Generated based on conversation history and contact interest."
+                : `Generated based on conversation history and contact interest. Fallback used: ${actualModelName} (requested ${requestedModelName}).`
         };
 
     } catch (error: any) {

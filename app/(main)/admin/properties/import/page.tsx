@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useRouter } from "next/navigation";
-import { GOOGLE_AI_MODELS } from "@/lib/ai/models";
+import { GEMINI_FLASH_LATEST_ALIAS, GOOGLE_AI_MODELS } from "@/lib/ai/models";
 import { CheckCircle2, Circle, Loader2, RefreshCw } from "lucide-react";
 import { CloudflareImageUploader } from "@/components/media/CloudflareImageUploader";
 import { getImageDeliveryUrl } from "@/lib/cloudflareImages";
@@ -47,15 +47,21 @@ export default function ImportPropertyPage() {
     const [statusMessage, setStatusMessage] = useState("");
     const [previewData, setPreviewData] = useState<any>(null);
     const [draftId, setDraftId] = useState<string | null>(null);
-    const [selectedModel, setSelectedModel] = useState("gemini-2.5-flash");
+    const [selectedModel, setSelectedModel] = useState(GEMINI_FLASH_LATEST_ALIAS);
     const [availableModels, setAvailableModels] = useState<any[]>([]);
+    const hasUserSelectedModelRef = useRef(false);
 
     useEffect(() => {
         let mounted = true;
         // Import dynamically to avoid circular deps if any, or just standard import
         import("@/app/(main)/admin/conversations/actions").then(mod => {
-            mod.getAvailableAiModelsAction().then(models => {
-                if (mounted && models && models.length > 0) setAvailableModels(models);
+            mod.getAiModelPickerDefaultsAction().then(({ models, defaults }: any) => {
+                if (mounted && models && models.length > 0) {
+                    setAvailableModels(models);
+                    if (!hasUserSelectedModelRef.current && defaults?.extraction) {
+                        setSelectedModel(defaults.extraction);
+                    }
+                }
             });
         });
         return () => { mounted = false; };
@@ -359,7 +365,10 @@ export default function ImportPropertyPage() {
                                             id="aiModel"
                                             className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background disabled:opacity-50 md:text-sm"
                                             value={selectedModel}
-                                            onChange={(e) => setSelectedModel(e.target.value)}
+                                            onChange={(e) => {
+                                                hasUserSelectedModelRef.current = true;
+                                                setSelectedModel(e.target.value);
+                                            }}
                                         >
                                             {(availableModels.length > 0 ? availableModels : GOOGLE_AI_MODELS).map((model) => (
                                                 <option key={model.value} value={model.value}>
@@ -791,4 +800,3 @@ export default function ImportPropertyPage() {
         </div >
     );
 }
-
