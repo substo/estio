@@ -150,10 +150,18 @@ The default GHL message list endpoint returns stripped-down plaintext bodies and
 ### URL-Based Navigation (New)
 To support direct linking, bookmarking, and browser navigation, the hub now synchronizes its state with the URL query parameters:
 *   **Deep Linking**: Navigate directly to a conversation using `?id=CONVERSATION_ID`.
-    *   The server now includes the URL-selected conversation in the initial payload even if it is older than the default top-50 list window, so the Chat/Info panels still render for valid deep links.
+    *   The server includes the URL-selected conversation in the initial payload even if it is older than the current first page window, so the Chat/Info panels still render for valid deep links.
+    *   The client now preserves the selected conversation during list refetches (for example after mount/view changes), so deep links do not disappear from the center panel when the selected item is outside the currently loaded page.
 *   **View Persistence**: The active view (Inbox, Archived, Trash) is persisted via `?view=archived`.
 *   **Deal Mode**: Direct access to deal rooms via `?mode=deals&dealId=DEAL_ID`.
 *   **Browser History**: Back and Forward buttons correctly navigate through conversation selection history.
+
+### Conversation List Pagination (Infinite Scroll)
+The conversation list is now loaded incrementally instead of a single fixed top-50 fetch:
+
+*   **Backend**: `fetchConversations(...)` uses cursor pagination with stable ordering (`lastMessageAt DESC`, `id DESC`).
+*   **Frontend**: The left list uses an `IntersectionObserver` sentinel to auto-load more rows when the user scrolls near the bottom.
+*   **Fallback**: A manual **Load more** button remains available if the observer does not fire (browser quirks / slow layouts).
 
 ### Individual Conversation Previews
 The conversation list uses a **compact layout** by default, showing only the contact name and channel icon. To view message details without disrupting the layout:
@@ -179,6 +187,17 @@ We refactored the message display into a shared component (`_components/message-
 *   **Feature Parity**: One-click "Expand/Collapse" for emails and attachment rendering are available everywhere.
 *   **Inline Media Preview**: Image attachments (including WhatsApp images stored via private R2 attachment proxy URLs) render inline previews in the bubble, while non-image attachments remain click-through links.
 *   **Maintainability**: Updates to message styling now propagate instantly to all parts of the Admin Hub.
+*   **Selection Actions (New)**: Selecting text in message bodies or inside HTML email content shows a floating action toolbar with:
+    *   `Paste Lead` (opens a prefilled lead-import flow using the existing AI paste-lead pipeline)
+    *   `Find Contact` (opens a contact search dialog seeded from the selection; supports phone/email/full-name lookup)
+
+### Selection-Based Lead Processing (Replaces Legacy CRM Email Buttons)
+The old message-level legacy CRM notification processing actions (`Process Lead`, `Reprocess`, `Old CRM`) were removed from the message bubble UI in favor of explicit text selection actions.
+
+Why:
+*   **Operator Intent First**: The user chooses what text to process/search.
+*   **Lower False Positives**: Avoids guessing which emails are machine-generated lead notifications.
+*   **Reuse**: Uses the same `parseLeadFromText(...)` + `createParsedLead(...)` backend path as manual paste imports.
 
 ### Channel-Specific From/To Display
 Message bubbles now display contextually appropriate sender/recipient information based on channel type:

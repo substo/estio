@@ -1,20 +1,42 @@
-# Legacy CRM Lead Email Automation
+# Legacy CRM Lead Email Automation (Deprecated)
 
 ## Overview
 
-This document covers the legacy CRM lead notification email automation used during migration from the old CRM to Estio.
+This document describes the **previous** legacy CRM lead notification email automation that was built for migration support.
 
-Goal:
-- Keep using the old CRM as the lead source temporarily
-- Detect lead notification emails (for example Mailgun-routed notifications)
-- Convert those emails into Estio leads/conversations using the existing "Paste Lead" import path
-- Optionally auto-generate a first-contact draft
+Status:
+- **Deprecated / no longer the primary workflow**
+- Outlook email sync still works
+- The legacy CRM email **auto-processing trigger is disabled**
+- Message-level email actions (`Process Lead`, `Reprocess`, `Old CRM`) were removed from the conversation UI
 
-This feature is designed for transition periods where teams still receive leads in the old CRM but want processing, visibility, and automation inside Estio.
+## Current Recommended Workflow (Replaces This Feature)
 
-## What This Feature Does
+Instead of parsing CRM notification emails automatically, Estio now uses an explicit **selection-based workflow** inside conversations/emails:
 
-When enabled for a location:
+1. Select text in a message (plain text or email HTML)
+2. Use the floating selection toolbar
+3. Choose one of:
+   - `Paste Lead` (reuses the existing AI lead import flow)
+   - `Find Contact` (search by phone/email/full name)
+
+Why this replaced the old automation:
+- lower complexity
+- fewer false positives
+- easier operator control
+- reuses the existing import path directly
+
+Key behavior in the new workflow:
+- **Paste Lead from Selection** opens a prefilled dialog and calls the same backend path as manual paste import (`parseLeadFromText(...)` + `createParsedLead(...)`)
+- **Find Contact from Selection** searches contacts by `phone`, `email`, `name`, `firstName`, `lastName` with location-scoped ranking
+
+See also:
+- `documentation/ai-agentic-conversations-hub.md` (conversation UI behavior)
+- `documentation/contact-model-spec.md` (contact search behavior / open conversation flow)
+
+## Historical Reference (Old Behavior)
+
+When enabled for a location (historical implementation):
 - Outlook-synced emails are checked against configured legacy CRM notifier sender(s)/domain(s)
 - Matching lead notification emails are classified and parsed
 - A message-level processing status record is stored
@@ -22,9 +44,9 @@ When enabled for a location:
 - Auto-processing can run in the background after email sync
 - Optional auto-draft creates a first outreach draft using the existing AI draft pipeline
 
-## Where It Is Configured
+## Where It Was Configured
 
-Admin page:
+Admin page (still contains legacy settings fields, but the automation is not the recommended path):
 - `/admin/settings/crm`
 
 Settings added (location-level):
@@ -80,7 +102,7 @@ Sender match modes used internally:
 
 If any required check fails, the email is stored as `ignored` (when processing is attempted) with a reason.
 
-## End-to-End Processing Flow
+## Historical End-to-End Processing Flow
 
 ### 1. Email Ingestion (Outlook Sync)
 
@@ -90,7 +112,11 @@ Outlook sync (OWA and Graph):
 - Sets `source` (`OUTLOOK_OWA_SYNC` or `OUTLOOK_GRAPH_SYNC`)
 - Updates conversation `lastMessage*` summary fields
 
-After save/upsert, sync schedules legacy CRM lead auto-processing (if enabled).
+Historical behavior:
+- After save/upsert, sync scheduled legacy CRM lead auto-processing (if enabled)
+
+Current behavior:
+- **Disabled** (sync no longer enqueues legacy CRM lead auto-processing jobs)
 
 ### 2. Classification + Parsing
 
@@ -139,13 +165,13 @@ Important behavior:
 - Stores result metadata in the processing record
 - Uses normal draft generation infrastructure so it appears in the usual AI draft/agent execution flow
 
-## Manual Processing in Conversation UI
+## Historical Manual Processing in Conversation UI
 
-Email messages can show an "Old CRM" processing badge/status when they are:
+Email messages could show an "Old CRM" processing badge/status when they were:
 - already processed/tracked, or
 - detected as a matching legacy CRM email (Outlook-synced email + detection enabled)
 
-Available actions in the message bubble:
+Historical message-bubble actions:
 - `Process Lead`
 - `Reprocess`
 - `Open Lead` (Estio contact page)
@@ -186,7 +212,7 @@ Key fields:
 - `processedAt`
 - `error`
 
-## Auto-Processing Queue (BullMQ + Redis)
+## Historical Auto-Processing Queue (BullMQ + Redis)
 
 Queue module:
 - `lib/queue/legacy-crm-lead-email.ts`
@@ -280,17 +306,25 @@ Badge is shown when:
 
 Non-Outlook emails are intentionally not auto-badged unless already processed.
 
-## Recommended Setup (Transition Period)
+## Updated Recommended Setup (Transition Period)
 
-1. Enable legacy CRM lead email detection
-2. Configure exact sender email and Mailgun sender domain
-3. Keep subject patterns broad but specific (case-insensitive partial match)
-4. Enable pinning for the notifier thread
-5. Start with manual `Process Lead` validation on a few emails
-6. Enable auto-process after confirming parsing quality
-7. Enable auto-draft only after reviewing generated drafts on real samples
+1. Keep Outlook sync enabled (OWA and/or Graph) so emails are visible in Estio
+2. Open the relevant email conversation in `/admin/conversations`
+3. Select the lead text (full block or a phone/email/name snippet)
+4. Use `Paste Lead` for structured lead import (AI-assisted)
+5. Use `Find Contact` for quick lookup/open contact/open conversation
+6. Reserve legacy CRM email automation settings only for debugging/backward reference until removed
 
-## Key Code References
+## Current Key Code References (Selection-Based Workflow)
+
+- Selection actions UI: `app/(main)/admin/conversations/_components/message-selection-actions.tsx`
+- Message bubble integration: `app/(main)/admin/conversations/_components/message-bubble.tsx`
+- Email iframe selection bridge: `app/(main)/admin/conversations/_components/email-frame.tsx`
+- Contact search action (ranked): `app/(main)/admin/contacts/actions.ts`
+- Paste lead parser/import: `app/(main)/admin/conversations/actions.ts`
+- Outlook sync (email ingestion only): `lib/microsoft/owa-email-sync.ts`, `lib/microsoft/outlook-sync.ts`
+
+## Historical Code References (Legacy Automation)
 
 - CRM settings UI: `app/(main)/admin/settings/crm/page.tsx`
 - CRM settings actions: `app/(main)/admin/settings/crm/actions.ts`
@@ -301,7 +335,17 @@ Non-Outlook emails are intentionally not auto-badged unless already processed.
 - Outlook Graph sync trigger: `lib/microsoft/outlook-sync.ts`
 - Prisma models: `prisma/schema.prisma`
 
-## Known Limitations / Future Improvements
+## Migration Notes / Cleanup TODO
+
+- Legacy parser/queue/settings code may still exist in the codebase for backward compatibility/reference
+- Outlook sync auto-processing hooks are disabled
+- Message-bubble legacy CRM controls are removed
+- Future cleanup can remove:
+  - legacy queue worker (`lib/queue/legacy-crm-lead-email.ts`)
+  - processing status UI payload enrichment in conversation message fetches
+  - legacy CRM email automation settings (after confirming no remaining operational dependency)
+
+## Known Limitations / Future Improvements (Historical + Current)
 
 - Notifier/system mailbox contacts may still appear as normal lead contacts unless additionally tagged/badged at contact level
 - Pinning currently only reorders within the fetched conversation window

@@ -142,8 +142,9 @@ model Contact {
 -   **Current Rule**: The database enforces **one conversation per contact per location** via a unique constraint on `Conversation(locationId, contactId)`.
 -   **UI Behavior (`/admin/contacts`)**:
     -   If a conversation exists, the contact row shows an **Open conversation** action (message icon) that deep-links to `/admin/conversations?id=<ghlConversationId>`.
+    -   If the existing conversation is in **Archived** or **Trash**, the link includes the matching `view` query param (`?view=archived` / `?view=trash`) so the correct list filter is opened.
     -   If no conversation exists, the row shows **Start conversation** (when a phone exists), which creates the conversation for that exact contact and then opens it.
-    -   If the contact has no usable phone number, the action is disabled.
+    -   If the contact has no usable phone number and no existing conversation, the action is disabled (`No phone`), because the "Start conversation" action currently creates phone/WhatsApp threads only.
 -   **Why exact-contact creation matters**: The system supports masked phone numbers and phone normalization rules, so conversation creation from Contacts should use the contact's internal ID rather than heuristic phone matching whenever possible.
 
 ### 1. Identity & GHL Sync
@@ -309,6 +310,21 @@ The system now includes a dedicated read-only view page for contacts (`/admin/co
 -   **Interaction Lists**: Read-only lists of Properties Interested, Inspected, and Matched, with direct links to the respective property pages.
 -   **Roles & Associations**: Clear listing of all property and company roles.
 -   **Edit Access**: Includes an "Edit Contact" button that triggers the `EditContactDialog`.
+
+### 4. Contact Lookup from Conversation Text Selection (New)
+Contacts can now be looked up directly from selected text inside `/admin/conversations` message bubbles (including HTML email content).
+
+-   **Trigger**: Select text and click `Find Contact` in the floating selection toolbar.
+-   **Seeded Query**: The dialog extracts a likely search term from the selection (prefers Email, then Phone, then first text line).
+-   **Search Fields**: `phone`, `email`, `name`, `firstName`, `lastName`.
+-   **Scope**: Search is location-scoped and permission-checked.
+-   **Ranking**:
+    -   Exact phone / email first
+    -   Phone suffix / email prefix next
+    -   Full-name and token matches after that
+-   **Actions**:
+    -   `Open Contact`
+    -   `Open Conversation` (or `Start Conversation` if the contact has no existing conversation but has a phone)
 
 ## Data Integrity & Validation
 

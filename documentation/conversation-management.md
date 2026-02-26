@@ -1,5 +1,5 @@
 # Conversation Management & Deletion Features
-**Last Updated:** 2026-02-08
+**Last Updated:** 2026-02-25
 
 ## Overview
 This document outlines the architecture and logic for managing conversation lifecycles, specifically focusing on **Soft Deletion**, **Archiving**, and the **Trash** system introduced in Feb 2026.
@@ -26,6 +26,17 @@ The Conversation List (`/admin/conversations`) now supports three distinct views
 - **Inbox** (`active`): Shows conversations where `deletedAt` is NULL and `archivedAt` is NULL.
 - **Archived** (`archived`): Shows conversations where `archivedAt` is SET and `deletedAt` is NULL.
 - **Trash** (`trash`): Shows conversations where `deletedAt` is SET (regardless of archive status).
+
+### 1.1 Conversation List Pagination & Infinite Scroll
+The Conversations list (`/admin/conversations`) is now **cursor-paginated** and loaded incrementally instead of being hard-capped to a single 50-row fetch.
+
+- **Page Size**: Default `50` conversations per page (configurable server-side, capped to prevent heavy requests).
+- **Pagination Strategy**: **Keyset/Cursor Pagination** ordered by:
+  1. `lastMessageAt DESC`
+  2. `id DESC` (tie-breaker for stable ordering)
+- **Why**: Prevents performance degradation from loading all conversations at once and avoids duplicate/missing rows that are common with offset paging on actively changing inboxes.
+- **UI Loading**: The left conversation panel uses **infinite scroll** (IntersectionObserver) and a manual **Load more** fallback button.
+- **Deep Links**: If a URL-selected conversation (`?id=...`) is outside the current page window, the server injects it into the initial payload so the center/right panels can still render.
 
 ### 2. Formatting & Actions
 
@@ -79,7 +90,7 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
 
 | Function | Purpose |
 | :--- | :--- |
-| `fetchConversations(status)` | Fetches list based on filter ('active', 'archived', 'trash'). |
+| `fetchConversations(status, selectedConversationId?, options?)` | Fetches a paginated list based on filter (`active`, `archived`, `trash`, `all`) and returns `hasMore` / `nextCursor` for infinite scroll. |
 | `deleteConversations(ids)` | Performs **Soft Delete** (sets `deletedAt`). |
 | `permanentlyDeleteConversations(ids)` | Performs **Hard Delete** (removes record). |
 | `restoreConversations(ids)` | Resets `deletedAt` to NULL. |
@@ -91,6 +102,9 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
 - **Selection Mode**: Allows bulk actions (Archive, Delete, Restore) with a "Cancel" button aligned next to actions.
 - **Safety**: "Delete Forever" dialog only appears when deleting items from the Trash view.
 - **URL Synchronization**: View state (`active`, `archived`, `trash`) is synced to the URL (`?view=...`), allowing for bookmarking and sharing of specific lists.
+- **Infinite Scroll**: The left list auto-loads more conversations near the bottom using a sentinel + `IntersectionObserver`, with a visible "Load more" fallback.
+- **Deep-Link Stability**: URL-selected conversations are preserved during list refreshes and view changes, preventing the center panel from dropping back to "Select a conversation" when the selected item is older than the first page.
+- **Selection Actions**: Message/email text selection in the chat panel now opens a floating action toolbar (`Paste Lead`, `Find Contact`) for explicit lead import and contact lookup workflows.
 
 ## WhatsApp Import
 We support importing `.txt` chat exports from WhatsApp directly into a specific conversation.

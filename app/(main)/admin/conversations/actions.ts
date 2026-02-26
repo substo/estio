@@ -906,7 +906,7 @@ export async function sendReply(conversationId: string, contactId: string, messa
                         ],
                         locationId: location.id
                     },
-                    select: { id: true, phone: true, ghlContactId: true, name: true }
+                    select: { id: true, phone: true, ghlContactId: true, name: true, contactType: true }
                 });
 
                 console.log('[sendReply] Evolution contact lookup:', { contactId, found: !!contact, phone: contact?.phone });
@@ -938,6 +938,22 @@ export async function sendReply(conversationId: string, contactId: string, messa
                     return {
                         success: false,
                         error: `${contactName}'s phone number "${contact.phone}" appears to be missing a country code. Please update the contact with the full international number (e.g., +357${contact.phone}).`
+                    };
+                }
+
+                const eligibility = await checkWhatsAppPhoneEligibility(
+                    { evolutionInstanceId: location.evolutionInstanceId },
+                    contact.phone,
+                    {
+                        contactName: contact.name,
+                        contactType: contact.contactType,
+                    }
+                );
+
+                if (eligibility.status === 'ineligible') {
+                    return {
+                        success: false,
+                        error: eligibility.reason || "This contact's phone number is not registered on WhatsApp."
                     };
                 }
 
@@ -1703,6 +1719,66 @@ export async function getAvailableAiModelsAction() {
     const location = await getBasicLocationContext();
     const { getAvailableModels } = await import("@/lib/ai/fetch-models");
     return getAvailableModels(location.id);
+}
+
+export async function getWhatsAppChannelEligibility(conversationId: string) {
+    try {
+        const location = await getBasicLocationContext();
+
+        const conversation = await db.conversation.findFirst({
+            where: {
+                ghlConversationId: conversationId,
+                locationId: location.id,
+            },
+            select: {
+                contact: {
+                    select: {
+                        name: true,
+                        phone: true,
+                        contactType: true,
+                    }
+                }
+            }
+        });
+
+        if (!conversation?.contact) {
+            return {
+                success: false,
+                eligible: null as boolean | null,
+                status: 'unknown' as const,
+                reason: 'Conversation contact not found.',
+            };
+        }
+
+        const contact = conversation.contact;
+        const eligibility = await checkWhatsAppPhoneEligibility(
+            {
+                evolutionInstanceId: location.evolutionInstanceId,
+            },
+            contact.phone,
+            {
+                contactName: contact.name,
+                contactType: contact.contactType,
+                verifyServiceHealth: true,
+            }
+        );
+
+        return {
+            success: true,
+            eligible: eligibility.status === 'eligible' ? true : eligibility.status === 'ineligible' ? false : null,
+            status: eligibility.status,
+            reason: eligibility.reason,
+            phone: contact.phone || null,
+        };
+    } catch (error: any) {
+        console.error('[getWhatsAppChannelEligibility] Error:', error);
+        return {
+            success: false,
+            eligible: null as boolean | null,
+            status: 'unknown' as const,
+            reason: error?.message || 'Failed to check WhatsApp eligibility.',
+        };
+    }
 }
 
 export async function getEvolutionStatus() {
@@ -2604,6 +2680,90 @@ export async function getConversationParticipants(conversationId: string) {
 // =============================================
 // WhatsApp Chat Sync & New Conversation Actions
 // =============================================
+
+async function checkWhatsAppPhoneEligibility(
+    location: { evolutionInstanceId?: string | null },
+    phone: string | null | undefined,
+    options?: {
+        contactName?: string | null;
+        contactType?: string | null;
+        verifyServiceHealth?: boolean;
+    }
+): Promise<{ status: 'eligible' | 'ineligible' | 'unknown'; reason?: string; normalizedDigits?: string }> {
+    const contactName = options?.contactName || 'This contact';
+    const phoneValue = String(phone || '').trim();
+
+    if (!phoneValue) {
+        return {
+            status: 'ineligible',
+            reason: `${contactName} does not have a phone number.`,
+        };
+    }
+
+    if (options?.contactType === 'WhatsAppGroup' || phoneValue.includes('@g.us')) {
+        return { status: 'eligible' };
+    }
+
+    if (phoneValue.includes('*')) {
+        return {
+            status: 'ineligible',
+            reason: `${contactName}'s phone number "${phoneValue}" is masked (contains ***), so WhatsApp cannot be verified.`,
+        };
+    }
+
+    const rawDigits = phoneValue.replace(/\D/g, '');
+    if (rawDigits.length < 7) {
+        return {
+            status: 'ineligible',
+            reason: `${contactName}'s phone number "${phoneValue}" is invalid or too short.`,
+            normalizedDigits: rawDigits,
+        };
+    }
+
+    if (!location?.evolutionInstanceId) {
+        return {
+            status: 'unknown',
+            reason: 'WhatsApp eligibility check is unavailable (Evolution is not connected).',
+            normalizedDigits: rawDigits,
+        };
+    }
+
+    try {
+        const { evolutionClient } = await import("@/lib/evolution/client");
+
+        if (options?.verifyServiceHealth) {
+            const health = await evolutionClient.healthCheck();
+            if (!health.ok) {
+                return {
+                    status: 'unknown',
+                    reason: health.error || 'WhatsApp service is unavailable.',
+                    normalizedDigits: rawDigits,
+                };
+            }
+        }
+
+        const lookup = await evolutionClient.checkWhatsAppNumber(location.evolutionInstanceId, rawDigits);
+        if (lookup.exists) {
+            return {
+                status: 'eligible',
+                normalizedDigits: rawDigits,
+            };
+        }
+
+        return {
+            status: 'ineligible',
+            reason: `${contactName}'s phone number is not registered on WhatsApp.`,
+            normalizedDigits: rawDigits,
+        };
+    } catch (err) {
+        console.warn(`[WhatsAppEligibility] Lookup failed for ${rawDigits}:`, err);
+        return {
+            status: 'unknown',
+            reason: 'Could not verify WhatsApp registration right now.',
+            normalizedDigits: rawDigits,
+        };
+    }
+}
 
 async function resolvePreferredChannelTypeForPhone(
     location: { evolutionInstanceId?: string | null },

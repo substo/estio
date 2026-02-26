@@ -261,7 +261,7 @@ We track message delivery status (`sent`, `delivered`, `read`, `failed`) by list
 | **"Uploaded image not found in media storage"** | The presigned upload may have expired or the browser upload failed. Re-upload the image, then call `sendWhatsAppImageReply(...)` again. |
 | **"Unsupported image type" / size errors** | Current allow-list is images only (`jpeg/png/webp/gif/heic/heif`) and max size is `16MB` in `createWhatsAppImageUploadUrl(...)`. |
 | **Image shows in App but not in GHL as a binary attachment** | Expected for current implementation. GHL custom channel receives caption text or `[Image]`; the binary is stored/displayed through our app + private R2 path. |
-| **Conversation deep link opens but center panel says "Select a conversation"** | The selected conversation can be older than the default top-50 list. The page now injects the URL-selected conversation into the initial payload so chat/contact panels render for valid `?id=...` links. Refresh after deploy if you still see the old behavior. |
+| **Conversation deep link opens but center panel says "Select a conversation"** | The selected conversation may be older than the currently loaded list page (or in Archived/Trash). Fixes now include (1) injecting the URL-selected conversation into the initial payload and (2) preserving the selected conversation during client list refetches. If reproducing from Contacts, ensure the link opens the correct `view` (`archived` / `trash`) when applicable. |
 
 ### 4. Server Logging & Debugging
 To investigate issues like duplicate conversations or "Contact not found" errors for specific numbers:
