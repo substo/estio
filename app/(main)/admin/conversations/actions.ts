@@ -6,6 +6,7 @@ import { generateDraft } from "@/lib/ai/coordinator";
 import { refreshGhlAccessToken } from "@/lib/location";
 import db from "@/lib/db";
 import { updateConversationLastMessage } from "@/lib/conversations/update";
+import { seedConversationFromContactLeadText } from "@/lib/conversations/bootstrap";
 import { generateMultiContextDraft } from "@/lib/ai/context-builder";
 import { ensureLocalContactSynced } from "@/lib/crm/contact-sync";
 import { ensureConversationHistory, syncMessageFromWebhook } from "@/lib/ghl/sync";
@@ -1259,7 +1260,19 @@ export async function orchestrateAction(conversationId: string, contactId: strin
             ghlConversationId: conversationId,
             locationId: location.id
         },
-        select: { id: true, contactId: true }
+        select: {
+            id: true,
+            contactId: true,
+            lastMessageType: true,
+            createdAt: true,
+            contact: {
+                select: {
+                    id: true,
+                    message: true,
+                    name: true
+                }
+            }
+        }
     });
 
     if (!conversation) {
@@ -1280,20 +1293,54 @@ export async function orchestrateAction(conversationId: string, contactId: strin
         if (mapped?.id) resolvedContactId = mapped.id;
     }
 
-    // Fetch conversation history
+    // Heal empty shell conversations created from Contacts by seeding the lead inquiry text
+    // when the Contact record already contains a captured message.
+    const seedResult = await seedConversationFromContactLeadText({
+        conversationId: conversation.id,
+        contact: conversation.contact,
+        messageType: conversation.lastMessageType || "TYPE_SMS",
+        messageDate: conversation.createdAt,
+        source: "contact_bootstrap"
+    });
+    if (seedResult.seeded) {
+        console.log(`[ORCHESTRATE_ACTION] Seeded conversation ${conversationId} from contact.message before orchestration`);
+    }
+
+    // Fetch conversation history (ignore system notes; AI orchestration should operate on real dialog turns)
     const messages = await db.message.findMany({
-        where: { conversationId: conversation.id },
+        where: {
+            conversationId: conversation.id,
+            direction: { in: ['inbound', 'outbound'] }
+        },
         orderBy: { createdAt: 'asc' },
         take: 20
     });
 
+    let messageForOrchestration: string;
+    let historyForOrchestration: string;
+    let bootstrapMode: "none" | "empty_thread" = "none";
+
     if (messages.length === 0) {
-        throw new Error("No messages found in conversation");
+        // Last-resort fallback: allow Smart Agent to draft the *first* outreach on a brand-new thread.
+        // The classifier will typically route this to lead qualification (or UNKNOWN -> lead qualification).
+        bootstrapMode = "empty_thread";
+        messageForOrchestration = "I am interested in a property and would like more information. This is our first contact.";
+        historyForOrchestration = "";
+        console.warn(`[ORCHESTRATE_ACTION] No dialog messages for ${conversationId}; using empty-thread bootstrap prompt.`);
+    } else {
+        const lastMessage = messages[messages.length - 1];
+        messageForOrchestration = (lastMessage.body || "").trim();
+        if (!messageForOrchestration) {
+            messageForOrchestration = `[${lastMessage.direction} ${lastMessage.type || "message"} with no text body]`;
+        }
+        historyForOrchestration = messages
+            .map((m) => {
+                const speaker = m.direction === 'inbound' ? 'User' : 'Agent';
+                const body = (m.body || "").trim() || `[${m.type || "message"} with no text body]`;
+                return `${speaker}: ${body}`;
+            })
+            .join("\n");
     }
-
-    const lastMessage = messages[messages.length - 1];
-
-    const history = messages.map(m => `${m.direction === 'inbound' ? 'User' : 'Agent'}: ${m.body}`).join("\n");
 
     // Dynamic import to avoid build-time circular deps if any (though standard import is likely fine)
     const { orchestrate } = await import("@/lib/ai/orchestrator");
@@ -1301,10 +1348,17 @@ export async function orchestrateAction(conversationId: string, contactId: strin
     const result = await orchestrate({
         conversationId: conversation.id, // Use real DB ID, not ghlConversationId
         contactId: resolvedContactId,
-        message: lastMessage.body || "",
-        conversationHistory: history,
+        message: messageForOrchestration,
+        conversationHistory: historyForOrchestration,
         dealStage
     });
+
+    if (bootstrapMode !== "none") {
+        return {
+            ...result,
+            bootstrapMode
+        };
+    }
 
     return result;
 }
@@ -2928,6 +2982,17 @@ export async function startNewConversation(phone: string) {
                 }
             }
 
+            const seedResult = await seedConversationFromContactLeadText({
+                conversationId: existingConv.id,
+                contact,
+                messageType: existingConv.lastMessageType || preferredChannelType,
+                messageDate: existingConv.createdAt,
+                source: "contact_bootstrap"
+            });
+            if (seedResult.seeded) {
+                console.log(`[NewConversation] Seeded existing conversation ${existingConv.ghlConversationId} from contact.message`);
+            }
+
             return {
                 success: true,
                 conversationId: existingConv.ghlConversationId,
@@ -2992,6 +3057,17 @@ export async function startNewConversation(phone: string) {
             } catch (backfillErr) {
                 console.warn("[NewConversation] History backfill failed:", backfillErr);
             }
+        }
+
+        const seedResult = await seedConversationFromContactLeadText({
+            conversationId: conversation.id,
+            contact,
+            messageType: conversation.lastMessageType || preferredChannelType,
+            messageDate: conversation.createdAt,
+            source: "contact_bootstrap"
+        });
+        if (seedResult.seeded) {
+            console.log(`[NewConversation] Seeded new conversation ${conversation.ghlConversationId} from contact.message`);
         }
 
         return {

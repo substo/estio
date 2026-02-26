@@ -3,6 +3,12 @@ import { getMessages, getConversations, getConversation } from "./conversations"
 import { ensureLocalContactSynced } from "@/lib/crm/contact-sync";
 import { Prisma } from "@prisma/client";
 
+function isLocalSyntheticConversationId(id: string | null | undefined) {
+    const value = String(id || "").trim();
+    if (!value) return false;
+    return value.startsWith("wa_") || value.startsWith("wa_import_");
+}
+
 export async function syncMessageFromWebhook(payload: any) {
     // Normalize Payload (Handling both snake_case and camelCase just in case)
     const type = payload.type; // "InboundMessage" or "OutboundMessage"
@@ -199,6 +205,11 @@ export async function ensureConversationHistory(internalContactId: string, locat
             console.log(`[History Sync] No local conversation found for contact ${internalContactId}. Trying to sync list...`);
             // We can trigger batch sync again, but maybe ineffective if conv is old.
             // Let's defer to batch sync for now or maybe implement search later.
+            return;
+        }
+
+        if (isLocalSyntheticConversationId(ghlConversationId)) {
+            console.log(`[History Sync] Skipping GHL fetch for local synthetic conversation ${ghlConversationId}`);
             return;
         }
 

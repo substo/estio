@@ -13,6 +13,7 @@ import { syncContactToGHL } from '@/lib/ghl/stakeholders';
 import { runGoogleAutoSyncForContact } from '@/lib/google/automation';
 import { getLocationContext } from '@/lib/auth/location-context';
 import { parseEvolutionMessageContent } from '@/lib/whatsapp/evolution-media';
+import { seedConversationFromContactLeadText } from '@/lib/conversations/bootstrap';
 
 async function resolvePreferredChannelTypeForPhone(
   location: { evolutionInstanceId?: string | null },
@@ -240,7 +241,7 @@ export async function openOrStartConversationForContact(contactId: string) {
 
     const contact = await db.contact.findFirst({
       where: { id: contactId, locationId: location.id },
-      select: { id: true, phone: true, name: true }
+      select: { id: true, phone: true, name: true, message: true }
     });
 
     if (!contact) {
@@ -249,10 +250,21 @@ export async function openOrStartConversationForContact(contactId: string) {
 
     const existingConversation = await db.conversation.findFirst({
       where: { locationId: location.id, contactId: contact.id },
-      select: { ghlConversationId: true }
+      select: { id: true, ghlConversationId: true, lastMessageType: true, createdAt: true }
     });
 
     if (existingConversation) {
+      const seedResult = await seedConversationFromContactLeadText({
+        conversationId: existingConversation.id,
+        contact,
+        messageType: existingConversation.lastMessageType || 'TYPE_SMS',
+        messageDate: existingConversation.createdAt,
+        source: 'contact_bootstrap'
+      });
+      if (seedResult.seeded) {
+        console.log(`[Contacts] Seeded existing conversation ${existingConversation.ghlConversationId} from contact.message`);
+      }
+
       return {
         success: true,
         conversationId: existingConversation.ghlConversationId,
@@ -277,7 +289,7 @@ export async function openOrStartConversationForContact(contactId: string) {
         unreadCount: 0,
         status: 'open'
       },
-      select: { ghlConversationId: true }
+      select: { id: true, ghlConversationId: true, lastMessageType: true, createdAt: true }
     });
 
     let messagesImported = 0;
@@ -318,6 +330,17 @@ export async function openOrStartConversationForContact(contactId: string) {
       } catch (backfillError) {
         console.warn('[Contacts] Conversation backfill failed:', backfillError);
       }
+    }
+
+    const seedResult = await seedConversationFromContactLeadText({
+      conversationId: conversation.id,
+      contact,
+      messageType: conversation.lastMessageType || preferredChannelType,
+      messageDate: conversation.createdAt,
+      source: 'contact_bootstrap'
+    });
+    if (seedResult.seeded) {
+      console.log(`[Contacts] Seeded new conversation ${conversation.ghlConversationId} from contact.message`);
     }
 
     return {
