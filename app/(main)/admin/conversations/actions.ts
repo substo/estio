@@ -458,6 +458,127 @@ export async function fetchMessages(conversationId: string) {
     }));
 }
 
+function normalizeWhatsAppDigits(value: string | null | undefined): string {
+    return String(value || "").replace(/\D/g, "");
+}
+
+function normalizeStoredLidJid(value: string | null | undefined): string | null {
+    const raw = String(value || "").trim();
+    if (!raw) return null;
+    if (raw.endsWith("@lid")) return raw;
+    if (raw.includes("@")) return null;
+    return `${raw}@lid`;
+}
+
+function normalizeKnownChatJid(value: string | null | undefined): string | null {
+    const raw = String(value || "").trim();
+    if (!raw) return null;
+    if (raw.endsWith("@s.whatsapp.net") || raw.endsWith("@g.us") || raw.endsWith("@lid")) {
+        return raw;
+    }
+    return null;
+}
+
+function dedupeStrings(values: Array<string | null | undefined>): string[] {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const value of values) {
+        const v = String(value || "").trim();
+        if (!v || seen.has(v)) continue;
+        seen.add(v);
+        out.push(v);
+    }
+    return out;
+}
+
+function extractEvolutionLidJid(key: any): string | undefined {
+    const remoteJid = typeof key?.remoteJid === "string" ? key.remoteJid : null;
+    if (remoteJid?.endsWith("@lid")) return remoteJid;
+
+    const participantJid = typeof key?.participant === "string" ? key.participant : null;
+    if (participantJid?.endsWith("@lid")) return participantJid;
+
+    return undefined;
+}
+
+async function resolveWhatsAppHistoryRemoteJids(
+    evolutionClient: any,
+    evolutionInstanceId: string,
+    contact: { phone?: string | null; lid?: string | null; contactType?: string | null }
+): Promise<{ candidates: string[]; isGroup: boolean; phoneDigits: string }> {
+    const rawPhone = String(contact.phone || "").trim();
+    const phoneDigits = normalizeWhatsAppDigits(rawPhone);
+    const explicitPhoneJid = normalizeKnownChatJid(rawPhone);
+    const explicitLidJid = normalizeStoredLidJid(contact.lid);
+    const isGroup = contact.contactType === "WhatsAppGroup" || rawPhone.includes("@g.us");
+
+    if (isGroup) {
+        const groupJid =
+            (explicitPhoneJid && explicitPhoneJid.endsWith("@g.us") ? explicitPhoneJid : null) ||
+            (phoneDigits ? `${phoneDigits}@g.us` : null);
+        return { candidates: dedupeStrings([groupJid]), isGroup: true, phoneDigits };
+    }
+
+    const candidates: Array<string | null> = [explicitLidJid];
+
+    if (explicitPhoneJid && (explicitPhoneJid.endsWith("@s.whatsapp.net") || explicitPhoneJid.endsWith("@lid"))) {
+        candidates.push(explicitPhoneJid);
+    }
+
+    if (phoneDigits.length >= 7) {
+        try {
+            const lookup = await evolutionClient.checkWhatsAppNumber(evolutionInstanceId, phoneDigits);
+            if (lookup?.exists && typeof lookup.jid === "string" && lookup.jid) {
+                candidates.push(lookup.jid);
+            }
+        } catch (err) {
+            console.warn("[WhatsApp History] Failed to resolve phone to WhatsApp JID:", err);
+        }
+
+        candidates.push(`${phoneDigits}@s.whatsapp.net`);
+    }
+
+    return { candidates: dedupeStrings(candidates), isGroup: false, phoneDigits };
+}
+
+async function fetchEvolutionMessagesForContactHistory(params: {
+    evolutionClient: any;
+    evolutionInstanceId: string;
+    contact: { phone?: string | null; lid?: string | null; contactType?: string | null };
+    limit: number;
+    offset?: number;
+    logPrefix: string;
+}): Promise<{
+    messages: any[];
+    remoteJid: string | null;
+    candidates: string[];
+    isGroup: boolean;
+    phoneDigits: string;
+}> {
+    const { evolutionClient, evolutionInstanceId, contact, limit, offset = 0, logPrefix } = params;
+    const { candidates, isGroup, phoneDigits } = await resolveWhatsAppHistoryRemoteJids(
+        evolutionClient,
+        evolutionInstanceId,
+        contact
+    );
+
+    if (candidates.length === 0) {
+        return { messages: [], remoteJid: null, candidates, isGroup, phoneDigits };
+    }
+
+    let lastTried: string | null = null;
+    for (const candidate of candidates) {
+        lastTried = candidate;
+        console.log(`${logPrefix} Fetching messages for ${candidate} (Limit: ${limit}, Offset: ${offset})...`);
+        const messages = await evolutionClient.fetchMessages(evolutionInstanceId, candidate, limit, offset);
+        if ((messages || []).length > 0) {
+            return { messages, remoteJid: candidate, candidates, isGroup, phoneDigits };
+        }
+    }
+
+    return { messages: [], remoteJid: lastTried, candidates, isGroup, phoneDigits };
+}
+
 export async function syncWhatsAppHistory(conversationId: string, limit: number = 20, ignoreDuplicates: boolean = false, offset: number = 0) {
     const location = await getAuthenticatedLocation();
 
@@ -468,24 +589,34 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
 
     if (!conversation) return { success: false, error: "Conversation not found" };
     if (!location.evolutionInstanceId) return { success: false, error: "WhatsApp not connected" };
-    if (!conversation.contact?.phone) return { success: false, error: "Contact has no phone number" };
+    if (!conversation.contact?.phone && !conversation.contact?.lid) return { success: false, error: "Contact has no phone number or WhatsApp LID" };
 
     try {
         const { evolutionClient } = await import("@/lib/evolution/client");
         const { processNormalizedMessage } = await import("@/lib/whatsapp/sync");
 
-        const phone = conversation.contact.phone.replace(/\D/g, '');
-
-        let remoteJid = `${phone}@s.whatsapp.net`;
-        const isGroup = conversation.contact.contactType === 'WhatsAppGroup' || conversation.contact.phone.includes('@g.us');
-
-        if (isGroup) {
-            remoteJid = `${phone}@g.us`;
-        }
-
         const fetchLimit = limit || 50;
-        console.log(`[Sync] Fetching messages for ${remoteJid} (Limit: ${fetchLimit}, Offset: ${offset}, IgnoreDupes: ${ignoreDuplicates})...`);
-        const evolutionMessages = await evolutionClient.fetchMessages(location.evolutionInstanceId, remoteJid, fetchLimit, offset);
+        const {
+            messages: evolutionMessages,
+            remoteJid,
+            candidates: remoteJidCandidates,
+            phoneDigits: phone,
+        } = await fetchEvolutionMessagesForContactHistory({
+            evolutionClient,
+            evolutionInstanceId: location.evolutionInstanceId,
+            contact: {
+                phone: conversation.contact.phone,
+                lid: (conversation.contact as any).lid || null,
+                contactType: (conversation.contact as any).contactType || null,
+            },
+            limit: fetchLimit,
+            offset,
+            logPrefix: `[Sync][${conversationId}]`,
+        });
+
+        console.log(
+            `[Sync] History fetch candidates for ${conversationId}: ${remoteJidCandidates.join(", ") || "(none)"}; selected=${remoteJid || "none"}; found=${evolutionMessages.length}; ignoreDupes=${ignoreDuplicates}`
+        );
 
         let synced = 0;
         let skipped = 0;
@@ -529,7 +660,9 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
                     locationId: location.id,
                     contactName: isGroup ? undefined : (msg.pushName || realSenderPhone), // Don't rename group to sender name
                     isGroup: isGroup,
-                    participant: participantPhone // Pass resolved participant to sync
+                    participant: participantPhone, // Pass resolved participant to sync
+                    lid: !isGroup ? extractEvolutionLidJid(key) : undefined,
+                    resolvedPhone: !isGroup && phone ? phone : undefined,
                 };
 
                 if (parsedContent.type === 'image' && location.evolutionInstanceId) {
@@ -3108,8 +3241,21 @@ export async function startNewConversation(phone: string) {
                     const { processNormalizedMessage } = await import("@/lib/whatsapp/sync");
 
                     const whatsappPhone = rawDigits;
-                    const remoteJid = `${whatsappPhone}@s.whatsapp.net`;
-                    const messages = await evolutionClient.fetchMessages(location.evolutionInstanceId, remoteJid, 30);
+                    const { messages, remoteJid, candidates } = await fetchEvolutionMessagesForContactHistory({
+                        evolutionClient,
+                        evolutionInstanceId: location.evolutionInstanceId,
+                        contact: {
+                            phone: contact.phone,
+                            lid: (contact as any).lid || null,
+                            contactType: (contact as any).contactType || null,
+                        },
+                        limit: 30,
+                        offset: 0,
+                        logPrefix: `[NewConversation][existing:${existingConv.ghlConversationId}]`,
+                    });
+                    console.log(
+                        `[NewConversation] Existing convo history candidates: ${candidates.join(", ") || "(none)"}; selected=${remoteJid || "none"}; found=${messages.length}`
+                    );
 
                     let imported = 0;
                     for (const msg of (messages || [])) {
@@ -3129,7 +3275,9 @@ export async function startNewConversation(phone: string) {
                             direction: isFromMe ? 'outbound' : 'inbound',
                             source: 'whatsapp_evolution',
                             locationId: location.id,
-                            contactName: isFromMe ? undefined : msg.pushName
+                            contactName: isFromMe ? undefined : msg.pushName,
+                            lid: extractEvolutionLidJid(key),
+                            resolvedPhone: whatsappPhone,
                         };
 
                         const result = await processNormalizedMessage(normalized);
@@ -3186,8 +3334,21 @@ export async function startNewConversation(phone: string) {
                 const { processNormalizedMessage } = await import("@/lib/whatsapp/sync");
 
                 const whatsappPhone = rawDigits;
-                const remoteJid = `${whatsappPhone}@s.whatsapp.net`;
-                const messages = await evolutionClient.fetchMessages(location.evolutionInstanceId, remoteJid, 30);
+                const { messages, remoteJid, candidates } = await fetchEvolutionMessagesForContactHistory({
+                    evolutionClient,
+                    evolutionInstanceId: location.evolutionInstanceId,
+                    contact: {
+                        phone: contact.phone,
+                        lid: (contact as any).lid || null,
+                        contactType: (contact as any).contactType || null,
+                    },
+                    limit: 30,
+                    offset: 0,
+                    logPrefix: `[NewConversation][new:${conversation.ghlConversationId}]`,
+                });
+                console.log(
+                    `[NewConversation] New convo history candidates: ${candidates.join(", ") || "(none)"}; selected=${remoteJid || "none"}; found=${messages.length}`
+                );
 
                 for (const msg of (messages || [])) {
                     const key = msg.key;
@@ -3206,7 +3367,9 @@ export async function startNewConversation(phone: string) {
                         direction: isFromMe ? 'outbound' : 'inbound',
                         source: 'whatsapp_evolution',
                         locationId: location.id,
-                        contactName: isFromMe ? undefined : msg.pushName
+                        contactName: isFromMe ? undefined : msg.pushName,
+                        lid: extractEvolutionLidJid(key),
+                        resolvedPhone: whatsappPhone,
                     };
 
                     const result = await processNormalizedMessage(normalized);

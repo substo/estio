@@ -102,10 +102,15 @@ To handle high-volume sync and rate limits, we introduced a **Queue-Based Archit
    - Fetches a small batch (default: 20 messages).
    - **Consecutive Duplicate Detection**: The sync loop counts how many existing messages it encounters. If it finds **5 consecutive duplicates**, it assumes the history is up-to-date and **stops early**. This prevents re-scanning thousands of old messages.
 3. **Manual Override**: A "Sync History" button (refresh icon) is available in the Chat Window header. This allows the user to force a deeper history fetch if they suspect missing messages (e.g., after a long phone disconnection).
+4. **Identity-Aware Manual Fetch (Feb 26, 2026)**:
+   - Manual history sync and new-conversation backfill now resolve multiple candidate chat JIDs instead of assuming only `phone@s.whatsapp.net`.
+   - Candidate order (deduplicated): `Contact.lid` (`@lid`) -> explicit stored chat JID (if any) -> Evolution `checkWhatsAppNumber(...)` result JID -> `phone@s.whatsapp.net` fallback.
+   - This fixes cases where manually-created leads (including international numbers) have WhatsApp history stored under an LID-backed chat identity.
 
 #### Key Files
 - **`app/(main)/admin/conversations/actions.ts`**: 
-    - `syncWhatsAppHistory(conversationId, limit, ignoreDuplicates, offset)`: Core manual/background history sync action with duplicate-stop logic and optional paging.
+    - `syncWhatsAppHistory(conversationId, limit, ignoreDuplicates, offset)`: Core manual/background history sync action with duplicate-stop logic, optional paging, and LID-aware multi-candidate JID fetch.
+    - `startNewConversation(phone)`: Initial Evolution backfill now reuses the same JID resolution strategy used by manual sync.
 - **`lib/whatsapp/sync.ts`**: 
     - `processNormalizedMessage`: Updated to return a status (`{ status: 'skipped' | 'processed' }`) to enable the duplicate detection logic.
 - **`app/(main)/admin/conversations/_components/conversation-interface.tsx`**: 
@@ -256,6 +261,7 @@ We track message delivery status (`sent`, `delivered`, `read`, `failed`) by list
 | **Evolution API Crash Loop** | **Error P2000**: "Value too long". Occurs if a Contact name or Profile Pic URL exceeds 191 chars. **Fix**: Manually altered the Postgres `Contact` table columns (`pushName`, `profilePicUrl`) to `TEXT` (unlimited length). |
 | **Duplicate Conversations (Same Contact)** | **Issue**: Race conditions can create multiple conversations for one contact. **Fix**: Run `scripts/merge-same-contact-conversations.ts` to merge them. **Prevention**: Logic updated to search last 2 digits for robust matching (`sync.ts`). |
 | **Lead gets split into two contacts/conversations after reply** | **Issue**: Outbound uses phone identity, reply arrives as unresolved `@lid`. **Fix**: Inbound unresolved LID is now deferred (`whatsapp-lid-resolve` queue) until resolved to phone; verify Redis is up and worker logs show retries/resolution. |
+| **Manual "Sync WhatsApp History" finds no past messages for a manually-created lead (often international numbers)** | **Issue**: Evolution may store the chat under an LID (`@lid`) while older history sync queried only `phone@s.whatsapp.net`. **Fix**: Manual sync/new-conversation backfill now try multiple JIDs (`Contact.lid`, Evolution lookup JID, phone fallback). Check logs for `History fetch candidates ... selected=... found=...`. |
 | **Image message exists but no attachment appears (especially `@lid` contacts)** | Older builds could ingest media before the deferred LID message row existed (`message_not_found`). **Fix**: Attachment ingest now waits for deferred LID resolution/processing, then retries automatically. Re-sync history to backfill previously missed attachments. |
 | **WhatsApp image upload fails before send** | Check R2 env vars (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`) and bucket CORS for browser `PUT`. The upload action is `createWhatsAppImageUploadUrl(...)`. |
 | **"Uploaded image not found in media storage"** | The presigned upload may have expired or the browser upload failed. Re-upload the image, then call `sendWhatsAppImageReply(...)` again. |
@@ -480,6 +486,9 @@ The critical issue was split identity: outbound lead creation used phone, but in
    - Outbound dedup path captures `msg.lid` and links it to the real phone contact.
    - `CONTACTS_UPSERT` also links/merges phone<->LID mappings in background.
    - Deferred inbound retries then resolve to the existing phone contact and continue normally.
+5. **Manual history sync participates in LID reconciliation**:
+   - `syncWhatsAppHistory(...)` and `startNewConversation(...)` backfill now try multiple remote JIDs (`@lid` and phone-based) before giving up.
+   - Fetched history records pass `lid` and `resolvedPhone` hints into `sync.ts` to improve contact matching during backfill.
 
 **Key outcome**: inbound reply no longer needs to create a second placeholder contact first.
 
