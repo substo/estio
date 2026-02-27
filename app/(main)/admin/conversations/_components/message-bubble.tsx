@@ -17,6 +17,8 @@ type MessageAttachment = string | {
 export interface MessageBubbleProps {
     message: {
         id: string;
+        conversationId?: string;
+        contactId?: string;
         body: string;
         type: string;
         direction: 'inbound' | 'outbound';
@@ -345,6 +347,7 @@ export function MessageBubble({ message, contactPhone, contactEmail: _contactEma
             <MessageSelectionActions
                 selection={selectionTarget}
                 onClearSelection={clearSelectionTarget}
+                conversationId={message.conversationId || null}
             />
 
             <Dialog open={selectedImageIndex !== null} onOpenChange={(open) => { if (!open) setSelectedImageIndex(null); }}>

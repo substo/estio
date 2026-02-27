@@ -256,7 +256,7 @@ export async function fetchDealTimeline(dealId: string) {
         include: {
             conversation: {
                 select: {
-                    contact: { select: { name: true, email: true, ghlContactId: true } }
+                    contact: { select: { id: true, name: true, email: true, ghlContactId: true } }
                 }
             }
         }
@@ -276,10 +276,11 @@ export async function fetchDealTimeline(dealId: string) {
         subject: m.subject,
         emailFrom: m.emailFrom,
         emailTo: m.emailTo,
+        conversationId: m.conversationId,
 
         senderName: m.direction === 'outbound' ? 'You' : (m.conversation.contact.name || "Unknown Contact"),
         senderEmail: m.conversation.contact.email,
-        contactId: m.conversation.contact.ghlContactId,
+        contactId: m.conversation.contact.id || m.conversation.contact.ghlContactId,
         getStatus: m.status
     }));
 }

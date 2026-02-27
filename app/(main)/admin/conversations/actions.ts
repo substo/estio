@@ -15,6 +15,7 @@ import { z } from "zod";
 import { getModelForTask } from "@/lib/ai/model-router";
 import { callLLM } from "@/lib/ai/llm";
 import { auth } from "@clerk/nextjs/server";
+import { revalidatePath } from "next/cache";
 import { runGoogleAutoSyncForContact } from "@/lib/google/automation";
 import {
     buildWhatsAppOutboundUploadKey,
@@ -24,6 +25,119 @@ import {
     toR2Uri,
 } from "@/lib/whatsapp/media-r2";
 import { ingestEvolutionImageAttachment, parseEvolutionMessageContent } from "@/lib/whatsapp/evolution-media";
+
+const MAX_SELECTION_TEXT_LENGTH = 12000;
+const MAX_CUSTOM_OUTPUT_LENGTH = 2200;
+
+function trimSelectionText(text: string, maxLength: number = MAX_SELECTION_TEXT_LENGTH): string {
+    const normalized = String(text || "").replace(/\u00a0/g, " ").trim();
+    if (!normalized) return "";
+    if (normalized.length <= maxLength) return normalized;
+    return normalized.slice(0, maxLength);
+}
+
+function normalizeSingleLine(text: string, fallback: string): string {
+    const cleaned = String(text || "")
+        .replace(/```[\s\S]*?```/g, " ")
+        .replace(/[\r\n]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    if (!cleaned) return fallback;
+    return cleaned;
+}
+
+function formatLogDate(date: Date): string {
+    const dd = String(date.getDate()).padStart(2, "0");
+    const mm = String(date.getMonth() + 1).padStart(2, "0");
+    const yy = String(date.getFullYear()).slice(-2);
+    return `${dd}.${mm}.${yy}`;
+}
+
+function deriveFirstName(name: string | null | undefined, email: string | null | undefined): string {
+    const rawName = String(name || "").trim();
+    if (rawName) {
+        return rawName.split(/\s+/)[0];
+    }
+
+    const emailLocal = String(email || "")
+        .split("@")[0]
+        .replace(/[._-]+/g, " ")
+        .trim();
+    if (!emailLocal) return "User";
+
+    const firstToken = emailLocal.split(/\s+/)[0];
+    if (!firstToken) return "User";
+    return firstToken.charAt(0).toUpperCase() + firstToken.slice(1);
+}
+
+function formatCrmLogEntry(actorFirstName: string, body: string, date: Date = new Date()): string {
+    const normalizedBody = normalizeSingleLine(body, "Updated conversation notes.");
+    return `${formatLogDate(date)} ${actorFirstName}: ${normalizedBody}`;
+}
+
+async function resolveConversationForCrmLog(locationId: string, conversationId: string) {
+    return db.conversation.findFirst({
+        where: {
+            locationId,
+            OR: [
+                { id: conversationId },
+                { ghlConversationId: conversationId },
+            ]
+        },
+        select: {
+            id: true,
+            ghlConversationId: true,
+            contactId: true,
+        }
+    });
+}
+
+async function persistSelectionLogEntry(args: {
+    conversationId: string;
+    entryBody: string;
+}) {
+    const { userId: clerkUserId } = await auth();
+    if (!clerkUserId) {
+        return { success: false, error: "Unauthorized" as const };
+    }
+
+    const location = await getAuthenticatedLocation();
+    const user = await db.user.findUnique({
+        where: { clerkId: clerkUserId },
+        select: { id: true, name: true, email: true },
+    });
+
+    if (!user) {
+        return { success: false, error: "User not found" as const };
+    }
+
+    const conversation = await resolveConversationForCrmLog(location.id, String(args.conversationId || "").trim());
+    if (!conversation) {
+        return { success: false, error: "Conversation not found" as const };
+    }
+
+    const now = new Date();
+    const actorFirstName = deriveFirstName(user.name, user.email);
+    const entry = formatCrmLogEntry(actorFirstName, args.entryBody, now);
+
+    await db.contactHistory.create({
+        data: {
+            contactId: conversation.contactId,
+            userId: user.id,
+            action: "MANUAL_ENTRY",
+            changes: {
+                date: now.toISOString(),
+                entry,
+            },
+        },
+    });
+
+    revalidatePath(`/admin/contacts/${conversation.contactId}/view`);
+    revalidatePath(`/admin/conversations?id=${encodeURIComponent(conversation.ghlConversationId)}`);
+
+    return { success: true as const, entry };
+}
 
 async function getAuthenticatedLocation() {
     const location = await getLocationContext();
@@ -4122,6 +4236,128 @@ function parseLegacyCrmLeadNotificationEmail(args: {
         fields,
         parsedLeadData: buildParsedLeadDataFromLegacyCrmEmail(classification, fields, leadUrl),
     };
+}
+
+export async function summarizeSelectionToCrmLog(conversationId: string, selectedText: string) {
+    const sanitizedConversationId = String(conversationId || "").trim();
+    if (!sanitizedConversationId) {
+        return { success: false, error: "Missing conversation ID" };
+    }
+
+    const text = trimSelectionText(selectedText);
+    if (!text || text.length < 5) {
+        return { success: false, error: "Selected text is too short" };
+    }
+
+    try {
+        const modelId = getModelForTask("simple_generation");
+        const summaryPrompt = [
+            "You write concise internal CRM activity summaries for real estate teams.",
+            "Rules:",
+            "- Return exactly one plain-text sentence.",
+            "- Keep it factual and action-oriented.",
+            "- Include key entities (person/property/reference/price/date) only if present in the source text.",
+            "- Do not include agent name or date prefix.",
+            "- Do not use markdown, bullets, or quotes.",
+            "",
+            "Selected text:",
+            '"""',
+            text,
+            '"""',
+        ].join("\n");
+
+        const rawSummary = await callLLM(modelId, summaryPrompt, undefined, { temperature: 0.2 });
+        const summary = normalizeSingleLine(rawSummary, "Contacted lead and captured conversation update.");
+        const persisted = await persistSelectionLogEntry({
+            conversationId: sanitizedConversationId,
+            entryBody: summary,
+        });
+
+        if (!persisted.success) {
+            return { success: false, error: persisted.error };
+        }
+
+        return {
+            success: true,
+            summary,
+            entry: persisted.entry,
+        };
+    } catch (error: any) {
+        console.error("[summarizeSelectionToCrmLog] Error:", error);
+        return { success: false, error: error?.message || "Failed to summarize selection" };
+    }
+}
+
+export async function runCustomSelectionPrompt(conversationId: string, selectedText: string, instruction: string) {
+    const sanitizedConversationId = String(conversationId || "").trim();
+    if (!sanitizedConversationId) {
+        return { success: false, error: "Missing conversation ID" };
+    }
+
+    const text = trimSelectionText(selectedText);
+    const cleanedInstruction = String(instruction || "").trim();
+    if (!cleanedInstruction || cleanedInstruction.length < 3) {
+        return { success: false, error: "Prompt instruction is too short" };
+    }
+    if (!text || text.length < 5) {
+        return { success: false, error: "Selected text is too short" };
+    }
+
+    try {
+        const modelId = getModelForTask("simple_generation");
+        const systemPrompt = [
+            "You are an assistant for CRM operators.",
+            "Follow the operator instruction strictly, using only the provided selected text as context.",
+            "If the instruction asks for factual output, do not invent details that are not in context.",
+            "Return plain text only, no markdown.",
+            "",
+            "Operator instruction:",
+            cleanedInstruction,
+            "",
+            "Selected text context:",
+            '"""',
+            text,
+            '"""',
+        ].join("\n");
+
+        const rawOutput = await callLLM(modelId, systemPrompt, undefined, { temperature: 0.25 });
+        const output = normalizeSingleLine(rawOutput, "No output generated.").slice(0, MAX_CUSTOM_OUTPUT_LENGTH);
+
+        return {
+            success: true,
+            output,
+        };
+    } catch (error: any) {
+        console.error("[runCustomSelectionPrompt] Error:", error);
+        return { success: false, error: error?.message || "Failed to run custom prompt" };
+    }
+}
+
+export async function saveCustomSelectionToCrmLog(conversationId: string, outputText: string) {
+    const sanitizedConversationId = String(conversationId || "").trim();
+    if (!sanitizedConversationId) {
+        return { success: false, error: "Missing conversation ID" };
+    }
+
+    const body = normalizeSingleLine(outputText, "");
+    if (!body || body.length < 3) {
+        return { success: false, error: "Custom output is too short to save" };
+    }
+
+    try {
+        const persisted = await persistSelectionLogEntry({
+            conversationId: sanitizedConversationId,
+            entryBody: body,
+        });
+        if (!persisted.success) {
+            return { success: false, error: persisted.error };
+        }
+
+        return { success: true, entry: persisted.entry };
+    } catch (error: any) {
+        console.error("[saveCustomSelectionToCrmLog] Error:", error);
+        return { success: false, error: error?.message || "Failed to save custom output to CRM log" };
+    }
 }
 
 export async function parseLeadFromText(text: string) {

@@ -22,11 +22,14 @@ import {
     CommandItem,
     CommandList,
 } from "@/components/ui/command";
-import { Loader2, Search, Clipboard, MessageCircle, BadgeAlert, AlertTriangle, User, Phone, Mail, ExternalLink } from "lucide-react";
+import { Loader2, Search, Clipboard, MessageCircle, BadgeAlert, AlertTriangle, User, Phone, Mail, ExternalLink, FileText, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import {
     parseLeadFromText,
     createParsedLead,
+    summarizeSelectionToCrmLog,
+    runCustomSelectionPrompt,
+    saveCustomSelectionToCrmLog,
     type ParsedLeadData,
     type LeadAnalysisTrace,
 } from "@/app/(main)/admin/conversations/actions";
@@ -62,6 +65,7 @@ type ContactSearchResult = {
 interface MessageSelectionActionsProps {
     selection: MessageSelectionActionTarget | null;
     onClearSelection: () => void;
+    conversationId?: string | null;
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -101,7 +105,7 @@ function getSelectionPreview(text: string) {
     return `${compact.slice(0, 140)}...`;
 }
 
-export function MessageSelectionActions({ selection, onClearSelection }: MessageSelectionActionsProps) {
+export function MessageSelectionActions({ selection, onClearSelection, conversationId }: MessageSelectionActionsProps) {
     const router = useRouter();
     const toolbarRef = useRef<HTMLDivElement>(null);
 
@@ -120,7 +124,20 @@ export function MessageSelectionActions({ selection, onClearSelection }: Message
     const [searchingContacts, setSearchingContacts] = useState(false);
     const [openingConversationContactId, setOpeningConversationContactId] = useState<string | null>(null);
 
-    const selectionVisible = !!selection && !pasteLeadOpen && !findContactOpen;
+    const [summarizeOpen, setSummarizeOpen] = useState(false);
+    const [summarizeSelectionText, setSummarizeSelectionText] = useState("");
+    const [isSummarizing, setIsSummarizing] = useState(false);
+    const [summarySavedEntry, setSummarySavedEntry] = useState("");
+
+    const [customOpen, setCustomOpen] = useState(false);
+    const [customSelectionText, setCustomSelectionText] = useState("");
+    const [customInstruction, setCustomInstruction] = useState("");
+    const [customOutput, setCustomOutput] = useState("");
+    const [isRunningCustom, setIsRunningCustom] = useState(false);
+    const [isSavingCustom, setIsSavingCustom] = useState(false);
+    const [customSavedEntry, setCustomSavedEntry] = useState("");
+
+    const selectionVisible = !!selection && !pasteLeadOpen && !findContactOpen && !summarizeOpen && !customOpen;
 
     useEffect(() => {
         if (!selectionVisible) return;
@@ -197,6 +214,24 @@ export function MessageSelectionActions({ selection, onClearSelection }: Message
         onClearSelection();
     };
 
+    const openSummarizeDialog = () => {
+        if (!selection?.text?.trim()) return;
+        setSummarizeSelectionText(selection.text.trim());
+        setSummarySavedEntry("");
+        setSummarizeOpen(true);
+        onClearSelection();
+    };
+
+    const openCustomDialog = () => {
+        if (!selection?.text?.trim()) return;
+        setCustomSelectionText(selection.text.trim());
+        setCustomInstruction("");
+        setCustomOutput("");
+        setCustomSavedEntry("");
+        setCustomOpen(true);
+        onClearSelection();
+    };
+
     const handleAnalyzeLead = async () => {
         if (!leadText.trim()) return;
         setIsAnalyzingLead(true);
@@ -235,6 +270,82 @@ export function MessageSelectionActions({ selection, onClearSelection }: Message
         }
     };
 
+    const handleSummarizeToCrmLog = async () => {
+        if (!conversationId) {
+            toast.error("Open a conversation first to save CRM logs.");
+            return;
+        }
+        if (!summarizeSelectionText.trim()) return;
+
+        setIsSummarizing(true);
+        try {
+            const res = await summarizeSelectionToCrmLog(conversationId, summarizeSelectionText);
+            if (!res?.success || !res?.entry) {
+                toast.error(res?.error || "Failed to summarize and save to CRM log");
+                return;
+            }
+            setSummarySavedEntry(res.entry);
+            toast.success("Summary saved to CRM log");
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to summarize and save to CRM log");
+        } finally {
+            setIsSummarizing(false);
+        }
+    };
+
+    const handleRunCustomPrompt = async () => {
+        if (!conversationId) {
+            toast.error("Open a conversation first to run custom actions.");
+            return;
+        }
+        if (!customSelectionText.trim()) return;
+        if (!customInstruction.trim() || customInstruction.trim().length < 3) {
+            toast.error("Type a short instruction for the custom action.");
+            return;
+        }
+
+        setIsRunningCustom(true);
+        try {
+            const res = await runCustomSelectionPrompt(conversationId, customSelectionText, customInstruction);
+            if (!res?.success || !res?.output) {
+                toast.error(res?.error || "Failed to run custom action");
+                return;
+            }
+            setCustomOutput(res.output);
+            setCustomSavedEntry("");
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to run custom action");
+        } finally {
+            setIsRunningCustom(false);
+        }
+    };
+
+    const handleSaveCustomToCrmLog = async () => {
+        if (!conversationId) {
+            toast.error("Open a conversation first to save CRM logs.");
+            return;
+        }
+        if (!customOutput.trim()) {
+            toast.error("Generate custom output first.");
+            return;
+        }
+
+        setIsSavingCustom(true);
+        try {
+            const res = await saveCustomSelectionToCrmLog(conversationId, customOutput);
+            if (!res?.success || !res?.entry) {
+                toast.error(res?.error || "Failed to save custom output to CRM log");
+                return;
+            }
+            setCustomSavedEntry(res.entry);
+            toast.success("Custom output saved to CRM log");
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to save custom output to CRM log");
+        } finally {
+            setIsSavingCustom(false);
+        }
+    };
+
     const handleOpenContact = (contactId: string) => {
         setFindContactOpen(false);
         router.push(`/admin/contacts/${contactId}/view`);
@@ -266,6 +377,8 @@ export function MessageSelectionActions({ selection, onClearSelection }: Message
             setOpeningConversationContactId(null);
         }
     };
+
+    const canUseCrmLogActions = !!conversationId;
 
     let toolbarNode: ReactNode = null;
     if (selectionVisible && selection && typeof document !== "undefined") {
@@ -307,6 +420,32 @@ export function MessageSelectionActions({ selection, onClearSelection }: Message
                     >
                         <Search className="h-3.5 w-3.5" />
                         Find Contact
+                    </Button>
+                    <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 gap-1.5 px-2 text-xs"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={openSummarizeDialog}
+                        disabled={!canUseCrmLogActions}
+                        title={canUseCrmLogActions ? "Summarize selected text and save to CRM log" : "Open a conversation to save CRM logs"}
+                    >
+                        <FileText className="h-3.5 w-3.5" />
+                        Summarize
+                    </Button>
+                    <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 gap-1.5 px-2 text-xs"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={openCustomDialog}
+                        disabled={!canUseCrmLogActions}
+                        title={canUseCrmLogActions ? "Run custom AI prompt with selected text context" : "Open a conversation to run custom actions"}
+                    >
+                        <Wand2 className="h-3.5 w-3.5" />
+                        Custom
                     </Button>
                 </div>
             </div>,
@@ -577,6 +716,133 @@ export function MessageSelectionActions({ selection, onClearSelection }: Message
                                 })}
                             </CommandList>
                         </Command>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog
+                open={summarizeOpen}
+                onOpenChange={(open) => {
+                    setSummarizeOpen(open);
+                    if (!open) {
+                        setIsSummarizing(false);
+                        setSummarySavedEntry("");
+                    }
+                }}
+            >
+                <DialogContent className="sm:max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <FileText className="h-4 w-4 text-emerald-600" />
+                            Summarize Selection to CRM Log
+                        </DialogTitle>
+                        <DialogDescription>
+                            Generates a concise activity note and saves it to contact history using format: DD.MM.YY FirstName: summary.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-3">
+                        <div className="rounded-md border bg-slate-50 p-2 text-xs text-slate-600">
+                            <span className="font-medium text-slate-800">Selected text:</span>{" "}
+                            {summarizeSelectionText ? getSelectionPreview(summarizeSelectionText) : "Selection captured"}
+                        </div>
+
+                        <Button
+                            type="button"
+                            className="w-full gap-2"
+                            onClick={handleSummarizeToCrmLog}
+                            disabled={isSummarizing || !summarizeSelectionText.trim() || !canUseCrmLogActions}
+                        >
+                            {isSummarizing ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                            {isSummarizing ? "Summarizing..." : "Summarize & Save to CRM Log"}
+                        </Button>
+
+                        {summarySavedEntry ? (
+                            <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+                                <div className="mb-1 font-semibold">Saved Entry</div>
+                                <p className="whitespace-pre-wrap">{summarySavedEntry}</p>
+                            </div>
+                        ) : null}
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog
+                open={customOpen}
+                onOpenChange={(open) => {
+                    setCustomOpen(open);
+                    if (!open) {
+                        setIsRunningCustom(false);
+                        setIsSavingCustom(false);
+                        setCustomInstruction("");
+                        setCustomOutput("");
+                        setCustomSavedEntry("");
+                    }
+                }}
+            >
+                <DialogContent className="sm:max-w-xl">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Wand2 className="h-4 w-4 text-violet-600" />
+                            Custom Selection Action
+                        </DialogTitle>
+                        <DialogDescription>
+                            Type what AI should do. The selected text is automatically passed as context.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-3">
+                        <div className="rounded-md border bg-slate-50 p-2 text-xs text-slate-600">
+                            <span className="font-medium text-slate-800">Selected text:</span>{" "}
+                            {customSelectionText ? getSelectionPreview(customSelectionText) : "Selection captured"}
+                        </div>
+
+                        <Textarea
+                            value={customInstruction}
+                            onChange={(e) => setCustomInstruction(e.target.value)}
+                            className="min-h-[92px] text-sm"
+                            placeholder="Example: Write a 1-line follow-up note focused on next action and timeline."
+                            disabled={isRunningCustom}
+                        />
+
+                        <Button
+                            type="button"
+                            className="w-full gap-2"
+                            onClick={handleRunCustomPrompt}
+                            disabled={isRunningCustom || !customInstruction.trim() || !canUseCrmLogActions}
+                        >
+                            {isRunningCustom ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+                            {isRunningCustom ? "Running..." : "Run Custom Prompt"}
+                        </Button>
+
+                        {customOutput ? (
+                            <div className="space-y-2">
+                                <label className="text-xs font-medium text-slate-700">AI Output</label>
+                                <Textarea
+                                    value={customOutput}
+                                    onChange={(e) => setCustomOutput(e.target.value)}
+                                    className="min-h-[110px] text-sm"
+                                    disabled={isSavingCustom}
+                                />
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="w-full gap-2"
+                                    onClick={handleSaveCustomToCrmLog}
+                                    disabled={isSavingCustom || !customOutput.trim() || !canUseCrmLogActions}
+                                >
+                                    {isSavingCustom ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                                    {isSavingCustom ? "Saving..." : "Save Output to CRM Log"}
+                                </Button>
+                            </div>
+                        ) : null}
+
+                        {customSavedEntry ? (
+                            <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+                                <div className="mb-1 font-semibold">Saved Entry</div>
+                                <p className="whitespace-pre-wrap">{customSavedEntry}</p>
+                            </div>
+                        ) : null}
                     </div>
                 </DialogContent>
             </Dialog>
