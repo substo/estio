@@ -2,10 +2,12 @@ import Provider from '@/app/(main)/provider'
 import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/sonner"
 import AuthWrapper from '@/components/wrapper/auth-wrapper'
+import { LiveDeployGuard } from "@/components/deploy/live-deploy-guard"
 import { GeistSans } from 'geist/font/sans'
 import type { Metadata } from 'next'
 import '@/app/globals.css'
 import { APP_URL } from '@/lib/app-config';
+import { getRuntimeBuildId } from "@/lib/runtime/build-id";
 
 console.log('[MainLayout] Rendering');
 
@@ -32,11 +34,13 @@ export const metadata: Metadata = {
   },
 }
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
+  const initialBuildId = await getRuntimeBuildId();
+
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -60,6 +64,7 @@ export default function RootLayout({
               enableSystem
               disableTransitionOnChange
             >
+              <LiveDeployGuard initialBuildId={initialBuildId} />
               {children}
               <Toaster />
             </ThemeProvider>

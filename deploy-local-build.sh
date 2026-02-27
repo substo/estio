@@ -11,6 +11,13 @@ SYMLINK_NAME="estio-app"
 SYMLINK_PATH="$BASE_DIR/$SYMLINK_NAME"
 BLUE_DIR="$BASE_DIR/estio-app-blue"
 GREEN_DIR="$BASE_DIR/estio-app-green"
+BLUE_PORT=3001
+GREEN_PORT=3002
+APP_NAME_PREFIX="estio-app"
+
+# Keep previous color process alive briefly after traffic switch to reduce abrupt cutovers.
+# Override with DRAIN_SECONDS=0 for immediate cleanup.
+DRAIN_SECONDS="${DRAIN_SECONDS:-900}"
 
 echo "🚀 Starting LOCAL BUILD deployment to estio.co..."
 
@@ -55,36 +62,37 @@ fi
 
 # Step 0: Determine Active/Target Slots
 echo "🔍 Checking server state..."
-# Check if symlink
-    if ssh $SSH_OPTS $SERVER "[ -L $SYMLINK_PATH ] && readlink $SYMLINK_PATH || echo none"; then
-        TARGET_LINK=$(ssh $SSH_OPTS $SERVER readlink "$SYMLINK_PATH")
-        if [[ "$TARGET_LINK" == *"-blue"* ]]; then
-            echo "CURRENT_COLOR=blue" > /tmp/deploy_state.log
-        elif [[ "$TARGET_LINK" == *"-green"* ]]; then
-             echo "CURRENT_COLOR=green" > /tmp/deploy_state.log
-        else
-             # Fallback check for directory existance if link is weird or missing
-             if ssh $SSH_OPTS $SERVER "[ -d $BLUE_DIR ]"; then
-                 echo "CURRENT_COLOR=blue" > /tmp/deploy_state.log
-             else
-                 echo "CURRENT_COLOR=none" > /tmp/deploy_state.log
-             fi
-        fi
-    else
-         echo "CURRENT_COLOR=none" > /tmp/deploy_state.log
-    fi
+CURRENT_COLOR=$(ssh $SSH_OPTS $SERVER "if [ -L '$SYMLINK_PATH' ]; then LINK=\$(readlink '$SYMLINK_PATH'); if [[ \"\$LINK\" == *'-blue'* ]]; then echo blue; elif [[ \"\$LINK\" == *'-green'* ]]; then echo green; else echo none; fi; else echo none; fi")
 
-# Read active color from log
-if grep -q "CURRENT_COLOR=blue" /tmp/deploy_state.log; then
-    TARGET_DIR=$GREEN_DIR
-    TARGET_COLOR="green"
-    echo "🔵 Active: BLUE -> 🟢 Target: GREEN"
-else
-    TARGET_DIR=$BLUE_DIR
-    TARGET_COLOR="blue"
-    echo "🟢 Active: GREEN -> 🔵 Target: BLUE"
-fi
-rm -f /tmp/deploy_state.log
+case "$CURRENT_COLOR" in
+    blue)
+        ACTIVE_DIR=$BLUE_DIR
+        ACTIVE_COLOR="blue"
+        ACTIVE_PORT=$BLUE_PORT
+        TARGET_DIR=$GREEN_DIR
+        TARGET_COLOR="green"
+        TARGET_PORT=$GREEN_PORT
+        echo "🔵 Active: BLUE:${BLUE_PORT} -> 🟢 Target: GREEN:${GREEN_PORT}"
+        ;;
+    green)
+        ACTIVE_DIR=$GREEN_DIR
+        ACTIVE_COLOR="green"
+        ACTIVE_PORT=$GREEN_PORT
+        TARGET_DIR=$BLUE_DIR
+        TARGET_COLOR="blue"
+        TARGET_PORT=$BLUE_PORT
+        echo "🟢 Active: GREEN:${GREEN_PORT} -> 🔵 Target: BLUE:${BLUE_PORT}"
+        ;;
+    *)
+        ACTIVE_DIR=""
+        ACTIVE_COLOR="none"
+        ACTIVE_PORT=""
+        TARGET_DIR=$BLUE_DIR
+        TARGET_COLOR="blue"
+        TARGET_PORT=$BLUE_PORT
+        echo "⚪ Active: NONE -> 🔵 Target: BLUE:${BLUE_PORT}"
+        ;;
+esac
 
 # Step 1: LOCAL BUILD
 echo "🏗️  Building LOCALLY (Bypassing Server Limits)..."
@@ -171,14 +179,83 @@ else
     ssh $SSH_OPTS $SERVER "docker ps --filter name=evolution --format 'table {{.Names}}\t{{.Status}}' || true"
 fi
 
-# Step 7: Switch Live
-echo "🔄 Switching live..."
+# Step 7: Runtime-Safe Blue/Green Switch
+TARGET_APP_NAME="${APP_NAME_PREFIX}-${TARGET_COLOR}"
+if [[ "$ACTIVE_COLOR" == "none" ]]; then
+    ACTIVE_APP_NAME=""
+else
+    ACTIVE_APP_NAME="${APP_NAME_PREFIX}-${ACTIVE_COLOR}"
+fi
+
+echo "🔄 Switching live with health-checked runtime cutover..."
 ssh $SSH_OPTS $SERVER bash << ENDSSH
-    ln -sfn "$TARGET_DIR" "$SYMLINK_PATH"
-    cd "$SYMLINK_PATH"
-    if pm2 describe estio-app > /dev/null 2>&1; then pm2 delete estio-app; fi
-    PORT=3000 NODE_ENV=production pm2 start npm --name 'estio-app' -- start
+    set -euo pipefail
+
+    TARGET_APP_NAME="$TARGET_APP_NAME"
+    TARGET_PORT="$TARGET_PORT"
+    TARGET_DIR="$TARGET_DIR"
+    SYMLINK_PATH="$SYMLINK_PATH"
+    ACTIVE_APP_NAME="$ACTIVE_APP_NAME"
+    ACTIVE_COLOR="$ACTIVE_COLOR"
+    DRAIN_SECONDS="$DRAIN_SECONDS"
+
+    echo "▶️  Starting target process \$TARGET_APP_NAME on :\$TARGET_PORT"
+    if pm2 describe "\$TARGET_APP_NAME" > /dev/null 2>&1; then
+        pm2 delete "\$TARGET_APP_NAME" || true
+    fi
+
+    cd "\$TARGET_DIR"
+    PORT="\$TARGET_PORT" NODE_ENV=production pm2 start npm --name "\$TARGET_APP_NAME" -- start -- -H 127.0.0.1
+
+    echo "🩺 Waiting for target health check..."
+    for i in \$(seq 1 45); do
+        if curl -fsS "http://127.0.0.1:\$TARGET_PORT/api/health" > /dev/null 2>&1; then
+            echo "✅ Target process healthy"
+            break
+        fi
+
+        if [ "\$i" -eq 45 ]; then
+            echo "❌ Target health check failed on :\$TARGET_PORT"
+            pm2 logs "\$TARGET_APP_NAME" --lines 80 || true
+            exit 1
+        fi
+        sleep 1
+    done
+
+    # Keep symlink aligned with active release directory for operational visibility.
+    ln -sfn "\$TARGET_DIR" "\$SYMLINK_PATH"
+
+    # Update Caddy upstream to point at target color port, then reload gracefully.
+    if [ -f /etc/caddy/Caddyfile ]; then
+        cp /etc/caddy/Caddyfile "/etc/caddy/Caddyfile.bak.\$(date +%Y%m%d%H%M%S)"
+        sed -E -i "s|localhost:[0-9]+|localhost:\$TARGET_PORT|g" /etc/caddy/Caddyfile
+        sed -E -i "s|reverse_proxy[[:space:]]+localhost([^:0-9]|$)|reverse_proxy localhost:\$TARGET_PORT\\\\1|g" /etc/caddy/Caddyfile
+
+        caddy validate --config /etc/caddy/Caddyfile
+        systemctl reload caddy || systemctl restart caddy
+        echo "🌐 Caddy now routes to localhost:\$TARGET_PORT"
+    else
+        echo "⚠️  /etc/caddy/Caddyfile not found; skipping proxy switch"
+    fi
+
+    # Remove legacy single-process deployment if present.
+    if pm2 describe estio-app > /dev/null 2>&1; then
+        pm2 delete estio-app || true
+    fi
+
+    # Drain old color process after a grace window.
+    if [ -n "\$ACTIVE_APP_NAME" ] && [ "\$ACTIVE_APP_NAME" != "\$TARGET_APP_NAME" ]; then
+        if [ "\$DRAIN_SECONDS" -gt 0 ] 2>/dev/null; then
+            nohup bash -lc "sleep \$DRAIN_SECONDS; pm2 delete '\$ACTIVE_APP_NAME' >/dev/null 2>&1 || true; pm2 save >/dev/null 2>&1 || true" >/dev/null 2>&1 &
+            echo "⏳ Scheduled old process drain: \$ACTIVE_APP_NAME in \$DRAIN_SECONDS seconds"
+        else
+            pm2 delete "\$ACTIVE_APP_NAME" || true
+            echo "🧹 Removed old process immediately: \$ACTIVE_APP_NAME"
+        fi
+    fi
+
     pm2 save
+    pm2 list
 ENDSSH
 
 echo "✅ Local Build Deployment Complete!"
