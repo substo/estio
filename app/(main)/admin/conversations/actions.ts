@@ -2620,6 +2620,31 @@ export async function refreshConversation(conversationId: string) {
     };
 }
 
+export async function markConversationAsRead(conversationId: string) {
+    const location = await getAuthenticatedLocation();
+
+    if (!conversationId) {
+        return { success: false, error: "Missing conversationId" };
+    }
+
+    try {
+        await db.conversation.updateMany({
+            where: {
+                ghlConversationId: conversationId,
+                locationId: location.id,
+            },
+            data: {
+                unreadCount: 0,
+            }
+        });
+
+        return { success: true };
+    } catch (error: any) {
+        console.error("markConversationAsRead error:", error);
+        return { success: false, error: error?.message || "Failed to mark conversation as read" };
+    }
+}
+
 export async function deleteConversations(conversationIds: string[]) {
     const location = await getAuthenticatedLocation();
 

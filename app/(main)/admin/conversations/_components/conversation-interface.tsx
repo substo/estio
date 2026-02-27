@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { Conversation, Message } from '@/lib/ghl/conversations';
-import { fetchConversations, fetchMessages, sendReply, createWhatsAppImageUploadUrl, sendWhatsAppImageReply, generateAIDraft, deleteConversations, restoreConversations, archiveConversations, unarchiveConversations, permanentlyDeleteConversations, syncWhatsAppHistory, refreshConversation } from '../actions';
+import { fetchConversations, fetchMessages, sendReply, createWhatsAppImageUploadUrl, sendWhatsAppImageReply, generateAIDraft, deleteConversations, restoreConversations, archiveConversations, unarchiveConversations, permanentlyDeleteConversations, syncWhatsAppHistory, refreshConversation, markConversationAsRead } from '../actions';
 import { toast } from '@/components/ui/use-toast';
 import { getDealContexts, createPersistentDeal } from '../../deals/actions';
 import { UnifiedTimeline } from './unified-timeline';
@@ -46,6 +46,12 @@ function getMessageType(conversation: Conversation): 'SMS' | 'Email' | 'WhatsApp
     return 'SMS'; // Default fallback
 }
 
+function getMessageSignature(messages: Message[]): string {
+    if (!messages || messages.length === 0) return '0';
+    const last = messages[messages.length - 1];
+    return `${messages.length}:${last.id}:${last.status}:${last.dateAdded}:${String(last.body || '').length}`;
+}
+
 export function ConversationInterface({ initialConversations, initialConversationListPageInfo }: ConversationInterfaceProps) {
     const router = useRouter();
     const pathname = usePathname();
@@ -68,17 +74,18 @@ export function ConversationInterface({ initialConversations, initialConversatio
     }, [pathname, router, searchParams]);
 
     // Initialize state from URL or props
-    const initialViewFilter = (searchParams.get('view') as 'active' | 'archived' | 'trash') || 'active';
     // Map URL 'inbox' to internal 'active' if needed, but 'active' is the internal string. 
     // Let's support 'inbox' in URL for user friendliness
     const urlView = searchParams.get('view');
     const normalizedViewFilter = (urlView === 'inbox' ? 'active' : urlView) as 'active' | 'archived' | 'trash' || 'active';
 
     const [conversations, setConversations] = useState<Conversation[]>(initialConversations);
+    const conversationsRef = useRef<Conversation[]>(initialConversations);
     const [conversationListHasMore, setConversationListHasMore] = useState<boolean>(!!initialConversationListPageInfo?.hasMore);
     const [conversationListNextCursor, setConversationListNextCursor] = useState<string | null>(initialConversationListPageInfo?.nextCursor || null);
     const [loadingMoreConversations, setLoadingMoreConversations] = useState(false);
     const loadingMoreConversationsRef = useRef(false);
+    const liveSyncInFlightRef = useRef(false);
 
     // Initialize Active ID from URL
     const initialActiveId = searchParams.get('id') || (initialConversations.length > 0 ? initialConversations[0].id : null);
@@ -118,6 +125,10 @@ export function ConversationInterface({ initialConversations, initialConversatio
         activeIdRef.current = activeId;
     }, [activeId]);
 
+    useEffect(() => {
+        conversationsRef.current = conversations;
+    }, [conversations]);
+
     // Fetch Deals when switching mode
     useEffect(() => {
         if (viewMode === 'deals' && deals.length === 0) {
@@ -135,6 +146,17 @@ export function ConversationInterface({ initialConversations, initialConversatio
         const seen = new Set<string>();
         const merged: Conversation[] = [];
         for (const item of [...existing, ...incoming]) {
+            if (!item?.id || seen.has(item.id)) continue;
+            seen.add(item.id);
+            merged.push(item);
+        }
+        return merged;
+    }, []);
+
+    const mergeConversationListsWithIncomingFirst = useCallback((existing: Conversation[], incoming: Conversation[]) => {
+        const seen = new Set<string>();
+        const merged: Conversation[] = [];
+        for (const item of [...incoming, ...existing]) {
             if (!item?.id || seen.has(item.id)) continue;
             seen.add(item.id);
             merged.push(item);
@@ -206,6 +228,7 @@ export function ConversationInterface({ initialConversations, initialConversatio
 
     const [messages, setMessages] = useState<Message[]>([]);
     const [loadingMessages, setLoadingMessages] = useState(false);
+    const messageSignatureRef = useRef<string>('0');
 
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
     const [permanentDeleteDialogOpen, setPermanentDeleteDialogOpen] = useState(false);
@@ -224,6 +247,25 @@ export function ConversationInterface({ initialConversations, initialConversatio
     // Sync All & New Conversation Dialog State
     const [syncAllOpen, setSyncAllOpen] = useState(false);
     const [newConversationOpen, setNewConversationOpen] = useState(false);
+
+    useEffect(() => {
+        messageSignatureRef.current = getMessageSignature(messages);
+    }, [messages, activeId]);
+
+    const markConversationReadInUi = useCallback(async (conversationId: string) => {
+        const currentConversation = conversationsRef.current.find((c) => c.id === conversationId);
+        if (!currentConversation || (currentConversation.unreadCount || 0) <= 0) return;
+
+        try {
+            const res = await markConversationAsRead(conversationId);
+            if (!res?.success) return;
+            setConversations(prev =>
+                prev.map(c => c.id === conversationId ? { ...c, unreadCount: 0 } : c)
+            );
+        } catch (err) {
+            console.error("Failed to mark conversation as read:", err);
+        }
+    }, []);
 
     const handleBindClick = (ids: string[]) => {
         if (ids.length === 0) return;
@@ -276,16 +318,21 @@ export function ConversationInterface({ initialConversations, initialConversatio
     useEffect(() => {
         if (!activeId) return;
 
+        const selectedConversationId = activeId;
         setMessages([]); // Clear previous messages immediately!
         setLoadingMessages(true);
-        fetchMessages(activeId)
+        fetchMessages(selectedConversationId)
             .then(msgs => {
+                if (activeIdRef.current !== selectedConversationId) return;
                 setMessages(msgs); // Keep chronological order (Oldest -> Newest)
+                messageSignatureRef.current = getMessageSignature(msgs);
+                void markConversationReadInUi(selectedConversationId);
 
                 // Refresh conversation details (status, suggests, etc)
-                refreshConversation(activeId).then(fresh => {
+                refreshConversation(selectedConversationId).then(fresh => {
+                    if (activeIdRef.current !== selectedConversationId) return;
                     if (fresh) {
-                        setConversations(prev => prev.map(c => c.id === activeId ? { ...c, ...fresh } : c));
+                        setConversations(prev => prev.map(c => c.id === selectedConversationId ? { ...c, ...fresh } : c));
                     }
                 });
 
@@ -294,18 +341,92 @@ export function ConversationInterface({ initialConversations, initialConversatio
                 // It runs silently and stops after finding duplicates.
                 if (msgs && msgs.length >= 0) {
                     // We run this without awaiting or loading state
-                    syncWhatsAppHistory(activeId, 20).then(res => {
+                    syncWhatsAppHistory(selectedConversationId, 20).then(res => {
                         if (res.success && res.count && res.count > 0) {
                             console.log(`[Smart Sync] Found ${res.count} new messages.`);
                             // Refresh quietly
-                            fetchMessages(activeId).then(setMessages);
+                            fetchMessages(selectedConversationId).then((freshMessages) => {
+                                if (activeIdRef.current !== selectedConversationId) return;
+                                setMessages(freshMessages);
+                                messageSignatureRef.current = getMessageSignature(freshMessages);
+                                void markConversationReadInUi(selectedConversationId);
+                            });
                         }
                     }).catch(err => console.error("[Smart Sync] Error:", err));
                 }
             })
             .catch(err => console.error(err))
             .finally(() => setLoadingMessages(false));
-    }, [activeId]);
+    }, [activeId, markConversationReadInUi]);
+
+    useEffect(() => {
+        if (viewMode !== 'chats' || viewFilter !== 'active') return;
+
+        let cancelled = false;
+
+        const runLiveSync = async () => {
+            if (liveSyncInFlightRef.current) return;
+            liveSyncInFlightRef.current = true;
+
+            try {
+                const selectedConversationId = activeIdRef.current;
+                const currentList = conversationsRef.current;
+                const currentActive = selectedConversationId
+                    ? currentList.find((c) => c.id === selectedConversationId)
+                    : null;
+
+                const data = await fetchConversations('active', selectedConversationId || undefined);
+                if (cancelled) return;
+
+                const incoming = Array.isArray(data?.conversations) ? data.conversations : [];
+                if (incoming.length === 0) return;
+
+                setConversations(prev => mergeConversationListsWithIncomingFirst(prev, incoming));
+
+                if (!selectedConversationId) return;
+
+                const incomingActive = incoming.find((c) => c.id === selectedConversationId);
+                if (!incomingActive) return;
+
+                const hasActiveConversationChanged =
+                    !currentActive ||
+                    incomingActive.lastMessageDate !== currentActive.lastMessageDate ||
+                    incomingActive.lastMessageBody !== currentActive.lastMessageBody;
+
+                if (!hasActiveConversationChanged) {
+                    if ((incomingActive.unreadCount || 0) > 0) {
+                        void markConversationReadInUi(selectedConversationId);
+                    }
+                    return;
+                }
+
+                const latestMessages = await fetchMessages(selectedConversationId);
+                if (cancelled || activeIdRef.current !== selectedConversationId) return;
+
+                const latestSignature = getMessageSignature(latestMessages);
+                if (latestSignature !== messageSignatureRef.current) {
+                    messageSignatureRef.current = latestSignature;
+                    setMessages(latestMessages);
+                }
+
+                if ((incomingActive.unreadCount || 0) > 0) {
+                    void markConversationReadInUi(selectedConversationId);
+                }
+            } catch (err) {
+                console.error("Live conversation sync failed:", err);
+            } finally {
+                liveSyncInFlightRef.current = false;
+            }
+        };
+
+        runLiveSync();
+        const intervalId = setInterval(runLiveSync, 3000);
+
+        return () => {
+            cancelled = true;
+            clearInterval(intervalId);
+        };
+    }, [viewMode, viewFilter, mergeConversationListsWithIncomingFirst, markConversationReadInUi]);
 
     // Handle clicking a conversation in the list
     const handleSelect = (id: string) => {

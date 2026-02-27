@@ -458,11 +458,18 @@ export function ConversationList({
                                                 <h4 className="font-semibold text-sm truncate flex-1">
                                                     {c.contactName || c.contactId || "Unknown Contact"}
                                                 </h4>
-                                                {(c as any).activeDealId && (
-                                                    <div title={`Linked to Deal: ${(c as any).activeDealTitle}`} className="ml-1">
-                                                        <LinkIcon className="h-3 w-3 text-indigo-500" />
-                                                    </div>
-                                                )}
+                                                <div className="ml-2 shrink-0 flex items-center gap-1">
+                                                    {c.unreadCount > 0 && (
+                                                        <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] leading-[18px] text-center font-semibold">
+                                                            {c.unreadCount > 99 ? "99+" : c.unreadCount}
+                                                        </span>
+                                                    )}
+                                                    {(c as any).activeDealId && (
+                                                        <div title={`Linked to Deal: ${(c as any).activeDealTitle}`}>
+                                                            <LinkIcon className="h-3 w-3 text-indigo-500" />
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </div>
                                             {/* Channel icon */}
                                             <div className="flex items-center gap-1 mt-1">
@@ -512,4 +519,3 @@ export function ConversationList({
         </div>
     );
 }
-
