@@ -33,6 +33,10 @@ Key behavior in the new workflow:
 - **Find Contact from Selection** searches contacts by `phone`, `email`, `name`, `firstName`, `lastName` with location-scoped ranking
 - **Summarize from Selection** calls `summarizeSelectionToCrmLog(...)` and stores a `ContactHistory` `MANUAL_ENTRY` in format `DD.MM.YY FirstName: summary`
 - **Custom from Selection** calls `runCustomSelectionPrompt(...)`, allows editing, and can persist via `saveCustomSelectionToCrmLog(...)`
+- **Model Consistency**: `Paste Lead` / `Summarize` / `Custom` reuse the currently selected AI model from the chat toolbar.
+- **Usage/trace visibility**:
+  - `Summarize` / `Custom` now persist `AgentExecution` usage and cost records (`selection_toolbar`) and update conversation token/cost counters
+  - `Find Contact` is non-AI and does not create model usage trace entries
 
 See also:
 - `documentation/ai-agentic-conversations-hub.md` (conversation UI behavior)
@@ -241,7 +245,8 @@ If `Pin notifier conversation to top` is enabled:
 
 Current behavior (important):
 - It reorders within the fetched conversation list window
-- It does not currently fetch a separate pinned thread if it falls outside the normal query window (unless the conversation is already selected via deep-link)
+- On the first page load (no cursor), if the notifier conversation is outside the initial window, the server attempts to fetch the best matching notifier thread and prepends it
+- On subsequent cursor pages, pinning still applies to rows already in that page payload
 
 ## Idempotency and Reprocessing Rules
 
@@ -354,5 +359,5 @@ Non-Outlook emails are intentionally not auto-badged unless already processed.
 ## Known Limitations / Future Improvements (Historical + Current)
 
 - Notifier/system mailbox contacts may still appear as normal lead contacts unless additionally tagged/badged at contact level
-- Pinning currently only reorders within the fetched conversation window
+- Pinning off-window injection currently applies to the initial page load (non-cursor fetch) only
 - Parsing is designed for the current legacy CRM email format; template changes in the old CRM may require parser updates

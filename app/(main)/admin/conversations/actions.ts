@@ -55,21 +55,69 @@ function formatLogDate(date: Date): string {
     return `${dd}.${mm}.${yy}`;
 }
 
-function deriveFirstName(name: string | null | undefined, email: string | null | undefined): string {
-    const rawName = String(name || "").trim();
-    if (rawName) {
-        return rawName.split(/\s+/)[0];
+function normalizeFirstNameToken(value: string | null | undefined): string {
+    const cleaned = String(value || "")
+        .trim()
+        .replace(/^[^A-Za-z]+/, "")
+        .replace(/[^A-Za-z'-]+$/g, "");
+
+    if (!cleaned) return "";
+    return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+}
+
+function deriveFirstNameFromEmail(email: string | null | undefined): string {
+    const rawEmail = String(email || "").trim().toLowerCase();
+    if (!rawEmail || !rawEmail.includes("@")) return "";
+
+    const [rawLocal, rawDomain] = rawEmail.split("@");
+    let local = String(rawLocal || "").split("+")[0].trim();
+    const domain = String(rawDomain || "").trim();
+
+    if (!local) return "";
+
+    // If local-part ends with a domain stem (e.g. "martindowntowncyprus@mg.downtowncyprus.com"),
+    // strip it so the remaining prefix can be used as first name.
+    const labels = domain.split(".").map((l) => l.trim()).filter(Boolean);
+    const domainStems = Array.from(new Set([
+        labels.length >= 2 ? labels[labels.length - 2] : "",
+        ...labels.filter((l) => l.length >= 4),
+    ]))
+        .filter(Boolean)
+        .sort((a, b) => b.length - a.length);
+
+    for (const stem of domainStems) {
+        if (local.endsWith(stem) && local.length > stem.length + 1) {
+            local = local.slice(0, -stem.length);
+            break;
+        }
     }
 
-    const emailLocal = String(email || "")
-        .split("@")[0]
+    const token = local
         .replace(/[._-]+/g, " ")
-        .trim();
-    if (!emailLocal) return "User";
+        .trim()
+        .split(/\s+/)[0] || "";
 
-    const firstToken = emailLocal.split(/\s+/)[0];
-    if (!firstToken) return "User";
-    return firstToken.charAt(0).toUpperCase() + firstToken.slice(1);
+    return normalizeFirstNameToken(token);
+}
+
+function deriveFirstName(
+    firstName: string | null | undefined,
+    name: string | null | undefined,
+    email: string | null | undefined
+): string {
+    const normalizedFirstName = normalizeFirstNameToken(firstName);
+    if (normalizedFirstName) return normalizedFirstName;
+
+    const rawName = String(name || "").trim();
+    if (rawName) {
+        const fromName = normalizeFirstNameToken(rawName.split(/\s+/)[0]);
+        if (fromName) return fromName;
+    }
+
+    const fromEmail = deriveFirstNameFromEmail(email);
+    if (fromEmail) return fromEmail;
+
+    return "User";
 }
 
 function formatCrmLogEntry(actorFirstName: string, body: string, date: Date = new Date()): string {
@@ -106,7 +154,7 @@ async function persistSelectionLogEntry(args: {
     const location = await getAuthenticatedLocation();
     const user = await db.user.findUnique({
         where: { clerkId: clerkUserId },
-        select: { id: true, name: true, email: true },
+        select: { id: true, firstName: true, name: true, email: true },
     });
 
     if (!user) {
@@ -119,7 +167,7 @@ async function persistSelectionLogEntry(args: {
     }
 
     const now = new Date();
-    const actorFirstName = deriveFirstName(user.name, user.email);
+    const actorFirstName = deriveFirstName(user.firstName, user.name, user.email);
     const entry = formatCrmLogEntry(actorFirstName, args.entryBody, now);
 
     await db.contactHistory.create({
@@ -165,6 +213,7 @@ async function persistSelectionAiExecution(args: {
     rawOutput: string;
     normalizedOutput: string;
     usage: SelectionUsage;
+    latencyMs?: number | null;
 }) {
     const estimatedCost = calculateRunCostFromUsage(args.modelId, {
         promptTokens: args.usage.promptTokens || 0,
@@ -173,6 +222,10 @@ async function persistSelectionAiExecution(args: {
         thoughtsTokens: args.usage.thoughtsTokens || 0,
         toolUsePromptTokens: args.usage.toolUsePromptTokens || 0,
     });
+
+    const normalizedLatency = typeof args.latencyMs === "number" && Number.isFinite(args.latencyMs)
+        ? Math.max(1, Math.round(args.latencyMs))
+        : undefined;
 
     await db.agentExecution.create({
         data: {
@@ -232,6 +285,7 @@ async function persistSelectionAiExecution(args: {
             completionTokens: args.usage.completionTokens || 0,
             totalTokens: args.usage.totalTokens || 0,
             cost: estimatedCost.amount,
+            latencyMs: normalizedLatency,
         },
     });
 
@@ -4518,6 +4572,7 @@ export async function summarizeSelectionToCrmLog(conversationId: string, selecte
         const modelId = typeof modelOverride === "string" && modelOverride.trim()
             ? modelOverride.trim()
             : getModelForTask("simple_generation");
+        const startedAt = Date.now();
         const summaryPrompt = [
             "You write concise internal CRM activity summaries for real estate teams.",
             "Rules:",
@@ -4534,6 +4589,7 @@ export async function summarizeSelectionToCrmLog(conversationId: string, selecte
         ].join("\n");
 
         const { text: rawSummary, usage } = await callLLMWithMetadata(modelId, summaryPrompt, undefined, { temperature: 0.2 });
+        const latencyMs = Date.now() - startedAt;
         const summary = normalizeSingleLine(rawSummary, "Contacted lead and captured conversation update.");
         const persisted = await persistSelectionLogEntry({
             conversationId: sanitizedConversationId,
@@ -4560,6 +4616,7 @@ export async function summarizeSelectionToCrmLog(conversationId: string, selecte
                     thoughtsTokens: usage.thoughtsTokens || 0,
                     toolUsePromptTokens: usage.toolUsePromptTokens || 0,
                 },
+                latencyMs,
             });
         } catch (traceError) {
             console.warn("[summarizeSelectionToCrmLog] Failed to persist AI usage trace:", traceError);
@@ -4600,6 +4657,7 @@ export async function runCustomSelectionPrompt(
         const modelId = typeof modelOverride === "string" && modelOverride.trim()
             ? modelOverride.trim()
             : getModelForTask("simple_generation");
+        const startedAt = Date.now();
         const systemPrompt = [
             "You are an assistant for CRM operators.",
             "Follow the operator instruction strictly, using only the provided selected text as context.",
@@ -4616,6 +4674,7 @@ export async function runCustomSelectionPrompt(
         ].join("\n");
 
         const { text: rawOutput, usage } = await callLLMWithMetadata(modelId, systemPrompt, undefined, { temperature: 0.25 });
+        const latencyMs = Date.now() - startedAt;
         const output = normalizeSingleLine(rawOutput, "No output generated.").slice(0, MAX_CUSTOM_OUTPUT_LENGTH);
 
         try {
@@ -4637,6 +4696,7 @@ export async function runCustomSelectionPrompt(
                         thoughtsTokens: usage.thoughtsTokens || 0,
                         toolUsePromptTokens: usage.toolUsePromptTokens || 0,
                     },
+                    latencyMs,
                 });
             }
         } catch (traceError) {

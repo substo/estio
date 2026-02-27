@@ -109,6 +109,8 @@ The system now treats communication channels as first-class citizens:
 *   **Channel Eligibility Guards (Feb 2026)**:
     *   **WhatsApp** is disabled when number eligibility checks fail.
     *   **SMS** is now disabled when the contact phone is invalid/masked or when GHL location SMS/phone-system settings are not configured.
+    *   **Server Enforcement**: `sendReply(...)` also re-checks SMS eligibility before sending, so direct/manual action calls cannot bypass the UI guard.
+    *   **Config Source**: SMS readiness is inferred from GHL `GET /locations/{locationId}` via `checkGHLSMSStatus(...)` (`lib/ghl/sms.ts`), with conservative fallback to ineligible/unknown states.
 *   **Professional Identity**: Emails are sent using the configured GHL Location Email (e.g., `info@agency.com`) rather than generic relays, ensuring better deliverability and professional appearance.
 
 ### Robust Synchronization
@@ -165,6 +167,7 @@ The conversation list is now loaded incrementally instead of a single fixed top-
 *   **Backend**: `fetchConversations(...)` uses cursor pagination with stable ordering (`lastMessageAt DESC`, `id DESC`).
 *   **Frontend**: The left list uses an `IntersectionObserver` sentinel to auto-load more rows when the user scrolls near the bottom.
 *   **Fallback**: A manual **Load more** button remains available if the observer does not fire (browser quirks / slow layouts).
+*   **Live Inbox Sync (Feb 2026)**: In chats/inbox mode, the client runs a short-interval refresh of `fetchConversations('active', activeId)` and merges results incoming-first. Updated conversations move to the top without a page reload.
 
 ### Individual Conversation Previews
 The conversation list uses a **compact layout** by default, showing only the contact name and channel icon. To view message details without disrupting the layout:
@@ -172,11 +175,19 @@ The conversation list uses a **compact layout** by default, showing only the con
 *   **HoverCard Popovers**: Each conversation row is wrapped in a Radix `HoverCard`. Hovering over a row triggers a floating preview card to appear to the right.
 *   **Preview Content**: The popover displays contact name, timestamp, status badge, channel badge, and a 4-line message preview.
 *   **Non-Disorienting UX**: Unlike the previous full-panel expansion, only the hovered row shows a preview—the list panel remains stable, preventing layout shifts.
+*   **Unread Badge (Feb 2026)**: Rows now also show `unreadCount` badges (capped display), so unread state is visible at a glance.
 
 **Key Components:**
 *   `components/ui/hover-card.tsx`: Radix HoverCard wrapper with 300ms open delay and 100ms close delay.
 *   `conversation-preview-card.tsx`: The popover content component.
 *   `conversation-list.tsx`: Wraps each row with `HoverCard` + `HoverCardTrigger` + `HoverCardContent`.
+
+### Live Thread Refresh & Read-State Handling (Feb 2026)
+While a thread is open, the UI now keeps the chat in sync without manual refresh:
+
+*   **Selected Thread Change Detection**: When polling detects `lastMessageDate`/`lastMessageBody` changes for the active conversation, the client silently re-fetches `fetchMessages(activeId)`.
+*   **Auto Read Reset**: Opening or live-refreshing an active thread with unread messages triggers `markConversationAsRead(conversationId)` to clear `unreadCount`.
+*   **Auto-scroll to Latest**: `ChatWindow` already auto-scrolls on message updates; with live refresh in place, new inbound messages are immediately shown at the bottom for the active thread.
 
 ### Email Overflow Containment & Layout Stability
 Large HTML emails or long text strings (URLs, JSON) could previously cause the entire app window to expand horizontally. This is now robustly fixed with:
@@ -195,6 +206,7 @@ We refactored the message display into a shared component (`_components/message-
     *   `Find Contact` (opens a contact search dialog seeded from the selection; supports phone/email/full-name lookup)
     *   `Summarize` (creates a concise CRM activity note and saves it to contact history)
     *   `Custom` (runs a user instruction over selected text context, returns editable output, and can save to CRM log)
+    *   **Model Consistency**: These actions reuse the currently selected AI model from the chat toolbar so drafts and selection-based actions run on the same model by default.
 
 ### Selection-Based Conversation Operations (Replaces Legacy CRM Email Buttons)
 The old message-level legacy CRM notification processing actions (`Process Lead`, `Reprocess`, `Old CRM`) were removed from the message bubble UI in favor of explicit text selection actions.
@@ -204,10 +216,17 @@ Why:
 *   **Lower False Positives**: Avoids guessing which emails are machine-generated lead notifications.
 *   **Reuse**: Uses the same `parseLeadFromText(...)` + `createParsedLead(...)` backend path as manual paste imports.
 *   **Shared CRM Logging Path**: `Summarize` and `Custom` persist into `ContactHistory` (`MANUAL_ENTRY`) with normalized one-line entries (`DD.MM.YY FirstName: ...`) so teammates can track progress without opening the full thread.
+*   **Observability**:
+    *   `Paste Lead` (`Analyze Lead Text`) persists an `AgentExecution` trace on import confirmation.
+    *   `Summarize` and `Custom` persist `AgentExecution` usage/cost records (`skillName: selection_toolbar`) and increment conversation token/cost aggregates.
+    *   `Find Contact` is a direct contact search action (non-AI), so it does not create model usage entries.
 
 Server actions used:
+*   `getSmsChannelEligibility(...)`
+*   `getWhatsAppChannelEligibility(...)`
+*   `parseLeadFromText(...)` (optional model override)
 *   `summarizeSelectionToCrmLog(...)`
-*   `runCustomSelectionPrompt(...)`
+*   `runCustomSelectionPrompt(...)` (optional model override)
 *   `saveCustomSelectionToCrmLog(...)`
 
 ### Channel-Specific From/To Display

@@ -3,6 +3,8 @@
 ## 1. Overview
 The AI Draft feature allows agents to quickly generate professional replies directly within the Chat Window. It supports a **"Sketch-to-Draft"** workflow where users type a rough instruction (e.g., *"say thanks and ask about budget"*) and the AI expands it into a polite, context-aware message.
 
+As of Feb 2026, draft generation also applies a **name-greeting cadence rule** to avoid repetitive openers like `Hi George,` in consecutive short-interval messages.
+
 ## 2. Architecture: Local-First Hybrid
 To ensure resilience, speed, and compatibility with both "Synced" (GHL) and "Shadow" (WhatsApp-only) conversations, we use a **Local-First** architecture.
 
@@ -10,7 +12,8 @@ To ensure resilience, speed, and compatibility with both "Synced" (GHL) and "Sha
 When a user clicks generic draft:
 1.  **Source**: We read conversation history primarily from the **Local Database** (`db.conversation` + `db.message`).
 2.  **Fallback**: We only attempt to fetch from GoHighLevel (GHL) if the local conversation is completely empty or missing.
-3.  **Why**: This prevents `400 Bad Request` errors caused by sending internal IDs to GHL and ensures the UI remains responsive even if GHL's API is slow or down.
+3.  **Timing Context**: Message timestamps are included in prompt context so AI can respect greeting cadence rules.
+4.  **Why**: This prevents `400 Bad Request` errors caused by sending internal IDs to GHL and ensures the UI remains responsive even if GHL's API is slow or down.
 
 ### 2.2 The "Write" Path (Sending Messages)
 When the user sends the message, we ensure data consistency using a **Just-In-Time (JIT) Upsync** pattern:
@@ -36,8 +39,16 @@ It is critical to distinguish between **Content** and **Metadata**:
     *   *Example*: "tell him we have a viewing at 5pm"
 2.  **Click Sparkles**: Press the AI icon (Sparkles).
 3.  **Review**: The AI replaces your rough text with a polished draft.
-    *   *Result*: "Hi [Name], just confirming we have a viewing scheduled for today at 5:00 PM. Looking forward to seeing you there!"
+    *   *Result*: "Just confirming we have a viewing scheduled for today at 5:00 PM. Looking forward to seeing you there!"
 4.  **Edit & Send**: Make any final tweaks and press Send.
+
+### Greeting Cadence Rules (Feb 2026)
+- Name greeting (for example `Hi George,`) is allowed only when:
+  - it is first outreach in the thread, or
+  - the conversation resumed on a new day, or
+  - there was a long break between recent messages (currently `>= 3` hours).
+- For active back-to-back conversation, drafts should start directly with message intent and avoid repeating the contact's name greeting.
+- A safety post-processor strips a leading name greeting when it violates this rule.
 
 ## 5. Troubleshooting
 
@@ -58,12 +69,16 @@ Search server logs for the tag `[AI Draft]`.
     [AI Draft] GHL Context Fetch Failed: 400 Bad Request
     ```
     *Note: This warning is now safely handled by the Local-First fallback and does not block the user.*
+-   **Greeting Guard Applied**:
+    ```
+    [AI Draft] Removed leading name greeting based on timing rule.
+    ```
 
 ### Common Issues
 1.  **"Error generating draft"**:
     -   Check if the Google Gemini API Key is configured in `SiteConfig` or `.env`.
 
-## 4. AI Model Selection
+## 6. AI Model Selection
 
 ### Overview
 Users can override the default AI model directly from the Chat Window before generating a draft.
@@ -74,12 +89,20 @@ Users can override the default AI model directly from the Chat Window before gen
 3.  **Backend**: The selected model ID is passed to `generateAIDraft` -> `generateDraft`.
 4.  **Cost Tracking**: `AgentExecution` records the specific model used for accurate cost calculation.
 
+### Model Reuse in Selection Actions (New)
+The same active model selection is also reused by message text-selection actions in the Chat Window:
+- `Paste Lead`: `parseLeadFromText(selection, model?)`
+- `Summarize`: `summarizeSelectionToCrmLog(conversationId, selection, model?)`
+- `Custom`: `runCustomSelectionPrompt(conversationId, selection, instruction, model?)`
+
+This keeps selection-based outputs aligned with the tone/capability of the current draft model.
+
 ### Configuration
 -   **Default Model**: Resolved server-side for AI Draft (`Settings > AI Agent` override first; else `gemini-flash-latest`; fallback to pinned Flash if alias unavailable).
 -   **Available Models**: Fetched dynamically from Google's API (paginated) and merged with curated aliases (e.g., `gemini-flash-latest`) so the dropdown stays current while preserving stable alias options.
 
 
-## 6. Smart Replies (Auto-Suggestions)
+## 7. Smart Replies (Auto-Suggestions)
 
 ### Overview
 The system automatically analyzes inbound WhatsApp messages to suggest 3 quick "next actions" or intents (e.g., "Confirm Viewing", "Send Price List"). These appear as bubbles in the Chat Window.

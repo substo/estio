@@ -83,6 +83,7 @@ Real-time visibility into:
 - **Querying**: `getTraceTree(traceId)` server action reconstructs the flat database rows into a recursive `TraceNode` tree.
 - **Frontend**: `TraceNodeRenderer` component handles the recursive visual rendering.
 - **Paste Lead Trace Path**: `Analyze Lead Text` traces now persist `cost` on `AgentExecution` and include a dedicated "Usage & cost estimate" thought step before import enrichment.
+- **Selection Toolbar Usage Path (Feb 2026)**: `Summarize` and `Custom` actions also persist `AgentExecution` records (`skillName: selection_toolbar`) with model, usage tokens, and estimated cost, so these runs appear in AI history/trace UX.
 
 ---
 

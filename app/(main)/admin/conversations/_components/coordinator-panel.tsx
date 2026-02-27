@@ -743,7 +743,11 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
                                                     </div>
                                                     <div className="flex items-center gap-1.5">
                                                         <Activity className="w-3.5 h-3.5" />
-                                                        <span className="font-mono">{rawTrace.latencyMs ? `${rawTrace.latencyMs}ms` : 'N/A'}</span>
+                                                        <span className="font-mono">
+                                                            {typeof rawTrace.latencyMs === "number" && Number.isFinite(rawTrace.latencyMs)
+                                                                ? `${rawTrace.latencyMs}ms`
+                                                                : "N/A"}
+                                                        </span>
                                                     </div>
                                                     <div className="flex items-center gap-1.5">
                                                         <div className="w-1.5 h-1.5 rounded-full bg-slate-400" />
@@ -881,7 +885,11 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
                                                     <CardContent className="p-4 grid grid-cols-2 gap-4">
                                                         <div>
                                                             <div className="text-[10px] font-bold text-slate-400 uppercase">Latency</div>
-                                                            <div className="text-sm font-mono">{rawTrace.latencyMs || 0}ms</div>
+                                                            <div className="text-sm font-mono">
+                                                                {typeof rawTrace.latencyMs === "number" && Number.isFinite(rawTrace.latencyMs)
+                                                                    ? `${rawTrace.latencyMs}ms`
+                                                                    : "N/A"}
+                                                            </div>
                                                         </div>
                                                         <div>
                                                             <div className="text-[10px] font-bold text-slate-400 uppercase">Cost</div>

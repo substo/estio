@@ -334,9 +334,13 @@ Selected text inside `/admin/conversations` message bubbles (including HTML emai
     -   Generates a concise CRM activity note from selected text and saves to contact history.
     -   Persists as `ContactHistory.action = MANUAL_ENTRY`.
     -   Saved entry format: `DD.MM.YY FirstName: summary`.
+    -   Uses the currently selected chat-window AI model.
+    -   Persists an `AgentExecution` usage/cost trace (`skillName: selection_toolbar`, `intent: selection_summary`).
 -   **Custom**:
     -   Runs a user instruction prompt with selected text as context.
     -   Returns editable output and can optionally save to contact history (same format/path as `Summarize`).
+    -   Uses the currently selected chat-window AI model.
+    -   Persists an `AgentExecution` usage/cost trace (`skillName: selection_toolbar`, `intent: selection_custom`).
 
 ## Data Integrity & Validation
 
@@ -365,6 +369,9 @@ Data is automatically normalized before being saved to the database:
 -   **User Resolution**: Internal User IDs are correctly resolved and stored for history and viewing records, preventing foreign key errors with external Auth IDs (Clerk).
 -   **Readable Changes**: The history log enriches raw ID changes (e.g., Property ID changed) with human-readable names (e.g., Property Title changed) for better auditability.
 -   **Selection CRM Logs**: Conversation toolbar `Summarize`/`Custom` saves team-visible progress notes into `ContactHistory` as `MANUAL_ENTRY`, keeping contact timeline updates centralized.
+-   **Selection AI Usage Accounting**:
+    -   `Summarize` and `Custom` increment `Conversation.promptTokens`, `completionTokens`, `totalTokens`, and `totalCost`.
+    -   `Find Contact` remains a non-AI contact search and does not create usage traces.
 
 ## Security & Authorization
 

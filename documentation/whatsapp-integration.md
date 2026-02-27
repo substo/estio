@@ -1,5 +1,5 @@
 # WhatsApp Integration: Custom Channel ("Linked Device")
-**Last Updated:** 2026-02-23
+**Last Updated:** 2026-02-27
 **Related:** [Legacy Integration](whatsapp-integration-legacy.md)
 
 ## Overview
@@ -185,6 +185,19 @@ To avoid defaulting every manually-created lead/thread to WhatsApp when the numb
   - If not confirmed (or lookup fails / Evolution unavailable), it falls back to `TYPE_SMS`.
 
 This only affects the **default channel selection** for newly created/imported conversations; it does not force-convert established email threads.
+
+### 9. Live Inbox + Unread Behavior in Conversations UI (Feb 27, 2026)
+
+To improve operational responsiveness during active WhatsApp handling in `/admin/conversations`, the chat UI now updates without page refresh:
+
+- **Live Inbox Polling**: In chats + inbox view, the client polls `fetchConversations('active', activeId)` on a short interval.
+- **Immediate Reorder**: Results are merged incoming-first, so conversations with a new WhatsApp message appear at the top immediately.
+- **Unread Badge**: Conversation rows render `unreadCount` badges directly in the list (`99+` cap).
+- **Read Reset for Active Thread**:
+  - New server action: `markConversationAsRead(conversationId)` in `app/(main)/admin/conversations/actions.ts`
+  - Called when opening a thread and during live refresh if that active thread has unread items.
+- **Live Active Thread Refresh**: If the selected conversation summary changes (`lastMessageDate`/`lastMessageBody`), the message timeline is re-fetched silently.
+- **Auto-scroll to Latest**: `ChatWindow` already auto-scrolls to bottom on message updates, so live inbound messages remain visible in the active thread.
 
 ## Setup Guide
 

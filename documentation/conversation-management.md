@@ -2,7 +2,7 @@
 **Last Updated:** 2026-02-27
 
 ## Overview
-This document outlines the architecture and logic for managing conversation lifecycles, specifically focusing on **Soft Deletion**, **Archiving**, and the **Trash** system introduced in Feb 2026.
+This document outlines the architecture and logic for managing conversation lifecycles, including **Soft Deletion**, **Archiving**, **Trash**, and **live inbox/unread state behavior** introduced in Feb 2026.
 
 ## Data Model Changes
 We updated the `Conversation` model in `prisma/schema.prisma` to support these features without losing data:
@@ -37,6 +37,16 @@ The Conversations list (`/admin/conversations`) is now **cursor-paginated** and 
 - **Why**: Prevents performance degradation from loading all conversations at once and avoids duplicate/missing rows that are common with offset paging on actively changing inboxes.
 - **UI Loading**: The left conversation panel uses **infinite scroll** (IntersectionObserver) and a manual **Load more** fallback button.
 - **Deep Links**: If a URL-selected conversation (`?id=...`) is outside the current page window, the server injects it into the initial payload so the center/right panels can still render.
+
+### 1.2 Live Inbox Refresh, Reordering, and Unread State
+The inbox now updates on-page without requiring a manual refresh:
+
+- **Live Polling (Inbox only)**: In `view=active` + chats mode, the client polls `fetchConversations('active', activeId)` on a short interval.
+- **Live Reordering**: Incoming rows are merged **incoming-first** so conversations with newer `lastMessageAt` naturally move to the top immediately.
+- **Unread Badges**: Each row displays `Conversation.unreadCount` as a compact badge (`99+` cap).
+- **Read Reset on Open Thread**: Opening a thread (and live-refreshing an already open thread) calls `markConversationAsRead(conversationId)` to reset unread count to `0`.
+- **Active Thread Live Refresh**: If the selected conversation’s `lastMessageDate` or `lastMessageBody` changes during polling, messages are re-fetched silently.
+- **Auto-scroll**: ChatWindow auto-scrolls to the bottom whenever the message array changes, so fresh inbound messages are visible immediately when viewing that thread.
 
 ### 2. Formatting & Actions
 
@@ -96,6 +106,9 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
 | `restoreConversations(ids)` | Resets `deletedAt` to NULL. |
 | `archiveConversations(ids)` | Sets `archivedAt`. |
 | `emptyTrash()` | Permanently deletes all soft-deleted items > 30 days old (manual trigger). |
+| `markConversationAsRead(conversationId)` | Resets `unreadCount` to `0` for the selected conversation (location-scoped security check). |
+| `getSmsChannelEligibility(conversationId)` | Returns SMS send eligibility (`eligible`/`ineligible`/`unknown`) based on contact phone validity + GHL location SMS/phone-system readiness. |
+| `getWhatsAppChannelEligibility(conversationId)` | Returns WhatsApp send eligibility based on contact phone validity + Evolution checks. |
 
 ## UI Implementation
 - **View Filters**: `ConversationList` header uses icon buttons (Inbox, Archive, Trash) with a hoverable dropdown for quick switching.
@@ -104,12 +117,22 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
 - **URL Synchronization**: View state (`active`, `archived`, `trash`) is synced to the URL (`?view=...`), allowing for bookmarking and sharing of specific lists.
 - **Infinite Scroll**: The left list auto-loads more conversations near the bottom using a sentinel + `IntersectionObserver`, with a visible "Load more" fallback.
 - **Deep-Link Stability**: URL-selected conversations are preserved during list refreshes and view changes, preventing the center panel from dropping back to "Select a conversation" when the selected item is older than the first page.
+- **Live Inbox Reordering**: Inbox updates are merged with incoming-first ordering so newly active conversations move to top in real time.
+- **Unread Badges**: List rows show unread counts from `Conversation.unreadCount`.
+- **Auto Read Reset**: Selecting a conversation marks it read and clears the badge.
+- **Active Thread Live Updates**: While a thread is open, metadata changes trigger silent message refresh; ChatWindow auto-scroll keeps the latest message visible.
+- **Channel Guards**: The composer channel picker disables ineligible channels with a reason tooltip. SMS is blocked when phone is invalid/masked or GHL SMS is not configured; WhatsApp is blocked when eligibility checks fail.
 - **Selection Actions**: Message/email text selection in the chat panel now opens a floating action toolbar with:
   - `Paste Lead` for AI-assisted structured lead import.
   - `Find Contact` for phone/email/full-name lookup.
   - `Summarize` to generate and save a CRM log note into contact history.
   - `Custom` to run a user-provided prompt against selected text and optionally save the output to CRM log.
+- **Selection Model Consistency**: `Paste Lead`/`Summarize`/`Custom` use the currently selected AI model from the chat toolbar, keeping tone/behavior consistent with AI Draft.
 - **CRM Log Save Format**: Selection-based CRM log entries are saved as `MANUAL_ENTRY` in `ContactHistory` using format `DD.MM.YY FirstName: summary`.
+- **Selection Observability**:
+  - `Summarize` and `Custom` persist `AgentExecution` records (usage, model, cost estimate, request/response snapshots) and increment conversation token/cost totals.
+  - `Paste Lead` persists `Analyze Lead Text` trace metadata when the user confirms import.
+  - `Find Contact` is non-AI and does not produce AI usage/trace entries.
 
 ## WhatsApp Import
 We support importing `.txt` chat exports from WhatsApp directly into a specific conversation.
