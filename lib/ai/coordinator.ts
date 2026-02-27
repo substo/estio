@@ -27,6 +27,17 @@ type DraftMessage = {
 };
 
 const NAME_GREETING_LONG_BREAK_HOURS = 3;
+const SIGN_OFF_PHRASES = new Set([
+    "best regards",
+    "kind regards",
+    "warm regards",
+    "regards",
+    "sincerely",
+    "many thanks",
+    "thanks and regards",
+    "thank you",
+    "thanks"
+]);
 
 function isModelUnavailableError(error: unknown): boolean {
     const message = (error instanceof Error ? error.message : String(error || "")).toLowerCase();
@@ -69,6 +80,19 @@ function escapeRegExp(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function stripHtmlTags(value: string): string {
+    return value.replace(/<[^>]+>/g, " ");
+}
+
+function normalizeLineForSignoff(value: string): string {
+    return stripHtmlTags(value)
+        .replace(/\u00a0/g, " ")
+        .trim()
+        .toLowerCase()
+        .replace(/[,:;.!-]+$/g, "")
+        .replace(/\s+/g, " ");
+}
+
 function stripLeadingNameGreeting(text: string, firstName: string | null, allowNameGreeting: boolean): string {
     if (allowNameGreeting || !firstName) return text;
 
@@ -77,6 +101,46 @@ function stripLeadingNameGreeting(text: string, firstName: string | null, allowN
 
     const salutationRegex = new RegExp(`^\\s*(?:hi|hello|hey|dear)\\s+${escapedFirstName}\\s*[,:!\\-]*\\s*`, "i");
     return text.replace(salutationRegex, "").trimStart();
+}
+
+function stripManualSignatureBlock(text: string): string {
+    const trimmed = text.trim();
+    if (!trimmed) return text;
+
+    const normalized = trimmed
+        .replace(/<\/p>\s*<p[^>]*>/gi, "<br>")
+        .replace(/<\/div>\s*<div[^>]*>/gi, "<br>");
+    const usesHtmlBreaks = /<br\s*\/?>/i.test(normalized);
+    const lines = normalized.split(/(?:\r?\n|<br\s*\/?>)/i);
+
+    if (lines.length < 2) return trimmed;
+
+    const nonEmptyLines = lines
+        .map((line, idx) => ({
+            idx,
+            normalized: normalizeLineForSignoff(line),
+            raw: stripHtmlTags(line).replace(/\u00a0/g, " ").trim()
+        }))
+        .filter(item => item.raw.length > 0);
+
+    if (nonEmptyLines.length < 2) return trimmed;
+
+    for (let pointer = nonEmptyLines.length - 2; pointer >= Math.max(0, nonEmptyLines.length - 7); pointer--) {
+        const candidate = nonEmptyLines[pointer];
+        if (!SIGN_OFF_PHRASES.has(candidate.normalized)) continue;
+
+        const nonEmptyAfter = nonEmptyLines.length - pointer - 1;
+        if (nonEmptyAfter < 1 || nonEmptyAfter > 4) continue;
+
+        const stripped = lines
+            .slice(0, candidate.idx)
+            .join(usesHtmlBreaks ? "<br>" : "\n")
+            .trim();
+
+        return stripped || trimmed;
+    }
+
+    return trimmed;
 }
 
 export async function generateDraft(context: CoordinationContext) {
@@ -286,6 +350,10 @@ export async function generateDraft(context: CoordinationContext) {
         - Greeting decision for this draft: ${allowNameGreeting ? "Name greeting is ALLOWED." : "Name greeting is NOT ALLOWED."}
         - Greeting decision reason: ${greetingDecisionReason}
         ${!allowNameGreeting ? '- Start directly with the message purpose and do NOT open with "Hi {FirstName},".' : ""}
+        - Do NOT include manual signature blocks in the draft.
+        ${isEmail
+                ? '- Email-specific: Do NOT add sign-offs like "Best regards, [Name], [Company]". Signature is appended automatically by the sending system.'
+                : '- Messaging-specific: Never add email-style signatures or full name/company sign-offs in WhatsApp/SMS.'}
         - If this appears to be a first outreach or imported lead enquiry (notes/listing details but no real typed message), write a proactive first response.
         - If agent name and business name are available, introduce the agent naturally in first outreach (e.g. "It's ${agentName || "the agent"} at ${businessName} here.").
         - If a property is marked rented/sold/unavailable in the context, say that clearly early in the message.
@@ -403,9 +471,13 @@ export async function generateDraft(context: CoordinationContext) {
 
         const response = result.response;
         const rawText = response.text();
-        const text = stripLeadingNameGreeting(rawText, contactFirstName, allowNameGreeting);
-        if (text !== rawText) {
+        const withoutRepeatedGreeting = stripLeadingNameGreeting(rawText, contactFirstName, allowNameGreeting);
+        if (withoutRepeatedGreeting !== rawText) {
             console.log("[AI Draft] Removed leading name greeting based on timing rule.");
+        }
+        const text = stripManualSignatureBlock(withoutRepeatedGreeting);
+        if (text !== withoutRepeatedGreeting) {
+            console.log("[AI Draft] Removed manual signature block from draft output.");
         }
 
         // 5. Track Costs & Usage
