@@ -39,15 +39,7 @@ const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
   // Helper: Create Internal Rewrite using ABSOLUTE URL
   const createInternalRewrite = (targetPath: string) => {
     const normalizedPath = targetPath.startsWith('/') ? targetPath : `/${targetPath}`;
-    const destUrlString = `http://localhost:3000${normalizedPath}`;
-    const destUrl = new URL(destUrlString);
-
-    if (targetPath.includes('?')) {
-      const [p, q] = targetPath.split('?');
-      destUrl.pathname = p;
-      const targetParams = new URLSearchParams(q);
-      targetParams.forEach((v, k) => destUrl.searchParams.set(k, v));
-    }
+    const destUrl = new URL(normalizedPath, req.url);
 
     destUrl.searchParams.set('_internal_rewrite', 'true');
     console.log(`[Middleware] Rewriting Tenant to: ${destUrl.toString()}`);
@@ -123,7 +115,7 @@ const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
       const requestHeaders = new Headers(req.headers);
       requestHeaders.set("x-enable-satellite", "true");
 
-      const destUrl = new URL(`http://localhost:3000${path}`);
+      const destUrl = new URL(path, req.url);
       destUrl.searchParams.set('_internal_rewrite', 'true');
 
       return NextResponse.rewrite(destUrl, {

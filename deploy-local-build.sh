@@ -205,7 +205,7 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
     fi
 
     cd "\$TARGET_DIR"
-    PORT="\$TARGET_PORT" NODE_ENV=production pm2 start npm --name "\$TARGET_APP_NAME" -- start -- -H 127.0.0.1
+    PORT="\$TARGET_PORT" NODE_ENV=production pm2 start npm --name "\$TARGET_APP_NAME" -- start
 
     echo "🩺 Waiting for target health check..."
     for i in \$(seq 1 45); do
