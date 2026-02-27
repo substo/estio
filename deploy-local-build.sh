@@ -228,8 +228,8 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
     # Update Caddy upstream to point at target color port, then reload gracefully.
     if [ -f /etc/caddy/Caddyfile ]; then
         cp /etc/caddy/Caddyfile "/etc/caddy/Caddyfile.bak.\$(date +%Y%m%d%H%M%S)"
-        sed -E -i "s|localhost:[0-9]+|localhost:\$TARGET_PORT|g" /etc/caddy/Caddyfile
-        sed -E -i "s|reverse_proxy[[:space:]]+localhost([^:0-9]|$)|reverse_proxy localhost:\$TARGET_PORT\\\\1|g" /etc/caddy/Caddyfile
+        sed -E -i "s#localhost:[0-9]+#localhost:\$TARGET_PORT#g" /etc/caddy/Caddyfile
+        sed -E -i "s#reverse_proxy[[:space:]]+localhost([[:space:]]|$)#reverse_proxy localhost:\$TARGET_PORT\\\\1#g" /etc/caddy/Caddyfile
 
         caddy validate --config /etc/caddy/Caddyfile
         systemctl reload caddy || systemctl restart caddy
