@@ -19,6 +19,8 @@ Instead of parsing CRM notification emails automatically, Estio now uses an expl
 3. Choose one of:
    - `Paste Lead` (reuses the existing AI lead import flow)
    - `Find Contact` (search by phone/email/full name)
+   - `Summarize` (creates a concise CRM activity note and saves it to contact history)
+   - `Custom` (runs a user prompt with selected text as context, then optionally saves output to CRM log)
 
 Why this replaced the old automation:
 - lower complexity
@@ -29,6 +31,8 @@ Why this replaced the old automation:
 Key behavior in the new workflow:
 - **Paste Lead from Selection** opens a prefilled dialog and calls the same backend path as manual paste import (`parseLeadFromText(...)` + `createParsedLead(...)`)
 - **Find Contact from Selection** searches contacts by `phone`, `email`, `name`, `firstName`, `lastName` with location-scoped ranking
+- **Summarize from Selection** calls `summarizeSelectionToCrmLog(...)` and stores a `ContactHistory` `MANUAL_ENTRY` in format `DD.MM.YY FirstName: summary`
+- **Custom from Selection** calls `runCustomSelectionPrompt(...)`, allows editing, and can persist via `saveCustomSelectionToCrmLog(...)`
 
 See also:
 - `documentation/ai-agentic-conversations-hub.md` (conversation UI behavior)
@@ -313,7 +317,8 @@ Non-Outlook emails are intentionally not auto-badged unless already processed.
 3. Select the lead text (full block or a phone/email/name snippet)
 4. Use `Paste Lead` for structured lead import (AI-assisted)
 5. Use `Find Contact` for quick lookup/open contact/open conversation
-6. Reserve legacy CRM email automation settings only for debugging/backward reference until removed
+6. Use `Summarize` or `Custom` when you want to store team-visible CRM progress notes without opening the contact edit form
+7. Reserve legacy CRM email automation settings only for debugging/backward reference until removed
 
 ## Current Key Code References (Selection-Based Workflow)
 
@@ -321,7 +326,8 @@ Non-Outlook emails are intentionally not auto-badged unless already processed.
 - Message bubble integration: `app/(main)/admin/conversations/_components/message-bubble.tsx`
 - Email iframe selection bridge: `app/(main)/admin/conversations/_components/email-frame.tsx`
 - Contact search action (ranked): `app/(main)/admin/contacts/actions.ts`
-- Paste lead parser/import: `app/(main)/admin/conversations/actions.ts`
+- Paste lead parser/import + selection summarize/custom CRM logging: `app/(main)/admin/conversations/actions.ts`
+- Contact history storage/rendering (CRM log visibility): `app/(main)/admin/contacts/actions.ts`, `app/(main)/admin/contacts/_components/history-tab.tsx`
 - Outlook sync (email ingestion only): `lib/microsoft/owa-email-sync.ts`, `lib/microsoft/outlook-sync.ts`
 
 ## Historical Code References (Legacy Automation)

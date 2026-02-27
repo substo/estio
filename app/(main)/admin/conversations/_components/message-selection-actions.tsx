@@ -66,6 +66,7 @@ interface MessageSelectionActionsProps {
     selection: MessageSelectionActionTarget | null;
     onClearSelection: () => void;
     conversationId?: string | null;
+    aiModel?: string | null;
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -105,7 +106,7 @@ function getSelectionPreview(text: string) {
     return `${compact.slice(0, 140)}...`;
 }
 
-export function MessageSelectionActions({ selection, onClearSelection, conversationId }: MessageSelectionActionsProps) {
+export function MessageSelectionActions({ selection, onClearSelection, conversationId, aiModel }: MessageSelectionActionsProps) {
     const router = useRouter();
     const toolbarRef = useRef<HTMLDivElement>(null);
 
@@ -136,6 +137,7 @@ export function MessageSelectionActions({ selection, onClearSelection, conversat
     const [isRunningCustom, setIsRunningCustom] = useState(false);
     const [isSavingCustom, setIsSavingCustom] = useState(false);
     const [customSavedEntry, setCustomSavedEntry] = useState("");
+    const activeAiModel = typeof aiModel === "string" && aiModel.trim() ? aiModel.trim() : undefined;
 
     const selectionVisible = !!selection && !pasteLeadOpen && !findContactOpen && !summarizeOpen && !customOpen;
 
@@ -236,7 +238,7 @@ export function MessageSelectionActions({ selection, onClearSelection, conversat
         if (!leadText.trim()) return;
         setIsAnalyzingLead(true);
         try {
-            const res = await parseLeadFromText(leadText);
+            const res = await parseLeadFromText(leadText, activeAiModel);
             if (!res.success || !res.data) {
                 toast.error(res.error || "Failed to analyze selected text");
                 return;
@@ -279,7 +281,7 @@ export function MessageSelectionActions({ selection, onClearSelection, conversat
 
         setIsSummarizing(true);
         try {
-            const res = await summarizeSelectionToCrmLog(conversationId, summarizeSelectionText);
+            const res = await summarizeSelectionToCrmLog(conversationId, summarizeSelectionText, activeAiModel);
             if (!res?.success || !res?.entry) {
                 toast.error(res?.error || "Failed to summarize and save to CRM log");
                 return;
@@ -306,7 +308,7 @@ export function MessageSelectionActions({ selection, onClearSelection, conversat
 
         setIsRunningCustom(true);
         try {
-            const res = await runCustomSelectionPrompt(conversationId, customSelectionText, customInstruction);
+            const res = await runCustomSelectionPrompt(conversationId, customSelectionText, customInstruction, activeAiModel);
             if (!res?.success || !res?.output) {
                 toast.error(res?.error || "Failed to run custom action");
                 return;

@@ -1,5 +1,5 @@
 # Conversation Management & Deletion Features
-**Last Updated:** 2026-02-25
+**Last Updated:** 2026-02-27
 
 ## Overview
 This document outlines the architecture and logic for managing conversation lifecycles, specifically focusing on **Soft Deletion**, **Archiving**, and the **Trash** system introduced in Feb 2026.
@@ -104,7 +104,12 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
 - **URL Synchronization**: View state (`active`, `archived`, `trash`) is synced to the URL (`?view=...`), allowing for bookmarking and sharing of specific lists.
 - **Infinite Scroll**: The left list auto-loads more conversations near the bottom using a sentinel + `IntersectionObserver`, with a visible "Load more" fallback.
 - **Deep-Link Stability**: URL-selected conversations are preserved during list refreshes and view changes, preventing the center panel from dropping back to "Select a conversation" when the selected item is older than the first page.
-- **Selection Actions**: Message/email text selection in the chat panel now opens a floating action toolbar (`Paste Lead`, `Find Contact`) for explicit lead import and contact lookup workflows.
+- **Selection Actions**: Message/email text selection in the chat panel now opens a floating action toolbar with:
+  - `Paste Lead` for AI-assisted structured lead import.
+  - `Find Contact` for phone/email/full-name lookup.
+  - `Summarize` to generate and save a CRM log note into contact history.
+  - `Custom` to run a user-provided prompt against selected text and optionally save the output to CRM log.
+- **CRM Log Save Format**: Selection-based CRM log entries are saved as `MANUAL_ENTRY` in `ContactHistory` using format `DD.MM.YY FirstName: summary`.
 
 ## WhatsApp Import
 We support importing `.txt` chat exports from WhatsApp directly into a specific conversation.

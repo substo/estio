@@ -49,9 +49,10 @@ export interface MessageBubbleProps {
     contactPhone?: string;
     contactEmail?: string;
     contactName?: string; // Fallback contact name if message.contactName missing
+    aiModel?: string | null;
 }
 
-export function MessageBubble({ message, contactPhone, contactEmail: _contactEmail, contactName }: MessageBubbleProps) {
+export function MessageBubble({ message, contactPhone, contactEmail: _contactEmail, contactName, aiModel }: MessageBubbleProps) {
     const isOutbound = message.direction === 'outbound';
     const isEmail = (message.type || '').toUpperCase().includes('EMAIL');
     const isSMS = (message.type || '').toUpperCase().includes('SMS') || (message.type || '').toUpperCase().includes('PHONE');
@@ -348,6 +349,7 @@ export function MessageBubble({ message, contactPhone, contactEmail: _contactEma
                 selection={selectionTarget}
                 onClearSelection={clearSelectionTarget}
                 conversationId={message.conversationId || null}
+                aiModel={aiModel || null}
             />
 
             <Dialog open={selectedImageIndex !== null} onOpenChange={(open) => { if (!open) setSelectedImageIndex(null); }}>

@@ -106,6 +106,9 @@ The Conversations page header includes compact **connection/sync status indicato
 - Expired Outlook Puppeteer sessions are intentionally **visible** (error state) instead of hidden, so users can diagnose sync issues from `/admin/conversations` without navigating away.
 The system now treats communication channels as first-class citizens:
 *   **Dynamic Selector**: Agents can switch between SMS, Email, and WhatsApp within the same thread.
+*   **Channel Eligibility Guards (Feb 2026)**:
+    *   **WhatsApp** is disabled when number eligibility checks fail.
+    *   **SMS** is now disabled when the contact phone is invalid/masked or when GHL location SMS/phone-system settings are not configured.
 *   **Professional Identity**: Emails are sent using the configured GHL Location Email (e.g., `info@agency.com`) rather than generic relays, ensuring better deliverability and professional appearance.
 
 ### Robust Synchronization
@@ -190,14 +193,22 @@ We refactored the message display into a shared component (`_components/message-
 *   **Selection Actions (New)**: Selecting text in message bodies or inside HTML email content shows a floating action toolbar with:
     *   `Paste Lead` (opens a prefilled lead-import flow using the existing AI paste-lead pipeline)
     *   `Find Contact` (opens a contact search dialog seeded from the selection; supports phone/email/full-name lookup)
+    *   `Summarize` (creates a concise CRM activity note and saves it to contact history)
+    *   `Custom` (runs a user instruction over selected text context, returns editable output, and can save to CRM log)
 
-### Selection-Based Lead Processing (Replaces Legacy CRM Email Buttons)
+### Selection-Based Conversation Operations (Replaces Legacy CRM Email Buttons)
 The old message-level legacy CRM notification processing actions (`Process Lead`, `Reprocess`, `Old CRM`) were removed from the message bubble UI in favor of explicit text selection actions.
 
 Why:
 *   **Operator Intent First**: The user chooses what text to process/search.
 *   **Lower False Positives**: Avoids guessing which emails are machine-generated lead notifications.
 *   **Reuse**: Uses the same `parseLeadFromText(...)` + `createParsedLead(...)` backend path as manual paste imports.
+*   **Shared CRM Logging Path**: `Summarize` and `Custom` persist into `ContactHistory` (`MANUAL_ENTRY`) with normalized one-line entries (`DD.MM.YY FirstName: ...`) so teammates can track progress without opening the full thread.
+
+Server actions used:
+*   `summarizeSelectionToCrmLog(...)`
+*   `runCustomSelectionPrompt(...)`
+*   `saveCustomSelectionToCrmLog(...)`
 
 ### Channel-Specific From/To Display
 Message bubbles now display contextually appropriate sender/recipient information based on channel type:

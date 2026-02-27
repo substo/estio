@@ -20,6 +20,14 @@ interface CoordinationContext {
 
 import { calculateRunCost, DEFAULT_MODEL } from "@/lib/ai/pricing";
 
+type DraftMessage = {
+    direction: string;
+    body: string;
+    createdAt: Date | null;
+};
+
+const NAME_GREETING_LONG_BREAK_HOURS = 3;
+
 function isModelUnavailableError(error: unknown): boolean {
     const message = (error instanceof Error ? error.message : String(error || "")).toLowerCase();
     return (
@@ -29,6 +37,46 @@ function isModelUnavailableError(error: unknown): boolean {
         message.includes("invalid model") ||
         message.includes("unsupported model")
     );
+}
+
+function parseMessageTimestamp(value: unknown): Date | null {
+    if (value instanceof Date) {
+        return Number.isNaN(value.getTime()) ? null : value;
+    }
+
+    if (typeof value === "number" && Number.isFinite(value)) {
+        const timestampMs = value < 1_000_000_000_000 ? value * 1000 : value;
+        const parsed = new Date(timestampMs);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+
+        if (/^\d+$/.test(trimmed)) {
+            return parseMessageTimestamp(Number(trimmed));
+        }
+
+        const parsed = new Date(trimmed);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    return null;
+}
+
+function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function stripLeadingNameGreeting(text: string, firstName: string | null, allowNameGreeting: boolean): string {
+    if (allowNameGreeting || !firstName) return text;
+
+    const escapedFirstName = escapeRegExp(firstName.trim());
+    if (!escapedFirstName) return text;
+
+    const salutationRegex = new RegExp(`^\\s*(?:hi|hello|hey|dear)\\s+${escapedFirstName}\\s*[,:!\\-]*\\s*`, "i");
+    return text.replace(salutationRegex, "").trimStart();
 }
 
 export async function generateDraft(context: CoordinationContext) {
@@ -75,7 +123,7 @@ export async function generateDraft(context: CoordinationContext) {
         // STRATEGY: Local Database is the PRIMARY source of truth.
         // We only fetch from GHL if the conversation is missing locally or explicitly designated as GHL-sourced but empty.
 
-        let messages: any[] = [];
+        let messages: DraftMessage[] = [];
         let conversationType = 'SMS';
         let foundLocally = false;
 
@@ -98,7 +146,8 @@ export async function generateDraft(context: CoordinationContext) {
                 console.log(`[AI Draft] Local DB Fetch Success. Found ${localConversation.messages.length} messages.`);
                 messages = localConversation.messages.reverse().map(m => ({
                     direction: m.direction,
-                    body: m.body
+                    body: typeof m.body === "string" ? m.body : "",
+                    createdAt: parseMessageTimestamp(m.createdAt)
                 }));
                 conversationType = localConversation.lastMessageType || 'SMS';
                 foundLocally = true;
@@ -142,7 +191,11 @@ export async function generateDraft(context: CoordinationContext) {
                         : [];
 
                     if (ghlMessages.length > 0) {
-                        messages = ghlMessages;
+                        messages = ghlMessages.map((m: any) => ({
+                            direction: typeof m?.direction === "string" ? m.direction : "inbound",
+                            body: typeof m?.body === "string" ? m.body : "",
+                            createdAt: parseMessageTimestamp(m?.dateAdded ?? m?.createdAt)
+                        }));
                         conversationType = conversationData?.conversation?.lastMessageType || conversationData?.conversation?.type || 'SMS';
                         console.log(`[AI Draft] GHL Fallback Success. Found ${messages.length} messages.`);
                     } else {
@@ -184,6 +237,34 @@ export async function generateDraft(context: CoordinationContext) {
         });
         const contactFirstName = (contact?.firstName || contact?.name || "").trim().split(/\s+/)[0] || null;
 
+        const hasPriorOutbound = messages.some(m => m.direction === "outbound" && m.body.trim().length > 0);
+        const isFirstOutreach = !hasPriorOutbound;
+
+        const messagesWithTimestamps = messages.filter((m): m is DraftMessage & { createdAt: Date } => !!m.createdAt);
+        const latestTimestamp = messagesWithTimestamps.length > 0
+            ? messagesWithTimestamps[messagesWithTimestamps.length - 1].createdAt
+            : null;
+        const previousTimestamp = messagesWithTimestamps.length > 1
+            ? messagesWithTimestamps[messagesWithTimestamps.length - 2].createdAt
+            : null;
+
+        const hoursBetweenLastTwoMessages = latestTimestamp && previousTimestamp
+            ? (latestTimestamp.getTime() - previousTimestamp.getTime()) / (60 * 60 * 1000)
+            : null;
+        const isNewConversationDay = !!(latestTimestamp && previousTimestamp && latestTimestamp.toDateString() !== previousTimestamp.toDateString());
+        const hasLongBreak = hoursBetweenLastTwoMessages !== null && hoursBetweenLastTwoMessages >= NAME_GREETING_LONG_BREAK_HOURS;
+
+        const allowNameGreeting = !!contactFirstName && (isFirstOutreach || isNewConversationDay || hasLongBreak);
+        const greetingDecisionReason = !contactFirstName
+            ? "No contact first name is available."
+            : isFirstOutreach
+                ? "This is first outreach (no prior outbound message in history)."
+                : isNewConversationDay
+                    ? "The conversation resumed on a new calendar day."
+                    : hasLongBreak
+                        ? `The conversation resumed after a ${hoursBetweenLastTwoMessages?.toFixed(1)} hour break.`
+                        : "Recent messages are close together in the same active thread.";
+
         // 3. Construct Prompt
         let systemPrompt = `You are an expert real estate message drafter for a live agent.
         Write the exact outbound message the agent should send next (not analysis).
@@ -200,7 +281,11 @@ export async function generateDraft(context: CoordinationContext) {
         - Channel: ${channelName}.
 
         HIGH-PRIORITY DRAFTING RULES:
-        - Personalize the greeting with the contact's first name when available.
+        - Never repeat the contact's name greeting in back-to-back or recent messages.
+        - Only use a name greeting (e.g. "Hi ${contactFirstName || "there"},") when this is first outreach OR the conversation resumed after a long break/new day.
+        - Greeting decision for this draft: ${allowNameGreeting ? "Name greeting is ALLOWED." : "Name greeting is NOT ALLOWED."}
+        - Greeting decision reason: ${greetingDecisionReason}
+        ${!allowNameGreeting ? '- Start directly with the message purpose and do NOT open with "Hi {FirstName},".' : ""}
         - If this appears to be a first outreach or imported lead enquiry (notes/listing details but no real typed message), write a proactive first response.
         - If agent name and business name are available, introduce the agent naturally in first outreach (e.g. "It's ${agentName || "the agent"} at ${businessName} here.").
         - If a property is marked rented/sold/unavailable in the context, say that clearly early in the message.
@@ -260,7 +345,8 @@ export async function generateDraft(context: CoordinationContext) {
         let conversationText = "";
         messages.forEach(m => {
             const sender = m.direction === 'outbound' ? 'Agent' : 'Contact';
-            conversationText += `${sender}: ${m.body}\n`;
+            const timestampPrefix = m.createdAt ? `[${m.createdAt.toISOString()}] ` : "";
+            conversationText += `${timestampPrefix}${sender}: ${m.body || ""}\n`;
         });
 
         const fullPrompt = `${systemPrompt}
@@ -316,7 +402,11 @@ export async function generateDraft(context: CoordinationContext) {
         }
 
         const response = result.response;
-        const text = response.text();
+        const rawText = response.text();
+        const text = stripLeadingNameGreeting(rawText, contactFirstName, allowNameGreeting);
+        if (text !== rawText) {
+            console.log("[AI Draft] Removed leading name greeting based on timing rule.");
+        }
 
         // 5. Track Costs & Usage
         if (response.usageMetadata) {

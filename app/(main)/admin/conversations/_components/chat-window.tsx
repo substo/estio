@@ -53,9 +53,15 @@ import { MessageBubble } from "./message-bubble";
 import { SuggestionBubbles } from "./suggestion-bubbles";
 import { Sparkles, Loader2 as Spinner } from "lucide-react"; // Import Sparkles explicitly if not already
 
-import { getAiDraftModelPickerStateAction, getWhatsAppChannelEligibility } from "@/app/(main)/admin/conversations/actions";
+import { getAiDraftModelPickerStateAction, getSmsChannelEligibility, getWhatsAppChannelEligibility } from "@/app/(main)/admin/conversations/actions";
 
 type WhatsAppEligibilityState =
+    | { status: 'checking' }
+    | { status: 'eligible' }
+    | { status: 'ineligible'; reason?: string }
+    | { status: 'unknown'; reason?: string };
+
+type SmsEligibilityState =
     | { status: 'checking' }
     | { status: 'eligible' }
     | { status: 'ineligible'; reason?: string }
@@ -75,6 +81,7 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
     const [hasUserSelectedModel, setHasUserSelectedModel] = useState(false);
     const [availableModels, setAvailableModels] = useState<any[]>([]); // Dynamic list
     const [whatsAppEligibility, setWhatsAppEligibility] = useState<WhatsAppEligibilityState>({ status: 'checking' });
+    const [smsEligibility, setSmsEligibility] = useState<SmsEligibilityState>({ status: 'checking' });
     const fileInputRef = useRef<HTMLInputElement>(null);
     const hasUserSelectedModelRef = useRef(false);
 
@@ -128,6 +135,43 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
                 if (cancelled) return;
                 console.error("Failed to check WhatsApp eligibility:", err);
                 setWhatsAppEligibility({ status: 'unknown', reason: 'Could not verify WhatsApp availability.' });
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [conversation.id]);
+
+    useEffect(() => {
+        let cancelled = false;
+        setSmsEligibility({ status: 'checking' });
+
+        getSmsChannelEligibility(conversation.id)
+            .then((res) => {
+                if (cancelled) return;
+
+                if (!res?.success) {
+                    setSmsEligibility({ status: 'unknown', reason: res?.reason });
+                    return;
+                }
+
+                if (res.status === 'eligible') {
+                    setSmsEligibility({ status: 'eligible' });
+                    return;
+                }
+
+                if (res.status === 'ineligible') {
+                    setSmsEligibility({ status: 'ineligible', reason: res.reason });
+                    setSelectedChannel((prev) => prev === 'SMS' ? 'Email' : prev);
+                    return;
+                }
+
+                setSmsEligibility({ status: 'unknown', reason: res.reason });
+            })
+            .catch((err) => {
+                if (cancelled) return;
+                console.error("Failed to check SMS eligibility:", err);
+                setSmsEligibility({ status: 'unknown', reason: 'Could not verify SMS availability.' });
             });
 
         return () => {
@@ -196,6 +240,13 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
     };
 
     const isWhatsAppDisabled = whatsAppEligibility.status === 'ineligible';
+    const isSmsDisabled = smsEligibility.status === 'ineligible';
+    const channelSelectorTitle =
+        selectedChannel === 'SMS' && isSmsDisabled
+            ? (smsEligibility.reason || 'SMS not available for this contact')
+            : isWhatsAppDisabled
+                ? (whatsAppEligibility.reason || 'WhatsApp not available for this contact')
+                : undefined;
 
     return (
         <div className="h-full flex flex-col bg-white min-w-0 overflow-hidden">
@@ -248,6 +299,7 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
                         contactPhone={conversation.contactPhone}
                         contactEmail={conversation.contactEmail}
                         contactName={conversation.contactName}
+                        aiModel={selectedModel}
                     />
                 ))}
             </div>
@@ -288,18 +340,19 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
                                 <Select
                                     value={selectedChannel}
                                     onValueChange={(v: 'SMS' | 'Email' | 'WhatsApp') => {
+                                        if (v === 'SMS' && isSmsDisabled) return;
                                         if (v === 'WhatsApp' && isWhatsAppDisabled) return;
                                         setSelectedChannel(v);
                                     }}
                                 >
                                     <SelectTrigger
                                         className="h-7 w-auto min-w-[85px] text-[11px] border-0 bg-slate-50 hover:bg-slate-100 focus:ring-0 px-2"
-                                        title={isWhatsAppDisabled ? (whatsAppEligibility.reason || 'WhatsApp not available for this contact') : undefined}
+                                        title={channelSelectorTitle}
                                     >
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        <SelectItem value="SMS" className="text-xs">SMS</SelectItem>
+                                        <SelectItem value="SMS" className="text-xs" disabled={isSmsDisabled}>SMS</SelectItem>
                                         <SelectItem value="Email" className="text-xs">Email</SelectItem>
                                         <SelectItem value="WhatsApp" className="text-xs" disabled={isWhatsAppDisabled}>WhatsApp</SelectItem>
                                     </SelectContent>

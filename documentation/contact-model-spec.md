@@ -313,20 +313,30 @@ The system now includes a dedicated read-only view page for contacts (`/admin/co
 -   **Roles & Associations**: Clear listing of all property and company roles.
 -   **Edit Access**: Includes an "Edit Contact" button that triggers the `EditContactDialog`.
 
-### 4. Contact Lookup from Conversation Text Selection (New)
-Contacts can now be looked up directly from selected text inside `/admin/conversations` message bubbles (including HTML email content).
+### 4. Conversation Text Selection Actions (New)
+Selected text inside `/admin/conversations` message bubbles (including HTML email content) now supports four actions:
 
--   **Trigger**: Select text and click `Find Contact` in the floating selection toolbar.
--   **Seeded Query**: The dialog extracts a likely search term from the selection (prefers Email, then Phone, then first text line).
--   **Search Fields**: `phone`, `email`, `name`, `firstName`, `lastName`.
--   **Scope**: Search is location-scoped and permission-checked.
--   **Ranking**:
-    -   Exact phone / email first
-    -   Phone suffix / email prefix next
-    -   Full-name and token matches after that
--   **Actions**:
-    -   `Open Contact`
-    -   `Open Conversation` (or `Start Conversation` if the contact has no existing conversation but has a phone)
+-   **Paste Lead**:
+    -   Opens prefilled lead analysis/import flow.
+    -   Reuses existing backend path: `parseLeadFromText(...)` + `createParsedLead(...)`.
+-   **Find Contact**:
+    -   **Seeded Query**: Extracts likely search term from the selection (Email, then Phone, then first text line).
+    -   **Search Fields**: `phone`, `email`, `name`, `firstName`, `lastName`.
+    -   **Scope**: Location-scoped and permission-checked.
+    -   **Ranking**:
+        -   Exact phone / email first
+        -   Phone suffix / email prefix next
+        -   Full-name and token matches after that
+    -   **Actions**:
+        -   `Open Contact`
+        -   `Open Conversation` (or `Start Conversation` if the contact has no existing conversation but has a phone)
+-   **Summarize**:
+    -   Generates a concise CRM activity note from selected text and saves to contact history.
+    -   Persists as `ContactHistory.action = MANUAL_ENTRY`.
+    -   Saved entry format: `DD.MM.YY FirstName: summary`.
+-   **Custom**:
+    -   Runs a user instruction prompt with selected text as context.
+    -   Returns editable output and can optionally save to contact history (same format/path as `Summarize`).
 
 ## Data Integrity & Validation
 
@@ -354,6 +364,7 @@ Data is automatically normalized before being saved to the database:
 -   **Viewing Logs**: Creating/Updating Viewings now properly logs to `ContactHistory`.
 -   **User Resolution**: Internal User IDs are correctly resolved and stored for history and viewing records, preventing foreign key errors with external Auth IDs (Clerk).
 -   **Readable Changes**: The history log enriches raw ID changes (e.g., Property ID changed) with human-readable names (e.g., Property Title changed) for better auditability.
+-   **Selection CRM Logs**: Conversation toolbar `Summarize`/`Custom` saves team-visible progress notes into `ContactHistory` as `MANUAL_ENTRY`, keeping contact timeline updates centralized.
 
 ## Security & Authorization
 

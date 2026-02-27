@@ -10,10 +10,11 @@ import { seedConversationFromContactLeadText } from "@/lib/conversations/bootstr
 import { generateMultiContextDraft } from "@/lib/ai/context-builder";
 import { ensureLocalContactSynced } from "@/lib/crm/contact-sync";
 import { ensureConversationHistory, syncMessageFromWebhook } from "@/lib/ghl/sync";
+import { checkGHLSMSStatus } from "@/lib/ghl/sms";
 import { calculateRunCost, calculateRunCostFromUsage } from "@/lib/ai/pricing";
 import { z } from "zod";
 import { getModelForTask } from "@/lib/ai/model-router";
-import { callLLM } from "@/lib/ai/llm";
+import { callLLM, callLLMWithMetadata } from "@/lib/ai/llm";
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { runGoogleAutoSyncForContact } from "@/lib/google/automation";
@@ -136,7 +137,115 @@ async function persistSelectionLogEntry(args: {
     revalidatePath(`/admin/contacts/${conversation.contactId}/view`);
     revalidatePath(`/admin/conversations?id=${encodeURIComponent(conversation.ghlConversationId)}`);
 
-    return { success: true as const, entry };
+    return {
+        success: true as const,
+        entry,
+        conversation: {
+            id: conversation.id,
+            ghlConversationId: conversation.ghlConversationId,
+            contactId: conversation.contactId,
+        },
+    };
+}
+
+type SelectionUsage = {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    thoughtsTokens?: number;
+    toolUsePromptTokens?: number;
+};
+
+async function persistSelectionAiExecution(args: {
+    conversationInternalId: string;
+    taskTitle: string;
+    intent: string;
+    modelId: string;
+    promptText: string;
+    rawOutput: string;
+    normalizedOutput: string;
+    usage: SelectionUsage;
+}) {
+    const estimatedCost = calculateRunCostFromUsage(args.modelId, {
+        promptTokens: args.usage.promptTokens || 0,
+        completionTokens: args.usage.completionTokens || 0,
+        totalTokens: args.usage.totalTokens || 0,
+        thoughtsTokens: args.usage.thoughtsTokens || 0,
+        toolUsePromptTokens: args.usage.toolUsePromptTokens || 0,
+    });
+
+    await db.agentExecution.create({
+        data: {
+            conversationId: args.conversationInternalId,
+            taskTitle: args.taskTitle,
+            taskStatus: "done",
+            status: "success",
+            skillName: "selection_toolbar",
+            intent: args.intent,
+            model: args.modelId,
+            thoughtSummary: `Selection action "${args.taskTitle}" completed and usage recorded.`,
+            thoughtSteps: [
+                {
+                    step: 1,
+                    description: "LLM request payload",
+                    conclusion: "Captured full request prompt",
+                    data: { model: args.modelId, prompt: args.promptText },
+                },
+                {
+                    step: 2,
+                    description: "LLM response payload",
+                    conclusion: "Captured normalized output and usage metadata",
+                    data: {
+                        rawOutput: args.rawOutput,
+                        normalizedOutput: args.normalizedOutput,
+                        usage: args.usage,
+                    },
+                },
+                {
+                    step: 3,
+                    description: "Usage & cost estimate",
+                    conclusion: `Estimated run cost (${estimatedCost.confidence} confidence)`,
+                    data: {
+                        usd: estimatedCost.amount,
+                        method: estimatedCost.method,
+                        confidence: estimatedCost.confidence,
+                        breakdown: estimatedCost.breakdown,
+                    },
+                },
+            ],
+            toolCalls: [
+                {
+                    tool: "gemini.generateContent",
+                    arguments: {
+                        model: args.modelId,
+                        prompt: args.promptText,
+                    },
+                    result: {
+                        rawOutput: args.rawOutput,
+                        normalizedOutput: args.normalizedOutput,
+                        usage: args.usage,
+                    },
+                    error: null,
+                },
+            ],
+            promptTokens: args.usage.promptTokens || 0,
+            completionTokens: args.usage.completionTokens || 0,
+            totalTokens: args.usage.totalTokens || 0,
+            cost: estimatedCost.amount,
+        },
+    });
+
+    await db.conversation.update({
+        where: { id: args.conversationInternalId },
+        data: {
+            promptTokens: { increment: args.usage.promptTokens || 0 },
+            completionTokens: { increment: args.usage.completionTokens || 0 },
+            totalTokens: { increment: args.usage.totalTokens || 0 },
+            totalCost: { increment: estimatedCost.amount },
+        },
+    });
+
+    return estimatedCost.amount;
 }
 
 async function getAuthenticatedLocation() {
@@ -1126,6 +1235,39 @@ export async function sendReply(conversationId: string, contactId: string, messa
     }
 
     try {
+        if (type === 'SMS') {
+            const contact = await db.contact.findFirst({
+                where: {
+                    OR: [
+                        { ghlContactId: contactId },
+                        { id: contactId }
+                    ],
+                    locationId: location.id
+                },
+                select: { name: true, phone: true }
+            });
+
+            if (!contact) {
+                return { success: false, error: "Contact not found in database." };
+            }
+
+            const smsEligibility = await checkSmsPhoneEligibility(
+                {
+                    id: location.id,
+                    ghlAccessToken: location.ghlAccessToken,
+                    ghlLocationId: location.ghlLocationId,
+                },
+                contact.phone,
+                {
+                    contactName: contact.name,
+                }
+            );
+
+            if (smsEligibility.status === 'ineligible') {
+                return { success: false, error: smsEligibility.reason || 'SMS is not configured for this location.' };
+            }
+        }
+
         // Direct WhatsApp Integration Logic
         if (type === 'WhatsApp') {
             const hasTwilio = location.twilioAccountSid && location.twilioAuthToken && location.twilioWhatsAppFrom;
@@ -1985,6 +2127,65 @@ export async function getAiModelPickerDefaultsAction() {
     const location = await getBasicLocationContext();
     const { getAiModelPickerDefaults } = await import("@/lib/ai/fetch-models");
     return getAiModelPickerDefaults(location.id);
+}
+
+export async function getSmsChannelEligibility(conversationId: string) {
+    try {
+        const location = await getBasicLocationContext();
+
+        const conversation = await db.conversation.findFirst({
+            where: {
+                ghlConversationId: conversationId,
+                locationId: location.id,
+            },
+            select: {
+                contact: {
+                    select: {
+                        name: true,
+                        phone: true,
+                    }
+                }
+            }
+        });
+
+        if (!conversation?.contact) {
+            return {
+                success: false,
+                eligible: null as boolean | null,
+                status: 'unknown' as const,
+                reason: 'Conversation contact not found.',
+            };
+        }
+
+        const contact = conversation.contact;
+        const eligibility = await checkSmsPhoneEligibility(
+            {
+                id: location.id,
+                ghlAccessToken: location.ghlAccessToken,
+                ghlLocationId: location.ghlLocationId,
+            },
+            contact.phone,
+            {
+                contactName: contact.name,
+            }
+        );
+
+        return {
+            success: true,
+            eligible: eligibility.status === 'eligible' ? true : eligibility.status === 'ineligible' ? false : null,
+            status: eligibility.status,
+            reason: eligibility.reason,
+            phone: contact.phone || null,
+        };
+    } catch (error: any) {
+        console.error('[getSmsChannelEligibility] Error:', error);
+        return {
+            success: false,
+            eligible: null as boolean | null,
+            status: 'unknown' as const,
+            reason: error?.message || 'Failed to check SMS eligibility.',
+        };
+    }
 }
 
 export async function getWhatsAppChannelEligibility(conversationId: string) {
@@ -3054,6 +3255,70 @@ async function checkWhatsAppPhoneEligibility(
             normalizedDigits: rawDigits,
         };
     }
+}
+
+async function checkSmsPhoneEligibility(
+    location: { id: string; ghlAccessToken?: string | null; ghlLocationId?: string | null },
+    phone: string | null | undefined,
+    options?: {
+        contactName?: string | null;
+    }
+): Promise<{ status: 'eligible' | 'ineligible' | 'unknown'; reason?: string; normalizedDigits?: string }> {
+    const contactName = options?.contactName || 'This contact';
+    const phoneValue = String(phone || '').trim();
+
+    if (!phoneValue) {
+        return {
+            status: 'ineligible',
+            reason: `${contactName} does not have a phone number.`,
+        };
+    }
+
+    if (phoneValue.includes('*')) {
+        return {
+            status: 'ineligible',
+            reason: `${contactName}'s phone number "${phoneValue}" is masked (contains ***), so SMS cannot be sent.`,
+        };
+    }
+
+    const rawDigits = phoneValue.replace(/\D/g, '');
+    if (rawDigits.length < 7) {
+        return {
+            status: 'ineligible',
+            reason: `${contactName}'s phone number "${phoneValue}" is invalid or too short.`,
+            normalizedDigits: rawDigits,
+        };
+    }
+
+    if (!location?.ghlAccessToken || !location?.ghlLocationId) {
+        return {
+            status: 'unknown',
+            reason: 'SMS eligibility check is unavailable (GoHighLevel is not fully connected).',
+            normalizedDigits: rawDigits,
+        };
+    }
+
+    const smsStatus = await checkGHLSMSStatus(location.id);
+    if (smsStatus.status === 'configured') {
+        return {
+            status: 'eligible',
+            normalizedDigits: rawDigits,
+        };
+    }
+
+    if (smsStatus.status === 'not_configured') {
+        return {
+            status: 'ineligible',
+            reason: smsStatus.reason || 'SMS is not configured in GoHighLevel for this location.',
+            normalizedDigits: rawDigits,
+        };
+    }
+
+    return {
+        status: 'unknown',
+        reason: smsStatus.reason || 'Could not verify SMS configuration right now.',
+        normalizedDigits: rawDigits,
+    };
 }
 
 async function resolvePreferredChannelTypeForPhone(
@@ -4238,7 +4503,7 @@ function parseLegacyCrmLeadNotificationEmail(args: {
     };
 }
 
-export async function summarizeSelectionToCrmLog(conversationId: string, selectedText: string) {
+export async function summarizeSelectionToCrmLog(conversationId: string, selectedText: string, modelOverride?: string) {
     const sanitizedConversationId = String(conversationId || "").trim();
     if (!sanitizedConversationId) {
         return { success: false, error: "Missing conversation ID" };
@@ -4250,7 +4515,9 @@ export async function summarizeSelectionToCrmLog(conversationId: string, selecte
     }
 
     try {
-        const modelId = getModelForTask("simple_generation");
+        const modelId = typeof modelOverride === "string" && modelOverride.trim()
+            ? modelOverride.trim()
+            : getModelForTask("simple_generation");
         const summaryPrompt = [
             "You write concise internal CRM activity summaries for real estate teams.",
             "Rules:",
@@ -4266,15 +4533,36 @@ export async function summarizeSelectionToCrmLog(conversationId: string, selecte
             '"""',
         ].join("\n");
 
-        const rawSummary = await callLLM(modelId, summaryPrompt, undefined, { temperature: 0.2 });
+        const { text: rawSummary, usage } = await callLLMWithMetadata(modelId, summaryPrompt, undefined, { temperature: 0.2 });
         const summary = normalizeSingleLine(rawSummary, "Contacted lead and captured conversation update.");
         const persisted = await persistSelectionLogEntry({
             conversationId: sanitizedConversationId,
             entryBody: summary,
         });
 
-        if (!persisted.success) {
+        if (!persisted.success || !persisted.conversation) {
             return { success: false, error: persisted.error };
+        }
+
+        try {
+            await persistSelectionAiExecution({
+                conversationInternalId: persisted.conversation.id,
+                taskTitle: "Selection Summary to CRM Log",
+                intent: "selection_summary",
+                modelId,
+                promptText: summaryPrompt,
+                rawOutput: rawSummary,
+                normalizedOutput: summary,
+                usage: {
+                    promptTokens: usage.promptTokens || 0,
+                    completionTokens: usage.completionTokens || 0,
+                    totalTokens: usage.totalTokens || 0,
+                    thoughtsTokens: usage.thoughtsTokens || 0,
+                    toolUsePromptTokens: usage.toolUsePromptTokens || 0,
+                },
+            });
+        } catch (traceError) {
+            console.warn("[summarizeSelectionToCrmLog] Failed to persist AI usage trace:", traceError);
         }
 
         return {
@@ -4288,7 +4576,12 @@ export async function summarizeSelectionToCrmLog(conversationId: string, selecte
     }
 }
 
-export async function runCustomSelectionPrompt(conversationId: string, selectedText: string, instruction: string) {
+export async function runCustomSelectionPrompt(
+    conversationId: string,
+    selectedText: string,
+    instruction: string,
+    modelOverride?: string
+) {
     const sanitizedConversationId = String(conversationId || "").trim();
     if (!sanitizedConversationId) {
         return { success: false, error: "Missing conversation ID" };
@@ -4304,7 +4597,9 @@ export async function runCustomSelectionPrompt(conversationId: string, selectedT
     }
 
     try {
-        const modelId = getModelForTask("simple_generation");
+        const modelId = typeof modelOverride === "string" && modelOverride.trim()
+            ? modelOverride.trim()
+            : getModelForTask("simple_generation");
         const systemPrompt = [
             "You are an assistant for CRM operators.",
             "Follow the operator instruction strictly, using only the provided selected text as context.",
@@ -4320,8 +4615,33 @@ export async function runCustomSelectionPrompt(conversationId: string, selectedT
             '"""',
         ].join("\n");
 
-        const rawOutput = await callLLM(modelId, systemPrompt, undefined, { temperature: 0.25 });
+        const { text: rawOutput, usage } = await callLLMWithMetadata(modelId, systemPrompt, undefined, { temperature: 0.25 });
         const output = normalizeSingleLine(rawOutput, "No output generated.").slice(0, MAX_CUSTOM_OUTPUT_LENGTH);
+
+        try {
+            const location = await getAuthenticatedLocation();
+            const conversation = await resolveConversationForCrmLog(location.id, sanitizedConversationId);
+            if (conversation) {
+                await persistSelectionAiExecution({
+                    conversationInternalId: conversation.id,
+                    taskTitle: "Selection Custom Prompt",
+                    intent: "selection_custom",
+                    modelId,
+                    promptText: systemPrompt,
+                    rawOutput,
+                    normalizedOutput: output,
+                    usage: {
+                        promptTokens: usage.promptTokens || 0,
+                        completionTokens: usage.completionTokens || 0,
+                        totalTokens: usage.totalTokens || 0,
+                        thoughtsTokens: usage.thoughtsTokens || 0,
+                        toolUsePromptTokens: usage.toolUsePromptTokens || 0,
+                    },
+                });
+            }
+        } catch (traceError) {
+            console.warn("[runCustomSelectionPrompt] Failed to persist AI usage trace:", traceError);
+        }
 
         return {
             success: true,
@@ -4360,7 +4680,7 @@ export async function saveCustomSelectionToCrmLog(conversationId: string, output
     }
 }
 
-export async function parseLeadFromText(text: string) {
+export async function parseLeadFromText(text: string, modelOverride?: string) {
     const location = await getAuthenticatedLocation();
 
     if (!text || text.length < 5) {
@@ -4387,8 +4707,9 @@ Return JSON matching this schema:
 }
 `;
 
-        // Use Flash model for speed/cost
-        const modelId = getModelForTask("lead_parsing");
+        const modelId = typeof modelOverride === "string" && modelOverride.trim()
+            ? modelOverride.trim()
+            : getModelForTask("lead_parsing");
 
         const start = Date.now();
         // Pass jsonMode: true to force JSON output if supported, or rely on prompt instruction
