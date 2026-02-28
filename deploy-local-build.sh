@@ -332,19 +332,19 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
                 echo "ACTIVE_PORT=\"\$ACTIVE_PORT\""
                 echo "ACTIVE_APP_NAME=\"\$ACTIVE_APP_NAME\""
                 cat << 'DRAIN_EOF'
-CURRENT_TOKEN=$(cat "$CURRENT_DEPLOY_TOKEN_FILE" 2>/dev/null || true)
-if [ "$CURRENT_TOKEN" != "$DEPLOY_TOKEN" ]; then
+CURRENT_TOKEN=\$(cat "\$CURRENT_DEPLOY_TOKEN_FILE" 2>/dev/null || true)
+if [ "\$CURRENT_TOKEN" != "\$DEPLOY_TOKEN" ]; then
     exit 0
 fi
 
-LIVE_PORT=$(grep -Eo 'reverse_proxy[[:space:]]+localhost:[0-9]+' /etc/caddy/Caddyfile 2>/dev/null | head -n1 | sed -E 's/.*:([0-9]+)/\1/' || true)
-if [ "$LIVE_PORT" = "$ACTIVE_PORT" ]; then
+LIVE_PORT=\$(grep -Eo 'reverse_proxy[[:space:]]+localhost:[0-9]+' /etc/caddy/Caddyfile 2>/dev/null | head -n1 | sed -E 's/.*:([0-9]+)/\1/' || true)
+if [ "\$LIVE_PORT" = "\$ACTIVE_PORT" ]; then
     exit 0
 fi
 
-pm2 delete "$ACTIVE_APP_NAME" >/dev/null 2>&1 || true
+pm2 delete "\$ACTIVE_APP_NAME" >/dev/null 2>&1 || true
 pm2 save >/dev/null 2>&1 || true
-rm -f "$0"
+rm -f "\$0"
 DRAIN_EOF
             } > "\$DRAIN_SCRIPT"
             chmod +x "\$DRAIN_SCRIPT"
