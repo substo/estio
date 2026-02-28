@@ -30,6 +30,7 @@ type ContactTaskManagerProps = {
   conversationId?: string | null;
   compact?: boolean;
   className?: string;
+  title?: string | null;
 };
 
 const TASK_SYNC_MAX_ATTEMPTS = 6;
@@ -327,6 +328,7 @@ export function ContactTaskManager({
   conversationId,
   compact = false,
   className,
+  title = null,
 }: ContactTaskManagerProps) {
   const [tasks, setTasks] = useState<any[]>([]);
   const [counts, setCounts] = useState({ all: 0, open: 0, completed: 0 });
@@ -554,20 +556,41 @@ export function ContactTaskManager({
 
   return (
     <div className={cn('space-y-3', className)}>
+      {title && (
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-sm font-semibold">{title}</div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 px-2 text-[11px]"
+            onClick={() => {
+              setError(null);
+              setAddTaskModalOpen(true);
+            }}
+          >
+            <Plus className="mr-1 h-3.5 w-3.5" />
+            Add task
+          </Button>
+        </div>
+      )}
+
       <div className="flex items-center justify-end gap-1 flex-wrap">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-7 px-2 text-[11px]"
-          onClick={() => {
-            setError(null);
-            setAddTaskModalOpen(true);
-          }}
-        >
-          <Plus className="mr-1 h-3.5 w-3.5" />
-          Add task
-        </Button>
+        {!title && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 px-2 text-[11px]"
+            onClick={() => {
+              setError(null);
+              setAddTaskModalOpen(true);
+            }}
+          >
+            <Plus className="mr-1 h-3.5 w-3.5" />
+            Add task
+          </Button>
+        )}
         {refreshing && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
         <div className="flex items-center gap-1">
           <Button

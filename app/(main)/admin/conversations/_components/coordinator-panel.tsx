@@ -473,14 +473,12 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
             )}
 
             <Card className="shadow-none border-border/50">
-                <CardHeader className="p-3 pb-1.5">
-                    <CardTitle className="text-xs font-semibold">Contact Tasks</CardTitle>
-                </CardHeader>
-                <CardContent className="p-3 pt-0">
+                <CardContent className="p-3">
                     <ContactTaskManager
                         contactId={conversation.contactId || contactContext?.contact?.id}
                         conversationId={conversation.id}
                         compact
+                        title="Contact Tasks"
                     />
                 </CardContent>
             </Card>
