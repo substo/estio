@@ -14,12 +14,19 @@ type GhlTaskEnvelope = {
   dateUpdated?: string;
 };
 
+function toRequiredDueDate(dueAt: Date | null): string {
+  const value = dueAt || new Date();
+  return value.toISOString();
+}
+
 function toGhlTaskPayload(task: HubTaskForGhl) {
+  const completed = task.status === 'completed';
   return {
     title: task.title,
     body: task.description || undefined,
-    dueDate: task.dueAt ? task.dueAt.toISOString() : undefined,
+    dueDate: toRequiredDueDate(task.dueAt),
     assignedTo: task.assignedUserId || undefined,
+    completed,
   };
 }
 
@@ -105,7 +112,10 @@ export async function setGhlTaskCompletionForContact(options: {
       options.accessToken,
       {
         method: 'PUT',
-        body: JSON.stringify({ completed: options.completed }),
+        body: JSON.stringify({
+          dueDate: new Date().toISOString(),
+          completed: options.completed,
+        }),
       }
     );
 

@@ -47,8 +47,8 @@ export async function POST(req: NextRequest) {
 
         console.log(`[Gmail Webhook] Triggering sync for user ${syncState.userId} (History: ${event.historyId})`);
 
-        // Trigger Sync
-        syncRecentMessages(syncState.userId).catch(e => console.error(e));
+        // Trigger Sync (await to avoid background task being dropped on serverless shutdown)
+        await syncRecentMessages(syncState.userId);
 
         return NextResponse.json({ status: 'processed' });
     } catch (error) {

@@ -478,7 +478,7 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
                 </CardHeader>
                 <CardContent className="p-3 pt-0">
                     <ContactTaskManager
-                        contactId={contactContext?.contact?.id || conversation.contactId}
+                        contactId={conversation.contactId || contactContext?.contact?.id}
                         conversationId={conversation.id}
                         compact
                     />

@@ -41,6 +41,10 @@ export const GHL_CONFIG = {
         "documents_contracts/list.readonly",
         "documents_contracts/sendLink.write",
         "documents_contracts_template/list.readonly",
-        "documents_contracts_template/sendLink.write"
+        "documents_contracts_template/sendLink.write",
+        "locations/tasks.readonly",
+        "locations/tasks.write",
+        "recurring-tasks.readonly",
+        "recurring-tasks.write"
     ]
 };
