@@ -29,6 +29,7 @@ import { ingestEvolutionImageAttachment, parseEvolutionMessageContent } from "@/
 
 const MAX_SELECTION_TEXT_LENGTH = 12000;
 const MAX_CUSTOM_OUTPUT_LENGTH = 2200;
+const CRM_LOG_DEDUPE_RECENT_LIMIT = 30;
 
 function trimSelectionText(text: string, maxLength: number = MAX_SELECTION_TEXT_LENGTH): string {
     const normalized = String(text || "").replace(/\u00a0/g, " ").trim();
@@ -125,6 +126,104 @@ function formatCrmLogEntry(actorFirstName: string, body: string, date: Date = ne
     return `${formatLogDate(date)} ${actorFirstName}: ${normalizedBody}`;
 }
 
+function stripCrmLogPrefix(entry: string): string {
+    const raw = String(entry || "").trim();
+    if (!raw) return "";
+    return raw.replace(/^\d{2}\.\d{2}\.\d{2}\s+[^:]{1,64}:\s*/, "").trim();
+}
+
+function normalizeForLogDedupe(text: string): string {
+    return String(text || "")
+        .toLowerCase()
+        .replace(/[\r\n]+/g, " ")
+        .replace(/[^a-z0-9\s€$£%.,:/-]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function tokenizeForLogDedupe(text: string): string[] {
+    return normalizeForLogDedupe(text)
+        .split(/\s+/)
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 3);
+}
+
+function computeTokenOverlapScore(a: string, b: string): number {
+    const left = new Set(tokenizeForLogDedupe(a));
+    const right = new Set(tokenizeForLogDedupe(b));
+    if (!left.size || !right.size) return 0;
+
+    let common = 0;
+    for (const token of left) {
+        if (right.has(token)) common += 1;
+    }
+    return common / Math.min(left.size, right.size);
+}
+
+function extractManualEntryTextFromChanges(changes: any): string {
+    if (!changes) return "";
+    if (typeof changes === "string") {
+        try {
+            return extractManualEntryTextFromChanges(JSON.parse(changes));
+        } catch {
+            return "";
+        }
+    }
+    if (Array.isArray(changes)) {
+        const entryItem = changes.find((item: any) => item?.field === "entry");
+        if (entryItem && typeof entryItem.new === "string") return entryItem.new;
+        return "";
+    }
+    if (typeof changes === "object") {
+        if (typeof changes.entry === "string") return changes.entry;
+        if (changes.entry && typeof changes.entry.new === "string") return changes.entry.new;
+    }
+    return "";
+}
+
+function isLikelyDuplicateManualEntry(candidateBody: string, existingEntry: string): boolean {
+    const candidate = normalizeForLogDedupe(stripCrmLogPrefix(candidateBody));
+    const existing = normalizeForLogDedupe(stripCrmLogPrefix(existingEntry));
+    if (!candidate || !existing) return false;
+
+    if (candidate === existing) return true;
+    if (candidate.length >= 28 && existing.includes(candidate)) return true;
+    if (existing.length >= 28 && candidate.includes(existing)) return true;
+
+    const overlap = computeTokenOverlapScore(candidate, existing);
+    return overlap >= 0.9;
+}
+
+async function findRecentDuplicateManualEntry(contactId: string, candidateBody: string) {
+    const recent = await db.contactHistory.findMany({
+        where: {
+            contactId,
+            action: "MANUAL_ENTRY",
+        },
+        orderBy: { createdAt: "desc" },
+        take: CRM_LOG_DEDUPE_RECENT_LIMIT,
+        select: {
+            id: true,
+            createdAt: true,
+            changes: true,
+        },
+    });
+
+    for (const item of recent) {
+        const existingEntry = extractManualEntryTextFromChanges(item.changes);
+        if (!existingEntry) continue;
+        if (isLikelyDuplicateManualEntry(candidateBody, existingEntry)) {
+            return {
+                id: item.id,
+                entry: existingEntry,
+                createdAt: item.createdAt,
+            };
+        }
+    }
+
+    return null;
+}
+
 async function resolveConversationForCrmLog(locationId: string, conversationId: string) {
     return db.conversation.findFirst({
         where: {
@@ -166,9 +265,29 @@ async function persistSelectionLogEntry(args: {
         return { success: false, error: "Conversation not found" as const };
     }
 
+    const normalizedEntryBody = normalizeSingleLine(args.entryBody, "");
+    if (!normalizedEntryBody) {
+        return { success: false, error: "Entry is empty" as const };
+    }
+
+    const duplicate = await findRecentDuplicateManualEntry(conversation.contactId, normalizedEntryBody);
+    if (duplicate) {
+        return {
+            success: true as const,
+            skipped: true as const,
+            duplicateHistoryId: duplicate.id,
+            entry: duplicate.entry,
+            conversation: {
+                id: conversation.id,
+                ghlConversationId: conversation.ghlConversationId,
+                contactId: conversation.contactId,
+            },
+        };
+    }
+
     const now = new Date();
     const actorFirstName = deriveFirstName(user.firstName, user.name, user.email);
-    const entry = formatCrmLogEntry(actorFirstName, args.entryBody, now);
+    const entry = formatCrmLogEntry(actorFirstName, normalizedEntryBody, now);
 
     await db.contactHistory.create({
         data: {
@@ -187,6 +306,7 @@ async function persistSelectionLogEntry(args: {
 
     return {
         success: true as const,
+        skipped: false as const,
         entry,
         conversation: {
             id: conversation.id,
@@ -4626,6 +4746,7 @@ export async function summarizeSelectionToCrmLog(conversationId: string, selecte
             success: true,
             summary,
             entry: persisted.entry,
+            skipped: persisted.skipped ?? false,
         };
     } catch (error: any) {
         console.error("[summarizeSelectionToCrmLog] Error:", error);
@@ -4733,7 +4854,7 @@ export async function saveCustomSelectionToCrmLog(conversationId: string, output
             return { success: false, error: persisted.error };
         }
 
-        return { success: true, entry: persisted.entry };
+        return { success: true, entry: persisted.entry, skipped: persisted.skipped ?? false };
     } catch (error: any) {
         console.error("[saveCustomSelectionToCrmLog] Error:", error);
         return { success: false, error: error?.message || "Failed to save custom output to CRM log" };

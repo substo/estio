@@ -22,7 +22,7 @@ import {
     CommandItem,
     CommandList,
 } from "@/components/ui/command";
-import { Loader2, Search, Clipboard, MessageCircle, BadgeAlert, AlertTriangle, User, Phone, Mail, ExternalLink, FileText, Wand2 } from "lucide-react";
+import { Loader2, Search, Clipboard, MessageCircle, BadgeAlert, AlertTriangle, User, Phone, Mail, ExternalLink, FileText, Wand2, ListPlus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
     parseLeadFromText,
@@ -49,6 +49,17 @@ export type MessageSelectionActionTarget = {
     };
 };
 
+export type SelectionBatchInput = {
+    messageId?: string | null;
+    text: string;
+    source: "message" | "email";
+};
+
+export type SelectionBatchItem = SelectionBatchInput & {
+    id: string;
+    addedAt: number;
+};
+
 type ContactSearchResult = {
     id: string;
     name?: string | null;
@@ -67,6 +78,11 @@ interface MessageSelectionActionsProps {
     onClearSelection: () => void;
     conversationId?: string | null;
     aiModel?: string | null;
+    messageId?: string;
+    selectionBatch?: SelectionBatchItem[];
+    onAddSelectionToBatch?: (item: SelectionBatchInput) => { added: boolean; total: number } | void;
+    onRemoveSelectionBatchItem?: (id: string) => void;
+    onClearSelectionBatch?: () => void;
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -106,7 +122,23 @@ function getSelectionPreview(text: string) {
     return `${compact.slice(0, 140)}...`;
 }
 
-export function MessageSelectionActions({ selection, onClearSelection, conversationId, aiModel }: MessageSelectionActionsProps) {
+function buildBatchContextText(items: SelectionBatchItem[]) {
+    return items
+        .map((item, index) => `Snippet ${index + 1}:\n${item.text}`)
+        .join("\n\n");
+}
+
+export function MessageSelectionActions({
+    selection,
+    onClearSelection,
+    conversationId,
+    aiModel,
+    messageId,
+    selectionBatch = [],
+    onAddSelectionToBatch,
+    onRemoveSelectionBatchItem,
+    onClearSelectionBatch,
+}: MessageSelectionActionsProps) {
     const router = useRouter();
     const toolbarRef = useRef<HTMLDivElement>(null);
 
@@ -138,6 +170,8 @@ export function MessageSelectionActions({ selection, onClearSelection, conversat
     const [isSavingCustom, setIsSavingCustom] = useState(false);
     const [customSavedEntry, setCustomSavedEntry] = useState("");
     const activeAiModel = typeof aiModel === "string" && aiModel.trim() ? aiModel.trim() : undefined;
+    const hasBatchSelections = selectionBatch.length > 0;
+    const batchContextText = hasBatchSelections ? buildBatchContextText(selectionBatch) : "";
 
     const selectionVisible = !!selection && !pasteLeadOpen && !findContactOpen && !summarizeOpen && !customOpen;
 
@@ -217,20 +251,43 @@ export function MessageSelectionActions({ selection, onClearSelection, conversat
     };
 
     const openSummarizeDialog = () => {
-        if (!selection?.text?.trim()) return;
-        setSummarizeSelectionText(selection.text.trim());
+        const text = hasBatchSelections
+            ? batchContextText
+            : String(selection?.text || "").trim();
+        if (!text) return;
+        setSummarizeSelectionText(text);
         setSummarySavedEntry("");
         setSummarizeOpen(true);
-        onClearSelection();
+        if (selection?.text?.trim()) onClearSelection();
     };
 
     const openCustomDialog = () => {
-        if (!selection?.text?.trim()) return;
-        setCustomSelectionText(selection.text.trim());
+        const text = hasBatchSelections
+            ? batchContextText
+            : String(selection?.text || "").trim();
+        if (!text) return;
+        setCustomSelectionText(text);
         setCustomInstruction("");
         setCustomOutput("");
         setCustomSavedEntry("");
         setCustomOpen(true);
+        if (selection?.text?.trim()) onClearSelection();
+    };
+
+    const handleAddSelectionToBatch = () => {
+        if (!selection?.text?.trim() || !onAddSelectionToBatch) return;
+        const result = onAddSelectionToBatch({
+            messageId: messageId || null,
+            text: selection.text.trim(),
+            source: selection.source,
+        });
+        const added = !!result?.added;
+        const total = typeof result?.total === "number" ? result.total : selectionBatch.length;
+        if (added) {
+            toast.success(`Added to summary batch (${total})`);
+        } else {
+            toast.message(`Selection already in batch (${total})`);
+        }
         onClearSelection();
     };
 
@@ -287,7 +344,14 @@ export function MessageSelectionActions({ selection, onClearSelection, conversat
                 return;
             }
             setSummarySavedEntry(res.entry);
-            toast.success("Summary saved to CRM log");
+            if (res?.skipped) {
+                toast.message("No new info found. Skipped duplicate CRM log entry.");
+            } else {
+                toast.success("Summary saved to CRM log");
+            }
+            if (hasBatchSelections) {
+                onClearSelectionBatch?.();
+            }
         } catch (error: any) {
             toast.error(error?.message || "Failed to summarize and save to CRM log");
         } finally {
@@ -340,7 +404,14 @@ export function MessageSelectionActions({ selection, onClearSelection, conversat
                 return;
             }
             setCustomSavedEntry(res.entry);
-            toast.success("Custom output saved to CRM log");
+            if (res?.skipped) {
+                toast.message("No new info found. Skipped duplicate CRM log entry.");
+            } else {
+                toast.success("Custom output saved to CRM log");
+            }
+            if (hasBatchSelections) {
+                onClearSelectionBatch?.();
+            }
         } catch (error: any) {
             toast.error(error?.message || "Failed to save custom output to CRM log");
         } finally {
@@ -412,6 +483,21 @@ export function MessageSelectionActions({ selection, onClearSelection, conversat
                         <Clipboard className="h-3.5 w-3.5" />
                         Paste Lead
                     </Button>
+                    {onAddSelectionToBatch ? (
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 gap-1.5 px-2 text-xs"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={handleAddSelectionToBatch}
+                            disabled={!selection?.text?.trim()}
+                            title="Add this selection to a multi-message summary batch"
+                        >
+                            <ListPlus className="h-3.5 w-3.5" />
+                            Add
+                        </Button>
+                    ) : null}
                     <Button
                         type="button"
                         size="sm"
@@ -745,9 +831,52 @@ export function MessageSelectionActions({ selection, onClearSelection, conversat
 
                     <div className="space-y-3">
                         <div className="rounded-md border bg-slate-50 p-2 text-xs text-slate-600">
-                            <span className="font-medium text-slate-800">Selected text:</span>{" "}
-                            {summarizeSelectionText ? getSelectionPreview(summarizeSelectionText) : "Selection captured"}
+                            <span className="font-medium text-slate-800">
+                                {hasBatchSelections ? "Summary batch:" : "Selected text:"}
+                            </span>{" "}
+                            {hasBatchSelections
+                                ? `${selectionBatch.length} snippets queued across messages`
+                                : (summarizeSelectionText ? getSelectionPreview(summarizeSelectionText) : "Selection captured")}
                         </div>
+
+                        {hasBatchSelections ? (
+                            <div className="rounded-md border border-slate-200 bg-white p-2 text-xs">
+                                <div className="mb-2 flex items-center justify-between">
+                                    <span className="font-medium text-slate-700">Queued snippets</span>
+                                    {onClearSelectionBatch ? (
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-7 px-2 text-[11px]"
+                                            onClick={onClearSelectionBatch}
+                                        >
+                                            Clear Batch
+                                        </Button>
+                                    ) : null}
+                                </div>
+                                <div className="max-h-36 space-y-1 overflow-y-auto">
+                                    {selectionBatch.map((item, index) => (
+                                        <div key={item.id} className="flex items-start gap-1 rounded border border-slate-100 bg-slate-50 px-2 py-1">
+                                            <span className="mt-0.5 shrink-0 text-[10px] font-semibold text-slate-500">{index + 1}.</span>
+                                            <span className="flex-1 text-[11px] text-slate-700">{getSelectionPreview(item.text)}</span>
+                                            {onRemoveSelectionBatchItem ? (
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="h-5 w-5 p-0 text-slate-400 hover:text-slate-700"
+                                                    onClick={() => onRemoveSelectionBatchItem(item.id)}
+                                                    title="Remove snippet from batch"
+                                                >
+                                                    <Trash2 className="h-3 w-3" />
+                                                </Button>
+                                            ) : null}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        ) : null}
 
                         <Button
                             type="button"
@@ -795,9 +924,52 @@ export function MessageSelectionActions({ selection, onClearSelection, conversat
 
                     <div className="space-y-3">
                         <div className="rounded-md border bg-slate-50 p-2 text-xs text-slate-600">
-                            <span className="font-medium text-slate-800">Selected text:</span>{" "}
-                            {customSelectionText ? getSelectionPreview(customSelectionText) : "Selection captured"}
+                            <span className="font-medium text-slate-800">
+                                {hasBatchSelections ? "Custom context batch:" : "Selected text:"}
+                            </span>{" "}
+                            {hasBatchSelections
+                                ? `${selectionBatch.length} snippets queued across messages`
+                                : (customSelectionText ? getSelectionPreview(customSelectionText) : "Selection captured")}
                         </div>
+
+                        {hasBatchSelections ? (
+                            <div className="rounded-md border border-slate-200 bg-white p-2 text-xs">
+                                <div className="mb-2 flex items-center justify-between">
+                                    <span className="font-medium text-slate-700">Queued snippets</span>
+                                    {onClearSelectionBatch ? (
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-7 px-2 text-[11px]"
+                                            onClick={onClearSelectionBatch}
+                                        >
+                                            Clear Batch
+                                        </Button>
+                                    ) : null}
+                                </div>
+                                <div className="max-h-36 space-y-1 overflow-y-auto">
+                                    {selectionBatch.map((item, index) => (
+                                        <div key={item.id} className="flex items-start gap-1 rounded border border-slate-100 bg-slate-50 px-2 py-1">
+                                            <span className="mt-0.5 shrink-0 text-[10px] font-semibold text-slate-500">{index + 1}.</span>
+                                            <span className="flex-1 text-[11px] text-slate-700">{getSelectionPreview(item.text)}</span>
+                                            {onRemoveSelectionBatchItem ? (
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="h-5 w-5 p-0 text-slate-400 hover:text-slate-700"
+                                                    onClick={() => onRemoveSelectionBatchItem(item.id)}
+                                                    title="Remove snippet from batch"
+                                                >
+                                                    <Trash2 className="h-3 w-3" />
+                                                </Button>
+                                            ) : null}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        ) : null}
 
                         <Textarea
                             value={customInstruction}

@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Conversation, Message } from "@/lib/ghl/conversations";
 import { GEMINI_FLASH_LATEST_ALIAS, GOOGLE_AI_MODELS } from "@/lib/ai/models";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Send, MessageSquare, RefreshCw, Paperclip } from "lucide-react";
+import { Loader2, Send, MessageSquare, RefreshCw, Paperclip, FileText, Trash2 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { toast } from "sonner";
 
 interface ChatWindowProps {
     conversation: Conversation;
@@ -51,9 +52,15 @@ function getPlaceholderText(channel: 'SMS' | 'Email' | 'WhatsApp'): string {
 
 import { MessageBubble } from "./message-bubble";
 import { SuggestionBubbles } from "./suggestion-bubbles";
-import { Sparkles, Loader2 as Spinner } from "lucide-react"; // Import Sparkles explicitly if not already
+import { Sparkles } from "lucide-react";
 
-import { getAiDraftModelPickerStateAction, getSmsChannelEligibility, getWhatsAppChannelEligibility } from "@/app/(main)/admin/conversations/actions";
+import {
+    getAiDraftModelPickerStateAction,
+    getSmsChannelEligibility,
+    getWhatsAppChannelEligibility,
+    summarizeSelectionToCrmLog,
+} from "@/app/(main)/admin/conversations/actions";
+import type { SelectionBatchInput, SelectionBatchItem } from "./message-selection-actions";
 
 type WhatsAppEligibilityState =
     | { status: 'checking' }
@@ -71,6 +78,27 @@ function getFallbackChannelWithoutWhatsApp(conversation: Conversation): 'SMS' | 
     return getInitialChannel(conversation) === 'Email' ? 'Email' : 'SMS';
 }
 
+function normalizeSelectionForBatch(text: string) {
+    return String(text || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function hashString(input: string) {
+    let hash = 5381;
+    for (let i = 0; i < input.length; i += 1) {
+        hash = ((hash << 5) + hash) + input.charCodeAt(i);
+        hash |= 0;
+    }
+    return Math.abs(hash).toString(36);
+}
+
+function buildSelectionBatchId(conversationId: string, item: SelectionBatchInput, normalizedText: string) {
+    return `${conversationId}:${item.messageId || "no-message"}:${hashString(`${item.source}:${normalizedText.toLowerCase()}`)}`;
+}
+
+function buildBatchContextText(items: SelectionBatchItem[]) {
+    return items.map((item, index) => `Snippet ${index + 1}:\n${item.text}`).join("\n\n");
+}
+
 export function ChatWindow({ conversation, messages, loading, onSendMessage, onSendImage, onSync, onGenerateDraft, onFetchHistory, suggestions = [] }: ChatWindowProps & { suggestions?: string[] }) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const [draft, setDraft] = useState("");
@@ -84,6 +112,8 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
     const [smsEligibility, setSmsEligibility] = useState<SmsEligibilityState>({ status: 'checking' });
     const fileInputRef = useRef<HTMLInputElement>(null);
     const hasUserSelectedModelRef = useRef(false);
+    const [selectionBatch, setSelectionBatch] = useState<SelectionBatchItem[]>([]);
+    const [isSummarizingBatch, setIsSummarizingBatch] = useState(false);
 
     // Fetch available models on mount
     useEffect(() => {
@@ -103,6 +133,7 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
     // Update channel if conversation changes
     useEffect(() => {
         setSelectedChannel(getInitialChannel(conversation));
+        setSelectionBatch([]);
     }, [conversation.id]);
 
     useEffect(() => {
@@ -239,6 +270,64 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
         }
     };
 
+    const handleAddSelectionToBatch = useCallback((item: SelectionBatchInput) => {
+        const normalizedText = normalizeSelectionForBatch(item.text);
+        if (!normalizedText) {
+            return { added: false, total: selectionBatch.length };
+        }
+
+        const id = buildSelectionBatchId(conversation.id, item, normalizedText);
+        if (selectionBatch.some((existing) => existing.id === id)) {
+            return { added: false, total: selectionBatch.length };
+        }
+
+        const next = [
+            ...selectionBatch,
+            {
+                id,
+                messageId: item.messageId || null,
+                text: normalizedText,
+                source: item.source,
+                addedAt: Date.now(),
+            },
+        ];
+        setSelectionBatch(next);
+        return { added: true, total: next.length };
+    }, [conversation.id, selectionBatch]);
+
+    const handleRemoveSelectionBatchItem = useCallback((id: string) => {
+        setSelectionBatch((prev) => prev.filter((item) => item.id !== id));
+    }, []);
+
+    const handleClearSelectionBatch = useCallback(() => {
+        setSelectionBatch([]);
+    }, []);
+
+    const batchContextText = useMemo(() => buildBatchContextText(selectionBatch), [selectionBatch]);
+
+    const handleSummarizeBatch = async () => {
+        if (!selectionBatch.length) return;
+        setIsSummarizingBatch(true);
+        try {
+            const modelOverride = typeof selectedModel === "string" && selectedModel.trim() ? selectedModel.trim() : undefined;
+            const res = await summarizeSelectionToCrmLog(conversation.id, batchContextText, modelOverride);
+            if (!res?.success || !res?.entry) {
+                toast.error(res?.error || "Failed to summarize batch");
+                return;
+            }
+            if (res?.skipped) {
+                toast.message("No new info found. Skipped duplicate CRM log entry.");
+            } else {
+                toast.success("Batch summary saved to CRM log");
+            }
+            setSelectionBatch([]);
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to summarize batch");
+        } finally {
+            setIsSummarizingBatch(false);
+        }
+    };
+
     const isWhatsAppDisabled = whatsAppEligibility.status === 'ineligible';
     const isSmsDisabled = smsEligibility.status === 'ineligible';
     const channelSelectorTitle =
@@ -262,6 +351,30 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
+                    {selectionBatch.length > 0 && (
+                        <>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 gap-1.5 px-2 text-[11px]"
+                                onClick={handleSummarizeBatch}
+                                disabled={isSummarizingBatch}
+                                title="Summarize all queued snippets into one CRM log entry"
+                            >
+                                {isSummarizingBatch ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                                {isSummarizingBatch ? "Summarizing..." : `Summarize Batch (${selectionBatch.length})`}
+                            </Button>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={handleClearSelectionBatch}
+                                title="Clear queued summary snippets"
+                            >
+                                <Trash2 className="h-3.5 w-3.5 text-gray-500" />
+                            </Button>
+                        </>
+                    )}
                     {conversation.lastMessageType === 'TYPE_WHATSAPP' && onSync && (
                         <Button variant="ghost" size="icon" onClick={onSync} title="Sync WhatsApp History">
                             <RefreshCw className="h-4 w-4 text-gray-500" />
@@ -300,6 +413,10 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
                         contactEmail={conversation.contactEmail}
                         contactName={conversation.contactName}
                         aiModel={selectedModel}
+                        selectionBatch={selectionBatch}
+                        onAddSelectionToBatch={handleAddSelectionToBatch}
+                        onRemoveSelectionBatchItem={handleRemoveSelectionBatchItem}
+                        onClearSelectionBatch={handleClearSelectionBatch}
                     />
                 ))}
             </div>

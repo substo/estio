@@ -6,7 +6,12 @@ import { Mail, Smartphone, Paperclip, ExternalLink, ChevronDown, ChevronUp, Arro
 import { format } from "date-fns";
 import { EmailFrame, type EmailFrameSelection } from "./email-frame";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-import { MessageSelectionActions, type MessageSelectionActionTarget } from "./message-selection-actions";
+import {
+    MessageSelectionActions,
+    type MessageSelectionActionTarget,
+    type SelectionBatchInput,
+    type SelectionBatchItem,
+} from "./message-selection-actions";
 
 type MessageAttachment = string | {
     url: string;
@@ -50,9 +55,23 @@ export interface MessageBubbleProps {
     contactEmail?: string;
     contactName?: string; // Fallback contact name if message.contactName missing
     aiModel?: string | null;
+    selectionBatch?: SelectionBatchItem[];
+    onAddSelectionToBatch?: (item: SelectionBatchInput) => { added: boolean; total: number } | void;
+    onRemoveSelectionBatchItem?: (id: string) => void;
+    onClearSelectionBatch?: () => void;
 }
 
-export function MessageBubble({ message, contactPhone, contactEmail: _contactEmail, contactName, aiModel }: MessageBubbleProps) {
+export function MessageBubble({
+    message,
+    contactPhone,
+    contactEmail: _contactEmail,
+    contactName,
+    aiModel,
+    selectionBatch,
+    onAddSelectionToBatch,
+    onRemoveSelectionBatchItem,
+    onClearSelectionBatch,
+}: MessageBubbleProps) {
     const isOutbound = message.direction === 'outbound';
     const isEmail = (message.type || '').toUpperCase().includes('EMAIL');
     const isSMS = (message.type || '').toUpperCase().includes('SMS') || (message.type || '').toUpperCase().includes('PHONE');
@@ -146,9 +165,21 @@ export function MessageBubble({ message, contactPhone, contactEmail: _contactEma
         }
 
         const range = selection.getRangeAt(0);
-        const ancestor = range.commonAncestorContainer;
-        const ancestorNode = ancestor.nodeType === Node.TEXT_NODE ? ancestor.parentNode : ancestor;
-        if (!contentRef.current || !ancestorNode || !contentRef.current.contains(ancestorNode as Node)) {
+        const contentNode = contentRef.current;
+        if (!contentNode) {
+            return;
+        }
+
+        // Allow cross-message drag selection as long as this bubble intersects
+        // the current range. The old common-ancestor check blocked multi-bubble
+        // selections because the shared ancestor is often outside this bubble.
+        let intersects = false;
+        try {
+            intersects = range.intersectsNode(contentNode);
+        } catch {
+            intersects = false;
+        }
+        if (!intersects) {
             return;
         }
 
@@ -350,6 +381,11 @@ export function MessageBubble({ message, contactPhone, contactEmail: _contactEma
                 onClearSelection={clearSelectionTarget}
                 conversationId={message.conversationId || null}
                 aiModel={aiModel || null}
+                messageId={message.id}
+                selectionBatch={selectionBatch}
+                onAddSelectionToBatch={onAddSelectionToBatch}
+                onRemoveSelectionBatchItem={onRemoveSelectionBatchItem}
+                onClearSelectionBatch={onClearSelectionBatch}
             />
 
             <Dialog open={selectedImageIndex !== null} onOpenChange={(open) => { if (!open) setSelectedImageIndex(null); }}>
