@@ -323,24 +323,30 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
     if [ -n "\$ACTIVE_APP_NAME" ] && [ "\$ACTIVE_APP_NAME" != "\$TARGET_APP_NAME" ]; then
         if [ "\$DRAIN_SECONDS" -gt 0 ] 2>/dev/null; then
             DRAIN_SCRIPT="/tmp/\${ACTIVE_APP_NAME}-drain-\${DEPLOY_TOKEN}.sh"
-            cat > "\$DRAIN_SCRIPT" << DRAIN_EOF
-#!/usr/bin/env bash
-sleep "\$DRAIN_SECONDS"
-
-CURRENT_TOKEN=\\$(cat "\$CURRENT_DEPLOY_TOKEN_FILE" 2>/dev/null || true)
-if [ "\\$CURRENT_TOKEN" != "\$DEPLOY_TOKEN" ]; then
+            {
+                echo '#!/usr/bin/env bash'
+                echo "sleep \"\$DRAIN_SECONDS\""
+                echo
+                echo "CURRENT_DEPLOY_TOKEN_FILE=\"\$CURRENT_DEPLOY_TOKEN_FILE\""
+                echo "DEPLOY_TOKEN=\"\$DEPLOY_TOKEN\""
+                echo "ACTIVE_PORT=\"\$ACTIVE_PORT\""
+                echo "ACTIVE_APP_NAME=\"\$ACTIVE_APP_NAME\""
+                cat << 'DRAIN_EOF'
+CURRENT_TOKEN=$(cat "$CURRENT_DEPLOY_TOKEN_FILE" 2>/dev/null || true)
+if [ "$CURRENT_TOKEN" != "$DEPLOY_TOKEN" ]; then
     exit 0
 fi
 
-LIVE_PORT=\\$(grep -Eo 'reverse_proxy[[:space:]]+localhost:[0-9]+' /etc/caddy/Caddyfile 2>/dev/null | head -n1 | sed -E 's/.*:([0-9]+)/\1/' || true)
-if [ "\\$LIVE_PORT" = "\$ACTIVE_PORT" ]; then
+LIVE_PORT=$(grep -Eo 'reverse_proxy[[:space:]]+localhost:[0-9]+' /etc/caddy/Caddyfile 2>/dev/null | head -n1 | sed -E 's/.*:([0-9]+)/\1/' || true)
+if [ "$LIVE_PORT" = "$ACTIVE_PORT" ]; then
     exit 0
 fi
 
-pm2 delete "\$ACTIVE_APP_NAME" >/dev/null 2>&1 || true
+pm2 delete "$ACTIVE_APP_NAME" >/dev/null 2>&1 || true
 pm2 save >/dev/null 2>&1 || true
-rm -f "\$DRAIN_SCRIPT"
+rm -f "$0"
 DRAIN_EOF
+            } > "\$DRAIN_SCRIPT"
             chmod +x "\$DRAIN_SCRIPT"
             nohup "\$DRAIN_SCRIPT" >/dev/null 2>&1 &
             echo "⏳ Scheduled old process drain: \$ACTIVE_APP_NAME in \$DRAIN_SECONDS seconds"
