@@ -17,6 +17,7 @@ Instead of parsing CRM notification emails automatically, Estio now uses an expl
 1. Select text in a message (plain text or email HTML)
 2. Use the floating selection toolbar
 3. Choose one of:
+   - `Add` (queue snippet for multi-message summarize/custom)
    - `Paste Lead` (reuses the existing AI lead import flow)
    - `Find Contact` (search by phone/email/full name)
    - `Summarize` (creates a concise CRM activity note and saves it to contact history)
@@ -37,6 +38,8 @@ Key behavior in the new workflow:
 - **Usage/trace visibility**:
   - `Summarize` / `Custom` now persist `AgentExecution` usage and cost records (`selection_toolbar`) and update conversation token/cost counters
   - `Find Contact` is non-AI and does not create model usage trace entries
+
+For current behavior details (cross-message selection, batch controls, duplicate-save rules), use `documentation/conversation-management.md` as the source of truth.
 
 See also:
 - `documentation/ai-agentic-conversations-hub.md` (conversation UI behavior)

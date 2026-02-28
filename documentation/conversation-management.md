@@ -122,13 +122,21 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
 - **Auto Read Reset**: Selecting a conversation marks it read and clears the badge.
 - **Active Thread Live Updates**: While a thread is open, metadata changes trigger silent message refresh; ChatWindow auto-scroll keeps the latest message visible.
 - **Channel Guards**: The composer channel picker disables ineligible channels with a reason tooltip. SMS is blocked when phone is invalid/masked or GHL SMS is not configured; WhatsApp is blocked when eligibility checks fail.
+- **Source of Truth (Selection Workflow)**: This document is the canonical reference for chat text-selection behavior, batch summarize/custom flow, and CRM-log save semantics.
 - **Selection Actions**: Message/email text selection in the chat panel now opens a floating action toolbar with:
   - `Paste Lead` for AI-assisted structured lead import.
+  - `Add` to queue the current snippet into a multi-message summary/custom batch.
   - `Find Contact` for phone/email/full-name lookup.
   - `Summarize` to generate and save a CRM log note into contact history.
   - `Custom` to run a user-provided prompt against selected text and optionally save the output to CRM log.
+- **Cross-Message Selection (Phase 1 Quick Win)**: Drag-selection can span multiple message bubbles/email blocks in the visible chat window; the toolbar accepts the combined selection text.
+- **Batch Selection Flow (Phase 2)**:
+  - The batch is conversation-scoped and dedupes repeated snippet adds from the same message/selection hash.
+  - Chat header exposes `Summarize Batch (N)` plus a clear button for quick logging without opening each message.
+  - `Summarize` and `Custom` dialogs switch into batch mode when snippets are queued, show a queued-snippets list, and allow per-item remove/clear.
 - **Selection Model Consistency**: `Paste Lead`/`Summarize`/`Custom` use the currently selected AI model from the chat toolbar, keeping tone/behavior consistent with AI Draft.
 - **CRM Log Save Format**: Selection-based CRM log entries are saved as `MANUAL_ENTRY` in `ContactHistory` using format `DD.MM.YY FirstName: summary`.
+- **CRM Log Dedupe Guard**: Before writing `MANUAL_ENTRY` for `Summarize` or `Custom`, the system checks the latest 30 manual entries for likely duplicates (exact/contains/high token overlap). Duplicate entries are skipped and the existing entry is returned.
 - **Selection Observability**:
   - `Summarize` and `Custom` persist `AgentExecution` records (usage, model, cost estimate, request/response snapshots) and increment conversation token/cost totals.
   - `Paste Lead` persists `Analyze Lead Text` trace metadata when the user confirms import.

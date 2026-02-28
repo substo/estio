@@ -13,6 +13,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import {
@@ -22,7 +23,7 @@ import {
     CommandItem,
     CommandList,
 } from "@/components/ui/command";
-import { Loader2, Search, Clipboard, MessageCircle, BadgeAlert, AlertTriangle, User, Phone, Mail, ExternalLink, FileText, Wand2, ListPlus, Trash2 } from "lucide-react";
+import { Loader2, Search, Clipboard, MessageCircle, BadgeAlert, AlertTriangle, User, Phone, Mail, ExternalLink, FileText, Wand2, ListPlus, Trash2, ListTodo } from "lucide-react";
 import { toast } from "sonner";
 import {
     parseLeadFromText,
@@ -34,6 +35,7 @@ import {
     type LeadAnalysisTrace,
 } from "@/app/(main)/admin/conversations/actions";
 import { openOrStartConversationForContact, searchContactsAction } from "@/app/(main)/admin/contacts/actions";
+import { createContactTask } from "@/app/(main)/admin/tasks/actions";
 import { cn } from "@/lib/utils";
 
 export type MessageSelectionActionTarget = {
@@ -122,6 +124,15 @@ function getSelectionPreview(text: string) {
     return `${compact.slice(0, 140)}...`;
 }
 
+function suggestTaskTitleFromSelection(text: string) {
+    const compact = String(text || "").replace(/\s+/g, " ").trim();
+    if (!compact) return "Follow up with contact";
+
+    const firstSentence = compact.split(/[.!?]/).find(Boolean)?.trim() || compact;
+    const normalized = firstSentence.length > 100 ? `${firstSentence.slice(0, 100).trim()}...` : firstSentence;
+    return normalized || "Follow up with contact";
+}
+
 function buildBatchContextText(items: SelectionBatchItem[]) {
     return items
         .map((item, index) => `Snippet ${index + 1}:\n${item.text}`)
@@ -157,6 +168,11 @@ export function MessageSelectionActions({
     const [searchingContacts, setSearchingContacts] = useState(false);
     const [openingConversationContactId, setOpeningConversationContactId] = useState<string | null>(null);
 
+    const [createTaskOpen, setCreateTaskOpen] = useState(false);
+    const [taskTitle, setTaskTitle] = useState("");
+    const [taskDescription, setTaskDescription] = useState("");
+    const [isCreatingTask, setIsCreatingTask] = useState(false);
+
     const [summarizeOpen, setSummarizeOpen] = useState(false);
     const [summarizeSelectionText, setSummarizeSelectionText] = useState("");
     const [isSummarizing, setIsSummarizing] = useState(false);
@@ -173,7 +189,7 @@ export function MessageSelectionActions({
     const hasBatchSelections = selectionBatch.length > 0;
     const batchContextText = hasBatchSelections ? buildBatchContextText(selectionBatch) : "";
 
-    const selectionVisible = !!selection && !pasteLeadOpen && !findContactOpen && !summarizeOpen && !customOpen;
+    const selectionVisible = !!selection && !pasteLeadOpen && !findContactOpen && !createTaskOpen && !summarizeOpen && !customOpen;
 
     useEffect(() => {
         if (!selectionVisible) return;
@@ -247,6 +263,16 @@ export function MessageSelectionActions({
         setFindContactSelectionPreview(selection.text.trim());
         setContactResults([]);
         setFindContactOpen(true);
+        onClearSelection();
+    };
+
+    const openCreateTaskDialog = () => {
+        const text = String(selection?.text || "").trim();
+        if (!text) return;
+
+        setTaskTitle(suggestTaskTitleFromSelection(text));
+        setTaskDescription(text);
+        setCreateTaskOpen(true);
         onClearSelection();
     };
 
@@ -326,6 +352,39 @@ export function MessageSelectionActions({
             toast.error(error?.message || "Failed to import lead");
         } finally {
             setIsImportingLead(false);
+        }
+    };
+
+    const handleCreateTaskFromSelection = async () => {
+        if (!conversationId) {
+            toast.error("Open a conversation first to create a contact task.");
+            return;
+        }
+        if (!taskTitle.trim()) {
+            toast.error("Task title is required.");
+            return;
+        }
+
+        setIsCreatingTask(true);
+        try {
+            const res = await createContactTask({
+                conversationId,
+                title: taskTitle.trim(),
+                description: taskDescription.trim() || undefined,
+                source: "ai_selection",
+            });
+
+            if (!res?.success) {
+                toast.error(res?.error || "Failed to create task");
+                return;
+            }
+
+            toast.success("Task created");
+            setCreateTaskOpen(false);
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to create task");
+        } finally {
+            setIsCreatingTask(false);
         }
     };
 
@@ -508,6 +567,19 @@ export function MessageSelectionActions({
                     >
                         <Search className="h-3.5 w-3.5" />
                         Find Contact
+                    </Button>
+                    <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 gap-1.5 px-2 text-xs"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={openCreateTaskDialog}
+                        disabled={!canUseCrmLogActions}
+                        title={canUseCrmLogActions ? "Create a contact task from this selection" : "Open a conversation to create tasks"}
+                    >
+                        <ListTodo className="h-3.5 w-3.5" />
+                        Task
                     </Button>
                     <Button
                         type="button"
@@ -804,6 +876,65 @@ export function MessageSelectionActions({
                                 })}
                             </CommandList>
                         </Command>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog
+                open={createTaskOpen}
+                onOpenChange={(open) => {
+                    setCreateTaskOpen(open);
+                    if (!open) {
+                        setIsCreatingTask(false);
+                    }
+                }}
+            >
+                <DialogContent className="sm:max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <ListTodo className="h-4 w-4 text-blue-600" />
+                            Create Task From Selection
+                        </DialogTitle>
+                        <DialogDescription>
+                            Save this as an actionable task for the contact in Mission Control and Contact Tasks.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-3">
+                        <div className="rounded-md border bg-slate-50 p-2 text-xs text-slate-600">
+                            <span className="font-medium text-slate-800">Selected text:</span>{" "}
+                            {taskDescription ? getSelectionPreview(taskDescription) : "Selection captured"}
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-xs font-medium text-slate-700">Task title</label>
+                            <Input
+                                value={taskTitle}
+                                onChange={(event) => setTaskTitle(event.target.value)}
+                                placeholder="e.g. Confirm viewing availability"
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-xs font-medium text-slate-700">Task notes (optional)</label>
+                            <Textarea
+                                value={taskDescription}
+                                onChange={(event) => setTaskDescription(event.target.value)}
+                                className="min-h-[120px]"
+                            />
+                        </div>
+
+                        <DialogFooter>
+                            <Button
+                                type="button"
+                                className="gap-2"
+                                onClick={handleCreateTaskFromSelection}
+                                disabled={isCreatingTask || !taskTitle.trim() || !canUseCrmLogActions}
+                            >
+                                {isCreatingTask ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListTodo className="h-4 w-4" />}
+                                {isCreatingTask ? "Creating..." : "Create Task"}
+                            </Button>
+                        </DialogFooter>
                     </div>
                 </DialogContent>
             </Dialog>

@@ -745,9 +745,9 @@ export function ConversationInterface({ initialConversations, initialConversatio
             <PanelGroup orientation="horizontal" className="h-full w-full max-w-full overflow-hidden">
                 {/* Left: List */}
                 <Panel
-                    defaultSize={25}
-                    minSize={25}
-                    className="border-r"
+                    defaultSize={24}
+                    minSize={18}
+                    className="overflow-hidden min-w-0"
                 >
                     <ConversationList
                         conversations={conversations}
@@ -792,7 +792,7 @@ export function ConversationInterface({ initialConversations, initialConversatio
                 />
 
                 {/* Center: Chat */}
-                <Panel defaultSize={60} minSize={30} className="overflow-hidden">
+                <Panel defaultSize={52} minSize={36} className="overflow-hidden min-w-0">
                     {viewMode === 'chats' ? (
                         activeConversation ? (
                             <ChatWindow
@@ -861,7 +861,7 @@ export function ConversationInterface({ initialConversations, initialConversatio
                 />
 
                 {/* Right: AI Coordinator */}
-                <Panel defaultSize={25} minSize={25}>
+                <Panel defaultSize={24} minSize={20} className="min-w-0">
                     {viewMode === 'chats' ? (
                         activeConversation ? (
                             <CoordinatorPanel

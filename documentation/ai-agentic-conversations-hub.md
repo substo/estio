@@ -202,11 +202,13 @@ We refactored the message display into a shared component (`_components/message-
 *   **Inline Media Preview**: Image attachments (including WhatsApp images stored via private R2 attachment proxy URLs) render inline previews in the bubble, while non-image attachments remain click-through links.
 *   **Maintainability**: Updates to message styling now propagate instantly to all parts of the Admin Hub.
 *   **Selection Actions (New)**: Selecting text in message bodies or inside HTML email content shows a floating action toolbar with:
+    *   `Add` (queues the snippet into a conversation-level batch for cross-message summarize/custom workflows)
     *   `Paste Lead` (opens a prefilled lead-import flow using the existing AI paste-lead pipeline)
     *   `Find Contact` (opens a contact search dialog seeded from the selection; supports phone/email/full-name lookup)
     *   `Summarize` (creates a concise CRM activity note and saves it to contact history)
     *   `Custom` (runs a user instruction over selected text context, returns editable output, and can save to CRM log)
     *   **Model Consistency**: These actions reuse the currently selected AI model from the chat toolbar so drafts and selection-based actions run on the same model by default.
+    *   **Reference**: Full behavior details (cross-message selection, batch controls, dedupe rules) are documented in `documentation/conversation-management.md`.
 
 ### Selection-Based Conversation Operations (Replaces Legacy CRM Email Buttons)
 The old message-level legacy CRM notification processing actions (`Process Lead`, `Reprocess`, `Old CRM`) were removed from the message bubble UI in favor of explicit text selection actions.

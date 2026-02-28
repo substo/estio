@@ -364,7 +364,7 @@ export function ConversationList({
                 <UnifiedHeader />
 
 
-                <div className="flex-1 overflow-y-auto">
+                <div className="flex-1 overflow-y-auto overflow-x-hidden pr-1 [scrollbar-gutter:stable]">
                     {deals.map(d => (
                         <div
                             key={d.id}
@@ -412,7 +412,7 @@ export function ConversationList({
             {/* Unified Header with Mode Toggle + Action Buttons */}
             <UnifiedHeader />
 
-            <div ref={listScrollRef} className="flex-1 overflow-y-auto">
+            <div ref={listScrollRef} className="flex-1 overflow-y-auto overflow-x-hidden pr-1 [scrollbar-gutter:stable]">
                 {conversations.map((c) => {
                     const channel = getChannelInfo(c.lastMessageType || c.type);
                     const isChecked = selectedIds?.has(c.id);
@@ -423,7 +423,7 @@ export function ConversationList({
                                 <HoverCardTrigger asChild>
                                     <div
                                         className={cn(
-                                            "border-b transition-colors flex items-start p-2 cursor-pointer",
+                                            "border-b transition-colors flex items-start py-2 pl-2 pr-3 cursor-pointer",
                                             selectedId === c.id && !isSelectionMode ? "bg-slate-100 border-l-blue-500" : "border-l-transparent",
                                             isSelectionMode && isChecked ? "bg-indigo-50" : "hover:bg-slate-50",
                                             selectedId === c.id ? "border-l-4" : "border-l-4"
@@ -458,7 +458,7 @@ export function ConversationList({
                                                 <h4 className="font-semibold text-sm truncate flex-1">
                                                     {c.contactName || c.contactId || "Unknown Contact"}
                                                 </h4>
-                                                <div className="ml-2 shrink-0 flex items-center gap-1">
+                                                <div className="ml-2 mr-0.5 shrink-0 flex items-center gap-1">
                                                     {c.unreadCount > 0 && (
                                                         <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] leading-[18px] text-center font-semibold">
                                                             {c.unreadCount > 99 ? "99+" : c.unreadCount}

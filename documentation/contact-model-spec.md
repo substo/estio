@@ -313,34 +313,20 @@ The system now includes a dedicated read-only view page for contacts (`/admin/co
 -   **Roles & Associations**: Clear listing of all property and company roles.
 -   **Edit Access**: Includes an "Edit Contact" button that triggers the `EditContactDialog`.
 
-### 4. Conversation Text Selection Actions (New)
-Selected text inside `/admin/conversations` message bubbles (including HTML email content) now supports four actions:
+### 4. Conversation Text Selection Actions (Contact/Data Contract)
+This spec keeps only contact/data behavior for toolbar actions used inside `/admin/conversations`.
+Full UI and workflow details are maintained in `documentation/conversation-management.md`.
 
 -   **Paste Lead**:
-    -   Opens prefilled lead analysis/import flow.
-    -   Reuses existing backend path: `parseLeadFromText(...)` + `createParsedLead(...)`.
+    -   Reuses the existing lead-import backend path: `parseLeadFromText(...)` + `createParsedLead(...)`.
 -   **Find Contact**:
-    -   **Seeded Query**: Extracts likely search term from the selection (Email, then Phone, then first text line).
-    -   **Search Fields**: `phone`, `email`, `name`, `firstName`, `lastName`.
-    -   **Scope**: Location-scoped and permission-checked.
-    -   **Ranking**:
-        -   Exact phone / email first
-        -   Phone suffix / email prefix next
-        -   Full-name and token matches after that
-    -   **Actions**:
-        -   `Open Contact`
-        -   `Open Conversation` (or `Start Conversation` if the contact has no existing conversation but has a phone)
--   **Summarize**:
-    -   Generates a concise CRM activity note from selected text and saves to contact history.
-    -   Persists as `ContactHistory.action = MANUAL_ENTRY`.
+    -   Search is seeded from selected text and runs against `phone`, `email`, `name`, `firstName`, `lastName` (location-scoped).
+    -   Supports opening contact view or opening/starting a conversation for the matched contact.
+-   **Summarize / Custom Save**:
+    -   Persist team-visible notes as `ContactHistory.action = MANUAL_ENTRY`.
     -   Saved entry format: `DD.MM.YY FirstName: summary`.
-    -   Uses the currently selected chat-window AI model.
-    -   Persists an `AgentExecution` usage/cost trace (`skillName: selection_toolbar`, `intent: selection_summary`).
--   **Custom**:
-    -   Runs a user instruction prompt with selected text as context.
-    -   Returns editable output and can optionally save to contact history (same format/path as `Summarize`).
-    -   Uses the currently selected chat-window AI model.
-    -   Persists an `AgentExecution` usage/cost trace (`skillName: selection_toolbar`, `intent: selection_custom`).
+    -   Save path applies duplicate protection against recent manual entries.
+    -   `Summarize`/`Custom` persist `AgentExecution` usage/cost traces (`selection_toolbar`) and update conversation token/cost counters.
 
 ## Data Integrity & Validation
 
@@ -369,6 +355,7 @@ Data is automatically normalized before being saved to the database:
 -   **User Resolution**: Internal User IDs are correctly resolved and stored for history and viewing records, preventing foreign key errors with external Auth IDs (Clerk).
 -   **Readable Changes**: The history log enriches raw ID changes (e.g., Property ID changed) with human-readable names (e.g., Property Title changed) for better auditability.
 -   **Selection CRM Logs**: Conversation toolbar `Summarize`/`Custom` saves team-visible progress notes into `ContactHistory` as `MANUAL_ENTRY`, keeping contact timeline updates centralized.
+-   **Selection CRM Log Dedupe**: Save operations apply duplicate protection and skip repeated notes.
 -   **Selection AI Usage Accounting**:
     -   `Summarize` and `Custom` increment `Conversation.promptTokens`, `completionTokens`, `totalTokens`, and `totalCost`.
     -   `Find Contact` remains a non-AI contact search and does not create usage traces.

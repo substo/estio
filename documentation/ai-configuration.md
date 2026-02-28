@@ -1,50 +1,99 @@
 # AI Configuration & Integration
 
-Estio leverages Google Gemini AI for key features like Property Import, Theme Design, and Agentic Conversations. These settings are centrally managed to allow fine-tuning of models and branding.
+**Last Updated:** 2026-02-27
+
+Estio uses Google Gemini models across conversation drafting, selection actions, content generation, and import flows. This document reflects the current model-resolution logic used in production.
 
 ## AI Settings Page
-**Location**: `/admin/settings/ai` (Access via **Settings** > **AI Configuration** card)
 
-This page centralizes all AI-related configurations formerly located in general Site Settings.
+**Path:** `/admin/settings/ai`
 
-### 1. API Configuration
-*   **Google Gemini API Key**: The master key for all AI operations. Obtainable from Google AI Studio.
-*   **Storage**: Securely stored in the `SiteConfig` table. Check code references in `lib/db`.
+The settings page stores model and API configuration in `SiteConfig`.
 
-### 2. Model Selection
-We support configuring specific models for different stages of the pipeline. The list of available models is **fetched dynamically** from Google's API, ensuring immediate access to new releases (like Gemini 3.0) without code changes.
+## Core Fields in `SiteConfig`
 
-*   **Default Model**: The fallback model for general tasks (e.g., Agentic drafts).
-    *   *System Default*: `gemini-3-flash-preview` (Configured in `lib/ai/pricing.ts`).
-*   **Autonomous Agent**: Used by the AI Coordinator's "Run Agent" feature for complex reasoning and tool use.
-    *   *Default*: `gemini-2.5-pro` (Best reasoning, supports JSON mode).
-    *   *Planner*: Uses **System Default** (e.g., Gemini 3 Flash) for fast plan generation.
-*   **Stage 1: Extraction Model**: Used for heavy-duty text parsing, OCR, and structuring raw data from imports.
-    *   *Recommended*: **System Default** (Good balance) or `gemini-2.5-pro` (Better reasoning).
-*   **Stage 2: Design Engine**: Used for creative tasks, rewriting copy for "Premium" feel, and generating themes.
-    *   *Recommended*: `gemini-2.5-pro` (Best for creative writing).
+- `googleAiApiKey`
+- `googleAiModel` (general / draft default)
+- `googleAiModelExtraction` (stage 1 extraction)
+- `googleAiModelDesign` (stage 2 design)
+- `brandVoice`
+- `outreachConfig` (`enabled`, `visionIdPrompt`, `icebreakerPrompt`, `qualifierPrompt`)
 
-### 3. Brand Voice
-The "System Instruction" injected into AI prompts to ensure generated content matches your agency's tone.
+## Model Catalog Source
 
-*   **Configuration**:
-    *   **Manual Entry**: Type your own instructions (e.g., "Professional, Luxury, Concise").
-    *   **AI Researcher**: Use the "Research from URL" feature to have the AI scrape your existing website and generate a voice profile for you.
+Model options come from two sources:
 
-## Dynamic Model Usage in Code
+1. Dynamic fetch from Google Models API (`v1beta/models`, paginated).
+2. Curated fallback/alias list in `lib/ai/models.ts`.
 
-To ensure the configured settings are respected, we primarily use a **dynamic model list** and a standardized `DEFAULT_MODEL` constant.
+Important aliases/constants:
 
-### Library Functions
-*   **`lib/ai/coordinator.ts`**: Fetches the model dynamically from `SiteConfig` or falls back to `DEFAULT_MODEL`.
-*   **`lib/ai/agent.ts`**: The Autonomous Agent core. The Planner uses `DEFAULT_MODEL`.
-*   **`lib/feed/ai-mapper.ts`**: `analyzeFeedStructure` accepts a `modelName` parameter (defaults to `DEFAULT_MODEL`).
+- `gemini-flash-latest` (`GEMINI_FLASH_LATEST_ALIAS`)
+- `gemini-2.5-flash` (`GEMINI_FLASH_STABLE_FALLBACK`)
 
-### API Routes
-*   **`app/api/import-stream/route.ts`**: Defaults to the user's configured `googleAiModel` or `DEFAULT_MODEL`.
-    *   *Note*: The Property Import UI allows per-import overrides using the dynamic list.
+The UI list is deduped and sorted, and curated aliases remain available even if Google API omits them.
 
-## Related Documentation
-*   [AI Autonomous Agent](ai-autonomous-agent.md): Full technical documentation of the Agent, tools, prompts, and **AI Thinking Display**.
-*   [AI Agentic Conversations Hub](ai-agentic-conversations-hub.md): Original architecture and Deal Room concept.
-*   [AI Property Import Prompts](ai-property-import-prompts.md): Details the specific prompts used in the extraction pipeline.
+## Server-Resolved Default Logic
+
+Defaults are resolved server-side in `lib/ai/fetch-models.ts`.
+
+For a location:
+
+- `general` and `draft` default -> `googleAiModel` if set
+- `extraction` default -> `googleAiModelExtraction`, else `googleAiModel`
+- `design` default -> `googleAiModelDesign`, else `googleAiModel`
+
+If not configured:
+
+1. Use `gemini-flash-latest` when available
+2. Else use `gemini-2.5-flash`
+3. Else use first available Flash model
+4. Else final fallback `gemini-2.5-flash`
+
+### UI Consumers
+
+- `/admin/settings/ai` loads picker defaults from `getAiModelPickerDefaultsAction()`.
+- Chat window AI draft picker uses `getAiDraftModelPickerStateAction()`.
+
+This keeps picker defaults consistent across screens.
+
+## Conversation AI Model Reuse
+
+Inside chat, the selected model is reused by:
+
+- AI Draft generation
+- `Paste Lead` (selection)
+- `Summarize` (selection -> CRM log)
+- `Custom` (selection + user prompt)
+
+This ensures the same model behavior across drafting and selection workflows.
+
+## Cost & Usage Tracking
+
+For selection actions using LLM:
+
+- `Summarize` and `Custom` persist `AgentExecution` usage/cost metadata
+- Conversation token/cost counters are incremented
+
+`Find Contact` is non-AI and does not create model usage traces.
+
+## Pricing Default Note
+
+`lib/ai/pricing.ts` still exports `DEFAULT_MODEL = gemini-3-flash-preview` for generic fallback/cost contexts.
+
+For user-facing pickers and chat defaults, the effective model is resolved through `fetch-models.ts` as described above.
+
+## Key Files
+
+- `lib/ai/models.ts`
+- `lib/ai/fetch-models.ts`
+- `app/(main)/admin/settings/ai/actions.ts`
+- `app/(main)/admin/settings/ai/ai-settings-form.tsx`
+- `app/(main)/admin/conversations/actions.ts`
+- `app/(main)/admin/conversations/_components/chat-window.tsx`
+
+## Related Docs
+
+- `documentation/ai-draft-feature.md`
+- `documentation/ai-agentic-conversations-hub.md`
+- `documentation/conversation-management.md`

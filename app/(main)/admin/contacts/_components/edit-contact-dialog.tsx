@@ -35,6 +35,7 @@ import { DeleteContactDialog } from './delete-contact-dialog';
 import { ContactForm, type ContactData } from './contact-form';
 import { CONTACT_TYPE_CONFIG, type ContactType } from './contact-types';
 import { MergeContactDialog } from './merge-contact-dialog';
+import { ContactTaskManager } from '@/components/tasks/contact-task-manager';
 
 export function EditContactForm({ contact, onSuccess, onDelete, leadSources, initialMode = 'edit', isOutlookConnected = false, isGoogleConnected = false, isGhlConnected = false }: { contact: ContactData; onSuccess?: () => void; onDelete?: () => void; leadSources: string[]; initialMode?: 'view' | 'edit' | 'create'; isOutlookConnected?: boolean; isGoogleConnected?: boolean; isGhlConnected?: boolean }) {
     const { toast } = useToast();
@@ -227,10 +228,11 @@ export function EditContactForm({ contact, onSuccess, onDelete, leadSources, ini
                 onSuccess={onSuccess}
                 leadSources={leadSources}
                 isOutlookConnected={isOutlookConnected}
-                additionalTabCount={showViewings ? 2 : 1}
+                additionalTabCount={showViewings ? 3 : 2}
                 additionalTabs={
                     <>
                         {showViewings ? <TabsTrigger value="viewings">Viewings</TabsTrigger> : null}
+                        <TabsTrigger value="tasks">Tasks</TabsTrigger>
                         <TabsTrigger value="history">History</TabsTrigger>
                     </>
                 }
@@ -356,6 +358,13 @@ export function EditContactForm({ contact, onSuccess, onDelete, leadSources, ini
                                 </div>
                             </TabsContent>
                         ) : null}
+
+                        <TabsContent value="tasks" forceMount={true} className="space-y-4 pt-4 data-[state=inactive]:hidden">
+                            <div className="space-y-4">
+                                <h3 className="font-semibold">Tasks</h3>
+                                <ContactTaskManager contactId={contact.id} compact={!isEditing} />
+                            </div>
+                        </TabsContent>
 
                         <TabsContent value="history" forceMount={true} className="space-y-4 pt-4 data-[state=inactive]:hidden">
                             <div className="space-y-4">

@@ -20,8 +20,14 @@ You have just completed a coding a new implementation or refactoring. The code i
 2.  **Identify Affected Documentation:**
     -   List all files in the `documentation/` directory.
     -   Identify which files contain information relevant to the modified code (look for matching keywords, model names, or feature descriptions).
+    -   Decide a **single source-of-truth doc** for each major feature/page change (usually the page-level or feature-level document).
+    -   If a document is only tangentially related and no behavior for that audience changed, do **not** edit it.
 
 3.  **Perform Updates:**
+    -   **Minimize Duplication (Required):**
+        -   Put full implementation details in the source-of-truth doc.
+        -   In other related docs, keep only short context needed for that doc's audience, then link to the source-of-truth doc.
+        -   Only duplicate details when necessary for safety, compliance, or to keep a doc independently usable.
     -   For each relevant file, read its current content.
     -   **Update Schemas:** specific Prisma models or type definitions must match the code exactly.
     -   **Update Logic/Flows:** If business logic changed, update the text descriptions.
@@ -35,4 +41,5 @@ You have just completed a coding a new implementation or refactoring. The code i
 
 **Output:**
 -   List the documentation files you identified as relevant.
+-   Identify which file is the source-of-truth for the updated feature and which docs only received brief references.
 -   Apply the necessary edits to each file.

@@ -27,6 +27,8 @@ export function getGoogleAuthUrl(baseUrl?: string) {
         'https://www.googleapis.com/auth/gmail.modify',
         'https://www.googleapis.com/auth/calendar',              // Phase 4: Calendar access
         'https://www.googleapis.com/auth/calendar.events',       // Phase 4: Event management
+        'https://www.googleapis.com/auth/tasks',                 // Contact task hub sync
+        'https://www.googleapis.com/auth/tasks.readonly',
     ];
 
     const client = createOAuth2Client(baseUrl);

@@ -18,6 +18,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { cn } from "@/lib/utils";
 import { GroupMembersList } from './group-members-list';
 import { TraceNodeRenderer } from "./trace-node-renderer";
+import { ContactTaskManager } from "@/components/tasks/contact-task-manager";
 
 interface CoordinatorPanelProps {
     conversation: Conversation;
@@ -470,6 +471,19 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
                     </CardContent>
                 </Card>
             )}
+
+            <Card className="shadow-none border-border/50">
+                <CardHeader className="p-3 pb-1.5">
+                    <CardTitle className="text-xs font-semibold">Contact Tasks</CardTitle>
+                </CardHeader>
+                <CardContent className="p-3 pt-0">
+                    <ContactTaskManager
+                        contactId={contactContext?.contact?.id || conversation.contactId}
+                        conversationId={conversation.id}
+                        compact
+                    />
+                </CardContent>
+            </Card>
 
 
             {/* PLANNER SECTION */}
