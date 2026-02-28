@@ -178,6 +178,8 @@ model User {
   googleAutoSyncWhatsAppInbound Boolean         @default(false) // WhatsApp webhook-driven contact creation
   googleAutoSyncMode            String          @default("LINK_ONLY") // "LINK_ONLY" | "LINK_OR_CREATE"
   googleAutoSyncPushUpdates     Boolean         @default(false) // Push updates for already-linked contacts
+  googleTasklistId              String? // Preferred Google Tasks list id for task sync-out
+  googleTasklistTitle           String? // Cached display name for preferred Google Tasks list
   gmailSyncState                GmailSyncState?
 
   // Outlook / Microsoft Sync Credentials (OAuth method)

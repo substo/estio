@@ -8,6 +8,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { SyncDirectionSettings } from "./sync-direction-settings";
 import { GoogleAutomationSettings } from "./automation-settings";
+import { GoogleTasklistSettings } from "./tasklist-settings";
+import { listGoogleTasklists, DEFAULT_GOOGLE_TASKLIST_ID } from "@/lib/tasks/providers/google";
 
 export default async function GoogleIntegrationPage({
     searchParams,
@@ -30,7 +32,9 @@ export default async function GoogleIntegrationPage({
             googleAutoSyncContactForm: true,
             googleAutoSyncWhatsAppInbound: true,
             googleAutoSyncMode: true,
-            googleAutoSyncPushUpdates: true
+            googleAutoSyncPushUpdates: true,
+            googleTasklistId: true,
+            googleTasklistTitle: true,
         }
     });
 
@@ -41,13 +45,33 @@ export default async function GoogleIntegrationPage({
     const isConnected = !!user.googleAccessToken;
     const resolvedParams = await searchParams;
     const isNewConnection = resolvedParams?.google_connected === 'true';
+    let tasklistLoadError: string | null = null;
+    let googleTasklists: Array<{ id: string; title: string; isDefault: boolean }> = [];
+
+    if (isConnected) {
+        try {
+            const loadedTasklists = await listGoogleTasklists({ userId: user.id });
+            googleTasklists = loadedTasklists.map((tasklist) => ({
+                id: tasklist.id,
+                title: tasklist.title,
+                isDefault: tasklist.isDefault,
+            }));
+        } catch (error: any) {
+            tasklistLoadError = error?.message || "Could not load Google tasklists. Reconnect Google to refresh permissions.";
+            googleTasklists = [{
+                id: user.googleTasklistId || DEFAULT_GOOGLE_TASKLIST_ID,
+                title: user.googleTasklistTitle || "Default",
+                isDefault: (user.googleTasklistId || DEFAULT_GOOGLE_TASKLIST_ID) === DEFAULT_GOOGLE_TASKLIST_ID,
+            }];
+        }
+    }
 
     return (
         <div className="space-y-6">
             <div>
                 <h1 className="text-2xl font-bold tracking-tight">Google Workspace Sync</h1>
                 <p className="text-muted-foreground">
-                    Connect your Google account to sync Contacts and Gmail.
+                    Connect your Google account to sync Contacts, Gmail, and Tasks.
                 </p>
             </div>
 
@@ -84,7 +108,7 @@ export default async function GoogleIntegrationPage({
                                     <p className="font-medium">{isConnected ? 'Connected' : 'Not Connected'}</p>
                                     <p className="text-sm text-muted-foreground">
                                         {isConnected
-                                            ? 'Google account connected. Gmail sync is active; contact sync follows your automation settings.'
+                                            ? 'Google account connected. Gmail sync is active; contact and task sync follow your settings.'
                                             : 'Connect to start syncing.'}
                                     </p>
                                 </div>
@@ -128,6 +152,14 @@ export default async function GoogleIntegrationPage({
                         googleAutoSyncPushUpdates: user.googleAutoSyncPushUpdates
                     }}
                 />
+
+                <GoogleTasklistSettings
+                    isConnected={isConnected}
+                    tasklists={googleTasklists}
+                    currentTasklistId={user.googleTasklistId}
+                    currentTasklistTitle={user.googleTasklistTitle}
+                    loadError={tasklistLoadError}
+                />
             </div>
 
             <Card>
@@ -143,6 +175,7 @@ export default async function GoogleIntegrationPage({
                             <li><strong>Gmail Sync:</strong> Two-way email sync (Desktop & Mobile).</li>
                             <li><strong>Caller ID:</strong> Company field shows "Lead [Rent/Sale]..."</li>
                             <li><strong>Contact Sync:</strong> Manual by default, with optional per-flow automation.</li>
+                            <li><strong>Tasks Sync-Out:</strong> Contact tasks can be pushed to a selected Google task list.</li>
                         </ul>
                     </div>
 

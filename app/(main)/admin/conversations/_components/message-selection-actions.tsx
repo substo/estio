@@ -23,20 +23,24 @@ import {
     CommandItem,
     CommandList,
 } from "@/components/ui/command";
-import { Loader2, Search, Clipboard, MessageCircle, BadgeAlert, AlertTriangle, User, Phone, Mail, ExternalLink, FileText, Wand2, ListPlus, Trash2, ListTodo } from "lucide-react";
+import { Loader2, Search, Clipboard, MessageCircle, BadgeAlert, AlertTriangle, User, Phone, Mail, ExternalLink, FileText, Wand2, ListPlus, Trash2, ListTodo, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import {
+    applySuggestedTasksFromSelection,
     parseLeadFromText,
     createParsedLead,
+    suggestTasksFromSelection,
     summarizeSelectionToCrmLog,
     runCustomSelectionPrompt,
     saveCustomSelectionToCrmLog,
     type ParsedLeadData,
     type LeadAnalysisTrace,
+    type SelectionTaskSuggestion,
 } from "@/app/(main)/admin/conversations/actions";
 import { openOrStartConversationForContact, searchContactsAction } from "@/app/(main)/admin/contacts/actions";
 import { createContactTask } from "@/app/(main)/admin/tasks/actions";
 import { cn } from "@/lib/utils";
+import { TaskSuggestionFunnelMetrics } from "./task-suggestion-funnel-metrics";
 
 export type MessageSelectionActionTarget = {
     text: string;
@@ -73,6 +77,12 @@ type ContactSearchResult = {
     conversationId?: string | null;
     conversationStatus?: string | null;
     matchReason?: string | null;
+};
+
+type SuggestedTaskDraft = SelectionTaskSuggestion & {
+    id: string;
+    selected: boolean;
+    dueAtInput: string;
 };
 
 interface MessageSelectionActionsProps {
@@ -139,6 +149,14 @@ function buildBatchContextText(items: SelectionBatchItem[]) {
         .join("\n\n");
 }
 
+function toDateTimeLocalValue(value?: string | null) {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    const offset = date.getTimezoneOffset() * 60000;
+    return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
+
 export function MessageSelectionActions({
     selection,
     onClearSelection,
@@ -173,6 +191,12 @@ export function MessageSelectionActions({
     const [taskDescription, setTaskDescription] = useState("");
     const [isCreatingTask, setIsCreatingTask] = useState(false);
 
+    const [suggestTasksOpen, setSuggestTasksOpen] = useState(false);
+    const [suggestSelectionText, setSuggestSelectionText] = useState("");
+    const [taskSuggestions, setTaskSuggestions] = useState<SuggestedTaskDraft[]>([]);
+    const [isSuggestingTasks, setIsSuggestingTasks] = useState(false);
+    const [isApplyingSuggestedTasks, setIsApplyingSuggestedTasks] = useState(false);
+
     const [summarizeOpen, setSummarizeOpen] = useState(false);
     const [summarizeSelectionText, setSummarizeSelectionText] = useState("");
     const [isSummarizing, setIsSummarizing] = useState(false);
@@ -188,8 +212,9 @@ export function MessageSelectionActions({
     const activeAiModel = typeof aiModel === "string" && aiModel.trim() ? aiModel.trim() : undefined;
     const hasBatchSelections = selectionBatch.length > 0;
     const batchContextText = hasBatchSelections ? buildBatchContextText(selectionBatch) : "";
+    const selectedSuggestionCount = taskSuggestions.filter((item) => item.selected).length;
 
-    const selectionVisible = !!selection && !pasteLeadOpen && !findContactOpen && !createTaskOpen && !summarizeOpen && !customOpen;
+    const selectionVisible = !!selection && !pasteLeadOpen && !findContactOpen && !createTaskOpen && !suggestTasksOpen && !summarizeOpen && !customOpen;
 
     useEffect(() => {
         if (!selectionVisible) return;
@@ -274,6 +299,18 @@ export function MessageSelectionActions({
         setTaskDescription(text);
         setCreateTaskOpen(true);
         onClearSelection();
+    };
+
+    const openSuggestTasksDialog = () => {
+        const text = hasBatchSelections
+            ? batchContextText
+            : String(selection?.text || "").trim();
+        if (!text) return;
+
+        setSuggestSelectionText(text);
+        setTaskSuggestions([]);
+        setSuggestTasksOpen(true);
+        if (selection?.text?.trim()) onClearSelection();
     };
 
     const openSummarizeDialog = () => {
@@ -371,6 +408,7 @@ export function MessageSelectionActions({
                 conversationId,
                 title: taskTitle.trim(),
                 description: taskDescription.trim() || undefined,
+                priority: "medium",
                 source: "ai_selection",
             });
 
@@ -385,6 +423,112 @@ export function MessageSelectionActions({
             toast.error(error?.message || "Failed to create task");
         } finally {
             setIsCreatingTask(false);
+        }
+    };
+
+    const handleGenerateTaskSuggestions = async () => {
+        if (!conversationId) {
+            toast.error("Open a conversation first to suggest tasks.");
+            return;
+        }
+        if (!suggestSelectionText.trim()) {
+            toast.error("Selected text is required.");
+            return;
+        }
+
+        setIsSuggestingTasks(true);
+        try {
+            const res = await suggestTasksFromSelection(conversationId, suggestSelectionText, activeAiModel);
+            if (!res?.success) {
+                toast.error(res?.error || "Failed to generate task suggestions");
+                return;
+            }
+
+            const suggestions = Array.isArray(res.suggestions) ? res.suggestions : [];
+            const drafts: SuggestedTaskDraft[] = suggestions.map((suggestion, index) => ({
+                id: `suggestion-${Date.now()}-${index}`,
+                selected: true,
+                title: suggestion.title || "Follow up with contact",
+                description: suggestion.description || "",
+                priority: suggestion.priority || "medium",
+                dueAt: suggestion.dueAt || null,
+                dueAtInput: toDateTimeLocalValue(suggestion.dueAt),
+                confidence: typeof suggestion.confidence === "number" ? suggestion.confidence : 0.5,
+                reason: suggestion.reason || null,
+            }));
+
+            setTaskSuggestions(drafts);
+            if (drafts.length === 0) {
+                toast.message("No actionable tasks were suggested for this selection.");
+            } else {
+                toast.success(`Generated ${drafts.length} task suggestion${drafts.length > 1 ? "s" : ""}`);
+            }
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to generate task suggestions");
+        } finally {
+            setIsSuggestingTasks(false);
+        }
+    };
+
+    const handlePatchSuggestion = (id: string, patch: Partial<SuggestedTaskDraft>) => {
+        setTaskSuggestions((prev) => prev.map((item) => item.id === id ? { ...item, ...patch } : item));
+    };
+
+    const handleToggleAllSuggestions = (checked: boolean) => {
+        setTaskSuggestions((prev) => prev.map((item) => ({ ...item, selected: checked })));
+    };
+
+    const handleApplySuggestedTasks = async () => {
+        if (!conversationId) {
+            toast.error("Open a conversation first to create contact tasks.");
+            return;
+        }
+
+        const selected = taskSuggestions.filter((item) => item.selected && item.title.trim());
+        if (selected.length === 0) {
+            toast.error("Select at least one suggestion to create tasks.");
+            return;
+        }
+
+        setIsApplyingSuggestedTasks(true);
+        let created = 0;
+
+        try {
+            const res = await applySuggestedTasksFromSelection(
+                conversationId,
+                selected.map((suggestion) => ({
+                    title: suggestion.title.trim(),
+                    description: suggestion.description?.trim() || undefined,
+                    dueAt: suggestion.dueAtInput || undefined,
+                    priority: suggestion.priority,
+                    confidence: suggestion.confidence,
+                    reason: suggestion.reason || undefined,
+                }))
+            );
+
+            if (!res?.success) {
+                toast.error(res?.error || "Failed to create suggested tasks");
+                return;
+            }
+
+            created = Math.max(0, Number(res.createdCount || 0));
+            const failedCount = Math.max(0, Number(res.failedCount || 0));
+
+            if (created > 0) {
+                toast.success(`Created ${created} task${created > 1 ? "s" : ""} from suggestions`);
+                setSuggestTasksOpen(false);
+                if (hasBatchSelections) {
+                    onClearSelectionBatch?.();
+                }
+            }
+
+            if (failedCount > 0) {
+                toast.error(`Failed to create ${failedCount} task${failedCount > 1 ? "s" : ""}`);
+            }
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to create suggested tasks");
+        } finally {
+            setIsApplyingSuggestedTasks(false);
         }
     };
 
@@ -580,6 +724,19 @@ export function MessageSelectionActions({
                     >
                         <ListTodo className="h-3.5 w-3.5" />
                         Task
+                    </Button>
+                    <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 gap-1.5 px-2 text-xs"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={openSuggestTasksDialog}
+                        disabled={!canUseCrmLogActions}
+                        title={canUseCrmLogActions ? "Generate AI task suggestions from this selection" : "Open a conversation to suggest tasks"}
+                    >
+                        <Sparkles className="h-3.5 w-3.5" />
+                        Suggest
                     </Button>
                     <Button
                         type="button"
@@ -933,6 +1090,191 @@ export function MessageSelectionActions({
                             >
                                 {isCreatingTask ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListTodo className="h-4 w-4" />}
                                 {isCreatingTask ? "Creating..." : "Create Task"}
+                            </Button>
+                        </DialogFooter>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog
+                open={suggestTasksOpen}
+                onOpenChange={(open) => {
+                    setSuggestTasksOpen(open);
+                    if (!open) {
+                        setIsSuggestingTasks(false);
+                        setIsApplyingSuggestedTasks(false);
+                    }
+                }}
+            >
+                <DialogContent className="sm:max-w-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Sparkles className="h-4 w-4 text-violet-600" />
+                            AI Task Suggestions
+                        </DialogTitle>
+                        <DialogDescription>
+                            Generate actionable task suggestions from selected conversation text, then apply the ones you want.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-3">
+                        <div className="rounded-md border bg-slate-50 p-2 text-xs text-slate-600">
+                            <span className="font-medium text-slate-800">
+                                {hasBatchSelections ? "Suggestion context batch:" : "Selected text:"}
+                            </span>{" "}
+                            {hasBatchSelections
+                                ? `${selectionBatch.length} snippets queued across messages`
+                                : (suggestSelectionText ? getSelectionPreview(suggestSelectionText) : "Selection captured")}
+                        </div>
+
+                        {hasBatchSelections ? (
+                            <div className="rounded-md border border-slate-200 bg-white p-2 text-xs">
+                                <div className="mb-2 flex items-center justify-between">
+                                    <span className="font-medium text-slate-700">Queued snippets</span>
+                                    {onClearSelectionBatch ? (
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-7 px-2 text-[11px]"
+                                            onClick={onClearSelectionBatch}
+                                        >
+                                            Clear Batch
+                                        </Button>
+                                    ) : null}
+                                </div>
+                                <div className="max-h-36 space-y-1 overflow-y-auto">
+                                    {selectionBatch.map((item, index) => (
+                                        <div key={item.id} className="flex items-start gap-1 rounded border border-slate-100 bg-slate-50 px-2 py-1">
+                                            <span className="mt-0.5 shrink-0 text-[10px] font-semibold text-slate-500">{index + 1}.</span>
+                                            <span className="flex-1 text-[11px] text-slate-700">{getSelectionPreview(item.text)}</span>
+                                            {onRemoveSelectionBatchItem ? (
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="h-5 w-5 p-0 text-slate-400 hover:text-slate-700"
+                                                    onClick={() => onRemoveSelectionBatchItem(item.id)}
+                                                    title="Remove snippet from batch"
+                                                >
+                                                    <Trash2 className="h-3 w-3" />
+                                                </Button>
+                                            ) : null}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        ) : null}
+
+                        <div className="flex items-center justify-between gap-2">
+                            <Button
+                                type="button"
+                                className="gap-2"
+                                onClick={handleGenerateTaskSuggestions}
+                                disabled={isSuggestingTasks || !suggestSelectionText.trim() || !canUseCrmLogActions}
+                            >
+                                {isSuggestingTasks ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                                {isSuggestingTasks ? "Generating..." : "Generate Suggestions"}
+                            </Button>
+
+                            {taskSuggestions.length > 0 ? (
+                                <label className="flex items-center gap-2 text-xs text-slate-600">
+                                    <input
+                                        type="checkbox"
+                                        checked={selectedSuggestionCount === taskSuggestions.length}
+                                        onChange={(event) => handleToggleAllSuggestions(event.target.checked)}
+                                    />
+                                    Select all
+                                </label>
+                            ) : null}
+                        </div>
+
+                        <TaskSuggestionFunnelMetrics conversationId={conversationId} />
+
+                        {taskSuggestions.length > 0 ? (
+                            <div className="max-h-[360px] space-y-2 overflow-y-auto rounded-md border p-2">
+                                {taskSuggestions.map((suggestion, index) => (
+                                    <div key={suggestion.id} className="rounded-md border bg-white p-2.5 space-y-2">
+                                        <div className="flex items-start justify-between gap-2">
+                                            <label className="flex items-start gap-2 flex-1 cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={suggestion.selected}
+                                                    onChange={(event) => handlePatchSuggestion(suggestion.id, { selected: event.target.checked })}
+                                                    className="mt-0.5"
+                                                />
+                                                <span className="text-xs font-medium text-slate-700">Suggestion {index + 1}</span>
+                                            </label>
+
+                                            <Badge variant="outline" className="text-[10px]">
+                                                {Math.round((suggestion.confidence || 0.5) * 100)}% confidence
+                                            </Badge>
+                                        </div>
+
+                                        <div className="space-y-1">
+                                            <label className="text-[11px] font-medium text-slate-600">Task title</label>
+                                            <Input
+                                                value={suggestion.title}
+                                                onChange={(event) => handlePatchSuggestion(suggestion.id, { title: event.target.value })}
+                                                placeholder="Task title"
+                                            />
+                                        </div>
+
+                                        <div className="space-y-1">
+                                            <label className="text-[11px] font-medium text-slate-600">Task notes</label>
+                                            <Textarea
+                                                value={suggestion.description || ""}
+                                                onChange={(event) => handlePatchSuggestion(suggestion.id, { description: event.target.value })}
+                                                className="min-h-[84px]"
+                                                placeholder="Optional notes"
+                                            />
+                                        </div>
+
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <div className="space-y-1">
+                                                <label className="text-[11px] font-medium text-slate-600">Priority</label>
+                                                <select
+                                                    value={suggestion.priority}
+                                                    onChange={(event) => handlePatchSuggestion(suggestion.id, { priority: event.target.value as "low" | "medium" | "high" })}
+                                                    className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+                                                >
+                                                    <option value="low">low</option>
+                                                    <option value="medium">medium</option>
+                                                    <option value="high">high</option>
+                                                </select>
+                                            </div>
+
+                                            <div className="space-y-1">
+                                                <label className="text-[11px] font-medium text-slate-600">Due at</label>
+                                                <Input
+                                                    type="datetime-local"
+                                                    value={suggestion.dueAtInput || ""}
+                                                    onChange={(event) => handlePatchSuggestion(suggestion.id, { dueAtInput: event.target.value })}
+                                                />
+                                            </div>
+                                        </div>
+
+                                        {suggestion.reason ? (
+                                            <div className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5 text-[11px] text-slate-600">
+                                                <span className="font-medium text-slate-700">Why:</span> {suggestion.reason}
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                ))}
+                            </div>
+                        ) : null}
+
+                        <DialogFooter>
+                            <Button
+                                type="button"
+                                className="gap-2"
+                                onClick={handleApplySuggestedTasks}
+                                disabled={isApplyingSuggestedTasks || selectedSuggestionCount === 0 || !canUseCrmLogActions}
+                            >
+                                {isApplyingSuggestedTasks ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListTodo className="h-4 w-4" />}
+                                {isApplyingSuggestedTasks
+                                    ? "Applying..."
+                                    : `Create Selected Tasks${selectedSuggestionCount > 0 ? ` (${selectedSuggestionCount})` : ""}`}
                             </Button>
                         </DialogFooter>
                     </div>

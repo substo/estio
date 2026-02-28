@@ -3,6 +3,7 @@
 import { auth } from "@clerk/nextjs/server";
 import db from "@/lib/db";
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 
 export type GoogleAutoSyncMode = "LINK_ONLY" | "LINK_OR_CREATE";
 
@@ -52,6 +53,29 @@ export async function updateGoogleAutomationSettings(input: GoogleAutomationSett
     await db.user.update({
         where: { clerkId: clerkUserId },
         data: updateData
+    });
+
+    revalidatePath("/admin/settings/integrations/google");
+    return { success: true };
+}
+
+const updateGoogleTasklistSettingsSchema = z.object({
+    tasklistId: z.string().trim().min(1).max(255),
+    tasklistTitle: z.string().trim().max(255).optional().nullable()
+});
+
+export async function updateGoogleTasklistSettings(input: z.input<typeof updateGoogleTasklistSettingsSchema>) {
+    const { userId: clerkUserId } = await auth();
+    if (!clerkUserId) throw new Error("Unauthorized");
+
+    const parsed = updateGoogleTasklistSettingsSchema.parse(input);
+
+    await db.user.update({
+        where: { clerkId: clerkUserId },
+        data: {
+            googleTasklistId: parsed.tasklistId,
+            googleTasklistTitle: parsed.tasklistTitle || null
+        }
     });
 
     revalidatePath("/admin/settings/integrations/google");

@@ -4,12 +4,76 @@ import { getValidAccessToken } from '@/lib/google/auth';
 import { TaskSyncOperationResult } from '@/lib/tasks/types';
 
 export const DEFAULT_GOOGLE_TASKLIST_ID = '@default';
+const GOOGLE_TASKLIST_PAGE_SIZE = 100;
+const GOOGLE_TASKLIST_MAX_RESULTS = 500;
 
 type HubTaskForGoogle = Pick<ContactTask, 'title' | 'description' | 'dueAt' | 'status' | 'completedAt'>;
+
+export type GoogleTasklistOption = {
+  id: string;
+  title: string;
+  updatedAt: Date | null;
+  isDefault: boolean;
+};
 
 async function getGoogleTasksClient(userId: string) {
   const auth = await getValidAccessToken(userId);
   return google.tasks({ version: 'v1', auth });
+}
+
+function normalizeTasklistTitle(title?: string | null): string {
+  const trimmed = String(title || '').trim();
+  return trimmed || 'Untitled List';
+}
+
+export async function listGoogleTasklists(options: {
+  userId: string;
+  includeDefault?: boolean;
+}): Promise<GoogleTasklistOption[]> {
+  const tasksClient = await getGoogleTasksClient(options.userId);
+  const byId = new Map<string, GoogleTasklistOption>();
+
+  let pageToken: string | undefined;
+  let fetched = 0;
+
+  do {
+    const response = await tasksClient.tasklists.list({
+      maxResults: GOOGLE_TASKLIST_PAGE_SIZE,
+      pageToken,
+    });
+
+    const items = Array.isArray(response.data.items) ? response.data.items : [];
+    for (const item of items) {
+      if (!item.id) continue;
+      const updatedAt = item.updated ? new Date(item.updated) : null;
+      byId.set(item.id, {
+        id: item.id,
+        title: normalizeTasklistTitle(item.title),
+        updatedAt: updatedAt && !Number.isNaN(updatedAt.getTime()) ? updatedAt : null,
+        isDefault: item.id === DEFAULT_GOOGLE_TASKLIST_ID,
+      });
+      fetched += 1;
+      if (fetched >= GOOGLE_TASKLIST_MAX_RESULTS) break;
+    }
+
+    pageToken = response.data.nextPageToken || undefined;
+    if (fetched >= GOOGLE_TASKLIST_MAX_RESULTS) break;
+  } while (pageToken);
+
+  if (options.includeDefault !== false && !byId.has(DEFAULT_GOOGLE_TASKLIST_ID)) {
+    byId.set(DEFAULT_GOOGLE_TASKLIST_ID, {
+      id: DEFAULT_GOOGLE_TASKLIST_ID,
+      title: 'Default',
+      updatedAt: null,
+      isDefault: true,
+    });
+  }
+
+  return Array.from(byId.values()).sort((a, b) => {
+    if (a.isDefault && !b.isDefault) return -1;
+    if (!a.isDefault && b.isDefault) return 1;
+    return a.title.localeCompare(b.title);
+  });
 }
 
 function toGoogleStatus(status: string): 'needsAction' | 'completed' {

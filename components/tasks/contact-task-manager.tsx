@@ -25,6 +25,33 @@ type ContactTaskManagerProps = {
   title?: string;
 };
 
+const TASK_SYNC_MAX_ATTEMPTS = 6;
+
+type SyncRecord = {
+  provider: string;
+  status?: string | null;
+  lastSyncedAt?: string | Date | null;
+  lastError?: string | null;
+};
+
+type OutboxJob = {
+  provider: string;
+  status?: string | null;
+  operation?: string | null;
+  attemptCount?: number | null;
+  scheduledAt?: string | Date | null;
+  lastError?: string | null;
+  createdAt?: string | Date | null;
+};
+
+type ProviderBadge = {
+  provider: string;
+  key: string;
+  label: string;
+  tone: string;
+  title?: string;
+};
+
 function formatDueLabel(input?: Date | string | null) {
   if (!input) return null;
   const date = new Date(input);
@@ -38,10 +65,141 @@ function getPriorityTone(priority: string) {
   return 'bg-amber-100 text-amber-700 border-amber-200';
 }
 
-function getProviderSyncTone(status: string) {
+function getProviderSyncTone(status: 'synced' | 'error' | 'pending' | 'processing' | 'retrying' | 'dead' | 'disabled') {
   if (status === 'synced') return 'bg-emerald-100 text-emerald-700 border-emerald-200';
-  if (status === 'error') return 'bg-red-100 text-red-700 border-red-200';
+  if (status === 'processing') return 'bg-blue-100 text-blue-700 border-blue-200';
+  if (status === 'pending') return 'bg-sky-100 text-sky-700 border-sky-200';
+  if (status === 'retrying') return 'bg-amber-100 text-amber-700 border-amber-200';
+  if (status === 'dead' || status === 'error') return 'bg-red-100 text-red-700 border-red-200';
+  if (status === 'disabled') return 'bg-zinc-100 text-zinc-700 border-zinc-200';
   return 'bg-slate-100 text-slate-700 border-slate-200';
+}
+
+function pickProviderOutboxState(outboxJobs: OutboxJob[]) {
+  if (!outboxJobs.length) return null;
+
+  const byPriority = ['dead', 'failed', 'processing', 'pending'];
+  for (const status of byPriority) {
+    const match = outboxJobs
+      .filter((job) => (job.status || '').toLowerCase() === status)
+      .sort((a, b) => +new Date(b.createdAt || 0) - +new Date(a.createdAt || 0))[0];
+
+    if (match) return match;
+  }
+
+  return null;
+}
+
+function buildProviderBadges(syncRecords: SyncRecord[], outboxJobs: OutboxJob[]): ProviderBadge[] {
+  const providers = new Set<string>();
+  syncRecords.forEach((record) => providers.add(String(record.provider || '').toLowerCase()));
+  outboxJobs.forEach((job) => providers.add(String(job.provider || '').toLowerCase()));
+
+  const badges: ProviderBadge[] = [];
+
+  for (const provider of providers) {
+    if (!provider) continue;
+
+    const syncRecord = syncRecords.find((record) => String(record.provider || '').toLowerCase() === provider);
+    const providerOutbox = outboxJobs.filter((job) => String(job.provider || '').toLowerCase() === provider);
+    const outboxState = pickProviderOutboxState(providerOutbox);
+
+    if (outboxState) {
+      const status = String(outboxState.status || '').toLowerCase();
+
+      if (status === 'dead') {
+        badges.push({
+          provider,
+          key: `${provider}-dead`,
+          label: `${provider}:attention`,
+          tone: getProviderSyncTone('dead'),
+          title: outboxState.lastError || 'Sync is dead; requires manual intervention',
+        });
+        continue;
+      }
+
+      if (status === 'failed') {
+        const attempts = Math.max(1, Number(outboxState.attemptCount || 1));
+        const nextRetry = formatDueLabel(outboxState.scheduledAt || null);
+        const retryTitle = nextRetry
+          ? `Retry ${attempts}/${TASK_SYNC_MAX_ATTEMPTS} scheduled for ${nextRetry}`
+          : `Retry ${attempts}/${TASK_SYNC_MAX_ATTEMPTS} scheduled`;
+
+        badges.push({
+          provider,
+          key: `${provider}-retrying`,
+          label: `${provider}:retry ${attempts}/${TASK_SYNC_MAX_ATTEMPTS}`,
+          tone: getProviderSyncTone('retrying'),
+          title: outboxState.lastError ? `${retryTitle}\n${outboxState.lastError}` : retryTitle,
+        });
+        continue;
+      }
+
+      if (status === 'processing') {
+        badges.push({
+          provider,
+          key: `${provider}-processing`,
+          label: `${provider}:syncing`,
+          tone: getProviderSyncTone('processing'),
+          title: 'Sync operation in progress',
+        });
+        continue;
+      }
+
+      badges.push({
+        provider,
+        key: `${provider}-pending`,
+        label: `${provider}:queued`,
+        tone: getProviderSyncTone('pending'),
+        title: 'Sync queued',
+      });
+      continue;
+    }
+
+    const syncStatus = String(syncRecord?.status || '').toLowerCase();
+    if (syncStatus === 'synced') {
+      badges.push({
+        provider,
+        key: `${provider}-synced`,
+        label: `${provider}:synced`,
+        tone: getProviderSyncTone('synced'),
+        title: syncRecord?.lastSyncedAt ? `Last synced ${formatDueLabel(syncRecord.lastSyncedAt)}` : 'Synced',
+      });
+      continue;
+    }
+
+    if (syncStatus === 'disabled') {
+      badges.push({
+        provider,
+        key: `${provider}-disabled`,
+        label: `${provider}:disabled`,
+        tone: getProviderSyncTone('disabled'),
+        title: syncRecord?.lastError || 'Sync disabled',
+      });
+      continue;
+    }
+
+    if (syncStatus === 'error') {
+      badges.push({
+        provider,
+        key: `${provider}-error`,
+        label: `${provider}:error`,
+        tone: getProviderSyncTone('error'),
+        title: syncRecord?.lastError || 'Last sync attempt failed',
+      });
+      continue;
+    }
+
+    badges.push({
+      provider,
+      key: `${provider}-pending`,
+      label: `${provider}:pending`,
+      tone: getProviderSyncTone('pending'),
+      title: 'Awaiting first successful sync',
+    });
+  }
+
+  return badges.sort((a, b) => a.provider.localeCompare(b.provider));
 }
 
 export function ContactTaskManager({
@@ -230,7 +388,9 @@ export function ContactTaskManager({
           tasks.map((task) => {
             const isCompleted = task.status === 'completed';
             const dueLabel = formatDueLabel(task.dueAt);
-            const syncRecords = Array.isArray(task.syncRecords) ? task.syncRecords : [];
+            const syncRecords: SyncRecord[] = Array.isArray(task.syncRecords) ? task.syncRecords : [];
+            const outboxJobs: OutboxJob[] = Array.isArray(task.outboxJobs) ? task.outboxJobs : [];
+            const providerBadges = buildProviderBadges(syncRecords, outboxJobs);
 
             return (
               <div key={task.id} className="rounded-md border bg-card p-2.5 text-xs space-y-1.5">
@@ -277,14 +437,14 @@ export function ContactTaskManager({
                     </Badge>
                   )}
 
-                  {syncRecords.map((sync: any) => (
+                  {providerBadges.map((badge) => (
                     <Badge
-                      key={`${task.id}-${sync.provider}`}
+                      key={`${task.id}-${badge.key}`}
                       variant="outline"
-                      className={cn('text-[10px] h-5 uppercase', getProviderSyncTone(sync.status || 'pending'))}
-                      title={sync.lastError || undefined}
+                      className={cn('text-[10px] h-5 uppercase', badge.tone)}
+                      title={badge.title}
                     >
-                      {sync.provider}:{sync.status || 'pending'}
+                      {badge.label}
                     </Badge>
                   ))}
                 </div>

@@ -18,6 +18,7 @@ import { callLLM, callLLMWithMetadata } from "@/lib/ai/llm";
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { runGoogleAutoSyncForContact } from "@/lib/google/automation";
+import { createContactTask } from "@/app/(main)/admin/tasks/actions";
 import {
     buildWhatsAppOutboundUploadKey,
     createWhatsAppMediaReadUrl,
@@ -30,6 +31,63 @@ import { ingestEvolutionImageAttachment, parseEvolutionMessageContent } from "@/
 const MAX_SELECTION_TEXT_LENGTH = 12000;
 const MAX_CUSTOM_OUTPUT_LENGTH = 2200;
 const CRM_LOG_DEDUPE_RECENT_LIMIT = 30;
+const MAX_TASK_SUGGESTIONS = 6;
+const MAX_TASK_SUGGESTION_TITLE_LENGTH = 180;
+const MAX_TASK_SUGGESTION_DESCRIPTION_LENGTH = 3000;
+const TASK_SUGGESTION_FUNNEL_EVENT_TYPES = {
+    generateRequested: "task_suggestion.generate.requested",
+    generateSucceeded: "task_suggestion.generate.succeeded",
+    generateFailed: "task_suggestion.generate.failed",
+    applyRequested: "task_suggestion.apply.requested",
+    applyCompleted: "task_suggestion.apply.completed",
+    applyFailed: "task_suggestion.apply.failed",
+} as const;
+const TASK_SUGGESTION_FUNNEL_EVENT_TYPE_VALUES = Object.values(TASK_SUGGESTION_FUNNEL_EVENT_TYPES);
+
+type TaskSuggestionFunnelEventType = typeof TASK_SUGGESTION_FUNNEL_EVENT_TYPES[keyof typeof TASK_SUGGESTION_FUNNEL_EVENT_TYPES];
+
+const TaskSuggestionPrioritySchema = z.enum(["low", "medium", "high"]);
+
+const SelectionTaskSuggestionSchema = z.object({
+    title: z.string().min(1).max(MAX_TASK_SUGGESTION_TITLE_LENGTH),
+    description: z.string().max(MAX_TASK_SUGGESTION_DESCRIPTION_LENGTH).optional().nullable(),
+    priority: TaskSuggestionPrioritySchema.optional().nullable(),
+    dueAt: z.string().optional().nullable(),
+    confidence: z.number().min(0).max(1).optional().nullable(),
+    reason: z.string().max(500).optional().nullable(),
+});
+
+const SelectionTaskSuggestionEnvelopeSchema = z.object({
+    suggestions: z.array(SelectionTaskSuggestionSchema).max(MAX_TASK_SUGGESTIONS),
+});
+
+const ApplySelectionTaskSuggestionSchema = z.object({
+    title: z.string().trim().min(1).max(MAX_TASK_SUGGESTION_TITLE_LENGTH),
+    description: z.string().trim().max(MAX_TASK_SUGGESTION_DESCRIPTION_LENGTH).optional().nullable(),
+    priority: TaskSuggestionPrioritySchema.optional().nullable(),
+    dueAt: z.string().optional().nullable(),
+    confidence: z.number().min(0).max(1).optional().nullable(),
+    reason: z.string().max(500).optional().nullable(),
+});
+
+const ApplySelectionTaskSuggestionBatchSchema = z.array(ApplySelectionTaskSuggestionSchema)
+    .min(1)
+    .max(MAX_TASK_SUGGESTIONS);
+
+const TaskSuggestionFunnelMetricsInputSchema = z.object({
+    days: z.number().int().min(1).max(180).optional(),
+    scope: z.enum(["location", "conversation"]).default("location"),
+    conversationId: z.string().trim().optional(),
+}).optional();
+
+export type SelectionTaskSuggestion = {
+    title: string;
+    description: string | null;
+    priority: z.infer<typeof TaskSuggestionPrioritySchema>;
+    dueAt: string | null;
+    confidence: number;
+    reason: string | null;
+};
 
 function trimSelectionText(text: string, maxLength: number = MAX_SELECTION_TEXT_LENGTH): string {
     const normalized = String(text || "").replace(/\u00a0/g, " ").trim();
@@ -47,6 +105,48 @@ function normalizeSingleLine(text: string, fallback: string): string {
 
     if (!cleaned) return fallback;
     return cleaned;
+}
+
+function normalizeSuggestionPriority(value: unknown): z.infer<typeof TaskSuggestionPrioritySchema> {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (normalized === "low" || normalized === "high") return normalized;
+    return "medium";
+}
+
+function normalizeSuggestionDueAt(value: unknown): string | null {
+    const raw = String(value || "").trim();
+    if (!raw) return null;
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toISOString();
+}
+
+function normalizeSuggestionConfidence(value: unknown): number {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 0.5;
+    if (numeric < 0) return 0;
+    if (numeric > 1) return 1;
+    return Math.round(numeric * 100) / 100;
+}
+
+function getPayloadObject(payload: unknown): Record<string, unknown> {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return {};
+    return payload as Record<string, unknown>;
+}
+
+function getPayloadNumber(payload: unknown, key: string): number {
+    const numeric = Number(getPayloadObject(payload)[key]);
+    if (!Number.isFinite(numeric)) return 0;
+    return numeric;
+}
+
+function toIsoDayKey(date: Date): string {
+    return date.toISOString().slice(0, 10);
+}
+
+function safeRatio(numerator: number, denominator: number): number {
+    if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator <= 0) return 0;
+    return numerator / denominator;
 }
 
 function formatLogDate(date: Date): string {
@@ -504,6 +604,30 @@ async function persistSelectionAiExecution(args: {
     });
 
     return estimatedCost.amount;
+}
+
+async function persistTaskSuggestionFunnelEvent(args: {
+    type: TaskSuggestionFunnelEventType;
+    conversationInternalId: string;
+    contactId: string;
+    payload: Record<string, unknown>;
+    status?: "processed" | "error";
+    error?: string | null;
+}) {
+    try {
+        await db.agentEvent.create({
+            data: {
+                type: args.type,
+                payload: args.payload as any,
+                conversationId: args.conversationInternalId,
+                contactId: args.contactId,
+                status: args.status || "processed",
+                error: args.error || null,
+            },
+        });
+    } catch (eventError) {
+        console.warn("[taskSuggestionFunnel] Failed to persist event:", args.type, eventError);
+    }
 }
 
 async function getAuthenticatedLocation() {
@@ -4856,6 +4980,577 @@ export async function summarizeSelectionToCrmLog(conversationId: string, selecte
         console.error("[summarizeSelectionToCrmLog] Error:", error);
         return { success: false, error: error?.message || "Failed to summarize selection" };
     }
+}
+
+export async function suggestTasksFromSelection(conversationId: string, selectedText: string, modelOverride?: string) {
+    const sanitizedConversationId = String(conversationId || "").trim();
+    if (!sanitizedConversationId) {
+        return { success: false, error: "Missing conversation ID" };
+    }
+
+    const text = trimSelectionText(selectedText);
+    if (!text || text.length < 10) {
+        return { success: false, error: "Selected text is too short" };
+    }
+
+    let conversationForTelemetry: { id: string; contactId: string } | null = null;
+    let modelForTelemetry: string | null = null;
+
+    try {
+        const location = await getAuthenticatedLocation();
+        const conversation = await resolveConversationForCrmLog(location.id, sanitizedConversationId);
+        if (!conversation) {
+            return { success: false, error: "Conversation not found" };
+        }
+        conversationForTelemetry = {
+            id: conversation.id,
+            contactId: conversation.contactId,
+        };
+
+        const contactFirstName = deriveOptionalFirstName(
+            conversation.contact?.firstName,
+            conversation.contact?.name,
+            conversation.contact?.email
+        );
+
+        const modelId = typeof modelOverride === "string" && modelOverride.trim()
+            ? modelOverride.trim()
+            : getModelForTask("simple_generation");
+        modelForTelemetry = modelId;
+
+        const startedAt = Date.now();
+        const prompt = [
+            "You are a CRM assistant that proposes high-quality actionable tasks from a selected conversation excerpt.",
+            "Return JSON only. Do not include markdown or commentary.",
+            "Schema:",
+            '{ "suggestions": [ { "title": string, "description": string|null, "priority": "low"|"medium"|"high", "dueAt": string|null, "confidence": number, "reason": string|null } ] }',
+            "Rules:",
+            "- Suggest between 0 and 6 tasks.",
+            "- Each title must be a concise action phrase (5-120 chars).",
+            "- Include only tasks with clear value for follow-up.",
+            "- Keep description short and factual.",
+            "- Use priority=high only for urgent/time-sensitive actions.",
+            "- Set dueAt only when explicit timing is present in source text; otherwise null.",
+            "- confidence must be 0..1.",
+            contactFirstName
+                ? `- If you mention the contact, use first name only: ${contactFirstName}.`
+                : "- If you mention the contact, use first name only.",
+            "- Never include phone numbers or email addresses in task title.",
+            "",
+            "Selected text:",
+            '"""',
+            text,
+            '"""',
+        ].join("\n");
+
+        await persistTaskSuggestionFunnelEvent({
+            type: TASK_SUGGESTION_FUNNEL_EVENT_TYPES.generateRequested,
+            conversationInternalId: conversation.id,
+            contactId: conversation.contactId,
+            payload: {
+                source: "selection_toolbar",
+                selectedTextLength: text.length,
+                modelId,
+                maxSuggestions: MAX_TASK_SUGGESTIONS,
+            },
+        });
+
+        const { text: rawOutput, usage } = await callLLMWithMetadata(
+            modelId,
+            prompt,
+            undefined,
+            { jsonMode: true, temperature: 0.2 }
+        );
+        const latencyMs = Date.now() - startedAt;
+
+        const cleanJson = rawOutput.replace(/```json/g, "").replace(/```/g, "").trim();
+        const parsedPayload = JSON.parse(cleanJson);
+
+        let rawSuggestions: Array<z.infer<typeof SelectionTaskSuggestionSchema>> = [];
+        const parsedEnvelope = SelectionTaskSuggestionEnvelopeSchema.safeParse(parsedPayload);
+        if (parsedEnvelope.success) {
+            rawSuggestions = parsedEnvelope.data.suggestions;
+        } else {
+            const parsedArray = z.array(SelectionTaskSuggestionSchema).max(MAX_TASK_SUGGESTIONS).safeParse(parsedPayload);
+            if (!parsedArray.success) {
+                throw new Error("AI response was not valid task suggestion JSON");
+            }
+            rawSuggestions = parsedArray.data;
+        }
+
+        const seenTitles = new Set<string>();
+        const suggestions: SelectionTaskSuggestion[] = [];
+
+        for (const item of rawSuggestions) {
+            const normalizedTitle = normalizeSingleLine(item.title, "")
+                .replace(/\s+/g, " ")
+                .trim()
+                .slice(0, MAX_TASK_SUGGESTION_TITLE_LENGTH);
+            if (!normalizedTitle) continue;
+
+            const dedupeKey = normalizedTitle.toLowerCase();
+            if (seenTitles.has(dedupeKey)) continue;
+            seenTitles.add(dedupeKey);
+
+            const normalizedDescription = item.description
+                ? normalizeSingleLine(item.description, "").slice(0, MAX_TASK_SUGGESTION_DESCRIPTION_LENGTH)
+                : "";
+
+            const normalizedReason = item.reason
+                ? normalizeSingleLine(item.reason, "").slice(0, 500)
+                : "";
+
+            suggestions.push({
+                title: normalizedTitle,
+                description: normalizedDescription || null,
+                priority: normalizeSuggestionPriority(item.priority),
+                dueAt: normalizeSuggestionDueAt(item.dueAt),
+                confidence: normalizeSuggestionConfidence(item.confidence),
+                reason: normalizedReason || null,
+            });
+
+            if (suggestions.length >= MAX_TASK_SUGGESTIONS) break;
+        }
+
+        try {
+            await persistSelectionAiExecution({
+                conversationInternalId: conversation.id,
+                taskTitle: "Selection Task Suggestions",
+                intent: "selection_task_suggestions",
+                modelId,
+                promptText: prompt,
+                rawOutput,
+                normalizedOutput: JSON.stringify({ suggestions }),
+                usage: {
+                    promptTokens: usage.promptTokens || 0,
+                    completionTokens: usage.completionTokens || 0,
+                    totalTokens: usage.totalTokens || 0,
+                    thoughtsTokens: usage.thoughtsTokens || 0,
+                    toolUsePromptTokens: usage.toolUsePromptTokens || 0,
+                },
+                latencyMs,
+            });
+        } catch (traceError) {
+            console.warn("[suggestTasksFromSelection] Failed to persist AI usage trace:", traceError);
+        }
+
+        await persistTaskSuggestionFunnelEvent({
+            type: TASK_SUGGESTION_FUNNEL_EVENT_TYPES.generateSucceeded,
+            conversationInternalId: conversation.id,
+            contactId: conversation.contactId,
+            payload: {
+                source: "selection_toolbar",
+                selectedTextLength: text.length,
+                modelId,
+                suggestionCount: suggestions.length,
+                latencyMs,
+                promptTokens: usage.promptTokens || 0,
+                completionTokens: usage.completionTokens || 0,
+                totalTokens: usage.totalTokens || 0,
+            },
+        });
+
+        return {
+            success: true as const,
+            suggestions,
+            model: modelId,
+            usage: {
+                promptTokens: usage.promptTokens || 0,
+                completionTokens: usage.completionTokens || 0,
+                totalTokens: usage.totalTokens || 0,
+            },
+            latencyMs,
+        };
+    } catch (error: any) {
+        console.error("[suggestTasksFromSelection] Error:", error);
+        const errorMessage = error?.message || "Failed to suggest tasks from selection";
+
+        if (conversationForTelemetry) {
+            await persistTaskSuggestionFunnelEvent({
+                type: TASK_SUGGESTION_FUNNEL_EVENT_TYPES.generateFailed,
+                conversationInternalId: conversationForTelemetry.id,
+                contactId: conversationForTelemetry.contactId,
+                payload: {
+                    source: "selection_toolbar",
+                    selectedTextLength: text.length,
+                    modelId: modelForTelemetry,
+                    error: errorMessage,
+                },
+                status: "error",
+                error: errorMessage,
+            });
+        }
+
+        return { success: false as const, error: errorMessage };
+    }
+}
+
+export async function applySuggestedTasksFromSelection(
+    conversationId: string,
+    suggestionsInput: Array<z.input<typeof ApplySelectionTaskSuggestionSchema>>
+) {
+    const sanitizedConversationId = String(conversationId || "").trim();
+    if (!sanitizedConversationId) {
+        return { success: false as const, error: "Missing conversation ID" };
+    }
+
+    const parsedSuggestions = ApplySelectionTaskSuggestionBatchSchema.safeParse(suggestionsInput || []);
+    if (!parsedSuggestions.success) {
+        return { success: false as const, error: "No valid task suggestions to apply" };
+    }
+
+    const suggestions = parsedSuggestions.data.map((item) => ({
+        title: normalizeSingleLine(item.title, "").slice(0, MAX_TASK_SUGGESTION_TITLE_LENGTH),
+        description: item.description
+            ? normalizeSingleLine(item.description, "").slice(0, MAX_TASK_SUGGESTION_DESCRIPTION_LENGTH)
+            : "",
+        priority: normalizeSuggestionPriority(item.priority),
+        dueAt: normalizeSuggestionDueAt(item.dueAt),
+        confidence: normalizeSuggestionConfidence(item.confidence),
+        reason: item.reason ? normalizeSingleLine(item.reason, "").slice(0, 500) : "",
+    })).filter((item) => Boolean(item.title));
+
+    if (!suggestions.length) {
+        return { success: false as const, error: "No valid task suggestions to apply" };
+    }
+
+    let conversationForTelemetry: { id: string; contactId: string } | null = null;
+
+    try {
+        const location = await getAuthenticatedLocation();
+        const conversation = await resolveConversationForCrmLog(location.id, sanitizedConversationId);
+        if (!conversation) {
+            return { success: false as const, error: "Conversation not found" };
+        }
+
+        conversationForTelemetry = {
+            id: conversation.id,
+            contactId: conversation.contactId,
+        };
+
+        await persistTaskSuggestionFunnelEvent({
+            type: TASK_SUGGESTION_FUNNEL_EVENT_TYPES.applyRequested,
+            conversationInternalId: conversation.id,
+            contactId: conversation.contactId,
+            payload: {
+                source: "selection_toolbar",
+                selectedCount: suggestions.length,
+                titles: suggestions.map((item) => item.title).slice(0, MAX_TASK_SUGGESTIONS),
+            },
+        });
+
+        let createdCount = 0;
+        const failed: Array<{ title: string; error: string }> = [];
+
+        for (const suggestion of suggestions) {
+            const result = await createContactTask({
+                conversationId: conversation.id,
+                title: suggestion.title,
+                description: suggestion.description || undefined,
+                dueAt: suggestion.dueAt || undefined,
+                priority: suggestion.priority,
+                source: "ai_selection",
+            });
+
+            if (result?.success) {
+                createdCount += 1;
+                continue;
+            }
+
+            failed.push({
+                title: suggestion.title,
+                error: String(result?.error || "Unknown error"),
+            });
+        }
+
+        await persistTaskSuggestionFunnelEvent({
+            type: TASK_SUGGESTION_FUNNEL_EVENT_TYPES.applyCompleted,
+            conversationInternalId: conversation.id,
+            contactId: conversation.contactId,
+            payload: {
+                source: "selection_toolbar",
+                selectedCount: suggestions.length,
+                createdCount,
+                failedCount: failed.length,
+                failedTitles: failed.map((item) => item.title),
+                failedErrors: failed
+                    .map((item) => normalizeSingleLine(item.error, "Unknown error").slice(0, 180))
+                    .filter(Boolean),
+            },
+        });
+
+        return {
+            success: true as const,
+            selectedCount: suggestions.length,
+            createdCount,
+            failedCount: failed.length,
+            failed,
+        };
+    } catch (error: any) {
+        const errorMessage = error?.message || "Failed to apply task suggestions";
+        console.error("[applySuggestedTasksFromSelection] Error:", error);
+
+        if (conversationForTelemetry) {
+            await persistTaskSuggestionFunnelEvent({
+                type: TASK_SUGGESTION_FUNNEL_EVENT_TYPES.applyFailed,
+                conversationInternalId: conversationForTelemetry.id,
+                contactId: conversationForTelemetry.contactId,
+                payload: {
+                    source: "selection_toolbar",
+                    selectedCount: suggestions.length,
+                    error: errorMessage,
+                },
+                status: "error",
+                error: errorMessage,
+            });
+        }
+
+        return { success: false as const, error: errorMessage };
+    }
+}
+
+export async function getTaskSuggestionFunnelMetrics(input?: z.input<typeof TaskSuggestionFunnelMetricsInputSchema>) {
+    const parsedInput = TaskSuggestionFunnelMetricsInputSchema.safeParse(input);
+    if (!parsedInput.success) {
+        return { success: false as const, error: "Invalid metrics query" };
+    }
+
+    const location = await getAuthenticatedLocation();
+    const config = parsedInput.data;
+    const days = config?.days || 30;
+    const scope: "location" | "conversation" = config?.scope || "location";
+    const now = new Date();
+    const since = new Date(now.getTime() - (days * 24 * 60 * 60 * 1000));
+
+    let scopedConversationId: string | null = null;
+    if (scope === "conversation") {
+        const requestedConversationId = String(config?.conversationId || "").trim();
+        if (!requestedConversationId) {
+            return { success: false as const, error: "Conversation ID is required for conversation metrics" };
+        }
+
+        const conversation = await resolveConversationForCrmLog(location.id, requestedConversationId);
+        if (!conversation) {
+            return { success: false as const, error: "Conversation not found" };
+        }
+
+        scopedConversationId = conversation.id;
+    }
+
+    const rawEvents = await db.agentEvent.findMany({
+        where: {
+            type: { in: [...TASK_SUGGESTION_FUNNEL_EVENT_TYPE_VALUES] },
+            processedAt: { gte: since },
+            ...(scopedConversationId ? { conversationId: scopedConversationId } : {}),
+        },
+        select: {
+            type: true,
+            payload: true,
+            error: true,
+            processedAt: true,
+            conversationId: true,
+        },
+        orderBy: { processedAt: "asc" },
+    });
+
+    let scopedEvents = rawEvents;
+    if (!scopedConversationId) {
+        const conversationIds = Array.from(new Set(
+            rawEvents
+                .map((item) => item.conversationId)
+                .filter((item): item is string => Boolean(item))
+        ));
+
+        if (conversationIds.length > 0) {
+            const allowed = await db.conversation.findMany({
+                where: {
+                    id: { in: conversationIds },
+                    locationId: location.id,
+                },
+                select: { id: true },
+            });
+            const allowedIds = new Set(allowed.map((item) => item.id));
+            scopedEvents = rawEvents.filter((item) => item.conversationId ? allowedIds.has(item.conversationId) : false);
+        } else {
+            scopedEvents = [];
+        }
+    }
+
+    const totals = {
+        generateRequested: 0,
+        generateSucceeded: 0,
+        generateFailed: 0,
+        applyRequested: 0,
+        applyCompleted: 0,
+        applyFailed: 0,
+        suggestionsGenerated: 0,
+        selectedForApply: 0,
+        tasksCreated: 0,
+        tasksFailed: 0,
+    };
+
+    type DailyPoint = {
+        date: string;
+        generateRequested: number;
+        generateSucceeded: number;
+        generateFailed: number;
+        applyRequested: number;
+        applyCompleted: number;
+        applyFailed: number;
+        suggestionsGenerated: number;
+        selectedForApply: number;
+        tasksCreated: number;
+        tasksFailed: number;
+    };
+
+    const ensureDailyPoint = (map: Map<string, DailyPoint>, date: string): DailyPoint => {
+        const existing = map.get(date);
+        if (existing) return existing;
+        const created: DailyPoint = {
+            date,
+            generateRequested: 0,
+            generateSucceeded: 0,
+            generateFailed: 0,
+            applyRequested: 0,
+            applyCompleted: 0,
+            applyFailed: 0,
+            suggestionsGenerated: 0,
+            selectedForApply: 0,
+            tasksCreated: 0,
+            tasksFailed: 0,
+        };
+        map.set(date, created);
+        return created;
+    };
+
+    let generationLatencyTotalMs = 0;
+    let generationLatencySamples = 0;
+    const dailyMap = new Map<string, DailyPoint>();
+    const failureMap = new Map<string, number>();
+
+    for (const event of scopedEvents) {
+        const payload = getPayloadObject(event.payload);
+        const point = ensureDailyPoint(dailyMap, toIsoDayKey(event.processedAt));
+
+        switch (event.type) {
+            case TASK_SUGGESTION_FUNNEL_EVENT_TYPES.generateRequested: {
+                totals.generateRequested += 1;
+                point.generateRequested += 1;
+                break;
+            }
+            case TASK_SUGGESTION_FUNNEL_EVENT_TYPES.generateSucceeded: {
+                totals.generateSucceeded += 1;
+                point.generateSucceeded += 1;
+
+                const suggestionCount = Math.max(0, Math.round(getPayloadNumber(payload, "suggestionCount")));
+                totals.suggestionsGenerated += suggestionCount;
+                point.suggestionsGenerated += suggestionCount;
+
+                const latencyMs = getPayloadNumber(payload, "latencyMs");
+                if (latencyMs > 0) {
+                    generationLatencyTotalMs += latencyMs;
+                    generationLatencySamples += 1;
+                }
+                break;
+            }
+            case TASK_SUGGESTION_FUNNEL_EVENT_TYPES.generateFailed: {
+                totals.generateFailed += 1;
+                point.generateFailed += 1;
+                break;
+            }
+            case TASK_SUGGESTION_FUNNEL_EVENT_TYPES.applyRequested: {
+                totals.applyRequested += 1;
+                point.applyRequested += 1;
+
+                const selectedCount = Math.max(0, Math.round(getPayloadNumber(payload, "selectedCount")));
+                totals.selectedForApply += selectedCount;
+                point.selectedForApply += selectedCount;
+                break;
+            }
+            case TASK_SUGGESTION_FUNNEL_EVENT_TYPES.applyCompleted: {
+                totals.applyCompleted += 1;
+                point.applyCompleted += 1;
+
+                const createdCount = Math.max(0, Math.round(getPayloadNumber(payload, "createdCount")));
+                const failedCount = Math.max(0, Math.round(getPayloadNumber(payload, "failedCount")));
+
+                totals.tasksCreated += createdCount;
+                totals.tasksFailed += failedCount;
+
+                point.tasksCreated += createdCount;
+                point.tasksFailed += failedCount;
+
+                if (failedCount > 0) {
+                    const failedErrors = payload.failedErrors;
+                    if (Array.isArray(failedErrors) && failedErrors.length > 0) {
+                        for (const rawError of failedErrors) {
+                            const reason = normalizeSingleLine(String(rawError || ""), "Unknown error").slice(0, 180);
+                            if (!reason) continue;
+                            failureMap.set(reason, (failureMap.get(reason) || 0) + 1);
+                        }
+                    } else {
+                        const fallbackReason = "One or more task creates failed";
+                        failureMap.set(fallbackReason, (failureMap.get(fallbackReason) || 0) + 1);
+                    }
+                }
+                break;
+            }
+            case TASK_SUGGESTION_FUNNEL_EVENT_TYPES.applyFailed: {
+                totals.applyFailed += 1;
+                point.applyFailed += 1;
+                break;
+            }
+            default:
+                break;
+        }
+
+        if (
+            event.type === TASK_SUGGESTION_FUNNEL_EVENT_TYPES.generateFailed
+            || event.type === TASK_SUGGESTION_FUNNEL_EVENT_TYPES.applyFailed
+        ) {
+            const reasonRaw = String(payload.error || event.error || "Unknown error");
+            const reason = normalizeSingleLine(reasonRaw, "Unknown error").slice(0, 180);
+            failureMap.set(reason, (failureMap.get(reason) || 0) + 1);
+        }
+    }
+
+    const daily = Array.from(dailyMap.values())
+        .sort((left, right) => left.date.localeCompare(right.date));
+
+    const failures = Array.from(failureMap.entries())
+        .map(([reason, count]) => ({ reason, count }))
+        .sort((left, right) => right.count - left.count || left.reason.localeCompare(right.reason))
+        .slice(0, 8);
+
+    const rates = {
+        generateSuccessRate: safeRatio(totals.generateSucceeded, totals.generateRequested),
+        applyStartRate: safeRatio(totals.applyRequested, totals.generateSucceeded),
+        applyCompletionRate: safeRatio(totals.applyCompleted, totals.applyRequested),
+        suggestionToTaskConversion: safeRatio(totals.tasksCreated, totals.suggestionsGenerated),
+        selectedToTaskConversion: safeRatio(totals.tasksCreated, totals.selectedForApply),
+    };
+
+    const averages = {
+        suggestionsPerGeneration: safeRatio(totals.suggestionsGenerated, totals.generateSucceeded),
+        tasksPerApply: safeRatio(totals.tasksCreated, totals.applyCompleted),
+        generationLatencyMs: safeRatio(generationLatencyTotalMs, generationLatencySamples),
+    };
+
+    return {
+        success: true as const,
+        scope,
+        window: {
+            days,
+            since: since.toISOString(),
+            until: now.toISOString(),
+        },
+        totals,
+        rates,
+        averages,
+        daily,
+        failures,
+        eventCount: scopedEvents.length,
+    };
 }
 
 export async function runCustomSelectionPrompt(

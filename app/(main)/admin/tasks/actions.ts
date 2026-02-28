@@ -139,6 +139,27 @@ export async function listContactTasks(contactId: string, statusFilter?: 'open' 
             lastError: true,
           },
         },
+        outboxJobs: {
+          where: {
+            status: {
+              in: ['pending', 'processing', 'failed', 'dead'],
+            },
+          },
+          orderBy: [
+            { status: 'asc' },
+            { scheduledAt: 'asc' },
+            { createdAt: 'desc' },
+          ],
+          select: {
+            provider: true,
+            status: true,
+            operation: true,
+            attemptCount: true,
+            scheduledAt: true,
+            lastError: true,
+            createdAt: true,
+          },
+        },
         assignedUser: {
           select: {
             id: true,
@@ -161,7 +182,7 @@ export async function listContactTasks(contactId: string, statusFilter?: 'open' 
   };
 }
 
-export async function createContactTask(input: z.infer<typeof createTaskSchema>) {
+export async function createContactTask(input: z.input<typeof createTaskSchema>) {
   const { location, userId } = await getAuthContext();
   const parsed = createTaskSchema.parse(input);
 
@@ -231,7 +252,7 @@ export async function createContactTask(input: z.infer<typeof createTaskSchema>)
   };
 }
 
-export async function updateContactTask(input: z.infer<typeof updateTaskSchema>) {
+export async function updateContactTask(input: z.input<typeof updateTaskSchema>) {
   const { location, userId } = await getAuthContext();
   const parsed = updateTaskSchema.parse(input);
 
