@@ -625,14 +625,12 @@ export function ContactTaskManager({
               className="h-9 text-sm"
               autoFocus
             />
-            {!compact && (
-              <Textarea
-                value={descriptionInput}
-                onChange={(event) => setDescriptionInput(event.target.value)}
-                placeholder="Optional description"
-                className="min-h-[96px] text-sm"
-              />
-            )}
+            <Textarea
+              value={descriptionInput}
+              onChange={(event) => setDescriptionInput(event.target.value)}
+              placeholder="Optional description"
+              className="min-h-[96px] text-sm"
+            />
             <Input
               type="datetime-local"
               value={dueAtInput}

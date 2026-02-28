@@ -135,14 +135,14 @@ export function LiveDeployGuard({ initialBuildId }: { initialBuildId: string | n
     return (
         <div className="fixed inset-x-0 top-2 z-[120] flex justify-center px-3">
             <div className="flex items-center gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 shadow-lg">
-                <span>New version deployed. Refresh to avoid stale action errors.</span>
+                <span>We updated the app. Please refresh this page to keep everything working smoothly.</span>
                 <Button
                     type="button"
                     size="sm"
                     className="h-7 bg-amber-600 px-3 text-white hover:bg-amber-700"
                     onClick={() => window.location.reload()}
                 >
-                    Refresh
+                    Refresh page
                 </Button>
             </div>
         </div>
