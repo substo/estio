@@ -59,8 +59,8 @@ function formatLogDate(date: Date): string {
 function normalizeFirstNameToken(value: string | null | undefined): string {
     const cleaned = String(value || "")
         .trim()
-        .replace(/^[^A-Za-z]+/, "")
-        .replace(/[^A-Za-z'-]+$/g, "");
+        .replace(/^[^\p{L}]+/u, "")
+        .replace(/[^\p{L}'-]+$/gu, "");
 
     if (!cleaned) return "";
     return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
@@ -101,7 +101,7 @@ function deriveFirstNameFromEmail(email: string | null | undefined): string {
     return normalizeFirstNameToken(token);
 }
 
-function deriveFirstName(
+function deriveOptionalFirstName(
     firstName: string | null | undefined,
     name: string | null | undefined,
     email: string | null | undefined
@@ -118,7 +118,83 @@ function deriveFirstName(
     const fromEmail = deriveFirstNameFromEmail(email);
     if (fromEmail) return fromEmail;
 
+    return "";
+}
+
+function deriveFirstName(
+    firstName: string | null | undefined,
+    name: string | null | undefined,
+    email: string | null | undefined
+): string {
+    const preferred = deriveOptionalFirstName(firstName, name, email);
+    if (preferred) return preferred;
+
     return "User";
+}
+
+function normalizePhoneDigits(value: string | null | undefined): string {
+    return String(value || "").replace(/\D/g, "");
+}
+
+function phoneDigitsLikelyMatch(a: string, b: string): boolean {
+    const left = String(a || "").trim();
+    const right = String(b || "").trim();
+    if (!left || !right) return false;
+    if (left === right) return true;
+    if (left.length < 7 || right.length < 7) return false;
+    return left.endsWith(right) || right.endsWith(left);
+}
+
+function escapeRegExp(value: string): string {
+    return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function replaceContactIdentityMentionsWithFirstName(
+    summary: string,
+    contact: {
+        firstName?: string | null;
+        name?: string | null;
+        email?: string | null;
+        phone?: string | null;
+    } | null | undefined
+): string {
+    const firstName = deriveOptionalFirstName(
+        contact?.firstName,
+        contact?.name,
+        contact?.email
+    ) || "Contact";
+
+    const contactDigits = normalizePhoneDigits(contact?.phone);
+    const contactEmail = String(contact?.email || "").trim();
+    const contactName = String(contact?.name || "").trim();
+
+    let rewritten = String(summary || "");
+
+    if (contactDigits) {
+        rewritten = rewritten.replace(/\+?\d[\d\s().-]{5,}\d/g, (token) => {
+            const tokenDigits = normalizePhoneDigits(token);
+            if (!tokenDigits) return token;
+            return phoneDigitsLikelyMatch(tokenDigits, contactDigits) ? firstName : token;
+        });
+    }
+
+    if (contactEmail) {
+        const contactEmailPattern = new RegExp(escapeRegExp(contactEmail), "gi");
+        rewritten = rewritten.replace(contactEmailPattern, firstName);
+    }
+
+    if (contactName && contactName.toLowerCase() !== firstName.toLowerCase()) {
+        const contactNamePattern = new RegExp(`\\b${escapeRegExp(contactName)}\\b`, "gi");
+        rewritten = rewritten.replace(contactNamePattern, firstName);
+    }
+
+    const roleBeforeName = new RegExp(`\\b(?:lead|contact|client)\\s+${escapeRegExp(firstName)}\\b`, "gi");
+    rewritten = rewritten.replace(roleBeforeName, firstName);
+
+    const roleBeforeEmailOrPhone = /\b(?:lead|contact|client)\s+(?:named\s+)?(?:[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|\+?\d[\d\s().-]{5,}\d)\b/gi;
+    rewritten = rewritten.replace(roleBeforeEmailOrPhone, firstName);
+
+    return rewritten;
 }
 
 function formatCrmLogEntry(actorFirstName: string, body: string, date: Date = new Date()): string {
@@ -237,6 +313,14 @@ async function resolveConversationForCrmLog(locationId: string, conversationId: 
             id: true,
             ghlConversationId: true,
             contactId: true,
+            contact: {
+                select: {
+                    firstName: true,
+                    name: true,
+                    email: true,
+                    phone: true,
+                }
+            }
         }
     });
 }
@@ -4689,6 +4773,18 @@ export async function summarizeSelectionToCrmLog(conversationId: string, selecte
     }
 
     try {
+        const location = await getAuthenticatedLocation();
+        const conversation = await resolveConversationForCrmLog(location.id, sanitizedConversationId);
+        if (!conversation) {
+            return { success: false, error: "Conversation not found" };
+        }
+
+        const contactFirstName = deriveOptionalFirstName(
+            conversation.contact?.firstName,
+            conversation.contact?.name,
+            conversation.contact?.email
+        );
+
         const modelId = typeof modelOverride === "string" && modelOverride.trim()
             ? modelOverride.trim()
             : getModelForTask("simple_generation");
@@ -4699,6 +4795,10 @@ export async function summarizeSelectionToCrmLog(conversationId: string, selecte
             "- Return exactly one plain-text sentence.",
             "- Keep it factual and action-oriented.",
             "- Include key entities (person/property/reference/price/date) only if present in the source text.",
+            contactFirstName
+                ? `- Refer to the person as ${contactFirstName} (first name only) when mentioning the contact.`
+                : "- If a contact name is present, refer to the person by first name only.",
+            "- Never identify the contact by full name, phone number, or email.",
             "- Do not include agent name or date prefix.",
             "- Do not use markdown, bullets, or quotes.",
             "",
@@ -4710,7 +4810,11 @@ export async function summarizeSelectionToCrmLog(conversationId: string, selecte
 
         const { text: rawSummary, usage } = await callLLMWithMetadata(modelId, summaryPrompt, undefined, { temperature: 0.2 });
         const latencyMs = Date.now() - startedAt;
-        const summary = normalizeSingleLine(rawSummary, "Contacted lead and captured conversation update.");
+        const normalizedSummary = normalizeSingleLine(rawSummary, "Contacted lead and captured conversation update.");
+        const summary = replaceContactIdentityMentionsWithFirstName(
+            normalizedSummary,
+            conversation.contact
+        );
         const persisted = await persistSelectionLogEntry({
             conversationId: sanitizedConversationId,
             entryBody: summary,
