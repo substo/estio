@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLocationContext } from "@/lib/auth/location-context";
 import { evolutionClient } from "@/lib/evolution/client";
 import { processNormalizedMessage } from "@/lib/whatsapp/sync";
-import { parseEvolutionMessageContent } from "@/lib/whatsapp/evolution-media";
+import { ingestEvolutionMediaAttachment, parseEvolutionMessageContent } from "@/lib/whatsapp/evolution-media";
 import { refreshGhlAccessToken } from "@/lib/location";
 
 export const dynamic = 'force-dynamic';
@@ -224,7 +224,28 @@ export async function GET(req: NextRequest) {
                                         lid: isLid ? rawNumber : undefined
                                     };
 
+                                    if ((parsedContent.type === "image" || parsedContent.type === "audio") && location!.evolutionInstanceId) {
+                                        normalized.__evolutionMediaAttachmentPayload = {
+                                            instanceName: location!.evolutionInstanceId,
+                                            evolutionMessageData: msg,
+                                        };
+                                    }
+
                                     const result = await processNormalizedMessage(normalized);
+
+                                    if ((parsedContent.type === "image" || parsedContent.type === "audio") && location!.evolutionInstanceId) {
+                                        if (result?.status === "deferred_unresolved_lid") {
+                                            console.log(`[WhatsApp Sync] Delaying media attachment ingest until LID resolves (${key.id})`);
+                                        } else {
+                                            void ingestEvolutionMediaAttachment({
+                                                instanceName: location!.evolutionInstanceId,
+                                                evolutionMessageData: msg,
+                                                wamId: key.id,
+                                            }).catch((err) => {
+                                                console.error(`[WhatsApp Sync] Failed to ingest media attachment for ${key.id}:`, err);
+                                            });
+                                        }
+                                    }
 
                                     if (result?.status === 'skipped') {
                                         chatSkipped++;

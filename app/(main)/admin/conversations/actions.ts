@@ -22,11 +22,11 @@ import { createContactTask } from "@/app/(main)/admin/tasks/actions";
 import {
     buildWhatsAppOutboundUploadKey,
     createWhatsAppMediaReadUrl,
-    createWhatsAppMediaUploadUrl,
+    createWhatsAppMediaUploadUrl as createWhatsAppMediaUploadSignedUrl,
     headWhatsAppMediaObject,
     toR2Uri,
 } from "@/lib/whatsapp/media-r2";
-import { ingestEvolutionImageAttachment, parseEvolutionMessageContent } from "@/lib/whatsapp/evolution-media";
+import { ingestEvolutionMediaAttachment, parseEvolutionMessageContent } from "@/lib/whatsapp/evolution-media";
 
 const MAX_SELECTION_TEXT_LENGTH = 12000;
 const MAX_CUSTOM_OUTPUT_LENGTH = 2200;
@@ -1055,7 +1055,7 @@ export async function fetchMessages(conversationId: string) {
             url: String(a.url || "").startsWith("r2://")
                 ? `/api/media/attachments/${a.id}`
                 : a.url,
-            mimeType: a.mimeType || null,
+            mimeType: a.contentType || null,
             fileName: a.fileName || null,
         })),
         // Hydrated fields for UI
@@ -1270,8 +1270,8 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
                     resolvedPhone: !isGroup && phone ? phone : undefined,
                 };
 
-                if (parsedContent.type === 'image' && location.evolutionInstanceId) {
-                    normalized.__evolutionImageAttachmentPayload = {
+                if ((parsedContent.type === 'image' || parsedContent.type === 'audio') && location.evolutionInstanceId) {
+                    normalized.__evolutionMediaAttachmentPayload = {
                         instanceName: location.evolutionInstanceId,
                         evolutionMessageData: msg,
                     };
@@ -1279,16 +1279,16 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
 
                 const result = await processNormalizedMessage(normalized);
 
-                if (parsedContent.type === 'image' && location.evolutionInstanceId) {
+                if ((parsedContent.type === 'image' || parsedContent.type === 'audio') && location.evolutionInstanceId) {
                     if (result?.status === 'deferred_unresolved_lid') {
-                        console.log(`[Sync] Delaying image attachment ingest until LID resolves (${key.id})`);
+                        console.log(`[Sync] Delaying media attachment ingest until LID resolves (${key.id})`);
                     } else {
-                        void ingestEvolutionImageAttachment({
+                        void ingestEvolutionMediaAttachment({
                             instanceName: location.evolutionInstanceId,
                             evolutionMessageData: msg,
                             wamId: key.id,
                         }).catch((err) => {
-                            console.error(`[Sync] Failed to ingest image attachment for ${key.id}:`, err);
+                            console.error(`[Sync] Failed to ingest media attachment for ${key.id}:`, err);
                         });
                     }
                 }
@@ -1325,16 +1325,54 @@ const WHATSAPP_IMAGE_MIME_TYPES = new Set([
     "image/heic",
     "image/heif",
 ]);
+const WHATSAPP_AUDIO_MIME_TYPES = new Set([
+    "audio/ogg",
+    "audio/opus",
+    "audio/mpeg",
+    "audio/mp4",
+    "audio/webm",
+    "audio/wav",
+    "audio/x-wav",
+    "audio/aac",
+]);
 const MAX_WHATSAPP_IMAGE_BYTES = 16 * 1024 * 1024;
+const MAX_WHATSAPP_AUDIO_BYTES = 16 * 1024 * 1024;
 
-type WhatsAppImageUploadRef = {
+type WhatsAppMediaKind = "image" | "audio";
+
+type WhatsAppMediaUploadRef = {
     objectKey: string;
     fileName: string;
     contentType: string;
     size: number;
+    kind: WhatsAppMediaKind;
 };
 
-export async function createWhatsAppImageUploadUrl(
+type WhatsAppImageUploadRef = Omit<WhatsAppMediaUploadRef, "kind"> & { kind?: WhatsAppMediaKind };
+
+function getWhatsAppMediaKind(contentType: string, fileName?: string): WhatsAppMediaKind | null {
+    const normalizedContentType = String(contentType || "").toLowerCase();
+    if (WHATSAPP_IMAGE_MIME_TYPES.has(normalizedContentType)) return "image";
+    if (WHATSAPP_AUDIO_MIME_TYPES.has(normalizedContentType)) return "audio";
+
+    const target = String(fileName || "").toLowerCase();
+    if (target.match(/\.(jpg|jpeg|png|webp|gif|heic|heif)$/)) return "image";
+    if (target.match(/\.(ogg|opus|mp3|m4a|webm|wav|aac)$/)) return "audio";
+    return null;
+}
+
+function isSupportedWhatsAppMedia(contentType: string, kind: WhatsAppMediaKind) {
+    const normalizedContentType = String(contentType || "").toLowerCase();
+    return kind === "image"
+        ? WHATSAPP_IMAGE_MIME_TYPES.has(normalizedContentType)
+        : WHATSAPP_AUDIO_MIME_TYPES.has(normalizedContentType);
+}
+
+function getWhatsAppMediaMaxSize(kind: WhatsAppMediaKind) {
+    return kind === "image" ? MAX_WHATSAPP_IMAGE_BYTES : MAX_WHATSAPP_AUDIO_BYTES;
+}
+
+export async function createWhatsAppMediaUploadUrl(
     conversationId: string,
     contactId: string,
     file: { fileName: string; contentType: string; size: number }
@@ -1347,16 +1385,21 @@ export async function createWhatsAppImageUploadUrl(
 
     const contentType = String(file.contentType || "").toLowerCase();
     const size = Number(file.size || 0);
-    const fileName = String(file.fileName || "image");
+    const fileName = String(file.fileName || "upload");
+    const mediaKind = getWhatsAppMediaKind(contentType, fileName);
 
-    if (!WHATSAPP_IMAGE_MIME_TYPES.has(contentType)) {
-        return { success: false, error: `Unsupported image type: ${contentType || "unknown"}` };
+    if (!mediaKind) {
+        return { success: false, error: `Unsupported media type: ${contentType || "unknown"}` };
+    }
+    if (!isSupportedWhatsAppMedia(contentType, mediaKind)) {
+        return { success: false, error: `Unsupported ${mediaKind} type: ${contentType || "unknown"}` };
     }
     if (!size || size <= 0) {
         return { success: false, error: "Invalid file size." };
     }
-    if (size > MAX_WHATSAPP_IMAGE_BYTES) {
-        return { success: false, error: `Image is too large. Max size is ${Math.floor(MAX_WHATSAPP_IMAGE_BYTES / (1024 * 1024))}MB.` };
+    const maxSize = getWhatsAppMediaMaxSize(mediaKind);
+    if (size > maxSize) {
+        return { success: false, error: `${mediaKind === "image" ? "Image" : "Audio"} is too large. Max size is ${Math.floor(maxSize / (1024 * 1024))}MB.` };
     }
 
     const conversation = await db.conversation.findUnique({
@@ -1391,7 +1434,7 @@ export async function createWhatsAppImageUploadUrl(
         contentType,
     });
 
-    const upload = await createWhatsAppMediaUploadUrl({
+    const upload = await createWhatsAppMediaUploadSignedUrl({
         key,
         contentType,
         expiresInSeconds: 600,
@@ -1405,6 +1448,7 @@ export async function createWhatsAppImageUploadUrl(
             fileName,
             contentType,
             size,
+            kind: mediaKind,
         },
         headers: {
             "Content-Type": contentType,
@@ -1412,19 +1456,34 @@ export async function createWhatsAppImageUploadUrl(
     };
 }
 
-export async function sendWhatsAppImageReply(
+export async function createWhatsAppImageUploadUrl(
     conversationId: string,
     contactId: string,
-    caption: string,
-    upload: WhatsAppImageUploadRef
+    file: { fileName: string; contentType: string; size: number }
+) {
+    const mediaKind = getWhatsAppMediaKind(file.contentType, file.fileName);
+    if (mediaKind !== "image") {
+        return { success: false, error: `Unsupported image type: ${String(file.contentType || "").toLowerCase() || "unknown"}` };
+    }
+
+    return createWhatsAppMediaUploadUrl(conversationId, contactId, file);
+}
+
+export async function sendWhatsAppMediaReply(
+    conversationId: string,
+    contactId: string,
+    upload: WhatsAppMediaUploadRef | WhatsAppImageUploadRef,
+    options?: {
+        caption?: string;
+        kind?: WhatsAppMediaKind;
+    }
 ) {
     const location = await getAuthenticatedLocation();
     if (!location?.ghlAccessToken) {
         throw new Error("Unauthorized");
     }
 
-    const cleanCaption = (caption || "").trim();
-    const previewBody = cleanCaption || "[Image]";
+    const cleanCaption = String(options?.caption || "").trim();
 
     try {
         const hasEvolution = !!location.evolutionInstanceId;
@@ -1435,7 +1494,14 @@ export async function sendWhatsAppImageReply(
         const contentType = String(upload?.contentType || "").toLowerCase();
         const size = Number(upload?.size || 0);
         const objectKey = String(upload?.objectKey || "");
-        const fileName = String(upload?.fileName || "image");
+        const fileName = String(upload?.fileName || "upload");
+        const inferredKind = getWhatsAppMediaKind(contentType, fileName);
+        const uploadKind = (upload as any)?.kind as WhatsAppMediaKind | undefined;
+        const mediaKind: WhatsAppMediaKind | null = options?.kind || uploadKind || inferredKind;
+        const previewBody =
+            mediaKind === "audio"
+                ? "[Audio]"
+                : (cleanCaption || "[Image]");
 
         const conversation = await db.conversation.findUnique({
             where: { ghlConversationId: conversationId },
@@ -1451,16 +1517,20 @@ export async function sendWhatsAppImageReply(
         if (!objectKey.includes(`/location/${location.id}/`) || !objectKey.includes(`/conversation/${conversation.id}/`)) {
             return { success: false, error: "Upload reference does not belong to this conversation." };
         }
-        if (!WHATSAPP_IMAGE_MIME_TYPES.has(contentType)) {
-            return { success: false, error: `Unsupported image type: ${contentType || "unknown"}` };
+        if (!mediaKind) {
+            return { success: false, error: `Unsupported media type: ${contentType || "unknown"}` };
         }
-        if (!size || size > MAX_WHATSAPP_IMAGE_BYTES) {
-            return { success: false, error: "Invalid image size." };
+        if (!isSupportedWhatsAppMedia(contentType, mediaKind)) {
+            return { success: false, error: `Unsupported ${mediaKind} type: ${contentType || "unknown"}` };
+        }
+        const maxSize = getWhatsAppMediaMaxSize(mediaKind);
+        if (!size || size > maxSize) {
+            return { success: false, error: `Invalid ${mediaKind} size.` };
         }
 
         const objectHead = await headWhatsAppMediaObject(objectKey);
         if (!objectHead.exists) {
-            return { success: false, error: "Uploaded image not found in media storage. Please re-upload and try again." };
+            return { success: false, error: "Uploaded media not found in storage. Please re-upload and try again." };
         }
 
         const contact = await db.contact.findFirst({
@@ -1487,7 +1557,7 @@ export async function sendWhatsAppImageReply(
             const contactName = contact.name || 'This contact';
             return {
                 success: false,
-                error: `${contactName}'s phone number "${contact.phone}" is masked (contains ***). You cannot send WhatsApp images to masked numbers.`
+                error: `${contactName}'s phone number "${contact.phone}" is masked (contains ***). You cannot send WhatsApp media to masked numbers.`
             };
         }
 
@@ -1523,16 +1593,16 @@ export async function sendWhatsAppImageReply(
             location.evolutionInstanceId!,
             normalizedPhone,
             {
-                mediaType: "image",
+                mediaType: mediaKind,
                 mediaUrl: signedMediaUrl,
-                caption: cleanCaption || undefined,
+                caption: mediaKind === "image" ? (cleanCaption || undefined) : undefined,
                 mimetype: contentType,
                 fileName,
             }
         );
 
         if (!res?.key?.id) {
-            return { success: false, error: "Image sent but no confirmation received." };
+            return { success: false, error: "Media sent but no confirmation received." };
         }
 
         const created = await db.message.create({
@@ -1598,16 +1668,28 @@ export async function sendWhatsAppImageReply(
                         await sendMessage(accessToken, ghlPayload);
                     }
                 } catch (ghlErr) {
-                    console.error('[sendWhatsAppImageReply] GHL sync failed:', ghlErr);
+                    console.error('[sendWhatsAppMediaReply] GHL sync failed:', ghlErr);
                 }
             })();
         }
 
         return { success: true, messageId: created.id };
     } catch (err: any) {
-        console.error("Evolution API image send failed:", err);
-        return { success: false, error: `WhatsApp image send failed: ${err.message || 'Unknown error'}` };
+        console.error("Evolution API media send failed:", err);
+        return { success: false, error: `WhatsApp media send failed: ${err.message || 'Unknown error'}` };
     }
+}
+
+export async function sendWhatsAppImageReply(
+    conversationId: string,
+    contactId: string,
+    caption: string,
+    upload: WhatsAppImageUploadRef
+) {
+    return sendWhatsAppMediaReply(conversationId, contactId, {
+        ...upload,
+        kind: "image",
+    }, { caption, kind: "image" });
 }
 
 export async function sendReply(conversationId: string, contactId: string, messageBody: string, type: 'SMS' | 'Email' | 'WhatsApp') {
@@ -3824,7 +3906,28 @@ export async function syncAllEvolutionChats() {
                             participant: participantPhone
                         };
 
+                        if ((parsedContent.type === "image" || parsedContent.type === "audio") && location.evolutionInstanceId) {
+                            normalized.__evolutionMediaAttachmentPayload = {
+                                instanceName: location.evolutionInstanceId,
+                                evolutionMessageData: msg,
+                            };
+                        }
+
                         const result = await processNormalizedMessage(normalized);
+
+                        if ((parsedContent.type === "image" || parsedContent.type === "audio") && location.evolutionInstanceId) {
+                            if (result?.status === 'deferred_unresolved_lid') {
+                                console.log(`[SyncAll] Delaying media attachment ingest until LID resolves (${key.id})`);
+                            } else {
+                                void ingestEvolutionMediaAttachment({
+                                    instanceName: location.evolutionInstanceId,
+                                    evolutionMessageData: msg,
+                                    wamId: key.id,
+                                }).catch((err) => {
+                                    console.error(`[SyncAll] Failed to ingest media attachment for ${key.id}:`, err);
+                                });
+                            }
+                        }
 
                         if (result?.status === 'skipped') {
                             totalSkipped++;
@@ -4085,7 +4188,27 @@ export async function startNewConversation(phone: string) {
                             resolvedPhone: whatsappPhone,
                         };
 
+                        if ((parsedContent.type === "image" || parsedContent.type === "audio") && location.evolutionInstanceId) {
+                            normalized.__evolutionMediaAttachmentPayload = {
+                                instanceName: location.evolutionInstanceId,
+                                evolutionMessageData: msg,
+                            };
+                        }
+
                         const result = await processNormalizedMessage(normalized);
+                        if ((parsedContent.type === "image" || parsedContent.type === "audio") && location.evolutionInstanceId) {
+                            if (result?.status === "deferred_unresolved_lid") {
+                                console.log(`[NewConversation] Delaying media attachment ingest until LID resolves (${key.id})`);
+                            } else {
+                                void ingestEvolutionMediaAttachment({
+                                    instanceName: location.evolutionInstanceId,
+                                    evolutionMessageData: msg,
+                                    wamId: key.id,
+                                }).catch((err) => {
+                                    console.error(`[NewConversation] Failed to ingest media attachment for ${key.id}:`, err);
+                                });
+                            }
+                        }
                         if (result?.status === 'processed') imported++;
                     }
 
@@ -4177,7 +4300,27 @@ export async function startNewConversation(phone: string) {
                         resolvedPhone: whatsappPhone,
                     };
 
+                    if ((parsedContent.type === "image" || parsedContent.type === "audio") && location.evolutionInstanceId) {
+                        normalized.__evolutionMediaAttachmentPayload = {
+                            instanceName: location.evolutionInstanceId,
+                            evolutionMessageData: msg,
+                        };
+                    }
+
                     const result = await processNormalizedMessage(normalized);
+                    if ((parsedContent.type === "image" || parsedContent.type === "audio") && location.evolutionInstanceId) {
+                        if (result?.status === "deferred_unresolved_lid") {
+                            console.log(`[NewConversation] Delaying media attachment ingest until LID resolves (${key.id})`);
+                        } else {
+                            void ingestEvolutionMediaAttachment({
+                                instanceName: location.evolutionInstanceId,
+                                evolutionMessageData: msg,
+                                wamId: key.id,
+                            }).catch((err) => {
+                                console.error(`[NewConversation] Failed to ingest media attachment for ${key.id}:`, err);
+                            });
+                        }
+                    }
                     if (result?.status === 'processed') messagesImported++;
                 }
 

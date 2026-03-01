@@ -22,10 +22,14 @@ export interface NormalizedMessage {
     resolvedPhone?: string; // Explicitly passed resolved phone from webhook
     __skipUnresolvedLidDeferral?: boolean; // Internal: avoid enqueue loop during retry
     __deferredAttempt?: number; // Internal: deferred retry count for logging/limits
+    __evolutionMediaAttachmentPayload?: {
+        instanceName: string;
+        evolutionMessageData: any;
+    }; // Internal: used to ingest image/audio attachment after deferred LID resolution
     __evolutionImageAttachmentPayload?: {
         instanceName: string;
         evolutionMessageData: any;
-    }; // Internal: used to ingest image attachment after deferred LID resolution
+    }; // Backward compatibility: legacy image-only payload
 }
 
 // ... handleWhatsAppMessage ...
@@ -121,26 +125,30 @@ function clearDeferredLidEntry(key: string) {
     deferredLidMessages.delete(key);
 }
 
-export async function runDeferredEvolutionImageAttachmentIngest(msg: NormalizedMessage) {
-    const payload = msg.__evolutionImageAttachmentPayload;
-    if (msg.type !== "image" || !payload?.instanceName || !payload?.evolutionMessageData || !msg.wamId) {
+export async function runDeferredEvolutionMediaAttachmentIngest(msg: NormalizedMessage) {
+    const payload = msg.__evolutionMediaAttachmentPayload || msg.__evolutionImageAttachmentPayload;
+    if ((msg.type !== "image" && msg.type !== "audio") || !payload?.instanceName || !payload?.evolutionMessageData || !msg.wamId) {
         return;
     }
 
     try {
-        const { ingestEvolutionImageAttachment } = await import("@/lib/whatsapp/evolution-media");
-        const result: any = await ingestEvolutionImageAttachment({
+        const { ingestEvolutionMediaAttachment } = await import("@/lib/whatsapp/evolution-media");
+        const result: any = await ingestEvolutionMediaAttachment({
             instanceName: payload.instanceName,
             evolutionMessageData: payload.evolutionMessageData,
             wamId: msg.wamId,
         });
 
         if (result?.status === "skipped" && result?.reason === "message_not_found") {
-            console.warn(`[WhatsApp Sync] Deferred image attachment still missing message row for ${msg.wamId}`);
+            console.warn(`[WhatsApp Sync] Deferred media attachment still missing message row for ${msg.wamId}`);
         }
     } catch (err) {
-        console.error(`[WhatsApp Sync] Deferred image attachment ingest failed for ${msg.wamId}:`, err);
+        console.error(`[WhatsApp Sync] Deferred media attachment ingest failed for ${msg.wamId}:`, err);
     }
+}
+
+export async function runDeferredEvolutionImageAttachmentIngest(msg: NormalizedMessage) {
+    return runDeferredEvolutionMediaAttachmentIngest(msg);
 }
 
 function scheduleDeferredLidRetry(key: string) {
@@ -173,7 +181,7 @@ function scheduleDeferredLidRetry(key: string) {
                 return;
             }
 
-            await runDeferredEvolutionImageAttachmentIngest(current.msg);
+            await runDeferredEvolutionMediaAttachmentIngest(current.msg);
             clearDeferredLidEntry(key);
             console.log(`[WhatsApp Sync] Deferred LID message resolved/processed: ${current.msg.wamId}`);
         } catch (err) {

@@ -81,6 +81,13 @@ function inferExtension(fileName?: string, contentType?: string) {
     if (type === "image/webp") return ".webp";
     if (type === "image/gif") return ".gif";
     if (type === "image/heic") return ".heic";
+    if (type === "audio/ogg") return ".ogg";
+    if (type === "audio/opus") return ".opus";
+    if (type === "audio/mpeg") return ".mp3";
+    if (type === "audio/mp4") return ".m4a";
+    if (type === "audio/webm") return ".webm";
+    if (type === "audio/wav" || type === "audio/x-wav") return ".wav";
+    if (type === "audio/aac") return ".aac";
     return ".bin";
 }
 

@@ -4,7 +4,7 @@ import { GEMINI_FLASH_LATEST_ALIAS, GOOGLE_AI_MODELS } from "@/lib/ai/models";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Send, MessageSquare, RefreshCw, Paperclip, FileText, Trash2 } from "lucide-react";
+import { Loader2, Send, MessageSquare, RefreshCw, Paperclip, FileText, Trash2, Mic, Square } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 
@@ -13,7 +13,7 @@ interface ChatWindowProps {
     messages: Message[];
     loading: boolean;
     onSendMessage: (text: string, type: 'SMS' | 'Email' | 'WhatsApp') => void | Promise<void>;
-    onSendImage?: (file: File, caption: string) => void | Promise<void>;
+    onSendMedia?: (file: File, caption: string) => void | Promise<void>;
     onSync?: () => void;
     onFetchHistory?: () => void;
     onGenerateDraft?: (instruction?: string, model?: string) => Promise<string | null>; // Returns draft text or null if failed
@@ -99,7 +99,7 @@ function buildBatchContextText(items: SelectionBatchItem[]) {
     return items.map((item, index) => `Snippet ${index + 1}:\n${item.text}`).join("\n\n");
 }
 
-export function ChatWindow({ conversation, messages, loading, onSendMessage, onSendImage, onSync, onGenerateDraft, onFetchHistory, suggestions = [] }: ChatWindowProps & { suggestions?: string[] }) {
+export function ChatWindow({ conversation, messages, loading, onSendMessage, onSendMedia, onSync, onGenerateDraft, onFetchHistory, suggestions = [] }: ChatWindowProps & { suggestions?: string[] }) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const [draft, setDraft] = useState("");
     const [sending, setSending] = useState(false);
@@ -111,9 +111,13 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
     const [whatsAppEligibility, setWhatsAppEligibility] = useState<WhatsAppEligibilityState>({ status: 'checking' });
     const [smsEligibility, setSmsEligibility] = useState<SmsEligibilityState>({ status: 'checking' });
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const mediaStreamRef = useRef<MediaStream | null>(null);
+    const mediaChunksRef = useRef<Blob[]>([]);
     const hasUserSelectedModelRef = useRef(false);
     const [selectionBatch, setSelectionBatch] = useState<SelectionBatchItem[]>([]);
     const [isSummarizingBatch, setIsSummarizingBatch] = useState(false);
+    const [isRecording, setIsRecording] = useState(false);
 
     // Fetch available models on mount
     useEffect(() => {
@@ -218,7 +222,7 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
     }, [messages, loading]);
 
     const handleSend = async () => {
-        if (!draft.trim()) return;
+        if (isRecording || !draft.trim()) return;
         setSending(true);
         try {
             await Promise.resolve(onSendMessage(draft, selectedChannel));
@@ -228,24 +232,170 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
         }
     };
 
-    const handleImagePickClick = () => {
-        if (selectedChannel !== "WhatsApp" || !onSendImage) return;
+    const stopRecorderTracks = () => {
+        if (mediaStreamRef.current) {
+            mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+            mediaStreamRef.current = null;
+        }
+    };
+
+    useEffect(() => {
+        return () => {
+            try {
+                mediaRecorderRef.current?.stop();
+            } catch {
+                // ignore stop race during unmount
+            }
+            stopRecorderTracks();
+        };
+    }, []);
+
+    useEffect(() => {
+        if (selectedChannel !== "WhatsApp" && mediaRecorderRef.current && isRecording) {
+            try {
+                mediaRecorderRef.current.stop();
+            } catch {
+                stopRecorderTracks();
+                mediaRecorderRef.current = null;
+                setIsRecording(false);
+            }
+        }
+    }, [selectedChannel, isRecording]);
+
+    const handleMediaPickClick = () => {
+        if (selectedChannel !== "WhatsApp" || !onSendMedia) return;
         fileInputRef.current?.click();
     };
 
-    const handleImageSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleMediaSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
-        if (!file || !onSendImage) return;
+        if (!file || !onSendMedia) return;
 
         setSending(true);
         try {
-            await Promise.resolve(onSendImage(file, draft));
+            await Promise.resolve(onSendMedia(file, draft));
             setDraft("");
         } catch (err) {
-            console.error("Image send failed", err);
+            console.error("Media send failed", err);
+            toast.error("Failed to send media");
         } finally {
             setSending(false);
             e.target.value = "";
+        }
+    };
+
+    const pickRecorderMimeType = () => {
+        const candidates = [
+            "audio/webm;codecs=opus",
+            "audio/webm",
+            "audio/ogg;codecs=opus",
+            "audio/ogg",
+            "audio/mp4",
+        ];
+        for (const candidate of candidates) {
+            if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(candidate)) {
+                return candidate;
+            }
+        }
+        return "";
+    };
+
+    const extensionForAudioMimeType = (mimeType: string) => {
+        const normalized = String(mimeType || "").toLowerCase();
+        if (normalized.includes("ogg")) return "ogg";
+        if (normalized.includes("mp4")) return "m4a";
+        if (normalized.includes("mpeg")) return "mp3";
+        if (normalized.includes("wav")) return "wav";
+        if (normalized.includes("aac")) return "aac";
+        return "webm";
+    };
+
+    const handleRecordToggle = async () => {
+        if (selectedChannel !== "WhatsApp" || !onSendMedia || sending) return;
+
+        if (isRecording && mediaRecorderRef.current) {
+            try {
+                mediaRecorderRef.current.stop();
+            } catch (err) {
+                console.error("Failed stopping recorder", err);
+                stopRecorderTracks();
+                mediaRecorderRef.current = null;
+                setIsRecording(false);
+            }
+            return;
+        }
+
+        if (typeof window === "undefined" || typeof MediaRecorder === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+            toast.error("Audio recording is not supported in this browser.");
+            return;
+        }
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const mimeType = pickRecorderMimeType();
+            const recorder = mimeType
+                ? new MediaRecorder(stream, { mimeType })
+                : new MediaRecorder(stream);
+
+            mediaStreamRef.current = stream;
+            mediaRecorderRef.current = recorder;
+            mediaChunksRef.current = [];
+
+            recorder.ondataavailable = (event: BlobEvent) => {
+                if (event.data && event.data.size > 0) {
+                    mediaChunksRef.current.push(event.data);
+                }
+            };
+
+            recorder.onerror = (event: Event) => {
+                console.error("Recorder error", event);
+                toast.error("Recording failed. Please try again.");
+                stopRecorderTracks();
+                mediaRecorderRef.current = null;
+                setIsRecording(false);
+            };
+
+            recorder.onstop = async () => {
+                const chunks = [...mediaChunksRef.current];
+                mediaChunksRef.current = [];
+
+                const recorderMimeType = recorder.mimeType || mimeType || "audio/webm";
+                const blob = new Blob(chunks, { type: recorderMimeType });
+
+                stopRecorderTracks();
+                mediaRecorderRef.current = null;
+                setIsRecording(false);
+
+                if (!blob.size) {
+                    toast.error("No audio captured. Please try again.");
+                    return;
+                }
+
+                const file = new File(
+                    [blob],
+                    `voice-note-${Date.now()}.${extensionForAudioMimeType(recorderMimeType)}`,
+                    { type: recorderMimeType }
+                );
+
+                setSending(true);
+                try {
+                    await Promise.resolve(onSendMedia(file, ""));
+                } catch (err) {
+                    console.error("Voice note send failed", err);
+                    toast.error("Failed to send voice note");
+                } finally {
+                    setSending(false);
+                }
+            };
+
+            recorder.start();
+            setIsRecording(true);
+        } catch (err) {
+            console.error("Unable to start audio recording", err);
+            toast.error("Microphone access denied or unavailable.");
+            stopRecorderTracks();
+            mediaRecorderRef.current = null;
+            setIsRecording(false);
         }
     };
 
@@ -433,9 +583,9 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
                     <input
                         ref={fileInputRef}
                         type="file"
-                        accept="image/*"
+                        accept="image/*,audio/*"
                         className="hidden"
-                        onChange={handleImageSelected}
+                        onChange={handleMediaSelected}
                     />
                     <div className="relative rounded-xl border bg-white shadow-sm focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-300 transition-all">
                         <Textarea
@@ -518,18 +668,36 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
 
                             <div className="flex items-center gap-1.5">
                                 <span className="text-[10px] text-slate-400 hidden sm:inline">⌘↵</span>
-                                {selectedChannel === 'WhatsApp' && onSendImage && (
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-7 w-7 p-0 text-slate-500 hover:text-slate-700"
-                                        onClick={handleImagePickClick}
-                                        title="Send image"
-                                        disabled={sending}
-                                    >
-                                        <Paperclip className="h-3.5 w-3.5" />
-                                    </Button>
+                                {selectedChannel === 'WhatsApp' && onSendMedia && (
+                                    <>
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-7 w-7 p-0 text-slate-500 hover:text-slate-700"
+                                            onClick={handleMediaPickClick}
+                                            title="Send media"
+                                            disabled={sending || isRecording}
+                                        >
+                                            <Paperclip className="h-3.5 w-3.5" />
+                                        </Button>
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            className={cn(
+                                                "h-7 w-7 p-0",
+                                                isRecording
+                                                    ? "text-red-600 hover:text-red-700"
+                                                    : "text-slate-500 hover:text-slate-700"
+                                            )}
+                                            onClick={handleRecordToggle}
+                                            title={isRecording ? "Stop recording and send voice note" : "Record voice note"}
+                                            disabled={sending}
+                                        >
+                                            {isRecording ? <Square className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
+                                        </Button>
+                                    </>
                                 )}
                                 {selectedChannel === 'SMS' && draft.length > 0 && (
                                     <span className="text-[10px] text-slate-400">{draft.length}</span>
@@ -541,7 +709,7 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
                                         draft.trim() ? "bg-blue-600 hover:bg-blue-700" : "bg-slate-100 text-slate-400 hover:bg-slate-200"
                                     )}
                                     onClick={handleSend}
-                                    disabled={sending || !draft.trim()}
+                                    disabled={sending || isRecording || !draft.trim()}
                                 >
                                     {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
                                 </Button>

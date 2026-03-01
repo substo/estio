@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { Conversation, Message } from '@/lib/ghl/conversations';
-import { fetchConversations, fetchMessages, sendReply, createWhatsAppImageUploadUrl, sendWhatsAppImageReply, generateAIDraft, deleteConversations, restoreConversations, archiveConversations, unarchiveConversations, permanentlyDeleteConversations, syncWhatsAppHistory, refreshConversation, markConversationAsRead } from '../actions';
+import { fetchConversations, fetchMessages, sendReply, createWhatsAppMediaUploadUrl, sendWhatsAppMediaReply, generateAIDraft, deleteConversations, restoreConversations, archiveConversations, unarchiveConversations, permanentlyDeleteConversations, syncWhatsAppHistory, refreshConversation, markConversationAsRead } from '../actions';
 import { toast } from '@/components/ui/use-toast';
 import { getDealContexts, createPersistentDeal } from '../../deals/actions';
 import { UnifiedTimeline } from './unified-timeline';
@@ -625,18 +625,18 @@ export function ConversationInterface({ initialConversations, initialConversatio
         }
     };
 
-    const handleSendImage = async (file: File, caption: string) => {
+    const handleSendMedia = async (file: File, caption: string) => {
         if (!activeConversation) return;
 
         try {
-            const prep = await createWhatsAppImageUploadUrl(activeConversation.id, activeConversation.contactId, {
+            const prep = await createWhatsAppMediaUploadUrl(activeConversation.id, activeConversation.contactId, {
                 fileName: file.name,
                 contentType: file.type || 'application/octet-stream',
                 size: file.size,
             });
 
             if (!prep.success) {
-                alert('Failed to prepare image upload: ' + JSON.stringify(prep.error));
+                alert('Failed to prepare media upload: ' + JSON.stringify(prep.error));
                 return;
             }
 
@@ -659,21 +659,21 @@ export function ConversationInterface({ initialConversations, initialConversatio
                 throw new Error(`R2 upload failed (${uploadRes.status}) ${errText}`);
             }
 
-            const sendRes = await sendWhatsAppImageReply(
+            const sendRes = await sendWhatsAppMediaReply(
                 activeConversation.id,
                 activeConversation.contactId,
-                caption,
-                uploadRef
+                uploadRef,
+                { caption }
             );
 
             if (sendRes.success) {
                 const newMsgs = await fetchMessages(activeConversation.id);
                 setMessages(newMsgs);
             } else {
-                alert('Failed to send image: ' + JSON.stringify(sendRes.error));
+                alert('Failed to send media: ' + JSON.stringify(sendRes.error));
             }
         } catch (e: any) {
-            alert('Failed to send image: ' + (e?.message || 'Unknown error'));
+            alert('Failed to send media: ' + (e?.message || 'Unknown error'));
         }
     };
 
@@ -801,7 +801,7 @@ export function ConversationInterface({ initialConversations, initialConversatio
                                 messages={messages}
                                 loading={loadingMessages}
                                 onSendMessage={handleSendMessage}
-                                onSendImage={handleSendImage}
+                                onSendMedia={handleSendMedia}
                                 onSync={handleSync}
                                 onFetchHistory={async () => {
                                     setLoadingMessages(true);

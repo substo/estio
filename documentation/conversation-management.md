@@ -122,6 +122,7 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
 - **Auto Read Reset**: Selecting a conversation marks it read and clears the badge.
 - **Active Thread Live Updates**: While a thread is open, metadata changes trigger silent message refresh; ChatWindow auto-scroll keeps the latest message visible.
 - **Channel Guards**: The composer channel picker disables ineligible channels with a reason tooltip. SMS is blocked when phone is invalid/masked or GHL SMS is not configured; WhatsApp is blocked when eligibility checks fail.
+- **WhatsApp Media Composer**: For WhatsApp-eligible conversations, the composer supports media upload (`image/*`, `audio/*`) and in-app voice-note recording (`MediaRecorder`). Media is sent through the private R2 -> Evolution `sendMedia` flow and rendered inline (image preview or audio player) from signed attachment URLs.
 - **Source of Truth (Selection Workflow)**: This document is the canonical reference for chat text-selection behavior, batch summarize/custom flow, and CRM-log save semantics.
 - **Selection Actions**: Message/email text selection in the chat panel now opens a floating action toolbar with:
   - `Paste Lead` for AI-assisted structured lead import.

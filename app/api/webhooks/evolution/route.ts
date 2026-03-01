@@ -3,7 +3,7 @@ import db from '@/lib/db';
 import { processNormalizedMessage, NormalizedMessage } from '@/lib/whatsapp/sync';
 import { handleContactSyncEvent } from '@/lib/whatsapp/contact-sync-handler';
 import { logWebhookPayload } from '@/lib/logging/webhook-logger';
-import { ingestEvolutionImageAttachment, parseEvolutionMessageContent } from '@/lib/whatsapp/evolution-media';
+import { ingestEvolutionMediaAttachment, parseEvolutionMessageContent } from '@/lib/whatsapp/evolution-media';
 
 export async function POST(req: NextRequest) {
     try {
@@ -208,8 +208,8 @@ export async function POST(req: NextRequest) {
                 resolvedPhone: realPhone
             };
 
-            if (parsedContent.type === 'image' && location.evolutionInstanceId) {
-                normalized.__evolutionImageAttachmentPayload = {
+            if ((parsedContent.type === 'image' || parsedContent.type === 'audio') && location.evolutionInstanceId) {
+                normalized.__evolutionMediaAttachmentPayload = {
                     instanceName: location.evolutionInstanceId,
                     evolutionMessageData: msg,
                 };
@@ -218,16 +218,16 @@ export async function POST(req: NextRequest) {
             console.log(`[Evolution] Processing ${normalized.direction} message for ${location.id}`);
             const processResult = await processNormalizedMessage(normalized);
 
-            if (parsedContent.type === 'image' && location.evolutionInstanceId) {
+            if ((parsedContent.type === 'image' || parsedContent.type === 'audio') && location.evolutionInstanceId) {
                 if (processResult?.status === 'deferred_unresolved_lid') {
-                    console.log(`[Evolution] Delaying image attachment ingest until LID resolves (${key.id})`);
+                    console.log(`[Evolution] Delaying media attachment ingest until LID resolves (${key.id})`);
                 } else {
-                    void ingestEvolutionImageAttachment({
+                    void ingestEvolutionMediaAttachment({
                         instanceName: location.evolutionInstanceId,
                         evolutionMessageData: msg,
                         wamId: key.id,
                     }).catch((err) => {
-                        console.error(`[Evolution] Failed to ingest image attachment for ${key.id}:`, err);
+                        console.error(`[Evolution] Failed to ingest media attachment for ${key.id}:`, err);
                     });
                 }
             }

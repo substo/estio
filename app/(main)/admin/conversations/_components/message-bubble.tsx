@@ -111,7 +111,16 @@ export function MessageBubble({
         const target = (attachment.fileName || attachment.url || "").toLowerCase().split("?")[0];
         return [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".svg"].some((ext) => target.endsWith(ext));
     });
-    const fileAttachments = attachments.filter((attachment) => !imageAttachments.includes(attachment));
+    const audioAttachments = attachments.filter((attachment) => {
+        const mimeType = (attachment.mimeType || "").toLowerCase();
+        if (mimeType.startsWith("audio/")) return true;
+
+        const target = (attachment.fileName || attachment.url || "").toLowerCase().split("?")[0];
+        return [".ogg", ".opus", ".mp3", ".m4a", ".webm", ".wav", ".aac"].some((ext) => target.endsWith(ext));
+    });
+    const fileAttachments = attachments.filter((attachment) =>
+        !imageAttachments.includes(attachment) && !audioAttachments.includes(attachment)
+    );
     const selectedImage = selectedImageIndex !== null ? imageAttachments[selectedImageIndex] : null;
     const getDownloadUrl = (url: string) => {
         try {
@@ -326,6 +335,37 @@ export function MessageBubble({
                                     </span>
                                 </div>
                             </button>
+                        ))}
+                        {audioAttachments.map((attachment, i) => (
+                            <div
+                                key={`audio-${i}-${attachment.url}`}
+                                className={cn(
+                                    "rounded-lg border border-black/10 bg-black/5 p-2",
+                                    isOutbound && !isEmail ? "bg-white/10 border-white/20" : "bg-black/[0.03]"
+                                )}
+                                onClick={(e) => e.stopPropagation()}
+                            >
+                                <audio
+                                    controls
+                                    preload="metadata"
+                                    src={attachment.url}
+                                    className="w-full max-w-[320px]"
+                                />
+                                <div className="mt-1 flex items-center gap-2 text-[11px]">
+                                    <span className="truncate">{attachment.fileName || `Audio attachment ${i + 1}`}</span>
+                                    <a
+                                        href={getDownloadUrl(attachment.url)}
+                                        download={attachment.fileName || `audio-${i + 1}`}
+                                        className={cn(
+                                            "ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-black/10",
+                                            isOutbound && !isEmail ? "text-blue-100 hover:bg-white/20" : "text-gray-600"
+                                        )}
+                                    >
+                                        <Download className="h-3 w-3" />
+                                        Download
+                                    </a>
+                                </div>
+                            </div>
                         ))}
                         {fileAttachments.map((attachment, i) => (
                             <a

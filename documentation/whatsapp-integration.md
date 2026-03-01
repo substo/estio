@@ -1,5 +1,5 @@
 # WhatsApp Integration: Custom Channel ("Linked Device")
-**Last Updated:** 2026-02-27
+**Last Updated:** 2026-03-01
 **Related:** [Legacy Integration](whatsapp-integration-legacy.md)
 
 ## Overview
@@ -7,7 +7,7 @@
 We use a **Custom Messaging Channel** (shadowed by Evolution API) to solve "Unsuccessful Message" errors and provide full 2-way sync with GoHighLevel (GHL).
 
 > [!NOTE]
-> **Evolution-only image support** is now implemented in this integration. Image media is stored in a **private Cloudflare R2 bucket** (`whatsapp-media`) and served to the UI through an app-authenticated attachment route. The Twilio/Meta WhatsApp implementations were not changed.
+> **Evolution-only media support (images + audio)** is implemented in this integration. Media is stored in a **private Cloudflare R2 bucket** (`whatsapp-media`) and served to the UI through an app-authenticated attachment route. The Twilio/Meta WhatsApp implementations were not changed.
 
 ### Architecture
 We use a **Hybrid Approach**:
@@ -19,7 +19,7 @@ We use a **Hybrid Approach**:
 1.  **No "Unsuccessful" Errors**: Using `type: 'Custom'` bypasses GHL's strict checks for official WhatsApp subscriptions.
 2.  **2-Way Sync**: Messages sent from the GHL UI are relayed to WhatsApp; messages received on WhatsApp are pushed to GHL.
 3.  **Correct Type**: Messages appear as "WhatsApp Linked" (or Custom SMS) rather than generic "SMS".
-4.  **Private Media Storage**: WhatsApp images received/sent through the App UI (Evolution path) are stored privately in Cloudflare R2 and exposed only via short-lived signed URLs.
+4.  **Private Media Storage**: WhatsApp media received/sent through the App UI (Evolution path) is stored privately in Cloudflare R2 and exposed only via short-lived signed URLs.
 
 ### Message Flow
 
@@ -34,27 +34,27 @@ We use a **Hybrid Approach**:
 #### B. Outbound (App -> WhatsApp -> GHL)
 1.  **User Action**: User sends a message in the App's custom UI.
     -   **Text**: `sendReply(...)`
-    -   **Image (Evolution-only)**: paperclip upload flow in the chat window
+    -   **Media (Evolution-only)**: paperclip upload flow (images/audio) + voice recorder in the chat window
 2.  **Text Path**: Server calls `evolutionClient.sendMessage(...)`.
-3.  **Image Path (Evolution-only)**:
-    -   App calls `createWhatsAppImageUploadUrl(...)` to get a short-lived presigned **R2 `PUT` URL**.
+3.  **Media Path (Evolution-only)**:
+    -   App calls `createWhatsAppMediaUploadUrl(...)` to get a short-lived presigned **R2 `PUT` URL**.
     -   Browser uploads the file directly to the private `whatsapp-media` bucket.
-    -   App calls `sendWhatsAppImageReply(...)`.
+    -   App calls `sendWhatsAppMediaReply(...)`.
     -   Server validates the upload, signs a short-lived **R2 `GET` URL**, then calls `evolutionClient.sendMedia(...)`.
     -   Server creates the local `Message` plus `MessageAttachment` row (stored as `r2://bucket/key`).
 4.  **GHL Sync**:
     -   Server calls GHL API `POST /conversations/messages` with `type: 'Custom'` and `conversationProviderId`.
-    -   For image sends, GHL currently receives the caption (or `[Image]`) as text; the binary attachment remains in our app/R2 storage.
+    -   For media sends, GHL currently receives placeholder/caption text (`[Image]`, `[Audio]`, or caption text for images); the binary attachment remains in our app/R2 storage.
 
 #### C. Inbound (WhatsApp -> GHL)
 1.  **Webhook**: Evolution API sends `MESSAGES_UPSERT` to `POST /api/webhooks/evolution`.
 2.  **Parsing**: `parseEvolutionMessageContent(...)` unwraps nested message containers (ephemeral / view-once) and normalizes text, reactions/stickers, and media message types.
 3.  **Processing**: `lib/whatsapp/sync.ts` writes the normalized message to the local DB.
-4.  **Image Attachment Ingestion (Evolution-only)**:
-    -   If the message is an image, webhook/history sync triggers `ingestEvolutionImageAttachment(...)` asynchronously.
+4.  **Media Attachment Ingestion (Evolution-only)**:
+    -   If the message is an image or audio, webhook/history sync triggers `ingestEvolutionMediaAttachment(...)` asynchronously.
     -   The server calls `evolutionClient.getBase64FromMediaMessage(...)` (on-demand, not webhook base64).
-    -   The image is uploaded to private R2 and saved as a `MessageAttachment`.
-    -   **LID-safe behavior**: If inbound processing is deferred due to an unresolved `@lid`, image attachment ingestion is also deferred and runs after the LID retry worker successfully processes the message. This prevents the previous `message_not_found` race.
+    -   The media is uploaded to private R2 and saved as a `MessageAttachment`.
+    -   **LID-safe behavior**: If inbound processing is deferred due to an unresolved `@lid`, media attachment ingestion is also deferred and runs after the LID retry worker successfully processes the message. This prevents the previous `message_not_found` race.
 5.  **JIT Sync**: Server ensures the contact exists in GHL (`ensureRemoteContact`).
 6.  **GHL Push**: Server pushes the inbound message to GHL using `type: 'Custom'` and `conversationProviderId` (caption or placeholder text for media).
 
@@ -122,7 +122,7 @@ To handle high-volume sync and rate limits, we introduced a **Queue-Based Archit
 - **Efficiency**: Stops processing as soon as it hits known history.
 - **Resilience**: Manual button handles edge cases.
 
-### 6. Private Media Storage for WhatsApp Images (Feb 2026)
+### 6. Private Media Storage for WhatsApp Media (Images + Audio) (Feb-Mar 2026)
 
 We use a **single private Cloudflare R2 bucket** for WhatsApp media across environments:
 
@@ -150,7 +150,7 @@ whatsapp/evolution/v1/env/{env}/location/{locationId}/contact/{contactId?}/conve
 - The R2 bucket is **private**. We do **not** store public URLs.
 - `MessageAttachment.url` stores an internal `r2://bucket/key` URI for R2-backed files (schema-compatible, no migration required).
 - `fetchMessages(...)` rewrites R2-backed attachments to `/api/media/attachments/{attachmentId}` for the UI.
-- `fetchMessages(...)` now also returns attachment metadata (`url`, `mimeType`, `fileName`) so the chat UI can render **inline image previews** for image attachments while keeping non-image files as links.
+- `fetchMessages(...)` now also returns attachment metadata (`url`, `mimeType`, `fileName`) so the chat UI can render **inline image previews** and **audio players** for supported media attachments.
 - We intentionally do **not** enable webhook base64 payloads globally. Media is fetched on demand using `getBase64FromMediaMessage(...)` to avoid oversized webhook payloads.
 
 ### 7. Emoji, Reactions, and Sticker Semantics (Feb 23, 2026)
@@ -165,7 +165,7 @@ To prevent emoji reactions/stickers from being mislabeled as generic media (`[Me
 - **Emoji-only text messages** stay plain text (e.g. `👍`, `🔥🔥`).
 - **Reactions** (`reactionMessage`) are stored as readable text, e.g. `Reaction: 👍` or `[Reaction removed]`.
 - **Stickers** (`stickerMessage`) are stored as `Sticker: 😀` when WhatsApp includes a linked emoji, otherwise `[Sticker]`.
-- **Image ingestion remains image-only** (we do not attempt media attachment ingestion for reactions/stickers).
+- **Media ingestion remains limited to image/audio** (we do not attempt attachment ingestion for reactions/stickers).
 
 #### Why this matters
 - GHL custom channels do not have native reaction objects, so we keep a human-readable text fallback for CRM sync.
@@ -238,7 +238,7 @@ The code also accepts `CLOUDFLARE_R2_*` aliases (and optional `R2_ENDPOINT` / `C
 
 #### 2a. Cloudflare R2 CORS (Required for Browser Uploads)
 
-The image upload flow uses a browser `PUT` to a presigned R2 URL, so the bucket needs CORS for your app origins.
+The media upload flow uses a browser `PUT` to a presigned R2 URL, so the bucket needs CORS for your app origins.
 
 Example CORS policy (adjust origins for local/staging/prod):
 ```json
@@ -275,11 +275,11 @@ We track message delivery status (`sent`, `delivered`, `read`, `failed`) by list
 | **Duplicate Conversations (Same Contact)** | **Issue**: Race conditions can create multiple conversations for one contact. **Fix**: Run `scripts/merge-same-contact-conversations.ts` to merge them. **Prevention**: Logic updated to search last 2 digits for robust matching (`sync.ts`). |
 | **Lead gets split into two contacts/conversations after reply** | **Issue**: Outbound uses phone identity, reply arrives as unresolved `@lid`. **Fix**: Inbound unresolved LID is now deferred (`whatsapp-lid-resolve` queue) until resolved to phone; verify Redis is up and worker logs show retries/resolution. |
 | **Manual "Sync WhatsApp History" finds no past messages for a manually-created lead (often international numbers)** | **Issue**: Evolution may store the chat under an LID (`@lid`) while older history sync queried only `phone@s.whatsapp.net`. **Fix**: Manual sync/new-conversation backfill now try multiple JIDs (`Contact.lid`, Evolution lookup JID, phone fallback). Check logs for `History fetch candidates ... selected=... found=...`. |
-| **Image message exists but no attachment appears (especially `@lid` contacts)** | Older builds could ingest media before the deferred LID message row existed (`message_not_found`). **Fix**: Attachment ingest now waits for deferred LID resolution/processing, then retries automatically. Re-sync history to backfill previously missed attachments. |
-| **WhatsApp image upload fails before send** | Check R2 env vars (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`) and bucket CORS for browser `PUT`. The upload action is `createWhatsAppImageUploadUrl(...)`. |
-| **"Uploaded image not found in media storage"** | The presigned upload may have expired or the browser upload failed. Re-upload the image, then call `sendWhatsAppImageReply(...)` again. |
-| **"Unsupported image type" / size errors** | Current allow-list is images only (`jpeg/png/webp/gif/heic/heif`) and max size is `16MB` in `createWhatsAppImageUploadUrl(...)`. |
-| **Image shows in App but not in GHL as a binary attachment** | Expected for current implementation. GHL custom channel receives caption text or `[Image]`; the binary is stored/displayed through our app + private R2 path. |
+| **Media message exists but no attachment appears (especially `@lid` contacts)** | Older builds could ingest media before the deferred LID message row existed (`message_not_found`). **Fix**: Attachment ingest now waits for deferred LID resolution/processing, then retries automatically. Re-sync history to backfill previously missed attachments. |
+| **WhatsApp media upload fails before send** | Check R2 env vars (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`) and bucket CORS for browser `PUT`. The upload action is `createWhatsAppMediaUploadUrl(...)`. |
+| **"Uploaded media not found in media storage"** | The presigned upload may have expired or the browser upload failed. Re-upload the file, then call `sendWhatsAppMediaReply(...)` again. |
+| **"Unsupported media type" / size errors** | Current allow-lists: images (`jpeg/png/webp/gif/heic/heif`) and audio (`ogg/opus/mp3/m4a/webm/wav/aac`). Current max size is `16MB` for both image/audio in `createWhatsAppMediaUploadUrl(...)`. |
+| **Media shows in App but not in GHL as a binary attachment** | Expected for current implementation. GHL custom channel receives placeholder/caption text (`[Image]`, `[Audio]`, or image caption); the binary is stored/displayed through our app + private R2 path. |
 | **Conversation deep link opens but center panel says "Select a conversation"** | The selected conversation may be older than the currently loaded list page (or in Archived/Trash). Fixes now include (1) injecting the URL-selected conversation into the initial payload and (2) preserving the selected conversation during client list refetches. If reproducing from Contacts, ensure the link opens the correct `view` (`archived` / `trash`) when applicable. |
 
 ### 4. Server Logging & Debugging
@@ -427,28 +427,28 @@ No Prisma migration was required for the Evolution image/R2 feature, but we now 
 -   `Contact.ghlContactId`
 -   `Contact.lid` — WhatsApp Lightweight ID for LID-to-phone mapping.
 -   `Message.ghlMessageId` / `Message.wamId` mapping.
--   `Message.attachments` / `MessageAttachment` for WhatsApp image files.
+-   `Message.attachments` / `MessageAttachment` for WhatsApp media files (image/audio).
     -   For R2-backed attachments, `MessageAttachment.url` stores an internal `r2://bucket/key` URI.
     -   The UI receives `/api/media/attachments/{attachmentId}` URLs (signed at request time).
 -   **CRITICAL DB ALTERATION**: `Contact` table columns `pushName` and `profilePicUrl` MUST be type `TEXT` or `VARCHAR(1000+)` to prevent crashes. Check migration history.
 
-## Evolution Image Media Support (Feb 2026)
+## Evolution Media Support (Images + Audio) (Feb-Mar 2026)
 
 ### Supported Flows
 
-- **Outbound (App UI only)**: Users can send image attachments from the app conversation UI (paperclip icon) on WhatsApp conversations. This uses `createWhatsAppImageUploadUrl(...)` + `sendWhatsAppImageReply(...)`.
-- **Inbound (Webhook + Manual History Sync)**: Image messages received from Evolution webhooks and image messages discovered during `syncWhatsAppHistory(...)` are parsed and ingested into R2 asynchronously.
+- **Outbound (App UI only)**: Users can send image/audio attachments from the app conversation UI (paperclip icon) on WhatsApp conversations. This uses `createWhatsAppMediaUploadUrl(...)` + `sendWhatsAppMediaReply(...)`. Voice recording in the chat composer is sent through the same media action.
+- **Inbound (Webhook + Manual History Sync + Backfill)**: Image/audio messages received from Evolution webhooks and media messages discovered during sync/backfill paths are parsed and ingested into R2 asynchronously.
 - **Display**: Existing `message-bubble` UI renders message attachments once `fetchMessages(...)` hydrates attachment URLs.
 
-### Key Files (Image Path)
+### Key Files (Media Path)
 
 | File | Role |
 |------|------|
 | `lib/whatsapp/media-r2.ts` | Cloudflare R2 S3-compatible client, presigned URLs, key builders, `r2://` URI helpers |
-| `lib/whatsapp/evolution-media.ts` | Evolution message parsing + inbound image ingestion (`getBase64FromMediaMessage` -> R2 -> `MessageAttachment`) |
+| `lib/whatsapp/evolution-media.ts` | Evolution message parsing + inbound media ingestion (`getBase64FromMediaMessage` -> R2 -> `MessageAttachment`) |
 | `lib/evolution/client.ts` | Evolution `sendMedia(...)` and `getBase64FromMediaMessage(...)` client methods |
-| `app/api/webhooks/evolution/route.ts` | Webhook parsing + async image ingestion trigger for `MESSAGES_UPSERT` |
-| `app/(main)/admin/conversations/actions.ts` | `createWhatsAppImageUploadUrl(...)`, `sendWhatsAppImageReply(...)`, `syncWhatsAppHistory(...)`, attachment hydration in `fetchMessages(...)` |
+| `app/api/webhooks/evolution/route.ts` | Webhook parsing + async media ingestion trigger for `MESSAGES_UPSERT` |
+| `app/(main)/admin/conversations/actions.ts` | `createWhatsAppMediaUploadUrl(...)`, `sendWhatsAppMediaReply(...)`, `syncWhatsAppHistory(...)`, attachment hydration in `fetchMessages(...)` |
 | `app/api/media/attachments/[attachmentId]/route.ts` | Authenticated attachment proxy -> short-lived signed R2 GET |
 
 ### Evolution Media Retrieval Endpoint (Important)
@@ -461,7 +461,7 @@ Our deployed Evolution API expects the media fetch request body in this shape:
 }
 ```
 
-This is used by `evolutionClient.getBase64FromMediaMessage(...)` and is required for inbound image ingestion.
+This is used by `evolutionClient.getBase64FromMediaMessage(...)` and is required for inbound media ingestion.
 
 ## Group Chat & LID Support (Jan-Feb 2026)
 

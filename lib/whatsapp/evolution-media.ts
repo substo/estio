@@ -3,19 +3,22 @@ import { evolutionClient } from "@/lib/evolution/client";
 import {
     buildWhatsAppInboundAttachmentKey,
     putWhatsAppMediaObject,
+    sanitizeWhatsAppMediaFilename,
 } from "@/lib/whatsapp/media-r2";
 
 export type ParsedEvolutionMessageContent = {
     type: "text" | "image" | "document" | "audio" | "video" | "sticker" | "reaction" | "other";
     body: string;
     media?: {
-        kind: "image";
+        kind: "image" | "audio";
         fileName?: string;
         mimetype?: string;
         fileLength?: number;
         width?: number;
         height?: number;
         caption?: string;
+        seconds?: number;
+        ptt?: boolean;
     };
     reaction?: {
         emoji?: string;
@@ -105,7 +108,19 @@ export function parseEvolutionMessageContent(message: any): ParsedEvolutionMessa
         return { type: "document", body: text || "[Document]" };
     }
     if (content.audioMessage) {
-        return { type: "audio", body: text || "[Audio]" };
+        const audio = content.audioMessage;
+        return {
+            type: "audio",
+            body: text || "[Audio]",
+            media: {
+                kind: "audio",
+                fileName: audio.fileName,
+                mimetype: audio.mimetype,
+                fileLength: Number(String(audio.fileLength || "0")) || undefined,
+                seconds: Number(String(audio.seconds || "0")) || undefined,
+                ptt: typeof audio.ptt === "boolean" ? audio.ptt : undefined,
+            },
+        };
     }
     if (content.videoMessage) {
         return { type: "video", body: text || "[Video]" };
@@ -166,13 +181,26 @@ export async function ingestEvolutionImageAttachment(params: {
     evolutionMessageData: any;
     wamId: string;
 }) {
+    const parsed = parseEvolutionMessageContent(params.evolutionMessageData?.message);
+    if (parsed.type !== "image") {
+        return { status: "skipped" as const, reason: "not_image" };
+    }
+
+    return ingestEvolutionMediaAttachment(params);
+}
+
+export async function ingestEvolutionMediaAttachment(params: {
+    instanceName: string;
+    evolutionMessageData: any;
+    wamId: string;
+}) {
     const { instanceName, evolutionMessageData, wamId } = params;
 
     if (!instanceName || !evolutionMessageData || !wamId) return { status: "skipped" as const, reason: "missing_input" };
 
     const parsed = parseEvolutionMessageContent(evolutionMessageData.message);
-    if (parsed.type !== "image") {
-        return { status: "skipped" as const, reason: "not_image" };
+    if (parsed.type !== "image" && parsed.type !== "audio") {
+        return { status: "skipped" as const, reason: "unsupported_media_type" };
     }
 
     const message = await db.message.findFirst({
@@ -204,9 +232,13 @@ export async function ingestEvolutionImageAttachment(params: {
     }
 
     const buffer = decodeBase64Payload(base64);
-    const contentType = String(mediaRes?.mimetype || parsed.media?.mimetype || "image/jpeg");
-    const fileName =
-        String(mediaRes?.fileName || parsed.media?.fileName || `${wamId}.jpg`);
+    const fallbackContentType = parsed.type === "audio" ? "audio/ogg" : "image/jpeg";
+    const contentType = String(mediaRes?.mimetype || parsed.media?.mimetype || fallbackContentType);
+    const fileName = String(
+        mediaRes?.fileName ||
+        parsed.media?.fileName ||
+        sanitizeWhatsAppMediaFilename(wamId, contentType)
+    );
     const size =
         Number(String(mediaRes?.size?.fileLength || mediaRes?.fileLength || parsed.media?.fileLength || buffer.length)) ||
         buffer.length;
