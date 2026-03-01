@@ -887,8 +887,8 @@ async function getAuthenticatedLocation() {
 
 export async function fetchConversations(
     status: 'active' | 'archived' | 'trash' | 'tasks' | 'all' = 'active',
-    selectedId?: string,
-    options?: { cursor?: string; limit?: number }
+    selectedConversationId?: string | null,
+    options?: { cursor?: string | null; limit?: number | null }
 ) {
     try {
         const DEFAULT_PAGE_SIZE = 50;

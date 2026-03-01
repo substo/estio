@@ -249,6 +249,9 @@ export function ConversationInterface({ initialConversations, initialConversatio
 
     // Fetch Conversations when View Filter changes
     useEffect(() => {
+        // Tasks view uses its own data source (GlobalTaskList), skip conversation fetching.
+        if (viewFilter === 'tasks') return;
+
         // Preserve a deep-linked/off-window selection during the initial hydration fetch and view switches.
         // fetchConversations() can include the selected conversation even if it falls outside the top list window.
         fetchConversations(viewFilter, activeIdRef.current || undefined)
