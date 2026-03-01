@@ -4,8 +4,16 @@ import { GEMINI_FLASH_LATEST_ALIAS, GOOGLE_AI_MODELS } from "@/lib/ai/models";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Send, MessageSquare, RefreshCw, Paperclip, FileText, Trash2, Mic, Square, Search } from "lucide-react";
+import { Loader2, Send, MessageSquare, RefreshCw, Paperclip, FileText, Trash2, Mic, Square, Search, AudioLines } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 
@@ -529,15 +537,15 @@ export function ChatWindow({
         setSelectionBatch([]);
     }, []);
 
-    const handleBulkTranscribeUnprocessedAudio = useCallback(async () => {
+    const handleBulkTranscribeUnprocessedAudio = useCallback(async (window: "30d" | "all") => {
         if (!onBulkTranscribeUnprocessedAudio || isBulkTranscribingAudio) return;
         setIsBulkTranscribingAudio(true);
         try {
-            await Promise.resolve(onBulkTranscribeUnprocessedAudio({ window: bulkTranscriptWindow }));
+            await Promise.resolve(onBulkTranscribeUnprocessedAudio({ window }));
         } finally {
             setIsBulkTranscribingAudio(false);
         }
-    }, [bulkTranscriptWindow, isBulkTranscribingAudio, onBulkTranscribeUnprocessedAudio]);
+    }, [isBulkTranscribingAudio, onBulkTranscribeUnprocessedAudio]);
 
     const jumpToMessage = useCallback((messageId: string) => {
         const target = messageRefs.current[messageId];
@@ -678,34 +686,35 @@ export function ChatWindow({
                     {isWhatsAppConversation
                         && canUseTranscriptOnDemand
                         && onBulkTranscribeUnprocessedAudio && (
-                            <div className="flex items-center gap-1">
-                                <Select
-                                    value={bulkTranscriptWindow}
-                                    onValueChange={(value: "30d" | "all") => setBulkTranscriptWindow(value)}
-                                    disabled={isBulkTranscribingAudio}
-                                >
-                                    <SelectTrigger
-                                        className="h-8 min-w-[118px] border-gray-200 bg-white text-[11px]"
-                                        title="Choose audio backfill window"
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8"
+                                        disabled={isBulkTranscribingAudio}
+                                        title="Transcribe unprocessed audio"
                                     >
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="30d">Last 30 days</SelectItem>
-                                        <SelectItem value="all">All in convo</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="h-8 px-2 text-[11px]"
-                                    onClick={handleBulkTranscribeUnprocessedAudio}
-                                    disabled={isBulkTranscribingAudio}
-                                    title="Queue transcript jobs for audio messages with no transcript row"
-                                >
-                                    {isBulkTranscribingAudio ? "Queuing..." : "Transcribe unprocessed"}
-                                </Button>
-                            </div>
+                                        {isBulkTranscribingAudio ? (
+                                            <Loader2 className="h-4 w-4 animate-spin text-gray-500" />
+                                        ) : (
+                                            <AudioLines className="h-4 w-4 text-gray-500" />
+                                        )}
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-48">
+                                    <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                                        Backfill Transcripts
+                                    </DropdownMenuLabel>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem onClick={() => handleBulkTranscribeUnprocessedAudio("30d")} className="text-xs">
+                                        Last 30 days
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleBulkTranscribeUnprocessedAudio("all")} className="text-xs">
+                                        All in conversation
+                                    </DropdownMenuItem>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
                         )}
                     <Button
                         variant={showTranscriptSearch ? "secondary" : "ghost"}
