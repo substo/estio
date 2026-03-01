@@ -1,12 +1,12 @@
 import { useState, useEffect } from "react";
 import { Conversation } from "@/lib/ghl/conversations";
-import { generateAIDraft, generateMultiContextDraftAction, getContactContext, generatePlanAction, executeNextTaskAction, getAgentPlan, getAgentExecutions, getTraceTreeAction, getContactInsightsAction, orchestrateAction } from "../actions";
+import { generateAIDraft, generateMultiContextDraftAction, getContactContext, generatePlanAction, executeNextTaskAction, getAgentPlan, getAgentExecutions, getTraceTreeAction, getContactInsightsAction, orchestrateAction, getConversationTranscriptUsage } from "../actions";
 import { createPersistentDeal, findExistingDeal, removeConversationFromDeal } from "../../deals/actions";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { Loader2, Sparkles, Check, Info, Layers, Users, Home, Link as LinkIcon, AlertCircle, ExternalLink, X, ListTodo, Play, CheckCircle2, Circle, Brain, ChevronDown, ChevronUp, Expand, Clock, Wrench, History, Database, Activity, AlertTriangle, CheckCircle, XCircle, ArrowRight } from "lucide-react";
+import { Loader2, Sparkles, Check, Info, Layers, Users, Home, Link as LinkIcon, AlertCircle, ExternalLink, X, ListTodo, Play, CheckCircle2, Circle, Brain, ChevronDown, ChevronUp, Expand, Clock, Wrench, History, Database, Activity, AlertTriangle, CheckCircle, XCircle, ArrowRight, Mic } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -83,6 +83,9 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
         totalCost: 0
     });
 
+    // Transcript usage for this conversation
+    const [transcriptUsage, setTranscriptUsage] = useState({ totalTokens: 0, totalCost: 0, transcriptCount: 0, extractionCount: 0 });
+
     const isContextMode = selectedConversations && selectedConversations.length > 0;
     const traceToolCalls = Array.isArray(rawTrace?.toolCalls) ? rawTrace.toolCalls : [];
     const leadParserToolCall = traceToolCalls.find((c: any) => c?.tool === "gemini.generateContent") || null;
@@ -122,6 +125,15 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
                     }
                 }
             });
+        }
+    }, [conversation.id]);
+
+    // Fetch transcript usage for this conversation
+    useEffect(() => {
+        if (conversation.id) {
+            getConversationTranscriptUsage(conversation.id)
+                .then(setTranscriptUsage)
+                .catch(() => { });
         }
     }, [conversation.id]);
 
@@ -922,6 +934,25 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
                                                             <div className="text-[10px] font-bold text-slate-400 uppercase">Status</div>
                                                             <div className="text-sm font-medium capitalize">{rawTrace.taskStatus}</div>
                                                         </div>
+                                                        {transcriptUsage.totalTokens > 0 && (
+                                                            <>
+                                                                <div>
+                                                                    <div className="text-[10px] font-bold text-amber-500 uppercase flex items-center gap-1">
+                                                                        <Mic className="h-3 w-3" /> Transcript Tokens
+                                                                    </div>
+                                                                    <div className="text-sm font-mono">{transcriptUsage.totalTokens.toLocaleString()}</div>
+                                                                    <div className="text-[10px] text-slate-400">{transcriptUsage.transcriptCount} files, {transcriptUsage.extractionCount} extractions</div>
+                                                                </div>
+                                                                <div>
+                                                                    <div className="text-[10px] font-bold text-amber-500 uppercase flex items-center gap-1">
+                                                                        <Mic className="h-3 w-3" /> Transcript Cost
+                                                                    </div>
+                                                                    <div className="text-sm font-mono font-bold text-amber-600">
+                                                                        ${transcriptUsage.totalCost.toFixed(5)}
+                                                                    </div>
+                                                                </div>
+                                                            </>
+                                                        )}
                                                     </CardContent>
                                                 </Card>
                                             </div>

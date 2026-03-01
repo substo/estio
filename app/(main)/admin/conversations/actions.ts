@@ -5407,65 +5407,61 @@ export async function getContactInsightsAction(contactId: string) {
  * Get aggregate AI usage across all conversations for the current location.
  * Returns usage broken down by time period (today, this month, all-time)
  * and top conversations for the detailed modal.
+ * Includes both AI agent usage (from AgentExecution) and transcription usage
+ * (from MessageTranscript + MessageTranscriptExtraction).
  */
 export async function getAggregateAIUsage() {
+    const emptyResult = {
+        today: { totalTokens: 0, totalCost: 0 },
+        thisMonth: { totalTokens: 0, totalCost: 0 },
+        allTime: { totalTokens: 0, totalCost: 0, conversationCount: 0 },
+        transcription: {
+            today: { totalTokens: 0, totalCost: 0 },
+            thisMonth: { totalTokens: 0, totalCost: 0 },
+            allTime: { totalTokens: 0, totalCost: 0, transcriptCount: 0 },
+        },
+        topConversations: [] as any[]
+    };
+
     try {
         const location = await getLocationContext();
-        if (!location) {
-            return {
-                today: { totalTokens: 0, totalCost: 0 },
-                thisMonth: { totalTokens: 0, totalCost: 0 },
-                allTime: { totalTokens: 0, totalCost: 0, conversationCount: 0 },
-                topConversations: []
-            };
-        }
+        if (!location) return emptyResult;
 
         // Calculate date boundaries
         const now = new Date();
         const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-        // Aggregate from AgentExecution for time-based filtering (more accurate)
-        const [todayUsage, monthUsage, allTimeUsage, topConversations] = await Promise.all([
-            // Today's usage
+        const locationFilter = { message: { conversation: { locationId: location.id } } };
+
+        // Aggregate from AgentExecution + MessageTranscript + MessageTranscriptExtraction
+        const [
+            todayUsage, monthUsage, allTimeUsage, topConversations,
+            txTodayT, txMonthT, txAllTimeT,
+            txTodayE, txMonthE, txAllTimeE,
+        ] = await Promise.all([
+            // --- AI Agent usage ---
             db.agentExecution.aggregate({
                 where: {
                     conversation: { locationId: location.id },
                     createdAt: { gte: startOfToday }
                 },
-                _sum: {
-                    totalTokens: true,
-                    cost: true
-                }
+                _sum: { totalTokens: true, cost: true }
             }),
-            // This month's usage
             db.agentExecution.aggregate({
                 where: {
                     conversation: { locationId: location.id },
                     createdAt: { gte: startOfMonth }
                 },
-                _sum: {
-                    totalTokens: true,
-                    cost: true
-                }
+                _sum: { totalTokens: true, cost: true }
             }),
-            // All-time usage (from Conversation for efficiency)
             db.conversation.aggregate({
                 where: { locationId: location.id },
-                _sum: {
-                    totalTokens: true,
-                    totalCost: true
-                },
-                _count: {
-                    id: true
-                }
+                _sum: { totalTokens: true, totalCost: true },
+                _count: { id: true }
             }),
-            // Top conversations by cost (for modal breakdown)
             db.conversation.findMany({
-                where: {
-                    locationId: location.id,
-                    totalCost: { gt: 0 }
-                },
+                where: { locationId: location.id, totalCost: { gt: 0 } },
                 orderBy: { totalCost: 'desc' },
                 take: 10,
                 select: {
@@ -5474,15 +5470,69 @@ export async function getAggregateAIUsage() {
                     totalTokens: true,
                     totalCost: true,
                     lastMessageAt: true,
-                    contact: {
-                        select: {
-                            name: true,
-                            email: true
-                        }
-                    }
+                    contact: { select: { name: true, email: true } }
                 }
-            })
+            }),
+
+            // --- Transcript usage (MessageTranscript) ---
+            db.messageTranscript.aggregate({
+                where: { ...locationFilter, createdAt: { gte: startOfToday } },
+                _sum: { totalTokens: true, estimatedCostUsd: true }
+            }),
+            db.messageTranscript.aggregate({
+                where: { ...locationFilter, createdAt: { gte: startOfMonth } },
+                _sum: { totalTokens: true, estimatedCostUsd: true }
+            }),
+            db.messageTranscript.aggregate({
+                where: locationFilter,
+                _sum: { totalTokens: true, estimatedCostUsd: true },
+                _count: { id: true }
+            }),
+
+            // --- Extraction usage (MessageTranscriptExtraction) ---
+            db.messageTranscriptExtraction.aggregate({
+                where: { transcript: locationFilter, createdAt: { gte: startOfToday } },
+                _sum: { totalTokens: true, estimatedCostUsd: true }
+            }),
+            db.messageTranscriptExtraction.aggregate({
+                where: { transcript: locationFilter, createdAt: { gte: startOfMonth } },
+                _sum: { totalTokens: true, estimatedCostUsd: true }
+            }),
+            db.messageTranscriptExtraction.aggregate({
+                where: { transcript: locationFilter },
+                _sum: { totalTokens: true, estimatedCostUsd: true }
+            }),
         ]);
+
+        // Per-conversation transcript cost for top conversations
+        const topConvIds = topConversations.map(c => c.id);
+        let convTranscriptMap: Record<string, { tokens: number; cost: number }> = {};
+        if (topConvIds.length > 0) {
+            const convTxRows = await db.messageTranscript.groupBy({
+                by: ['messageId'],
+                where: {
+                    message: { conversationId: { in: topConvIds } },
+                },
+                _sum: { totalTokens: true, estimatedCostUsd: true }
+            });
+            // Map messageId -> conversationId via a quick lookup
+            const msgIds = convTxRows.map(r => r.messageId);
+            if (msgIds.length > 0) {
+                const msgs = await db.message.findMany({
+                    where: { id: { in: msgIds } },
+                    select: { id: true, conversationId: true }
+                });
+                const msgToConv = new Map(msgs.map(m => [m.id, m.conversationId]));
+                for (const row of convTxRows) {
+                    const convId = msgToConv.get(row.messageId);
+                    if (!convId) continue;
+                    const existing = convTranscriptMap[convId] || { tokens: 0, cost: 0 };
+                    existing.tokens += Number(row._sum.totalTokens || 0);
+                    existing.cost += Number(row._sum.estimatedCostUsd || 0);
+                    convTranscriptMap[convId] = existing;
+                }
+            }
+        }
 
         return {
             today: {
@@ -5498,6 +5548,21 @@ export async function getAggregateAIUsage() {
                 totalCost: allTimeUsage._sum.totalCost || 0,
                 conversationCount: allTimeUsage._count.id || 0
             },
+            transcription: {
+                today: {
+                    totalTokens: (txTodayT._sum.totalTokens || 0) + (txTodayE._sum.totalTokens || 0),
+                    totalCost: (txTodayT._sum.estimatedCostUsd || 0) + (txTodayE._sum.estimatedCostUsd || 0),
+                },
+                thisMonth: {
+                    totalTokens: (txMonthT._sum.totalTokens || 0) + (txMonthE._sum.totalTokens || 0),
+                    totalCost: (txMonthT._sum.estimatedCostUsd || 0) + (txMonthE._sum.estimatedCostUsd || 0),
+                },
+                allTime: {
+                    totalTokens: (txAllTimeT._sum.totalTokens || 0) + (txAllTimeE._sum.totalTokens || 0),
+                    totalCost: (txAllTimeT._sum.estimatedCostUsd || 0) + (txAllTimeE._sum.estimatedCostUsd || 0),
+                    transcriptCount: txAllTimeT._count?.id || 0,
+                },
+            },
             topConversations: topConversations.map(c => ({
                 id: c.id,
                 conversationId: c.ghlConversationId,
@@ -5505,17 +5570,59 @@ export async function getAggregateAIUsage() {
                 contactEmail: c.contact?.email,
                 totalTokens: c.totalTokens,
                 totalCost: c.totalCost,
+                transcriptTokens: convTranscriptMap[c.id]?.tokens || 0,
+                transcriptCost: convTranscriptMap[c.id]?.cost || 0,
                 lastMessageAt: c.lastMessageAt.toISOString()
             }))
         };
     } catch (e) {
         console.error('[getAggregateAIUsage] Error:', e);
+        return emptyResult;
+    }
+}
+
+/**
+ * Get transcript usage (tokens + cost) for a single conversation.
+ * Used by the AI Thinking Trace Performance card.
+ */
+export async function getConversationTranscriptUsage(conversationId: string) {
+    try {
+        const location = await getLocationContext();
+        if (!location) return { totalTokens: 0, totalCost: 0, transcriptCount: 0, extractionCount: 0 };
+
+        const conversation = await db.conversation.findFirst({
+            where: {
+                OR: [{ id: conversationId }, { ghlConversationId: conversationId }],
+                locationId: location.id
+            },
+            select: { id: true }
+        });
+        if (!conversation) return { totalTokens: 0, totalCost: 0, transcriptCount: 0, extractionCount: 0 };
+
+        const txWhere = { message: { conversationId: conversation.id } };
+
+        const [txAgg, exAgg] = await Promise.all([
+            db.messageTranscript.aggregate({
+                where: txWhere,
+                _sum: { totalTokens: true, estimatedCostUsd: true },
+                _count: { id: true }
+            }),
+            db.messageTranscriptExtraction.aggregate({
+                where: { transcript: txWhere },
+                _sum: { totalTokens: true, estimatedCostUsd: true },
+                _count: { id: true }
+            }),
+        ]);
+
         return {
-            today: { totalTokens: 0, totalCost: 0 },
-            thisMonth: { totalTokens: 0, totalCost: 0 },
-            allTime: { totalTokens: 0, totalCost: 0, conversationCount: 0 },
-            topConversations: []
+            totalTokens: (txAgg._sum.totalTokens || 0) + (exAgg._sum.totalTokens || 0),
+            totalCost: (txAgg._sum.estimatedCostUsd || 0) + (exAgg._sum.estimatedCostUsd || 0),
+            transcriptCount: txAgg._count.id || 0,
+            extractionCount: exAgg._count.id || 0,
         };
+    } catch (e) {
+        console.error('[getConversationTranscriptUsage] Error:', e);
+        return { totalTokens: 0, totalCost: 0, transcriptCount: 0, extractionCount: 0 };
     }
 }
 

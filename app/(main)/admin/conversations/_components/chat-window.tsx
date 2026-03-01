@@ -4,7 +4,7 @@ import { GEMINI_FLASH_LATEST_ALIAS, GOOGLE_AI_MODELS } from "@/lib/ai/models";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Send, MessageSquare, RefreshCw, Paperclip, FileText, Trash2, Mic, Square, Search, BarChart3 } from "lucide-react";
+import { Loader2, Send, MessageSquare, RefreshCw, Paperclip, FileText, Trash2, Mic, Square, Search } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
@@ -75,7 +75,6 @@ import {
     getWhatsAppChannelEligibility,
     summarizeSelectionToCrmLog,
     searchConversationTranscriptMatches,
-    getAudioTranscriptMonthlyReport,
 } from "@/app/(main)/admin/conversations/actions";
 import type { SelectionBatchInput, SelectionBatchItem } from "./message-selection-actions";
 
@@ -94,9 +93,6 @@ type SmsEligibilityState =
 type TranscriptSearchResult = Awaited<ReturnType<typeof searchConversationTranscriptMatches>>;
 type TranscriptSearchSuccess = Extract<TranscriptSearchResult, { success: true }>;
 type TranscriptSearchMatch = TranscriptSearchSuccess["results"][number];
-type TranscriptMonthlyReportResult = Awaited<ReturnType<typeof getAudioTranscriptMonthlyReport>>;
-type TranscriptMonthlyReportSuccess = Extract<TranscriptMonthlyReportResult, { success: true }>;
-type TranscriptReportWindowOffset = 0 | 1 | 2;
 
 const TRANSCRIPT_SEARCH_KEYWORDS = [
     "budget",
@@ -108,33 +104,6 @@ const TRANSCRIPT_SEARCH_KEYWORDS = [
     "bedroom",
     "villa",
 ];
-
-function formatUsd(value: number): string {
-    return new Intl.NumberFormat(undefined, {
-        style: "currency",
-        currency: "USD",
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 4,
-    }).format(Number(value || 0));
-}
-
-function formatTokenCount(value: number): string {
-    const normalized = Number(value || 0);
-    if (!Number.isFinite(normalized)) return "0";
-    return Math.round(normalized).toLocaleString();
-}
-
-function formatMonthOffsetLabel(offset: number): string {
-    const base = new Date();
-    const target = new Date(base.getFullYear(), base.getMonth() - offset, 1);
-    return target.toLocaleDateString(undefined, { month: "short", year: "numeric" });
-}
-
-function formatReportDay(date: string): string {
-    const parsed = new Date(`${date}T00:00:00Z`);
-    if (Number.isNaN(parsed.getTime())) return date;
-    return parsed.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
 
 function getFallbackChannelWithoutWhatsApp(conversation: Conversation): 'SMS' | 'Email' {
     return getInitialChannel(conversation) === 'Email' ? 'Email' : 'SMS';
@@ -204,11 +173,6 @@ export function ChatWindow({
     const [transcriptSearchError, setTranscriptSearchError] = useState<string | null>(null);
     const [transcriptSearchTotal, setTranscriptSearchTotal] = useState(0);
     const [transcriptSearchResults, setTranscriptSearchResults] = useState<TranscriptSearchMatch[]>([]);
-    const [showTranscriptReport, setShowTranscriptReport] = useState(false);
-    const [transcriptReportWindow, setTranscriptReportWindow] = useState<TranscriptReportWindowOffset>(0);
-    const [isTranscriptReportLoading, setIsTranscriptReportLoading] = useState(false);
-    const [transcriptReportError, setTranscriptReportError] = useState<string | null>(null);
-    const [transcriptReport, setTranscriptReport] = useState<TranscriptMonthlyReportSuccess | null>(null);
     const [jumpMessageId, setJumpMessageId] = useState<string | null>(null);
     const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
     const jumpHighlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -238,11 +202,7 @@ export function ChatWindow({
         setTranscriptSearchError(null);
         setTranscriptSearchResults([]);
         setTranscriptSearchTotal(0);
-        setTranscriptReportError(null);
-        setTranscriptReport(null);
-        setTranscriptReportWindow(0);
         setShowTranscriptSearch(false);
-        setShowTranscriptReport(false);
         setJumpMessageId(null);
         messageRefs.current = {};
     }, [conversation.id]);
@@ -637,36 +597,6 @@ export function ChatWindow({
         void handleTranscriptSearch(keyword);
     }, [handleTranscriptSearch]);
 
-    const loadTranscriptReport = useCallback(async (windowOffset?: TranscriptReportWindowOffset) => {
-        const monthOffset = typeof windowOffset === "number" ? windowOffset : transcriptReportWindow;
-        setIsTranscriptReportLoading(true);
-        setTranscriptReportError(null);
-        try {
-            const result = await getAudioTranscriptMonthlyReport({
-                monthOffset,
-                includeExtractions: true,
-            });
-
-            if (!result?.success) {
-                setTranscriptReport(null);
-                setTranscriptReportError(result?.error || "Failed to load transcript report.");
-                return;
-            }
-
-            setTranscriptReport(result);
-        } catch (error: any) {
-            setTranscriptReport(null);
-            setTranscriptReportError(String(error?.message || "Failed to load transcript report."));
-        } finally {
-            setIsTranscriptReportLoading(false);
-        }
-    }, [transcriptReportWindow]);
-
-    useEffect(() => {
-        if (!showTranscriptReport) return;
-        void loadTranscriptReport();
-    }, [showTranscriptReport, transcriptReportWindow, loadTranscriptReport]);
-
     const batchContextText = useMemo(() => buildBatchContextText(selectionBatch), [selectionBatch]);
 
     const handleSummarizeBatch = async () => {
@@ -778,28 +708,16 @@ export function ChatWindow({
                             </div>
                         )}
                     {isWhatsAppConversation && (
-                        <>
-                            <Button
-                                variant={showTranscriptSearch ? "secondary" : "outline"}
-                                size="sm"
-                                className="h-8 gap-1 px-2 text-[11px]"
-                                onClick={() => setShowTranscriptSearch((prev) => !prev)}
-                                title="Search transcript text and jump to matching messages"
-                            >
-                                <Search className="h-3.5 w-3.5" />
-                                Transcript Search
-                            </Button>
-                            <Button
-                                variant={showTranscriptReport ? "secondary" : "outline"}
-                                size="sm"
-                                className="h-8 gap-1 px-2 text-[11px]"
-                                onClick={() => setShowTranscriptReport((prev) => !prev)}
-                                title="Open monthly transcript and extraction reporting"
-                            >
-                                <BarChart3 className="h-3.5 w-3.5" />
-                                Transcript Report
-                            </Button>
-                        </>
+                        <Button
+                            variant={showTranscriptSearch ? "secondary" : "outline"}
+                            size="sm"
+                            className="h-8 gap-1 px-2 text-[11px]"
+                            onClick={() => setShowTranscriptSearch((prev) => !prev)}
+                            title="Search transcript text and jump to matching messages"
+                        >
+                            <Search className="h-3.5 w-3.5" />
+                            Transcript Search
+                        </Button>
                     )}
                     {(conversation.type === 'Email' || conversation.lastMessageType === 'TYPE_EMAIL') && onFetchHistory && (
                         <Button variant="ghost" size="icon" onClick={onFetchHistory} title="Fetch Gmail History">
@@ -809,7 +727,7 @@ export function ChatWindow({
                 </div>
             </div>
 
-            {(showTranscriptSearch || showTranscriptReport) && (
+            {showTranscriptSearch && (
                 <div className="border-b bg-slate-50/80 px-4 py-3 space-y-3">
                     {showTranscriptSearch && (
                         <div className="rounded-md border border-slate-200 bg-white p-3 space-y-2">
@@ -887,143 +805,6 @@ export function ChatWindow({
                                             <p className="mt-0.5 text-slate-700 line-clamp-2">{match.snippet || "(empty snippet)"}</p>
                                         </button>
                                     ))}
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {showTranscriptReport && (
-                        <div className="rounded-md border border-slate-200 bg-white p-3 space-y-2">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                                <div className="flex items-center gap-2">
-                                    <BarChart3 className="h-4 w-4 text-slate-600" />
-                                    <p className="text-xs font-semibold text-slate-800">Monthly Transcript Report</p>
-                                </div>
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-7 px-2 text-[11px]"
-                                    onClick={() => void loadTranscriptReport()}
-                                    disabled={isTranscriptReportLoading}
-                                >
-                                    {isTranscriptReportLoading ? "Refreshing..." : "Refresh"}
-                                </Button>
-                            </div>
-                            <div className="flex flex-wrap gap-1">
-                                {[0, 1, 2].map((windowOffset) => (
-                                    <Button
-                                        key={windowOffset}
-                                        type="button"
-                                        variant={transcriptReportWindow === windowOffset ? "secondary" : "ghost"}
-                                        size="sm"
-                                        className="h-6 px-2 text-[10px]"
-                                        onClick={() => setTranscriptReportWindow(windowOffset as TranscriptReportWindowOffset)}
-                                        disabled={isTranscriptReportLoading}
-                                    >
-                                        {formatMonthOffsetLabel(windowOffset)}
-                                    </Button>
-                                ))}
-                            </div>
-
-                            {transcriptReportError && (
-                                <div className="rounded border border-red-200 bg-red-50 px-2 py-1 text-[11px] text-red-700">
-                                    {transcriptReportError}
-                                </div>
-                            )}
-
-                            {isTranscriptReportLoading && !transcriptReport && (
-                                <div className="text-[11px] text-slate-500">Loading report...</div>
-                            )}
-
-                            {transcriptReport && (
-                                <div className="space-y-2">
-                                    <div className="text-[11px] text-slate-500">{transcriptReport.window.label}</div>
-                                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-                                        <div className="rounded border bg-slate-50 p-2">
-                                            <div className="text-[10px] uppercase text-slate-500">Transcripts</div>
-                                            <div className="text-sm font-semibold text-slate-900">{transcriptReport.totals.transcripts}</div>
-                                        </div>
-                                        <div className="rounded border bg-slate-50 p-2">
-                                            <div className="text-[10px] uppercase text-slate-500">Extractions</div>
-                                            <div className="text-sm font-semibold text-slate-900">{transcriptReport.totals.extractions}</div>
-                                        </div>
-                                        <div className="rounded border bg-slate-50 p-2">
-                                            <div className="text-[10px] uppercase text-slate-500">Completed</div>
-                                            <div className="text-sm font-semibold text-slate-900">{transcriptReport.totals.completed}</div>
-                                        </div>
-                                        <div className="rounded border bg-slate-50 p-2">
-                                            <div className="text-[10px] uppercase text-slate-500">Failed</div>
-                                            <div className="text-sm font-semibold text-slate-900">{transcriptReport.totals.failed}</div>
-                                        </div>
-                                        <div className="rounded border bg-slate-50 p-2">
-                                            <div className="text-[10px] uppercase text-slate-500">Cost</div>
-                                            <div className="text-sm font-semibold text-slate-900">{formatUsd(transcriptReport.totals.estimatedCostUsd)}</div>
-                                        </div>
-                                    </div>
-
-                                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                                        <div className="rounded border bg-slate-50 px-2 py-1.5 text-[11px] text-slate-700">
-                                            Transcript status: completed {transcriptReport.status.transcripts.completed}, failed {transcriptReport.status.transcripts.failed}, pending {transcriptReport.status.transcripts.pending}, processing {transcriptReport.status.transcripts.processing}
-                                        </div>
-                                        <div className="rounded border bg-slate-50 px-2 py-1.5 text-[11px] text-slate-700">
-                                            Extraction status: completed {transcriptReport.status.extractions.completed}, failed {transcriptReport.status.extractions.failed}, pending {transcriptReport.status.extractions.pending}, processing {transcriptReport.status.extractions.processing}
-                                        </div>
-                                    </div>
-
-                                    {transcriptReport.byModel.length > 0 && (
-                                        <div className="rounded border border-slate-200">
-                                            <div className="border-b px-2 py-1 text-[10px] font-semibold uppercase text-slate-500">
-                                                Usage By Model
-                                            </div>
-                                            <div className="max-h-40 overflow-y-auto">
-                                                {transcriptReport.byModel.map((row) => (
-                                                    <div key={`${row.kind}:${row.provider}:${row.model}`} className="grid grid-cols-5 gap-2 border-b px-2 py-1.5 text-[11px] last:border-b-0">
-                                                        <span className="truncate text-slate-700" title={`${row.kind} • ${row.provider} • ${row.model}`}>
-                                                            {row.model}
-                                                        </span>
-                                                        <span className="text-slate-500">{row.kind}</span>
-                                                        <span className="text-slate-600">{row.runs} runs</span>
-                                                        <span className="text-slate-600">{formatTokenCount(row.totalTokens)} tok</span>
-                                                        <span className="text-slate-700">{formatUsd(row.estimatedCostUsd)}</span>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {transcriptReport.failureCategories.length > 0 && (
-                                        <div className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5">
-                                            <div className="mb-1 text-[10px] font-semibold uppercase text-slate-500">Failure Categories</div>
-                                            <div className="flex flex-wrap gap-1">
-                                                {transcriptReport.failureCategories.map((row) => (
-                                                    <span key={row.category} className="rounded border bg-white px-2 py-0.5 text-[10px] text-slate-700">
-                                                        {row.category}: {row.count}
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {transcriptReport.daily.length > 0 && (
-                                        <div className="rounded border border-slate-200">
-                                            <div className="border-b px-2 py-1 text-[10px] font-semibold uppercase text-slate-500">
-                                                Daily Trend
-                                            </div>
-                                            <div className="max-h-40 overflow-y-auto">
-                                                {[...transcriptReport.daily].slice(-8).reverse().map((row) => (
-                                                    <div key={row.date} className="grid grid-cols-6 gap-2 border-b px-2 py-1.5 text-[11px] last:border-b-0">
-                                                        <span className="text-slate-700">{formatReportDay(row.date)}</span>
-                                                        <span className="text-slate-600">TC {row.transcriptsCompleted}</span>
-                                                        <span className="text-slate-600">TF {row.transcriptsFailed}</span>
-                                                        <span className="text-slate-600">EC {row.extractionsCompleted}</span>
-                                                        <span className="text-slate-600">{formatTokenCount(row.totalTokens)} tok</span>
-                                                        <span className="text-slate-700">{formatUsd(row.estimatedCostUsd)}</span>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
                                 </div>
                             )}
                         </div>

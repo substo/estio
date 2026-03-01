@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Sparkles, X, TrendingUp, Calendar, Clock, MessageSquare } from "lucide-react";
+import { Sparkles, X, TrendingUp, Calendar, Clock, MessageSquare, Mic } from "lucide-react";
 import { getAggregateAIUsage } from "@/app/(main)/admin/conversations/actions";
 import {
     Dialog,
@@ -25,6 +25,8 @@ interface ConversationUsage {
     contactEmail: string | null;
     totalTokens: number;
     totalCost: number;
+    transcriptTokens: number;
+    transcriptCost: number;
     lastMessageAt: string;
 }
 
@@ -32,6 +34,11 @@ interface AIUsage {
     today: TimePeriodUsage;
     thisMonth: TimePeriodUsage;
     allTime: TimePeriodUsage & { conversationCount: number };
+    transcription: {
+        today: TimePeriodUsage;
+        thisMonth: TimePeriodUsage;
+        allTime: TimePeriodUsage & { transcriptCount: number };
+    };
     topConversations: ConversationUsage[];
 }
 
@@ -87,6 +94,11 @@ export function AICostBadge() {
         today: { totalTokens: 0, totalCost: 0 },
         thisMonth: { totalTokens: 0, totalCost: 0 },
         allTime: { totalTokens: 0, totalCost: 0, conversationCount: 0 },
+        transcription: {
+            today: { totalTokens: 0, totalCost: 0 },
+            thisMonth: { totalTokens: 0, totalCost: 0 },
+            allTime: { totalTokens: 0, totalCost: 0, transcriptCount: 0 },
+        },
         topConversations: []
     };
 
@@ -100,21 +112,21 @@ export function AICostBadge() {
             >
                 <Sparkles className="h-3.5 w-3.5 text-purple-500 dark:text-purple-400" />
 
-                {/* Today's cost */}
+                {/* Today's total cost (AI + Transcript) */}
                 <div className="flex items-center gap-1">
                     <span className="text-[10px] text-gray-400 dark:text-gray-500">Today</span>
                     <span className="text-xs font-medium text-green-700 dark:text-green-400 font-mono">
-                        {formatCost(displayUsage.today.totalCost)}
+                        {formatCost(displayUsage.today.totalCost + (displayUsage.transcription?.today?.totalCost || 0))}
                     </span>
                 </div>
 
                 <span className="text-gray-300 dark:text-gray-600">|</span>
 
-                {/* This month's cost */}
+                {/* This month's total cost (AI + Transcript) */}
                 <div className="flex items-center gap-1">
                     <span className="text-[10px] text-gray-400 dark:text-gray-500">Month</span>
                     <span className="text-xs font-medium text-blue-700 dark:text-blue-400 font-mono">
-                        {formatCost(displayUsage.thisMonth.totalCost)}
+                        {formatCost(displayUsage.thisMonth.totalCost + (displayUsage.transcription?.thisMonth?.totalCost || 0))}
                     </span>
                 </div>
             </button>
@@ -142,11 +154,16 @@ export function AICostBadge() {
                                     <span className="text-xs font-semibold uppercase tracking-wider">Today</span>
                                 </div>
                                 <div className="text-2xl font-bold text-green-800 dark:text-green-300 font-mono">
-                                    {formatCost(displayUsage.today.totalCost)}
+                                    {formatCost(displayUsage.today.totalCost + (displayUsage.transcription?.today?.totalCost || 0))}
                                 </div>
                                 <div className="text-xs text-green-600 dark:text-green-500 font-mono mt-1">
-                                    {formatTokens(displayUsage.today.totalTokens)} tokens
+                                    <Sparkles className="inline h-3 w-3 mr-0.5" />{formatTokens(displayUsage.today.totalTokens)} AI
                                 </div>
+                                {(displayUsage.transcription?.today?.totalTokens || 0) > 0 && (
+                                    <div className="text-xs text-green-600 dark:text-green-500 font-mono mt-0.5">
+                                        <Mic className="inline h-3 w-3 mr-0.5" />{formatTokens(displayUsage.transcription.today.totalTokens)} transcript
+                                    </div>
+                                )}
                             </div>
 
                             {/* This Month */}
@@ -156,11 +173,16 @@ export function AICostBadge() {
                                     <span className="text-xs font-semibold uppercase tracking-wider">This Month</span>
                                 </div>
                                 <div className="text-2xl font-bold text-blue-800 dark:text-blue-300 font-mono">
-                                    {formatCost(displayUsage.thisMonth.totalCost)}
+                                    {formatCost(displayUsage.thisMonth.totalCost + (displayUsage.transcription?.thisMonth?.totalCost || 0))}
                                 </div>
                                 <div className="text-xs text-blue-600 dark:text-blue-500 font-mono mt-1">
-                                    {formatTokens(displayUsage.thisMonth.totalTokens)} tokens
+                                    <Sparkles className="inline h-3 w-3 mr-0.5" />{formatTokens(displayUsage.thisMonth.totalTokens)} AI
                                 </div>
+                                {(displayUsage.transcription?.thisMonth?.totalTokens || 0) > 0 && (
+                                    <div className="text-xs text-blue-600 dark:text-blue-500 font-mono mt-0.5">
+                                        <Mic className="inline h-3 w-3 mr-0.5" />{formatTokens(displayUsage.transcription.thisMonth.totalTokens)} transcript
+                                    </div>
+                                )}
                             </div>
 
                             {/* All Time */}
@@ -170,11 +192,16 @@ export function AICostBadge() {
                                     <span className="text-xs font-semibold uppercase tracking-wider">All Time</span>
                                 </div>
                                 <div className="text-2xl font-bold text-purple-800 dark:text-purple-300 font-mono">
-                                    {formatCost(displayUsage.allTime.totalCost)}
+                                    {formatCost(displayUsage.allTime.totalCost + (displayUsage.transcription?.allTime?.totalCost || 0))}
                                 </div>
                                 <div className="text-xs text-purple-600 dark:text-purple-500 font-mono mt-1">
-                                    {formatTokens(displayUsage.allTime.totalTokens)} tokens
+                                    <Sparkles className="inline h-3 w-3 mr-0.5" />{formatTokens(displayUsage.allTime.totalTokens)} AI
                                 </div>
+                                {(displayUsage.transcription?.allTime?.totalTokens || 0) > 0 && (
+                                    <div className="text-xs text-purple-600 dark:text-purple-500 font-mono mt-0.5">
+                                        <Mic className="inline h-3 w-3 mr-0.5" />{formatTokens(displayUsage.transcription.allTime.totalTokens)} transcript • {displayUsage.transcription.allTime.transcriptCount} files
+                                    </div>
+                                )}
                                 <div className="text-[10px] text-purple-500 dark:text-purple-600 mt-1">
                                     {displayUsage.allTime.conversationCount} conversations
                                 </div>
@@ -213,11 +240,17 @@ export function AICostBadge() {
                                             </div>
                                             <div className="text-right">
                                                 <div className="text-sm font-mono font-medium text-green-700 dark:text-green-400">
-                                                    {formatCost(conv.totalCost)}
+                                                    {formatCost(conv.totalCost + (conv.transcriptCost || 0))}
                                                 </div>
                                                 <div className="text-[10px] text-gray-400 font-mono">
-                                                    {formatTokens(conv.totalTokens)} tokens
+                                                    {formatTokens(conv.totalTokens)} AI tokens
                                                 </div>
+                                                {(conv.transcriptCost || 0) > 0 && (
+                                                    <div className="text-[10px] text-amber-500 dark:text-amber-400 font-mono flex items-center gap-0.5 justify-end">
+                                                        <Mic className="h-2.5 w-2.5" />
+                                                        {formatCost(conv.transcriptCost)}
+                                                    </div>
+                                                )}
                                             </div>
                                         </Link>
                                     ))}
