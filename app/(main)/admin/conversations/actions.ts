@@ -33,10 +33,15 @@ import {
     enqueueWhatsAppAudioTranscription,
     initWhatsAppAudioTranscriptionWorker,
 } from "@/lib/queue/whatsapp-audio-transcription";
+import {
+    enqueueWhatsAppAudioExtraction,
+    initWhatsAppAudioExtractionWorker,
+} from "@/lib/queue/whatsapp-audio-extraction";
 
 const MAX_SELECTION_TEXT_LENGTH = 12000;
 const MAX_CUSTOM_OUTPUT_LENGTH = 2200;
 const CRM_LOG_DEDUPE_RECENT_LIMIT = 30;
+const WHATSAPP_TRANSCRIPT_BULK_DEFAULT_WINDOW_DAYS = 30;
 const MAX_TASK_SUGGESTIONS = 6;
 const MAX_TASK_SUGGESTION_TITLE_LENGTH = 180;
 const MAX_TASK_SUGGESTION_DESCRIPTION_LENGTH = 3000;
@@ -51,6 +56,19 @@ const TASK_SUGGESTION_FUNNEL_EVENT_TYPES = {
 const TASK_SUGGESTION_FUNNEL_EVENT_TYPE_VALUES = Object.values(TASK_SUGGESTION_FUNNEL_EVENT_TYPES);
 
 type TaskSuggestionFunnelEventType = typeof TASK_SUGGESTION_FUNNEL_EVENT_TYPES[keyof typeof TASK_SUGGESTION_FUNNEL_EVENT_TYPES];
+const TRANSCRIPT_VISIBILITY_POLICIES = {
+    team: "team",
+    adminOnly: "admin_only",
+} as const;
+const TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES = {
+    request: "audio_transcript.manual.requested",
+    retry: "audio_transcript.manual.retried",
+    bulkRequest: "audio_transcript.manual.bulk_requested",
+    extract: "audio_transcript.manual.extraction_requested",
+} as const;
+
+type TranscriptVisibilityPolicy = typeof TRANSCRIPT_VISIBILITY_POLICIES[keyof typeof TRANSCRIPT_VISIBILITY_POLICIES];
+type TranscriptManualAuditEventType = typeof TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES[keyof typeof TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES];
 
 const TaskSuggestionPrioritySchema = z.enum(["low", "medium", "high"]);
 
@@ -636,6 +654,220 @@ async function persistTaskSuggestionFunnelEvent(args: {
     }
 }
 
+function normalizeTranscriptVisibilityPolicy(value: unknown): TranscriptVisibilityPolicy {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (normalized === TRANSCRIPT_VISIBILITY_POLICIES.adminOnly) {
+        return TRANSCRIPT_VISIBILITY_POLICIES.adminOnly;
+    }
+    return TRANSCRIPT_VISIBILITY_POLICIES.team;
+}
+
+async function getTranscriptVisibilityPolicyForLocation(locationId: string): Promise<TranscriptVisibilityPolicy> {
+    const config = await db.siteConfig.findUnique({
+        where: { locationId },
+        select: {
+            whatsappTranscriptVisibility: true,
+        } as any,
+    });
+    return normalizeTranscriptVisibilityPolicy((config as any)?.whatsappTranscriptVisibility);
+}
+
+type LocationActorContext = {
+    clerkUserId: string | null;
+    userId: string | null;
+    isAdmin: boolean;
+    hasAccess: boolean;
+    roleSource: "location_role" | "legacy_fallback" | "unknown";
+};
+
+async function resolveLocationActorContext(locationId: string): Promise<LocationActorContext> {
+    const { userId: clerkUserId } = await auth();
+    if (!clerkUserId) {
+        return {
+            clerkUserId: null,
+            userId: null,
+            isAdmin: false,
+            hasAccess: false,
+            roleSource: "unknown",
+        };
+    }
+
+    const user = await db.user.findUnique({
+        where: { clerkId: clerkUserId },
+        select: {
+            id: true,
+            locations: {
+                where: { id: locationId },
+                select: { id: true },
+            },
+        },
+    });
+
+    if (!user) {
+        return {
+            clerkUserId,
+            userId: null,
+            isAdmin: false,
+            hasAccess: false,
+            roleSource: "unknown",
+        };
+    }
+
+    if (!user.locations?.length) {
+        return {
+            clerkUserId,
+            userId: user.id,
+            isAdmin: false,
+            hasAccess: false,
+            roleSource: "unknown",
+        };
+    }
+
+    try {
+        const [membership, locationRoleCount] = await Promise.all([
+            db.userLocationRole.findUnique({
+                where: {
+                    userId_locationId: {
+                        userId: user.id,
+                        locationId,
+                    },
+                },
+                select: { role: true },
+            }),
+            db.userLocationRole.count({
+                where: { locationId },
+            }),
+        ]);
+
+        if (membership?.role === "ADMIN") {
+            return {
+                clerkUserId,
+                userId: user.id,
+                isAdmin: true,
+                hasAccess: true,
+                roleSource: "location_role",
+            };
+        }
+
+        // Legacy fallback for locations that haven't migrated roles yet.
+        if (locationRoleCount === 0) {
+            return {
+                clerkUserId,
+                userId: user.id,
+                isAdmin: true,
+                hasAccess: true,
+                roleSource: "legacy_fallback",
+            };
+        }
+    } catch {
+        return {
+            clerkUserId,
+            userId: user.id,
+            isAdmin: true,
+            hasAccess: true,
+            roleSource: "legacy_fallback",
+        };
+    }
+
+    return {
+        clerkUserId,
+        userId: user.id,
+        isAdmin: false,
+        hasAccess: true,
+        roleSource: "location_role",
+    };
+}
+
+async function resolveTranscriptVisibilityAccess(locationId: string): Promise<{
+    policy: TranscriptVisibilityPolicy;
+    actor: LocationActorContext;
+    restrictContent: boolean;
+}> {
+    const policy = await getTranscriptVisibilityPolicyForLocation(locationId);
+    if (policy !== TRANSCRIPT_VISIBILITY_POLICIES.adminOnly) {
+        return {
+            policy,
+            actor: {
+                clerkUserId: null,
+                userId: null,
+                isAdmin: true,
+                hasAccess: true,
+                roleSource: "unknown",
+            },
+            restrictContent: false,
+        };
+    }
+
+    const actor = await resolveLocationActorContext(locationId);
+    return {
+        policy,
+        actor,
+        restrictContent: !actor.isAdmin,
+    };
+}
+
+function getTranscriptVisibilityRestrictionMessage(): string {
+    return "Transcript content is restricted to admins for this location.";
+}
+
+function getTranscriptManualActionRestrictionMessage(): string {
+    return "Transcript actions are restricted to admins for this location.";
+}
+
+async function resolveTranscriptManualActionAccess(locationId: string): Promise<{
+    policy: TranscriptVisibilityPolicy;
+    actor: LocationActorContext;
+    blocked: boolean;
+}> {
+    const [policy, actor] = await Promise.all([
+        getTranscriptVisibilityPolicyForLocation(locationId),
+        resolveLocationActorContext(locationId),
+    ]);
+
+    return {
+        policy,
+        actor,
+        blocked: policy === TRANSCRIPT_VISIBILITY_POLICIES.adminOnly && !actor.isAdmin,
+    };
+}
+
+async function persistTranscriptManualAuditEvent(args: {
+    type: TranscriptManualAuditEventType;
+    locationId: string;
+    conversationId?: string | null;
+    contactId?: string | null;
+    payload: Record<string, unknown>;
+    actor?: LocationActorContext | null;
+    status?: "processed" | "error";
+    error?: string | null;
+}) {
+    try {
+        const actor = args.actor || await resolveLocationActorContext(args.locationId);
+        await db.agentEvent.create({
+            data: {
+                type: args.type,
+                conversationId: args.conversationId || null,
+                contactId: args.contactId || null,
+                status: args.status || "processed",
+                error: args.error || null,
+                payload: {
+                    ...args.payload,
+                    locationId: args.locationId,
+                    actor: {
+                        clerkUserId: actor.clerkUserId,
+                        userId: actor.userId,
+                        isAdmin: actor.isAdmin,
+                        hasAccess: actor.hasAccess,
+                        roleSource: actor.roleSource,
+                    },
+                } as any,
+            },
+        });
+    } catch (eventError) {
+        console.warn("[audioTranscriptManualAudit] Failed to persist event:", args.type, eventError);
+    }
+}
+
 async function getAuthenticatedLocation() {
     const location = await getLocationContext();
     if (!location?.ghlAccessToken) {
@@ -957,7 +1189,14 @@ export async function fetchMessages(conversationId: string) {
         include: {
             attachments: {
                 include: {
-                    transcript: true,
+                    transcript: {
+                        include: {
+                            extractions: {
+                                orderBy: { createdAt: "desc" },
+                                take: 1,
+                            },
+                        },
+                    },
                 },
             },
             legacyCrmLeadEmailProcessing: {
@@ -998,6 +1237,8 @@ export async function fetchMessages(conversationId: string) {
     const legacyCrmConfiguredSenders = (((legacyCrmSettings as any)?.legacyCrmLeadEmailSenders || []) as string[]);
     const legacyCrmConfiguredDomains = (((legacyCrmSettings as any)?.legacyCrmLeadEmailSenderDomains || []) as string[]);
     const legacyCrmSubjectPatterns = (((legacyCrmSettings as any)?.legacyCrmLeadEmailSubjectPatterns || []) as string[]);
+    const transcriptVisibility = await resolveTranscriptVisibilityAccess(location.id);
+    const redactTranscriptContent = transcriptVisibility.restrictContent;
 
     return messages.map((m: any) => ({
         ...(() => {
@@ -1069,17 +1310,583 @@ export async function fetchMessages(conversationId: string) {
             mimeType: a.contentType || null,
             fileName: a.fileName || null,
             transcript: a.transcript ? {
+                ...(a.transcript.extractions?.[0] ? {
+                    extraction: {
+                        status: a.transcript.extractions[0].status,
+                        payload: redactTranscriptContent ? null : (a.transcript.extractions[0].payload || null),
+                        error: redactTranscriptContent ? null : (a.transcript.extractions[0].error || null),
+                        model: a.transcript.extractions[0].model || null,
+                        provider: a.transcript.extractions[0].provider || null,
+                        updatedAt: a.transcript.extractions[0].updatedAt
+                            ? new Date(a.transcript.extractions[0].updatedAt).toISOString()
+                            : null,
+                        restricted: redactTranscriptContent,
+                    },
+                } : {}),
                 status: a.transcript.status,
-                text: a.transcript.text || null,
-                error: a.transcript.error || null,
+                text: redactTranscriptContent ? null : (a.transcript.text || null),
+                error: redactTranscriptContent ? null : (a.transcript.error || null),
                 model: a.transcript.model || null,
                 provider: a.transcript.provider || null,
                 updatedAt: a.transcript.updatedAt ? new Date(a.transcript.updatedAt).toISOString() : null,
+                restricted: redactTranscriptContent,
             } : null,
         })),
         // Hydrated fields for UI
         html: m.body?.includes('<') ? m.body : undefined // Simple check
     }));
+}
+
+const MAX_TRANSCRIPT_SEARCH_QUERY_LENGTH = 180;
+const DEFAULT_TRANSCRIPT_SEARCH_LIMIT = 20;
+const MAX_TRANSCRIPT_SEARCH_LIMIT = 60;
+const MAX_TRANSCRIPT_FAILURE_EXAMPLES = 5;
+const DEFAULT_TRANSCRIPT_REPORT_MONTH_OFFSET = 0;
+const MAX_TRANSCRIPT_REPORT_MONTH_OFFSET = 11;
+
+const TranscriptSearchInputSchema = z.object({
+    query: z.string().trim().min(1).max(MAX_TRANSCRIPT_SEARCH_QUERY_LENGTH),
+    limit: z.number().int().min(1).max(MAX_TRANSCRIPT_SEARCH_LIMIT).optional(),
+}).optional();
+
+const TranscriptMonthlyReportInputSchema = z.object({
+    monthOffset: z.number().int().min(0).max(MAX_TRANSCRIPT_REPORT_MONTH_OFFSET).optional(),
+    includeExtractions: z.boolean().optional(),
+}).optional();
+
+function clampTranscriptSearchLimit(limit?: number): number {
+    const numeric = Number(limit);
+    if (!Number.isFinite(numeric)) return DEFAULT_TRANSCRIPT_SEARCH_LIMIT;
+    return Math.min(Math.max(Math.floor(numeric), 1), MAX_TRANSCRIPT_SEARCH_LIMIT);
+}
+
+function buildTranscriptSearchSnippet(text: string, query: string): string {
+    const source = String(text || "").replace(/\s+/g, " ").trim();
+    if (!source) return "";
+
+    const needle = String(query || "").trim().toLowerCase();
+    if (!needle) return source.slice(0, 200);
+
+    const haystack = source.toLowerCase();
+    const index = haystack.indexOf(needle);
+    if (index < 0) return source.slice(0, 200);
+
+    const before = 70;
+    const after = 140;
+    const start = Math.max(0, index - before);
+    const end = Math.min(source.length, index + needle.length + after);
+    const snippet = source.slice(start, end);
+
+    return `${start > 0 ? "..." : ""}${snippet}${end < source.length ? "..." : ""}`;
+}
+
+function categorizeTranscriptFailure(error: unknown): string {
+    const normalized = String(error || "").trim().toLowerCase();
+    if (!normalized) return "unknown";
+    if (
+        normalized.includes("api key")
+        || normalized.includes("unauthorized")
+        || normalized.includes("forbidden")
+        || normalized.includes("permission")
+        || normalized.includes("403")
+    ) {
+        return "auth_or_api_key";
+    }
+    if (normalized.includes("rate limit") || normalized.includes("429")) {
+        return "rate_limited";
+    }
+    if (
+        normalized.includes("timeout")
+        || normalized.includes("timed out")
+        || normalized.includes("deadline")
+        || normalized.includes("aborted")
+    ) {
+        return "timeout";
+    }
+    if (
+        normalized.includes("queue")
+        || normalized.includes("redis")
+        || normalized.includes("enqueue")
+    ) {
+        return "queue_or_enqueue";
+    }
+    if (
+        normalized.includes("attachment")
+        || normalized.includes("r2")
+        || normalized.includes("not found")
+        || normalized.includes("empty")
+    ) {
+        return "media_or_storage";
+    }
+    if (
+        normalized.includes("json")
+        || normalized.includes("parse")
+        || normalized.includes("schema")
+    ) {
+        return "invalid_model_output";
+    }
+    if (
+        normalized.includes("network")
+        || normalized.includes("socket")
+        || normalized.includes("econn")
+        || normalized.includes("fetch")
+    ) {
+        return "network";
+    }
+    if (
+        normalized.includes("model")
+        || normalized.includes("provider")
+        || normalized.includes("gemini")
+    ) {
+        return "provider";
+    }
+    return "other";
+}
+
+function formatMonthLabel(date: Date): string {
+    return date.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+}
+
+export async function searchConversationTranscriptMatches(
+    conversationId: string,
+    input?: z.input<typeof TranscriptSearchInputSchema>
+) {
+    const parsed = TranscriptSearchInputSchema.safeParse(input || {});
+    if (!parsed.success) {
+        return { success: false as const, error: "Invalid search query." };
+    }
+
+    const query = String(parsed.data?.query || "").trim();
+    if (!query) {
+        return { success: false as const, error: "Search query is required." };
+    }
+
+    const limit = clampTranscriptSearchLimit(parsed.data?.limit);
+
+    try {
+        const location = await getAuthenticatedLocation();
+        const conversation = await db.conversation.findUnique({
+            where: { ghlConversationId: String(conversationId || "").trim() },
+            select: { id: true, locationId: true },
+        });
+
+        if (!conversation || conversation.locationId !== location.id) {
+            return { success: false as const, error: "Conversation not found." };
+        }
+
+        const visibility = await resolveTranscriptVisibilityAccess(location.id);
+        if (visibility.restrictContent) {
+            return {
+                success: false as const,
+                error: getTranscriptVisibilityRestrictionMessage(),
+            };
+        }
+
+        const where: any = {
+            message: { conversationId: conversation.id },
+            text: {
+                not: null,
+                contains: query,
+                mode: "insensitive",
+            },
+        };
+
+        const [totalMatches, items] = await Promise.all([
+            db.messageTranscript.count({ where }),
+            db.messageTranscript.findMany({
+                where,
+                orderBy: { updatedAt: "desc" },
+                take: limit,
+                select: {
+                    id: true,
+                    status: true,
+                    text: true,
+                    model: true,
+                    provider: true,
+                    updatedAt: true,
+                    createdAt: true,
+                    message: {
+                        select: {
+                            id: true,
+                            type: true,
+                            direction: true,
+                            createdAt: true,
+                        },
+                    },
+                    attachment: {
+                        select: {
+                            id: true,
+                            fileName: true,
+                            contentType: true,
+                        },
+                    },
+                },
+            }),
+        ]);
+
+        const results = items.map((item, index) => ({
+            rank: index + 1,
+            transcriptId: item.id,
+            messageId: item.message.id,
+            attachmentId: item.attachment.id,
+            messageType: item.message.type,
+            direction: item.message.direction,
+            messageDate: item.message.createdAt.toISOString(),
+            transcriptStatus: item.status,
+            model: item.model || null,
+            provider: item.provider || null,
+            updatedAt: item.updatedAt.toISOString(),
+            fileName: item.attachment.fileName || null,
+            contentType: item.attachment.contentType || null,
+            snippet: buildTranscriptSearchSnippet(String(item.text || ""), query),
+        }));
+
+        return {
+            success: true as const,
+            query,
+            limit,
+            totalMatches,
+            returned: results.length,
+            results,
+        };
+    } catch (error: any) {
+        console.error("[searchConversationTranscriptMatches] Error:", error);
+        return {
+            success: false as const,
+            error: error?.message || "Failed to search transcript matches.",
+        };
+    }
+}
+
+export async function getAudioTranscriptMonthlyReport(
+    input?: z.input<typeof TranscriptMonthlyReportInputSchema>
+) {
+    const parsed = TranscriptMonthlyReportInputSchema.safeParse(input || {});
+    if (!parsed.success) {
+        return { success: false as const, error: "Invalid report query." };
+    }
+
+    const monthOffset = parsed.data?.monthOffset ?? DEFAULT_TRANSCRIPT_REPORT_MONTH_OFFSET;
+    const includeExtractions = parsed.data?.includeExtractions !== false;
+
+    try {
+        const location = await getAuthenticatedLocation();
+        const now = new Date();
+        const monthStart = new Date(now.getFullYear(), now.getMonth() - monthOffset, 1);
+        const monthEnd = new Date(now.getFullYear(), now.getMonth() - monthOffset + 1, 1);
+
+        const transcriptWhere: any = {
+            createdAt: { gte: monthStart, lt: monthEnd },
+            message: {
+                conversation: {
+                    locationId: location.id,
+                },
+            },
+        };
+        const extractionWhere: any = {
+            createdAt: { gte: monthStart, lt: monthEnd },
+            transcript: {
+                message: {
+                    conversation: {
+                        locationId: location.id,
+                    },
+                },
+            },
+        };
+
+        const [
+            transcriptTotalCount,
+            transcriptStatusRows,
+            transcriptModelStatusRows,
+            transcriptFailureRows,
+            transcriptDailyRows,
+            extractionTotalCount,
+            extractionStatusRows,
+            extractionModelStatusRows,
+            extractionFailureRows,
+            extractionDailyRows,
+        ] = await Promise.all([
+            db.messageTranscript.count({ where: transcriptWhere }),
+            db.messageTranscript.groupBy({
+                by: ["status"],
+                where: transcriptWhere,
+                _count: { _all: true },
+            }),
+            db.messageTranscript.groupBy({
+                by: ["model", "provider", "status"],
+                where: transcriptWhere,
+                _count: { _all: true },
+                _sum: {
+                    promptTokens: true,
+                    completionTokens: true,
+                    totalTokens: true,
+                    estimatedCostUsd: true,
+                },
+            }),
+            db.messageTranscript.findMany({
+                where: {
+                    ...transcriptWhere,
+                    status: "failed",
+                    error: { not: null },
+                },
+                select: { error: true },
+                take: 500,
+            }),
+            db.messageTranscript.findMany({
+                where: transcriptWhere,
+                select: {
+                    createdAt: true,
+                    status: true,
+                    totalTokens: true,
+                    estimatedCostUsd: true,
+                },
+            }),
+            includeExtractions ? db.messageTranscriptExtraction.count({ where: extractionWhere }) : Promise.resolve(0),
+            includeExtractions
+                ? db.messageTranscriptExtraction.groupBy({
+                    by: ["status"],
+                    where: extractionWhere,
+                    _count: { _all: true },
+                })
+                : Promise.resolve([] as any[]),
+            includeExtractions
+                ? db.messageTranscriptExtraction.groupBy({
+                    by: ["model", "provider", "status"],
+                    where: extractionWhere,
+                    _count: { _all: true },
+                    _sum: {
+                        promptTokens: true,
+                        completionTokens: true,
+                        totalTokens: true,
+                        estimatedCostUsd: true,
+                    },
+                })
+                : Promise.resolve([] as any[]),
+            includeExtractions
+                ? db.messageTranscriptExtraction.findMany({
+                    where: {
+                        ...extractionWhere,
+                        status: "failed",
+                        error: { not: null },
+                    },
+                    select: { error: true },
+                    take: 500,
+                })
+                : Promise.resolve([] as any[]),
+            includeExtractions
+                ? db.messageTranscriptExtraction.findMany({
+                    where: extractionWhere,
+                    select: {
+                        createdAt: true,
+                        status: true,
+                        totalTokens: true,
+                        estimatedCostUsd: true,
+                    },
+                })
+                : Promise.resolve([] as any[]),
+        ]);
+
+        const transcriptStatusCounts: Record<string, number> = {
+            pending: 0,
+            processing: 0,
+            completed: 0,
+            failed: 0,
+        };
+        for (const row of transcriptStatusRows) {
+            const key = String(row.status || "").toLowerCase();
+            if (!key) continue;
+            transcriptStatusCounts[key] = row._count._all;
+        }
+
+        const extractionStatusCounts: Record<string, number> = {
+            pending: 0,
+            processing: 0,
+            completed: 0,
+            failed: 0,
+        };
+        for (const row of extractionStatusRows || []) {
+            const key = String(row.status || "").toLowerCase();
+            if (!key) continue;
+            extractionStatusCounts[key] = row._count._all;
+        }
+
+        type ModelBucket = {
+            model: string;
+            provider: string;
+            kind: "transcript" | "extraction";
+            runs: number;
+            completedRuns: number;
+            failedRuns: number;
+            promptTokens: number;
+            completionTokens: number;
+            totalTokens: number;
+            estimatedCostUsd: number;
+        };
+
+        const modelMap = new Map<string, ModelBucket>();
+        const consumeModelRows = (
+            rows: Array<{
+                model: string;
+                provider: string;
+                status: string;
+                _count: { _all: number };
+                _sum: {
+                    promptTokens: number | null;
+                    completionTokens: number | null;
+                    totalTokens: number | null;
+                    estimatedCostUsd: number | null;
+                };
+            }>,
+            kind: "transcript" | "extraction"
+        ) => {
+            for (const row of rows) {
+                const model = String(row.model || "").trim() || "unknown";
+                const provider = String(row.provider || "").trim() || "unknown";
+                const key = `${kind}:${provider}:${model}`;
+                const existing = modelMap.get(key) || {
+                    model,
+                    provider,
+                    kind,
+                    runs: 0,
+                    completedRuns: 0,
+                    failedRuns: 0,
+                    promptTokens: 0,
+                    completionTokens: 0,
+                    totalTokens: 0,
+                    estimatedCostUsd: 0,
+                };
+
+                const rowCount = Number(row._count?._all || 0);
+                const status = String(row.status || "").toLowerCase();
+                existing.runs += rowCount;
+                if (status === "completed") existing.completedRuns += rowCount;
+                if (status === "failed") existing.failedRuns += rowCount;
+                existing.promptTokens += Number(row._sum?.promptTokens || 0);
+                existing.completionTokens += Number(row._sum?.completionTokens || 0);
+                existing.totalTokens += Number(row._sum?.totalTokens || 0);
+                existing.estimatedCostUsd += Number(row._sum?.estimatedCostUsd || 0);
+
+                modelMap.set(key, existing);
+            }
+        };
+
+        consumeModelRows(transcriptModelStatusRows as any, "transcript");
+        consumeModelRows((extractionModelStatusRows || []) as any, "extraction");
+
+        const byModel = Array.from(modelMap.values()).sort((a, b) => {
+            const costDiff = b.estimatedCostUsd - a.estimatedCostUsd;
+            if (Math.abs(costDiff) > 1e-9) return costDiff;
+            return b.totalTokens - a.totalTokens;
+        });
+
+        const failureCategoryMap = new Map<string, { category: string; count: number; examples: string[] }>();
+        const collectFailures = (rows: Array<{ error: string | null }>) => {
+            for (const row of rows) {
+                const raw = String(row.error || "").trim();
+                if (!raw) continue;
+                const category = categorizeTranscriptFailure(raw);
+                const existing = failureCategoryMap.get(category) || { category, count: 0, examples: [] };
+                existing.count += 1;
+                if (existing.examples.length < MAX_TRANSCRIPT_FAILURE_EXAMPLES && !existing.examples.includes(raw)) {
+                    existing.examples.push(raw);
+                }
+                failureCategoryMap.set(category, existing);
+            }
+        };
+        collectFailures(transcriptFailureRows as any);
+        collectFailures((extractionFailureRows || []) as any);
+
+        const failureCategories = Array.from(failureCategoryMap.values())
+            .sort((a, b) => b.count - a.count)
+            .map((item) => ({
+                category: item.category,
+                count: item.count,
+                examples: item.examples,
+            }));
+
+        type DailyPoint = {
+            date: string;
+            transcriptsCompleted: number;
+            transcriptsFailed: number;
+            extractionsCompleted: number;
+            extractionsFailed: number;
+            totalTokens: number;
+            estimatedCostUsd: number;
+        };
+
+        const dailyMap = new Map<string, DailyPoint>();
+        const ensureDaily = (date: string): DailyPoint => {
+            const existing = dailyMap.get(date);
+            if (existing) return existing;
+            const created: DailyPoint = {
+                date,
+                transcriptsCompleted: 0,
+                transcriptsFailed: 0,
+                extractionsCompleted: 0,
+                extractionsFailed: 0,
+                totalTokens: 0,
+                estimatedCostUsd: 0,
+            };
+            dailyMap.set(date, created);
+            return created;
+        };
+
+        for (const row of transcriptDailyRows) {
+            const key = row.createdAt.toISOString().slice(0, 10);
+            const point = ensureDaily(key);
+            const status = String(row.status || "").toLowerCase();
+            if (status === "completed") point.transcriptsCompleted += 1;
+            if (status === "failed") point.transcriptsFailed += 1;
+            point.totalTokens += Number(row.totalTokens || 0);
+            point.estimatedCostUsd += Number(row.estimatedCostUsd || 0);
+        }
+
+        for (const row of extractionDailyRows || []) {
+            const key = row.createdAt.toISOString().slice(0, 10);
+            const point = ensureDaily(key);
+            const status = String(row.status || "").toLowerCase();
+            if (status === "completed") point.extractionsCompleted += 1;
+            if (status === "failed") point.extractionsFailed += 1;
+            point.totalTokens += Number(row.totalTokens || 0);
+            point.estimatedCostUsd += Number(row.estimatedCostUsd || 0);
+        }
+
+        const daily = Array.from(dailyMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+
+        const totalTokens = byModel.reduce((sum, row) => sum + row.totalTokens, 0);
+        const estimatedCostUsd = byModel.reduce((sum, row) => sum + row.estimatedCostUsd, 0);
+
+        return {
+            success: true as const,
+            window: {
+                monthOffset,
+                start: monthStart.toISOString(),
+                end: monthEnd.toISOString(),
+                label: formatMonthLabel(monthStart),
+            },
+            totals: {
+                transcripts: transcriptTotalCount,
+                extractions: extractionTotalCount,
+                failed: transcriptStatusCounts.failed + extractionStatusCounts.failed,
+                completed: transcriptStatusCounts.completed + extractionStatusCounts.completed,
+                totalTokens,
+                estimatedCostUsd,
+            },
+            status: {
+                transcripts: transcriptStatusCounts,
+                extractions: extractionStatusCounts,
+            },
+            byModel,
+            failureCategories,
+            daily,
+        };
+    } catch (error: any) {
+        console.error("[getAudioTranscriptMonthlyReport] Error:", error);
+        return {
+            success: false as const,
+            error: error?.message || "Failed to load audio transcript monthly report.",
+        };
+    }
 }
 
 function normalizeWhatsAppDigits(value: string | null | undefined): string {
@@ -1454,6 +2261,806 @@ export async function refetchWhatsAppMediaAttachment(
     };
 }
 
+export async function getWhatsAppTranscriptOnDemandEligibility(conversationId: string) {
+    try {
+        const location = await getAuthenticatedLocation();
+        const enabled = await isWhatsAppTranscriptOnDemandEnabledForLocation(location.id);
+        const manualAccess = await resolveTranscriptManualActionAccess(location.id);
+
+        if (!enabled) {
+            return {
+                success: true as const,
+                enabled: false as const,
+                reason: "Audio transcript on-demand is disabled for this location.",
+            };
+        }
+
+        if (manualAccess.blocked) {
+            return {
+                success: true as const,
+                enabled: false as const,
+                reason: getTranscriptManualActionRestrictionMessage(),
+            };
+        }
+
+        const trimmedConversationId = String(conversationId || "").trim();
+        if (!trimmedConversationId) {
+            return {
+                success: false as const,
+                enabled: false as const,
+                reason: "Missing conversation ID.",
+            };
+        }
+
+        const conversation = await db.conversation.findUnique({
+            where: { ghlConversationId: trimmedConversationId },
+            select: {
+                id: true,
+                locationId: true,
+                lastMessageType: true,
+            },
+        });
+
+        if (!conversation || conversation.locationId !== location.id) {
+            return {
+                success: false as const,
+                enabled: false as const,
+                reason: "Conversation not found.",
+            };
+        }
+
+        if (!isLikelyWhatsAppConversation(conversation.lastMessageType)) {
+            return {
+                success: true as const,
+                enabled: false as const,
+                reason: "This action is currently available only for WhatsApp conversations.",
+            };
+        }
+
+        return {
+            success: true as const,
+            enabled: true as const,
+            reason: null as string | null,
+        };
+    } catch (error: any) {
+        console.error("[getWhatsAppTranscriptOnDemandEligibility] Error:", error);
+        return {
+            success: false as const,
+            enabled: false as const,
+            reason: error?.message || "Failed to resolve transcription eligibility.",
+        };
+    }
+}
+
+export async function requestWhatsAppAudioTranscript(
+    conversationId: string,
+    messageId: string,
+    attachmentId: string,
+    options?: {
+        force?: boolean;
+        priority?: WhatsAppTranscriptOnDemandPriority;
+    }
+) {
+    try {
+        const location = await getAuthenticatedLocation();
+        const force = !!options?.force;
+        const priority = options?.priority || "high";
+        const manualAccess = await resolveTranscriptManualActionAccess(location.id);
+        const baseAuditPayload: Record<string, unknown> = {
+            conversationId,
+            messageId,
+            attachmentId,
+            force,
+            priority,
+            visibilityPolicy: manualAccess.policy,
+        };
+
+        const onDemandEnabled = await isWhatsAppTranscriptOnDemandEnabledForLocation(location.id);
+        if (!onDemandEnabled) {
+            await persistTranscriptManualAuditEvent({
+                type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.request,
+                locationId: location.id,
+                actor: manualAccess.actor,
+                payload: {
+                    ...baseAuditPayload,
+                    reason: "on_demand_disabled",
+                },
+                status: "error",
+                error: "Audio transcript on-demand is disabled for this location.",
+            });
+            return {
+                success: false as const,
+                error: "Audio transcript on-demand is disabled for this location.",
+            };
+        }
+
+        if (manualAccess.blocked) {
+            await persistTranscriptManualAuditEvent({
+                type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.request,
+                locationId: location.id,
+                actor: manualAccess.actor,
+                payload: {
+                    ...baseAuditPayload,
+                    reason: "visibility_policy_blocked",
+                },
+                status: "error",
+                error: getTranscriptManualActionRestrictionMessage(),
+            });
+            return {
+                success: false as const,
+                error: getTranscriptManualActionRestrictionMessage(),
+            };
+        }
+
+        const resolved = await resolveOwnedConversationAudioAttachment({
+            locationId: location.id,
+            conversationId,
+            messageId,
+            attachmentId,
+        });
+        if (!resolved.success) {
+            await persistTranscriptManualAuditEvent({
+                type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.request,
+                locationId: location.id,
+                actor: manualAccess.actor,
+                payload: {
+                    ...baseAuditPayload,
+                    reason: "attachment_resolution_failed",
+                },
+                status: "error",
+                error: resolved.error,
+            });
+            return { success: false as const, error: resolved.error };
+        }
+
+        if (!isLikelyWhatsAppConversation(resolved.conversation.lastMessageType)) {
+            await persistTranscriptManualAuditEvent({
+                type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.request,
+                locationId: location.id,
+                actor: manualAccess.actor,
+                conversationId: resolved.conversation.id,
+                contactId: resolved.conversation.contactId,
+                payload: {
+                    ...baseAuditPayload,
+                    reason: "not_whatsapp",
+                },
+                status: "error",
+                error: "This action is currently available only for WhatsApp conversations.",
+            });
+            return {
+                success: false as const,
+                error: "This action is currently available only for WhatsApp conversations.",
+            };
+        }
+
+        try {
+            await initWhatsAppAudioTranscriptionWorker();
+        } catch (workerErr) {
+            console.warn("[requestWhatsAppAudioTranscript] Worker init failed, continuing with enqueue fallback:", workerErr);
+        }
+
+        const enqueueResult = await enqueueWhatsAppAudioTranscription({
+            locationId: location.id,
+            messageId: resolved.message.id,
+            attachmentId: resolved.attachment.id,
+            force,
+            priority,
+        });
+
+        if (!enqueueResult.accepted && enqueueResult.mode === "queue-unavailable") {
+            await persistTranscriptManualAuditEvent({
+                type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.request,
+                locationId: location.id,
+                actor: manualAccess.actor,
+                conversationId: resolved.conversation.id,
+                contactId: resolved.conversation.contactId,
+                payload: {
+                    ...baseAuditPayload,
+                    mode: enqueueResult.mode,
+                    accepted: enqueueResult.accepted,
+                    transcriptId: enqueueResult.transcriptId,
+                    queueError: enqueueResult.error || null,
+                },
+                status: "error",
+                error: enqueueResult.error || "Queue is unavailable. Please try again.",
+            });
+            return {
+                success: false as const,
+                error: enqueueResult.error || "Queue is unavailable. Please try again.",
+                mode: enqueueResult.mode,
+            };
+        }
+
+        if (!enqueueResult.accepted && enqueueResult.mode === "skipped") {
+            await persistTranscriptManualAuditEvent({
+                type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.request,
+                locationId: location.id,
+                actor: manualAccess.actor,
+                conversationId: resolved.conversation.id,
+                contactId: resolved.conversation.contactId,
+                payload: {
+                    ...baseAuditPayload,
+                    mode: enqueueResult.mode,
+                    accepted: enqueueResult.accepted,
+                    transcriptId: enqueueResult.transcriptId,
+                    skipped: true,
+                },
+            });
+            return {
+                success: true as const,
+                mode: enqueueResult.mode,
+                skipped: true as const,
+                message: "Transcript already completed.",
+            };
+        }
+
+        if (enqueueResult.mode === "already-queued") {
+            await persistTranscriptManualAuditEvent({
+                type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.request,
+                locationId: location.id,
+                actor: manualAccess.actor,
+                conversationId: resolved.conversation.id,
+                contactId: resolved.conversation.contactId,
+                payload: {
+                    ...baseAuditPayload,
+                    mode: enqueueResult.mode,
+                    accepted: enqueueResult.accepted,
+                    transcriptId: enqueueResult.transcriptId,
+                    skipped: true,
+                },
+            });
+            return {
+                success: true as const,
+                mode: enqueueResult.mode,
+                skipped: true as const,
+                message: "Transcript is already queued.",
+            };
+        }
+
+        await persistTranscriptManualAuditEvent({
+            type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.request,
+            locationId: location.id,
+            actor: manualAccess.actor,
+            conversationId: resolved.conversation.id,
+            contactId: resolved.conversation.contactId,
+            payload: {
+                ...baseAuditPayload,
+                mode: enqueueResult.mode,
+                accepted: enqueueResult.accepted,
+                transcriptId: enqueueResult.transcriptId,
+                skipped: false,
+            },
+        });
+
+        return {
+            success: true as const,
+            mode: enqueueResult.mode,
+            skipped: false as const,
+            message: enqueueResult.mode === "inline-fallback"
+                ? `${force ? "Regeneration" : "Transcription"} started (inline fallback).`
+                : `${force ? "Regeneration" : "Transcription"} queued.`,
+        };
+    } catch (error: any) {
+        console.error("[requestWhatsAppAudioTranscript] Error:", error);
+        return { success: false as const, error: error?.message || "Failed to request transcript." };
+    }
+}
+
+export async function bulkRequestWhatsAppAudioTranscripts(
+    conversationId: string,
+    options?: {
+        window?: WhatsAppTranscriptBulkWindow;
+        priority?: WhatsAppTranscriptOnDemandPriority;
+    }
+) {
+    try {
+        const location = await getAuthenticatedLocation();
+        const window = options?.window === "all" ? "all" : "30d";
+        const priority = options?.priority || "normal";
+        const manualAccess = await resolveTranscriptManualActionAccess(location.id);
+        const baseAuditPayload: Record<string, unknown> = {
+            conversationId,
+            window,
+            priority,
+            visibilityPolicy: manualAccess.policy,
+        };
+
+        const onDemandEnabled = await isWhatsAppTranscriptOnDemandEnabledForLocation(location.id);
+        if (!onDemandEnabled) {
+            await persistTranscriptManualAuditEvent({
+                type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.bulkRequest,
+                locationId: location.id,
+                actor: manualAccess.actor,
+                payload: {
+                    ...baseAuditPayload,
+                    reason: "on_demand_disabled",
+                },
+                status: "error",
+                error: "Audio transcript on-demand is disabled for this location.",
+            });
+            return {
+                success: false as const,
+                error: "Audio transcript on-demand is disabled for this location.",
+            };
+        }
+
+        if (manualAccess.blocked) {
+            await persistTranscriptManualAuditEvent({
+                type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.bulkRequest,
+                locationId: location.id,
+                actor: manualAccess.actor,
+                payload: {
+                    ...baseAuditPayload,
+                    reason: "visibility_policy_blocked",
+                },
+                status: "error",
+                error: getTranscriptManualActionRestrictionMessage(),
+            });
+            return {
+                success: false as const,
+                error: getTranscriptManualActionRestrictionMessage(),
+            };
+        }
+
+        const conversation = await db.conversation.findUnique({
+            where: { ghlConversationId: conversationId },
+            select: {
+                id: true,
+                locationId: true,
+                contactId: true,
+                lastMessageType: true,
+            },
+        });
+
+        if (!conversation || conversation.locationId !== location.id) {
+            await persistTranscriptManualAuditEvent({
+                type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.bulkRequest,
+                locationId: location.id,
+                actor: manualAccess.actor,
+                payload: {
+                    ...baseAuditPayload,
+                    reason: "conversation_not_found",
+                },
+                status: "error",
+                error: "Conversation not found.",
+            });
+            return { success: false as const, error: "Conversation not found." };
+        }
+        if (!isLikelyWhatsAppConversation(conversation.lastMessageType)) {
+            await persistTranscriptManualAuditEvent({
+                type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.bulkRequest,
+                locationId: location.id,
+                actor: manualAccess.actor,
+                conversationId: conversation.id,
+                contactId: conversation.contactId,
+                payload: {
+                    ...baseAuditPayload,
+                    reason: "not_whatsapp",
+                },
+                status: "error",
+                error: "Bulk transcription is currently available only for WhatsApp conversations.",
+            });
+            return {
+                success: false as const,
+                error: "Bulk transcription is currently available only for WhatsApp conversations.",
+            };
+        }
+
+        const since = window === "all"
+            ? null
+            : new Date(Date.now() - WHATSAPP_TRANSCRIPT_BULK_DEFAULT_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+
+        const messages = await db.message.findMany({
+            where: {
+                conversationId: conversation.id,
+                ...(since ? { createdAt: { gte: since } } : {}),
+            },
+            select: {
+                id: true,
+                attachments: {
+                    select: {
+                        id: true,
+                        contentType: true,
+                        fileName: true,
+                        url: true,
+                        transcript: {
+                            select: {
+                                id: true,
+                                status: true,
+                            },
+                        },
+                    },
+                },
+            },
+            orderBy: { createdAt: "desc" },
+        });
+
+        try {
+            await initWhatsAppAudioTranscriptionWorker();
+        } catch (workerErr) {
+            console.warn("[bulkRequestWhatsAppAudioTranscripts] Worker init failed, continuing with enqueue fallback:", workerErr);
+        }
+
+        let scannedCount = 0;
+        let audioCount = 0;
+        let queuedCount = 0;
+        let skippedCount = 0;
+        let failedCount = 0;
+        let alreadyQueuedCount = 0;
+        let skippedHasTranscriptCount = 0;
+        let skippedNonAudioCount = 0;
+        const errors: string[] = [];
+
+        for (const message of messages) {
+            for (const attachment of message.attachments || []) {
+                scannedCount += 1;
+                const mediaKind = getWhatsAppMediaKind(attachment.contentType, attachment.fileName || attachment.url);
+                if (mediaKind !== "audio") {
+                    skippedCount += 1;
+                    skippedNonAudioCount += 1;
+                    continue;
+                }
+
+                audioCount += 1;
+                if (attachment.transcript) {
+                    skippedCount += 1;
+                    skippedHasTranscriptCount += 1;
+                    continue;
+                }
+
+                const enqueueResult = await enqueueWhatsAppAudioTranscription({
+                    locationId: location.id,
+                    messageId: message.id,
+                    attachmentId: attachment.id,
+                    force: false,
+                    priority,
+                    allowInlineFallback: false,
+                });
+
+                if (enqueueResult.mode === "queued" || enqueueResult.mode === "inline-fallback") {
+                    queuedCount += 1;
+                    continue;
+                }
+                if (enqueueResult.mode === "already-queued") {
+                    skippedCount += 1;
+                    alreadyQueuedCount += 1;
+                    continue;
+                }
+                if (enqueueResult.mode === "skipped") {
+                    skippedCount += 1;
+                    skippedHasTranscriptCount += 1;
+                    continue;
+                }
+
+                failedCount += 1;
+                if (errors.length < 5) {
+                    errors.push(enqueueResult.error || `Failed to enqueue attachment ${attachment.id}.`);
+                }
+            }
+        }
+
+        await persistTranscriptManualAuditEvent({
+            type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.bulkRequest,
+            locationId: location.id,
+            actor: manualAccess.actor,
+            conversationId: conversation.id,
+            contactId: conversation.contactId,
+            payload: {
+                ...baseAuditPayload,
+                scannedCount,
+                audioCount,
+                queuedCount,
+                skippedCount,
+                failedCount,
+                skippedNonAudioCount,
+                skippedHasTranscriptCount,
+                alreadyQueuedCount,
+                sampleErrors: errors,
+            },
+        });
+
+        return {
+            success: true as const,
+            mode: "bulk" as const,
+            window,
+            scannedCount,
+            audioCount,
+            queuedCount,
+            skippedCount,
+            failedCount,
+            breakdown: {
+                skippedNonAudioCount,
+                skippedHasTranscriptCount,
+                alreadyQueuedCount,
+            },
+            errors,
+            message: queuedCount > 0
+                ? `Queued ${queuedCount} audio transcript job${queuedCount === 1 ? "" : "s"}.`
+                : failedCount > 0
+                    ? "No jobs were queued due to queue errors."
+                    : "No unprocessed audio attachments were found for this window.",
+        };
+    } catch (error: any) {
+        console.error("[bulkRequestWhatsAppAudioTranscripts] Error:", error);
+        return {
+            success: false as const,
+            error: error?.message || "Failed to request bulk transcription.",
+        };
+    }
+}
+
+export async function extractWhatsAppViewingNotes(
+    conversationId: string,
+    messageId: string,
+    attachmentId: string,
+    options?: {
+        force?: boolean;
+        priority?: WhatsAppTranscriptOnDemandPriority;
+        allowInlineFallback?: boolean;
+    }
+) {
+    try {
+        const location = await getAuthenticatedLocation();
+        const force = !!options?.force;
+        const priority = options?.priority || "high";
+        const allowInlineFallback = options?.allowInlineFallback;
+        const manualAccess = await resolveTranscriptManualActionAccess(location.id);
+        const baseAuditPayload: Record<string, unknown> = {
+            conversationId,
+            messageId,
+            attachmentId,
+            force,
+            priority,
+            allowInlineFallback: typeof allowInlineFallback === "boolean" ? allowInlineFallback : null,
+            visibilityPolicy: manualAccess.policy,
+        };
+
+        const onDemandEnabled = await isWhatsAppTranscriptOnDemandEnabledForLocation(location.id);
+        if (!onDemandEnabled) {
+            await persistTranscriptManualAuditEvent({
+                type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.extract,
+                locationId: location.id,
+                actor: manualAccess.actor,
+                payload: {
+                    ...baseAuditPayload,
+                    reason: "on_demand_disabled",
+                },
+                status: "error",
+                error: "Audio transcript on-demand is disabled for this location.",
+            });
+            return {
+                success: false as const,
+                error: "Audio transcript on-demand is disabled for this location.",
+            };
+        }
+
+        if (manualAccess.blocked) {
+            await persistTranscriptManualAuditEvent({
+                type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.extract,
+                locationId: location.id,
+                actor: manualAccess.actor,
+                payload: {
+                    ...baseAuditPayload,
+                    reason: "visibility_policy_blocked",
+                },
+                status: "error",
+                error: getTranscriptManualActionRestrictionMessage(),
+            });
+            return {
+                success: false as const,
+                error: getTranscriptManualActionRestrictionMessage(),
+            };
+        }
+
+        const resolved = await resolveOwnedConversationAudioAttachment({
+            locationId: location.id,
+            conversationId,
+            messageId,
+            attachmentId,
+        });
+        if (!resolved.success) {
+            await persistTranscriptManualAuditEvent({
+                type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.extract,
+                locationId: location.id,
+                actor: manualAccess.actor,
+                payload: {
+                    ...baseAuditPayload,
+                    reason: "attachment_resolution_failed",
+                },
+                status: "error",
+                error: resolved.error,
+            });
+            return { success: false as const, error: resolved.error };
+        }
+
+        if (!isLikelyWhatsAppConversation(resolved.conversation.lastMessageType)) {
+            await persistTranscriptManualAuditEvent({
+                type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.extract,
+                locationId: location.id,
+                actor: manualAccess.actor,
+                conversationId: resolved.conversation.id,
+                contactId: resolved.conversation.contactId,
+                payload: {
+                    ...baseAuditPayload,
+                    reason: "not_whatsapp",
+                },
+                status: "error",
+                error: "Viewing notes extraction is currently available only for WhatsApp conversations.",
+            });
+            return {
+                success: false as const,
+                error: "Viewing notes extraction is currently available only for WhatsApp conversations.",
+            };
+        }
+
+        if (!resolved.attachment.transcript) {
+            await persistTranscriptManualAuditEvent({
+                type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.extract,
+                locationId: location.id,
+                actor: manualAccess.actor,
+                conversationId: resolved.conversation.id,
+                contactId: resolved.conversation.contactId,
+                payload: {
+                    ...baseAuditPayload,
+                    reason: "transcript_missing",
+                },
+                status: "error",
+                error: "Transcript not found. Transcribe this audio first.",
+            });
+            return {
+                success: false as const,
+                error: "Transcript not found. Transcribe this audio first.",
+            };
+        }
+
+        if (resolved.attachment.transcript.status !== "completed") {
+            const statusError = resolved.attachment.transcript.status === "failed"
+                ? "Transcript failed. Regenerate transcript first."
+                : "Transcript is still processing. Try again once it is completed.";
+            await persistTranscriptManualAuditEvent({
+                type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.extract,
+                locationId: location.id,
+                actor: manualAccess.actor,
+                conversationId: resolved.conversation.id,
+                contactId: resolved.conversation.contactId,
+                payload: {
+                    ...baseAuditPayload,
+                    reason: "transcript_not_completed",
+                    transcriptStatus: resolved.attachment.transcript.status,
+                },
+                status: "error",
+                error: statusError,
+            });
+            return {
+                success: false as const,
+                error: statusError,
+            };
+        }
+
+        try {
+            await initWhatsAppAudioExtractionWorker();
+        } catch (workerErr) {
+            console.warn("[extractWhatsAppViewingNotes] Worker init failed, continuing with enqueue fallback:", workerErr);
+        }
+
+        const enqueueResult = await enqueueWhatsAppAudioExtraction({
+            locationId: location.id,
+            messageId: resolved.message.id,
+            attachmentId: resolved.attachment.id,
+            force,
+            priority,
+            allowInlineFallback,
+        });
+
+        if (!enqueueResult.accepted && enqueueResult.mode === "queue-unavailable") {
+            await persistTranscriptManualAuditEvent({
+                type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.extract,
+                locationId: location.id,
+                actor: manualAccess.actor,
+                conversationId: resolved.conversation.id,
+                contactId: resolved.conversation.contactId,
+                payload: {
+                    ...baseAuditPayload,
+                    mode: enqueueResult.mode,
+                    accepted: enqueueResult.accepted,
+                    transcriptId: enqueueResult.transcriptId,
+                    extractionId: enqueueResult.extractionId,
+                    queueError: enqueueResult.error || null,
+                },
+                status: "error",
+                error: enqueueResult.error || "Queue is unavailable. Please try again.",
+            });
+            return {
+                success: false as const,
+                error: enqueueResult.error || "Queue is unavailable. Please try again.",
+                mode: enqueueResult.mode,
+            };
+        }
+
+        if (!enqueueResult.accepted && enqueueResult.mode === "skipped") {
+            await persistTranscriptManualAuditEvent({
+                type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.extract,
+                locationId: location.id,
+                actor: manualAccess.actor,
+                conversationId: resolved.conversation.id,
+                contactId: resolved.conversation.contactId,
+                payload: {
+                    ...baseAuditPayload,
+                    mode: enqueueResult.mode,
+                    accepted: enqueueResult.accepted,
+                    transcriptId: enqueueResult.transcriptId,
+                    extractionId: enqueueResult.extractionId,
+                    skipped: true,
+                },
+            });
+            return {
+                success: true as const,
+                mode: enqueueResult.mode,
+                skipped: true as const,
+                extractionId: enqueueResult.extractionId,
+                message: "Viewing notes are already extracted.",
+            };
+        }
+
+        if (enqueueResult.mode === "already-queued") {
+            await persistTranscriptManualAuditEvent({
+                type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.extract,
+                locationId: location.id,
+                actor: manualAccess.actor,
+                conversationId: resolved.conversation.id,
+                contactId: resolved.conversation.contactId,
+                payload: {
+                    ...baseAuditPayload,
+                    mode: enqueueResult.mode,
+                    accepted: enqueueResult.accepted,
+                    transcriptId: enqueueResult.transcriptId,
+                    extractionId: enqueueResult.extractionId,
+                    skipped: true,
+                },
+            });
+            return {
+                success: true as const,
+                mode: enqueueResult.mode,
+                skipped: true as const,
+                extractionId: enqueueResult.extractionId,
+                message: "Viewing notes extraction is already queued.",
+            };
+        }
+
+        await persistTranscriptManualAuditEvent({
+            type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.extract,
+            locationId: location.id,
+            actor: manualAccess.actor,
+            conversationId: resolved.conversation.id,
+            contactId: resolved.conversation.contactId,
+            payload: {
+                ...baseAuditPayload,
+                mode: enqueueResult.mode,
+                accepted: enqueueResult.accepted,
+                transcriptId: enqueueResult.transcriptId,
+                extractionId: enqueueResult.extractionId,
+                skipped: false,
+            },
+        });
+
+        return {
+            success: true as const,
+            mode: enqueueResult.mode,
+            skipped: false as const,
+            extractionId: enqueueResult.extractionId,
+            message: enqueueResult.mode === "inline-fallback"
+                ? `${force ? "Notes regeneration" : "Viewing notes extraction"} started (inline fallback).`
+                : `${force ? "Notes regeneration" : "Viewing notes extraction"} queued.`,
+        };
+    } catch (error: any) {
+        console.error("[extractWhatsAppViewingNotes] Error:", error);
+        return {
+            success: false as const,
+            error: error?.message || "Failed to extract viewing notes.",
+        };
+    }
+}
+
 export async function retryWhatsAppAudioTranscript(
     conversationId: string,
     messageId: string,
@@ -1461,32 +3068,53 @@ export async function retryWhatsAppAudioTranscript(
 ) {
     try {
         const location = await getAuthenticatedLocation();
+        const manualAccess = await resolveTranscriptManualActionAccess(location.id);
+        const baseAuditPayload: Record<string, unknown> = {
+            conversationId,
+            messageId,
+            attachmentId,
+            force: true,
+            priority: "high",
+            visibilityPolicy: manualAccess.policy,
+        };
 
-        const conversation = await db.conversation.findUnique({
-            where: { ghlConversationId: conversationId },
-            select: { id: true, locationId: true },
+        if (manualAccess.blocked) {
+            await persistTranscriptManualAuditEvent({
+                type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.retry,
+                locationId: location.id,
+                actor: manualAccess.actor,
+                payload: {
+                    ...baseAuditPayload,
+                    reason: "visibility_policy_blocked",
+                },
+                status: "error",
+                error: getTranscriptManualActionRestrictionMessage(),
+            });
+            return {
+                success: false as const,
+                error: getTranscriptManualActionRestrictionMessage(),
+            };
+        }
+
+        const resolved = await resolveOwnedConversationAudioAttachment({
+            locationId: location.id,
+            conversationId,
+            messageId,
+            attachmentId,
         });
-
-        if (!conversation || conversation.locationId !== location.id) {
-            return { success: false as const, error: "Conversation not found." };
-        }
-
-        const message = await db.message.findUnique({
-            where: { id: messageId },
-            include: { attachments: true },
-        });
-        if (!message || message.conversationId !== conversation.id) {
-            return { success: false as const, error: "Message not found for this conversation." };
-        }
-
-        const attachment = (message.attachments || []).find((item) => item.id === attachmentId);
-        if (!attachment) {
-            return { success: false as const, error: "Attachment not found for this message." };
-        }
-
-        const mediaKind = getWhatsAppMediaKind(attachment.contentType, attachment.fileName || attachment.url);
-        if (mediaKind !== "audio") {
-            return { success: false as const, error: "Attachment is not an audio file." };
+        if (!resolved.success) {
+            await persistTranscriptManualAuditEvent({
+                type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.retry,
+                locationId: location.id,
+                actor: manualAccess.actor,
+                payload: {
+                    ...baseAuditPayload,
+                    reason: "attachment_resolution_failed",
+                },
+                status: "error",
+                error: resolved.error,
+            });
+            return { success: false as const, error: resolved.error };
         }
 
         try {
@@ -1496,12 +3124,27 @@ export async function retryWhatsAppAudioTranscript(
         }
         const enqueueResult = await enqueueWhatsAppAudioTranscription({
             locationId: location.id,
-            messageId: message.id,
-            attachmentId: attachment.id,
+            messageId: resolved.message.id,
+            attachmentId: resolved.attachment.id,
             force: true,
+            priority: "high",
         });
 
         if (!enqueueResult.accepted && enqueueResult.mode === "skipped") {
+            await persistTranscriptManualAuditEvent({
+                type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.retry,
+                locationId: location.id,
+                actor: manualAccess.actor,
+                conversationId: resolved.conversation.id,
+                contactId: resolved.conversation.contactId,
+                payload: {
+                    ...baseAuditPayload,
+                    mode: enqueueResult.mode,
+                    accepted: enqueueResult.accepted,
+                    transcriptId: enqueueResult.transcriptId,
+                    skipped: true,
+                },
+            });
             return {
                 success: true as const,
                 mode: enqueueResult.mode,
@@ -1509,6 +3152,68 @@ export async function retryWhatsAppAudioTranscript(
                 message: "Transcript already completed. No retry was needed.",
             };
         }
+
+        if (!enqueueResult.accepted && enqueueResult.mode === "queue-unavailable") {
+            await persistTranscriptManualAuditEvent({
+                type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.retry,
+                locationId: location.id,
+                actor: manualAccess.actor,
+                conversationId: resolved.conversation.id,
+                contactId: resolved.conversation.contactId,
+                payload: {
+                    ...baseAuditPayload,
+                    mode: enqueueResult.mode,
+                    accepted: enqueueResult.accepted,
+                    transcriptId: enqueueResult.transcriptId,
+                    queueError: enqueueResult.error || null,
+                },
+                status: "error",
+                error: enqueueResult.error || "Queue is unavailable. Please try again.",
+            });
+            return {
+                success: false as const,
+                error: enqueueResult.error || "Queue is unavailable. Please try again.",
+                mode: enqueueResult.mode,
+            };
+        }
+
+        if (enqueueResult.mode === "already-queued") {
+            await persistTranscriptManualAuditEvent({
+                type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.retry,
+                locationId: location.id,
+                actor: manualAccess.actor,
+                conversationId: resolved.conversation.id,
+                contactId: resolved.conversation.contactId,
+                payload: {
+                    ...baseAuditPayload,
+                    mode: enqueueResult.mode,
+                    accepted: enqueueResult.accepted,
+                    transcriptId: enqueueResult.transcriptId,
+                    skipped: true,
+                },
+            });
+            return {
+                success: true as const,
+                mode: enqueueResult.mode,
+                skipped: true as const,
+                message: "Transcript is already queued.",
+            };
+        }
+
+        await persistTranscriptManualAuditEvent({
+            type: TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES.retry,
+            locationId: location.id,
+            actor: manualAccess.actor,
+            conversationId: resolved.conversation.id,
+            contactId: resolved.conversation.contactId,
+            payload: {
+                ...baseAuditPayload,
+                mode: enqueueResult.mode,
+                accepted: enqueueResult.accepted,
+                transcriptId: enqueueResult.transcriptId,
+                skipped: false,
+            },
+        });
 
         return {
             success: true as const,
@@ -1679,6 +3384,8 @@ const MAX_WHATSAPP_IMAGE_BYTES = 16 * 1024 * 1024;
 const MAX_WHATSAPP_AUDIO_BYTES = 16 * 1024 * 1024;
 
 type WhatsAppMediaKind = "image" | "audio";
+type WhatsAppTranscriptOnDemandPriority = "normal" | "high";
+type WhatsAppTranscriptBulkWindow = "30d" | "all";
 
 type WhatsAppMediaUploadRef = {
     objectKey: string;
@@ -1699,6 +3406,89 @@ function getWhatsAppMediaKind(contentType: string, fileName?: string): WhatsAppM
     if (target.match(/\.(jpg|jpeg|png|webp|gif|heic|heif)$/)) return "image";
     if (target.match(/\.(ogg|opus|mp3|m4a|webm|wav|aac)$/)) return "audio";
     return null;
+}
+
+function parseOptionalBooleanFlag(value: unknown): boolean | null {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (!normalized) return null;
+    if (["1", "true", "yes", "on"].includes(normalized)) return true;
+    if (["0", "false", "no", "off"].includes(normalized)) return false;
+    return null;
+}
+
+async function isWhatsAppTranscriptOnDemandEnabledForLocation(locationId: string): Promise<boolean> {
+    const envOverride = parseOptionalBooleanFlag(process.env.WHATSAPP_TRANSCRIPT_ON_DEMAND_ENABLED);
+    if (typeof envOverride === "boolean") return envOverride;
+
+    const config = await db.siteConfig.findUnique({
+        where: { locationId },
+        select: {
+            whatsappTranscriptOnDemandEnabled: true,
+        } as any,
+    });
+
+    return !!(config as any)?.whatsappTranscriptOnDemandEnabled;
+}
+
+function isLikelyWhatsAppConversation(lastMessageType: string | null | undefined): boolean {
+    return String(lastMessageType || "").toUpperCase().includes("WHATSAPP");
+}
+
+async function resolveOwnedConversationAudioAttachment(args: {
+    locationId: string;
+    conversationId: string;
+    messageId: string;
+    attachmentId: string;
+}) {
+    const conversation = await db.conversation.findUnique({
+        where: { ghlConversationId: args.conversationId },
+        select: {
+            id: true,
+            locationId: true,
+            contactId: true,
+            lastMessageType: true,
+        },
+    });
+
+    if (!conversation || conversation.locationId !== args.locationId) {
+        return { success: false as const, error: "Conversation not found." };
+    }
+
+    const message = await db.message.findUnique({
+        where: { id: args.messageId },
+        include: {
+            attachments: {
+                include: {
+                    transcript: {
+                        select: {
+                            id: true,
+                            status: true,
+                        },
+                    },
+                },
+            },
+        },
+    });
+    if (!message || message.conversationId !== conversation.id) {
+        return { success: false as const, error: "Message not found for this conversation." };
+    }
+
+    const attachment = (message.attachments || []).find((item) => item.id === args.attachmentId);
+    if (!attachment) {
+        return { success: false as const, error: "Attachment not found for this message." };
+    }
+
+    const mediaKind = getWhatsAppMediaKind(attachment.contentType, attachment.fileName || attachment.url);
+    if (mediaKind !== "audio") {
+        return { success: false as const, error: "Attachment is not an audio file." };
+    }
+
+    return {
+        success: true as const,
+        conversation,
+        message,
+        attachment,
+    };
 }
 
 function isSupportedWhatsAppMedia(contentType: string, kind: WhatsAppMediaKind) {

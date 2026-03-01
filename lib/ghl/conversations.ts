@@ -44,6 +44,23 @@ export interface Message {
             model?: string | null;
             provider?: string | null;
             updatedAt?: string | null;
+            restricted?: boolean;
+            extraction?: {
+                status: 'pending' | 'processing' | 'completed' | 'failed';
+                payload?: {
+                    prospects?: string[];
+                    requirements?: string[];
+                    budget?: string | null;
+                    locations?: string[];
+                    objections?: string[];
+                    nextActions?: string[];
+                } | null;
+                error?: string | null;
+                model?: string | null;
+                provider?: string | null;
+                updatedAt?: string | null;
+                restricted?: boolean;
+            } | null;
         } | null;
     }>;
     html?: string; // For Email content

@@ -3,7 +3,28 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { Conversation, Message } from '@/lib/ghl/conversations';
-import { fetchConversations, fetchMessages, sendReply, createWhatsAppMediaUploadUrl, sendWhatsAppMediaReply, generateAIDraft, deleteConversations, restoreConversations, archiveConversations, unarchiveConversations, permanentlyDeleteConversations, syncWhatsAppHistory, refreshConversation, markConversationAsRead, refetchWhatsAppMediaAttachment, retryWhatsAppAudioTranscript } from '../actions';
+import {
+    fetchConversations,
+    fetchMessages,
+    sendReply,
+    createWhatsAppMediaUploadUrl,
+    sendWhatsAppMediaReply,
+    generateAIDraft,
+    deleteConversations,
+    restoreConversations,
+    archiveConversations,
+    unarchiveConversations,
+    permanentlyDeleteConversations,
+    syncWhatsAppHistory,
+    refreshConversation,
+    markConversationAsRead,
+    refetchWhatsAppMediaAttachment,
+    retryWhatsAppAudioTranscript,
+    requestWhatsAppAudioTranscript,
+    bulkRequestWhatsAppAudioTranscripts,
+    extractWhatsAppViewingNotes,
+    getWhatsAppTranscriptOnDemandEligibility,
+} from '../actions';
 import { toast } from '@/components/ui/use-toast';
 import { getDealContexts, createPersistentDeal } from '../../deals/actions';
 import { UnifiedTimeline } from './unified-timeline';
@@ -52,12 +73,17 @@ function getMessageSignature(messages: Message[]): string {
         const attachmentSignature = (message.attachments || []).map((attachment) => {
             if (typeof attachment === "string") return `s:${attachment.length}`;
             const transcript = attachment.transcript;
+            const extraction = transcript?.extraction;
             return [
                 attachment.id || "",
                 transcript?.status || "",
                 String(transcript?.text || "").length,
                 String(transcript?.error || "").length,
                 transcript?.updatedAt || "",
+                extraction?.status || "",
+                extraction?.updatedAt || "",
+                String(extraction?.error || "").length,
+                extraction?.payload ? JSON.stringify(extraction.payload).length : 0,
             ].join(":");
         }).join(",");
 
@@ -78,7 +104,12 @@ function hasPendingTranscripts(messages: Message[]): boolean {
         (message.attachments || []).some((attachment) =>
             typeof attachment !== "string"
             && !!attachment.transcript
-            && (attachment.transcript.status === "pending" || attachment.transcript.status === "processing")
+            && (
+                attachment.transcript.status === "pending"
+                || attachment.transcript.status === "processing"
+                || attachment.transcript.extraction?.status === "pending"
+                || attachment.transcript.extraction?.status === "processing"
+            )
         )
     );
 }
@@ -138,6 +169,7 @@ export function ConversationInterface({ initialConversations, initialConversatio
 
     const initialDealId = searchParams.get('dealId');
     const [activeDealId, setActiveDealId] = useState<string | null>(initialDealId);
+    const [transcriptOnDemandEnabled, setTranscriptOnDemandEnabled] = useState(false);
 
     // Sync View Mode & Deal ID to URL
     useEffect(() => {
@@ -348,6 +380,29 @@ export function ConversationInterface({ initialConversations, initialConversatio
 
     // Let's find a proxy conversation for the Coordinator if in Deal Mode
     const dealProxyConversation = activeDeal ? conversations.find(c => activeDeal.conversationIds.includes(c.id)) : null;
+
+    useEffect(() => {
+        let cancelled = false;
+        if (!activeConversation) {
+            setTranscriptOnDemandEnabled(false);
+            return;
+        }
+
+        getWhatsAppTranscriptOnDemandEligibility(activeConversation.id)
+            .then((res) => {
+                if (cancelled) return;
+                setTranscriptOnDemandEnabled(!!res?.success && !!res?.enabled);
+            })
+            .catch((err) => {
+                if (cancelled) return;
+                console.error("Failed to resolve transcript on-demand eligibility:", err);
+                setTranscriptOnDemandEnabled(false);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [activeConversation?.id]);
 
     // Fetch Messages when active selection changes
     useEffect(() => {
@@ -796,6 +851,134 @@ export function ConversationInterface({ initialConversations, initialConversatio
         }
     };
 
+    const handleRequestTranscript = async (
+        messageId: string,
+        attachmentId: string,
+        options?: { force?: boolean }
+    ) => {
+        if (!activeConversation) return;
+        try {
+            const result = await requestWhatsAppAudioTranscript(
+                activeConversation.id,
+                messageId,
+                attachmentId,
+                { force: !!options?.force, priority: "high" }
+            );
+
+            if (!result?.success) {
+                toast({
+                    title: options?.force ? "Regeneration Failed" : "Transcription Failed",
+                    description: String(result?.error || "Could not start transcript job."),
+                    variant: "destructive",
+                });
+                return;
+            }
+
+            const modeLabel = result.mode === "inline-fallback" ? "inline fallback" : result.mode;
+            toast({
+                title: result.skipped
+                    ? "Transcript Already Queued"
+                    : (options?.force ? "Transcript Regeneration Started" : "Transcript Started"),
+                description: result.message || `Accepted via ${modeLabel}.`,
+            });
+
+            const refreshed = await fetchMessages(activeConversation.id);
+            if (activeIdRef.current === activeConversation.id) {
+                setMessages(refreshed);
+                messageSignatureRef.current = getMessageSignature(refreshed);
+            }
+        } catch (error: any) {
+            toast({
+                title: options?.force ? "Regeneration Failed" : "Transcription Failed",
+                description: String(error?.message || "Unexpected error while starting transcript."),
+                variant: "destructive",
+            });
+        }
+    };
+
+    const handleBulkTranscribeUnprocessedAudio = async (options?: { window?: "30d" | "all" }) => {
+        if (!activeConversation) return;
+        try {
+            const result = await bulkRequestWhatsAppAudioTranscripts(activeConversation.id, {
+                window: options?.window || "30d",
+                priority: "normal",
+            });
+
+            if (!result?.success) {
+                toast({
+                    title: "Bulk Transcription Failed",
+                    description: String(result?.error || "Could not queue bulk transcript jobs."),
+                    variant: "destructive",
+                });
+                return;
+            }
+
+            const summary = `Queued ${result.queuedCount}, skipped ${result.skippedCount}, failed ${result.failedCount}.`;
+            toast({
+                title: "Bulk Transcription Requested",
+                description: `${result.message} ${summary}`.trim(),
+                variant: result.failedCount > 0 ? "destructive" : "default",
+            });
+
+            const refreshed = await fetchMessages(activeConversation.id);
+            if (activeIdRef.current === activeConversation.id) {
+                setMessages(refreshed);
+                messageSignatureRef.current = getMessageSignature(refreshed);
+            }
+        } catch (error: any) {
+            toast({
+                title: "Bulk Transcription Failed",
+                description: String(error?.message || "Unexpected error while queuing bulk transcripts."),
+                variant: "destructive",
+            });
+        }
+    };
+
+    const handleExtractViewingNotes = async (
+        messageId: string,
+        attachmentId: string,
+        options?: { force?: boolean }
+    ) => {
+        if (!activeConversation) return;
+        try {
+            const result = await extractWhatsAppViewingNotes(
+                activeConversation.id,
+                messageId,
+                attachmentId,
+                { force: !!options?.force, priority: "high" }
+            );
+
+            if (!result?.success) {
+                toast({
+                    title: options?.force ? "Notes Regeneration Failed" : "Extraction Failed",
+                    description: String(result?.error || "Could not start viewing notes extraction."),
+                    variant: "destructive",
+                });
+                return;
+            }
+
+            const modeLabel = result.mode === "inline-fallback" ? "inline fallback" : result.mode;
+            toast({
+                title: result.skipped
+                    ? "Viewing Notes Already Available"
+                    : (options?.force ? "Notes Regeneration Started" : "Viewing Notes Extraction Started"),
+                description: result.message || `Accepted via ${modeLabel}.`,
+            });
+
+            const refreshed = await fetchMessages(activeConversation.id);
+            if (activeIdRef.current === activeConversation.id) {
+                setMessages(refreshed);
+                messageSignatureRef.current = getMessageSignature(refreshed);
+            }
+        } catch (error: any) {
+            toast({
+                title: options?.force ? "Notes Regeneration Failed" : "Extraction Failed",
+                description: String(error?.message || "Unexpected error while extracting viewing notes."),
+                variant: "destructive",
+            });
+        }
+    };
+
 
     const handleSync = async () => {
         if (!activeId) return;
@@ -922,7 +1105,11 @@ export function ConversationInterface({ initialConversations, initialConversatio
                                 onSendMessage={handleSendMessage}
                                 onSendMedia={handleSendMedia}
                                 onRefetchMedia={handleRefetchMedia}
+                                onRequestTranscript={handleRequestTranscript}
+                                onExtractViewingNotes={handleExtractViewingNotes}
                                 onRetryTranscript={handleRetryTranscript}
+                                onBulkTranscribeUnprocessedAudio={handleBulkTranscribeUnprocessedAudio}
+                                transcriptOnDemandEnabled={transcriptOnDemandEnabled}
                                 onSync={handleSync}
                                 onFetchHistory={async () => {
                                     setLoadingMessages(true);

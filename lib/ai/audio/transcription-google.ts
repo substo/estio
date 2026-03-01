@@ -140,6 +140,7 @@ export async function ensurePendingMessageTranscript(input: AudioTranscriptionJo
             estimatedCostUsd: null,
             startedAt: null,
             completedAt: null,
+            deadLetteredAt: null,
         }
         : {};
 
@@ -157,6 +158,7 @@ export async function ensurePendingMessageTranscript(input: AudioTranscriptionJo
             model,
             status: "pending",
             error: null,
+            deadLetteredAt: null,
             ...reset,
         },
     });
@@ -197,6 +199,7 @@ export async function transcribeAttachmentWithGoogle(input: AudioTranscriptionJo
                 model: resolvedModel,
                 status: "processing",
                 error: null,
+                deadLetteredAt: null,
                 startedAt,
                 completedAt: null,
                 ...(input.force ? {
@@ -252,6 +255,7 @@ export async function transcribeAttachmentWithGoogle(input: AudioTranscriptionJo
                 status: "completed",
                 text: transcriptText,
                 error: null,
+                deadLetteredAt: null,
                 promptTokens: readUsageInt(usage, "promptTokenCount"),
                 completionTokens: readUsageInt(usage, "candidatesTokenCount"),
                 totalTokens: readUsageInt(usage, "totalTokenCount"),
@@ -278,6 +282,7 @@ export async function transcribeAttachmentWithGoogle(input: AudioTranscriptionJo
                     error: errorMessage,
                     startedAt,
                     completedAt: new Date(),
+                    retryCount: 1,
                 },
                 update: {
                     provider: "google",
@@ -285,6 +290,7 @@ export async function transcribeAttachmentWithGoogle(input: AudioTranscriptionJo
                     status: "failed",
                     error: errorMessage,
                     completedAt: new Date(),
+                    retryCount: { increment: 1 },
                 },
             });
         } catch (persistErr) {

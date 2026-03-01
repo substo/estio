@@ -353,6 +353,9 @@ model SiteConfig {
   outreachConfig Json? // AI Outreach Assistant Configuration (Prompts, Enabled status)
 
   publicListingEnabled Boolean @default(true) // Feature Flag for "List Your Property"
+  whatsappTranscriptOnDemandEnabled Boolean @default(false) // Phase 2A: Manual transcript/backfill controls
+  whatsappTranscriptRetentionDays Int @default(90) // Phase 2C: retention policy (30/90/365)
+  whatsappTranscriptVisibility String @default("team") // Phase 2C: transcript visibility (team|admin_only)
 
   // Existing Fields
   primaryColor   String?
@@ -1169,14 +1172,51 @@ model MessageTranscript {
   estimatedCostUsd Float?
   startedAt        DateTime?
   completedAt      DateTime?
+  retryCount       Int      @default(0)
+  lastRetryAt      DateTime?
+  deadLetteredAt   DateTime?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
   message    Message           @relation(fields: [messageId], references: [id], onDelete: Cascade)
   attachment MessageAttachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+  extractions MessageTranscriptExtraction[]
 
   @@index([messageId])
   @@index([status])
+  @@index([status, updatedAt])
+  @@index([deadLetteredAt])
+  @@index([createdAt])
+}
+
+model MessageTranscriptExtraction {
+  id               String   @id @default(cuid())
+  transcriptId     String
+  provider         String   @default("google")
+  model            String
+  status           String   @default("pending") // pending | processing | completed | failed
+  payload          Json?
+  error            String?
+  promptTokens     Int?
+  completionTokens Int?
+  totalTokens      Int?
+  estimatedCostUsd Float?
+  startedAt        DateTime?
+  completedAt      DateTime?
+  retryCount       Int      @default(0)
+  lastRetryAt      DateTime?
+  deadLetteredAt   DateTime?
+  crmLogHistoryId  String?
+  crmLoggedAt      DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  transcript MessageTranscript @relation(fields: [transcriptId], references: [id], onDelete: Cascade)
+
+  @@index([transcriptId])
+  @@index([status])
+  @@index([status, updatedAt])
+  @@index([deadLetteredAt])
   @@index([createdAt])
 }
 

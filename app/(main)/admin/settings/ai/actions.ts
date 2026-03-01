@@ -27,6 +27,17 @@ function normalizeTranscriptionModel(value: unknown): string {
     return looksAudioCapable ? normalized : GEMINI_FLASH_STABLE_FALLBACK;
 }
 
+function normalizeTranscriptRetentionDays(value: unknown): number {
+    const numeric = Number(value);
+    if (numeric === 30 || numeric === 90 || numeric === 365) return numeric;
+    return 90;
+}
+
+function normalizeTranscriptVisibility(value: unknown): "team" | "admin_only" {
+    const normalized = String(value || "").trim().toLowerCase();
+    return normalized === "admin_only" ? "admin_only" : "team";
+}
+
 export async function updateAiSettings(
     prevState: AiSettingsState,
     formData: FormData
@@ -46,6 +57,9 @@ export async function updateAiSettings(
 
     try {
         const transcriptionModel = normalizeTranscriptionModel(formData.get("googleAiModelTranscription"));
+        const transcriptOnDemandEnabled = formData.get("whatsappTranscriptOnDemandEnabled") === "on";
+        const transcriptRetentionDays = normalizeTranscriptRetentionDays(formData.get("whatsappTranscriptRetentionDays"));
+        const transcriptVisibility = normalizeTranscriptVisibility(formData.get("whatsappTranscriptVisibility"));
 
         await db.siteConfig.upsert({
             where: { locationId },
@@ -56,6 +70,9 @@ export async function updateAiSettings(
                 googleAiModelExtraction: formData.get("googleAiModelExtraction") as string || GEMINI_FLASH_LATEST_ALIAS,
                 googleAiModelDesign: formData.get("googleAiModelDesign") as string || GEMINI_FLASH_LATEST_ALIAS,
                 googleAiModelTranscription: transcriptionModel,
+                whatsappTranscriptOnDemandEnabled: transcriptOnDemandEnabled,
+                whatsappTranscriptRetentionDays: transcriptRetentionDays,
+                whatsappTranscriptVisibility: transcriptVisibility,
                 brandVoice: formData.get("brandVoice") as string,
                 outreachConfig: {
                     enabled: formData.get("outreachEnabled") === "on",
@@ -70,6 +87,9 @@ export async function updateAiSettings(
                 googleAiModelExtraction: formData.get("googleAiModelExtraction") as string || GEMINI_FLASH_LATEST_ALIAS,
                 googleAiModelDesign: formData.get("googleAiModelDesign") as string || GEMINI_FLASH_LATEST_ALIAS,
                 googleAiModelTranscription: transcriptionModel,
+                whatsappTranscriptOnDemandEnabled: transcriptOnDemandEnabled,
+                whatsappTranscriptRetentionDays: transcriptRetentionDays,
+                whatsappTranscriptVisibility: transcriptVisibility,
                 brandVoice: formData.get("brandVoice") as string,
                 outreachConfig: {
                     enabled: formData.get("outreachEnabled") === "on",

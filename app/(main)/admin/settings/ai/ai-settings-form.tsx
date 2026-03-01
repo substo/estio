@@ -231,6 +231,62 @@ export function AiSettingsForm({ initialData, locationId }: { initialData: any, 
                                 <p className="text-[10px] text-muted-foreground">Used for WhatsApp audio transcript generation.</p>
                             </div>
                         </div>
+                        <div className="mt-4 flex items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2">
+                            <div className="space-y-0.5">
+                                <Label htmlFor="whatsappTranscriptOnDemandEnabled" className="text-xs text-slate-500 uppercase tracking-wider">
+                                    Audio: On-demand Controls
+                                </Label>
+                                <p className="text-[10px] text-muted-foreground">
+                                    Enables `Transcribe now`, `Regenerate transcript`, and conversation bulk backfill actions.
+                                </p>
+                            </div>
+                            <input
+                                id="whatsappTranscriptOnDemandEnabled"
+                                name="whatsappTranscriptOnDemandEnabled"
+                                type="checkbox"
+                                className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                                defaultChecked={initialData?.whatsappTranscriptOnDemandEnabled === true}
+                            />
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                            <div className="grid gap-2 rounded-md border border-slate-200 bg-white p-3">
+                                <Label htmlFor="whatsappTranscriptRetentionDays" className="text-xs text-slate-500 uppercase tracking-wider">
+                                    Audio: Retention Policy
+                                </Label>
+                                <select
+                                    id="whatsappTranscriptRetentionDays"
+                                    name="whatsappTranscriptRetentionDays"
+                                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                                    defaultValue={String(initialData?.whatsappTranscriptRetentionDays || 90)}
+                                >
+                                    <option value="30">30 days</option>
+                                    <option value="90">90 days</option>
+                                    <option value="365">365 days</option>
+                                </select>
+                                <p className="text-[10px] text-muted-foreground">
+                                    Applies to automatic transcript cleanup jobs.
+                                </p>
+                            </div>
+
+                            <div className="grid gap-2 rounded-md border border-slate-200 bg-white p-3">
+                                <Label htmlFor="whatsappTranscriptVisibility" className="text-xs text-slate-500 uppercase tracking-wider">
+                                    Audio: Visibility Policy
+                                </Label>
+                                <select
+                                    id="whatsappTranscriptVisibility"
+                                    name="whatsappTranscriptVisibility"
+                                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                                    defaultValue={String(initialData?.whatsappTranscriptVisibility || "team")}
+                                >
+                                    <option value="team">Team members</option>
+                                    <option value="admin_only">Admins only</option>
+                                </select>
+                                <p className="text-[10px] text-muted-foreground">
+                                    Controls who can view transcript text and extraction payloads.
+                                </p>
+                            </div>
+                        </div>
                     </div>
                 </div>
 

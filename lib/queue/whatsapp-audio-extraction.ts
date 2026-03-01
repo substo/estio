@@ -1,31 +1,32 @@
 import {
-    ensurePendingMessageTranscript,
-    transcribeAttachmentWithGoogle,
-    type AudioTranscriptionJobInput,
-} from "@/lib/ai/audio/transcription-google";
+    ensurePendingTranscriptExtraction,
+    extractViewingNotesWithGoogle,
+    type WhatsAppViewingNotesExtractionInput,
+} from "@/lib/ai/audio/viewing-notes-extraction-google";
 
 const REDIS_CONNECTION = {
     host: process.env.REDIS_HOST || "127.0.0.1",
     port: Number(process.env.REDIS_PORT || 6379),
 };
 
-const QUEUE_NAME = "whatsapp-audio-transcription";
+const QUEUE_NAME = "whatsapp-audio-extraction";
 
-interface WhatsAppAudioTranscriptionJobData extends AudioTranscriptionJobInput {
+interface WhatsAppAudioExtractionJobData extends WhatsAppViewingNotesExtractionInput {
     queuedAt: string;
 }
 
-export type WhatsAppAudioTranscriptionPriority = "normal" | "high";
+export type WhatsAppAudioExtractionPriority = "normal" | "high";
 
-export type EnqueueWhatsAppAudioTranscriptionInput = AudioTranscriptionJobInput & {
-    priority?: WhatsAppAudioTranscriptionPriority;
+export type EnqueueWhatsAppAudioExtractionInput = WhatsAppViewingNotesExtractionInput & {
+    priority?: WhatsAppAudioExtractionPriority;
     allowInlineFallback?: boolean;
 };
 
-export type EnqueueWhatsAppAudioTranscriptionResult = {
+export type EnqueueWhatsAppAudioExtractionResult = {
     accepted: boolean;
     mode: "queued" | "already-queued" | "inline-fallback" | "skipped" | "queue-unavailable";
-    reason?: "already_completed" | "enqueue_failed";
+    reason?: "already_completed" | "already_in_progress" | "enqueue_failed";
+    extractionId: string;
     transcriptId: string;
     jobId?: string;
     error?: string;
@@ -38,7 +39,7 @@ async function getQueueInstance() {
     if (!_queuePromise) {
         _queuePromise = (async () => {
             const { Queue } = await import("bullmq");
-            return new Queue<WhatsAppAudioTranscriptionJobData>(QUEUE_NAME, {
+            return new Queue<WhatsAppAudioExtractionJobData>(QUEUE_NAME, {
                 connection: REDIS_CONNECTION,
                 defaultJobOptions: {
                     removeOnComplete: true,
@@ -50,7 +51,7 @@ async function getQueueInstance() {
     return _queuePromise;
 }
 
-function resolveQueuePriority(priority?: WhatsAppAudioTranscriptionPriority): number {
+function resolveQueuePriority(priority?: WhatsAppAudioExtractionPriority): number {
     return priority === "high" ? 1 : 5;
 }
 
@@ -60,20 +61,33 @@ function isDuplicateQueueJobError(error: unknown): boolean {
     return message.includes("job") && message.includes("already") && message.includes("exist");
 }
 
-export async function enqueueWhatsAppAudioTranscription(
-    input: EnqueueWhatsAppAudioTranscriptionInput
-): Promise<EnqueueWhatsAppAudioTranscriptionResult> {
-    const prepared = await ensurePendingMessageTranscript(input);
+export async function enqueueWhatsAppAudioExtraction(
+    input: EnqueueWhatsAppAudioExtractionInput
+): Promise<EnqueueWhatsAppAudioExtractionResult> {
+    const prepared = await ensurePendingTranscriptExtraction(input);
     if (!prepared.shouldEnqueue) {
+        if (prepared.reason === "already_in_progress") {
+            return {
+                accepted: true as const,
+                mode: "already-queued" as const,
+                reason: "already_in_progress" as const,
+                extractionId: prepared.extractionId,
+                transcriptId: prepared.transcriptId,
+                jobId: `extract:${prepared.extractionId}`,
+            };
+        }
+
         return {
             accepted: false as const,
             mode: "skipped" as const,
-            reason: "already_completed",
+            reason: "already_completed" as const,
+            extractionId: prepared.extractionId,
             transcriptId: prepared.transcriptId,
+            jobId: `extract:${prepared.extractionId}`,
         };
     }
 
-    const jobId = `transcript:${input.attachmentId}`;
+    const jobId = `extract:${prepared.extractionId}`;
     const allowInlineFallback = input.allowInlineFallback !== false;
 
     try {
@@ -83,17 +97,20 @@ export async function enqueueWhatsAppAudioTranscription(
             return {
                 accepted: true as const,
                 mode: "already-queued" as const,
+                reason: "already_in_progress" as const,
+                extractionId: prepared.extractionId,
                 transcriptId: prepared.transcriptId,
                 jobId,
             };
         }
 
         await queue.add(
-            "transcribe-audio",
+            "extract-viewing-notes",
             {
                 locationId: input.locationId,
                 messageId: input.messageId,
                 attachmentId: input.attachmentId,
+                extractionId: prepared.extractionId,
                 force: !!input.force,
                 queuedAt: new Date().toISOString(),
             },
@@ -111,6 +128,7 @@ export async function enqueueWhatsAppAudioTranscription(
         return {
             accepted: true as const,
             mode: "queued" as const,
+            extractionId: prepared.extractionId,
             transcriptId: prepared.transcriptId,
             jobId,
         };
@@ -119,6 +137,8 @@ export async function enqueueWhatsAppAudioTranscription(
             return {
                 accepted: true as const,
                 mode: "already-queued" as const,
+                reason: "already_in_progress" as const,
+                extractionId: prepared.extractionId,
                 transcriptId: prepared.transcriptId,
                 jobId,
             };
@@ -129,40 +149,49 @@ export async function enqueueWhatsAppAudioTranscription(
                 accepted: false as const,
                 mode: "queue-unavailable" as const,
                 reason: "enqueue_failed" as const,
+                extractionId: prepared.extractionId,
                 transcriptId: prepared.transcriptId,
                 jobId,
-                error: String((queueError as any)?.message || "Failed to enqueue job."),
+                error: String((queueError as any)?.message || "Failed to enqueue extraction job."),
             };
         }
 
-        console.warn("[Queue] Failed to enqueue audio transcription job. Falling back to inline processing:", queueError);
+        console.warn("[Queue] Failed to enqueue audio extraction job. Falling back to inline processing:", queueError);
 
-        void transcribeAttachmentWithGoogle(input).catch((inlineErr) => {
-            console.error("[Queue] Inline audio transcription fallback failed:", inlineErr);
+        void extractViewingNotesWithGoogle({
+            locationId: input.locationId,
+            messageId: input.messageId,
+            attachmentId: input.attachmentId,
+            extractionId: prepared.extractionId,
+            force: !!input.force,
+        }).catch((inlineErr) => {
+            console.error("[Queue] Inline audio extraction fallback failed:", inlineErr);
         });
 
         return {
             accepted: true as const,
             mode: "inline-fallback" as const,
+            extractionId: prepared.extractionId,
             transcriptId: prepared.transcriptId,
             jobId,
         };
     }
 }
 
-export async function initWhatsAppAudioTranscriptionWorker() {
+export async function initWhatsAppAudioExtractionWorker() {
     if (_workerPromise) return _workerPromise;
 
     _workerPromise = (async () => {
         const { Worker } = await import("bullmq");
 
-        const worker = new Worker<WhatsAppAudioTranscriptionJobData>(
+        const worker = new Worker<WhatsAppAudioExtractionJobData>(
             QUEUE_NAME,
             async (job: any) => {
-                await transcribeAttachmentWithGoogle({
+                await extractViewingNotesWithGoogle({
                     locationId: job.data.locationId,
                     messageId: job.data.messageId,
                     attachmentId: job.data.attachmentId,
+                    extractionId: job.data.extractionId,
                     force: !!job.data.force,
                 });
             },
@@ -173,12 +202,12 @@ export async function initWhatsAppAudioTranscriptionWorker() {
         );
 
         worker.on("ready", () => {
-            console.log("[Queue] WhatsApp audio transcription worker is ready.");
+            console.log("[Queue] WhatsApp audio extraction worker is ready.");
         });
 
         worker.on("failed", (job: any, err: Error) => {
             console.error(
-                `[Queue] Audio transcription job failed (${job?.id || "unknown"}): ${err.message}`
+                `[Queue] Audio extraction job failed (${job?.id || "unknown"}): ${err.message}`
             );
         });
 

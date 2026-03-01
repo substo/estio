@@ -4,8 +4,9 @@ import { GEMINI_FLASH_LATEST_ALIAS, GOOGLE_AI_MODELS } from "@/lib/ai/models";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Send, MessageSquare, RefreshCw, Paperclip, FileText, Trash2, Mic, Square } from "lucide-react";
+import { Loader2, Send, MessageSquare, RefreshCw, Paperclip, FileText, Trash2, Mic, Square, Search, BarChart3 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 
 interface ChatWindowProps {
@@ -15,7 +16,19 @@ interface ChatWindowProps {
     onSendMessage: (text: string, type: 'SMS' | 'Email' | 'WhatsApp') => void | Promise<void>;
     onSendMedia?: (file: File, caption: string) => void | Promise<void>;
     onRefetchMedia?: (messageId: string) => void | Promise<void>;
+    onRequestTranscript?: (
+        messageId: string,
+        attachmentId: string,
+        options?: { force?: boolean }
+    ) => void | Promise<void>;
+    onExtractViewingNotes?: (
+        messageId: string,
+        attachmentId: string,
+        options?: { force?: boolean }
+    ) => void | Promise<void>;
     onRetryTranscript?: (messageId: string, attachmentId: string) => void | Promise<void>;
+    onBulkTranscribeUnprocessedAudio?: (options?: { window?: "30d" | "all" }) => void | Promise<void>;
+    transcriptOnDemandEnabled?: boolean;
     onSync?: () => void;
     onFetchHistory?: () => void;
     onGenerateDraft?: (instruction?: string, model?: string) => Promise<string | null>; // Returns draft text or null if failed
@@ -61,6 +74,8 @@ import {
     getSmsChannelEligibility,
     getWhatsAppChannelEligibility,
     summarizeSelectionToCrmLog,
+    searchConversationTranscriptMatches,
+    getAudioTranscriptMonthlyReport,
 } from "@/app/(main)/admin/conversations/actions";
 import type { SelectionBatchInput, SelectionBatchItem } from "./message-selection-actions";
 
@@ -75,6 +90,51 @@ type SmsEligibilityState =
     | { status: 'eligible' }
     | { status: 'ineligible'; reason?: string }
     | { status: 'unknown'; reason?: string };
+
+type TranscriptSearchResult = Awaited<ReturnType<typeof searchConversationTranscriptMatches>>;
+type TranscriptSearchSuccess = Extract<TranscriptSearchResult, { success: true }>;
+type TranscriptSearchMatch = TranscriptSearchSuccess["results"][number];
+type TranscriptMonthlyReportResult = Awaited<ReturnType<typeof getAudioTranscriptMonthlyReport>>;
+type TranscriptMonthlyReportSuccess = Extract<TranscriptMonthlyReportResult, { success: true }>;
+type TranscriptReportWindowOffset = 0 | 1 | 2;
+
+const TRANSCRIPT_SEARCH_KEYWORDS = [
+    "budget",
+    "requirements",
+    "location",
+    "viewing",
+    "objection",
+    "next action",
+    "bedroom",
+    "villa",
+];
+
+function formatUsd(value: number): string {
+    return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 4,
+    }).format(Number(value || 0));
+}
+
+function formatTokenCount(value: number): string {
+    const normalized = Number(value || 0);
+    if (!Number.isFinite(normalized)) return "0";
+    return Math.round(normalized).toLocaleString();
+}
+
+function formatMonthOffsetLabel(offset: number): string {
+    const base = new Date();
+    const target = new Date(base.getFullYear(), base.getMonth() - offset, 1);
+    return target.toLocaleDateString(undefined, { month: "short", year: "numeric" });
+}
+
+function formatReportDay(date: string): string {
+    const parsed = new Date(`${date}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime())) return date;
+    return parsed.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
 
 function getFallbackChannelWithoutWhatsApp(conversation: Conversation): 'SMS' | 'Email' {
     return getInitialChannel(conversation) === 'Email' ? 'Email' : 'SMS';
@@ -101,7 +161,23 @@ function buildBatchContextText(items: SelectionBatchItem[]) {
     return items.map((item, index) => `Snippet ${index + 1}:\n${item.text}`).join("\n\n");
 }
 
-export function ChatWindow({ conversation, messages, loading, onSendMessage, onSendMedia, onRefetchMedia, onRetryTranscript, onSync, onGenerateDraft, onFetchHistory, suggestions = [] }: ChatWindowProps & { suggestions?: string[] }) {
+export function ChatWindow({
+    conversation,
+    messages,
+    loading,
+    onSendMessage,
+    onSendMedia,
+    onRefetchMedia,
+    onRequestTranscript,
+    onExtractViewingNotes,
+    onRetryTranscript,
+    onBulkTranscribeUnprocessedAudio,
+    transcriptOnDemandEnabled,
+    onSync,
+    onGenerateDraft,
+    onFetchHistory,
+    suggestions = [],
+}: ChatWindowProps & { suggestions?: string[] }) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const [draft, setDraft] = useState("");
     const [sending, setSending] = useState(false);
@@ -120,6 +196,23 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
     const [selectionBatch, setSelectionBatch] = useState<SelectionBatchItem[]>([]);
     const [isSummarizingBatch, setIsSummarizingBatch] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
+    const [bulkTranscriptWindow, setBulkTranscriptWindow] = useState<"30d" | "all">("30d");
+    const [isBulkTranscribingAudio, setIsBulkTranscribingAudio] = useState(false);
+    const [showTranscriptSearch, setShowTranscriptSearch] = useState(false);
+    const [transcriptSearchQuery, setTranscriptSearchQuery] = useState("");
+    const [isTranscriptSearching, setIsTranscriptSearching] = useState(false);
+    const [transcriptSearchError, setTranscriptSearchError] = useState<string | null>(null);
+    const [transcriptSearchTotal, setTranscriptSearchTotal] = useState(0);
+    const [transcriptSearchResults, setTranscriptSearchResults] = useState<TranscriptSearchMatch[]>([]);
+    const [showTranscriptReport, setShowTranscriptReport] = useState(false);
+    const [transcriptReportWindow, setTranscriptReportWindow] = useState<TranscriptReportWindowOffset>(0);
+    const [isTranscriptReportLoading, setIsTranscriptReportLoading] = useState(false);
+    const [transcriptReportError, setTranscriptReportError] = useState<string | null>(null);
+    const [transcriptReport, setTranscriptReport] = useState<TranscriptMonthlyReportSuccess | null>(null);
+    const [jumpMessageId, setJumpMessageId] = useState<string | null>(null);
+    const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
+    const jumpHighlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const canUseTranscriptOnDemand = transcriptOnDemandEnabled !== false;
 
     // Fetch available models on mount
     useEffect(() => {
@@ -140,7 +233,28 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
     useEffect(() => {
         setSelectedChannel(getInitialChannel(conversation));
         setSelectionBatch([]);
+        setIsBulkTranscribingAudio(false);
+        setTranscriptSearchQuery("");
+        setTranscriptSearchError(null);
+        setTranscriptSearchResults([]);
+        setTranscriptSearchTotal(0);
+        setTranscriptReportError(null);
+        setTranscriptReport(null);
+        setTranscriptReportWindow(0);
+        setShowTranscriptSearch(false);
+        setShowTranscriptReport(false);
+        setJumpMessageId(null);
+        messageRefs.current = {};
     }, [conversation.id]);
+
+    useEffect(() => {
+        return () => {
+            if (jumpHighlightTimeoutRef.current) {
+                clearTimeout(jumpHighlightTimeoutRef.current);
+                jumpHighlightTimeoutRef.current = null;
+            }
+        };
+    }, []);
 
     useEffect(() => {
         let cancelled = false;
@@ -455,6 +569,104 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
         setSelectionBatch([]);
     }, []);
 
+    const handleBulkTranscribeUnprocessedAudio = useCallback(async () => {
+        if (!onBulkTranscribeUnprocessedAudio || isBulkTranscribingAudio) return;
+        setIsBulkTranscribingAudio(true);
+        try {
+            await Promise.resolve(onBulkTranscribeUnprocessedAudio({ window: bulkTranscriptWindow }));
+        } finally {
+            setIsBulkTranscribingAudio(false);
+        }
+    }, [bulkTranscriptWindow, isBulkTranscribingAudio, onBulkTranscribeUnprocessedAudio]);
+
+    const jumpToMessage = useCallback((messageId: string) => {
+        const target = messageRefs.current[messageId];
+        if (!target) {
+            toast.error("Message not found in current view.");
+            return;
+        }
+
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+        setJumpMessageId(messageId);
+        if (jumpHighlightTimeoutRef.current) {
+            clearTimeout(jumpHighlightTimeoutRef.current);
+        }
+        jumpHighlightTimeoutRef.current = setTimeout(() => {
+            setJumpMessageId((current) => current === messageId ? null : current);
+            jumpHighlightTimeoutRef.current = null;
+        }, 2200);
+    }, []);
+
+    const handleTranscriptSearch = useCallback(async (overrideQuery?: string) => {
+        const query = String(overrideQuery ?? transcriptSearchQuery).trim();
+        if (!query) {
+            setTranscriptSearchError(null);
+            setTranscriptSearchResults([]);
+            setTranscriptSearchTotal(0);
+            return;
+        }
+
+        setIsTranscriptSearching(true);
+        setTranscriptSearchError(null);
+        try {
+            const result = await searchConversationTranscriptMatches(conversation.id, {
+                query,
+                limit: 20,
+            });
+
+            if (!result?.success) {
+                setTranscriptSearchResults([]);
+                setTranscriptSearchTotal(0);
+                setTranscriptSearchError(result?.error || "Failed to search transcripts.");
+                return;
+            }
+
+            setTranscriptSearchResults(result.results || []);
+            setTranscriptSearchTotal(Number(result.totalMatches || 0));
+        } catch (error: any) {
+            setTranscriptSearchResults([]);
+            setTranscriptSearchTotal(0);
+            setTranscriptSearchError(String(error?.message || "Failed to search transcripts."));
+        } finally {
+            setIsTranscriptSearching(false);
+        }
+    }, [conversation.id, transcriptSearchQuery]);
+
+    const handleTranscriptKeyword = useCallback((keyword: string) => {
+        setTranscriptSearchQuery(keyword);
+        void handleTranscriptSearch(keyword);
+    }, [handleTranscriptSearch]);
+
+    const loadTranscriptReport = useCallback(async (windowOffset?: TranscriptReportWindowOffset) => {
+        const monthOffset = typeof windowOffset === "number" ? windowOffset : transcriptReportWindow;
+        setIsTranscriptReportLoading(true);
+        setTranscriptReportError(null);
+        try {
+            const result = await getAudioTranscriptMonthlyReport({
+                monthOffset,
+                includeExtractions: true,
+            });
+
+            if (!result?.success) {
+                setTranscriptReport(null);
+                setTranscriptReportError(result?.error || "Failed to load transcript report.");
+                return;
+            }
+
+            setTranscriptReport(result);
+        } catch (error: any) {
+            setTranscriptReport(null);
+            setTranscriptReportError(String(error?.message || "Failed to load transcript report."));
+        } finally {
+            setIsTranscriptReportLoading(false);
+        }
+    }, [transcriptReportWindow]);
+
+    useEffect(() => {
+        if (!showTranscriptReport) return;
+        void loadTranscriptReport();
+    }, [showTranscriptReport, transcriptReportWindow, loadTranscriptReport]);
+
     const batchContextText = useMemo(() => buildBatchContextText(selectionBatch), [selectionBatch]);
 
     const handleSummarizeBatch = async () => {
@@ -482,6 +694,7 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
 
     const isWhatsAppDisabled = whatsAppEligibility.status === 'ineligible';
     const isSmsDisabled = smsEligibility.status === 'ineligible';
+    const isWhatsAppConversation = String(conversation.lastMessageType || conversation.type || "").toUpperCase().includes("WHATSAPP");
     const channelSelectorTitle =
         selectedChannel === 'SMS' && isSmsDisabled
             ? (smsEligibility.reason || 'SMS not available for this contact')
@@ -527,10 +740,66 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
                             </Button>
                         </>
                     )}
-                    {conversation.lastMessageType === 'TYPE_WHATSAPP' && onSync && (
+                    {isWhatsAppConversation && onSync && (
                         <Button variant="ghost" size="icon" onClick={onSync} title="Sync WhatsApp History">
                             <RefreshCw className="h-4 w-4 text-gray-500" />
                         </Button>
+                    )}
+                    {isWhatsAppConversation
+                        && canUseTranscriptOnDemand
+                        && onBulkTranscribeUnprocessedAudio && (
+                            <div className="flex items-center gap-1">
+                                <Select
+                                    value={bulkTranscriptWindow}
+                                    onValueChange={(value: "30d" | "all") => setBulkTranscriptWindow(value)}
+                                    disabled={isBulkTranscribingAudio}
+                                >
+                                    <SelectTrigger
+                                        className="h-8 min-w-[118px] border-gray-200 bg-white text-[11px]"
+                                        title="Choose audio backfill window"
+                                    >
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="30d">Last 30 days</SelectItem>
+                                        <SelectItem value="all">All in convo</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 px-2 text-[11px]"
+                                    onClick={handleBulkTranscribeUnprocessedAudio}
+                                    disabled={isBulkTranscribingAudio}
+                                    title="Queue transcript jobs for audio messages with no transcript row"
+                                >
+                                    {isBulkTranscribingAudio ? "Queuing..." : "Transcribe unprocessed"}
+                                </Button>
+                            </div>
+                        )}
+                    {isWhatsAppConversation && (
+                        <>
+                            <Button
+                                variant={showTranscriptSearch ? "secondary" : "outline"}
+                                size="sm"
+                                className="h-8 gap-1 px-2 text-[11px]"
+                                onClick={() => setShowTranscriptSearch((prev) => !prev)}
+                                title="Search transcript text and jump to matching messages"
+                            >
+                                <Search className="h-3.5 w-3.5" />
+                                Transcript Search
+                            </Button>
+                            <Button
+                                variant={showTranscriptReport ? "secondary" : "outline"}
+                                size="sm"
+                                className="h-8 gap-1 px-2 text-[11px]"
+                                onClick={() => setShowTranscriptReport((prev) => !prev)}
+                                title="Open monthly transcript and extraction reporting"
+                            >
+                                <BarChart3 className="h-3.5 w-3.5" />
+                                Transcript Report
+                            </Button>
+                        </>
                     )}
                     {(conversation.type === 'Email' || conversation.lastMessageType === 'TYPE_EMAIL') && onFetchHistory && (
                         <Button variant="ghost" size="icon" onClick={onFetchHistory} title="Fetch Gmail History">
@@ -539,6 +808,228 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
                     )}
                 </div>
             </div>
+
+            {(showTranscriptSearch || showTranscriptReport) && (
+                <div className="border-b bg-slate-50/80 px-4 py-3 space-y-3">
+                    {showTranscriptSearch && (
+                        <div className="rounded-md border border-slate-200 bg-white p-3 space-y-2">
+                            <div className="flex items-center gap-2">
+                                <Search className="h-4 w-4 text-slate-600" />
+                                <p className="text-xs font-semibold text-slate-800">Transcript Search</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <Input
+                                    value={transcriptSearchQuery}
+                                    onChange={(e) => setTranscriptSearchQuery(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                            e.preventDefault();
+                                            void handleTranscriptSearch();
+                                        }
+                                    }}
+                                    placeholder="Search transcript text..."
+                                    className="h-8 text-xs"
+                                />
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    className="h-8 px-2 text-[11px]"
+                                    onClick={() => void handleTranscriptSearch()}
+                                    disabled={isTranscriptSearching}
+                                >
+                                    {isTranscriptSearching ? "Searching..." : "Search"}
+                                </Button>
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                                {TRANSCRIPT_SEARCH_KEYWORDS.map((keyword) => (
+                                    <button
+                                        key={keyword}
+                                        type="button"
+                                        className={cn(
+                                            "rounded border px-2 py-0.5 text-[10px] transition-colors",
+                                            transcriptSearchQuery.trim().toLowerCase() === keyword.toLowerCase()
+                                                ? "border-blue-300 bg-blue-50 text-blue-700"
+                                                : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
+                                        )}
+                                        onClick={() => handleTranscriptKeyword(keyword)}
+                                        disabled={isTranscriptSearching}
+                                    >
+                                        {keyword}
+                                    </button>
+                                ))}
+                            </div>
+                            {transcriptSearchError && (
+                                <div className="rounded border border-red-200 bg-red-50 px-2 py-1 text-[11px] text-red-700">
+                                    {transcriptSearchError}
+                                </div>
+                            )}
+                            {!transcriptSearchError && transcriptSearchQuery.trim() && !isTranscriptSearching && (
+                                <div className="text-[11px] text-slate-500">
+                                    {transcriptSearchTotal > 0
+                                        ? `Showing ${transcriptSearchResults.length} of ${transcriptSearchTotal} matches.`
+                                        : "No transcript matches found for this query."}
+                                </div>
+                            )}
+                            {transcriptSearchResults.length > 0 && (
+                                <div className="max-h-52 space-y-1 overflow-y-auto rounded border border-slate-200 bg-slate-50 p-1.5">
+                                    {transcriptSearchResults.map((match) => (
+                                        <button
+                                            key={`${match.transcriptId}:${match.messageId}`}
+                                            type="button"
+                                            onClick={() => jumpToMessage(match.messageId)}
+                                            className="w-full rounded border border-transparent bg-white px-2 py-1.5 text-left text-[11px] hover:border-blue-200 hover:bg-blue-50"
+                                        >
+                                            <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                                                <span>{new Date(match.messageDate).toLocaleString()}</span>
+                                                <span className="uppercase">{match.direction}</span>
+                                                <span>{match.model || "unknown-model"}</span>
+                                            </div>
+                                            <p className="mt-0.5 text-slate-700 line-clamp-2">{match.snippet || "(empty snippet)"}</p>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {showTranscriptReport && (
+                        <div className="rounded-md border border-slate-200 bg-white p-3 space-y-2">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                    <BarChart3 className="h-4 w-4 text-slate-600" />
+                                    <p className="text-xs font-semibold text-slate-800">Monthly Transcript Report</p>
+                                </div>
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 px-2 text-[11px]"
+                                    onClick={() => void loadTranscriptReport()}
+                                    disabled={isTranscriptReportLoading}
+                                >
+                                    {isTranscriptReportLoading ? "Refreshing..." : "Refresh"}
+                                </Button>
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                                {[0, 1, 2].map((windowOffset) => (
+                                    <Button
+                                        key={windowOffset}
+                                        type="button"
+                                        variant={transcriptReportWindow === windowOffset ? "secondary" : "ghost"}
+                                        size="sm"
+                                        className="h-6 px-2 text-[10px]"
+                                        onClick={() => setTranscriptReportWindow(windowOffset as TranscriptReportWindowOffset)}
+                                        disabled={isTranscriptReportLoading}
+                                    >
+                                        {formatMonthOffsetLabel(windowOffset)}
+                                    </Button>
+                                ))}
+                            </div>
+
+                            {transcriptReportError && (
+                                <div className="rounded border border-red-200 bg-red-50 px-2 py-1 text-[11px] text-red-700">
+                                    {transcriptReportError}
+                                </div>
+                            )}
+
+                            {isTranscriptReportLoading && !transcriptReport && (
+                                <div className="text-[11px] text-slate-500">Loading report...</div>
+                            )}
+
+                            {transcriptReport && (
+                                <div className="space-y-2">
+                                    <div className="text-[11px] text-slate-500">{transcriptReport.window.label}</div>
+                                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                                        <div className="rounded border bg-slate-50 p-2">
+                                            <div className="text-[10px] uppercase text-slate-500">Transcripts</div>
+                                            <div className="text-sm font-semibold text-slate-900">{transcriptReport.totals.transcripts}</div>
+                                        </div>
+                                        <div className="rounded border bg-slate-50 p-2">
+                                            <div className="text-[10px] uppercase text-slate-500">Extractions</div>
+                                            <div className="text-sm font-semibold text-slate-900">{transcriptReport.totals.extractions}</div>
+                                        </div>
+                                        <div className="rounded border bg-slate-50 p-2">
+                                            <div className="text-[10px] uppercase text-slate-500">Completed</div>
+                                            <div className="text-sm font-semibold text-slate-900">{transcriptReport.totals.completed}</div>
+                                        </div>
+                                        <div className="rounded border bg-slate-50 p-2">
+                                            <div className="text-[10px] uppercase text-slate-500">Failed</div>
+                                            <div className="text-sm font-semibold text-slate-900">{transcriptReport.totals.failed}</div>
+                                        </div>
+                                        <div className="rounded border bg-slate-50 p-2">
+                                            <div className="text-[10px] uppercase text-slate-500">Cost</div>
+                                            <div className="text-sm font-semibold text-slate-900">{formatUsd(transcriptReport.totals.estimatedCostUsd)}</div>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                        <div className="rounded border bg-slate-50 px-2 py-1.5 text-[11px] text-slate-700">
+                                            Transcript status: completed {transcriptReport.status.transcripts.completed}, failed {transcriptReport.status.transcripts.failed}, pending {transcriptReport.status.transcripts.pending}, processing {transcriptReport.status.transcripts.processing}
+                                        </div>
+                                        <div className="rounded border bg-slate-50 px-2 py-1.5 text-[11px] text-slate-700">
+                                            Extraction status: completed {transcriptReport.status.extractions.completed}, failed {transcriptReport.status.extractions.failed}, pending {transcriptReport.status.extractions.pending}, processing {transcriptReport.status.extractions.processing}
+                                        </div>
+                                    </div>
+
+                                    {transcriptReport.byModel.length > 0 && (
+                                        <div className="rounded border border-slate-200">
+                                            <div className="border-b px-2 py-1 text-[10px] font-semibold uppercase text-slate-500">
+                                                Usage By Model
+                                            </div>
+                                            <div className="max-h-40 overflow-y-auto">
+                                                {transcriptReport.byModel.map((row) => (
+                                                    <div key={`${row.kind}:${row.provider}:${row.model}`} className="grid grid-cols-5 gap-2 border-b px-2 py-1.5 text-[11px] last:border-b-0">
+                                                        <span className="truncate text-slate-700" title={`${row.kind} • ${row.provider} • ${row.model}`}>
+                                                            {row.model}
+                                                        </span>
+                                                        <span className="text-slate-500">{row.kind}</span>
+                                                        <span className="text-slate-600">{row.runs} runs</span>
+                                                        <span className="text-slate-600">{formatTokenCount(row.totalTokens)} tok</span>
+                                                        <span className="text-slate-700">{formatUsd(row.estimatedCostUsd)}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {transcriptReport.failureCategories.length > 0 && (
+                                        <div className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5">
+                                            <div className="mb-1 text-[10px] font-semibold uppercase text-slate-500">Failure Categories</div>
+                                            <div className="flex flex-wrap gap-1">
+                                                {transcriptReport.failureCategories.map((row) => (
+                                                    <span key={row.category} className="rounded border bg-white px-2 py-0.5 text-[10px] text-slate-700">
+                                                        {row.category}: {row.count}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {transcriptReport.daily.length > 0 && (
+                                        <div className="rounded border border-slate-200">
+                                            <div className="border-b px-2 py-1 text-[10px] font-semibold uppercase text-slate-500">
+                                                Daily Trend
+                                            </div>
+                                            <div className="max-h-40 overflow-y-auto">
+                                                {[...transcriptReport.daily].slice(-8).reverse().map((row) => (
+                                                    <div key={row.date} className="grid grid-cols-6 gap-2 border-b px-2 py-1.5 text-[11px] last:border-b-0">
+                                                        <span className="text-slate-700">{formatReportDay(row.date)}</span>
+                                                        <span className="text-slate-600">TC {row.transcriptsCompleted}</span>
+                                                        <span className="text-slate-600">TF {row.transcriptsFailed}</span>
+                                                        <span className="text-slate-600">EC {row.extractionsCompleted}</span>
+                                                        <span className="text-slate-600">{formatTokenCount(row.totalTokens)} tok</span>
+                                                        <span className="text-slate-700">{formatUsd(row.estimatedCostUsd)}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* Messages Area */}
             <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50/50 scroll-smooth">
@@ -558,20 +1049,32 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
                 )}
 
                 {messages.map((m) => (
-                    <MessageBubble
+                    <div
                         key={m.id}
-                        message={m}
-                        contactPhone={conversation.contactPhone}
-                        contactEmail={conversation.contactEmail}
-                        contactName={conversation.contactName}
-                        onRefetchMedia={onRefetchMedia}
-                        onRetryTranscript={onRetryTranscript}
-                        aiModel={selectedModel}
-                        selectionBatch={selectionBatch}
-                        onAddSelectionToBatch={handleAddSelectionToBatch}
-                        onRemoveSelectionBatchItem={handleRemoveSelectionBatchItem}
-                        onClearSelectionBatch={handleClearSelectionBatch}
-                    />
+                        ref={(node) => {
+                            messageRefs.current[m.id] = node;
+                        }}
+                        className={cn(
+                            "rounded-xl transition-colors",
+                            jumpMessageId === m.id && "ring-2 ring-blue-300 bg-blue-50/60"
+                        )}
+                    >
+                        <MessageBubble
+                            message={m}
+                            contactPhone={conversation.contactPhone}
+                            contactEmail={conversation.contactEmail}
+                            contactName={conversation.contactName}
+                            onRefetchMedia={onRefetchMedia}
+                            onRequestTranscript={canUseTranscriptOnDemand ? onRequestTranscript : undefined}
+                            onExtractViewingNotes={canUseTranscriptOnDemand ? onExtractViewingNotes : undefined}
+                            onRetryTranscript={canUseTranscriptOnDemand ? onRetryTranscript : undefined}
+                            aiModel={selectedModel}
+                            selectionBatch={selectionBatch}
+                            onAddSelectionToBatch={handleAddSelectionToBatch}
+                            onRemoveSelectionBatchItem={handleRemoveSelectionBatchItem}
+                            onClearSelectionBatch={handleClearSelectionBatch}
+                        />
+                    </div>
                 ))}
             </div>
 

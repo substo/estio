@@ -25,6 +25,23 @@ type MessageAttachment = string | {
         model?: string | null;
         provider?: string | null;
         updatedAt?: string | null;
+        restricted?: boolean;
+        extraction?: {
+            status: "pending" | "processing" | "completed" | "failed";
+            payload?: {
+                prospects?: string[];
+                requirements?: string[];
+                budget?: string | null;
+                locations?: string[];
+                objections?: string[];
+                nextActions?: string[];
+            } | null;
+            error?: string | null;
+            model?: string | null;
+            provider?: string | null;
+            updatedAt?: string | null;
+            restricted?: boolean;
+        } | null;
     } | null;
 };
 
@@ -69,6 +86,16 @@ export interface MessageBubbleProps {
     onRemoveSelectionBatchItem?: (id: string) => void;
     onClearSelectionBatch?: () => void;
     onRefetchMedia?: (messageId: string) => void | Promise<void>;
+    onRequestTranscript?: (
+        messageId: string,
+        attachmentId: string,
+        options?: { force?: boolean }
+    ) => void | Promise<void>;
+    onExtractViewingNotes?: (
+        messageId: string,
+        attachmentId: string,
+        options?: { force?: boolean }
+    ) => void | Promise<void>;
     onRetryTranscript?: (messageId: string, attachmentId: string) => void | Promise<void>;
 }
 
@@ -83,6 +110,8 @@ export function MessageBubble({
     onRemoveSelectionBatchItem,
     onClearSelectionBatch,
     onRefetchMedia,
+    onRequestTranscript,
+    onExtractViewingNotes,
     onRetryTranscript,
 }: MessageBubbleProps) {
     const isOutbound = message.direction === 'outbound';
@@ -93,14 +122,16 @@ export function MessageBubble({
     const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
     const [selectionTarget, setSelectionTarget] = useState<MessageSelectionActionTarget | null>(null);
     const [isRefetchingMedia, setIsRefetchingMedia] = useState(false);
-    const [retryingTranscriptAttachmentId, setRetryingTranscriptAttachmentId] = useState<string | null>(null);
+    const [transcriptActionAttachmentId, setTranscriptActionAttachmentId] = useState<string | null>(null);
+    const [extractActionAttachmentId, setExtractActionAttachmentId] = useState<string | null>(null);
     const [expandedTranscriptIds, setExpandedTranscriptIds] = useState<Record<string, boolean>>({});
     const contentRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         setSelectionTarget(null);
         setExpandedTranscriptIds({});
-        setRetryingTranscriptAttachmentId(null);
+        setTranscriptActionAttachmentId(null);
+        setExtractActionAttachmentId(null);
     }, [message.id, isExpanded]);
 
     // Helper to detect if content is rich HTML (heuristic)
@@ -178,19 +209,53 @@ export function MessageBubble({
         setExpandedTranscriptIds((prev) => ({ ...prev, [key]: !prev[key] }));
     };
 
-    const handleRetryTranscript = async (
+    const handleRequestTranscript = async (
         e: React.MouseEvent<HTMLButtonElement>,
-        attachmentId?: string
+        attachmentId?: string,
+        options?: { force?: boolean }
     ) => {
         e.stopPropagation();
-        if (!onRetryTranscript || !attachmentId || retryingTranscriptAttachmentId) return;
+        if (!attachmentId || transcriptActionAttachmentId) return;
 
-        setRetryingTranscriptAttachmentId(attachmentId);
+        const canUseOnDemand = !!onRequestTranscript;
+        const canUseRetryFallback = !!onRetryTranscript;
+        if (!canUseOnDemand && !canUseRetryFallback) return;
+
+        setTranscriptActionAttachmentId(attachmentId);
         try {
-            await Promise.resolve(onRetryTranscript(message.id, attachmentId));
+            if (canUseOnDemand) {
+                await Promise.resolve(onRequestTranscript(message.id, attachmentId, options));
+                return;
+            }
+            if (canUseRetryFallback) {
+                await Promise.resolve(onRetryTranscript(message.id, attachmentId));
+            }
         } finally {
-            setRetryingTranscriptAttachmentId(null);
+            setTranscriptActionAttachmentId(null);
         }
+    };
+
+    const handleExtractViewingNotes = async (
+        e: React.MouseEvent<HTMLButtonElement>,
+        attachmentId?: string,
+        options?: { force?: boolean }
+    ) => {
+        e.stopPropagation();
+        if (!onExtractViewingNotes || !attachmentId || extractActionAttachmentId) return;
+
+        setExtractActionAttachmentId(attachmentId);
+        try {
+            await Promise.resolve(onExtractViewingNotes(message.id, attachmentId, options));
+        } finally {
+            setExtractActionAttachmentId(null);
+        }
+    };
+
+    const formatExtractionList = (value: unknown): string[] => {
+        if (!Array.isArray(value)) return [];
+        return value
+            .map((item) => String(item || "").trim())
+            .filter((item) => !!item);
     };
 
     const clearSelectionTarget = () => setSelectionTarget(null);
@@ -424,6 +489,29 @@ export function MessageBubble({
                                     </a>
                                 </div>
 
+                                {!attachment.transcript && onRequestTranscript && attachment.id && (
+                                    <div className="mt-2 rounded-md border border-black/10 bg-white/70 px-2 py-1.5 text-xs">
+                                        <div className="flex items-center gap-2">
+                                            <span className={cn("text-[11px]", isOutbound && !isEmail ? "text-blue-100/90" : "text-gray-600")}>
+                                                No transcript yet.
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={(e) => handleRequestTranscript(e, attachment.id, { force: false })}
+                                                disabled={transcriptActionAttachmentId === attachment.id}
+                                                className={cn(
+                                                    "ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px]",
+                                                    isOutbound && !isEmail
+                                                        ? "bg-white/20 text-blue-50 hover:bg-white/30 disabled:opacity-70"
+                                                        : "bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-70"
+                                                )}
+                                            >
+                                                {transcriptActionAttachmentId === attachment.id ? "Starting..." : "Transcribe now"}
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+
                                 {attachment.transcript && (
                                     <div
                                         className={cn(
@@ -462,32 +550,76 @@ export function MessageBubble({
                                         )}
 
                                         {attachment.transcript.status === "completed" && (
-                                            <div className="mt-1 space-y-1">
-                                                <p className={cn(
-                                                    "whitespace-pre-wrap leading-relaxed",
-                                                    isOutbound && !isEmail ? "text-blue-50" : "text-gray-700"
-                                                )}>
-                                                    {(() => {
-                                                        const text = String(attachment.transcript?.text || "");
-                                                        const expanded = isTranscriptExpanded(attachment.id, i);
-                                                        if (expanded || text.length <= 280) return text;
-                                                        return `${text.slice(0, 280)}...`;
-                                                    })()}
-                                                </p>
-                                                {String(attachment.transcript.text || "").length > 280 && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            toggleTranscriptExpanded(attachment.id, i);
-                                                        }}
-                                                        className={cn(
-                                                            "text-[11px] underline underline-offset-2",
-                                                            isOutbound && !isEmail ? "text-blue-100 hover:text-white" : "text-gray-600 hover:text-gray-900"
+                                            <div className="mt-1 space-y-2">
+                                                {attachment.transcript?.restricted ? (
+                                                    <p className={cn("text-[11px] italic", isOutbound && !isEmail ? "text-blue-100/85" : "text-gray-600")}>
+                                                        Transcript text is hidden by policy.
+                                                    </p>
+                                                ) : (
+                                                    <>
+                                                        <p className={cn(
+                                                            "whitespace-pre-wrap leading-relaxed",
+                                                            isOutbound && !isEmail ? "text-blue-50" : "text-gray-700"
+                                                        )}>
+                                                            {(() => {
+                                                                const text = String(attachment.transcript?.text || "");
+                                                                const expanded = isTranscriptExpanded(attachment.id, i);
+                                                                if (expanded || text.length <= 280) return text;
+                                                                return `${text.slice(0, 280)}...`;
+                                                            })()}
+                                                        </p>
+                                                        {String(attachment.transcript.text || "").length > 280 && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    toggleTranscriptExpanded(attachment.id, i);
+                                                                }}
+                                                                className={cn(
+                                                                    "text-[11px] underline underline-offset-2",
+                                                                    isOutbound && !isEmail ? "text-blue-100 hover:text-white" : "text-gray-600 hover:text-gray-900"
+                                                                )}
+                                                            >
+                                                                {isTranscriptExpanded(attachment.id, i) ? "Show less" : "Show more"}
+                                                            </button>
                                                         )}
-                                                    >
-                                                        {isTranscriptExpanded(attachment.id, i) ? "Show less" : "Show more"}
-                                                    </button>
+                                                    </>
+                                                )}
+                                                {!attachment.transcript?.restricted && (
+                                                    <div className="flex flex-wrap items-center gap-1.5">
+                                                        {onRequestTranscript && attachment.id && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => handleRequestTranscript(e, attachment.id, { force: true })}
+                                                                disabled={transcriptActionAttachmentId === attachment.id}
+                                                                className={cn(
+                                                                    "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px]",
+                                                                    isOutbound && !isEmail
+                                                                        ? "bg-white/20 text-blue-50 hover:bg-white/30 disabled:opacity-70"
+                                                                        : "bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-70"
+                                                                )}
+                                                            >
+                                                                {transcriptActionAttachmentId === attachment.id ? "Regenerating..." : "Regenerate transcript"}
+                                                            </button>
+                                                        )}
+                                                        {onExtractViewingNotes && attachment.id && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => handleExtractViewingNotes(e, attachment.id, { force: !!attachment.transcript?.extraction })}
+                                                                disabled={extractActionAttachmentId === attachment.id}
+                                                                className={cn(
+                                                                    "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px]",
+                                                                    isOutbound && !isEmail
+                                                                        ? "bg-white/20 text-blue-50 hover:bg-white/30 disabled:opacity-70"
+                                                                        : "bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-70"
+                                                                )}
+                                                            >
+                                                                {extractActionAttachmentId === attachment.id
+                                                                    ? (attachment.transcript?.extraction ? "Regenerating notes..." : "Extracting...")
+                                                                    : (attachment.transcript?.extraction ? "Regenerate notes" : "Extract viewing notes")}
+                                                            </button>
+                                                        )}
+                                                    </div>
                                                 )}
                                             </div>
                                         )}
@@ -495,13 +627,15 @@ export function MessageBubble({
                                         {attachment.transcript.status === "failed" && (
                                             <div className="mt-1 space-y-1">
                                                 <p className={cn("text-[11px]", isOutbound && !isEmail ? "text-red-100" : "text-red-600")}>
-                                                    {attachment.transcript.error || "Transcription failed."}
+                                                    {attachment.transcript?.restricted
+                                                        ? "Transcript details are hidden by policy."
+                                                        : (attachment.transcript.error || "Transcription failed.")}
                                                 </p>
-                                                {onRetryTranscript && attachment.id && (
+                                                {!attachment.transcript?.restricted && (onRequestTranscript || onRetryTranscript) && attachment.id && (
                                                     <button
                                                         type="button"
-                                                        onClick={(e) => handleRetryTranscript(e, attachment.id)}
-                                                        disabled={retryingTranscriptAttachmentId === attachment.id}
+                                                        onClick={(e) => handleRequestTranscript(e, attachment.id, { force: true })}
+                                                        disabled={transcriptActionAttachmentId === attachment.id}
                                                         className={cn(
                                                             "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px]",
                                                             isOutbound && !isEmail
@@ -509,8 +643,87 @@ export function MessageBubble({
                                                                 : "bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-70"
                                                         )}
                                                     >
-                                                        {retryingTranscriptAttachmentId === attachment.id ? "Retrying..." : "Retry transcript"}
+                                                        {transcriptActionAttachmentId === attachment.id ? "Retrying..." : "Retry transcript"}
                                                     </button>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {attachment.transcript.status === "completed" && attachment.transcript.extraction && (
+                                            <div
+                                                className={cn(
+                                                    "mt-2 rounded-md border px-2 py-1.5 text-[11px]",
+                                                    isOutbound && !isEmail
+                                                        ? "border-white/20 bg-white/10 text-blue-50"
+                                                        : "border-black/10 bg-white text-gray-700"
+                                                )}
+                                            >
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-medium">Viewing notes</span>
+                                                    <span className={cn(
+                                                        "rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide",
+                                                        attachment.transcript.extraction.status === "completed" && (isOutbound && !isEmail ? "bg-emerald-500/25 text-emerald-100" : "bg-emerald-100 text-emerald-700"),
+                                                        attachment.transcript.extraction.status === "failed" && (isOutbound && !isEmail ? "bg-red-500/25 text-red-100" : "bg-red-100 text-red-700"),
+                                                        (attachment.transcript.extraction.status === "pending" || attachment.transcript.extraction.status === "processing") && (isOutbound && !isEmail ? "bg-amber-500/25 text-amber-100" : "bg-amber-100 text-amber-700")
+                                                    )}>
+                                                        {attachment.transcript.extraction.status}
+                                                    </span>
+                                                    {attachment.transcript.extraction.model && (
+                                                        <span className={cn(
+                                                            "ml-auto text-[10px]",
+                                                            isOutbound && !isEmail ? "text-blue-100/80" : "text-gray-500"
+                                                        )}>
+                                                            {attachment.transcript.extraction.model}
+                                                        </span>
+                                                    )}
+                                                </div>
+
+                                                {(attachment.transcript.extraction.status === "pending" || attachment.transcript.extraction.status === "processing") && (
+                                                    <p className={cn("mt-1 text-[11px]", isOutbound && !isEmail ? "text-blue-100/90" : "text-gray-600")}>
+                                                        Extracting viewing notes...
+                                                    </p>
+                                                )}
+
+                                                {attachment.transcript.extraction.status === "failed" && (
+                                                    <div className="mt-1 space-y-1">
+                                                        <p className={cn("text-[11px]", isOutbound && !isEmail ? "text-red-100" : "text-red-600")}>
+                                                            {attachment.transcript.extraction?.restricted
+                                                                ? "Viewing notes details are hidden by policy."
+                                                                : (attachment.transcript.extraction.error || "Viewing notes extraction failed.")}
+                                                        </p>
+                                                        {!attachment.transcript.extraction?.restricted && onExtractViewingNotes && attachment.id && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => handleExtractViewingNotes(e, attachment.id, { force: true })}
+                                                                disabled={extractActionAttachmentId === attachment.id}
+                                                                className={cn(
+                                                                    "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px]",
+                                                                    isOutbound && !isEmail
+                                                                        ? "bg-white/20 text-blue-50 hover:bg-white/30 disabled:opacity-70"
+                                                                        : "bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-70"
+                                                                )}
+                                                            >
+                                                                {extractActionAttachmentId === attachment.id ? "Retrying..." : "Retry extraction"}
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                )}
+
+                                                {attachment.transcript.extraction.status === "completed" && (
+                                                    attachment.transcript.extraction?.restricted ? (
+                                                        <p className={cn("mt-1 text-[11px] italic", isOutbound && !isEmail ? "text-blue-100/85" : "text-gray-600")}>
+                                                            Viewing notes are hidden by policy.
+                                                        </p>
+                                                    ) : (
+                                                        <div className="mt-1 space-y-0.5">
+                                                            <p>Prospects: {formatExtractionList((attachment.transcript.extraction.payload as any)?.prospects).join("; ") || "None"}</p>
+                                                            <p>Requirements: {formatExtractionList((attachment.transcript.extraction.payload as any)?.requirements).join("; ") || "None"}</p>
+                                                            <p>Budget: {String((attachment.transcript.extraction.payload as any)?.budget || "").trim() || "Not specified"}</p>
+                                                            <p>Locations: {formatExtractionList((attachment.transcript.extraction.payload as any)?.locations).join("; ") || "None"}</p>
+                                                            <p>Objections: {formatExtractionList((attachment.transcript.extraction.payload as any)?.objections).join("; ") || "None"}</p>
+                                                            <p>Next actions: {formatExtractionList((attachment.transcript.extraction.payload as any)?.nextActions).join("; ") || "None"}</p>
+                                                        </div>
+                                                    )
                                                 )}
                                             </div>
                                         )}
