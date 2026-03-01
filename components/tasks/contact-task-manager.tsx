@@ -399,6 +399,13 @@ export function ContactTaskManager({
 
   useEffect(() => {
     void loadTasks();
+
+    const handleMutated = () => {
+      void loadTasks({ silent: true });
+    };
+
+    window.addEventListener('estio-tasks-mutated', handleMutated);
+    return () => window.removeEventListener('estio-tasks-mutated', handleMutated);
   }, [loadTasks]);
 
   const canSubmit = useMemo(() => titleInput.trim().length > 0 && !submitting, [titleInput, submitting]);

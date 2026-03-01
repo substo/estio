@@ -420,6 +420,7 @@ export function MessageSelectionActions({
             }
 
             toast.success("Task created");
+            window.dispatchEvent(new Event('estio-tasks-mutated'));
             setCreateTaskOpen(false);
         } catch (error: any) {
             toast.error(error?.message || "Failed to create task");
@@ -528,6 +529,7 @@ export function MessageSelectionActions({
 
             if (created > 0) {
                 toast.success(`Created ${created} task${created > 1 ? "s" : ""} from suggestions`);
+                window.dispatchEvent(new Event('estio-tasks-mutated'));
                 setSuggestTasksOpen(false);
                 if (hasBatchSelections) {
                     onClearSelectionBatch?.();
