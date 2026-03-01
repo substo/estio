@@ -707,18 +707,15 @@ export function ChatWindow({
                                 </Button>
                             </div>
                         )}
-                    {isWhatsAppConversation && (
-                        <Button
-                            variant={showTranscriptSearch ? "secondary" : "outline"}
-                            size="sm"
-                            className="h-8 gap-1 px-2 text-[11px]"
-                            onClick={() => setShowTranscriptSearch((prev) => !prev)}
-                            title="Search transcript text and jump to matching messages"
-                        >
-                            <Search className="h-3.5 w-3.5" />
-                            Transcript Search
-                        </Button>
-                    )}
+                    <Button
+                        variant={showTranscriptSearch ? "secondary" : "ghost"}
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => setShowTranscriptSearch((prev) => !prev)}
+                        title="Search conversation"
+                    >
+                        <Search className="h-4 w-4 text-gray-500" />
+                    </Button>
                     {(conversation.type === 'Email' || conversation.lastMessageType === 'TYPE_EMAIL') && onFetchHistory && (
                         <Button variant="ghost" size="icon" onClick={onFetchHistory} title="Fetch Gmail History">
                             <RefreshCw className="h-4 w-4 text-gray-500" />
@@ -733,7 +730,7 @@ export function ChatWindow({
                         <div className="rounded-md border border-slate-200 bg-white p-3 space-y-2">
                             <div className="flex items-center gap-2">
                                 <Search className="h-4 w-4 text-slate-600" />
-                                <p className="text-xs font-semibold text-slate-800">Transcript Search</p>
+                                <p className="text-xs font-semibold text-slate-800">Search</p>
                             </div>
                             <div className="flex items-center gap-2">
                                 <Input
@@ -745,7 +742,7 @@ export function ChatWindow({
                                             void handleTranscriptSearch();
                                         }
                                     }}
-                                    placeholder="Search transcript text..."
+                                    placeholder="Search messages..."
                                     className="h-8 text-xs"
                                 />
                                 <Button
@@ -785,7 +782,7 @@ export function ChatWindow({
                                 <div className="text-[11px] text-slate-500">
                                     {transcriptSearchTotal > 0
                                         ? `Showing ${transcriptSearchResults.length} of ${transcriptSearchTotal} matches.`
-                                        : "No transcript matches found for this query."}
+                                        : "No matches found for this query."}
                                 </div>
                             )}
                             {transcriptSearchResults.length > 0 && (
@@ -800,7 +797,7 @@ export function ChatWindow({
                                             <div className="flex items-center gap-2 text-[10px] text-slate-500">
                                                 <span>{new Date(match.messageDate).toLocaleString()}</span>
                                                 <span className="uppercase">{match.direction}</span>
-                                                <span>{match.model || "unknown-model"}</span>
+                                                {match.source === "transcript" && <span className="text-purple-500">transcript</span>}
                                             </div>
                                             <p className="mt-0.5 text-slate-700 line-clamp-2">{match.snippet || "(empty snippet)"}</p>
                                         </button>

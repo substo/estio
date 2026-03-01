@@ -1474,15 +1474,8 @@ export async function searchConversationTranscriptMatches(
             return { success: false as const, error: "Conversation not found." };
         }
 
-        const visibility = await resolveTranscriptVisibilityAccess(location.id);
-        if (visibility.restrictContent) {
-            return {
-                success: false as const,
-                error: getTranscriptVisibilityRestrictionMessage(),
-            };
-        }
-
-        const where: any = {
+        // --- Search transcripts (existing behaviour) ---
+        const transcriptWhere: any = {
             message: { conversationId: conversation.id },
             text: {
                 not: null,
@@ -1491,10 +1484,20 @@ export async function searchConversationTranscriptMatches(
             },
         };
 
-        const [totalMatches, items] = await Promise.all([
-            db.messageTranscript.count({ where }),
+        // --- Search regular message bodies ---
+        const messageWhere: any = {
+            conversationId: conversation.id,
+            body: {
+                not: null,
+                contains: query,
+                mode: "insensitive",
+            },
+        };
+
+        const [transcriptTotal, transcriptItems, messageTotal, messageItems] = await Promise.all([
+            db.messageTranscript.count({ where: transcriptWhere }),
             db.messageTranscript.findMany({
-                where,
+                where: transcriptWhere,
                 orderBy: { updatedAt: "desc" },
                 take: limit,
                 select: {
@@ -1522,10 +1525,24 @@ export async function searchConversationTranscriptMatches(
                     },
                 },
             }),
+            db.message.count({ where: messageWhere }),
+            db.message.findMany({
+                where: messageWhere,
+                orderBy: { createdAt: "desc" },
+                take: limit,
+                select: {
+                    id: true,
+                    type: true,
+                    direction: true,
+                    body: true,
+                    createdAt: true,
+                },
+            }),
         ]);
 
-        const results = items.map((item, index) => ({
-            rank: index + 1,
+        // Build transcript results
+        const transcriptResults = transcriptItems.map((item) => ({
+            source: "transcript" as const,
             transcriptId: item.id,
             messageId: item.message.id,
             attachmentId: item.attachment.id,
@@ -1541,19 +1558,50 @@ export async function searchConversationTranscriptMatches(
             snippet: buildTranscriptSearchSnippet(String(item.text || ""), query),
         }));
 
+        // Collect messageIds already covered by transcript matches to avoid duplicates
+        const transcriptMessageIds = new Set(transcriptResults.map((r) => r.messageId));
+
+        // Build message body results (skip if messageId already in transcript results)
+        const messageResults = messageItems
+            .filter((msg) => !transcriptMessageIds.has(msg.id))
+            .map((msg) => ({
+                source: "message" as const,
+                transcriptId: null as string | null,
+                messageId: msg.id,
+                attachmentId: null as string | null,
+                messageType: msg.type,
+                direction: msg.direction,
+                messageDate: msg.createdAt.toISOString(),
+                transcriptStatus: null as string | null,
+                model: null as string | null,
+                provider: null as string | null,
+                updatedAt: msg.createdAt.toISOString(),
+                fileName: null as string | null,
+                contentType: null as string | null,
+                snippet: buildTranscriptSearchSnippet(String(msg.body || ""), query),
+            }));
+
+        // Merge, sort by messageDate desc, and cap at limit
+        const merged = [...transcriptResults, ...messageResults]
+            .sort((a, b) => new Date(b.messageDate).getTime() - new Date(a.messageDate).getTime())
+            .slice(0, limit)
+            .map((item, index) => ({ ...item, rank: index + 1 }));
+
+        const totalMatches = transcriptTotal + messageTotal;
+
         return {
             success: true as const,
             query,
             limit,
             totalMatches,
-            returned: results.length,
-            results,
+            returned: merged.length,
+            results: merged,
         };
     } catch (error: any) {
         console.error("[searchConversationTranscriptMatches] Error:", error);
         return {
             success: false as const,
-            error: error?.message || "Failed to search transcript matches.",
+            error: error?.message || "Failed to search conversation.",
         };
     }
 }
