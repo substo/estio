@@ -170,6 +170,7 @@ export function MessageSelectionActions({
 }: MessageSelectionActionsProps) {
     const router = useRouter();
     const toolbarRef = useRef<HTMLDivElement>(null);
+    const suggestGenerationRunIdRef = useRef(0);
 
     const [pasteLeadOpen, setPasteLeadOpen] = useState(false);
     const [findContactOpen, setFindContactOpen] = useState(false);
@@ -310,6 +311,7 @@ export function MessageSelectionActions({
         setSuggestSelectionText(text);
         setTaskSuggestions([]);
         setSuggestTasksOpen(true);
+        void handleGenerateTaskSuggestions(text, false);
         if (selection?.text?.trim()) onClearSelection();
     };
 
@@ -426,19 +428,26 @@ export function MessageSelectionActions({
         }
     };
 
-    const handleGenerateTaskSuggestions = async () => {
+    const handleGenerateTaskSuggestions = async (
+        selectionText?: string,
+        showSuccessToast = true
+    ) => {
         if (!conversationId) {
             toast.error("Open a conversation first to suggest tasks.");
             return;
         }
-        if (!suggestSelectionText.trim()) {
+        const sourceText = String((selectionText ?? suggestSelectionText) || "").trim();
+        if (!sourceText) {
             toast.error("Selected text is required.");
             return;
         }
 
+        const runId = suggestGenerationRunIdRef.current + 1;
+        suggestGenerationRunIdRef.current = runId;
         setIsSuggestingTasks(true);
         try {
-            const res = await suggestTasksFromSelection(conversationId, suggestSelectionText, activeAiModel);
+            const res = await suggestTasksFromSelection(conversationId, sourceText, activeAiModel);
+            if (suggestGenerationRunIdRef.current !== runId) return;
             if (!res?.success) {
                 toast.error(res?.error || "Failed to generate task suggestions");
                 return;
@@ -446,7 +455,7 @@ export function MessageSelectionActions({
 
             const suggestions = Array.isArray(res.suggestions) ? res.suggestions : [];
             const drafts: SuggestedTaskDraft[] = suggestions.map((suggestion, index) => ({
-                id: `suggestion-${Date.now()}-${index}`,
+                id: `suggestion-${runId}-${index}`,
                 selected: true,
                 title: suggestion.title || "Follow up with contact",
                 description: suggestion.description || "",
@@ -460,13 +469,16 @@ export function MessageSelectionActions({
             setTaskSuggestions(drafts);
             if (drafts.length === 0) {
                 toast.message("No actionable tasks were suggested for this selection.");
-            } else {
+            } else if (showSuccessToast) {
                 toast.success(`Generated ${drafts.length} task suggestion${drafts.length > 1 ? "s" : ""}`);
             }
         } catch (error: any) {
+            if (suggestGenerationRunIdRef.current !== runId) return;
             toast.error(error?.message || "Failed to generate task suggestions");
         } finally {
-            setIsSuggestingTasks(false);
+            if (suggestGenerationRunIdRef.current === runId) {
+                setIsSuggestingTasks(false);
+            }
         }
     };
 
@@ -1101,12 +1113,13 @@ export function MessageSelectionActions({
                 onOpenChange={(open) => {
                     setSuggestTasksOpen(open);
                     if (!open) {
+                        suggestGenerationRunIdRef.current += 1;
                         setIsSuggestingTasks(false);
                         setIsApplyingSuggestedTasks(false);
                     }
                 }}
             >
-                <DialogContent className="sm:max-w-2xl">
+                <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
                             <Sparkles className="h-4 w-4 text-violet-600" />
@@ -1170,11 +1183,15 @@ export function MessageSelectionActions({
                             <Button
                                 type="button"
                                 className="gap-2"
-                                onClick={handleGenerateTaskSuggestions}
+                                onClick={() => {
+                                    void handleGenerateTaskSuggestions();
+                                }}
                                 disabled={isSuggestingTasks || !suggestSelectionText.trim() || !canUseCrmLogActions}
                             >
                                 {isSuggestingTasks ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                                {isSuggestingTasks ? "Generating..." : "Generate Suggestions"}
+                                {isSuggestingTasks
+                                    ? "Generating..."
+                                    : (taskSuggestions.length > 0 ? "Regenerate Suggestions" : "Generate Suggestions")}
                             </Button>
 
                             {taskSuggestions.length > 0 ? (
@@ -1190,6 +1207,19 @@ export function MessageSelectionActions({
                         </div>
 
                         <TaskSuggestionFunnelMetrics conversationId={conversationId} />
+
+                        {isSuggestingTasks ? (
+                            <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                                <Loader2 className="h-4 w-4 animate-spin text-slate-500" />
+                                Generating task suggestions...
+                            </div>
+                        ) : null}
+
+                        {!isSuggestingTasks && taskSuggestions.length === 0 ? (
+                            <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                                No suggestions yet. Use "Generate Suggestions" to retry if needed.
+                            </div>
+                        ) : null}
 
                         {taskSuggestions.length > 0 ? (
                             <div className="max-h-[360px] space-y-2 overflow-y-auto rounded-md border p-2">
