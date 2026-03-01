@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { Conversation, Message } from '@/lib/ghl/conversations';
-import { fetchConversations, fetchMessages, sendReply, createWhatsAppMediaUploadUrl, sendWhatsAppMediaReply, generateAIDraft, deleteConversations, restoreConversations, archiveConversations, unarchiveConversations, permanentlyDeleteConversations, syncWhatsAppHistory, refreshConversation, markConversationAsRead } from '../actions';
+import { fetchConversations, fetchMessages, sendReply, createWhatsAppMediaUploadUrl, sendWhatsAppMediaReply, generateAIDraft, deleteConversations, restoreConversations, archiveConversations, unarchiveConversations, permanentlyDeleteConversations, syncWhatsAppHistory, refreshConversation, markConversationAsRead, refetchWhatsAppMediaAttachment } from '../actions';
 import { toast } from '@/components/ui/use-toast';
 import { getDealContexts, createPersistentDeal } from '../../deals/actions';
 import { UnifiedTimeline } from './unified-timeline';
@@ -677,6 +677,55 @@ export function ConversationInterface({ initialConversations, initialConversatio
         }
     };
 
+    const handleRefetchMedia = async (messageId: string) => {
+        if (!activeConversation) return;
+
+        const selectedConversationId = activeConversation.id;
+
+        try {
+            const res = await refetchWhatsAppMediaAttachment(selectedConversationId, messageId, {
+                deleteStoredObject: true,
+            });
+
+            if (!res?.success) {
+                toast({
+                    title: "Media Re-fetch Failed",
+                    description: String(res?.error || "Unknown error"),
+                    variant: "destructive",
+                });
+                return;
+            }
+
+            const refreshed = await fetchMessages(selectedConversationId);
+            if (activeIdRef.current === selectedConversationId) {
+                setMessages(refreshed);
+            }
+
+            const deletedStorageSuffix = (res.removedStorageObjects || 0) > 0
+                ? ` • removed ${res.removedStorageObjects} old object${res.removedStorageObjects === 1 ? "" : "s"}`
+                : "";
+
+            toast({
+                title: "Media Re-fetched",
+                description: `Fetched ${res.mediaType} from WhatsApp again${deletedStorageSuffix}.`,
+            });
+
+            if (Array.isArray(res.warnings) && res.warnings.length > 0) {
+                toast({
+                    title: "Media Re-fetch Warning",
+                    description: res.warnings[0],
+                    variant: "destructive",
+                });
+            }
+        } catch (error: any) {
+            toast({
+                title: "Media Re-fetch Failed",
+                description: String(error?.message || "Unexpected error"),
+                variant: "destructive",
+            });
+        }
+    };
+
 
     const handleSync = async () => {
         if (!activeId) return;
@@ -802,6 +851,7 @@ export function ConversationInterface({ initialConversations, initialConversatio
                                 loading={loadingMessages}
                                 onSendMessage={handleSendMessage}
                                 onSendMedia={handleSendMedia}
+                                onRefetchMedia={handleRefetchMedia}
                                 onSync={handleSync}
                                 onFetchHistory={async () => {
                                     setLoadingMessages(true);

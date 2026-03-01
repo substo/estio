@@ -23,7 +23,9 @@ import {
     buildWhatsAppOutboundUploadKey,
     createWhatsAppMediaReadUrl,
     createWhatsAppMediaUploadUrl as createWhatsAppMediaUploadSignedUrl,
+    deleteWhatsAppMediaObject,
     headWhatsAppMediaObject,
+    parseR2Uri,
     toR2Uri,
 } from "@/lib/whatsapp/media-r2";
 import { ingestEvolutionMediaAttachment, parseEvolutionMessageContent } from "@/lib/whatsapp/evolution-media";
@@ -1182,6 +1184,257 @@ async function fetchEvolutionMessagesForContactHistory(params: {
     }
 
     return { messages: [], remoteJid: lastTried, candidates, isGroup, phoneDigits };
+}
+
+const WHATSAPP_MEDIA_REFETCH_BATCH_SIZE = 50;
+const WHATSAPP_MEDIA_REFETCH_MAX_SCAN = 2500;
+
+function formatMediaRefetchFailureReason(reason: string | undefined) {
+    switch (reason) {
+        case "missing_input":
+            return "missing input";
+        case "unsupported_media_type":
+            return "unsupported media type";
+        case "message_not_found":
+            return "message row missing";
+        case "attachment_exists":
+            return "attachment already exists";
+        case "missing_base64":
+            return "WhatsApp/Evolution no longer provides media payload for this message";
+        default:
+            return reason || "unknown reason";
+    }
+}
+
+async function findEvolutionMessageByWamId(params: {
+    evolutionClient: any;
+    evolutionInstanceId: string;
+    contact: { phone?: string | null; lid?: string | null; contactType?: string | null };
+    wamId: string;
+    maxScan?: number;
+    batchSize?: number;
+}) {
+    const maxScan = Number(params.maxScan || WHATSAPP_MEDIA_REFETCH_MAX_SCAN);
+    const batchSize = Number(params.batchSize || WHATSAPP_MEDIA_REFETCH_BATCH_SIZE);
+    const safeMaxScan = Number.isFinite(maxScan) && maxScan > 0 ? Math.min(Math.floor(maxScan), 20000) : WHATSAPP_MEDIA_REFETCH_MAX_SCAN;
+    const safeBatchSize = Number.isFinite(batchSize) && batchSize > 0 ? Math.min(Math.floor(batchSize), 250) : WHATSAPP_MEDIA_REFETCH_BATCH_SIZE;
+
+    const { candidates } = await resolveWhatsAppHistoryRemoteJids(
+        params.evolutionClient,
+        params.evolutionInstanceId,
+        params.contact
+    );
+
+    let scannedTotal = 0;
+
+    for (const candidate of candidates) {
+        let offset = 0;
+        let scannedForCandidate = 0;
+
+        while (scannedForCandidate < safeMaxScan) {
+            const remaining = safeMaxScan - scannedForCandidate;
+            const limit = Math.min(safeBatchSize, remaining);
+            if (limit <= 0) break;
+
+            const batch = await params.evolutionClient.fetchMessages(
+                params.evolutionInstanceId,
+                candidate,
+                limit,
+                offset
+            );
+
+            const records = Array.isArray(batch) ? batch : [];
+            if (records.length === 0) break;
+
+            scannedForCandidate += records.length;
+            scannedTotal += records.length;
+            const matched = records.find((item: any) => String(item?.key?.id || "") === params.wamId);
+            if (matched) {
+                return {
+                    message: matched,
+                    remoteJid: candidate,
+                    scanned: scannedTotal,
+                    candidates,
+                };
+            }
+
+            offset += records.length;
+            if (records.length < limit) break;
+        }
+    }
+
+    return {
+        message: null as any,
+        remoteJid: null as string | null,
+        scanned: scannedTotal,
+        candidates,
+    };
+}
+
+export async function refetchWhatsAppMediaAttachment(
+    conversationId: string,
+    messageId: string,
+    options?: {
+        deleteStoredObject?: boolean;
+        maxScan?: number;
+        batchSize?: number;
+    }
+) {
+    const location = await getAuthenticatedLocation();
+
+    if (!location?.evolutionInstanceId) {
+        return { success: false as const, error: "WhatsApp (Evolution) is not connected." };
+    }
+
+    const conversation = await db.conversation.findUnique({
+        where: { ghlConversationId: conversationId },
+        include: {
+            contact: {
+                select: {
+                    phone: true,
+                    lid: true,
+                    contactType: true,
+                },
+            },
+        },
+    });
+
+    if (!conversation || conversation.locationId !== location.id) {
+        return { success: false as const, error: "Conversation not found." };
+    }
+
+    const message = await db.message.findUnique({
+        where: { id: messageId },
+        include: { attachments: true },
+    });
+
+    if (!message || message.conversationId !== conversation.id) {
+        return { success: false as const, error: "Message not found for this conversation." };
+    }
+    if (!message.wamId) {
+        return { success: false as const, error: "Message is missing WhatsApp message id (wamId)." };
+    }
+
+    const { evolutionClient } = await import("@/lib/evolution/client");
+    const lookup = await findEvolutionMessageByWamId({
+        evolutionClient,
+        evolutionInstanceId: location.evolutionInstanceId,
+        contact: {
+            phone: conversation.contact?.phone || null,
+            lid: (conversation.contact as any)?.lid || null,
+            contactType: (conversation.contact as any)?.contactType || null,
+        },
+        wamId: message.wamId,
+        maxScan: options?.maxScan,
+        batchSize: options?.batchSize,
+    });
+
+    if (!lookup.message) {
+        return {
+            success: false as const,
+            error: `Could not locate this message in WhatsApp history. Tried JIDs: ${(lookup.candidates || []).join(", ") || "(none)"}; scanned ${lookup.scanned} messages.`,
+        };
+    }
+
+    const parsedContent = parseEvolutionMessageContent(lookup.message?.message);
+    if (parsedContent.type !== "image" && parsedContent.type !== "audio") {
+        return {
+            success: false as const,
+            error: `Target message is not an image/audio media message (detected: ${parsedContent.type}).`,
+        };
+    }
+
+    const snapshot = message.attachments.map((attachment) => ({
+        fileName: attachment.fileName,
+        contentType: attachment.contentType,
+        size: attachment.size,
+        url: attachment.url,
+    }));
+
+    if (snapshot.length > 0) {
+        await db.messageAttachment.deleteMany({
+            where: { messageId: message.id },
+        });
+    }
+
+    let ingestResult: any;
+    try {
+        ingestResult = await ingestEvolutionMediaAttachment({
+            instanceName: location.evolutionInstanceId,
+            evolutionMessageData: lookup.message,
+            wamId: message.wamId,
+        });
+    } catch (error: any) {
+        if (snapshot.length > 0) {
+            await db.messageAttachment.createMany({
+                data: snapshot.map((attachment) => ({
+                    messageId: message.id,
+                    fileName: attachment.fileName,
+                    contentType: attachment.contentType,
+                    size: attachment.size,
+                    url: attachment.url,
+                })),
+            }).catch((restoreErr) => {
+                console.error("[refetchWhatsAppMediaAttachment] Failed to restore attachment rows after ingest error:", restoreErr);
+            });
+        }
+
+        return {
+            success: false as const,
+            error: `Failed to fetch media from WhatsApp: ${error?.message || "Unknown error"}`,
+        };
+    }
+
+    if (ingestResult?.status !== "stored") {
+        if (snapshot.length > 0) {
+            await db.messageAttachment.createMany({
+                data: snapshot.map((attachment) => ({
+                    messageId: message.id,
+                    fileName: attachment.fileName,
+                    contentType: attachment.contentType,
+                    size: attachment.size,
+                    url: attachment.url,
+                })),
+            }).catch((restoreErr) => {
+                console.error("[refetchWhatsAppMediaAttachment] Failed to restore attachment rows after skipped ingest:", restoreErr);
+            });
+        }
+
+        return {
+            success: false as const,
+            error: `WhatsApp media re-fetch did not store a new attachment (${formatMediaRefetchFailureReason(ingestResult?.reason)}).`,
+        };
+    }
+
+    const deleteStoredObject = options?.deleteStoredObject !== false;
+    const storageWarnings: string[] = [];
+    let removedStorageObjects = 0;
+
+    if (deleteStoredObject && snapshot.length > 0) {
+        for (const attachment of snapshot) {
+            const r2 = parseR2Uri(String(attachment.url || ""));
+            if (!r2) continue;
+
+            try {
+                const removed = await deleteWhatsAppMediaObject(r2.key);
+                if (removed.deleted) {
+                    removedStorageObjects += 1;
+                }
+            } catch (storageErr: any) {
+                storageWarnings.push(`Failed to delete old object ${r2.key}: ${storageErr?.message || "Unknown error"}`);
+            }
+        }
+    }
+
+    return {
+        success: true as const,
+        mediaType: parsedContent.type,
+        removedAttachmentRows: snapshot.length,
+        removedStorageObjects,
+        remoteJid: lookup.remoteJid,
+        scannedMessages: lookup.scanned,
+        warnings: storageWarnings,
+    };
 }
 
 export async function syncWhatsAppHistory(conversationId: string, limit: number = 20, ignoreDuplicates: boolean = false, offset: number = 0) {

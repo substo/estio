@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { Mail, Smartphone, Paperclip, ExternalLink, ChevronDown, ChevronUp, ArrowRight, Download, Maximize2 } from "lucide-react";
+import { Mail, Smartphone, Paperclip, ExternalLink, ChevronDown, ChevronUp, ArrowRight, Download, Maximize2, RefreshCw } from "lucide-react";
 import { format } from "date-fns";
 import { EmailFrame, type EmailFrameSelection } from "./email-frame";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -59,6 +59,7 @@ export interface MessageBubbleProps {
     onAddSelectionToBatch?: (item: SelectionBatchInput) => { added: boolean; total: number } | void;
     onRemoveSelectionBatchItem?: (id: string) => void;
     onClearSelectionBatch?: () => void;
+    onRefetchMedia?: (messageId: string) => void | Promise<void>;
 }
 
 export function MessageBubble({
@@ -71,6 +72,7 @@ export function MessageBubble({
     onAddSelectionToBatch,
     onRemoveSelectionBatchItem,
     onClearSelectionBatch,
+    onRefetchMedia,
 }: MessageBubbleProps) {
     const isOutbound = message.direction === 'outbound';
     const isEmail = (message.type || '').toUpperCase().includes('EMAIL');
@@ -79,6 +81,7 @@ export function MessageBubble({
     const [isExpanded, setIsExpanded] = useState(!isEmail); // Emails collapsed by default
     const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
     const [selectionTarget, setSelectionTarget] = useState<MessageSelectionActionTarget | null>(null);
+    const [isRefetchingMedia, setIsRefetchingMedia] = useState(false);
     const contentRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -122,6 +125,9 @@ export function MessageBubble({
         !imageAttachments.includes(attachment) && !audioAttachments.includes(attachment)
     );
     const selectedImage = selectedImageIndex !== null ? imageAttachments[selectedImageIndex] : null;
+    const hasLikelyMediaPlaceholder = ["[Audio]", "[Image]", "[Media]"].includes(String(message.body || "").trim());
+    const hasRenderableMediaAttachment = imageAttachments.length > 0 || audioAttachments.length > 0;
+    const canRefetchMedia = !!onRefetchMedia && isWhatsApp && (hasRenderableMediaAttachment || hasLikelyMediaPlaceholder);
     const getDownloadUrl = (url: string) => {
         try {
             if (url.includes("/api/media/attachments/")) {
@@ -133,6 +139,18 @@ export function MessageBubble({
             // Fall through to original URL
         }
         return url;
+    };
+
+    const handleRefetchMedia = async (e: React.MouseEvent<HTMLButtonElement>) => {
+        e.stopPropagation();
+        if (!onRefetchMedia || isRefetchingMedia) return;
+
+        setIsRefetchingMedia(true);
+        try {
+            await Promise.resolve(onRefetchMedia(message.id));
+        } finally {
+            setIsRefetchingMedia(false);
+        }
     };
 
     const clearSelectionTarget = () => setSelectionTarget(null);
@@ -384,6 +402,26 @@ export function MessageBubble({
                                 <ExternalLink className="h-3 w-3 shrink-0 ml-auto opacity-50" />
                             </a>
                         ))}
+                    </div>
+                )}
+
+                {canRefetchMedia && (
+                    <div className={cn("px-4 pb-2 mt-1", attachments.length === 0 && "pt-2")}>
+                        <button
+                            type="button"
+                            onClick={handleRefetchMedia}
+                            disabled={isRefetchingMedia}
+                            className={cn(
+                                "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] transition-colors",
+                                isOutbound && !isEmail
+                                    ? "border-white/30 text-blue-100 hover:bg-white/20 disabled:opacity-70"
+                                    : "border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-70"
+                            )}
+                            title="Delete local stored media and fetch it again from WhatsApp"
+                        >
+                            <RefreshCw className={cn("h-3 w-3", isRefetchingMedia && "animate-spin")} />
+                            {isRefetchingMedia ? "Re-fetching..." : "Re-fetch Media"}
+                        </button>
                     </div>
                 )}
 

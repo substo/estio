@@ -1,6 +1,7 @@
 import path from "path";
 import { randomUUID } from "crypto";
 import {
+    DeleteObjectCommand,
     GetObjectCommand,
     HeadObjectCommand,
     PutObjectCommand,
@@ -288,6 +289,27 @@ export async function headWhatsAppMediaObject(key: string) {
         const code = error?.$metadata?.httpStatusCode || error?.$response?.statusCode;
         if (code === 404 || error?.name === "NotFound") {
             return { exists: false as const };
+        }
+        throw error;
+    }
+}
+
+export async function deleteWhatsAppMediaObject(key: string) {
+    const { bucketName } = getR2Config();
+    const client = getR2Client();
+
+    try {
+        await client.send(
+            new DeleteObjectCommand({
+                Bucket: bucketName,
+                Key: key,
+            })
+        );
+        return { deleted: true as const };
+    } catch (error: any) {
+        const code = error?.$metadata?.httpStatusCode || error?.$response?.statusCode;
+        if (code === 404 || error?.name === "NotFound" || error?.name === "NoSuchKey") {
+            return { deleted: false as const };
         }
         throw error;
     }

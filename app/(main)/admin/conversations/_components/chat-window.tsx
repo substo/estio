@@ -14,6 +14,7 @@ interface ChatWindowProps {
     loading: boolean;
     onSendMessage: (text: string, type: 'SMS' | 'Email' | 'WhatsApp') => void | Promise<void>;
     onSendMedia?: (file: File, caption: string) => void | Promise<void>;
+    onRefetchMedia?: (messageId: string) => void | Promise<void>;
     onSync?: () => void;
     onFetchHistory?: () => void;
     onGenerateDraft?: (instruction?: string, model?: string) => Promise<string | null>; // Returns draft text or null if failed
@@ -99,7 +100,7 @@ function buildBatchContextText(items: SelectionBatchItem[]) {
     return items.map((item, index) => `Snippet ${index + 1}:\n${item.text}`).join("\n\n");
 }
 
-export function ChatWindow({ conversation, messages, loading, onSendMessage, onSendMedia, onSync, onGenerateDraft, onFetchHistory, suggestions = [] }: ChatWindowProps & { suggestions?: string[] }) {
+export function ChatWindow({ conversation, messages, loading, onSendMessage, onSendMedia, onRefetchMedia, onSync, onGenerateDraft, onFetchHistory, suggestions = [] }: ChatWindowProps & { suggestions?: string[] }) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const [draft, setDraft] = useState("");
     const [sending, setSending] = useState(false);
@@ -562,6 +563,7 @@ export function ChatWindow({ conversation, messages, loading, onSendMessage, onS
                         contactPhone={conversation.contactPhone}
                         contactEmail={conversation.contactEmail}
                         contactName={conversation.contactName}
+                        onRefetchMedia={onRefetchMedia}
                         aiModel={selectedModel}
                         selectionBatch={selectionBatch}
                         onAddSelectionToBatch={handleAddSelectionToBatch}
