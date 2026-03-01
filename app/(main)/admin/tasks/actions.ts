@@ -182,6 +182,107 @@ export async function listContactTasks(contactId: string, statusFilter?: 'open' 
   };
 }
 
+export async function listLocationTasks(statusFilter?: 'open' | 'completed' | 'all') {
+  const { location } = await getAuthContext();
+  const filter = statusFilterSchema.parse(statusFilter || 'all');
+
+  const baseWhere = {
+    locationId: location.id,
+    deletedAt: null,
+  } as const;
+
+  const [allCount, openCount, completedCount, tasks] = await Promise.all([
+    db.contactTask.count({ where: baseWhere }),
+    db.contactTask.count({
+      where: {
+        ...baseWhere,
+        status: { not: 'completed' },
+      },
+    }),
+    db.contactTask.count({
+      where: {
+        ...baseWhere,
+        status: 'completed',
+      },
+    }),
+    db.contactTask.findMany({
+      where: {
+        ...baseWhere,
+        ...(filter === 'open' ? { status: { not: 'completed' } } : {}),
+        ...(filter === 'completed' ? { status: 'completed' } : {}),
+      },
+      orderBy: [
+        { status: 'asc' },
+        { dueAt: 'asc' },
+        { createdAt: 'desc' },
+      ],
+      include: {
+        contact: {
+          select: {
+            id: true,
+            name: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            phone: true,
+          }
+        },
+        conversation: {
+          select: {
+            id: true,
+          }
+        },
+        syncRecords: {
+          select: {
+            provider: true,
+            status: true,
+            lastSyncedAt: true,
+            lastError: true,
+          },
+        },
+        outboxJobs: {
+          where: {
+            status: {
+              in: ['pending', 'processing', 'failed', 'dead'],
+            },
+          },
+          orderBy: [
+            { status: 'asc' },
+            { scheduledAt: 'asc' },
+            { createdAt: 'desc' },
+          ],
+          select: {
+            provider: true,
+            status: true,
+            operation: true,
+            attemptCount: true,
+            scheduledAt: true,
+            lastError: true,
+            createdAt: true,
+          },
+        },
+        assignedUser: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+      },
+    }),
+  ]);
+
+  return {
+    success: true,
+    tasks,
+    counts: {
+      all: allCount,
+      open: openCount,
+      completed: completedCount,
+    },
+  };
+}
+
 export async function createContactTask(input: z.input<typeof createTaskSchema>) {
   const { location, userId } = await getAuthContext();
   const parsed = createTaskSchema.parse(input);

@@ -73,12 +73,15 @@ export default async function ConversationsPage({ searchParams }: { searchParams
     const initialViewFilterParam = Array.isArray(resolvedSearchParams?.view)
         ? resolvedSearchParams.view[0]
         : resolvedSearchParams?.view;
-    const initialConversationStatus = (initialViewFilterParam === 'archived' || initialViewFilterParam === 'trash')
+    const initialConversationStatus = (initialViewFilterParam === 'archived' || initialViewFilterParam === 'trash' || initialViewFilterParam === 'tasks')
         ? initialViewFilterParam
         : 'active';
 
     // Initial Fetch on Server (include deep-linked conversation even if not in the top-50 window)
-    const initialConversationsData = await fetchConversations(initialConversationStatus, selectedConversationId);
+    const initialConversationsData = await fetchConversations(
+        initialConversationStatus === 'tasks' ? 'active' : initialConversationStatus,
+        selectedConversationId
+    );
 
     return (
         <div className="h-[calc(100vh-64px)] w-full max-w-full min-w-0 overflow-hidden flex flex-col">

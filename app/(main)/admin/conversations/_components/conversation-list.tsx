@@ -32,8 +32,8 @@ interface ConversationListProps {
     viewMode?: 'chats' | 'deals';
     onViewModeChange?: (mode: 'chats' | 'deals') => void;
     // View Filter Props
-    viewFilter?: 'active' | 'archived' | 'trash';
-    onViewFilterChange?: (filter: 'active' | 'archived' | 'trash') => void;
+    viewFilter?: 'active' | 'archived' | 'trash' | 'tasks';
+    onViewFilterChange?: (filter: 'active' | 'archived' | 'trash' | 'tasks') => void;
     deals?: any[];
     onSelectDeal?: (id: string) => void;
     onImportClick?: () => void;
@@ -256,6 +256,7 @@ export function ConversationList({
                                             {viewFilter === 'active' && <Inbox className="w-4 h-4" />}
                                             {viewFilter === 'archived' && <Archive className="w-4 h-4" />}
                                             {viewFilter === 'trash' && <Trash2 className="w-4 h-4" />}
+                                            {viewFilter === 'tasks' && <CheckSquare className="w-4 h-4 text-emerald-600" />}
                                         </Button>
                                     </DropdownMenuTrigger>
                                     <DropdownMenuContent
@@ -266,6 +267,9 @@ export function ConversationList({
                                     >
                                         <DropdownMenuItem onClick={() => { onViewFilterChange('active'); setIsMenuOpen(false); }} className="gap-2">
                                             <Inbox className="w-4 h-4" /> Inbox
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => { onViewFilterChange('tasks'); setIsMenuOpen(false); }} className="gap-2">
+                                            <CheckSquare className="w-4 h-4 text-emerald-600" /> Tasks
                                         </DropdownMenuItem>
                                         <DropdownMenuItem onClick={() => { onViewFilterChange('archived'); setIsMenuOpen(false); }} className="gap-2">
                                             <Archive className="w-4 h-4" /> Archived

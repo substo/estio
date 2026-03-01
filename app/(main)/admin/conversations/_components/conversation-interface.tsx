@@ -139,7 +139,7 @@ export function ConversationInterface({ initialConversations, initialConversatio
     // Map URL 'inbox' to internal 'active' if needed, but 'active' is the internal string. 
     // Let's support 'inbox' in URL for user friendliness
     const urlView = searchParams.get('view');
-    const normalizedViewFilter = (urlView === 'inbox' ? 'active' : urlView) as 'active' | 'archived' | 'trash' || 'active';
+    const normalizedViewFilter = (urlView === 'inbox' ? 'active' : urlView) as 'active' | 'archived' | 'trash' | 'tasks' || 'active';
 
     const [conversations, setConversations] = useState<Conversation[]>(initialConversations);
     const conversationsRef = useRef<Conversation[]>(initialConversations);
@@ -159,7 +159,7 @@ export function ConversationInterface({ initialConversations, initialConversatio
     const activeIdRef = useRef<string | null>(initialActiveId);
 
     // View Mode State (inbox, archived, trash)
-    const [viewFilter, setViewFilter] = useState<'active' | 'archived' | 'trash'>(normalizedViewFilter);
+    const [viewFilter, setViewFilter] = useState<'active' | 'archived' | 'trash' | 'tasks'>(normalizedViewFilter);
 
     // Deal Mode State
     const initialViewMode = (searchParams.get('mode') as 'chats' | 'deals') || 'chats';
