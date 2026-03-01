@@ -192,6 +192,42 @@ export function parseR2Uri(uri: string): { bucket: string; key: string } | null 
     return { bucket, key };
 }
 
+async function streamToBuffer(stream: any): Promise<Buffer> {
+    if (!stream) return Buffer.alloc(0);
+
+    if (Buffer.isBuffer(stream)) return stream;
+    if (stream instanceof Uint8Array) return Buffer.from(stream);
+
+    if (typeof stream.transformToByteArray === "function") {
+        const bytes = await stream.transformToByteArray();
+        return Buffer.from(bytes);
+    }
+
+    if (typeof stream.transformToWebStream === "function") {
+        const webStream = stream.transformToWebStream();
+        const reader = webStream.getReader();
+        const chunks: Uint8Array[] = [];
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value) chunks.push(value);
+        }
+
+        return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
+    }
+
+    if (typeof stream[Symbol.asyncIterator] === "function") {
+        const chunks: Buffer[] = [];
+        for await (const chunk of stream) {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        return Buffer.concat(chunks);
+    }
+
+    throw new Error("Unsupported object stream type for R2 read");
+}
+
 export async function createWhatsAppMediaUploadUrl(params: {
     key: string;
     contentType: string;
@@ -240,6 +276,25 @@ export async function createWhatsAppMediaReadUrl(params: {
     });
 
     return url;
+}
+
+export async function getWhatsAppMediaObjectBytes(key: string) {
+    const { bucketName } = getR2Config();
+    const client = getR2Client();
+
+    const result = await client.send(
+        new GetObjectCommand({
+            Bucket: bucketName,
+            Key: key,
+        })
+    );
+
+    return {
+        key,
+        buffer: await streamToBuffer(result.Body),
+        contentType: result.ContentType || undefined,
+        contentLength: result.ContentLength ?? undefined,
+    };
 }
 
 export async function putWhatsAppMediaObject(params: {

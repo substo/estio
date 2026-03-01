@@ -259,7 +259,7 @@ export async function ingestEvolutionMediaAttachment(params: {
         contentLength: size,
     });
 
-    await db.messageAttachment.create({
+    const createdAttachment = await db.messageAttachment.create({
         data: {
             messageId: message.id,
             fileName,
@@ -268,6 +268,31 @@ export async function ingestEvolutionMediaAttachment(params: {
             url: uploaded.r2Uri,
         },
     });
+
+    if (parsed.type === "audio") {
+        void (async () => {
+            const {
+                enqueueWhatsAppAudioTranscription,
+                initWhatsAppAudioTranscriptionWorker,
+            } = await import("@/lib/queue/whatsapp-audio-transcription");
+
+            try {
+                await initWhatsAppAudioTranscriptionWorker();
+            } catch (error) {
+                console.warn(`[WhatsApp Audio] Worker init failed for ${wamId}, continuing with enqueue fallback:`, error);
+            }
+
+            try {
+                await enqueueWhatsAppAudioTranscription({
+                    locationId: message.conversation.locationId,
+                    messageId: message.id,
+                    attachmentId: createdAttachment.id,
+                });
+            } catch (error) {
+                console.error(`[WhatsApp Audio] Failed to enqueue transcription for ${wamId}:`, error);
+            }
+        })();
+    }
 
     return { status: "stored" as const, key: uploaded.key };
 }

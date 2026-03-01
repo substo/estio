@@ -4,13 +4,27 @@ import db from "@/lib/db";
 import { auth } from "@clerk/nextjs/server";
 import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
 import { revalidatePath } from "next/cache";
-import { GEMINI_FLASH_LATEST_ALIAS } from "@/lib/ai/models";
+import { GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 
 interface AiSettingsState {
     message?: string;
     errors?: {
         _form?: string[];
     };
+}
+
+function normalizeTranscriptionModel(value: unknown): string {
+    const normalized = String(value || "").trim();
+    if (!normalized) return GEMINI_FLASH_STABLE_FALLBACK;
+
+    const lower = normalized.toLowerCase();
+    const disallowed = ["embedding", "image", "robotics"];
+    const looksAudioCapable =
+        lower.includes("gemini")
+        && lower.includes("flash")
+        && !disallowed.some((token) => lower.includes(token));
+
+    return looksAudioCapable ? normalized : GEMINI_FLASH_STABLE_FALLBACK;
 }
 
 export async function updateAiSettings(
@@ -31,6 +45,8 @@ export async function updateAiSettings(
     }
 
     try {
+        const transcriptionModel = normalizeTranscriptionModel(formData.get("googleAiModelTranscription"));
+
         await db.siteConfig.upsert({
             where: { locationId },
             create: {
@@ -39,6 +55,7 @@ export async function updateAiSettings(
                 googleAiModel: formData.get("googleAiModel") as string || GEMINI_FLASH_LATEST_ALIAS,
                 googleAiModelExtraction: formData.get("googleAiModelExtraction") as string || GEMINI_FLASH_LATEST_ALIAS,
                 googleAiModelDesign: formData.get("googleAiModelDesign") as string || GEMINI_FLASH_LATEST_ALIAS,
+                googleAiModelTranscription: transcriptionModel,
                 brandVoice: formData.get("brandVoice") as string,
                 outreachConfig: {
                     enabled: formData.get("outreachEnabled") === "on",
@@ -52,6 +69,7 @@ export async function updateAiSettings(
                 googleAiModel: formData.get("googleAiModel") as string || GEMINI_FLASH_LATEST_ALIAS,
                 googleAiModelExtraction: formData.get("googleAiModelExtraction") as string || GEMINI_FLASH_LATEST_ALIAS,
                 googleAiModelDesign: formData.get("googleAiModelDesign") as string || GEMINI_FLASH_LATEST_ALIAS,
+                googleAiModelTranscription: transcriptionModel,
                 brandVoice: formData.get("brandVoice") as string,
                 outreachConfig: {
                     enabled: formData.get("outreachEnabled") === "on",

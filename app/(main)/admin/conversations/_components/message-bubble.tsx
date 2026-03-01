@@ -14,9 +14,18 @@ import {
 } from "./message-selection-actions";
 
 type MessageAttachment = string | {
+    id?: string;
     url: string;
     mimeType?: string | null;
     fileName?: string | null;
+    transcript?: {
+        status: "pending" | "processing" | "completed" | "failed";
+        text?: string | null;
+        error?: string | null;
+        model?: string | null;
+        provider?: string | null;
+        updatedAt?: string | null;
+    } | null;
 };
 
 export interface MessageBubbleProps {
@@ -60,6 +69,7 @@ export interface MessageBubbleProps {
     onRemoveSelectionBatchItem?: (id: string) => void;
     onClearSelectionBatch?: () => void;
     onRefetchMedia?: (messageId: string) => void | Promise<void>;
+    onRetryTranscript?: (messageId: string, attachmentId: string) => void | Promise<void>;
 }
 
 export function MessageBubble({
@@ -73,6 +83,7 @@ export function MessageBubble({
     onRemoveSelectionBatchItem,
     onClearSelectionBatch,
     onRefetchMedia,
+    onRetryTranscript,
 }: MessageBubbleProps) {
     const isOutbound = message.direction === 'outbound';
     const isEmail = (message.type || '').toUpperCase().includes('EMAIL');
@@ -82,10 +93,14 @@ export function MessageBubble({
     const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
     const [selectionTarget, setSelectionTarget] = useState<MessageSelectionActionTarget | null>(null);
     const [isRefetchingMedia, setIsRefetchingMedia] = useState(false);
+    const [retryingTranscriptAttachmentId, setRetryingTranscriptAttachmentId] = useState<string | null>(null);
+    const [expandedTranscriptIds, setExpandedTranscriptIds] = useState<Record<string, boolean>>({});
     const contentRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         setSelectionTarget(null);
+        setExpandedTranscriptIds({});
+        setRetryingTranscriptAttachmentId(null);
     }, [message.id, isExpanded]);
 
     // Helper to detect if content is rich HTML (heuristic)
@@ -104,7 +119,7 @@ export function MessageBubble({
     const snippet = isEmail ? getSnippet(message.body) : "";
     const attachments = (message.attachments || []).map((attachment) =>
         typeof attachment === "string"
-            ? { url: attachment, mimeType: undefined, fileName: undefined }
+            ? { id: undefined, url: attachment, mimeType: undefined, fileName: undefined, transcript: null }
             : attachment
     );
     const imageAttachments = attachments.filter((attachment) => {
@@ -150,6 +165,31 @@ export function MessageBubble({
             await Promise.resolve(onRefetchMedia(message.id));
         } finally {
             setIsRefetchingMedia(false);
+        }
+    };
+
+    const isTranscriptExpanded = (attachmentId?: string, fallbackIndex?: number) => {
+        const key = attachmentId || `${message.id}:audio:${fallbackIndex || 0}`;
+        return !!expandedTranscriptIds[key];
+    };
+
+    const toggleTranscriptExpanded = (attachmentId?: string, fallbackIndex?: number) => {
+        const key = attachmentId || `${message.id}:audio:${fallbackIndex || 0}`;
+        setExpandedTranscriptIds((prev) => ({ ...prev, [key]: !prev[key] }));
+    };
+
+    const handleRetryTranscript = async (
+        e: React.MouseEvent<HTMLButtonElement>,
+        attachmentId?: string
+    ) => {
+        e.stopPropagation();
+        if (!onRetryTranscript || !attachmentId || retryingTranscriptAttachmentId) return;
+
+        setRetryingTranscriptAttachmentId(attachmentId);
+        try {
+            await Promise.resolve(onRetryTranscript(message.id, attachmentId));
+        } finally {
+            setRetryingTranscriptAttachmentId(null);
         }
     };
 
@@ -383,6 +423,99 @@ export function MessageBubble({
                                         Download
                                     </a>
                                 </div>
+
+                                {attachment.transcript && (
+                                    <div
+                                        className={cn(
+                                            "mt-2 rounded-md border px-2 py-1.5 text-xs",
+                                            isOutbound && !isEmail
+                                                ? "border-white/20 bg-white/10 text-blue-50"
+                                                : "border-black/10 bg-white/70 text-gray-700"
+                                        )}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <span className="font-medium">
+                                                Transcript
+                                            </span>
+                                            <span className={cn(
+                                                "rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide",
+                                                attachment.transcript.status === "completed" && (isOutbound && !isEmail ? "bg-emerald-500/25 text-emerald-100" : "bg-emerald-100 text-emerald-700"),
+                                                attachment.transcript.status === "failed" && (isOutbound && !isEmail ? "bg-red-500/25 text-red-100" : "bg-red-100 text-red-700"),
+                                                (attachment.transcript.status === "pending" || attachment.transcript.status === "processing") && (isOutbound && !isEmail ? "bg-amber-500/25 text-amber-100" : "bg-amber-100 text-amber-700")
+                                            )}>
+                                                {attachment.transcript.status}
+                                            </span>
+                                            {attachment.transcript.model && (
+                                                <span className={cn(
+                                                    "ml-auto text-[10px]",
+                                                    isOutbound && !isEmail ? "text-blue-100/80" : "text-gray-500"
+                                                )}>
+                                                    {attachment.transcript.model}
+                                                </span>
+                                            )}
+                                        </div>
+
+                                        {(attachment.transcript.status === "pending" || attachment.transcript.status === "processing") && (
+                                            <p className={cn("mt-1 text-[11px]", isOutbound && !isEmail ? "text-blue-100/90" : "text-gray-600")}>
+                                                Transcribing...
+                                            </p>
+                                        )}
+
+                                        {attachment.transcript.status === "completed" && (
+                                            <div className="mt-1 space-y-1">
+                                                <p className={cn(
+                                                    "whitespace-pre-wrap leading-relaxed",
+                                                    isOutbound && !isEmail ? "text-blue-50" : "text-gray-700"
+                                                )}>
+                                                    {(() => {
+                                                        const text = String(attachment.transcript?.text || "");
+                                                        const expanded = isTranscriptExpanded(attachment.id, i);
+                                                        if (expanded || text.length <= 280) return text;
+                                                        return `${text.slice(0, 280)}...`;
+                                                    })()}
+                                                </p>
+                                                {String(attachment.transcript.text || "").length > 280 && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            toggleTranscriptExpanded(attachment.id, i);
+                                                        }}
+                                                        className={cn(
+                                                            "text-[11px] underline underline-offset-2",
+                                                            isOutbound && !isEmail ? "text-blue-100 hover:text-white" : "text-gray-600 hover:text-gray-900"
+                                                        )}
+                                                    >
+                                                        {isTranscriptExpanded(attachment.id, i) ? "Show less" : "Show more"}
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {attachment.transcript.status === "failed" && (
+                                            <div className="mt-1 space-y-1">
+                                                <p className={cn("text-[11px]", isOutbound && !isEmail ? "text-red-100" : "text-red-600")}>
+                                                    {attachment.transcript.error || "Transcription failed."}
+                                                </p>
+                                                {onRetryTranscript && attachment.id && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => handleRetryTranscript(e, attachment.id)}
+                                                        disabled={retryingTranscriptAttachmentId === attachment.id}
+                                                        className={cn(
+                                                            "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px]",
+                                                            isOutbound && !isEmail
+                                                                ? "bg-white/20 text-blue-50 hover:bg-white/30 disabled:opacity-70"
+                                                                : "bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-70"
+                                                        )}
+                                                    >
+                                                        {retryingTranscriptAttachmentId === attachment.id ? "Retrying..." : "Retry transcript"}
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         ))}
                         {fileAttachments.map((attachment, i) => (

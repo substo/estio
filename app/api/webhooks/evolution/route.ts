@@ -38,6 +38,13 @@ export async function POST(req: NextRequest) {
             console.error('[Evolution Webhook] Failed to initialize LID resolve worker:', err);
         }
 
+        try {
+            const { initWhatsAppAudioTranscriptionWorker } = await import('@/lib/queue/whatsapp-audio-transcription');
+            await initWhatsAppAudioTranscriptionWorker();
+        } catch (err) {
+            console.error('[Evolution Webhook] Failed to initialize audio transcription worker:', err);
+        }
+
         if (eventType === 'CONTACTS_UPSERT' || eventType === 'CONTACTS.UPSERT' || eventType === 'CONTACTS_UPDATE' || eventType === 'CONTACTS.UPDATE') {
             await handleContactSyncEvent(body, location.id);
             // We don't return here because sometimes contacts update comes with message update? 

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { Conversation, Message } from '@/lib/ghl/conversations';
-import { fetchConversations, fetchMessages, sendReply, createWhatsAppMediaUploadUrl, sendWhatsAppMediaReply, generateAIDraft, deleteConversations, restoreConversations, archiveConversations, unarchiveConversations, permanentlyDeleteConversations, syncWhatsAppHistory, refreshConversation, markConversationAsRead, refetchWhatsAppMediaAttachment } from '../actions';
+import { fetchConversations, fetchMessages, sendReply, createWhatsAppMediaUploadUrl, sendWhatsAppMediaReply, generateAIDraft, deleteConversations, restoreConversations, archiveConversations, unarchiveConversations, permanentlyDeleteConversations, syncWhatsAppHistory, refreshConversation, markConversationAsRead, refetchWhatsAppMediaAttachment, retryWhatsAppAudioTranscript } from '../actions';
 import { toast } from '@/components/ui/use-toast';
 import { getDealContexts, createPersistentDeal } from '../../deals/actions';
 import { UnifiedTimeline } from './unified-timeline';
@@ -48,8 +48,39 @@ function getMessageType(conversation: Conversation): 'SMS' | 'Email' | 'WhatsApp
 
 function getMessageSignature(messages: Message[]): string {
     if (!messages || messages.length === 0) return '0';
-    const last = messages[messages.length - 1];
-    return `${messages.length}:${last.id}:${last.status}:${last.dateAdded}:${String(last.body || '').length}`;
+    const compact = messages.map((message) => {
+        const attachmentSignature = (message.attachments || []).map((attachment) => {
+            if (typeof attachment === "string") return `s:${attachment.length}`;
+            const transcript = attachment.transcript;
+            return [
+                attachment.id || "",
+                transcript?.status || "",
+                String(transcript?.text || "").length,
+                String(transcript?.error || "").length,
+                transcript?.updatedAt || "",
+            ].join(":");
+        }).join(",");
+
+        return [
+            message.id,
+            message.status,
+            message.dateAdded,
+            String(message.body || "").length,
+            attachmentSignature,
+        ].join("|");
+    }).join(";");
+
+    return `${messages.length}:${compact}`;
+}
+
+function hasPendingTranscripts(messages: Message[]): boolean {
+    return (messages || []).some((message) =>
+        (message.attachments || []).some((attachment) =>
+            typeof attachment !== "string"
+            && !!attachment.transcript
+            && (attachment.transcript.status === "pending" || attachment.transcript.status === "processing")
+        )
+    );
 }
 
 export function ConversationInterface({ initialConversations, initialConversationListPageInfo }: ConversationInterfaceProps) {
@@ -81,6 +112,10 @@ export function ConversationInterface({ initialConversations, initialConversatio
 
     const [conversations, setConversations] = useState<Conversation[]>(initialConversations);
     const conversationsRef = useRef<Conversation[]>(initialConversations);
+    const [messages, setMessages] = useState<Message[]>([]);
+    const messagesRef = useRef<Message[]>([]);
+    const [loadingMessages, setLoadingMessages] = useState(false);
+    const messageSignatureRef = useRef<string>('0');
     const [conversationListHasMore, setConversationListHasMore] = useState<boolean>(!!initialConversationListPageInfo?.hasMore);
     const [conversationListNextCursor, setConversationListNextCursor] = useState<string | null>(initialConversationListPageInfo?.nextCursor || null);
     const [loadingMoreConversations, setLoadingMoreConversations] = useState(false);
@@ -128,6 +163,10 @@ export function ConversationInterface({ initialConversations, initialConversatio
     useEffect(() => {
         conversationsRef.current = conversations;
     }, [conversations]);
+
+    useEffect(() => {
+        messagesRef.current = messages;
+    }, [messages]);
 
     // Fetch Deals when switching mode
     useEffect(() => {
@@ -225,10 +264,6 @@ export function ConversationInterface({ initialConversations, initialConversatio
         activeId,
         appendConversationPageFromResponse,
     ]);
-
-    const [messages, setMessages] = useState<Message[]>([]);
-    const [loadingMessages, setLoadingMessages] = useState(false);
-    const messageSignatureRef = useRef<string>('0');
 
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
     const [permanentDeleteDialogOpen, setPermanentDeleteDialogOpen] = useState(false);
@@ -393,7 +428,9 @@ export function ConversationInterface({ initialConversations, initialConversatio
                     incomingActive.lastMessageDate !== currentActive.lastMessageDate ||
                     incomingActive.lastMessageBody !== currentActive.lastMessageBody;
 
-                if (!hasActiveConversationChanged) {
+                const shouldPollPendingTranscripts = hasPendingTranscripts(messagesRef.current);
+
+                if (!hasActiveConversationChanged && !shouldPollPendingTranscripts) {
                     if ((incomingActive.unreadCount || 0) > 0) {
                         void markConversationReadInUi(selectedConversationId);
                     }
@@ -726,6 +763,39 @@ export function ConversationInterface({ initialConversations, initialConversatio
         }
     };
 
+    const handleRetryTranscript = async (messageId: string, attachmentId: string) => {
+        if (!activeConversation) return;
+        try {
+            const result = await retryWhatsAppAudioTranscript(activeConversation.id, messageId, attachmentId);
+            if (!result?.success) {
+                toast({
+                    title: "Retry Failed",
+                    description: String(result?.error || "Could not retry transcript."),
+                    variant: "destructive",
+                });
+                return;
+            }
+
+            const modeLabel = result.mode === "inline-fallback" ? "inline fallback" : result.mode;
+            toast({
+                title: result.skipped ? "Transcript Already Complete" : "Transcript Retry Started",
+                description: result.message || `Retry accepted via ${modeLabel}.`,
+            });
+
+            const refreshed = await fetchMessages(activeConversation.id);
+            if (activeIdRef.current === activeConversation.id) {
+                setMessages(refreshed);
+                messageSignatureRef.current = getMessageSignature(refreshed);
+            }
+        } catch (error: any) {
+            toast({
+                title: "Retry Failed",
+                description: String(error?.message || "Unexpected error while retrying transcript."),
+                variant: "destructive",
+            });
+        }
+    };
+
 
     const handleSync = async () => {
         if (!activeId) return;
@@ -852,6 +922,7 @@ export function ConversationInterface({ initialConversations, initialConversatio
                                 onSendMessage={handleSendMessage}
                                 onSendMedia={handleSendMedia}
                                 onRefetchMedia={handleRefetchMedia}
+                                onRetryTranscript={handleRetryTranscript}
                                 onSync={handleSync}
                                 onFetchHistory={async () => {
                                     setLoadingMessages(true);

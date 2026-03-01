@@ -29,6 +29,10 @@ import {
     toR2Uri,
 } from "@/lib/whatsapp/media-r2";
 import { ingestEvolutionMediaAttachment, parseEvolutionMessageContent } from "@/lib/whatsapp/evolution-media";
+import {
+    enqueueWhatsAppAudioTranscription,
+    initWhatsAppAudioTranscriptionWorker,
+} from "@/lib/queue/whatsapp-audio-transcription";
 
 const MAX_SELECTION_TEXT_LENGTH = 12000;
 const MAX_CUSTOM_OUTPUT_LENGTH = 2200;
@@ -951,7 +955,11 @@ export async function fetchMessages(conversationId: string) {
         where: { conversationId: conversation.id },
         orderBy: { createdAt: 'asc' },
         include: {
-            attachments: true,
+            attachments: {
+                include: {
+                    transcript: true,
+                },
+            },
             legacyCrmLeadEmailProcessing: {
                 select: {
                     status: true,
@@ -1054,11 +1062,20 @@ export async function fetchMessages(conversationId: string) {
         emailTo: m.emailTo || undefined,
         source: m.source || undefined,
         attachments: (m.attachments || []).map((a: any) => ({
+            id: a.id,
             url: String(a.url || "").startsWith("r2://")
                 ? `/api/media/attachments/${a.id}`
                 : a.url,
             mimeType: a.contentType || null,
             fileName: a.fileName || null,
+            transcript: a.transcript ? {
+                status: a.transcript.status,
+                text: a.transcript.text || null,
+                error: a.transcript.error || null,
+                model: a.transcript.model || null,
+                provider: a.transcript.provider || null,
+                updatedAt: a.transcript.updatedAt ? new Date(a.transcript.updatedAt).toISOString() : null,
+            } : null,
         })),
         // Hydrated fields for UI
         html: m.body?.includes('<') ? m.body : undefined // Simple check
@@ -1435,6 +1452,76 @@ export async function refetchWhatsAppMediaAttachment(
         scannedMessages: lookup.scanned,
         warnings: storageWarnings,
     };
+}
+
+export async function retryWhatsAppAudioTranscript(
+    conversationId: string,
+    messageId: string,
+    attachmentId: string
+) {
+    try {
+        const location = await getAuthenticatedLocation();
+
+        const conversation = await db.conversation.findUnique({
+            where: { ghlConversationId: conversationId },
+            select: { id: true, locationId: true },
+        });
+
+        if (!conversation || conversation.locationId !== location.id) {
+            return { success: false as const, error: "Conversation not found." };
+        }
+
+        const message = await db.message.findUnique({
+            where: { id: messageId },
+            include: { attachments: true },
+        });
+        if (!message || message.conversationId !== conversation.id) {
+            return { success: false as const, error: "Message not found for this conversation." };
+        }
+
+        const attachment = (message.attachments || []).find((item) => item.id === attachmentId);
+        if (!attachment) {
+            return { success: false as const, error: "Attachment not found for this message." };
+        }
+
+        const mediaKind = getWhatsAppMediaKind(attachment.contentType, attachment.fileName || attachment.url);
+        if (mediaKind !== "audio") {
+            return { success: false as const, error: "Attachment is not an audio file." };
+        }
+
+        try {
+            await initWhatsAppAudioTranscriptionWorker();
+        } catch (workerErr) {
+            console.warn("[retryWhatsAppAudioTranscript] Worker init failed, continuing with enqueue fallback:", workerErr);
+        }
+        const enqueueResult = await enqueueWhatsAppAudioTranscription({
+            locationId: location.id,
+            messageId: message.id,
+            attachmentId: attachment.id,
+            force: true,
+        });
+
+        if (!enqueueResult.accepted && enqueueResult.mode === "skipped") {
+            return {
+                success: true as const,
+                mode: enqueueResult.mode,
+                skipped: true as const,
+                message: "Transcript already completed. No retry was needed.",
+            };
+        }
+
+        return {
+            success: true as const,
+            mode: enqueueResult.mode,
+            skipped: false as const,
+            message: enqueueResult.mode === "inline-fallback"
+                ? "Retry started (inline fallback)."
+                : "Retry queued.",
+        };
+    } catch (error: any) {
+        console.error("[retryWhatsAppAudioTranscript] Error:", error);
+        return { success: false as const, error: error?.message || "Failed to retry transcript." };
+    }
 }
 
 export async function syncWhatsAppHistory(conversationId: string, limit: number = 20, ignoreDuplicates: boolean = false, offset: number = 0) {
@@ -1896,6 +1983,26 @@ export async function sendWhatsAppMediaReply(
                 messageDate: new Date(),
                 direction: 'outbound',
             });
+        }
+
+        if (mediaKind === "audio" && created.attachments?.[0]?.id) {
+            void (async () => {
+                try {
+                    try {
+                        await initWhatsAppAudioTranscriptionWorker();
+                    } catch (workerErr) {
+                        console.warn('[sendWhatsAppMediaReply] Worker init failed, continuing with enqueue fallback:', workerErr);
+                    }
+
+                    await enqueueWhatsAppAudioTranscription({
+                        locationId: location.id,
+                        messageId: created.id,
+                        attachmentId: created.attachments[0].id,
+                    });
+                } catch (transcriptionErr) {
+                    console.error('[sendWhatsAppMediaReply] Failed to enqueue audio transcription:', transcriptionErr);
+                }
+            })();
         }
 
         const accessToken = location.ghlAccessToken;

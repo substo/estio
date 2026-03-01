@@ -4,7 +4,7 @@ import { useActionState, useState, useEffect, useRef } from "react";
 import { useFormStatus } from "react-dom";
 import { updateAiSettings } from "./actions";
 import { Input } from "@/components/ui/input";
-import { GEMINI_FLASH_LATEST_ALIAS, GOOGLE_AI_MODELS } from "@/lib/ai/models";
+import { GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK, GOOGLE_AI_MODELS } from "@/lib/ai/models";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -47,9 +47,15 @@ export function AiSettingsForm({ initialData, locationId }: { initialData: any, 
         || (typeof initialData?.googleAiModel === "string" && initialData.googleAiModel.trim())
         || GEMINI_FLASH_LATEST_ALIAS
     );
+    const [googleAiModelTranscription, setGoogleAiModelTranscription] = useState(
+        (typeof initialData?.googleAiModelTranscription === "string" && initialData.googleAiModelTranscription.trim())
+        || (typeof initialData?.googleAiModelExtraction === "string" && initialData.googleAiModelExtraction.trim())
+        || GEMINI_FLASH_STABLE_FALLBACK
+    );
     const hasUserSelectedGeneralModelRef = useRef(false);
     const hasUserSelectedExtractionModelRef = useRef(false);
     const hasUserSelectedDesignModelRef = useRef(false);
+    const hasUserSelectedTranscriptionModelRef = useRef(false);
 
     const hasConfiguredGeneralModel = Boolean(
         typeof initialData?.googleAiModel === "string" && initialData.googleAiModel.trim()
@@ -59,6 +65,9 @@ export function AiSettingsForm({ initialData, locationId }: { initialData: any, 
     );
     const hasConfiguredDesignModel = Boolean(
         typeof initialData?.googleAiModelDesign === "string" && initialData.googleAiModelDesign.trim()
+    );
+    const hasConfiguredTranscriptionModel = Boolean(
+        typeof initialData?.googleAiModelTranscription === "string" && initialData.googleAiModelTranscription.trim()
     );
 
     useEffect(() => {
@@ -78,11 +87,14 @@ export function AiSettingsForm({ initialData, locationId }: { initialData: any, 
                     if (!hasUserSelectedDesignModelRef.current && !hasConfiguredDesignModel && defaults?.design) {
                         setGoogleAiModelDesign(defaults.design);
                     }
+                    if (!hasUserSelectedTranscriptionModelRef.current && !hasConfiguredTranscriptionModel) {
+                        setGoogleAiModelTranscription(defaults?.extraction || defaults?.general || GEMINI_FLASH_STABLE_FALLBACK);
+                    }
                 }
             });
         });
         return () => { mounted = false; };
-    }, [hasConfiguredDesignModel, hasConfiguredExtractionModel, hasConfiguredGeneralModel]);
+    }, [hasConfiguredDesignModel, hasConfiguredExtractionModel, hasConfiguredGeneralModel, hasConfiguredTranscriptionModel]);
 
     return (
         <div className="space-y-8">
@@ -152,7 +164,7 @@ export function AiSettingsForm({ initialData, locationId }: { initialData: any, 
                             </select>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
                             {/* Stage 1: Extraction */}
                             <div className="grid gap-2">
                                 <Label htmlFor="googleAiModelExtraction" className="text-xs text-slate-500 uppercase tracking-wider">Stage 1: Extraction</Label>
@@ -195,6 +207,28 @@ export function AiSettingsForm({ initialData, locationId }: { initialData: any, 
                                     ))}
                                 </select>
                                 <p className="text-[10px] text-muted-foreground">Used for redesigns & badges.</p>
+                            </div>
+
+                            {/* Audio Transcription */}
+                            <div className="grid gap-2">
+                                <Label htmlFor="googleAiModelTranscription" className="text-xs text-slate-500 uppercase tracking-wider">Audio: Transcription</Label>
+                                <select
+                                    id="googleAiModelTranscription"
+                                    name="googleAiModelTranscription"
+                                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                                    value={googleAiModelTranscription}
+                                    onChange={(e) => {
+                                        hasUserSelectedTranscriptionModelRef.current = true;
+                                        setGoogleAiModelTranscription(e.target.value);
+                                    }}
+                                >
+                                    {(availableModels.length > 0 ? availableModels : GOOGLE_AI_MODELS).map((model) => (
+                                        <option key={model.value} value={model.value}>
+                                            {model.label}
+                                        </option>
+                                    ))}
+                                </select>
+                                <p className="text-[10px] text-muted-foreground">Used for WhatsApp audio transcript generation.</p>
                             </div>
                         </div>
                     </div>

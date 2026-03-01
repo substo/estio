@@ -1,5 +1,5 @@
 # Conversation Management & Deletion Features
-**Last Updated:** 2026-02-27
+**Last Updated:** 2026-03-01
 
 ## Overview
 This document outlines the architecture and logic for managing conversation lifecycles, including **Soft Deletion**, **Archiving**, **Trash**, and **live inbox/unread state behavior** introduced in Feb 2026.
@@ -123,6 +123,7 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
 - **Active Thread Live Updates**: While a thread is open, metadata changes trigger silent message refresh; ChatWindow auto-scroll keeps the latest message visible.
 - **Channel Guards**: The composer channel picker disables ineligible channels with a reason tooltip. SMS is blocked when phone is invalid/masked or GHL SMS is not configured; WhatsApp is blocked when eligibility checks fail.
 - **WhatsApp Media Composer**: For WhatsApp-eligible conversations, the composer supports media upload (`image/*`, `audio/*`) and in-app voice-note recording (`MediaRecorder`). Media is sent through the private R2 -> Evolution `sendMedia` flow and rendered inline (image preview or audio player) from signed attachment URLs.
+- **WhatsApp Media Recovery**: Message bubbles now expose `Re-fetch Media` for WhatsApp media messages/placeholders to recover missing or stale attachment storage. Source-of-truth details: [`whatsapp-integration.md`](whatsapp-integration.md#61-media-re-fetch-recovery-mar-2026).
 - **Source of Truth (Selection Workflow)**: This document is the canonical reference for chat text-selection behavior, batch summarize/custom flow, and CRM-log save semantics.
 - **Selection Actions**: Message/email text selection in the chat panel now opens a floating action toolbar with:
   - `Paste Lead` for AI-assisted structured lead import.

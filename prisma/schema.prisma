@@ -343,6 +343,7 @@ model SiteConfig {
   googleAiModel           String? @default("gemini-1.5-pro") // Default / Legacy
   googleAiModelExtraction String? @default("gemini-1.5-flash") // Stage 1: Fast Scraper
   googleAiModelDesign     String? @default("gemini-1.5-pro") // Stage 2: High-End Designer
+  googleAiModelTranscription String? @default("gemini-2.5-flash") // Phase 1: Audio transcription default
   brandVoice              String? // Custom instructions for AI Brand Voice
   homeSections            Json? // Configuration for Home Page Sections (order, visibility)
   favoritesConfig         Json? // { title, emptyTitle, emptyBody, headerStyle, heroImage }
@@ -1070,6 +1071,7 @@ model Message {
   // Relations
   conversation                 Conversation                  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   attachments                  MessageAttachment[]
+  transcripts                  MessageTranscript[]
   legacyCrmLeadEmailProcessing LegacyCrmLeadEmailProcessing?
 
   // WhatsApp Integration
@@ -1145,9 +1147,37 @@ model MessageAttachment {
   size        Int
   url         String
 
-  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  message    Message            @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  transcript MessageTranscript?
 
   @@index([messageId])
+}
+
+model MessageTranscript {
+  id               String   @id @default(cuid())
+  messageId        String
+  attachmentId     String   @unique
+  provider         String   @default("google")
+  model            String
+  status           String   @default("pending") // pending | processing | completed | failed
+  language         String?
+  text             String?  @db.Text
+  error            String?
+  promptTokens     Int?
+  completionTokens Int?
+  totalTokens      Int?
+  estimatedCostUsd Float?
+  startedAt        DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  message    Message           @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  attachment MessageAttachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@index([status])
+  @@index([createdAt])
 }
 
 model WhatsAppImportSession {

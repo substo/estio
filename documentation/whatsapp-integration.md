@@ -153,6 +153,28 @@ whatsapp/evolution/v1/env/{env}/location/{locationId}/contact/{contactId?}/conve
 - `fetchMessages(...)` now also returns attachment metadata (`url`, `mimeType`, `fileName`) so the chat UI can render **inline image previews** and **audio players** for supported media attachments.
 - We intentionally do **not** enable webhook base64 payloads globally. Media is fetched on demand using `getBase64FromMediaMessage(...)` to avoid oversized webhook payloads.
 
+### 6.1 Media Re-fetch Recovery (Mar 2026)
+
+To recover from stale/missing media storage objects without deleting the WhatsApp message itself, we added a **media re-fetch** path in Conversations:
+
+- **UI trigger**: `message-bubble` renders a `Re-fetch Media` button for WhatsApp messages when:
+  - the message has renderable media attachments (image/audio), or
+  - the message body indicates a media placeholder (`[Audio]`, `[Image]`, `[Media]`).
+- **Server action**: `refetchWhatsAppMediaAttachment(conversationId, messageId, options?)` in `app/(main)/admin/conversations/actions.ts`.
+- **Lookup strategy**:
+  - Requires local `Message.wamId`.
+  - Resolves candidate JIDs using the same LID-aware strategy as history sync.
+  - Pages Evolution `fetchMessages(...)` batches to find the exact `wamId`.
+- **Recovery flow**:
+  1. Snapshot existing `MessageAttachment` rows.
+  2. Remove current attachment rows for that message.
+  3. Re-run `ingestEvolutionMediaAttachment(...)` (Evolution `getBase64FromMediaMessage` -> R2 -> new `MessageAttachment`).
+  4. If ingest fails or is skipped, restore original attachment rows.
+  5. On success, delete old R2 object keys (`r2://...`) best-effort and return warnings if cleanup fails.
+
+> [!IMPORTANT]
+> Re-fetch only succeeds if Evolution/WhatsApp still returns media bytes for that historic message. If Evolution returns no base64 (`missing_base64`), there is nothing to recover automatically.
+
 ### 7. Emoji, Reactions, and Sticker Semantics (Feb 23, 2026)
 
 To prevent emoji reactions/stickers from being mislabeled as generic media (`[Media]`), the Evolution integration now normalizes additional WhatsApp message types in **one shared parser** (`parseEvolutionMessageContent(...)`) and reuses it across:
@@ -276,6 +298,7 @@ We track message delivery status (`sent`, `delivered`, `read`, `failed`) by list
 | **Lead gets split into two contacts/conversations after reply** | **Issue**: Outbound uses phone identity, reply arrives as unresolved `@lid`. **Fix**: Inbound unresolved LID is now deferred (`whatsapp-lid-resolve` queue) until resolved to phone; verify Redis is up and worker logs show retries/resolution. |
 | **Manual "Sync WhatsApp History" finds no past messages for a manually-created lead (often international numbers)** | **Issue**: Evolution may store the chat under an LID (`@lid`) while older history sync queried only `phone@s.whatsapp.net`. **Fix**: Manual sync/new-conversation backfill now try multiple JIDs (`Contact.lid`, Evolution lookup JID, phone fallback). Check logs for `History fetch candidates ... selected=... found=...`. |
 | **Media message exists but no attachment appears (especially `@lid` contacts)** | Older builds could ingest media before the deferred LID message row existed (`message_not_found`). **Fix**: Attachment ingest now waits for deferred LID resolution/processing, then retries automatically. Re-sync history to backfill previously missed attachments. |
+| **Media row exists but playback/download fails (missing/corrupted object in R2)** | Use `Re-fetch Media` in the message bubble. It re-downloads by `wamId` from Evolution, restores DB rows on failure, and replaces storage only after successful ingest. |
 | **WhatsApp media upload fails before send** | Check R2 env vars (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`) and bucket CORS for browser `PUT`. The upload action is `createWhatsAppMediaUploadUrl(...)`. |
 | **"Uploaded media not found in media storage"** | The presigned upload may have expired or the browser upload failed. Re-upload the file, then call `sendWhatsAppMediaReply(...)` again. |
 | **"Unsupported media type" / size errors** | Current allow-lists: images (`jpeg/png/webp/gif/heic/heif`) and audio (`ogg/opus/mp3/m4a/webm/wav/aac`). Current max size is `16MB` for both image/audio in `createWhatsAppMediaUploadUrl(...)`. |
@@ -439,16 +462,18 @@ No Prisma migration was required for the Evolution image/R2 feature, but we now 
 - **Outbound (App UI only)**: Users can send image/audio attachments from the app conversation UI (paperclip icon) on WhatsApp conversations. This uses `createWhatsAppMediaUploadUrl(...)` + `sendWhatsAppMediaReply(...)`. Voice recording in the chat composer is sent through the same media action.
 - **Inbound (Webhook + Manual History Sync + Backfill)**: Image/audio messages received from Evolution webhooks and media messages discovered during sync/backfill paths are parsed and ingested into R2 asynchronously.
 - **Display**: Existing `message-bubble` UI renders message attachments once `fetchMessages(...)` hydrates attachment URLs.
+- **Recovery (Re-fetch by `wamId`)**: Users can re-fetch a WhatsApp media payload for a specific message from the conversation thread using `refetchWhatsAppMediaAttachment(...)`.
 
 ### Key Files (Media Path)
 
 | File | Role |
 |------|------|
-| `lib/whatsapp/media-r2.ts` | Cloudflare R2 S3-compatible client, presigned URLs, key builders, `r2://` URI helpers |
+| `lib/whatsapp/media-r2.ts` | Cloudflare R2 S3-compatible client, presigned URLs, key builders, `r2://` URI helpers, and object delete helper (`deleteWhatsAppMediaObject`) |
 | `lib/whatsapp/evolution-media.ts` | Evolution message parsing + inbound media ingestion (`getBase64FromMediaMessage` -> R2 -> `MessageAttachment`) |
 | `lib/evolution/client.ts` | Evolution `sendMedia(...)` and `getBase64FromMediaMessage(...)` client methods |
 | `app/api/webhooks/evolution/route.ts` | Webhook parsing + async media ingestion trigger for `MESSAGES_UPSERT` |
-| `app/(main)/admin/conversations/actions.ts` | `createWhatsAppMediaUploadUrl(...)`, `sendWhatsAppMediaReply(...)`, `syncWhatsAppHistory(...)`, attachment hydration in `fetchMessages(...)` |
+| `app/(main)/admin/conversations/actions.ts` | `createWhatsAppMediaUploadUrl(...)`, `sendWhatsAppMediaReply(...)`, `syncWhatsAppHistory(...)`, `refetchWhatsAppMediaAttachment(...)`, attachment hydration in `fetchMessages(...)` |
+| `app/(main)/admin/conversations/_components/message-bubble.tsx` | Inline image/audio rendering and `Re-fetch Media` UI control |
 | `app/api/media/attachments/[attachmentId]/route.ts` | Authenticated attachment proxy -> short-lived signed R2 GET |
 
 ### Evolution Media Retrieval Endpoint (Important)

@@ -33,9 +33,18 @@ export interface Message {
     status: string;
     dateAdded: string; // ISO or timestamp
     attachments?: Array<string | {
+        id?: string;
         url: string;
         mimeType?: string | null;
         fileName?: string | null;
+        transcript?: {
+            status: 'pending' | 'processing' | 'completed' | 'failed';
+            text?: string | null;
+            error?: string | null;
+            model?: string | null;
+            provider?: string | null;
+            updatedAt?: string | null;
+        } | null;
     }>;
     html?: string; // For Email content
     subject?: string; // For Email
