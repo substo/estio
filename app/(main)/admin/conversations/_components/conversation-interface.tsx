@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useDebounce } from 'use-debounce';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { Conversation, Message } from '@/lib/ghl/conversations';
 import {
@@ -165,7 +166,87 @@ export function ConversationInterface({ initialConversations, initialConversatio
     const initialViewMode = (searchParams.get('mode') as 'chats' | 'deals') || 'chats';
     const [viewMode, setViewMode] = useState<'chats' | 'deals'>(initialViewMode);
 
+    const [searchQuery, setSearchQuery] = useState('');
+    const [debouncedSearchQuery] = useDebounce(searchQuery, 300);
+    const [isSearching, setIsSearching] = useState(false);
+    const [searchResults, setSearchResults] = useState<Conversation[]>([]);
+
+    const [searchQuery, setSearchQuery] = useState('');
+    const [debouncedSearchQuery] = useDebounce(searchQuery, 300);
+    const [isSearching, setIsSearching] = useState(false);
+    const [searchResults, setSearchResults] = useState<Conversation[]>([]);
+
     const [deals, setDeals] = useState<any[]>([]);
+
+    // Global Search Effect
+    useEffect(() => {
+        if (!debouncedSearchQuery.trim()) {
+            setSearchResults([]);
+            setIsSearching(false);
+            return;
+        }
+
+        let isCancelled = false;
+        setIsSearching(true);
+
+        searchConversations(debouncedSearchQuery, { limit: 50 })
+            .then(res => {
+                if (isCancelled) return;
+                if (res.success) {
+                    setSearchResults(res.conversations || []);
+                } else {
+                    toast({ title: "Search Failed", description: String(res.error), variant: "destructive" });
+                    setSearchResults([]);
+                }
+            })
+            .catch(err => {
+                if (isCancelled) return;
+                console.error("Search failed:", err);
+                toast({ title: "Error", description: "Search failed.", variant: "destructive" });
+            })
+            .finally(() => {
+                if (!isCancelled) setIsSearching(false);
+            });
+
+        return () => {
+            isCancelled = true;
+        };
+    }, [debouncedSearchQuery]);
+
+    // Global Search Effect
+    useEffect(() => {
+        if (!debouncedSearchQuery.trim()) {
+            setSearchResults([]);
+            setIsSearching(false);
+            return;
+        }
+
+        let isCancelled = false;
+        setIsSearching(true);
+
+        searchConversations(debouncedSearchQuery, { limit: 50 })
+            .then(res => {
+                if (isCancelled) return;
+                if (res.success) {
+                    setSearchResults(res.conversations || []);
+                } else {
+                    toast({ title: "Search Failed", description: String(res.error), variant: "destructive" });
+                    setSearchResults([]);
+                }
+            })
+            .catch(err => {
+                if (isCancelled) return;
+                console.error("Search failed:", err);
+                toast({ title: "Error", description: "Search failed.", variant: "destructive" });
+            })
+            .finally(() => {
+                if (!isCancelled) setIsSearching(false);
+            });
+
+        return () => {
+            isCancelled = true;
+        };
+    }, [debouncedSearchQuery]);
 
     const initialDealId = searchParams.get('dealId');
     const [activeDealId, setActiveDealId] = useState<string | null>(initialDealId);
@@ -1055,7 +1136,7 @@ export function ConversationInterface({ initialConversations, initialConversatio
                     className="overflow-hidden min-w-0"
                 >
                     <ConversationList
-                        conversations={conversations}
+                        conversations={debouncedSearchQuery.trim() ? searchResults : conversations}
                         selectedId={viewMode === 'chats' ? activeId : activeDealId}
                         onSelect={handleSelect}
                         hasMore={viewMode === 'chats' ? conversationListHasMore : false}

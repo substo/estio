@@ -9012,3 +9012,193 @@ export async function processLegacyCrmLeadEmailAction(
         triggerSource: "manual_action",
     });
 }
+export async function searchConversations(query: string, options?: { limit?: number }) {
+    try {
+        const location = await getAuthenticatedLocation();
+        const MAX_SEARCH_LIMIT = 50;
+        const limit = Math.min(Math.max(Number(options?.limit || 20), 1), MAX_SEARCH_LIMIT);
+        
+        const q = String(query || "").trim();
+        if (!q) {
+            return {
+                success: true,
+                conversations: [],
+                total: 0,
+                hasMore: false,
+                nextCursor: null,
+                pageSize: limit,
+            };
+        }
+
+        // Phase 1: Contact matching
+        // We look for contacts matching the query in various fields
+        const contactMatches = await db.contact.findMany({
+            where: {
+                locationId: location.id,
+                OR: [
+                    { name: { contains: q, mode: 'insensitive' } },
+                    { firstName: { contains: q, mode: 'insensitive' } },
+                    { lastName: { contains: q, mode: 'insensitive' } },
+                    { email: { contains: q, mode: 'insensitive' } },
+                    { phone: { contains: q, mode: 'insensitive' } },
+                    { notes: { contains: q, mode: 'insensitive' } },
+                    { leadGoal: { contains: q, mode: 'insensitive' } },
+                    { requirementOtherDetails: { contains: q, mode: 'insensitive' } },
+                    // Tags array is tricky to search directly with contains, but Prisma 
+                    // supports `has` or string casting sometimes. For text search, 
+                    // we'll rely on the other fields or require exact tag match if used.
+                ]
+            },
+            select: {
+                id: true,
+            },
+            take: limit
+        });
+
+        const contactIds = contactMatches.map(c => c.id);
+
+        // Find conversations for these contacts
+        const contactConversations = await db.conversation.findMany({
+            where: {
+                locationId: location.id,
+                deletedAt: null, // Only search active/archived
+                contactId: { in: contactIds }
+            },
+            select: { id: true }
+        });
+
+        // Phase 2: Message & Transcript matching
+        // Search message bodies
+        const messageMatches = await db.message.findMany({
+            where: {
+                conversation: {
+                    locationId: location.id,
+                    deletedAt: null
+                },
+                body: { contains: q, mode: 'insensitive' }
+            },
+            select: {
+                conversationId: true
+            },
+            take: limit
+        });
+
+        // Search transcripts
+        const transcriptMatches = await db.messageTranscript.findMany({
+            where: {
+                message: {
+                    conversation: {
+                        locationId: location.id,
+                        deletedAt: null
+                    }
+                },
+                text: { contains: q, mode: 'insensitive' }
+            },
+            select: {
+                message: {
+                    select: { conversationId: true }
+                }
+            },
+            take: limit
+        });
+
+        // Search conversation last messages
+        const lastMessageMatches = await db.conversation.findMany({
+            where: {
+                locationId: location.id,
+                deletedAt: null,
+                lastMessageBody: { contains: q, mode: 'insensitive' }
+            },
+            select: { id: true },
+            take: limit
+        });
+
+        // Combine unique conversation IDs
+        const matchedConversationIds = new Set<string>([
+            ...contactConversations.map(c => c.id),
+            ...messageMatches.map(m => m.conversationId),
+            ...transcriptMatches.map(t => t.message.conversationId),
+            ...lastMessageMatches.map(c => c.id)
+        ]);
+
+        if (matchedConversationIds.size === 0) {
+            return {
+                success: true,
+                conversations: [],
+                total: 0,
+                hasMore: false,
+                nextCursor: null,
+                pageSize: limit,
+            };
+        }
+
+        // Build the final query to fetch the full conversation objects
+        // similar to fetchConversations
+        const finalLimit = Math.min(matchedConversationIds.size, limit);
+        
+        const fetchedRows = await db.conversation.findMany({
+            where: {
+                id: { in: Array.from(matchedConversationIds) }
+            },
+            orderBy: [{ lastMessageAt: 'desc' }, { id: 'desc' }],
+            take: finalLimit,
+            include: { contact: { select: { name: true, email: true, phone: true, ghlContactId: true } } }
+        });
+
+        // Fetch active deals as well
+        const activeDeals = await db.dealContext.findMany({
+            where: {
+                locationId: location.id,
+                stage: 'ACTIVE',
+                conversationIds: {
+                    hasSome: fetchedRows.map((c: any) => c.ghlConversationId)
+                }
+            },
+            select: { id: true, title: true, conversationIds: true }
+        });
+
+        const dealMap = new Map<string, { id: string, title: string }>();
+        for (const deal of activeDeals) {
+            for (const id of deal.conversationIds) {
+                dealMap.set(id, { id: deal.id, title: deal.title });
+            }
+        }
+
+        return {
+            success: true,
+            conversations: fetchedRows.map((c: any) => ({
+                id: c.ghlConversationId,
+                contactId: c.contact.ghlContactId || c.contactId,
+                contactName: c.contact.name || "Unknown",
+                contactPhone: c.contact.phone || undefined,
+                contactEmail: c.contact.email || undefined,
+                lastMessageBody: c.lastMessageBody || "",
+                lastMessageDate: Math.floor(c.lastMessageAt.getTime() / 1000),
+                unreadCount: c.unreadCount,
+                status: c.status as any,
+                type: c.lastMessageType || 'TYPE_SMS',
+                lastMessageType: c.lastMessageType || undefined,
+                locationId: location.ghlLocationId || "",
+                activeDealId: dealMap.get(c.ghlConversationId)?.id,
+                activeDealTitle: dealMap.get(c.ghlConversationId)?.title,
+                suggestedActions: c.suggestedActions || []
+            })),
+            total: fetchedRows.length,
+            hasMore: false, // Search doesn't paginate for now to keep UI simple
+            nextCursor: null,
+            pageSize: finalLimit,
+        };
+
+    } catch (error: any) {
+        console.error("[searchConversations] error:", error);
+        return { 
+            success: false, 
+            error: error.message || "Search failed",
+            conversations: [], 
+            total: 0, 
+            hasMore: false, 
+            nextCursor: null, 
+            pageSize: 0 
+        };
+    }
+}

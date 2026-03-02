@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { Conversation } from "@/lib/ghl/conversations";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
-import { Mail, MessageSquare, MessageCircle, Layers, Link as LinkIcon, Upload, Trash2, X, CheckSquare, Inbox, Archive, Plus, CloudDownload, Loader2 } from "lucide-react";
+import { Mail, MessageSquare, MessageCircle, Layers, Link as LinkIcon, Upload, Trash2, X, CheckSquare, Inbox, Archive, Plus, CloudDownload, Loader2, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card";
@@ -41,6 +41,9 @@ interface ConversationListProps {
     onArchive?: (ids: string[]) => void;
     onNewConversationClick?: () => void;
     onSyncAllClick?: () => void;
+    searchQuery?: string;
+    onSearchChange?: (q: string) => void;
+    isSearching?: boolean;
 }
 
 /**
@@ -88,7 +91,10 @@ export function ConversationList({
     onBind,
     onArchive,
     onNewConversationClick,
-    onSyncAllClick
+    onSyncAllClick,
+    searchQuery = "",
+    onSearchChange,
+    isSearching = false
 }: ConversationListProps) {
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -222,6 +228,56 @@ export function ConversationList({
         // Standard Header with Mode Toggle + Filter + Actions
         return (
             <div className="p-2 border-b bg-slate-50 flex items-center justify-start gap-1 h-[50px] overflow-hidden">
+                
+                {/* Search Bar - only in chats mode */}
+                {effectiveViewMode === 'chats' && onSearchChange !== undefined && (
+                    <div className="flex-1 relative mx-1">
+                        <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none">
+                            <Search className="h-3 w-3 text-slate-400" />
+                        </div>
+                        <input
+                            type="text"
+                            placeholder="Search..."
+                            className="block w-full pl-7 pr-7 py-1 text-xs border border-transparent rounded-md leading-5 bg-white text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                            value={searchQuery}
+                            onChange={(e) => onSearchChange(e.target.value)}
+                        />
+                        {searchQuery && (
+                            <button
+                                className="absolute inset-y-0 right-0 pr-2 flex items-center text-slate-400 hover:text-slate-600"
+                                onClick={() => onSearchChange("")}
+                            >
+                                <X className="h-3 w-3" />
+                            </button>
+                        )}
+                    </div>
+                )}
+
+                
+                {/* Search Bar - only in chats mode */}
+                {effectiveViewMode === 'chats' && onSearchChange !== undefined && (
+                    <div className="flex-1 relative mx-1">
+                        <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none">
+                            <Search className="h-3 w-3 text-slate-400" />
+                        </div>
+                        <input
+                            type="text"
+                            placeholder="Search..."
+                            className="block w-full pl-7 pr-7 py-1 text-xs border border-transparent rounded-md leading-5 bg-white text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                            value={searchQuery}
+                            onChange={(e) => onSearchChange(e.target.value)}
+                        />
+                        {searchQuery && (
+                            <button
+                                className="absolute inset-y-0 right-0 pr-2 flex items-center text-slate-400 hover:text-slate-600"
+                                onClick={() => onSearchChange("")}
+                            >
+                                <X className="h-3 w-3" />
+                            </button>
+                        )}
+                    </div>
+                )}
+
                 {/* Segmented Control for Mode Toggle */}
                 {onViewModeChange && (
                     <Tabs value={effectiveViewMode} onValueChange={(v: string) => onViewModeChange(v as 'chats' | 'deals')} className="flex-shrink-0">
@@ -398,6 +454,34 @@ export function ConversationList({
         );
     }
 
+    
+    if (isSearching) {
+        return (
+            <div className="h-full flex flex-col border-r">
+                <WhatsAppStatus />
+                <UnifiedHeader />
+                <div className="p-8 flex flex-col items-center justify-center text-slate-500">
+                    <Loader2 className="w-6 h-6 animate-spin mb-2" />
+                    <p className="text-sm">Searching...</p>
+                </div>
+            </div>
+        );
+    }
+
+    
+    if (isSearching) {
+        return (
+            <div className="h-full flex flex-col border-r">
+                <WhatsAppStatus />
+                <UnifiedHeader />
+                <div className="p-8 flex flex-col items-center justify-center text-slate-500">
+                    <Loader2 className="w-6 h-6 animate-spin mb-2" />
+                    <p className="text-sm">Searching...</p>
+                </div>
+            </div>
+        );
+    }
+
     if (conversations.length === 0 && effectiveViewMode === 'chats') {
         return (
             <div className="h-full flex flex-col border-r">
@@ -496,7 +580,7 @@ export function ConversationList({
                     );
                 })}
 
-                {(hasMore || isLoadingMore) && (
+                {(hasMore || isLoadingMore) && !searchQuery.trim() && (
                     <div className="px-3 py-3 border-t bg-white/80">
                         <div ref={loadMoreSentinelRef} className="h-1 w-full" aria-hidden="true" />
                         <div className="mt-2 flex items-center justify-center">
