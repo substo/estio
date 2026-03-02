@@ -25,6 +25,7 @@ import {
     bulkRequestWhatsAppAudioTranscripts,
     extractWhatsAppViewingNotes,
     getWhatsAppTranscriptOnDemandEligibility,
+    searchConversations,
 } from '../actions';
 import { toast } from '@/components/ui/use-toast';
 import { getDealContexts, createPersistentDeal } from '../../deals/actions';
@@ -208,40 +209,6 @@ export function ConversationInterface({ initialConversations, initialConversatio
         };
     }, [debouncedSearchQuery]);
 
-    // Global Search Effect
-    useEffect(() => {
-        if (!debouncedSearchQuery.trim()) {
-            setSearchResults([]);
-            setIsSearching(false);
-            return;
-        }
-
-        let isCancelled = false;
-        setIsSearching(true);
-
-        searchConversations(debouncedSearchQuery, { limit: 50 })
-            .then(res => {
-                if (isCancelled) return;
-                if (res.success) {
-                    setSearchResults(res.conversations || []);
-                } else {
-                    toast({ title: "Search Failed", description: String(res.error), variant: "destructive" });
-                    setSearchResults([]);
-                }
-            })
-            .catch(err => {
-                if (isCancelled) return;
-                console.error("Search failed:", err);
-                toast({ title: "Error", description: "Search failed.", variant: "destructive" });
-            })
-            .finally(() => {
-                if (!isCancelled) setIsSearching(false);
-            });
-
-        return () => {
-            isCancelled = true;
-        };
-    }, [debouncedSearchQuery]);
 
     const initialDealId = searchParams.get('dealId');
     const [activeDealId, setActiveDealId] = useState<string | null>(initialDealId);
@@ -346,6 +313,23 @@ export function ConversationInterface({ initialConversations, initialConversatio
                 toast({ title: "Error", description: "Failed to load conversations.", variant: "destructive" });
             });
     }, [viewFilter, replaceConversationListFromResponse]);
+
+    // When in Tasks view and a task is clicked, load its conversation so center/right panels can render.
+    useEffect(() => {
+        if (viewFilter !== 'tasks' || !activeId) return;
+        // If conversation is already in the list, no need to fetch
+        if (conversationsRef.current.some(c => c.id === activeId)) return;
+
+        refreshConversation(activeId).then(fresh => {
+            if (!fresh || activeIdRef.current !== activeId) return;
+            setConversations(prev => {
+                if (prev.some(c => c.id === activeId)) return prev;
+                return [...prev, fresh as Conversation];
+            });
+        }).catch(err => {
+            console.error("Failed to load task conversation:", err);
+        });
+    }, [viewFilter, activeId]);
 
     const loadMoreConversations = useCallback(async () => {
         if (viewMode !== 'chats') return;

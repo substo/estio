@@ -11,6 +11,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { ConversationPreviewCard } from "./conversation-preview-card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { WhatsAppStatus } from './whatsapp-status';
+import { GlobalTaskList } from './global-task-list';
 import Link from 'next/link';
 
 interface ConversationListProps {
@@ -228,7 +229,7 @@ export function ConversationList({
         // Standard Header with Mode Toggle + Filter + Actions
         return (
             <div className="p-2 border-b bg-slate-50 flex items-center justify-start gap-1 h-[50px] overflow-hidden">
-                
+
                 {/* Search Bar - only in chats mode */}
                 {effectiveViewMode === 'chats' && onSearchChange !== undefined && (
                     <div className="flex-1 relative mx-1">
@@ -253,30 +254,6 @@ export function ConversationList({
                     </div>
                 )}
 
-                
-                {/* Search Bar - only in chats mode */}
-                {effectiveViewMode === 'chats' && onSearchChange !== undefined && (
-                    <div className="flex-1 relative mx-1">
-                        <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none">
-                            <Search className="h-3 w-3 text-slate-400" />
-                        </div>
-                        <input
-                            type="text"
-                            placeholder="Search..."
-                            className="block w-full pl-7 pr-7 py-1 text-xs border border-transparent rounded-md leading-5 bg-white text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                            value={searchQuery}
-                            onChange={(e) => onSearchChange(e.target.value)}
-                        />
-                        {searchQuery && (
-                            <button
-                                className="absolute inset-y-0 right-0 pr-2 flex items-center text-slate-400 hover:text-slate-600"
-                                onClick={() => onSearchChange("")}
-                            >
-                                <X className="h-3 w-3" />
-                            </button>
-                        )}
-                    </div>
-                )}
 
                 {/* Segmented Control for Mode Toggle */}
                 {onViewModeChange && (
@@ -454,7 +431,8 @@ export function ConversationList({
         );
     }
 
-    
+
+
     if (isSearching) {
         return (
             <div className="h-full flex flex-col border-r">
@@ -468,16 +446,15 @@ export function ConversationList({
         );
     }
 
-    
-    if (isSearching) {
+    if (viewFilter === 'tasks') {
         return (
             <div className="h-full flex flex-col border-r">
                 <WhatsAppStatus />
                 <UnifiedHeader />
-                <div className="p-8 flex flex-col items-center justify-center text-slate-500">
-                    <Loader2 className="w-6 h-6 animate-spin mb-2" />
-                    <p className="text-sm">Searching...</p>
-                </div>
+                <GlobalTaskList
+                    selectedConversationId={selectedId}
+                    onSelectConversation={onSelect}
+                />
             </div>
         );
     }
