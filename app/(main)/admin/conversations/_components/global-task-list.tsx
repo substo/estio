@@ -125,8 +125,11 @@ export function GlobalTaskList({ selectedConversationId, onSelectConversation }:
                     <div
                         key={task.id}
                         onClick={() => {
-                            if (task.conversation?.id) {
-                                onSelectConversation(task.conversation.id);
+                            const convId =
+                                task.conversation?.ghlConversationId
+                                || task.contact?.conversations?.[0]?.ghlConversationId;
+                            if (convId) {
+                                onSelectConversation(convId);
                             }
                         }}
                         className={cn(

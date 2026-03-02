@@ -225,11 +225,17 @@ export async function listLocationTasks(statusFilter?: 'open' | 'completed' | 'a
             lastName: true,
             email: true,
             phone: true,
+            conversations: {
+              select: { ghlConversationId: true },
+              take: 1,
+              orderBy: { lastMessageAt: 'desc' as const },
+            },
           }
         },
         conversation: {
           select: {
             id: true,
+            ghlConversationId: true,
           }
         },
         syncRecords: {
