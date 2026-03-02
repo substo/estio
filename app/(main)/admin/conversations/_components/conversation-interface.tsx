@@ -171,11 +171,6 @@ export function ConversationInterface({ initialConversations, initialConversatio
     const [isSearching, setIsSearching] = useState(false);
     const [searchResults, setSearchResults] = useState<Conversation[]>([]);
 
-    const [searchQuery, setSearchQuery] = useState('');
-    const [debouncedSearchQuery] = useDebounce(searchQuery, 300);
-    const [isSearching, setIsSearching] = useState(false);
-    const [searchResults, setSearchResults] = useState<Conversation[]>([]);
-
     const [deals, setDeals] = useState<any[]>([]);
 
     // Global Search Effect
