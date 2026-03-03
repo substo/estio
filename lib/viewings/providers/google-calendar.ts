@@ -13,6 +13,10 @@ export type ViewingSyncOperationResult = {
 export type HubViewingForGoogle = Pick<Viewing, 'date' | 'notes'> & {
     propertyTitle?: string;
     contactName?: string;
+    title?: string | null;
+    description?: string | null;
+    location?: string | null;
+    duration?: number | null;
 };
 
 export async function getGoogleCalendarClient(userId: string) {
@@ -43,15 +47,21 @@ export async function listGoogleCalendars(userId: string): Promise<GoogleCalenda
 }
 
 function toGoogleEventBody(viewing: HubViewingForGoogle): calendar_v3.Schema$Event {
-    const title = `Viewing: ${viewing.propertyTitle || 'Property'} with ${viewing.contactName || 'Contact'}`;
+    // Use custom title if provided, otherwise auto-generate from property/contact
+    const summary = viewing.title || `Viewing: ${viewing.propertyTitle || 'Property'} with ${viewing.contactName || 'Contact'}`;
 
-    // Create end time (default to 1 hour after start if not explicitly set in the future)
+    // Use description if provided, otherwise fall back to notes
+    const eventDescription = viewing.description || viewing.notes || undefined;
+
+    // Calculate end time from duration (default 60 minutes)
     const startTime = new Date(viewing.date);
-    const endTime = new Date(startTime.getTime() + 60 * 60 * 1000); // +1 hour
+    const durationMinutes = viewing.duration || 60;
+    const endTime = new Date(startTime.getTime() + durationMinutes * 60 * 1000);
 
     return {
-        summary: title,
-        description: viewing.notes || undefined,
+        summary,
+        description: eventDescription,
+        location: viewing.location || undefined,
         start: {
             dateTime: startTime.toISOString(),
         },

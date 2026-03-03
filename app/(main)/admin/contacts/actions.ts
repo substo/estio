@@ -1361,6 +1361,10 @@ const viewingSchema = z.object({
   userId: z.string().min(1, 'Agent/User ID is required'),
   date: z.string().min(1, 'Date is required'),
   notes: z.string().optional(),
+  title: z.string().optional(),
+  description: z.string().optional(),
+  location: z.string().optional(),
+  duration: z.coerce.number().int().min(5).max(480).default(60),
 });
 
 import { createAppointment } from '@/lib/ghl/calendars';
@@ -1376,6 +1380,10 @@ export async function createViewing(
     userId: formData.get('userId'),
     date: formData.get('date'),
     notes: formData.get('notes'),
+    title: formData.get('title') || undefined,
+    description: formData.get('description') || undefined,
+    location: formData.get('location') || undefined,
+    duration: formData.get('duration') || 60,
   });
 
   if (!validatedFields.success) {
@@ -1402,6 +1410,11 @@ export async function createViewing(
         userId: data.userId,
         date: new Date(data.date),
         notes: data.notes,
+        title: data.title || null,
+        description: data.description || null,
+        location: data.location || null,
+        duration: data.duration,
+        endAt: new Date(new Date(data.date).getTime() + data.duration * 60 * 1000),
         status: 'scheduled',
       }
     });
@@ -1450,6 +1463,10 @@ export async function updateViewing(
     userId: formData.get('userId'),
     date: formData.get('date'),
     notes: formData.get('notes'),
+    title: formData.get('title') || undefined,
+    description: formData.get('description') || undefined,
+    location: formData.get('location') || undefined,
+    duration: formData.get('duration') || 60,
   });
 
   if (!validatedFields.success || !viewingId) {
@@ -1475,6 +1492,11 @@ export async function updateViewing(
         notes: validatedFields.data.notes,
         userId: validatedFields.data.userId,
         propertyId: validatedFields.data.propertyId,
+        title: validatedFields.data.title || null,
+        description: validatedFields.data.description || null,
+        location: validatedFields.data.location || null,
+        duration: validatedFields.data.duration,
+        endAt: new Date(new Date(validatedFields.data.date).getTime() + validatedFields.data.duration * 60 * 1000),
       }
     });
 

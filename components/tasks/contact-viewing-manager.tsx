@@ -201,9 +201,13 @@ export function ContactViewingManager({
 
     // Form State
     const [viewingDate, setViewingDate] = useState('');
-    const [viewingNotes, setViewingNotes] = useState('Customer Feedback');
+    const [viewingNotes, setViewingNotes] = useState('');
     const [viewingPropertyId, setViewingPropertyId] = useState('');
     const [viewingUserId, setViewingUserId] = useState('');
+    const [viewingTitle, setViewingTitle] = useState('');
+    const [viewingDescription, setViewingDescription] = useState('');
+    const [viewingLocation, setViewingLocation] = useState('');
+    const [viewingDuration, setViewingDuration] = useState('60');
     const [editingViewingId, setEditingViewingId] = useState<string | null>(null);
 
     const loadRequestIdRef = useRef(0);
@@ -255,6 +259,10 @@ export function ContactViewingManager({
         formData.append('userId', viewingUserId);
         formData.append('date', viewingDate);
         formData.append('notes', viewingNotes);
+        formData.append('title', viewingTitle);
+        formData.append('description', viewingDescription);
+        formData.append('location', viewingLocation);
+        formData.append('duration', viewingDuration);
 
         try {
             let result;
@@ -289,6 +297,10 @@ export function ContactViewingManager({
         setViewingPropertyId(viewing.propertyId);
         setViewingUserId(viewing.userId);
         setViewingNotes(viewing.notes || '');
+        setViewingTitle(viewing.title || '');
+        setViewingDescription(viewing.description || '');
+        setViewingLocation(viewing.location || '');
+        setViewingDuration(String(viewing.duration || 60));
         setModalOpen(true);
     };
 
@@ -309,9 +321,13 @@ export function ContactViewingManager({
 
     const resetForm = () => {
         setViewingDate('');
-        setViewingNotes('Customer Feedback');
+        setViewingNotes('');
         setViewingPropertyId('');
         setViewingUserId('');
+        setViewingTitle('');
+        setViewingDescription('');
+        setViewingLocation('');
+        setViewingDuration('60');
         setEditingViewingId(null);
     };
 
@@ -398,7 +414,7 @@ export function ContactViewingManager({
             </div>
 
             <Dialog open={modalOpen} onOpenChange={(open) => { setModalOpen(open); if (!open) resetForm(); }}>
-                <DialogContent className="sm:max-w-[500px]">
+                <DialogContent className="sm:max-w-[560px] max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle>{editingViewingId ? 'Edit Viewing' : 'Schedule Viewing'}</DialogTitle>
                         <DialogDescription>
@@ -406,37 +422,91 @@ export function ContactViewingManager({
                         </DialogDescription>
                     </DialogHeader>
                     <div className="grid gap-4 py-4">
+                        {/* Title */}
+                        <div className="space-y-2">
+                            <Label>Title <span className="text-muted-foreground text-[10px]">(optional — auto-generated from property if blank)</span></Label>
+                            <Input value={viewingTitle} onChange={e => setViewingTitle(e.target.value)} placeholder="e.g. Viewing: 3BR Villa in Limassol" />
+                        </div>
+
+                        {/* Property & Agent */}
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
-                                <Label>Date & Time</Label>
+                                <Label>Property <span className="text-red-500">*</span></Label>
+                                {!locationId ? (
+                                    <div className="text-xs text-amber-600 py-2">No location configured</div>
+                                ) : (
+                                    <SearchableSelect
+                                        name="viewingPropertyId"
+                                        value={viewingPropertyId}
+                                        onChange={setViewingPropertyId}
+                                        options={properties.map(p => ({ value: p.id, label: (p as any).unitNumber ? `[${(p as any).unitNumber}] ${p.title}` : p.title }))}
+                                        placeholder="Select Property..."
+                                        searchPlaceholder="Search Property..."
+                                    />
+                                )}
+                            </div>
+                            <div className="space-y-2">
+                                <Label>Assigned Agent <span className="text-red-500">*</span></Label>
+                                {!locationId ? (
+                                    <div className="text-xs text-amber-600 py-2">No location configured</div>
+                                ) : (
+                                    <Select value={viewingUserId} onValueChange={setViewingUserId}>
+                                        <SelectTrigger><SelectValue placeholder="Select Agent" /></SelectTrigger>
+                                        <SelectContent>
+                                            {users.map(u => (
+                                                <SelectItem key={u.id} value={u.id}>{u.name || u.email}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Date/Time & Duration */}
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                                <Label>Date & Time <span className="text-red-500">*</span></Label>
                                 <Input type="datetime-local" value={viewingDate} onChange={e => setViewingDate(e.target.value)} />
                             </div>
                             <div className="space-y-2">
-                                <Label>Assigned Agent</Label>
-                                <Select value={viewingUserId} onValueChange={setViewingUserId}>
-                                    <SelectTrigger><SelectValue placeholder="Select Agent" /></SelectTrigger>
+                                <Label>Duration</Label>
+                                <Select value={viewingDuration} onValueChange={setViewingDuration}>
+                                    <SelectTrigger><SelectValue placeholder="Duration" /></SelectTrigger>
                                     <SelectContent>
-                                        {users.map(u => (
-                                            <SelectItem key={u.id} value={u.id}>{u.name || u.email}</SelectItem>
-                                        ))}
+                                        <SelectItem value="15">15 minutes</SelectItem>
+                                        <SelectItem value="30">30 minutes</SelectItem>
+                                        <SelectItem value="45">45 minutes</SelectItem>
+                                        <SelectItem value="60">1 hour</SelectItem>
+                                        <SelectItem value="90">1.5 hours</SelectItem>
+                                        <SelectItem value="120">2 hours</SelectItem>
+                                        <SelectItem value="180">3 hours</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>
                         </div>
+
+                        {/* Location */}
                         <div className="space-y-2">
-                            <Label>Property</Label>
-                            <SearchableSelect
-                                name="viewingPropertyId"
-                                value={viewingPropertyId}
-                                onChange={setViewingPropertyId}
-                                options={properties.map(p => ({ value: p.id, label: (p as any).unitNumber ? `[${(p as any).unitNumber}] ${p.title}` : p.title }))}
-                                placeholder="Select Property..."
-                                searchPlaceholder="Search Property..."
+                            <Label>Location <span className="text-muted-foreground text-[10px]">(address or meeting point)</span></Label>
+                            <Input value={viewingLocation} onChange={e => setViewingLocation(e.target.value)} placeholder="e.g. 25 Makarios Ave, Limassol" />
+                        </div>
+
+                        {/* Description */}
+                        <div className="space-y-2">
+                            <Label>Description</Label>
+                            <textarea
+                                className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                value={viewingDescription}
+                                onChange={e => setViewingDescription(e.target.value)}
+                                placeholder="Detailed agenda or pre-viewing notes..."
+                                rows={3}
                             />
                         </div>
+
+                        {/* Notes */}
                         <div className="space-y-2">
-                            <Label>Notes</Label>
-                            <Input value={viewingNotes} onChange={e => setViewingNotes(e.target.value)} placeholder="Customer Feedback" />
+                            <Label>Internal Notes</Label>
+                            <Input value={viewingNotes} onChange={e => setViewingNotes(e.target.value)} placeholder="Internal notes (not synced to calendar)" />
                         </div>
                     </div>
                     {error && <div className="text-xs text-red-600 pb-2">{error}</div>}
