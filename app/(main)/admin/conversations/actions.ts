@@ -9383,7 +9383,7 @@ ${trimmedText}
     }
 }
 
-export const ApplySelectionViewingSuggestionSchema = z.object({
+const ApplySelectionViewingSuggestionSchema = z.object({
     propertyId: z.string().min(1),
     propertyDescription: z.string(),
     userId: z.string().min(1),
@@ -9392,7 +9392,7 @@ export const ApplySelectionViewingSuggestionSchema = z.object({
     notes: z.string().optional().nullable(),
 });
 
-export const ApplySelectionViewingSuggestionBatchSchema = z.array(ApplySelectionViewingSuggestionSchema).min(1).max(MAX_TASK_SUGGESTIONS);
+const ApplySelectionViewingSuggestionBatchSchema = z.array(ApplySelectionViewingSuggestionSchema).min(1).max(MAX_TASK_SUGGESTIONS);
 
 export async function applySuggestedViewingsFromSelection(
     conversationId: string,
