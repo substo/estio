@@ -201,14 +201,17 @@ export function ContactViewingManager({
 
     // Form State
     const [viewingDate, setViewingDate] = useState('');
-    const [viewingNotes, setViewingNotes] = useState('');
     const [viewingPropertyId, setViewingPropertyId] = useState('');
     const [viewingUserId, setViewingUserId] = useState('');
     const [viewingTitle, setViewingTitle] = useState('');
     const [viewingDescription, setViewingDescription] = useState('');
     const [viewingLocation, setViewingLocation] = useState('');
-    const [viewingDuration, setViewingDuration] = useState('60');
+    const [viewingDuration, setViewingDuration] = useState('30');
     const [editingViewingId, setEditingViewingId] = useState<string | null>(null);
+
+    // Initial Defaults
+    const [defaultUserId, setDefaultUserId] = useState('');
+    const [interestedProps, setInterestedProps] = useState<string[]>([]);
 
     const loadRequestIdRef = useRef(0);
 
@@ -228,10 +231,15 @@ export function ContactViewingManager({
 
             if (requestId !== loadRequestIdRef.current) return;
 
-            setViewings((viewingsRes || []).map(normalizeViewing));
+            const res = viewingsRes || { viewings: [], currentUserId: null, interestedProperties: [] };
+            setViewings((res.viewings || []).map(normalizeViewing));
             setProperties(props);
             setUsers(usrs);
             setError(null);
+
+            // Set Defaults
+            if (res.currentUserId) setDefaultUserId(res.currentUserId);
+            if (res.interestedProperties) setInterestedProps(res.interestedProperties);
         } catch (e: any) {
             if (requestId !== loadRequestIdRef.current) return;
             setError(e?.message || 'Failed to load viewings');
@@ -258,7 +266,6 @@ export function ContactViewingManager({
         formData.append('propertyId', viewingPropertyId);
         formData.append('userId', viewingUserId);
         formData.append('date', viewingDate);
-        formData.append('notes', viewingNotes);
         formData.append('title', viewingTitle);
         formData.append('description', viewingDescription);
         formData.append('location', viewingLocation);
@@ -276,7 +283,7 @@ export function ContactViewingManager({
             if (result.success) {
                 setModalOpen(false);
                 void loadData({ silent: true });
-                resetForm();
+                // Don't fully reset form — let onOpen logic handle defaults next time
             } else {
                 setError(result.message || 'Operation failed');
             }
@@ -296,11 +303,10 @@ export function ContactViewingManager({
         setViewingDate(localISOTime);
         setViewingPropertyId(viewing.propertyId);
         setViewingUserId(viewing.userId);
-        setViewingNotes(viewing.notes || '');
         setViewingTitle(viewing.title || '');
-        setViewingDescription(viewing.description || '');
+        setViewingDescription(viewing.description || viewing.notes || '');
         setViewingLocation(viewing.location || '');
-        setViewingDuration(String(viewing.duration || 60));
+        setViewingDuration(String(viewing.duration || 30));
         setModalOpen(true);
     };
 
@@ -321,14 +327,20 @@ export function ContactViewingManager({
 
     const resetForm = () => {
         setViewingDate('');
-        setViewingNotes('');
-        setViewingPropertyId('');
-        setViewingUserId('');
         setViewingTitle('');
         setViewingDescription('');
         setViewingLocation('');
-        setViewingDuration('60');
+        setViewingDuration('30');
         setEditingViewingId(null);
+
+        // Apply smart defaults for New Viewings
+        setViewingUserId(defaultUserId || '');
+        // Pre-select first interested property if one exists and isn't already selected
+        if (interestedProps.length > 0) {
+            setViewingPropertyId(interestedProps[0]);
+        } else {
+            setViewingPropertyId('');
+        }
     };
 
     return (
@@ -389,8 +401,11 @@ export function ContactViewingManager({
                                     )}
                                 </div>
 
-                                {viewing.notes && (
-                                    <div className="text-muted-foreground whitespace-pre-wrap text-[11px] bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded p-1.5">{viewing.notes}</div>
+                                {viewing.description && (
+                                    <div className="text-muted-foreground whitespace-pre-wrap text-[11px] bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded p-1.5 pt-0 mt-0">{viewing.description}</div>
+                                )}
+                                {!viewing.description && viewing.notes && (
+                                    <div className="text-muted-foreground whitespace-pre-wrap text-[11px] bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded p-1.5 pt-0 mt-0">{viewing.notes}</div>
                                 )}
 
                                 <div className="flex flex-wrap items-center gap-1.5 pt-1">
@@ -439,9 +454,12 @@ export function ContactViewingManager({
                                         name="viewingPropertyId"
                                         value={viewingPropertyId}
                                         onChange={setViewingPropertyId}
-                                        options={properties.map(p => ({ value: p.id, label: (p as any).unitNumber ? `[${(p as any).unitNumber}] ${p.title}` : p.title }))}
+                                        options={properties.map(p => ({
+                                            value: p.id,
+                                            label: (p as any).reference ? `[${(p as any).reference}] ${p.title}` : (p as any).unitNumber ? `[${(p as any).unitNumber}] ${p.title}` : p.title
+                                        }))}
                                         placeholder="Select Property..."
-                                        searchPlaceholder="Search Property..."
+                                        searchPlaceholder="Search Property... (+ Ref)"
                                     />
                                 )}
                             </div>
@@ -493,20 +511,14 @@ export function ContactViewingManager({
 
                         {/* Description */}
                         <div className="space-y-2">
-                            <Label>Description</Label>
+                            <Label>Description <span className="text-muted-foreground text-[10px]">(synced to calendar)</span></Label>
                             <textarea
-                                className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                                 value={viewingDescription}
                                 onChange={e => setViewingDescription(e.target.value)}
-                                placeholder="Detailed agenda or pre-viewing notes..."
+                                placeholder="Detailed agenda, access codes, or pre-viewing notes..."
                                 rows={3}
                             />
-                        </div>
-
-                        {/* Notes */}
-                        <div className="space-y-2">
-                            <Label>Internal Notes</Label>
-                            <Input value={viewingNotes} onChange={e => setViewingNotes(e.target.value)} placeholder="Internal notes (not synced to calendar)" />
                         </div>
                     </div>
                     {error && <div className="text-xs text-red-600 pb-2">{error}</div>}

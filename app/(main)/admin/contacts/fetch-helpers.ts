@@ -94,35 +94,48 @@ export async function getUsersForSelect(locationId: string) {
 export async function getContactViewings(contactId: string) {
     try {
         const { userId } = await auth();
-        if (!userId) return [];
-        // Ideally check access to contact's location
+        if (!userId) return { viewings: [], currentUserId: null, interestedProperties: [] };
 
-        const viewings = await db.viewing.findMany({
-            where: { contactId },
-            include: {
-                property: { select: { title: true, unitNumber: true } },
-                user: { select: { name: true } },
-                syncRecords: true,
-                outboxJobs: {
-                    select: {
-                        id: true,
-                        provider: true,
-                        operation: true,
-                        status: true,
-                        attemptCount: true,
-                        scheduledAt: true,
-                        lastError: true,
-                        createdAt: true
-                    },
-                    where: { status: { notIn: ['completed'] } }
-                }
-            },
-            orderBy: { date: 'desc' },
-        });
-        return viewings;
+        const dbUser = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } });
+        const internalUserId = dbUser?.id || null;
+
+        const [viewings, contact] = await Promise.all([
+            db.viewing.findMany({
+                where: { contactId },
+                include: {
+                    property: { select: { title: true, unitNumber: true, reference: true } },
+                    user: { select: { name: true } },
+                    syncRecords: true,
+                    outboxJobs: {
+                        select: {
+                            id: true,
+                            provider: true,
+                            operation: true,
+                            status: true,
+                            attemptCount: true,
+                            scheduledAt: true,
+                            lastError: true,
+                            createdAt: true
+                        },
+                        where: { status: { notIn: ['completed'] } }
+                    }
+                },
+                orderBy: { date: 'desc' },
+            }),
+            db.contact.findUnique({
+                where: { id: contactId },
+                select: { propertiesInterested: true }
+            })
+        ]);
+
+        return {
+            viewings,
+            currentUserId: internalUserId,
+            interestedProperties: contact?.propertiesInterested || []
+        };
     } catch (error) {
         console.error('Failed to fetch viewings:', error);
-        return [];
+        return { viewings: [], currentUserId: null, interestedProperties: [] };
     }
 }
 
