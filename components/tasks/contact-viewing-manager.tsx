@@ -258,6 +258,12 @@ export function ContactViewingManager({
 
     const handleSubmit = async () => {
         if (!canSubmit) return;
+
+        if (!contactId) {
+            setError("No contact associated with this conversation. Please link a contact first.");
+            return;
+        }
+
         setSubmitting(true);
         setError(null);
 

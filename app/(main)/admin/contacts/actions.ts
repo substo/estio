@@ -1446,9 +1446,9 @@ export async function createViewing(
     // }
 
     return { success: true, message: 'Viewing scheduled successfully!' };
-  } catch (error) {
+  } catch (error: any) {
     console.error('Failed to create viewing:', error);
-    return { success: false, message: 'Failed to create viewing.' };
+    return { success: false, message: `Failed to create viewing: ${error?.message || String(error)}` };
   }
 }
 
@@ -1529,9 +1529,9 @@ export async function updateViewing(
     }
 
     return { success: true, message: 'Viewing updated successfully.' };
-  } catch (e) {
+  } catch (e: any) {
     console.error(e);
-    return { success: false, message: 'Failed to update viewing.' };
+    return { success: false, message: `Failed to update viewing: ${e?.message || String(e)}` };
   }
 }
 
