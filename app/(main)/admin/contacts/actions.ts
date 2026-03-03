@@ -753,7 +753,7 @@ export async function createContact(
 async function updateContactCore(
   data: ValidatedContactData & { contactId: string },
   userId: string
-): Promise<{ success: boolean; message?: string; errors?: any; duplicateContact?: CreateContactState['duplicateContact'] }> {
+): Promise<CreateContactState> {
   // Resolve internal user ID for history logging
   const dbUser = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } });
   const internalUserId = dbUser?.id || null;
@@ -1364,6 +1364,7 @@ const viewingSchema = z.object({
 });
 
 import { createAppointment } from '@/lib/ghl/calendars';
+import { enqueueViewingSyncJobs } from '@/lib/viewings/sync-engine';
 
 export async function createViewing(
   prevState: any,
@@ -1394,68 +1395,20 @@ export async function createViewing(
   const internalUserId = dbUser?.id || null;
 
   try {
-    const agent = await db.user.findUnique({
-      where: { id: data.userId },
-      select: { ghlCalendarId: true }
-    });
-
-    const contact = await db.contact.findUnique({
-      where: { id: data.contactId },
-      include: { location: true }
-    });
-
-    if (!contact) return { success: false, message: 'Contact not found.' };
-
-    let ghlAppointmentId: string | undefined;
-
-    if (agent?.ghlCalendarId && contact.location.ghlAccessToken && contact.location.ghlLocationId) {
-      try {
-        let ghlContactId = contact.ghlContactId;
-
-        // Ensure GHL Contact Exists
-        if (!ghlContactId) {
-          console.log('[createViewing] Syncing contact to GHL before appointment...');
-          ghlContactId = await syncContactToGHL(contact.location.ghlLocationId, {
-            name: contact.name || undefined,
-            email: contact.email || undefined,
-            phone: contact.phone || undefined,
-          }, contact.ghlContactId);
-
-          if (ghlContactId) {
-            await db.contact.update({ where: { id: contact.id }, data: { ghlContactId } });
-          }
-        }
-
-        if (ghlContactId) {
-          const appointmentResponse = await createAppointment({
-            calendarId: agent.ghlCalendarId,
-            locationId: contact.locationId,
-            contactId: ghlContactId,
-            startTime: new Date(data.date).toISOString(),
-            title: `Viewing: ${data.propertyId}`,
-            appointmentStatus: "confirmed",
-            toNotify: true
-          });
-
-          if (appointmentResponse?.id) {
-            ghlAppointmentId = appointmentResponse.id;
-          }
-        }
-      } catch (ghlError) {
-        console.error('[createViewing] GHL Sync Failed (proceeding locally):', ghlError);
-      }
-    }
-
-    await db.viewing.create({
+    const viewingResult = await db.viewing.create({
       data: {
         contactId: data.contactId,
         propertyId: data.propertyId,
         userId: data.userId,
         date: new Date(data.date),
         notes: data.notes,
-        ghlAppointmentId,
         status: 'scheduled',
       }
+    });
+
+    await enqueueViewingSyncJobs({
+      viewingId: viewingResult.id,
+      operation: 'create',
     });
 
     // Fetch property reference for logging
@@ -1525,6 +1478,11 @@ export async function updateViewing(
       }
     });
 
+    await enqueueViewingSyncJobs({
+      viewingId,
+      operation: 'update',
+    });
+
     // Log Viewing Updated
     // We need contactId here, but it's in formData as optional/string. The schema validates it.
     // However, the updateViewing function doesn't seem to have contactId easily available from the update result?
@@ -1560,6 +1518,12 @@ export async function deleteViewing(viewingId: string) {
   if (!userId) return { success: false, message: 'Unauthorized' };
 
   try {
+    // Create the delete outbox jobs first
+    await enqueueViewingSyncJobs({
+      viewingId,
+      operation: 'delete',
+    });
+
     await db.viewing.delete({ where: { id: viewingId } });
     return { success: true, message: 'Viewing deleted.' };
   } catch (e) {

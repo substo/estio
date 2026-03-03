@@ -23,7 +23,7 @@ import {
     CommandItem,
     CommandList,
 } from "@/components/ui/command";
-import { Loader2, Search, Clipboard, MessageCircle, BadgeAlert, AlertTriangle, User, Phone, Mail, ExternalLink, FileText, Wand2, ListPlus, Trash2, ListTodo, Sparkles } from "lucide-react";
+import { Loader2, Search, Clipboard, MessageCircle, BadgeAlert, AlertTriangle, User, Phone, Mail, ExternalLink, FileText, Wand2, ListPlus, Trash2, ListTodo, Sparkles, Home } from "lucide-react";
 import { toast } from "sonner";
 import {
     applySuggestedTasksFromSelection,
@@ -36,11 +36,13 @@ import {
     type ParsedLeadData,
     type LeadAnalysisTrace,
     type SelectionTaskSuggestion,
+    suggestViewingsFromSelection,
 } from "@/app/(main)/admin/conversations/actions";
 import { openOrStartConversationForContact, searchContactsAction } from "@/app/(main)/admin/contacts/actions";
 import { createContactTask } from "@/app/(main)/admin/tasks/actions";
 import { cn } from "@/lib/utils";
 import { TaskSuggestionFunnelMetrics } from "./task-suggestion-funnel-metrics";
+import { ViewingsSuggestionDialog } from "./viewings-suggestion-dialog";
 
 export type MessageSelectionActionTarget = {
     text: string;
@@ -198,6 +200,8 @@ export function MessageSelectionActions({
     const [isSuggestingTasks, setIsSuggestingTasks] = useState(false);
     const [isApplyingSuggestedTasks, setIsApplyingSuggestedTasks] = useState(false);
 
+    const [suggestViewingsOpen, setSuggestViewingsOpen] = useState(false);
+
     const [summarizeOpen, setSummarizeOpen] = useState(false);
     const [summarizeSelectionText, setSummarizeSelectionText] = useState("");
     const [isSummarizing, setIsSummarizing] = useState(false);
@@ -312,6 +316,17 @@ export function MessageSelectionActions({
         setTaskSuggestions([]);
         setSuggestTasksOpen(true);
         void handleGenerateTaskSuggestions(text, false);
+        if (selection?.text?.trim()) onClearSelection();
+    };
+
+    const openSuggestViewingsDialog = () => {
+        const text = hasBatchSelections
+            ? batchContextText
+            : String(selection?.text || "").trim();
+        if (!text) return;
+
+        setSuggestSelectionText(text);
+        setSuggestViewingsOpen(true);
         if (selection?.text?.trim()) onClearSelection();
     };
 
@@ -750,7 +765,20 @@ export function MessageSelectionActions({
                         title={canUseCrmLogActions ? "Generate AI task suggestions from this selection" : "Open a conversation to suggest tasks"}
                     >
                         <Sparkles className="h-3.5 w-3.5" />
-                        Suggest
+                        Tasks
+                    </Button>
+                    <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 gap-1.5 px-2 text-xs"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={openSuggestViewingsDialog}
+                        disabled={!canUseCrmLogActions}
+                        title={canUseCrmLogActions ? "Generate AI property viewing suggestions from this selection" : "Open a conversation to suggest viewings"}
+                    >
+                        <Home className="h-3.5 w-3.5" />
+                        Viewings
                     </Button>
                     <Button
                         type="button"
@@ -1524,7 +1552,7 @@ export function MessageSelectionActions({
                         ) : null}
                     </div>
                 </DialogContent>
-            </Dialog>
+            </Dialog >
         </>
     );
 }

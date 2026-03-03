@@ -180,6 +180,8 @@ model User {
   googleAutoSyncPushUpdates     Boolean         @default(false) // Push updates for already-linked contacts
   googleTasklistId              String? // Preferred Google Tasks list id for task sync-out
   googleTasklistTitle           String? // Cached display name for preferred Google Tasks list
+  googleCalendarId              String? // Preferred Google Calendar id for viewing sync-out
+  googleCalendarTitle           String? // Cached display name for preferred Google Calendar
   gmailSyncState                GmailSyncState?
 
   // Outlook / Microsoft Sync Credentials (OAuth method)
@@ -694,9 +696,66 @@ model Viewing {
   feedback         Json? // { overallRating, liked, disliked, interestedInOffer, comments }
   reminders        Json? // Track sent reminders [{type, sentAt}]
 
+  // Sync engine fields
+  syncVersion      Int       @default(1)
+  syncRecords      ViewingSync[]
+  outboxJobs       ViewingOutbox[]
+
   @@index([contactId])
   @@index([propertyId])
   @@index([userId])
+}
+
+model ViewingSync {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  viewingId           String
+  provider            String // ghl | google
+  providerAccountId   String  @default("default")
+  providerContainerId String? // e.g. Google Calendar ID
+  providerViewingId   String? // e.g. Calendar Event ID, GHL Appointment ID
+
+  status          String    @default("pending") // pending, synced, error, disabled
+  remoteUpdatedAt DateTime?
+  etag            String?
+  lastSyncedAt    DateTime?
+  lastAttemptAt   DateTime?
+  attemptCount    Int       @default(0)
+  lastError       String?   @db.Text
+
+  viewing Viewing @relation(fields: [viewingId], references: [id], onDelete: Cascade)
+
+  @@unique([viewingId, provider, providerAccountId])
+  @@index([provider, status, lastSyncedAt])
+}
+
+model ViewingOutbox {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  viewingId  String
+  locationId String
+  provider   String // ghl | google
+  operation  String // create | update | delete
+  payload    Json?
+
+  status       String    @default("pending") // pending, processing, completed, failed, dead
+  scheduledAt  DateTime  @default(now())
+  lockedAt     DateTime?
+  lockedBy     String?
+  processedAt  DateTime?
+  attemptCount Int       @default(0)
+  lastError    String?   @db.Text
+
+  idempotencyKey String @unique
+
+  viewing Viewing  @relation(fields: [viewingId], references: [id], onDelete: Cascade)
+
+  @@index([provider, status, scheduledAt])
+  @@index([viewingId, status, scheduledAt])
 }
 
 model ScrapeRule {

@@ -36,25 +36,17 @@ import { ContactForm, type ContactData } from './contact-form';
 import { CONTACT_TYPE_CONFIG, type ContactType } from './contact-types';
 import { MergeContactDialog } from './merge-contact-dialog';
 import { ContactTaskManager } from '@/components/tasks/contact-task-manager';
+import { ContactViewingManager } from '@/components/tasks/contact-viewing-manager';
 
 export function EditContactForm({ contact, onSuccess, onDelete, leadSources, initialMode = 'edit', isOutlookConnected = false, isGoogleConnected = false, isGhlConnected = false }: { contact: ContactData; onSuccess?: () => void; onDelete?: () => void; leadSources: string[]; initialMode?: 'view' | 'edit' | 'create'; isOutlookConnected?: boolean; isGoogleConnected?: boolean; isGhlConnected?: boolean }) {
     const { toast } = useToast();
     const [isDeleting, setIsDeleting] = useState(false);
 
-    // Viewings State
+    // Viewings State (Now handled largely by ContactViewingManager, keeping only what's needed for other tabs)
     const [properties, setProperties] = useState<{ id: string; title: string }[]>([]);
-    const [users, setUsers] = useState<{ id: string; name: string | null; email: string; ghlCalendarId?: string | null }[]>([]);
     const [loadingData, setLoadingData] = useState(false);
 
-    const [viewingDate, setViewingDate] = useState('');
-    const [viewingNotes, setViewingNotes] = useState('Customer Feedback');
-    const [viewingPropertyId, setViewingPropertyId] = useState('');
-    const [viewingUserId, setViewingUserId] = useState('');
-    const [editingViewingId, setEditingViewingId] = useState<string | null>(null);
-    const [ownerNotification, setOwnerNotification] = useState<string | null>(null);
-    const [pastViewings, setPastViewings] = useState<any[]>([]);
     const [history, setHistory] = useState<any[]>([]);
-    const [viewingModalOpen, setViewingModalOpen] = useState(false);
 
     // CRM Pull State
     const [pullModalOpen, setPullModalOpen] = useState(false);
@@ -68,15 +60,11 @@ export function EditContactForm({ contact, onSuccess, onDelete, leadSources, ini
         const fetchData = async () => {
             setLoadingData(true);
             try {
-                const [props, usrs, viewings, hist] = await Promise.all([
+                const [props, hist] = await Promise.all([
                     getPropertiesForSelect(contact.locationId),
-                    getUsersForSelect(contact.locationId),
-                    getContactViewings(contact.id),
                     getContactHistory(contact.id)
                 ]);
                 setProperties(props);
-                setUsers(usrs);
-                setPastViewings(viewings);
                 setHistory(hist);
             } catch (e) {
                 console.error("Error fetching data", e);
@@ -87,92 +75,7 @@ export function EditContactForm({ contact, onSuccess, onDelete, leadSources, ini
         fetchData();
     }, [contact.locationId, contact.id]);
 
-    // Check Owner Email when Viewing Property changes
-    useEffect(() => {
-        if (viewingPropertyId) {
-            checkPropertyOwnerEmail(viewingPropertyId).then(result => {
-                if (!result.hasEmail) {
-                    const prop = properties.find(p => p.id === viewingPropertyId);
-                    const ref = (prop as any)?.unitNumber || (prop as any)?.title || 'Selected Property';
-                    setOwnerNotification(`Please note that owner of property ${ref} does not have a valid email to receive viewing notifications.`);
-                } else {
-                    setOwnerNotification(null);
-                }
-            });
-        } else {
-            setOwnerNotification(null);
-        }
-    }, [viewingPropertyId, properties]);
 
-    const handleSaveViewing = async () => {
-        if (!viewingPropertyId || !viewingUserId || !viewingDate) {
-            toast({ title: "Validation Error", description: "Please fill in all required fields (Date, Property, Agent).", variant: "destructive" });
-            return;
-        }
-
-        const formData = new FormData();
-        formData.append('contactId', contact.id);
-        formData.append('propertyId', viewingPropertyId);
-        formData.append('userId', viewingUserId);
-        formData.append('date', viewingDate);
-        formData.append('notes', viewingNotes);
-
-        let result;
-        if (editingViewingId) {
-            formData.append('viewingId', editingViewingId);
-            result = await updateViewing(null, formData);
-        } else {
-            result = await createViewing(null, formData);
-        }
-
-        if (result.success) {
-            toast({ title: "Success", description: result.message });
-            resetViewingForm();
-            const viewings = await getContactViewings(contact.id);
-            setPastViewings(viewings);
-        } else {
-            toast({ title: "Error", description: result.message, variant: "destructive" });
-        }
-    };
-
-    const handleEditViewing = (viewing: any) => {
-        setEditingViewingId(viewing.id);
-        const dateObj = new Date(viewing.date);
-        const offset = dateObj.getTimezoneOffset() * 60000;
-        const localISOTime = (new Date(dateObj.getTime() - offset)).toISOString().slice(0, 16);
-
-        setViewingDate(localISOTime);
-        setViewingPropertyId(viewing.propertyId);
-        setViewingUserId(viewing.userId);
-        setViewingNotes(viewing.notes || '');
-        setViewingModalOpen(true);
-    };
-
-    const handleDeleteViewing = async (viewingId: string) => {
-        if (confirm("Are you sure you want to delete this viewing?")) {
-            const result = await deleteViewing(viewingId);
-            if (result.success) {
-                toast({ title: "Success", description: result.message });
-                const viewings = await getContactViewings(contact.id);
-                setPastViewings(viewings);
-                if (editingViewingId === viewingId) {
-                    resetViewingForm();
-                }
-            } else {
-                toast({ title: "Error", description: result.message, variant: "destructive" });
-            }
-        }
-    };
-
-    const resetViewingForm = () => {
-        setViewingDate('');
-        setViewingNotes('Customer Feedback');
-        setViewingPropertyId('');
-        setViewingUserId('');
-        setOwnerNotification(null);
-        setEditingViewingId(null);
-        setViewingModalOpen(false);
-    };
 
     const handlePullFromCrm = async () => {
         if (!crmLeadId) {
@@ -240,122 +143,11 @@ export function EditContactForm({ contact, onSuccess, onDelete, leadSources, ini
                     <>
                         {showViewings ? (
                             <TabsContent value="viewings" forceMount={true} className="space-y-4 pt-4 data-[state=inactive]:hidden">
-                                <div className="space-y-4">
-                                    <div className="flex justify-between items-center">
-                                        <h3 className="font-semibold">Viewings</h3>
-                                        {isEditing && (
-                                            <Button
-                                                onClick={() => {
-                                                    resetViewingForm();
-                                                    setViewingModalOpen(true);
-                                                }}
-                                                size="sm"
-                                                type="button"
-                                            >
-                                                Add a New Property Viewing
-                                            </Button>
-                                        )}
-                                    </div>
-
-                                    <Dialog open={viewingModalOpen} onOpenChange={setViewingModalOpen}>
-                                        <DialogContent className="sm:max-w-[500px]">
-                                            <DialogHeader>
-                                                <DialogTitle>{editingViewingId ? 'Edit Viewing' : 'Add a New Property Viewing'}</DialogTitle>
-                                                <DialogDescription>
-                                                    {editingViewingId ? 'Update the details of the viewing below.' : 'Enter the details for the new viewing.'}
-                                                </DialogDescription>
-                                            </DialogHeader>
-                                            <div className="grid gap-4 py-4">
-                                                <div className="grid grid-cols-2 gap-4">
-                                                    <div className="space-y-2">
-                                                        <Label>Date & Time</Label>
-                                                        <Input
-                                                            type="datetime-local"
-                                                            value={viewingDate}
-                                                            onChange={e => setViewingDate(e.target.value)}
-                                                        />
-                                                    </div>
-                                                    <div className="space-y-2">
-                                                        <Label>Assigned Agent</Label>
-                                                        <Select value={viewingUserId} onValueChange={setViewingUserId}>
-                                                            <SelectTrigger><SelectValue placeholder="Select Agent" /></SelectTrigger>
-                                                            <SelectContent>
-                                                                {users.map(u => (
-                                                                    <SelectItem key={u.id} value={u.id}>{u.name || u.email}</SelectItem>
-                                                                ))}
-                                                            </SelectContent>
-                                                        </Select>
-                                                        {viewingUserId && users.find(u => u.id === viewingUserId)?.ghlCalendarId && (
-                                                            <div className="mt-1 text-xs text-green-600 flex items-center gap-1">
-                                                                <span>📅 GHL Calendar Connected</span>
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                                <div className="space-y-2">
-                                                    <Label>Property</Label>
-                                                    <SearchableSelect
-                                                        name="viewingPropertyId"
-                                                        value={viewingPropertyId}
-                                                        onChange={setViewingPropertyId}
-                                                        options={properties.map(p => ({ value: p.id, label: (p as any).unitNumber ? `[${(p as any).unitNumber}] ${p.title}` : p.title }))}
-                                                        placeholder="Select Property..."
-                                                        searchPlaceholder="Search Property..."
-                                                    />
-                                                    {ownerNotification && (
-                                                        <div className="text-sm text-yellow-600 bg-yellow-50 p-2 rounded border border-yellow-200">
-                                                            {ownerNotification}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                                <div className="space-y-2">
-                                                    <Label>Notes</Label>
-                                                    <Input
-                                                        value={viewingNotes}
-                                                        onChange={e => setViewingNotes(e.target.value)}
-                                                        placeholder="Customer Feedback"
-                                                    />
-                                                </div>
-                                            </div>
-                                            <DialogFooter>
-                                                <Button variant="ghost" type="button" onClick={() => setViewingModalOpen(false)}>Cancel</Button>
-                                                <Button type="button" onClick={handleSaveViewing} disabled={loadingData}>
-                                                    {editingViewingId ? 'Update Viewing' : 'Save Viewing'}
-                                                </Button>
-                                            </DialogFooter>
-                                        </DialogContent>
-                                    </Dialog>
-
-                                    <div className="pt-2">
-                                        {pastViewings.length === 0 ? (
-                                            <p className="text-sm text-muted-foreground">No viewings recorded.</p>
-                                        ) : (
-                                            <div className="space-y-2 max-h-[200px] overflow-y-auto w-full">
-                                                {pastViewings.map((v) => (
-                                                    <div key={v.id} className="text-sm bg-gray-50 dark:bg-gray-900 p-2 rounded border flex flex-col gap-1 w-full">
-                                                        <div className="flex justify-between items-start font-medium w-full">
-                                                            <span>{new Date(v.date).toLocaleString()} - {v.property.unitNumber || v.property.title}</span>
-                                                            <div className="flex items-center space-x-2">
-                                                                <span className="text-muted-foreground text-xs mr-2">{v.user.name}</span>
-                                                                {isEditing && (
-                                                                    <>
-                                                                        <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={() => handleEditViewing(v)}>
-                                                                            <Pencil className="h-3 w-3" />
-                                                                        </Button>
-                                                                        <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-red-50" onClick={() => handleDeleteViewing(v.id)}>
-                                                                            <Trash className="h-3 w-3" />
-                                                                        </Button>
-                                                                    </>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                        <div className="text-gray-600">{v.notes}</div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
+                                <ContactViewingManager
+                                    contactId={contact.id}
+                                    locationId={contact.locationId}
+                                    isEditing={isEditing}
+                                />
                             </TabsContent>
                         ) : null}
 

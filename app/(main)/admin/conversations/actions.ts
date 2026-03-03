@@ -9017,7 +9017,7 @@ export async function searchConversations(query: string, options?: { limit?: num
         const location = await getAuthenticatedLocation();
         const MAX_SEARCH_LIMIT = 50;
         const limit = Math.min(Math.max(Number(options?.limit || 20), 1), MAX_SEARCH_LIMIT);
-        
+
         const q = String(query || "").trim();
         if (!q) {
             return {
@@ -9135,7 +9135,7 @@ export async function searchConversations(query: string, options?: { limit?: num
         // Build the final query to fetch the full conversation objects
         // similar to fetchConversations
         const finalLimit = Math.min(matchedConversationIds.size, limit);
-        
+
         const fetchedRows = await db.conversation.findMany({
             where: {
                 id: { in: Array.from(matchedConversationIds) }
@@ -9191,14 +9191,599 @@ export async function searchConversations(query: string, options?: { limit?: num
 
     } catch (error: any) {
         console.error("[searchConversations] error:", error);
-        return { 
-            success: false, 
+        return {
+            success: false,
             error: error.message || "Search failed",
-            conversations: [], 
-            total: 0, 
-            hasMore: false, 
-            nextCursor: null, 
-            pageSize: 0 
+            conversations: [],
+            total: 0,
+            hasMore: false,
+            nextCursor: null,
+            pageSize: 0
         };
     }
+}
+
+
+const SelectionViewingSuggestionSchema = z.object({
+    propertyDescription: z.string().describe("The name, title, reference, or description of the property being viewed."),
+    date: z.string().optional().nullable().describe("The date of the viewing, in ISO 8601 format (YYYY-MM-DD). If no clear date is mentioned, leave null."),
+    time: z.string().optional().nullable().describe("The time of the viewing, in HH:mm format (24-hour). If no clear time is mentioned, leave null."),
+    notes: z.string().optional().nullable().describe("Any additional notes or context about the viewing, such as the person attending or specific requirements."),
+});
+
+const SelectionViewingSuggestionEnvelopeSchema = z.object({
+    suggestions: z.array(SelectionViewingSuggestionSchema).max(MAX_TASK_SUGGESTIONS),
+});
+
+export type SelectionViewingSuggestion = z.infer<typeof SelectionViewingSuggestionSchema>;
+
+export async function suggestViewingsFromSelection(
+    conversationId: string,
+    selectionText: string,
+    requestedModelId?: string
+) {
+    const { userId: clerkUserId } = await auth();
+    if (!clerkUserId) {
+        return { success: false, error: "Unauthorized" as const };
+    }
+
+    const trimmedText = trimSelectionText(selectionText, MAX_SELECTION_TEXT_LENGTH);
+    if (!trimmedText) {
+        return { success: false, error: "No text provided" as const };
+    }
+
+    if (trimmedText.split(/\s+/).length < 2) {
+        return { success: false, error: "Selection is too short to suggest viewings." as const };
+    }
+
+    const conversation = await db.conversation.findUnique({
+        where: { id: conversationId },
+        select: {
+            id: true,
+            contactId: true,
+            contact: {
+                select: {
+                    name: true,
+                    firstName: true,
+                    email: true,
+                    phone: true,
+                }
+            }
+        }
+    });
+
+    if (!conversation) {
+        return { success: false, error: "Conversation not found" as const };
+    }
+
+    const modelId = requestedModelId || getModelForTask("suggest_viewings");
+
+    await persistViewingsSuggestionFunnelEvent({
+        type: VIEWINGS_SUGGESTION_FUNNEL_EVENT_TYPES.generateRequested,
+        conversationInternalId: conversation.id,
+        contactId: conversation.contactId,
+        payload: {
+            source: "selection_toolbar",
+            selectedTextLength: trimmedText.length,
+            modelId,
+        },
+    });
+
+    const systemPrompt = `You are an AI assistant helping a real estate agent extract property viewing appointments from conversation text.
+Given a snippet of text, your job is to identify any properties the client wants to view, along with the date and time if specified.
+Extract the property description, date (YYYY-MM-DD), time (HH:mm), and any relevant notes.
+If multiple viewings are mentioned, extract them all.
+Return a maximum of ${MAX_TASK_SUGGESTIONS} suggestions.
+
+OUTPUT FORMAT:
+You must return a valid JSON object matching this schema:
+{
+  "suggestions": [
+    {
+      "propertyDescription": "string",
+      "date": "YYYY-MM-DD or null",
+      "time": "HH:mm or null",
+      "notes": "string or null"
+    }
+  ]
+}`;
+
+    const promptText = `Extract viewing suggestions from the following text snippet.
+
+Contact Context:
+Name: ${conversation.contact?.name || conversation.contact?.firstName || 'Unknown'}
+
+Text Snippet:
+"""
+${trimmedText}
+"""`;
+
+    try {
+        const startMs = Date.now();
+        const result = await callLLMWithMetadata(
+            modelId,
+            systemPrompt,
+            promptText,
+            { jsonMode: true, temperature: 0.2 }
+        );
+        const latencyMs = Date.now() - startMs;
+
+        const rawJsonRaw = String(result.text || "").trim();
+        let rawJson = rawJsonRaw;
+        if (rawJsonRaw.startsWith("\`\`\`json")) {
+            rawJson = rawJsonRaw.replace(/^\`\`\`json/, "").replace(/\`\`\`$/, "").trim();
+        }
+
+        let parsedData: unknown;
+        try {
+            parsedData = JSON.parse(rawJson);
+        } catch (parseError) {
+            console.error("[suggestViewings] JSON parse error:", parseError, "Raw output:", rawJson);
+            throw new Error("AI returned invalid JSON formatting.");
+        }
+
+        const validation = SelectionViewingSuggestionEnvelopeSchema.safeParse(parsedData);
+        if (!validation.success) {
+            console.error("[suggestViewings] Schema validation error:", validation.error);
+            throw new Error("AI returned data that didn't match the expected schema.");
+        }
+
+        await persistSelectionAiExecution({
+            conversationInternalId: conversation.id,
+            taskTitle: "Suggest Viewings from Selection",
+            intent: "extract_viewings",
+            modelId,
+            promptText: `${systemPrompt}\n\n${promptText}`,
+            rawOutput: rawJsonRaw,
+            normalizedOutput: JSON.stringify(validation.data),
+            usage: {
+                promptTokens: result.usage.promptTokens,
+                completionTokens: result.usage.completionTokens,
+                totalTokens: result.usage.totalTokens,
+            },
+        });
+
+        await persistViewingsSuggestionFunnelEvent({
+            type: VIEWINGS_SUGGESTION_FUNNEL_EVENT_TYPES.generateSucceeded,
+            conversationInternalId: conversation.id,
+            contactId: conversation.contactId,
+            payload: {
+                source: "selection_toolbar",
+                suggestionCount: validation.data.suggestions.length,
+                modelId,
+                latencyMs,
+            },
+        });
+
+        return {
+            success: true as const,
+            suggestions: validation.data.suggestions,
+            contactId: conversation.contactId,
+        };
+
+    } catch (error: any) {
+        console.error("[suggestViewings] Failed:", error);
+        if (conversation) {
+            await persistViewingsSuggestionFunnelEvent({
+                type: VIEWINGS_SUGGESTION_FUNNEL_EVENT_TYPES.generateFailed,
+                conversationInternalId: conversation.id,
+                contactId: conversation.contactId,
+                payload: {
+                    source: "selection_toolbar",
+                    error: error?.message || "Failed to generate viewing suggestions",
+                },
+                status: "error",
+                error: error?.message || "Failed to generate viewing suggestions",
+            });
+        }
+        return {
+            success: false as const,
+            error: error?.message || "Failed to generate viewing suggestions",
+        };
+    }
+}
+
+export const ApplySelectionViewingSuggestionSchema = z.object({
+    propertyId: z.string().min(1),
+    propertyDescription: z.string(),
+    userId: z.string().min(1),
+    date: z.string().min(1),
+    time: z.string().optional().nullable(),
+    notes: z.string().optional().nullable(),
+});
+
+export const ApplySelectionViewingSuggestionBatchSchema = z.array(ApplySelectionViewingSuggestionSchema).min(1).max(MAX_TASK_SUGGESTIONS);
+
+export async function applySuggestedViewingsFromSelection(
+    conversationId: string,
+    contactId: string,
+    suggestionsInput: Array<z.input<typeof ApplySelectionViewingSuggestionSchema>>
+) {
+    const { createViewing } = await import("@/app/(main)/admin/contacts/actions");
+
+    const sanitizedConversationId = String(conversationId || "").trim();
+    if (!sanitizedConversationId || !contactId) {
+        return { success: false as const, error: "Missing conversation or contact ID" };
+    }
+
+    const parsedSuggestions = ApplySelectionViewingSuggestionBatchSchema.safeParse(suggestionsInput || []);
+    if (!parsedSuggestions.success) {
+        return { success: false as const, error: "No valid viewing suggestions to apply" };
+    }
+
+    const suggestions = parsedSuggestions.data;
+
+    let conversationForTelemetry: { id: string; contactId: string } | null = null;
+
+    try {
+        const location = await getAuthenticatedLocation();
+        const conversation = await resolveConversationForCrmLog(location.id, sanitizedConversationId);
+        if (!conversation) {
+            return { success: false as const, error: "Conversation not found" };
+        }
+
+        conversationForTelemetry = {
+            id: conversation.id,
+            contactId: conversation.contactId,
+        };
+
+        await persistViewingsSuggestionFunnelEvent({
+            type: VIEWINGS_SUGGESTION_FUNNEL_EVENT_TYPES.applyRequested,
+            conversationInternalId: conversation.id,
+            contactId: conversation.contactId,
+            payload: {
+                source: "selection_toolbar",
+                selectedCount: suggestions.length,
+            },
+        });
+
+        let createdCount = 0;
+        const failed: Array<{ description: string; error: string }> = [];
+
+        for (const suggestion of suggestions) {
+            const formData = new FormData();
+            formData.append('contactId', contactId);
+            formData.append('propertyId', suggestion.propertyId);
+            formData.append('userId', suggestion.userId);
+
+            let finalDate = suggestion.date;
+            if (suggestion.time && finalDate) {
+                finalDate = `${finalDate}T${suggestion.time}`;
+            } else if (!finalDate) {
+                finalDate = new Date().toISOString();
+            }
+
+            formData.append('date', finalDate);
+            formData.append('notes', suggestion.notes || '');
+
+            const result = await createViewing(null, formData);
+
+            if (result?.success) {
+                createdCount += 1;
+                continue;
+            }
+
+            failed.push({
+                description: suggestion.propertyDescription,
+                error: String(result?.message || "Unknown error"),
+            });
+        }
+
+        await persistViewingsSuggestionFunnelEvent({
+            type: VIEWINGS_SUGGESTION_FUNNEL_EVENT_TYPES.applyCompleted,
+            conversationInternalId: conversation.id,
+            contactId: conversation.contactId,
+            payload: {
+                source: "selection_toolbar",
+                selectedCount: suggestions.length,
+                createdCount,
+                failedCount: failed.length,
+                failedDescriptions: failed.map((item) => item.description),
+                failedErrors: failed
+                    .map((item) => normalizeSingleLine(item.error, "Unknown error").slice(0, 180))
+                    .filter(Boolean),
+            },
+        });
+
+        return {
+            success: true as const,
+            selectedCount: suggestions.length,
+            createdCount,
+            failedCount: failed.length,
+            failed,
+        };
+    } catch (error: any) {
+        const errorMessage = error?.message || "Failed to apply viewing suggestions";
+        console.error("[applySuggestedViewingsFromSelection] Error:", error);
+
+        if (conversationForTelemetry) {
+            await persistViewingsSuggestionFunnelEvent({
+                type: VIEWINGS_SUGGESTION_FUNNEL_EVENT_TYPES.applyFailed,
+                conversationInternalId: conversationForTelemetry.id,
+                contactId: conversationForTelemetry.contactId,
+                payload: {
+                    source: "selection_toolbar",
+                    selectedCount: suggestions.length,
+                    error: errorMessage,
+                },
+                status: "error",
+                error: errorMessage,
+            });
+        }
+
+        return { success: false as const, error: errorMessage };
+    }
+}
+
+const VIEWINGS_SUGGESTION_FUNNEL_EVENT_TYPES = {
+    generateRequested: "viewings_suggestion.generate.requested",
+    generateSucceeded: "viewings_suggestion.generate.succeeded",
+    generateFailed: "viewings_suggestion.generate.failed",
+    applyRequested: "viewings_suggestion.apply.requested",
+    applyCompleted: "viewings_suggestion.apply.completed",
+    applyFailed: "viewings_suggestion.apply.failed",
+} as const;
+
+const VIEWINGS_SUGGESTION_FUNNEL_EVENT_TYPE_VALUES = Object.values(VIEWINGS_SUGGESTION_FUNNEL_EVENT_TYPES);
+export type ViewingsSuggestionFunnelEventType = typeof VIEWINGS_SUGGESTION_FUNNEL_EVENT_TYPES[keyof typeof VIEWINGS_SUGGESTION_FUNNEL_EVENT_TYPES];
+
+export async function persistViewingsSuggestionFunnelEvent(args: {
+    type: ViewingsSuggestionFunnelEventType;
+    conversationInternalId: string;
+    contactId: string;
+    payload: Record<string, unknown>;
+    status?: "processed" | "error";
+    error?: string | null;
+}) {
+    try {
+        await db.agentEvent.create({
+            data: {
+                type: args.type,
+                payload: args.payload as any,
+                conversationId: args.conversationInternalId,
+                contactId: args.contactId,
+                status: args.status || "processed",
+                error: args.error || null,
+            },
+        });
+    } catch (eventError) {
+        console.warn("[viewingsSuggestionFunnel] Failed to persist event:", args.type, eventError);
+    }
+}
+
+const ViewingsSuggestionFunnelMetricsInputSchema = z.object({
+    days: z.number().int().min(1).max(180).optional(),
+    scope: z.enum(["location", "conversation"]).default("location"),
+    conversationId: z.string().trim().optional(),
+}).optional();
+
+export async function getViewingsSuggestionFunnelMetrics(input?: z.input<typeof ViewingsSuggestionFunnelMetricsInputSchema>) {
+    const parsedInput = ViewingsSuggestionFunnelMetricsInputSchema.safeParse(input);
+    if (!parsedInput.success) {
+        return { success: false as const, error: "Invalid metrics query" };
+    }
+
+    const location = await getAuthenticatedLocation();
+    const config = parsedInput.data;
+    const days = config?.days || 30;
+    const scope: "location" | "conversation" = config?.scope || "location";
+    const now = new Date();
+    const since = new Date(now.getTime() - (days * 24 * 60 * 60 * 1000));
+
+    let scopedConversationId: string | null = null;
+    if (scope === "conversation") {
+        const requestedConversationId = String(config?.conversationId || "").trim();
+        if (!requestedConversationId) {
+            return { success: false as const, error: "Conversation ID is required for conversation metrics" };
+        }
+
+        const conversation = await resolveConversationForCrmLog(location.id, requestedConversationId);
+        if (!conversation) {
+            return { success: false as const, error: "Conversation not found" };
+        }
+
+        scopedConversationId = conversation.id;
+    }
+
+    const rawEvents = await db.agentEvent.findMany({
+        where: {
+            type: { in: [...VIEWINGS_SUGGESTION_FUNNEL_EVENT_TYPE_VALUES] },
+            processedAt: { gte: since },
+            ...(scopedConversationId ? { conversationId: scopedConversationId } : {}),
+        },
+        select: {
+            type: true,
+            payload: true,
+            error: true,
+            processedAt: true,
+            conversationId: true,
+        },
+        orderBy: { processedAt: "asc" },
+    });
+
+    let scopedEvents = rawEvents;
+    if (!scopedConversationId) {
+        const conversationIds = Array.from(new Set(
+            rawEvents
+                .map((item) => item.conversationId)
+                .filter((item): item is string => Boolean(item))
+        ));
+
+        if (conversationIds.length > 0) {
+            const allowed = await db.conversation.findMany({
+                where: {
+                    id: { in: conversationIds },
+                    locationId: location.id,
+                },
+                select: { id: true },
+            });
+            const allowedIds = new Set(allowed.map((item) => item.id));
+            scopedEvents = rawEvents.filter((item) => item.conversationId ? allowedIds.has(item.conversationId) : false);
+        } else {
+            scopedEvents = [];
+        }
+    }
+
+    const totals = {
+        generateRequested: 0,
+        generateSucceeded: 0,
+        generateFailed: 0,
+        applyRequested: 0,
+        applyCompleted: 0,
+        applyFailed: 0,
+        suggestionsGenerated: 0,
+        selectedForApply: 0,
+        viewingsCreated: 0,
+        viewingsFailed: 0,
+    };
+
+    type DailyPoint = {
+        date: string;
+        generateRequested: number;
+        generateSucceeded: number;
+        generateFailed: number;
+        applyRequested: number;
+        applyCompleted: number;
+        applyFailed: number;
+        suggestionsGenerated: number;
+        selectedForApply: number;
+        viewingsCreated: number;
+        viewingsFailed: number;
+    };
+
+    const ensureDailyPoint = (map: Map<string, DailyPoint>, date: string): DailyPoint => {
+        const existing = map.get(date);
+        if (existing) return existing;
+        const created: DailyPoint = {
+            date,
+            generateRequested: 0,
+            generateSucceeded: 0,
+            generateFailed: 0,
+            applyRequested: 0,
+            applyCompleted: 0,
+            applyFailed: 0,
+            suggestionsGenerated: 0,
+            selectedForApply: 0,
+            viewingsCreated: 0,
+            viewingsFailed: 0,
+        };
+        map.set(date, created);
+        return created;
+    };
+
+    let generationLatencyTotalMs = 0;
+    let generationLatencySamples = 0;
+    const dailyMap = new Map<string, DailyPoint>();
+    const failureMap = new Map<string, number>();
+
+    for (const event of scopedEvents) {
+        const payload = getPayloadObject(event.payload);
+        const point = ensureDailyPoint(dailyMap, toIsoDayKey(event.processedAt));
+
+        switch (event.type) {
+            case VIEWINGS_SUGGESTION_FUNNEL_EVENT_TYPES.generateRequested: {
+                totals.generateRequested += 1;
+                point.generateRequested += 1;
+                break;
+            }
+            case VIEWINGS_SUGGESTION_FUNNEL_EVENT_TYPES.generateSucceeded: {
+                totals.generateSucceeded += 1;
+                point.generateSucceeded += 1;
+
+                const suggestionCount = Math.max(0, Math.round(getPayloadNumber(payload, "suggestionCount")));
+                totals.suggestionsGenerated += suggestionCount;
+                point.suggestionsGenerated += suggestionCount;
+
+                const latencyMs = getPayloadNumber(payload, "latencyMs");
+                if (latencyMs > 0) {
+                    generationLatencyTotalMs += latencyMs;
+                    generationLatencySamples += 1;
+                }
+                break;
+            }
+            case VIEWINGS_SUGGESTION_FUNNEL_EVENT_TYPES.generateFailed: {
+                totals.generateFailed += 1;
+                point.generateFailed += 1;
+                break;
+            }
+            case VIEWINGS_SUGGESTION_FUNNEL_EVENT_TYPES.applyRequested: {
+                totals.applyRequested += 1;
+                point.applyRequested += 1;
+
+                const selectedCount = Math.max(0, Math.round(getPayloadNumber(payload, "selectedCount")));
+                totals.selectedForApply += selectedCount;
+                point.selectedForApply += selectedCount;
+                break;
+            }
+            case VIEWINGS_SUGGESTION_FUNNEL_EVENT_TYPES.applyCompleted: {
+                totals.applyCompleted += 1;
+                point.applyCompleted += 1;
+
+                const createdCount = Math.max(0, Math.round(getPayloadNumber(payload, "createdCount")));
+                const failedCount = Math.max(0, Math.round(getPayloadNumber(payload, "failedCount")));
+
+                totals.viewingsCreated += createdCount;
+                point.viewingsCreated += createdCount;
+                totals.viewingsFailed += failedCount;
+                point.viewingsFailed += failedCount;
+
+                if (failedCount > 0) {
+                    const failedErrors = payload.failedErrors;
+                    if (Array.isArray(failedErrors) && failedErrors.length > 0) {
+                        for (const rawError of failedErrors) {
+                            const reason = normalizeSingleLine(String(rawError || ""), "Unknown error").slice(0, 180);
+                            if (!reason) continue;
+                            failureMap.set(reason, (failureMap.get(reason) || 0) + 1);
+                        }
+                    } else {
+                        const fallbackReason = "One or more viewing creates failed";
+                        failureMap.set(fallbackReason, (failureMap.get(fallbackReason) || 0) + 1);
+                    }
+                }
+                break;
+            }
+            case VIEWINGS_SUGGESTION_FUNNEL_EVENT_TYPES.applyFailed: {
+                totals.applyFailed += 1;
+                point.applyFailed += 1;
+                break;
+            }
+        }
+
+        if (
+            event.type === VIEWINGS_SUGGESTION_FUNNEL_EVENT_TYPES.generateFailed
+            || event.type === VIEWINGS_SUGGESTION_FUNNEL_EVENT_TYPES.applyFailed
+        ) {
+            const reasonRaw = String(payload.error || event.error || "Unknown error");
+            const reason = normalizeSingleLine(reasonRaw, "Unknown error").slice(0, 180);
+            failureMap.set(reason, (failureMap.get(reason) || 0) + 1);
+        }
+    }
+
+    const rates = {
+        generateSuccessRate: safeRatio(totals.generateSucceeded, totals.generateRequested),
+        applyStartRate: safeRatio(totals.applyRequested, totals.generateSucceeded),
+        applySuccessRate: safeRatio(totals.applyCompleted, totals.applyRequested),
+        selectedToViewingConversion: safeRatio(totals.viewingsCreated, totals.selectedForApply),
+    };
+
+    const averages = {
+        suggestionsPerGeneration: safeRatio(totals.suggestionsGenerated, totals.generateSucceeded),
+        viewingsPerApply: safeRatio(totals.viewingsCreated, totals.applyCompleted),
+        generationLatencyMs: generationLatencySamples > 0 ? (generationLatencyTotalMs / generationLatencySamples) : 0,
+    };
+
+    const daily = Array.from(dailyMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+    const failures = Array.from(failureMap.entries())
+        .map(([reason, count]) => ({ reason, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10);
+
+    return {
+        success: true as const,
+        totals,
+        rates,
+        averages,
+        daily,
+        failures,
+    };
 }

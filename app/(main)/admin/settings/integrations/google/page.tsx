@@ -9,7 +9,9 @@ import { redirect } from "next/navigation";
 import { SyncDirectionSettings } from "./sync-direction-settings";
 import { GoogleAutomationSettings } from "./automation-settings";
 import { GoogleTasklistSettings } from "./tasklist-settings";
+import { GoogleCalendarSettings } from "./calendar-settings";
 import { listGoogleTasklists, DEFAULT_GOOGLE_TASKLIST_ID } from "@/lib/tasks/providers/google";
+import { listGoogleCalendars } from "@/lib/viewings/providers/google-calendar";
 
 export default async function GoogleIntegrationPage({
     searchParams,
@@ -35,6 +37,8 @@ export default async function GoogleIntegrationPage({
             googleAutoSyncPushUpdates: true,
             googleTasklistId: true,
             googleTasklistTitle: true,
+            googleCalendarId: true,
+            googleCalendarTitle: true,
         }
     });
 
@@ -47,6 +51,9 @@ export default async function GoogleIntegrationPage({
     const isNewConnection = resolvedParams?.google_connected === 'true';
     let tasklistLoadError: string | null = null;
     let googleTasklists: Array<{ id: string; title: string; isDefault: boolean }> = [];
+
+    let calendarLoadError: string | null = null;
+    let googleCalendars: Array<{ id: string; title: string; isPrimary: boolean }> = [];
 
     if (isConnected) {
         try {
@@ -63,6 +70,24 @@ export default async function GoogleIntegrationPage({
                 title: user.googleTasklistTitle || "Default",
                 isDefault: (user.googleTasklistId || DEFAULT_GOOGLE_TASKLIST_ID) === DEFAULT_GOOGLE_TASKLIST_ID,
             }];
+        }
+
+        try {
+            const loadedCalendars = await listGoogleCalendars(user.id);
+            googleCalendars = loadedCalendars.map((calendar) => ({
+                id: calendar.id,
+                title: calendar.title,
+                isPrimary: calendar.isPrimary,
+            }));
+        } catch (error: any) {
+            calendarLoadError = error?.message || "Could not load Google calendars. Reconnect Google to refresh calendar permissions.";
+            if (user.googleCalendarId) {
+                googleCalendars = [{
+                    id: user.googleCalendarId,
+                    title: user.googleCalendarTitle || "Default Calendar",
+                    isPrimary: false,
+                }];
+            }
         }
     }
 
@@ -160,6 +185,14 @@ export default async function GoogleIntegrationPage({
                     currentTasklistTitle={user.googleTasklistTitle}
                     loadError={tasklistLoadError}
                 />
+
+                <GoogleCalendarSettings
+                    isConnected={isConnected}
+                    calendars={googleCalendars}
+                    currentCalendarId={(user as any).googleCalendarId}
+                    currentCalendarTitle={(user as any).googleCalendarTitle}
+                    loadError={calendarLoadError}
+                />
             </div>
 
             <Card>
@@ -176,6 +209,7 @@ export default async function GoogleIntegrationPage({
                             <li><strong>Caller ID:</strong> Company field shows "Lead [Rent/Sale]..."</li>
                             <li><strong>Contact Sync:</strong> Manual by default, with optional per-flow automation.</li>
                             <li><strong>Tasks Sync-Out:</strong> Contact tasks can be pushed to a selected Google task list.</li>
+                            <li><strong>Calendar Sync-Out:</strong> Viewings can be synchronized to a selected Google Calendar.</li>
                         </ul>
                     </div>
 

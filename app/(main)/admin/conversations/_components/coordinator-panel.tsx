@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { GroupMembersList } from './group-members-list';
 import { TraceNodeRenderer } from "./trace-node-renderer";
 import { ContactTaskManager } from "@/components/tasks/contact-task-manager";
+import { ContactViewingManager } from "@/components/tasks/contact-viewing-manager";
 
 interface CoordinatorPanelProps {
     conversation: Conversation;
@@ -451,20 +452,6 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
                                     </div>
                                 )}
 
-                                {/* Viewings (Recent) */}
-                                {contactContext.contact.viewings && contactContext.contact.viewings.length > 0 && (
-                                    <div className="pt-1.5 border-t text-[11px]">
-                                        <span className="text-muted-foreground font-medium mb-1 block">Recent Viewings</span>
-                                        <div className="space-y-1">
-                                            {contactContext.contact.viewings.slice(0, 3).map((v: any) => (
-                                                <div key={v.id} className="flex justify-between items-center text-foreground/80">
-                                                    <span className="truncate max-w-[120px]">{v.property.title}</span>
-                                                    <span className="text-muted-foreground text-[10px]">{new Date(v.date).toLocaleDateString()}</span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
                             </>
                         ) : (
                             // Fallback if context not loaded yet
@@ -495,6 +482,18 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
                 </CardContent>
             </Card>
 
+            <Card className="shadow-none border-border/50">
+                <CardContent className="p-3">
+                    {/* Viewings Manager */}
+                    <ContactViewingManager
+                        contactId={conversation.contactId || contactContext?.contact?.id}
+                        locationId={conversation.locationId}
+                        compact
+                        title="Property Viewings"
+                        isEditing={true}
+                    />
+                </CardContent>
+            </Card>
 
             {/* PLANNER SECTION */}
             <div className="flex-1 min-h-0 flex flex-col space-y-3">

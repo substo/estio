@@ -81,3 +81,26 @@ export async function updateGoogleTasklistSettings(input: z.input<typeof updateG
     revalidatePath("/admin/settings/integrations/google");
     return { success: true };
 }
+
+const updateGoogleCalendarSettingsSchema = z.object({
+    calendarId: z.string().trim().min(1).max(255),
+    calendarTitle: z.string().trim().max(255).optional().nullable()
+});
+
+export async function updateGoogleCalendarSettings(input: z.input<typeof updateGoogleCalendarSettingsSchema>) {
+    const { userId: clerkUserId } = await auth();
+    if (!clerkUserId) throw new Error("Unauthorized");
+
+    const parsed = updateGoogleCalendarSettingsSchema.parse(input);
+
+    await db.user.update({
+        where: { clerkId: clerkUserId },
+        data: {
+            googleCalendarId: parsed.calendarId,
+            googleCalendarTitle: parsed.calendarTitle || null
+        }
+    });
+
+    revalidatePath("/admin/settings/integrations/google");
+    return { success: true };
+}

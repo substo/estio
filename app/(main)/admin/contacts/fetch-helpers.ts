@@ -101,7 +101,21 @@ export async function getContactViewings(contactId: string) {
             where: { contactId },
             include: {
                 property: { select: { title: true, unitNumber: true } },
-                user: { select: { name: true } }
+                user: { select: { name: true } },
+                syncRecords: true,
+                outboxJobs: {
+                    select: {
+                        id: true,
+                        provider: true,
+                        operation: true,
+                        status: true,
+                        attemptCount: true,
+                        scheduledAt: true,
+                        lastError: true,
+                        createdAt: true
+                    },
+                    where: { status: { notIn: ['completed'] } }
+                }
             },
             orderBy: { date: 'desc' },
         });

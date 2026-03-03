@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { CronGuard } from '@/lib/cron/guard';
 import { processTaskSyncOutboxBatch } from '@/lib/tasks/sync-engine';
+import { processViewingSyncOutboxBatch } from '@/lib/viewings/sync-engine';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
@@ -25,8 +26,9 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const stats = await processTaskSyncOutboxBatch({ batchSize: 25 });
-    return NextResponse.json({ success: true, stats });
+    const taskStats = await processTaskSyncOutboxBatch({ batchSize: 25 });
+    const viewingStats = await processViewingSyncOutboxBatch({ batchSize: 25 });
+    return NextResponse.json({ success: true, taskStats, viewingStats });
   } catch (error: any) {
     return NextResponse.json(
       {
