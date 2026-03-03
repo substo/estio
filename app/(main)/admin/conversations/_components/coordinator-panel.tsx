@@ -22,6 +22,7 @@ import { ContactTaskManager } from "@/components/tasks/contact-task-manager";
 import { ContactViewingManager } from "@/components/tasks/contact-viewing-manager";
 
 interface CoordinatorPanelProps {
+    locationId: string;
     conversation: Conversation;
     selectedConversations?: Conversation[]; // New Prop for Context Mode
     onDraftApproved: (text: string) => void;
@@ -42,7 +43,7 @@ interface ThoughtStep {
     conclusion: string;
 }
 
-export function CoordinatorPanel({ conversation, selectedConversations, onDraftApproved, onDeselect, onSuggestionsGenerated }: CoordinatorPanelProps) {
+export function CoordinatorPanel({ locationId, conversation, selectedConversations, onDraftApproved, onDeselect, onSuggestionsGenerated }: CoordinatorPanelProps) {
     const [draft, setDraft] = useState("");
     const [reasoning, setReasoning] = useState("");
     const [generating, setGenerating] = useState(false);
@@ -487,7 +488,7 @@ export function CoordinatorPanel({ conversation, selectedConversations, onDraftA
                     {/* Viewings Manager */}
                     <ContactViewingManager
                         contactId={conversation.contactId || contactContext?.contact?.id}
-                        locationId={conversation.locationId}
+                        locationId={locationId}
                         compact
                         title="Property Viewings"
                         isEditing={true}

@@ -52,6 +52,7 @@ import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'reac
 
 
 interface ConversationInterfaceProps {
+    locationId: string;
     initialConversations: Conversation[];
     initialConversationListPageInfo?: {
         hasMore: boolean;
@@ -116,7 +117,7 @@ function hasPendingTranscripts(messages: Message[]): boolean {
     );
 }
 
-export function ConversationInterface({ initialConversations, initialConversationListPageInfo }: ConversationInterfaceProps) {
+export function ConversationInterface({ locationId, initialConversations, initialConversationListPageInfo }: ConversationInterfaceProps) {
     const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();
@@ -1236,6 +1237,7 @@ export function ConversationInterface({ initialConversations, initialConversatio
                     {viewMode === 'chats' ? (
                         activeConversation ? (
                             <CoordinatorPanel
+                                locationId={locationId}
                                 conversation={activeConversation}
                                 selectedConversations={isSelectionMode ? selectedConversations : undefined}
                                 onDraftApproved={(text) => handleSendMessage(text, getMessageType(activeConversation))}
@@ -1247,6 +1249,7 @@ export function ConversationInterface({ initialConversations, initialConversatio
                         // Deal Mode - Coordinator
                         activeDeal && dealProxyConversation ? (
                             <CoordinatorPanel
+                                locationId={locationId}
                                 conversation={dealProxyConversation}
                                 // Mocking selectedConversations to match the deal's participants so it looks like "Context Mode"
                                 selectedConversations={conversations.filter(c => activeDeal.conversationIds.includes(c.id))}

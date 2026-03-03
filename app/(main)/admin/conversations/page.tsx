@@ -90,6 +90,7 @@ export default async function ConversationsPage({ searchParams }: { searchParams
             <main className="flex-1 overflow-hidden relative">
                 <Suspense fallback={<div>Loading Interface...</div>}>
                     <ConversationInterface
+                        locationId={location.id}
                         initialConversations={initialConversationsData.conversations}
                         initialConversationListPageInfo={{
                             hasMore: !!initialConversationsData.hasMore,
