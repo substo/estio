@@ -1553,6 +1553,19 @@ export function MessageSelectionActions({
                     </div>
                 </DialogContent>
             </Dialog >
+
+            <ViewingsSuggestionDialog
+                open={suggestViewingsOpen}
+                onOpenChange={(open) => {
+                    setSuggestViewingsOpen(open);
+                    if (!open) {
+                        setSuggestSelectionText("");
+                    }
+                }}
+                selectionText={suggestSelectionText}
+                conversationId={conversationId || undefined}
+                activeAiModel={activeAiModel || undefined}
+            />
         </>
     );
 }

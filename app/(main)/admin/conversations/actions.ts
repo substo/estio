@@ -9247,6 +9247,15 @@ export async function suggestViewingsFromSelection(
                     firstName: true,
                     email: true,
                     phone: true,
+                    propertiesInterested: true,
+                    requirementDistrict: true,
+                    requirementBedrooms: true,
+                    requirementPropertyTypes: true,
+                    requirementPropertyLocations: true,
+                    requirementCondition: true,
+                    requirementMinPrice: true,
+                    requirementMaxPrice: true,
+                    requirementOtherDetails: true,
                 }
             }
         }
@@ -9288,10 +9297,39 @@ You must return a valid JSON object matching this schema:
   ]
 }`;
 
+    const interestedPropIds = conversation.contact?.propertiesInterested || [];
+    let interestedPropertiesText = "None explicitly specified in profile.";
+    if (interestedPropIds.length > 0) {
+        const props = await db.property.findMany({
+            where: { id: { in: interestedPropIds } },
+            select: { title: true, reference: true, city: true }
+        });
+        if (props.length > 0) {
+            interestedPropertiesText = props.map(p => `- ${p.title} (Ref: ${p.reference || 'N/A'}, City: ${p.city || 'Unknown'})`).join("\n");
+        }
+    }
+
+    const reqs = conversation.contact ? [
+        conversation.contact.requirementDistrict?.includes("Any") ? null : `District: ${conversation.contact.requirementDistrict}`,
+        conversation.contact.requirementBedrooms?.includes("Any") ? null : `Bedrooms: ${conversation.contact.requirementBedrooms}`,
+        conversation.contact.requirementPropertyTypes?.length ? `Types: ${conversation.contact.requirementPropertyTypes.join(", ")}` : null,
+        conversation.contact.requirementPropertyLocations?.length ? `Locations: ${conversation.contact.requirementPropertyLocations.join(", ")}` : null,
+        conversation.contact.requirementMinPrice !== "Any" || conversation.contact.requirementMaxPrice !== "Any"
+            ? `Price Range: ${conversation.contact.requirementMinPrice} - ${conversation.contact.requirementMaxPrice}` : null,
+        conversation.contact.requirementCondition?.includes("Any") ? null : `Condition: ${conversation.contact.requirementCondition}`,
+        conversation.contact.requirementOtherDetails ? `Other Notes: ${conversation.contact.requirementOtherDetails}` : null,
+    ].filter(Boolean).join("\n") || "No specific requirements recorded." : "No specific requirements recorded.";
+
     const promptText = `Extract viewing suggestions from the following text snippet.
 
 Contact Context:
 Name: ${conversation.contact?.name || conversation.contact?.firstName || 'Unknown'}
+
+Contact's Interested Properties:
+${interestedPropertiesText}
+
+Contact's Real Estate Requirements:
+${reqs}
 
 Text Snippet:
 """
