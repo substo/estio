@@ -1151,6 +1151,134 @@ export async function searchGoogleContactsAction(query: string) {
   }
 }
 
+export async function importNewGoogleContactAction(resourceName: string, expectedLocationId: string) {
+  const { userId } = await auth();
+  if (!userId) return { success: false, message: 'Unauthorized' };
+
+  try {
+    const hasAccess = await verifyUserHasAccessToLocation(userId, expectedLocationId);
+    if (!hasAccess) {
+      return { success: false, message: 'Unauthorized: You do not have access to this location.' };
+    }
+
+    // Check current user's Google connection
+    const user = await db.user.findUnique({
+      where: { clerkId: userId },
+      select: { id: true, googleSyncEnabled: true, googleRefreshToken: true }
+    });
+
+    if (!user?.googleSyncEnabled || !user?.googleRefreshToken) {
+      return { success: false, message: 'GOOGLE_NOT_CONNECTED' };
+    }
+
+    const { getGoogleContact } = await import('@/lib/google/people');
+    const googleData = await getGoogleContact(user.id, resourceName);
+
+    if (!googleData) return { success: false, message: 'Contact not found in Google' };
+
+    // Must have at least a name or some contact info
+    if (!googleData.name && !googleData.email && !googleData.phone) {
+      return { success: false, message: 'Google contact must have at least a name, email, or phone number.' };
+    }
+
+    // Before creating, make sure this exact googleContactId doesn't already exist in this location
+    const existingSync = await db.contact.findFirst({
+      where: { locationId: expectedLocationId, googleContactId: resourceName }
+    });
+
+    if (existingSync) {
+      return { success: false, message: 'This Google contact is already imported/linked to an existing contact.', contactId: existingSync.id };
+    }
+
+    // Check for duplicate phone/email to prevent errors during creation
+    if (googleData.email) {
+      const existingEmail = await db.contact.findFirst({
+        where: { locationId: expectedLocationId, email: googleData.email },
+      });
+      if (existingEmail) {
+        return { success: false, message: 'A contact with this email already exists localy. Try searching and linking from the Google Sync Manager instead.' };
+      }
+    }
+
+    if (googleData.phone) {
+      const phoneDuplicate = await checkPhoneDuplicate(expectedLocationId, googleData.phone);
+      if (phoneDuplicate?.type === 'Exact') {
+        return { success: false, message: 'A contact with this phone already exists locally. Try searching and linking from the Google Sync Manager instead.' };
+      }
+    }
+
+    const dbUser = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } });
+    const internalUserId = dbUser?.id || null;
+
+    // Transaction to create contact cleanly
+    const contact = await db.$transaction(async (tx) => {
+      // Split name blindly (this isn't perfect for all names but matches standard logic)
+      let firstName = '';
+      let lastName = '';
+      if (googleData.name) {
+        const parts = googleData.name.split(' ');
+        firstName = parts[0];
+        lastName = parts.slice(1).join(' ');
+      }
+
+      const createdContact = await tx.contact.create({
+        data: {
+          locationId: expectedLocationId,
+          name: googleData.name || 'Google Contact',
+          firstName: firstName || undefined,
+          lastName: lastName || undefined,
+          email: googleData.email || undefined,
+          phone: googleData.phone || undefined,
+          status: 'new',
+          contactType: 'Lead',
+          // Set as linked to Google immediately
+          googleContactId: resourceName,
+          googleContactUpdatedAt: googleData.updateTime,
+          lastGoogleSync: new Date()
+        }
+      });
+
+      // Log Creation
+      await logContactHistory(tx, createdContact.id, internalUserId, 'CREATED_FROM_GOOGLE');
+
+      return createdContact;
+    });
+
+    // Fire & Forget sync to GHL
+    const location = await db.location.findUnique({ where: { id: expectedLocationId }, select: { ghlAccessToken: true, ghlLocationId: true } });
+    if (location?.ghlAccessToken && location?.ghlLocationId) {
+      try {
+        console.log('[importNewGoogleContactAction] Syncing new Google import to GHL...');
+        syncContactToGHL(
+          location.ghlLocationId,
+          {
+            name: contact.name || undefined,
+            email: contact.email || undefined,
+            phone: contact.phone || undefined
+          },
+          contact.ghlContactId
+        ).then(async (ghlId) => {
+          if (ghlId) {
+            await db.contact.update({ where: { id: contact.id }, data: { ghlContactId: ghlId } });
+          }
+        }).catch(e => console.error('[importNewGoogleContactAction] GHL Sync Failed (async):', e));
+      } catch (e) {
+        console.error('[importNewGoogleContactAction] GHL Sync Failed (sync):', e);
+      }
+    }
+
+    revalidatePath('/admin/contacts');
+    return { success: true, message: 'Contact imported successfully.', contactId: contact.id };
+
+  } catch (error: any) {
+    if (error.message === 'GOOGLE_AUTH_EXPIRED') {
+      return { success: false, message: 'GOOGLE_AUTH_EXPIRED' };
+    }
+    console.error('[importNewGoogleContactAction] Error:', error);
+    return { success: false, message: 'Failed to import Google contact' };
+  }
+}
+
 export async function resolveSyncConflict(
   contactId: string,
   resolution: 'use_google' | 'use_local' | 'link_only',

@@ -475,7 +475,7 @@ export function CoordinatorPanel({ locationId, conversation, selectedConversatio
             <Card className="shadow-none border-border/50">
                 <CardContent className="p-3">
                     <ContactTaskManager
-                        contactId={conversation.contactId || contactContext?.contact?.id}
+                        contactId={contactContext?.contact?.id || ''}
                         conversationId={conversation.id}
                         compact
                         title="Contact Tasks"
@@ -487,7 +487,7 @@ export function CoordinatorPanel({ locationId, conversation, selectedConversatio
                 <CardContent className="p-3">
                     {/* Viewings Manager */}
                     <ContactViewingManager
-                        contactId={conversation.contactId || contactContext?.contact?.id}
+                        contactId={contactContext?.contact?.id || ''}
                         locationId={locationId}
                         compact
                         title="Property Viewings"

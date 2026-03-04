@@ -1346,6 +1346,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             <NewConversationDialog
                 open={newConversationOpen}
                 onOpenChange={setNewConversationOpen}
+                locationId={locationId}
                 onConversationCreated={async (conversationId) => {
                     // Refresh conversations list
                     const data = await fetchConversations(viewFilter, conversationId);

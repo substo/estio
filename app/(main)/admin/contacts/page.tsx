@@ -8,6 +8,9 @@ import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
 import { AddContactDialog } from "./_components/add-contact-dialog";
 import { ContactRow } from "./_components/contact-row";
 import { ContactFilters } from "./_components/contact-filters";
+import { GoogleContactImportDialogTrigger } from "./_components/google-contact-import-dialog-trigger";
+import { Button } from "@/components/ui/button";
+import { Plus } from "lucide-react";
 
 import { getLocationContext } from "@/lib/auth/location-context";
 
@@ -340,7 +343,15 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
                     <h1 className="text-2xl font-bold">Contacts</h1>
                     <p className="text-muted-foreground">Manage your contacts and leads.</p>
                 </div>
-                <AddContactDialog locationId={locationId} leadSources={leadSourceNames} />
+                <div className="flex gap-2">
+                    {/* The AddContactDialog handles its own button, but to align them we might wrap it. 
+                        AddContactDialog currently renders a DialogTrigger with a Button.
+                    */}
+                    <div className="flex items-center">
+                        <GoogleContactImportDialogTrigger locationId={locationId} isGoogleConnected={isGoogleConnected} />
+                    </div>
+                    <AddContactDialog locationId={locationId} leadSources={leadSourceNames} />
+                </div>
             </div>
 
             <ContactFilters leadSources={leadSourceNames} agents={agents} />
@@ -385,3 +396,5 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
         </div>
     );
 }
+
+
