@@ -122,7 +122,7 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
 - **Auto Read Reset**: Selecting a conversation marks it read and clears the badge.
 - **Active Thread Live Updates**: While a thread is open, metadata changes trigger silent message refresh; ChatWindow auto-scroll keeps the latest message visible.
 - **Channel Guards**: The composer channel picker disables ineligible channels with a reason tooltip. SMS is blocked when phone is invalid/masked or GHL SMS is not configured; WhatsApp is blocked when eligibility checks fail.
-- **WhatsApp Media Composer**: For WhatsApp-eligible conversations, the composer supports media upload (`image/*`, `audio/*`) and in-app voice-note recording (`MediaRecorder`). Media is sent through the private R2 -> Evolution `sendMedia` flow and rendered inline (image preview or audio player) from signed attachment URLs.
+- **WhatsApp Media Composer**: For WhatsApp-eligible conversations, the composer supports media upload (`image/*`, `audio/*`, and various document types like PDF/CSV) and in-app voice-note recording (`MediaRecorder`). Media is sent through the private R2 -> Evolution `sendMedia` flow and rendered inline (image preview, audio player, or document download link) from signed attachment URLs.
 - **WhatsApp Media Recovery**: Message bubbles now expose `Re-fetch Media` for WhatsApp media messages/placeholders to recover missing or stale attachment storage. Source-of-truth details: [`whatsapp-integration.md`](whatsapp-integration.md#61-media-re-fetch-recovery-mar-2026).
 - **Source of Truth (Selection Workflow)**: This document is the canonical reference for chat text-selection behavior, batch summarize/custom flow, and CRM-log save semantics.
 - **Selection Actions**: Message/email text selection in the chat panel now opens a floating action toolbar with:
@@ -143,6 +143,10 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
   - `Summarize` and `Custom` persist `AgentExecution` records (usage, model, cost estimate, request/response snapshots) and increment conversation token/cost totals.
   - `Paste Lead` persists `Analyze Lead Text` trace metadata when the user confirms import.
   - `Find Contact` is non-AI and does not produce AI usage/trace entries.
+
+## Initiating Conversations
+The `New Conversation` flow acts as a unified entry point to establish threads with local contacts or entirely new leads via external systems.
+- **Google Contacts**: The system integrates the Global **Google Contact Import** tool (see [Google Contact Sync](./google-contact-sync.md#4-global-contact-import)), allowing users to look up their Google directory, import a contact, and start a message instantly.
 
 ## WhatsApp Import
 We support importing `.txt` chat exports from WhatsApp directly into a specific conversation.

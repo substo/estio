@@ -162,10 +162,10 @@ Contacts sync bidirectionally with Google Contacts using a **"last write wins"**
 -   **`googleContactId`**: Maps to Google Person `resourceName` (e.g., `people/c12345`).
 -   **`googleContactUpdatedAt`**: Stores Google's metadata timestamp for conflict resolution.
 -   **Outbound (Estio → Google)**: Manual via Google Sync Manager by default. Optional per-flow automation can be enabled in Google Integrations settings.
--   **Inbound (Google → Estio)**: Manual pull via Google Sync Manager by default.
+-   **Inbound (Google → Estio)**: New contacts are imported globally using the **Google Contact Import** dialog. Existing contacts are synchronized and healed using the Google Sync Manager.
 -   **Visual ID**: The organization field in Google Contacts is populated with a summary (e.g., "Lead Rent DT4012 Paphos €750") for caller ID.
 
-> See [Google Contact Sync](./google-contact-sync.md) for full implementation details, including the **Google Sync Manager** for manual conflict resolution.
+> See [Google Contact Sync](./google-contact-sync.md) for full implementation details, including global import actions and the **Google Sync Manager** for manual conflict resolution.
 
 ### 2. Comprehensive Lead Tracking
 The model now includes extensive fields locally to track the full lifecycle of a lead without solely relying on external CRM fields:

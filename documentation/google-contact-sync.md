@@ -68,7 +68,17 @@ This guarantees that on iOS/Android, the incoming call screen shows the Name (bi
 We moved to manual sync to prevent data accidents where a WhatsApp message from a typo'd name overwrites a carefully curated contact in Google. Users now have full agency.
 
 ### 3. Google Sync Manager (The Control Center)
-The **Google Sync Manager** is the unified UI for managing connections.
+The **Google Sync Manager** is the unified UI for managing connections for *existing* contacts in Estio.
+
+### 4. Global Contact Import
+To bring entirely new contacts from Google into Estio, a dedicated **Google Contact Import** feature exists.
+- **Access Points**: 
+  - The main Contacts repository (`/admin/contacts`) via the "Import from Google" button.
+  - The "New Conversation" dialog to seamlessly import a contact and immediately start a chat.
+- **Capabilities**:
+  - Global fuzzy search across the user's connected Google Contacts directory.
+  - One-click import that automatically creates the Estio contact record, assigns the `googleContactId`, and prevents duplicate email/phone creation.
+  - "Import & Message" action that creates the contact and instantly opens a new or existing conversation thread.
 
 #### Features
 1.  **Source of Truth Setting**:
