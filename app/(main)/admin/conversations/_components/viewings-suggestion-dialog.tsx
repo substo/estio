@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Home, ListTodo } from "lucide-react";
+import { SearchableSelect } from "@/app/(main)/admin/contacts/_components/searchable-select";
 import { suggestViewingsFromSelection, applySuggestedViewingsFromSelection, type SelectionViewingSuggestion, getDropdownsForViewingsSuggestion } from "@/app/(main)/admin/conversations/actions";
 import { toast } from "sonner";
 
@@ -148,6 +149,11 @@ export function ViewingsSuggestionDialog({ open, onOpenChange, selectionText, co
 
     const selectedCount = suggestions.filter(s => s.selected).length;
 
+    const propertyOptions = properties.map(p => ({
+        value: p.id,
+        label: `${(p as any).reference ? `[${(p as any).reference}] ` : ""}${(p as any).unitNumber ? `Unit ${(p as any).unitNumber} - ` : ""}${p.title}`
+    }));
+
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="sm:max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
@@ -203,16 +209,15 @@ export function ViewingsSuggestionDialog({ open, onOpenChange, selectionText, co
 
                                     <div className="space-y-1">
                                         <label className="text-[11px] font-medium text-slate-600">Select Property <span className="text-red-500">*</span></label>
-                                        <select
-                                            className="w-full text-xs rounded border p-1.5 h-8 bg-white"
+                                        <SearchableSelect
+                                            options={propertyOptions}
                                             value={suggestion.propertyId || ""}
-                                            onChange={(e) => handlePatchSuggestion(suggestion.id, { propertyId: e.target.value })}
-                                        >
-                                            <option value="">-- Select Property --</option>
-                                            {properties.map(p => (
-                                                <option key={p.id} value={p.id}>{(p as any).unitNumber ? `[${(p as any).unitNumber}] ${p.title}` : p.title}</option>
-                                            ))}
-                                        </select>
+                                            onChange={(val) => handlePatchSuggestion(suggestion.id, { propertyId: val })}
+                                            placeholder="-- Select Property --"
+                                            searchPlaceholder="Search by title or ref..."
+                                            emptyMessage="No property found."
+                                            className="w-full text-xs bg-white rounded-md"
+                                        />
                                     </div>
 
                                     <div className="grid grid-cols-2 gap-2">
