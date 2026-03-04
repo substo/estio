@@ -9942,3 +9942,27 @@ export async function getViewingsSuggestionFunnelMetrics(input?: z.input<typeof 
         failures,
     };
 }
+
+export async function getDropdownsForViewingsSuggestion() {
+    try {
+        const location = await getAuthenticatedLocation();
+        if (!location?.id) return { properties: [], users: [] };
+
+        const [properties, users] = await Promise.all([
+            db.property.findMany({
+                where: { locationId: location.id },
+                select: { id: true, title: true, reference: true, unitNumber: true },
+                orderBy: { reference: 'asc' },
+            }),
+            db.user.findMany({
+                where: { locations: { some: { id: location.id } } },
+                select: { id: true, name: true, email: true },
+                orderBy: { name: 'asc' },
+            })
+        ]);
+        return { properties, users };
+    } catch (error) {
+        console.error("Failed to fetch dropdowns for viewings suggestion:", error);
+        return { properties: [], users: [] };
+    }
+}

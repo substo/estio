@@ -5,9 +5,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Home, ListTodo } from "lucide-react";
-import { suggestViewingsFromSelection, applySuggestedViewingsFromSelection, type SelectionViewingSuggestion } from "@/app/(main)/admin/conversations/actions";
+import { suggestViewingsFromSelection, applySuggestedViewingsFromSelection, type SelectionViewingSuggestion, getDropdownsForViewingsSuggestion } from "@/app/(main)/admin/conversations/actions";
 import { toast } from "sonner";
-import { getPropertiesForSelect, getUsersForSelect } from "@/app/(main)/admin/contacts/fetch-helpers";
 
 interface ViewingsSuggestionDialogProps {
     open: boolean;
@@ -36,14 +35,9 @@ export function ViewingsSuggestionDialog({ open, onOpenChange, selectionText, co
 
     const loadDropdowns = useCallback(async () => {
         try {
-            // Ideally we'd pass locationId, but fetch-helpers will use authenticated location if not passed,
-            // or we could fetch it. Assuming it works without for now or we will get a location.
-            const [props, usrs] = await Promise.all([
-                getPropertiesForSelect(""), // The helper might default to current location
-                getUsersForSelect("")
-            ]);
-            setProperties(props);
-            setUsers(usrs);
+            const data = await getDropdownsForViewingsSuggestion();
+            setProperties(data.properties);
+            setUsers(data.users);
         } catch (e) {
             console.error("Failed to load dropdowns for viewings:", e);
         }
