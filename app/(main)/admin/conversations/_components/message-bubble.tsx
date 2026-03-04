@@ -6,6 +6,7 @@ import { Mail, Smartphone, Paperclip, ExternalLink, ChevronDown, ChevronUp, Arro
 import { format } from "date-fns";
 import { EmailFrame, type EmailFrameSelection } from "./email-frame";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { LinkifiedText } from "./linkified-text";
 import {
     MessageSelectionActions,
     type MessageSelectionActionTarget,
@@ -407,7 +408,7 @@ export function MessageBubble({
 
                 {/* Content Area */}
                 <div className={cn(
-                    "w-full break-words break-all overflow-x-auto max-w-full transition-all duration-300 ease-in-out relative",
+                    "w-full break-words overflow-x-auto max-w-full transition-all duration-300 ease-in-out relative",
                     isEmail ? "bg-white text-black" : "", // Force white background for emails
                     isEmail && "p-4",
                     !isEmail && "whitespace-pre-wrap"
@@ -426,7 +427,7 @@ export function MessageBubble({
                         (isEmail || isRichHtml) ? (
                             <EmailFrame html={message.body} onSelectionChange={handleEmailSelectionChange} />
                         ) : (
-                            message.body
+                            <LinkifiedText text={message.body} />
                         )
                     )}
                 </div>
