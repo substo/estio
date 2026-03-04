@@ -15,6 +15,16 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog';
 import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
     Select,
     SelectContent,
     SelectItem,
@@ -209,6 +219,9 @@ export function ContactViewingManager({
     const [viewingDuration, setViewingDuration] = useState('30');
     const [editingViewingId, setEditingViewingId] = useState<string | null>(null);
 
+    // Deletion Modal
+    const [viewingToDeleteId, setViewingToDeleteId] = useState<string | null>(null);
+
     // Initial Defaults
     const [defaultUserId, setDefaultUserId] = useState('');
     const [interestedProps, setInterestedProps] = useState<string[]>([]);
@@ -317,17 +330,24 @@ export function ContactViewingManager({
     };
 
     const handleDelete = async (viewingId: string) => {
-        if (!confirm("Are you sure you want to delete this viewing?")) return;
+        setViewingToDeleteId(viewingId);
+    };
+
+    const confirmDelete = async () => {
+        if (!viewingToDeleteId) return;
 
         try {
-            const result = await deleteViewing(viewingId);
+            const result = await deleteViewing(viewingToDeleteId);
             if (result.success) {
                 void loadData({ silent: true });
             } else {
-                alert(result.message || 'Failed to delete');
+                setError(result.message || 'Failed to delete viewing.');
             }
         } catch (e) {
-            alert('Error deleting viewing');
+            setError('Error deleting viewing');
+            console.error(e);
+        } finally {
+            setViewingToDeleteId(null);
         }
     };
 
@@ -537,6 +557,21 @@ export function ContactViewingManager({
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            <AlertDialog open={!!viewingToDeleteId} onOpenChange={(open) => !open && setViewingToDeleteId(null)}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Are you sure you want to delete this viewing?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This will remove the viewing record and automatically cancel any linked Google Calendar or GoHighLevel appointments. This action cannot be undone.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={confirmDelete} className="bg-red-600 focus:ring-red-600 hover:bg-red-700">Continue</AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 }
