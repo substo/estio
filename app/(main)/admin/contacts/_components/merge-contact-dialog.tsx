@@ -83,6 +83,15 @@ export function MergeContactDialog({ sourceContactId, sourceName, trigger }: Mer
                 // Force hard refresh to update UI and redirect
                 // Use window.location.assign to avoid issues with space injection
                 window.location.assign(`/admin/contacts/${targetContactId}/view`);
+            } else if (result.message?.startsWith("already_merged:")) {
+                const mergedIntoId = result.message.split(":")[1];
+                toast.info("This contact was already merged automatically. Redirecting...");
+                setOpen(false);
+                window.location.assign(`/admin/contacts/${mergedIntoId}/view`);
+            } else if (result.message === "Contact not found") {
+                toast.info("This contact no longer exists. It may have been merged automatically.");
+                setOpen(false);
+                window.location.assign('/admin/contacts');
             } else {
                 toast.error(result.message || "Failed to merge contacts.");
             }

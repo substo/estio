@@ -2172,7 +2172,23 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
       const source = await tx.contact.findUnique({ where: { id: sourceContactId } });
       const target = await tx.contact.findUnique({ where: { id: targetContactId } });
 
-      if (!source || !target) throw new Error("Contact not found");
+      if (!source) {
+        // Check if this contact was already merged in the background
+        const mergeHistory = await tx.contactHistory.findFirst({
+          where: {
+            action: "MERGED_FROM",
+            changes: { string_contains: sourceContactId }
+          },
+          select: { contactId: true },
+          orderBy: { createdAt: 'desc' }
+        }).catch(() => null);
+
+        throw new Error(mergeHistory
+          ? `already_merged:${mergeHistory.contactId}`
+          : "Contact not found"
+        );
+      }
+      if (!target) throw new Error("Contact not found");
 
       // 2. Transfer LID if target doesn't have one
       if (source.lid && !target.lid) {

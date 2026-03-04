@@ -110,6 +110,37 @@ async function tryResolveLidToPhone(locationId: string, lidJid: string, instance
         if (evoPhone) {
             return evoPhone;
         }
+
+        // 3) Scan all Evolution contacts for LID↔phone mapping
+        // Some contacts in Evolution's address book have both `id` (phone JID) and `lid` fields.
+        // If findContact for the LID didn't return a phone, scan the full contact list.
+        try {
+            const allContacts = await evolutionClient.fetchContacts(instanceName);
+            if (Array.isArray(allContacts)) {
+                for (const c of allContacts) {
+                    const cLid = String(c.lid || '').replace('@lid', '');
+                    if (cLid && cLid === lidRaw) {
+                        // This contact has our LID — check if it also has a phone
+                        const cId = String(c.id || '');
+                        if (cId.endsWith('@s.whatsapp.net')) {
+                            const phone = normalizePhoneCandidate(cId.replace('@s.whatsapp.net', ''));
+                            if (phone) {
+                                console.log(`[LID Resolve] Found phone via Evolution contacts scan: ${lidJid} -> +${phone}`);
+                                // Proactively save this mapping to DB for next time
+                                await db.contact.updateMany({
+                                    where: { locationId, lid: { contains: lidRaw }, phone: null },
+                                    data: { phone: `+${phone}` }
+                                }).catch(() => { });
+                                return phone;
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (scanErr) {
+            // Non-critical — just log and continue
+            console.warn(`[LID Resolve] Evolution contacts scan failed for ${lidJid}:`, scanErr);
+        }
     }
 
     return null;

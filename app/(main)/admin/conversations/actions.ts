@@ -3316,6 +3316,102 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
             `[Sync] History fetch candidates for ${conversationId}: ${remoteJidCandidates.join(", ") || "(none)"}; selected=${remoteJid || "none"}; found=${evolutionMessages.length}; ignoreDupes=${ignoreDuplicates}`
         );
 
+        // --- Auto-resolve LID placeholder contacts ---
+        // If this contact has no phone but we discovered real phone digits via history fetch,
+        // backfill the phone or merge into an existing contact with that phone.
+        const syncContact = conversation.contact;
+        if (syncContact && !syncContact.phone && (syncContact as any).lid && phone && phone.length >= 7) {
+            const normalizedPhone = phone.startsWith('+') ? phone : `+${phone}`;
+            const phoneSuffix = phone.slice(-7);
+
+            try {
+                // Check if a real contact already exists for this phone
+                const phoneCandidates = await db.contact.findMany({
+                    where: {
+                        locationId: location.id,
+                        phone: { contains: phoneSuffix },
+                        id: { not: syncContact.id }
+                    }
+                });
+
+                const existingPhoneContact = phoneCandidates.find(c => {
+                    if (!c.phone) return false;
+                    const cDigits = c.phone.replace(/\D/g, '');
+                    return (
+                        cDigits === phone ||
+                        (cDigits.endsWith(phone) && phone.length >= 7) ||
+                        (phone.endsWith(cDigits) && cDigits.length >= 7)
+                    );
+                });
+
+                if (existingPhoneContact) {
+                    // Merge: move conversations & messages from placeholder to real contact
+                    console.log(`[Sync Auto-Merge] Merging LID placeholder ${syncContact.id} into phone contact ${existingPhoneContact.id} (${existingPhoneContact.phone})`);
+
+                    const sourceConvos = await db.conversation.findMany({
+                        where: { contactId: syncContact.id, locationId: location.id }
+                    });
+
+                    for (const sourceConvo of sourceConvos) {
+                        const targetConvo = await db.conversation.findUnique({
+                            where: {
+                                locationId_contactId: {
+                                    locationId: location.id,
+                                    contactId: existingPhoneContact.id
+                                }
+                            }
+                        });
+
+                        if (targetConvo) {
+                            await db.message.updateMany({
+                                where: { conversationId: sourceConvo.id },
+                                data: { conversationId: targetConvo.id }
+                            });
+                            await db.conversation.delete({ where: { id: sourceConvo.id } });
+                            console.log(`[Sync Auto-Merge] Merged conversation ${sourceConvo.id} -> ${targetConvo.id}`);
+                        } else {
+                            await db.conversation.update({
+                                where: { id: sourceConvo.id },
+                                data: { contactId: existingPhoneContact.id }
+                            });
+                            console.log(`[Sync Auto-Merge] Reassigned conversation ${sourceConvo.id} to ${existingPhoneContact.id}`);
+                        }
+                    }
+
+                    // Transfer LID to the real contact
+                    if ((syncContact as any).lid && !(existingPhoneContact as any).lid) {
+                        await db.contact.update({
+                            where: { id: existingPhoneContact.id },
+                            data: { lid: (syncContact as any).lid } as any
+                        });
+                    }
+
+                    // Delete the placeholder
+                    await db.contact.delete({ where: { id: syncContact.id } });
+                    console.log(`[Sync Auto-Merge] Deleted placeholder contact ${syncContact.id}. Merged into ${existingPhoneContact.id}`);
+
+                    return {
+                        success: true,
+                        count: 0,
+                        skipped: 0,
+                        autoMerged: true,
+                        mergedIntoContactId: existingPhoneContact.id,
+                        message: `Contact auto-merged into ${existingPhoneContact.name || existingPhoneContact.phone}`
+                    };
+                } else {
+                    // No duplicate — just backfill the phone on this placeholder
+                    await db.contact.update({
+                        where: { id: syncContact.id },
+                        data: { phone: normalizedPhone }
+                    });
+                    console.log(`[Sync Auto-Merge] Backfilled phone ${normalizedPhone} on LID contact ${syncContact.id}`);
+                }
+            } catch (autoMergeErr) {
+                console.error(`[Sync Auto-Merge] Error during auto-merge for ${syncContact.id}:`, autoMergeErr);
+                // Continue with normal sync even if auto-merge fails
+            }
+        }
+
         let synced = 0;
         let skipped = 0;
         let consecutiveDuplicates = 0;

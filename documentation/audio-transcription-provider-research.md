@@ -29,7 +29,7 @@
 
 ### Where audio already enters and is persisted
 - `lib/whatsapp/evolution-media.ts`
-  - Parses WhatsApp audio/image messages and stores media attachment metadata.
+  - Parses WhatsApp audio/image/document messages and stores media attachment metadata.
   - Writes `MessageAttachment` rows and R2-backed URIs.
 - `lib/whatsapp/sync.ts`
   - Normalizes inbound/outbound WhatsApp messages and persists `Message` rows.
