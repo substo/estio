@@ -7,7 +7,7 @@
 We use a **Custom Messaging Channel** (shadowed by Evolution API) to solve "Unsuccessful Message" errors and provide full 2-way sync with GoHighLevel (GHL).
 
 > [!NOTE]
-> **Evolution-only media support (images + audio)** is implemented in this integration. Media is stored in a **private Cloudflare R2 bucket** (`whatsapp-media`) and served to the UI through an app-authenticated attachment route. The Twilio/Meta WhatsApp implementations were not changed.
+> **Evolution-only media support (images, audio & documents)** is implemented in this integration. Media is stored in a **private Cloudflare R2 bucket** (`whatsapp-media`) and served to the UI through an app-authenticated attachment route. The Twilio/Meta WhatsApp implementations were not changed.
 
 ### Architecture
 We use a **Hybrid Approach**:
@@ -122,7 +122,7 @@ To handle high-volume sync and rate limits, we introduced a **Queue-Based Archit
 - **Efficiency**: Stops processing as soon as it hits known history.
 - **Resilience**: Manual button handles edge cases.
 
-### 6. Private Media Storage for WhatsApp Media (Images + Audio) (Feb-Mar 2026)
+### 6. Private Media Storage for WhatsApp Media (Images, Audio & Documents) (Feb-Mar 2026)
 
 We use a **single private Cloudflare R2 bucket** for WhatsApp media across environments:
 
@@ -187,7 +187,7 @@ To prevent emoji reactions/stickers from being mislabeled as generic media (`[Me
 - **Emoji-only text messages** stay plain text (e.g. `👍`, `🔥🔥`).
 - **Reactions** (`reactionMessage`) are stored as readable text, e.g. `Reaction: 👍` or `[Reaction removed]`.
 - **Stickers** (`stickerMessage`) are stored as `Sticker: 😀` when WhatsApp includes a linked emoji, otherwise `[Sticker]`.
-- **Media ingestion remains limited to image/audio** (we do not attempt attachment ingestion for reactions/stickers).
+- **Media ingestion supports image, audio, and document types** (reactions/stickers are not ingested as attachments).
 
 #### Why this matters
 - GHL custom channels do not have native reaction objects, so we keep a human-readable text fallback for CRM sync.
@@ -301,7 +301,7 @@ We track message delivery status (`sent`, `delivered`, `read`, `failed`) by list
 | **Media row exists but playback/download fails (missing/corrupted object in R2)** | Use `Re-fetch Media` in the message bubble. It re-downloads by `wamId` from Evolution, restores DB rows on failure, and replaces storage only after successful ingest. |
 | **WhatsApp media upload fails before send** | Check R2 env vars (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`) and bucket CORS for browser `PUT`. The upload action is `createWhatsAppMediaUploadUrl(...)`. |
 | **"Uploaded media not found in media storage"** | The presigned upload may have expired or the browser upload failed. Re-upload the file, then call `sendWhatsAppMediaReply(...)` again. |
-| **"Unsupported media type" / size errors** | Current allow-lists: images (`jpeg/png/webp/gif/heic/heif`) and audio (`ogg/opus/mp3/m4a/webm/wav/aac`). Current max size is `16MB` for both image/audio in `createWhatsAppMediaUploadUrl(...)`. |
+| **"Unsupported media type" / size errors** | Current allow-lists: images (`jpeg/png/webp/gif/heic/heif`), audio (`ogg/opus/mp3/m4a/webm/wav/aac`), and documents (`pdf/doc/docx/xls/xlsx/ppt/pptx/txt/zip/csv`). Current max size is `16MB` for image/audio and `100MB` for documents in `createWhatsAppMediaUploadUrl(...)`. |
 | **Media shows in App but not in GHL as a binary attachment** | Expected for current implementation. GHL custom channel receives placeholder/caption text (`[Image]`, `[Audio]`, or image caption); the binary is stored/displayed through our app + private R2 path. |
 | **Conversation deep link opens but center panel says "Select a conversation"** | The selected conversation may be older than the currently loaded list page (or in Archived/Trash). Fixes now include (1) injecting the URL-selected conversation into the initial payload and (2) preserving the selected conversation during client list refetches. If reproducing from Contacts, ensure the link opens the correct `view` (`archived` / `trash`) when applicable. |
 
@@ -450,17 +450,17 @@ No Prisma migration was required for the Evolution image/R2 feature, but we now 
 -   `Contact.ghlContactId`
 -   `Contact.lid` — WhatsApp Lightweight ID for LID-to-phone mapping.
 -   `Message.ghlMessageId` / `Message.wamId` mapping.
--   `Message.attachments` / `MessageAttachment` for WhatsApp media files (image/audio).
+-   `Message.attachments` / `MessageAttachment` for WhatsApp media files (image/audio/document).
     -   For R2-backed attachments, `MessageAttachment.url` stores an internal `r2://bucket/key` URI.
     -   The UI receives `/api/media/attachments/{attachmentId}` URLs (signed at request time).
 -   **CRITICAL DB ALTERATION**: `Contact` table columns `pushName` and `profilePicUrl` MUST be type `TEXT` or `VARCHAR(1000+)` to prevent crashes. Check migration history.
 
-## Evolution Media Support (Images + Audio) (Feb-Mar 2026)
+## Evolution Media Support (Images, Audio & Documents) (Feb-Mar 2026)
 
 ### Supported Flows
 
-- **Outbound (App UI only)**: Users can send image/audio attachments from the app conversation UI (paperclip icon) on WhatsApp conversations. This uses `createWhatsAppMediaUploadUrl(...)` + `sendWhatsAppMediaReply(...)`. Voice recording in the chat composer is sent through the same media action.
-- **Inbound (Webhook + Manual History Sync + Backfill)**: Image/audio messages received from Evolution webhooks and media messages discovered during sync/backfill paths are parsed and ingested into R2 asynchronously.
+- **Outbound (App UI only)**: Users can send image, audio, and document attachments from the app conversation UI (paperclip icon) on WhatsApp conversations. This uses `createWhatsAppMediaUploadUrl(...)` + `sendWhatsAppMediaReply(...)`. Voice recording in the chat composer is sent through the same media action.
+- **Inbound (Webhook + Manual History Sync + Backfill)**: Image, audio, and document messages received from Evolution webhooks and media messages discovered during sync/backfill paths are parsed and ingested into R2 asynchronously.
 - **Display**: Existing `message-bubble` UI renders message attachments once `fetchMessages(...)` hydrates attachment URLs.
 - **Recovery (Re-fetch by `wamId`)**: Users can re-fetch a WhatsApp media payload for a specific message from the conversation thread using `refetchWhatsAppMediaAttachment(...)`.
 

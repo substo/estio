@@ -171,8 +171,8 @@ export function MessageBubble({
         !imageAttachments.includes(attachment) && !audioAttachments.includes(attachment)
     );
     const selectedImage = selectedImageIndex !== null ? imageAttachments[selectedImageIndex] : null;
-    const hasLikelyMediaPlaceholder = ["[Audio]", "[Image]", "[Media]"].includes(String(message.body || "").trim());
-    const hasRenderableMediaAttachment = imageAttachments.length > 0 || audioAttachments.length > 0;
+    const hasLikelyMediaPlaceholder = ["[Audio]", "[Image]", "[Media]", "[Document]"].includes(String(message.body || "").trim());
+    const hasRenderableMediaAttachment = imageAttachments.length > 0 || audioAttachments.length > 0 || fileAttachments.length > 0;
     const canRefetchMedia = !!onRefetchMedia && isWhatsApp && (hasRenderableMediaAttachment || hasLikelyMediaPlaceholder);
     const getDownloadUrl = (url: string) => {
         try {

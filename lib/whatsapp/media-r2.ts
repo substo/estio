@@ -89,6 +89,16 @@ function inferExtension(fileName?: string, contentType?: string) {
     if (type === "audio/webm") return ".webm";
     if (type === "audio/wav" || type === "audio/x-wav") return ".wav";
     if (type === "audio/aac") return ".aac";
+    if (type === "application/pdf") return ".pdf";
+    if (type === "application/msword") return ".doc";
+    if (type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") return ".docx";
+    if (type === "application/vnd.ms-excel") return ".xls";
+    if (type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") return ".xlsx";
+    if (type === "application/vnd.ms-powerpoint") return ".ppt";
+    if (type === "application/vnd.openxmlformats-officedocument.presentationml.presentation") return ".pptx";
+    if (type === "text/plain") return ".txt";
+    if (type === "application/zip") return ".zip";
+    if (type === "text/csv") return ".csv";
     return ".bin";
 }
 

@@ -222,7 +222,7 @@ export async function POST(req: NextRequest) {
                 resolvedPhone: realPhone
             };
 
-            if ((parsedContent.type === 'image' || parsedContent.type === 'audio') && location.evolutionInstanceId) {
+            if ((parsedContent.type === 'image' || parsedContent.type === 'audio' || parsedContent.type === 'document') && location.evolutionInstanceId) {
                 normalized.__evolutionMediaAttachmentPayload = {
                     instanceName: location.evolutionInstanceId,
                     evolutionMessageData: msg,
@@ -232,7 +232,7 @@ export async function POST(req: NextRequest) {
             console.log(`[Evolution] Processing ${normalized.direction} message for ${location.id}`);
             const processResult = await processNormalizedMessage(normalized);
 
-            if ((parsedContent.type === 'image' || parsedContent.type === 'audio') && location.evolutionInstanceId) {
+            if ((parsedContent.type === 'image' || parsedContent.type === 'audio' || parsedContent.type === 'document') && location.evolutionInstanceId) {
                 if (processResult?.status === 'deferred_unresolved_lid') {
                     console.log(`[Evolution] Delaying media attachment ingest until LID resolves (${key.id})`);
                 } else {

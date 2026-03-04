@@ -10,7 +10,7 @@ export type ParsedEvolutionMessageContent = {
     type: "text" | "image" | "document" | "audio" | "video" | "sticker" | "reaction" | "other";
     body: string;
     media?: {
-        kind: "image" | "audio";
+        kind: "image" | "audio" | "document";
         fileName?: string;
         mimetype?: string;
         fileLength?: number;
@@ -105,7 +105,18 @@ export function parseEvolutionMessageContent(message: any): ParsedEvolutionMessa
     }
 
     if (content.documentMessage) {
-        return { type: "document", body: text || "[Document]" };
+        const doc = content.documentMessage;
+        return {
+            type: "document",
+            body: text || "[Document]",
+            media: {
+                kind: "document",
+                fileName: doc.fileName,
+                mimetype: doc.mimetype,
+                fileLength: Number(String(doc.fileLength || "0")) || undefined,
+                caption: doc.caption,
+            },
+        };
     }
     if (content.audioMessage) {
         const audio = content.audioMessage;
@@ -199,7 +210,7 @@ export async function ingestEvolutionMediaAttachment(params: {
     if (!instanceName || !evolutionMessageData || !wamId) return { status: "skipped" as const, reason: "missing_input" };
 
     const parsed = parseEvolutionMessageContent(evolutionMessageData.message);
-    if (parsed.type !== "image" && parsed.type !== "audio") {
+    if (parsed.type !== "image" && parsed.type !== "audio" && parsed.type !== "document") {
         return { status: "skipped" as const, reason: "unsupported_media_type" };
     }
 
@@ -232,7 +243,7 @@ export async function ingestEvolutionMediaAttachment(params: {
     }
 
     const buffer = decodeBase64Payload(base64);
-    const fallbackContentType = parsed.type === "audio" ? "audio/ogg" : "image/jpeg";
+    const fallbackContentType = parsed.type === "audio" ? "audio/ogg" : parsed.type === "document" ? "application/octet-stream" : "image/jpeg";
     const contentType = String(mediaRes?.mimetype || parsed.media?.mimetype || fallbackContentType);
     const fileName = String(
         mediaRes?.fileName ||

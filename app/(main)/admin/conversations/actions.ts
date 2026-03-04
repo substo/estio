@@ -3363,7 +3363,7 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
                     resolvedPhone: !isGroup && phone ? phone : undefined,
                 };
 
-                if ((parsedContent.type === 'image' || parsedContent.type === 'audio') && location.evolutionInstanceId) {
+                if ((parsedContent.type === 'image' || parsedContent.type === 'audio' || parsedContent.type === 'document') && location.evolutionInstanceId) {
                     normalized.__evolutionMediaAttachmentPayload = {
                         instanceName: location.evolutionInstanceId,
                         evolutionMessageData: msg,
@@ -3372,7 +3372,7 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
 
                 const result = await processNormalizedMessage(normalized);
 
-                if ((parsedContent.type === 'image' || parsedContent.type === 'audio') && location.evolutionInstanceId) {
+                if ((parsedContent.type === 'image' || parsedContent.type === 'audio' || parsedContent.type === 'document') && location.evolutionInstanceId) {
                     if (result?.status === 'deferred_unresolved_lid') {
                         console.log(`[Sync] Delaying media attachment ingest until LID resolves (${key.id})`);
                     } else {
@@ -3428,10 +3428,23 @@ const WHATSAPP_AUDIO_MIME_TYPES = new Set([
     "audio/x-wav",
     "audio/aac",
 ]);
+const WHATSAPP_DOCUMENT_MIME_TYPES = new Set([
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "text/plain",
+    "application/zip",
+    "text/csv",
+]);
 const MAX_WHATSAPP_IMAGE_BYTES = 16 * 1024 * 1024;
 const MAX_WHATSAPP_AUDIO_BYTES = 16 * 1024 * 1024;
+const MAX_WHATSAPP_DOCUMENT_BYTES = 100 * 1024 * 1024;
 
-type WhatsAppMediaKind = "image" | "audio";
+type WhatsAppMediaKind = "image" | "audio" | "document";
 type WhatsAppTranscriptOnDemandPriority = "normal" | "high";
 type WhatsAppTranscriptBulkWindow = "30d" | "all";
 
@@ -3449,10 +3462,12 @@ function getWhatsAppMediaKind(contentType: string, fileName?: string): WhatsAppM
     const normalizedContentType = String(contentType || "").toLowerCase();
     if (WHATSAPP_IMAGE_MIME_TYPES.has(normalizedContentType)) return "image";
     if (WHATSAPP_AUDIO_MIME_TYPES.has(normalizedContentType)) return "audio";
+    if (WHATSAPP_DOCUMENT_MIME_TYPES.has(normalizedContentType)) return "document";
 
     const target = String(fileName || "").toLowerCase();
     if (target.match(/\.(jpg|jpeg|png|webp|gif|heic|heif)$/)) return "image";
     if (target.match(/\.(ogg|opus|mp3|m4a|webm|wav|aac)$/)) return "audio";
+    if (target.match(/\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|zip|csv)$/)) return "document";
     return null;
 }
 
@@ -3541,13 +3556,16 @@ async function resolveOwnedConversationAudioAttachment(args: {
 
 function isSupportedWhatsAppMedia(contentType: string, kind: WhatsAppMediaKind) {
     const normalizedContentType = String(contentType || "").toLowerCase();
-    return kind === "image"
-        ? WHATSAPP_IMAGE_MIME_TYPES.has(normalizedContentType)
-        : WHATSAPP_AUDIO_MIME_TYPES.has(normalizedContentType);
+    if (kind === "image") return WHATSAPP_IMAGE_MIME_TYPES.has(normalizedContentType);
+    if (kind === "audio") return WHATSAPP_AUDIO_MIME_TYPES.has(normalizedContentType);
+    if (kind === "document") return WHATSAPP_DOCUMENT_MIME_TYPES.has(normalizedContentType);
+    return false;
 }
 
 function getWhatsAppMediaMaxSize(kind: WhatsAppMediaKind) {
-    return kind === "image" ? MAX_WHATSAPP_IMAGE_BYTES : MAX_WHATSAPP_AUDIO_BYTES;
+    if (kind === "image") return MAX_WHATSAPP_IMAGE_BYTES;
+    if (kind === "audio") return MAX_WHATSAPP_AUDIO_BYTES;
+    return MAX_WHATSAPP_DOCUMENT_BYTES;
 }
 
 export async function createWhatsAppMediaUploadUrl(
@@ -3577,7 +3595,8 @@ export async function createWhatsAppMediaUploadUrl(
     }
     const maxSize = getWhatsAppMediaMaxSize(mediaKind);
     if (size > maxSize) {
-        return { success: false, error: `${mediaKind === "image" ? "Image" : "Audio"} is too large. Max size is ${Math.floor(maxSize / (1024 * 1024))}MB.` };
+        const kindLabel = mediaKind === "image" ? "Image" : mediaKind === "audio" ? "Audio" : "Document";
+        return { success: false, error: `${kindLabel} is too large. Max size is ${Math.floor(maxSize / (1024 * 1024))}MB.` };
     }
 
     const conversation = await db.conversation.findUnique({
@@ -3679,7 +3698,9 @@ export async function sendWhatsAppMediaReply(
         const previewBody =
             mediaKind === "audio"
                 ? "[Audio]"
-                : (cleanCaption || "[Image]");
+                : mediaKind === "document"
+                    ? (cleanCaption || "[Document]")
+                    : (cleanCaption || "[Image]");
 
         const conversation = await db.conversation.findUnique({
             where: { ghlConversationId: conversationId },
