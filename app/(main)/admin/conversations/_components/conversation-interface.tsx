@@ -26,6 +26,8 @@ import {
     extractWhatsAppViewingNotes,
     getWhatsAppTranscriptOnDemandEligibility,
     searchConversations,
+    fetchConversationActivityLog,
+    addConversationActivityEntry,
 } from '../actions';
 import { toast } from '@/components/ui/use-toast';
 import { getDealContexts, createPersistentDeal } from '../../deals/actions';
@@ -150,6 +152,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const messagesRef = useRef<Message[]>([]);
     const [loadingMessages, setLoadingMessages] = useState(false);
     const messageSignatureRef = useRef<string>('0');
+    const [activityLog, setActivityLog] = useState<any[]>([]);
     const [conversationListHasMore, setConversationListHasMore] = useState<boolean>(!!initialConversationListPageInfo?.hasMore);
     const [conversationListNextCursor, setConversationListNextCursor] = useState<string | null>(initialConversationListPageInfo?.nextCursor || null);
     const [loadingMoreConversations, setLoadingMoreConversations] = useState(false);
@@ -481,6 +484,14 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 setMessages(msgs); // Keep chronological order (Oldest -> Newest)
                 messageSignatureRef.current = getMessageSignature(msgs);
                 void markConversationReadInUi(selectedConversationId);
+
+                // Fetch activity log for this conversation
+                fetchConversationActivityLog(selectedConversationId)
+                    .then(log => {
+                        if (activeIdRef.current !== selectedConversationId) return;
+                        setActivityLog(log);
+                    })
+                    .catch(err => console.error("Failed to fetch activity log:", err));
 
                 // Refresh conversation details (status, suggests, etc)
                 refreshConversation(selectedConversationId).then(fresh => {
@@ -1165,6 +1176,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                                 key={activeConversation.id} // Force remount to reset internal state/scroll
                                 conversation={activeConversation}
                                 messages={messages}
+                                activityLog={activityLog}
                                 loading={loadingMessages}
                                 onSendMessage={handleSendMessage}
                                 onSendMedia={handleSendMedia}
@@ -1175,6 +1187,12 @@ export function ConversationInterface({ locationId, initialConversations, initia
                                 onBulkTranscribeUnprocessedAudio={handleBulkTranscribeUnprocessedAudio}
                                 transcriptOnDemandEnabled={transcriptOnDemandEnabled}
                                 onSync={handleSync}
+                                onAddActivityEntry={async (entryText: string, dateIso: string) => {
+                                    await addConversationActivityEntry(activeConversation.id, entryText, dateIso);
+                                    // Refresh the activity log after adding
+                                    const log = await fetchConversationActivityLog(activeConversation.id);
+                                    setActivityLog(log);
+                                }}
                                 onFetchHistory={async () => {
                                     setLoadingMessages(true);
                                     try {

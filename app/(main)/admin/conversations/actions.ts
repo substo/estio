@@ -9966,3 +9966,85 @@ export async function getDropdownsForViewingsSuggestion() {
         return { properties: [], users: [] };
     }
 }
+
+export async function fetchConversationActivityLog(conversationId: string) {
+    const location = await getAuthenticatedLocation();
+    if (!location?.id) return [];
+
+    const conversation = await db.conversation.findFirst({
+        where: {
+            locationId: location.id,
+            OR: [
+                { id: conversationId },
+                { ghlConversationId: conversationId },
+            ]
+        },
+        select: { contactId: true, contact: { select: { firstName: true, name: true } } }
+    });
+
+    if (!conversation?.contactId) return [];
+
+    const history = await db.contactHistory.findMany({
+        where: { contactId: conversation.contactId },
+        include: {
+            user: { select: { name: true, email: true } }
+        },
+        orderBy: { createdAt: 'asc' }
+    });
+
+    return history.map(h => ({
+        id: h.id,
+        type: 'activity',
+        createdAt: h.createdAt.toISOString(),
+        action: h.action,
+        changes: h.changes,
+        user: h.user ? { name: h.user.name, email: h.user.email } : null,
+    }));
+}
+
+export async function addConversationActivityEntry(conversationId: string, entryText: string, dateIso: string) {
+    const { userId: clerkUserId } = await auth();
+    if (!clerkUserId) throw new Error("Unauthorized");
+
+    const location = await getAuthenticatedLocation();
+
+    const user = await db.user.findUnique({
+        where: { clerkId: clerkUserId },
+        select: { id: true, firstName: true, name: true, email: true }
+    });
+
+    if (!user) throw new Error("User not found");
+
+    const conversation = await db.conversation.findFirst({
+        where: {
+            locationId: location.id,
+            OR: [
+                { id: conversationId },
+                { ghlConversationId: conversationId },
+            ]
+        },
+        select: { id: true, contactId: true, ghlConversationId: true }
+    });
+
+    if (!conversation?.contactId) throw new Error("Conversation not found");
+
+    const actorFirstName = deriveFirstName(user.firstName, user.name, user.email);
+    const entry = formatCrmLogEntry(actorFirstName, entryText, new Date(dateIso));
+
+    await db.contactHistory.create({
+        data: {
+            contactId: conversation.contactId,
+            userId: user.id,
+            action: 'MANUAL_ENTRY',
+            changes: {
+                date: dateIso,
+                entry
+            }
+        }
+    });
+
+    revalidatePath(`/admin/contacts/${conversation.contactId}/view`);
+    revalidatePath(`/admin/conversations?id=${encodeURIComponent(conversation.ghlConversationId)}`);
+
+    return { success: true };
+}

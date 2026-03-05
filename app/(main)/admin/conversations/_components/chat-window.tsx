@@ -4,7 +4,7 @@ import { GEMINI_FLASH_LATEST_ALIAS, GOOGLE_AI_MODELS } from "@/lib/ai/models";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Send, MessageSquare, RefreshCw, Paperclip, FileText, Trash2, Mic, Square, Search, AudioLines } from "lucide-react";
+import { Loader2, Send, MessageSquare, RefreshCw, Paperclip, FileText, Trash2, Mic, Square, Search, AudioLines, NotebookPen, CalendarIcon } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
     DropdownMenu,
@@ -16,10 +16,22 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ActivityLogEntry } from "./activity-log-entry";
+
+export interface ActivityLogItem {
+    id: string;
+    type: 'activity';
+    createdAt: string;
+    action: string;
+    changes?: any;
+    user?: { name: string | null; email: string | null } | null;
+}
 
 interface ChatWindowProps {
     conversation: Conversation;
     messages: Message[];
+    activityLog?: ActivityLogItem[];
     loading: boolean;
     onSendMessage: (text: string, type: 'SMS' | 'Email' | 'WhatsApp') => void | Promise<void>;
     onSendMedia?: (file: File, caption: string) => void | Promise<void>;
@@ -39,7 +51,8 @@ interface ChatWindowProps {
     transcriptOnDemandEnabled?: boolean;
     onSync?: () => void;
     onFetchHistory?: () => void;
-    onGenerateDraft?: (instruction?: string, model?: string) => Promise<string | null>; // Returns draft text or null if failed
+    onGenerateDraft?: (instruction?: string, model?: string) => Promise<string | null>;
+    onAddActivityEntry?: (entryText: string, dateIso: string) => Promise<void>;
 }
 
 /**
@@ -141,6 +154,7 @@ function buildBatchContextText(items: SelectionBatchItem[]) {
 export function ChatWindow({
     conversation,
     messages,
+    activityLog = [],
     loading,
     onSendMessage,
     onSendMedia,
@@ -153,6 +167,7 @@ export function ChatWindow({
     onSync,
     onGenerateDraft,
     onFetchHistory,
+    onAddActivityEntry,
     suggestions = [],
 }: ChatWindowProps & { suggestions?: string[] }) {
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -185,6 +200,41 @@ export function ChatWindow({
     const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
     const jumpHighlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const canUseTranscriptOnDemand = transcriptOnDemandEnabled !== false;
+    const [addNoteOpen, setAddNoteOpen] = useState(false);
+    const [addNoteText, setAddNoteText] = useState("");
+    const [addNoteDate, setAddNoteDate] = useState(new Date().toISOString().slice(0, 16));
+    const [addingNote, setAddingNote] = useState(false);
+
+    // Merge messages and activity log into a single timeline
+    const timelineItems = useMemo(() => {
+        const msgItems = messages.map(m => ({
+            kind: 'message' as const,
+            sortDate: new Date(m.dateAdded).getTime(),
+            message: m,
+        }));
+        const actItems = activityLog.map(a => ({
+            kind: 'activity' as const,
+            sortDate: new Date(a.createdAt).getTime(),
+            activity: a,
+        }));
+        return [...msgItems, ...actItems].sort((a, b) => a.sortDate - b.sortDate);
+    }, [messages, activityLog]);
+
+    const handleAddNote = async () => {
+        if (!addNoteText.trim() || !onAddActivityEntry) return;
+        setAddingNote(true);
+        try {
+            await onAddActivityEntry(addNoteText.trim(), new Date(addNoteDate).toISOString());
+            setAddNoteText("");
+            setAddNoteDate(new Date().toISOString().slice(0, 16));
+            setAddNoteOpen(false);
+            toast.success("Note added to activity log");
+        } catch (e: any) {
+            toast.error(e?.message || "Failed to add note");
+        } finally {
+            setAddingNote(false);
+        }
+    };
 
     // Fetch available models on mount
     useEffect(() => {
@@ -716,6 +766,46 @@ export function ChatWindow({
                                 </DropdownMenuContent>
                             </DropdownMenu>
                         )}
+                    {onAddActivityEntry && (
+                        <Popover open={addNoteOpen} onOpenChange={setAddNoteOpen}>
+                            <PopoverTrigger asChild>
+                                <Button
+                                    variant={addNoteOpen ? "secondary" : "ghost"}
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    title="Add activity note"
+                                >
+                                    <NotebookPen className="h-4 w-4 text-gray-500" />
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent align="end" className="w-80 p-3">
+                                <div className="space-y-2">
+                                    <p className="text-xs font-semibold text-slate-700">Add Activity Note</p>
+                                    <Textarea
+                                        value={addNoteText}
+                                        onChange={(e) => setAddNoteText(e.target.value)}
+                                        placeholder="What happened?"
+                                        className="min-h-[60px] text-xs resize-none"
+                                    />
+                                    <Input
+                                        type="datetime-local"
+                                        value={addNoteDate}
+                                        onChange={(e) => setAddNoteDate(e.target.value)}
+                                        className="text-xs h-8"
+                                    />
+                                    <Button
+                                        size="sm"
+                                        className="w-full h-7 text-xs"
+                                        onClick={handleAddNote}
+                                        disabled={addingNote || !addNoteText.trim()}
+                                    >
+                                        {addingNote ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+                                        {addingNote ? "Saving..." : "Save Note"}
+                                    </Button>
+                                </div>
+                            </PopoverContent>
+                        </Popover>
+                    )}
                     <Button
                         variant={showTranscriptSearch ? "secondary" : "ghost"}
                         size="icon"
@@ -835,34 +925,46 @@ export function ChatWindow({
                     </div>
                 )}
 
-                {messages.map((m) => (
-                    <div
-                        key={m.id}
-                        ref={(node) => {
-                            messageRefs.current[m.id] = node;
-                        }}
-                        className={cn(
-                            "rounded-xl transition-colors",
-                            jumpMessageId === m.id && "ring-2 ring-blue-300 bg-blue-50/60"
-                        )}
-                    >
-                        <MessageBubble
-                            message={m}
-                            contactPhone={conversation.contactPhone}
-                            contactEmail={conversation.contactEmail}
-                            contactName={conversation.contactName}
-                            onRefetchMedia={onRefetchMedia}
-                            onRequestTranscript={canUseTranscriptOnDemand ? onRequestTranscript : undefined}
-                            onExtractViewingNotes={canUseTranscriptOnDemand ? onExtractViewingNotes : undefined}
-                            onRetryTranscript={canUseTranscriptOnDemand ? onRetryTranscript : undefined}
-                            aiModel={selectedModel}
-                            selectionBatch={selectionBatch}
-                            onAddSelectionToBatch={handleAddSelectionToBatch}
-                            onRemoveSelectionBatchItem={handleRemoveSelectionBatchItem}
-                            onClearSelectionBatch={handleClearSelectionBatch}
-                        />
-                    </div>
-                ))}
+                {timelineItems.map((item) => {
+                    if (item.kind === 'activity') {
+                        return (
+                            <ActivityLogEntry
+                                key={`activity-${item.activity.id}`}
+                                item={item.activity}
+                                contactName={conversation.contactName}
+                            />
+                        );
+                    }
+                    const m = item.message!;
+                    return (
+                        <div
+                            key={m.id}
+                            ref={(node) => {
+                                messageRefs.current[m.id] = node;
+                            }}
+                            className={cn(
+                                "rounded-xl transition-colors",
+                                jumpMessageId === m.id && "ring-2 ring-blue-300 bg-blue-50/60"
+                            )}
+                        >
+                            <MessageBubble
+                                message={m}
+                                contactPhone={conversation.contactPhone}
+                                contactEmail={conversation.contactEmail}
+                                contactName={conversation.contactName}
+                                onRefetchMedia={onRefetchMedia}
+                                onRequestTranscript={canUseTranscriptOnDemand ? onRequestTranscript : undefined}
+                                onExtractViewingNotes={canUseTranscriptOnDemand ? onExtractViewingNotes : undefined}
+                                onRetryTranscript={canUseTranscriptOnDemand ? onRetryTranscript : undefined}
+                                aiModel={selectedModel}
+                                selectionBatch={selectionBatch}
+                                onAddSelectionToBatch={handleAddSelectionToBatch}
+                                onRemoveSelectionBatchItem={handleRemoveSelectionBatchItem}
+                                onClearSelectionBatch={handleClearSelectionBatch}
+                            />
+                        </div>
+                    );
+                })}
             </div>
 
             {/* Input Area */}
