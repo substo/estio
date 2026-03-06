@@ -234,6 +234,7 @@ export function ViewingsSuggestionDialog({ open, onOpenChange, selectionText, co
                                             <label className="text-[11px] font-medium text-slate-600">Time</label>
                                             <Input
                                                 type="time"
+                                                step={300}
                                                 className="h-8 text-xs"
                                                 value={suggestion.time || ""}
                                                 onChange={(e) => handlePatchSuggestion(suggestion.id, { time: e.target.value })}
@@ -285,4 +286,3 @@ export function ViewingsSuggestionDialog({ open, onOpenChange, selectionText, co
         </Dialog>
     );
 }
-

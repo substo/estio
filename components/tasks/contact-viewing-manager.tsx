@@ -510,7 +510,12 @@ export function ContactViewingManager({
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
                                 <Label>Date & Time <span className="text-red-500">*</span></Label>
-                                <Input type="datetime-local" value={viewingDate} onChange={e => setViewingDate(e.target.value)} />
+                                <Input
+                                    type="datetime-local"
+                                    step={300}
+                                    value={viewingDate}
+                                    onChange={e => setViewingDate(e.target.value)}
+                                />
                             </div>
                             <div className="space-y-2">
                                 <Label>Duration</Label>

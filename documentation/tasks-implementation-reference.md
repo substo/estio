@@ -105,6 +105,7 @@ Primary file: [`app/(main)/admin/tasks/actions.ts`](/Users/martingreen/Projects/
   - Returns counts and includes sync/outbox status for badges
 - `createContactTask(input)`
   - Requires `contactId` or `conversationId`
+  - Defaults `dueAt` to the task creation timestamp when input is missing/invalid
   - Creates local task, then enqueues sync jobs
 - `updateContactTask(input)`
   - Updates editable fields, increments `syncVersion`, enqueues `update`

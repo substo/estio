@@ -339,6 +339,7 @@ export function GlobalTaskList({ selectedConversationId, onSelectConversation }:
                                 <label className="text-xs font-medium text-slate-700 mb-1 block">Due Date</label>
                                 <Input
                                     type="datetime-local"
+                                    step={300}
                                     value={editDueAt}
                                     onChange={(e) => setEditDueAt(e.target.value)}
                                     className="h-9 text-xs"

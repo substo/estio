@@ -86,6 +86,12 @@ function formatDueLabel(input?: Date | string | null) {
   return format(date, 'PPp');
 }
 
+function getCurrentDateTimeLocalValue() {
+  const now = new Date();
+  const offset = now.getTimezoneOffset() * 60000;
+  return new Date(now.getTime() - offset).toISOString().slice(0, 16);
+}
+
 function getPriorityTone(priority: string) {
   if (priority === 'high') return 'bg-red-100 text-red-700 border-red-200';
   if (priority === 'low') return 'bg-slate-100 text-slate-700 border-slate-200';
@@ -410,6 +416,12 @@ export function ContactTaskManager({
 
   const canSubmit = useMemo(() => titleInput.trim().length > 0 && !submitting, [titleInput, submitting]);
 
+  const openAddTaskModal = useCallback(() => {
+    setError(null);
+    setDueAtInput(getCurrentDateTimeLocalValue());
+    setAddTaskModalOpen(true);
+  }, []);
+
   const handleCreateTask = async () => {
     const trimmedTitle = titleInput.trim();
     if (!trimmedTitle) return;
@@ -571,10 +583,7 @@ export function ContactTaskManager({
             variant="outline"
             size="sm"
             className="h-7 px-2 text-[11px]"
-            onClick={() => {
-              setError(null);
-              setAddTaskModalOpen(true);
-            }}
+            onClick={openAddTaskModal}
           >
             <Plus className="mr-1 h-3.5 w-3.5" />
             Add task
@@ -589,10 +598,7 @@ export function ContactTaskManager({
             variant="outline"
             size="sm"
             className="h-7 px-2 text-[11px]"
-            onClick={() => {
-              setError(null);
-              setAddTaskModalOpen(true);
-            }}
+            onClick={openAddTaskModal}
           >
             <Plus className="mr-1 h-3.5 w-3.5" />
             Add task
@@ -663,6 +669,7 @@ export function ContactTaskManager({
             />
             <Input
               type="datetime-local"
+              step={300}
               value={dueAtInput}
               onChange={(event) => setDueAtInput(event.target.value)}
               className="h-9 text-xs"

@@ -326,7 +326,7 @@ export async function createContactTask(input: z.input<typeof createTaskSchema>)
     assignedUserId = assignee?.id || null;
   }
 
-  const dueAt = parseDueAt(parsed.dueAt || null);
+  const dueAt = parseDueAt(parsed.dueAt || null) || new Date();
 
   const task = await db.contactTask.create({
     data: {

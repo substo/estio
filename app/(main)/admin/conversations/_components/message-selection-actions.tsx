@@ -159,6 +159,12 @@ function toDateTimeLocalValue(value?: string | null) {
     return new Date(date.getTime() - offset).toISOString().slice(0, 16);
 }
 
+function getCurrentDateTimeLocalValue() {
+    const now = new Date();
+    const offset = now.getTimezoneOffset() * 60000;
+    return new Date(now.getTime() - offset).toISOString().slice(0, 16);
+}
+
 export function MessageSelectionActions({
     selection,
     onClearSelection,
@@ -477,7 +483,7 @@ export function MessageSelectionActions({
                 description: suggestion.description || "",
                 priority: suggestion.priority || "medium",
                 dueAt: suggestion.dueAt || null,
-                dueAtInput: toDateTimeLocalValue(suggestion.dueAt),
+                dueAtInput: toDateTimeLocalValue(suggestion.dueAt) || getCurrentDateTimeLocalValue(),
                 confidence: typeof suggestion.confidence === "number" ? suggestion.confidence : 0.5,
                 reason: suggestion.reason || null,
             }));
@@ -1308,6 +1314,7 @@ export function MessageSelectionActions({
                                                 <label className="text-[11px] font-medium text-slate-600">Due at</label>
                                                 <Input
                                                     type="datetime-local"
+                                                    step={300}
                                                     value={suggestion.dueAtInput || ""}
                                                     onChange={(event) => handlePatchSuggestion(suggestion.id, { dueAtInput: event.target.value })}
                                                 />

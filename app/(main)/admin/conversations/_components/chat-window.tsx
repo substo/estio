@@ -789,6 +789,7 @@ export function ChatWindow({
                                     />
                                     <Input
                                         type="datetime-local"
+                                        step={300}
                                         value={addNoteDate}
                                         onChange={(e) => setAddNoteDate(e.target.value)}
                                         className="text-xs h-8"
