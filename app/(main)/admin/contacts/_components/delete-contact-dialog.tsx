@@ -21,15 +21,30 @@ import { type ContactData } from './contact-form';
 interface DeleteContactDialogProps {
     contact: ContactData;
     trigger?: React.ReactNode;
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
     onSuccess?: () => void;
     onDelete?: () => void;
     isGoogleConnected?: boolean;
     isGhlConnected?: boolean;
 }
 
-export function DeleteContactDialog({ contact, trigger, onSuccess, onDelete, isGoogleConnected = false, isGhlConnected = false }: DeleteContactDialogProps) {
+export function DeleteContactDialog({
+    contact,
+    trigger,
+    open,
+    onOpenChange,
+    onSuccess,
+    onDelete,
+    isGoogleConnected = false,
+    isGhlConnected = false,
+}: DeleteContactDialogProps) {
     const { toast } = useToast();
-    const [open, setOpen] = useState(false);
+    const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+    const isControlled = typeof open === 'boolean';
+    const resolvedOpen = isControlled ? open : uncontrolledOpen;
+    const setOpen = onOpenChange || setUncontrolledOpen;
+    const shouldRenderTrigger = trigger !== undefined || !isControlled;
     const [isDeleting, setIsDeleting] = useState(false);
 
     // Initial State (will be updated from localStorage on mount)
@@ -37,7 +52,7 @@ export function DeleteContactDialog({ contact, trigger, onSuccess, onDelete, isG
     const [deleteFromGoogle, setDeleteFromGoogle] = useState(false);
 
     useEffect(() => {
-        if (open) {
+        if (resolvedOpen) {
             // Load preferences when dialog opens
             const prefGhl = localStorage.getItem('estio_delete_pref_ghl');
             const prefGoogle = localStorage.getItem('estio_delete_pref_google');
@@ -51,7 +66,7 @@ export function DeleteContactDialog({ contact, trigger, onSuccess, onDelete, isG
                 setDeleteFromGoogle(prefGoogle === 'true');
             }
         }
-    }, [open, contact.ghlContactId, contact.googleContactId, isGhlConnected, isGoogleConnected]);
+    }, [resolvedOpen, contact.ghlContactId, contact.googleContactId, isGhlConnected, isGoogleConnected]);
 
     const handleDelete = async () => {
         setIsDeleting(true);
@@ -87,14 +102,16 @@ export function DeleteContactDialog({ contact, trigger, onSuccess, onDelete, isG
     };
 
     return (
-        <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild>
-                {trigger || (
-                    <Button variant="destructive">
-                        <Trash className="mr-2 h-4 w-4" /> Delete Contact
-                    </Button>
-                )}
-            </DialogTrigger>
+        <Dialog open={resolvedOpen} onOpenChange={setOpen}>
+            {shouldRenderTrigger ? (
+                <DialogTrigger asChild>
+                    {trigger || (
+                        <Button variant="destructive">
+                            <Trash className="mr-2 h-4 w-4" /> Delete Contact
+                        </Button>
+                    )}
+                </DialogTrigger>
+            ) : null}
             <DialogContent className="sm:max-w-[425px]">
                 <DialogHeader>
                     <DialogTitle>Delete Contact</DialogTitle>

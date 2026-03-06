@@ -5,6 +5,7 @@ import { Pencil, Trash, RefreshCw, UploadCloud } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { previewLeadAction } from '@/app/(main)/admin/settings/crm/actions';
 import { CrmMergeDialog } from './crm-merge-dialog';
+import { DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import {
     Dialog,
     DialogContent,
@@ -54,6 +55,8 @@ export function EditContactForm({ contact, onSuccess, onDelete, leadSources, ini
     const [isPulling, setIsPulling] = useState(false);
     const [mergeModalOpen, setMergeModalOpen] = useState(false);
     const [remoteData, setRemoteData] = useState<any>(null);
+    const [mergeContactDialogOpen, setMergeContactDialogOpen] = useState(false);
+    const [deleteContactDialogOpen, setDeleteContactDialogOpen] = useState(false);
 
     // Fetch data for Viewings and Modal
     useEffect(() => {
@@ -166,57 +169,70 @@ export function EditContactForm({ contact, onSuccess, onDelete, leadSources, ini
                         </TabsContent>
                     </>
                 )}
-                additionalFooter={
-                    <div className="flex justify-between w-full">
-                        <div className="flex gap-2">
-                            <Dialog open={pullModalOpen} onOpenChange={setPullModalOpen}>
-                                <DialogTrigger asChild>
-                                    <Button variant="outline" type="button">
-                                        <UploadCloud className="mr-2 h-4 w-4" /> Pull from CRM
-                                    </Button>
-                                </DialogTrigger>
-                                <DialogContent>
-                                    <DialogHeader>
-                                        <DialogTitle>Pull from Old CRM</DialogTitle>
-                                        <DialogDescription>
-                                            Enter the numeric Lead ID from the old CRM to pull data. This will update this contact.
-                                        </DialogDescription>
-                                    </DialogHeader>
-                                    <div className="space-y-4 py-4">
-                                        <div className="space-y-2">
-                                            <Label>CRM Lead ID</Label>
-                                            <Input
-                                                value={crmLeadId}
-                                                onChange={(e) => setCrmLeadId(e.target.value)}
-                                                placeholder="e.g. 12345"
-                                            />
-                                        </div>
-                                    </div>
-                                    <DialogFooter>
-                                        <Button variant="outline" onClick={() => setPullModalOpen(false)}>Cancel</Button>
-                                        <Button onClick={handlePullFromCrm} disabled={isPulling}>
-                                            {isPulling && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}
-                                            {isPulling ? 'Pulling...' : 'Pull Data'}
-                                        </Button>
-                                    </DialogFooter>
-                                </DialogContent>
-                            </Dialog>
+                editActionsMenuItems={
+                    <>
+                        <DropdownMenuItem onSelect={() => setPullModalOpen(true)}>
+                            <UploadCloud className="mr-2 h-4 w-4" />
+                            Pull from CRM
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => setMergeContactDialogOpen(true)}>
+                            Merge
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                            className="text-destructive focus:text-destructive"
+                            onSelect={() => setDeleteContactDialogOpen(true)}
+                        >
+                            <Trash className="mr-2 h-4 w-4" />
+                            Delete Contact
+                        </DropdownMenuItem>
+                    </>
+                }
+            />
 
-                            <MergeContactDialog
-                                sourceContactId={contact.id}
-                                sourceName={contact.name || contact.phone || 'Unknown'}
+            <Dialog open={pullModalOpen} onOpenChange={setPullModalOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Pull from Old CRM</DialogTitle>
+                        <DialogDescription>
+                            Enter the numeric Lead ID from the old CRM to pull data. This will update this contact.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                        <div className="space-y-2">
+                            <Label>CRM Lead ID</Label>
+                            <Input
+                                value={crmLeadId}
+                                onChange={(e) => setCrmLeadId(e.target.value)}
+                                placeholder="e.g. 12345"
                             />
                         </div>
-
-                        <DeleteContactDialog
-                            contact={contact}
-                            onSuccess={onSuccess}
-                            onDelete={onDelete}
-                            isGoogleConnected={isGoogleConnected}
-                            isGhlConnected={isGhlConnected}
-                        />
                     </div>
-                }
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setPullModalOpen(false)}>Cancel</Button>
+                        <Button onClick={handlePullFromCrm} disabled={isPulling}>
+                            {isPulling && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}
+                            {isPulling ? 'Pulling...' : 'Pull Data'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <MergeContactDialog
+                sourceContactId={contact.id}
+                sourceName={contact.name || contact.phone || 'Unknown'}
+                open={mergeContactDialogOpen}
+                onOpenChange={setMergeContactDialogOpen}
+            />
+
+            <DeleteContactDialog
+                contact={contact}
+                onSuccess={onSuccess}
+                onDelete={onDelete}
+                isGoogleConnected={isGoogleConnected}
+                isGhlConnected={isGhlConnected}
+                open={deleteContactDialogOpen}
+                onOpenChange={setDeleteContactDialogOpen}
             />
 
             {/* Merge Dialog */}

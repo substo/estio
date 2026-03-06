@@ -34,10 +34,16 @@ interface MergeContactDialogProps {
     sourceContactId: string;
     sourceName: string;
     trigger?: React.ReactNode;
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
 }
 
-export function MergeContactDialog({ sourceContactId, sourceName, trigger }: MergeContactDialogProps) {
-    const [open, setOpen] = useState(false);
+export function MergeContactDialog({ sourceContactId, sourceName, trigger, open, onOpenChange }: MergeContactDialogProps) {
+    const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+    const isControlled = typeof open === 'boolean';
+    const resolvedOpen = isControlled ? open : uncontrolledOpen;
+    const setOpen = onOpenChange || setUncontrolledOpen;
+    const shouldRenderTrigger = trigger !== undefined || !isControlled;
     const [targetContactId, setTargetContactId] = useState<string | null>(null);
     const [isMerging, setIsMerging] = useState(false);
 
@@ -104,15 +110,17 @@ export function MergeContactDialog({ sourceContactId, sourceName, trigger }: Mer
     };
 
     return (
-        <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild>
-                {trigger || (
-                    <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10">
-                        <Merge className="mr-2 h-4 w-4" />
-                        Merge
-                    </Button>
-                )}
-            </DialogTrigger>
+        <Dialog open={resolvedOpen} onOpenChange={setOpen}>
+            {shouldRenderTrigger ? (
+                <DialogTrigger asChild>
+                    {trigger || (
+                        <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10">
+                            <Merge className="mr-2 h-4 w-4" />
+                            Merge
+                        </Button>
+                    )}
+                </DialogTrigger>
+            ) : null}
             <DialogContent className="sm:max-w-[425px]">
                 <DialogHeader>
                     <DialogTitle>Merge Contact</DialogTitle>

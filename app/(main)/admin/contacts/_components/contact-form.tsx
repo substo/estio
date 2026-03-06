@@ -11,6 +11,13 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
     Select,
     SelectContent,
     SelectItem,
@@ -156,8 +163,8 @@ interface ContactFormProps {
     onSuccess?: () => void;
     /** Additional content to render inside the form (e.g., viewings tab for edit mode) */
     additionalTabs?: React.ReactNode;
-    /** Additional footer content (e.g., delete button for edit mode) */
-    additionalFooter?: React.ReactNode;
+    /** Additional menu items rendered in the edit-mode Actions dropdown */
+    editActionsMenuItems?: React.ReactNode;
     /** Additional tab content nodes (for e.g. Viewings tab content) */
     additionalTabContent?: React.ReactNode | ((isEditing: boolean) => React.ReactNode);
     /** Number of additional tabs passed (for grid calculation) */
@@ -195,7 +202,7 @@ function formatDate(date: Date | string | null | undefined) {
     }
 }
 
-export function ContactForm({ initialMode = 'create', contact: initialContact, locationId, onSuccess, additionalTabs, additionalTabContent, additionalFooter, additionalTabCount = 0, leadSources = [], isOutlookConnected = false, initialData }: ContactFormProps) {
+export function ContactForm({ initialMode = 'create', contact: initialContact, locationId, onSuccess, additionalTabs, additionalTabContent, editActionsMenuItems, additionalTabCount = 0, leadSources = [], isOutlookConnected = false, initialData }: ContactFormProps) {
     // For initialization, merge passed contact with initialData (prefill)
     const baseContact = { ...initialData, ...initialContact } as ContactData | undefined;
 
@@ -1011,26 +1018,35 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
             <div className={`pt-4 border-t flex items-center justify-between ${!isEditing ? 'bg-background p-2' : ''}`}>
                 <div className="flex gap-2">
                     {isEditing ? (
-                        <div className="flex gap-2 w-full items-center">
-                            {/* Left Side: Sync Actions (Visible in Edit Mode too) */}
+                        <>
                             {contact && !isCreating && (
-                                <div className="flex gap-2 mr-auto">
-                                    <Button type="button" variant="outline" size="sm" onClick={() => setManagerOpen(true)}>
-                                        <RefreshCw className="mr-2 h-4 w-4" />
-                                        Manage Sync
-                                    </Button>
-                                    {contact.email && isOutlookConnected && (
-                                        <Button type="button" variant="outline" size="sm" onClick={() => setOutlookOpen(true)}>
-                                            <Mail className="mr-2 h-4 w-4" />
-                                            Outlook Emails
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <Button type="button" variant="outline" size="sm">
+                                            Actions
                                         </Button>
-                                    )}
-                                </div>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="start" className="w-52">
+                                        <DropdownMenuItem onSelect={() => setManagerOpen(true)}>
+                                            <RefreshCw className="mr-2 h-4 w-4" />
+                                            Manage Sync
+                                        </DropdownMenuItem>
+                                        {contact.email && isOutlookConnected && (
+                                            <DropdownMenuItem onSelect={() => setOutlookOpen(true)}>
+                                                <Mail className="mr-2 h-4 w-4" />
+                                                Outlook Emails
+                                            </DropdownMenuItem>
+                                        )}
+                                        {editActionsMenuItems ? (
+                                            <>
+                                                <DropdownMenuSeparator />
+                                                {editActionsMenuItems}
+                                            </>
+                                        ) : null}
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
                             )}
-
-                            {/* Right Side: Additional Footer Action (Delete) */}
-                            {additionalFooter}
-                        </div>
+                        </>
                     ) : (
                         <div className="flex gap-2">
                             {/* Manage Sync Button (Only in View Mode) */}
