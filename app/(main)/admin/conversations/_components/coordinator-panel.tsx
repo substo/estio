@@ -26,10 +26,24 @@ interface CoordinatorPanelProps {
     locationId: string;
     conversation: Conversation;
     selectedConversations?: Conversation[]; // New Prop for Context Mode
+    dealContacts?: DealContactOption[];
+    selectedDealConversationId?: string | null;
+    onSelectDealConversation?: (conversationId: string) => void;
     onDraftApproved: (text: string) => void;
     onDeselect?: (id: string) => void;
     onSuggestionsGenerated?: (suggestions: string[]) => void;
     onContactSaved?: (patch: ContactIdentityPatch) => void;
+}
+
+interface DealContactOption {
+    conversationId: string;
+    contactId: string;
+    contactName: string;
+    contactEmail?: string;
+    contactPhone?: string;
+    lastMessageDate: number;
+    unreadCount?: number;
+    lastMessageType?: string;
 }
 
 interface AgentTask {
@@ -160,7 +174,18 @@ function ActivityLogPanel({ conversationId }: { conversationId: string }) {
     );
 }
 
-export function CoordinatorPanel({ locationId, conversation, selectedConversations, onDraftApproved, onDeselect, onSuggestionsGenerated, onContactSaved }: CoordinatorPanelProps) {
+export function CoordinatorPanel({
+    locationId,
+    conversation,
+    selectedConversations,
+    dealContacts,
+    selectedDealConversationId,
+    onSelectDealConversation,
+    onDraftApproved,
+    onDeselect,
+    onSuggestionsGenerated,
+    onContactSaved
+}: CoordinatorPanelProps) {
     const [draft, setDraft] = useState("");
     const [reasoning, setReasoning] = useState("");
     const [generating, setGenerating] = useState(false);
@@ -542,6 +567,49 @@ export function CoordinatorPanel({ locationId, conversation, selectedConversatio
                     </Tooltip>
                 </TooltipProvider>
             </div>
+
+            {dealContacts && dealContacts.length > 0 && onSelectDealConversation && (
+                <Card className="shadow-none border-border/50">
+                    <CardHeader className="p-3 pb-1.5">
+                        <CardTitle className="text-xs font-semibold flex items-center gap-1.5">
+                            <Users className="h-3.5 w-3.5 text-slate-500" />
+                            Deal Contacts
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-3 pt-0 space-y-1.5">
+                        {dealContacts.map((contact) => {
+                            const isActive = selectedDealConversationId === contact.conversationId;
+                            return (
+                                <button
+                                    key={contact.conversationId}
+                                    type="button"
+                                    onClick={() => onSelectDealConversation(contact.conversationId)}
+                                    className={cn(
+                                        "w-full rounded-md border px-2 py-1.5 text-left transition-colors",
+                                        isActive
+                                            ? "border-blue-300 bg-blue-50"
+                                            : "border-slate-200 bg-white hover:bg-slate-50"
+                                    )}
+                                >
+                                    <div className="flex items-center justify-between gap-2">
+                                        <span className="text-xs font-medium text-slate-800 truncate">
+                                            {contact.contactName || "Unknown Contact"}
+                                        </span>
+                                        {!!contact.unreadCount && contact.unreadCount > 0 && (
+                                            <Badge variant="secondary" className="h-4 px-1 text-[9px]">
+                                                {contact.unreadCount > 99 ? "99+" : contact.unreadCount}
+                                            </Badge>
+                                        )}
+                                    </div>
+                                    <div className="text-[10px] text-slate-500 truncate mt-0.5">
+                                        {contact.contactEmail || contact.contactPhone || "No contact details"}
+                                    </div>
+                                </button>
+                            );
+                        })}
+                    </CardContent>
+                </Card>
+            )}
 
             {/* Contact Details / Group Members Card */}
             {(contactContext?.contact?.contactType === 'WhatsAppGroup' || contactContext?.contact?.phone?.includes('@g.us')) ? (

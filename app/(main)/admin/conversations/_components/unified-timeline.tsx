@@ -2,17 +2,41 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { fetchDealTimeline } from '../../deals/actions';
+import { Conversation } from '@/lib/ghl/conversations';
+import { GEMINI_FLASH_LATEST_ALIAS } from '@/lib/ai/models';
 
 import { MessageBubble } from './message-bubble';
 import { MessageSquare, Sparkles } from "lucide-react";
+import { ConversationComposer } from './conversation-composer';
 
 interface UnifiedTimelineProps {
     dealId: string;
+    refreshToken?: number;
+    composerConversation?: Conversation | null;
+    onSendMessage?: (text: string, type: 'SMS' | 'Email' | 'WhatsApp') => void | Promise<void>;
+    onSendMedia?: (file: File, caption: string) => void | Promise<void>;
+    onGenerateDraft?: (instruction?: string, model?: string) => Promise<string | null>;
+    suggestions?: string[];
+    composerDisabled?: boolean;
+    composerDisabledReason?: string;
+    replyingToLabel?: string;
 }
 
-export function UnifiedTimeline({ dealId }: UnifiedTimelineProps) {
+export function UnifiedTimeline({
+    dealId,
+    refreshToken = 0,
+    composerConversation = null,
+    onSendMessage,
+    onSendMedia,
+    onGenerateDraft,
+    suggestions = [],
+    composerDisabled = false,
+    composerDisabledReason,
+    replyingToLabel,
+}: UnifiedTimelineProps) {
     const [timelineMessages, setTimelineMessages] = useState<any[]>([]);
     const [loadingTimeline, setLoadingTimeline] = useState(true);
+    const [selectedModel, setSelectedModel] = useState(GEMINI_FLASH_LATEST_ALIAS);
     const timelineRef = useRef<HTMLDivElement>(null);
 
     // Initial Load of Timeline
@@ -27,7 +51,7 @@ export function UnifiedTimeline({ dealId }: UnifiedTimelineProps) {
                 console.error("Failed to load timeline", err);
                 setLoadingTimeline(false);
             });
-    }, [dealId]);
+    }, [dealId, refreshToken]);
 
     // Auto-scroll timeline
     useEffect(() => {
@@ -67,10 +91,23 @@ export function UnifiedTimeline({ dealId }: UnifiedTimelineProps) {
                             contactName={msg.senderName}
                             // UnifiedTimeline messages have senderEmail on them from the action
                             contactEmail={msg.senderEmail}
+                            aiModel={selectedModel}
                         />
                     ))
                 )}
             </div>
+
+            <ConversationComposer
+                conversation={composerConversation}
+                onSendMessage={(text, type) => Promise.resolve(onSendMessage?.(text, type))}
+                onSendMedia={onSendMedia}
+                onGenerateDraft={onGenerateDraft}
+                suggestions={suggestions}
+                disabled={composerDisabled || !composerConversation}
+                disabledReason={composerDisabledReason}
+                replyingToLabel={replyingToLabel}
+                onModelChange={setSelectedModel}
+            />
         </div>
     );
 }

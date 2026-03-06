@@ -31,7 +31,7 @@ import {
     addConversationActivityEntry,
 } from '../actions';
 import { toast } from '@/components/ui/use-toast';
-import { getDealContexts, createPersistentDeal } from '../../deals/actions';
+import { getDealContexts, createPersistentDeal, getDealContext } from '../../deals/actions';
 import { UnifiedTimeline } from './unified-timeline';
 import { ConversationList } from './conversation-list';
 import { ChatWindow } from './chat-window';
@@ -120,6 +120,48 @@ function hasPendingTranscripts(messages: Message[]): boolean {
     );
 }
 
+interface DealContactOption {
+    conversationId: string;
+    contactId: string;
+    contactName: string;
+    contactEmail?: string;
+    contactPhone?: string;
+    lastMessageDate: number;
+    unreadCount?: number;
+    lastMessageType?: string;
+}
+
+function buildDealContactOptions(participants: Conversation[]): DealContactOption[] {
+    const byContact = new Map<string, DealContactOption>();
+
+    for (const conversation of participants) {
+        const key = String(
+            conversation.contactId
+            || conversation.contactEmail
+            || conversation.contactPhone
+            || conversation.id
+        );
+
+        const candidate: DealContactOption = {
+            conversationId: conversation.id,
+            contactId: conversation.contactId,
+            contactName: conversation.contactName || "Unknown Contact",
+            contactEmail: conversation.contactEmail,
+            contactPhone: conversation.contactPhone,
+            lastMessageDate: Number(conversation.lastMessageDate || 0),
+            unreadCount: conversation.unreadCount,
+            lastMessageType: conversation.lastMessageType,
+        };
+
+        const current = byContact.get(key);
+        if (!current || candidate.lastMessageDate > current.lastMessageDate) {
+            byContact.set(key, candidate);
+        }
+    }
+
+    return Array.from(byContact.values()).sort((a, b) => b.lastMessageDate - a.lastMessageDate);
+}
+
 export function ConversationInterface({ locationId, initialConversations, initialConversationListPageInfo }: ConversationInterfaceProps) {
     const router = useRouter();
     const pathname = usePathname();
@@ -179,6 +221,10 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const [searchResults, setSearchResults] = useState<Conversation[]>([]);
 
     const [deals, setDeals] = useState<any[]>([]);
+    const [activeDealParticipants, setActiveDealParticipants] = useState<Conversation[]>([]);
+    const [dealContacts, setDealContacts] = useState<DealContactOption[]>([]);
+    const [loadingDealContext, setLoadingDealContext] = useState(false);
+    const [dealTimelineRefreshToken, setDealTimelineRefreshToken] = useState(0);
 
     useEffect(() => {
         setConversations(initialConversations);
@@ -224,6 +270,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
 
     const initialDealId = searchParams.get('dealId');
+    const urlConversationId = searchParams.get('id');
     const [activeDealId, setActiveDealId] = useState<string | null>(initialDealId);
     const [transcriptOnDemandEnabled, setTranscriptOnDemandEnabled] = useState(false);
 
@@ -262,6 +309,79 @@ export function ConversationInterface({ locationId, initialConversations, initia
             getDealContexts().then(setDeals).catch(console.error);
         }
     }, [viewMode]);
+
+    useEffect(() => {
+        if (viewMode !== 'deals' || !activeDealId) {
+            setActiveDealParticipants([]);
+            setDealContacts([]);
+            setLoadingDealContext(false);
+            return;
+        }
+
+        let cancelled = false;
+        setLoadingDealContext(true);
+
+        getDealContext(activeDealId)
+            .then((context: any) => {
+                if (cancelled) return;
+
+                const rawConversations = Array.isArray(context?.conversations) ? context.conversations : [];
+                const normalizedConversations: Conversation[] = rawConversations
+                    .map((item: any) => {
+                        const parsedDate = Number.isFinite(Number(item?.lastMessageDate))
+                            ? Number(item.lastMessageDate)
+                            : Math.floor(new Date(item?.lastMessageAt || item?.updatedAt || 0).getTime() / 1000);
+
+                        return {
+                            id: String(item?.id || ""),
+                            contactId: String(item?.contactId || ""),
+                            contactName: item?.contactName || "Unknown Contact",
+                            contactPhone: item?.contactPhone || undefined,
+                            contactEmail: item?.contactEmail || undefined,
+                            lastMessageBody: item?.lastMessageBody || "",
+                            lastMessageDate: Number.isFinite(parsedDate) ? parsedDate : 0,
+                            unreadCount: Number(item?.unreadCount || 0),
+                            status: (item?.status || 'open') as any,
+                            type: item?.type || item?.lastMessageType || 'TYPE_SMS',
+                            lastMessageType: item?.lastMessageType || undefined,
+                            locationId: item?.locationId || "",
+                            suggestedActions: Array.isArray(item?.suggestedActions) ? item.suggestedActions : [],
+                        } satisfies Conversation;
+                    })
+                    .filter((conversation: Conversation): conversation is Conversation => !!conversation.id);
+
+                const contacts = buildDealContactOptions(normalizedConversations);
+                const availableIds = new Set(normalizedConversations.map((conversation) => conversation.id));
+
+                setActiveDealParticipants(normalizedConversations);
+                setDealContacts(contacts);
+                setActiveId((prev) => {
+                    if (urlConversationId && availableIds.has(urlConversationId)) {
+                        return urlConversationId;
+                    }
+                    if (prev && availableIds.has(prev)) {
+                        return prev;
+                    }
+                    return contacts[0]?.conversationId || normalizedConversations[0]?.id || null;
+                });
+                setDealTimelineRefreshToken((previous) => previous + 1);
+            })
+            .catch((error) => {
+                if (cancelled) return;
+                console.error("Failed to fetch active deal context:", error);
+                setActiveDealParticipants([]);
+                setDealContacts([]);
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    setLoadingDealContext(false);
+                }
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [viewMode, activeDealId, urlConversationId]);
 
     // Multi-selection (what shows in the Context Builder)
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -441,21 +561,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     // Derived State
     const activeConversation = conversations.find(c => c.id === activeId);
     const selectedConversations = conversations.filter(c => selectedIds.has(c.id));
-
-    // Find active deal object
-    const activeDeal = deals.find(d => d.id === activeDealId);
-
-    // If in Deal Mode, we might want to "select" the conversations that are part of the deal for the Coordinator
-    // But CoordinatorPanel handles dealContextId mostly.
-
-    // For the Right Panel in Deal Mode:
-    // We need a dummy conversation or modify CoordinatorPanel to accept just a DealContext?
-    // Currently CoordinatorPanel requires `conversation`.
-    // If we are in Deal Mode, we might want to pick the "Last Active" conversation of the deal to act as the primary context?
-    // OR we update CoordinatorPanel to be optional conversation.
-
-    // Let's find a proxy conversation for the Coordinator if in Deal Mode
-    const dealProxyConversation = activeDeal ? conversations.find(c => activeDeal.conversationIds.includes(c.id)) : null;
+    const selectedDealConversation = activeDealParticipants.find((conversation) => conversation.id === activeId) || null;
 
     useEffect(() => {
         let cancelled = false;
@@ -482,6 +588,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
     // Fetch Messages when active selection changes
     useEffect(() => {
+        if (viewMode !== 'chats') return;
         if (!activeId) return;
 
         const selectedConversationId = activeId;
@@ -531,7 +638,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             })
             .catch(err => console.error(err))
             .finally(() => setLoadingMessages(false));
-    }, [activeId, markConversationReadInUi]);
+    }, [viewMode, activeId, markConversationReadInUi]);
 
     useEffect(() => {
         if (viewMode !== 'chats' || viewFilter !== 'active') return;
@@ -785,19 +892,27 @@ export function ConversationInterface({ locationId, initialConversations, initia
     };
 
 
-    const handleSendMessage = async (text: string, type: 'SMS' | 'Email' | 'WhatsApp') => {
-        if (!activeConversation) return;
+    const handleSendMessage = async (
+        text: string,
+        type: 'SMS' | 'Email' | 'WhatsApp',
+        targetConversation?: Conversation
+    ) => {
+        const conversationTarget = targetConversation || activeConversation;
+        if (!conversationTarget) return;
 
-        // Optimistic Update (Optional)
-        // For now, we wait for server confirmation to ensure it actually sent via GHL
-        const res = await sendReply(activeConversation.id, activeConversation.contactId, text, type);
-
-        if (res.success) {
-            // refresh messages
-            const newMsgs = await fetchMessages(activeConversation.id);
-            setMessages(newMsgs); // Keep chronological order
-        } else {
+        const res = await sendReply(conversationTarget.id, conversationTarget.contactId, text, type);
+        if (!res.success) {
             alert('Failed to send message: ' + JSON.stringify(res.error));
+            return;
+        }
+
+        if (viewMode === 'deals') {
+            setDealTimelineRefreshToken((previous) => previous + 1);
+        }
+
+        if (activeIdRef.current === conversationTarget.id) {
+            const newMsgs = await fetchMessages(conversationTarget.id);
+            setMessages(newMsgs);
         }
     };
 
@@ -812,6 +927,26 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
             return {
                 ...conversationItem,
+                ...(patch.name !== undefined ? { contactName: patch.name || "Unknown" } : {}),
+                ...(patch.email !== undefined ? { contactEmail: patch.email || undefined } : {}),
+                ...(patch.phone !== undefined ? { contactPhone: patch.phone || undefined } : {}),
+            };
+        }));
+
+        setActiveDealParticipants((prev) => prev.map((conversationItem) => {
+            if (conversationItem.id !== conversationId) return conversationItem;
+            return {
+                ...conversationItem,
+                ...(patch.name !== undefined ? { contactName: patch.name || "Unknown" } : {}),
+                ...(patch.email !== undefined ? { contactEmail: patch.email || undefined } : {}),
+                ...(patch.phone !== undefined ? { contactPhone: patch.phone || undefined } : {}),
+            };
+        }));
+
+        setDealContacts((prev) => prev.map((contact) => {
+            if (contact.conversationId !== conversationId) return contact;
+            return {
+                ...contact,
                 ...(patch.name !== undefined ? { contactName: patch.name || "Unknown" } : {}),
                 ...(patch.email !== undefined ? { contactEmail: patch.email || undefined } : {}),
                 ...(patch.phone !== undefined ? { contactPhone: patch.phone || undefined } : {}),
@@ -837,11 +972,16 @@ export function ConversationInterface({ locationId, initialConversations, initia
         }
     }, []);
 
-    const handleSendMedia = async (file: File, caption: string) => {
-        if (!activeConversation) return;
+    const handleSendMedia = async (
+        file: File,
+        caption: string,
+        targetConversation?: Conversation
+    ) => {
+        const conversationTarget = targetConversation || activeConversation;
+        if (!conversationTarget) return;
 
         try {
-            const prep = await createWhatsAppMediaUploadUrl(activeConversation.id, activeConversation.contactId, {
+            const prep = await createWhatsAppMediaUploadUrl(conversationTarget.id, conversationTarget.contactId, {
                 fileName: file.name,
                 contentType: file.type || 'application/octet-stream',
                 size: file.size,
@@ -872,15 +1012,20 @@ export function ConversationInterface({ locationId, initialConversations, initia
             }
 
             const sendRes = await sendWhatsAppMediaReply(
-                activeConversation.id,
-                activeConversation.contactId,
+                conversationTarget.id,
+                conversationTarget.contactId,
                 uploadRef,
                 { caption }
             );
 
             if (sendRes.success) {
-                const newMsgs = await fetchMessages(activeConversation.id);
-                setMessages(newMsgs);
+                if (viewMode === 'deals') {
+                    setDealTimelineRefreshToken((previous) => previous + 1);
+                }
+                if (activeIdRef.current === conversationTarget.id) {
+                    const newMsgs = await fetchMessages(conversationTarget.id);
+                    setMessages(newMsgs);
+                }
             } else {
                 alert('Failed to send media: ' + JSON.stringify(sendRes.error));
             }
@@ -1281,7 +1426,39 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     ) : (
                         // Deal Mode
                         activeDealId ? (
-                            <UnifiedTimeline dealId={activeDealId} />
+                            <UnifiedTimeline
+                                dealId={activeDealId}
+                                refreshToken={dealTimelineRefreshToken}
+                                composerConversation={selectedDealConversation}
+                                onSendMessage={(text, type) => handleSendMessage(text, type, selectedDealConversation || undefined)}
+                                onSendMedia={(file, caption) => handleSendMedia(file, caption, selectedDealConversation || undefined)}
+                                onGenerateDraft={async (instruction?: string, model?: string) => {
+                                    if (!selectedDealConversation) return null;
+                                    try {
+                                        const res = await generateAIDraft(
+                                            selectedDealConversation.id,
+                                            selectedDealConversation.contactId,
+                                            instruction,
+                                            model
+                                        );
+                                        if (res.reasoning) {
+                                            toast({ title: "Draft Generated", description: res.reasoning });
+                                        }
+                                        return res.draft;
+                                    } catch (error: any) {
+                                        toast({ title: "Draft Failed", description: error?.message || "Failed to generate draft", variant: "destructive" });
+                                        return null;
+                                    }
+                                }}
+                                suggestions={suggestions}
+                                composerDisabled={loadingDealContext || !selectedDealConversation}
+                                composerDisabledReason={
+                                    loadingDealContext
+                                        ? "Loading deal participants..."
+                                        : "Select a contact in Mission Control to reply."
+                                }
+                                replyingToLabel={selectedDealConversation?.contactName || undefined}
+                            />
                         ) : (
                             <div className="h-full flex items-center justify-center text-gray-400 bg-slate-50">
                                 Select a deal to view timeline
@@ -1311,20 +1488,22 @@ export function ConversationInterface({ locationId, initialConversations, initia
                         ) : <div className="h-full bg-slate-50" />
                     ) : (
                         // Deal Mode - Coordinator
-                        activeDeal && dealProxyConversation ? (
+                        selectedDealConversation ? (
                             <CoordinatorPanel
                                 locationId={locationId}
-                                conversation={dealProxyConversation}
-                                // Mocking selectedConversations to match the deal's participants so it looks like "Context Mode"
-                                selectedConversations={conversations.filter(c => activeDeal.conversationIds.includes(c.id))}
-                                onDraftApproved={(text) => handleSendMessage(text, 'Email')}
+                                conversation={selectedDealConversation}
+                                selectedConversations={activeDealParticipants}
+                                onDraftApproved={(text) => handleSendMessage(text, getMessageType(selectedDealConversation), selectedDealConversation)}
                                 onDeselect={() => undefined} // No deselect in deal mode
                                 onSuggestionsGenerated={setSuggestions}
-                                onContactSaved={(patch) => handleConversationContactSaved(dealProxyConversation.id, patch)}
+                                onContactSaved={(patch) => handleConversationContactSaved(selectedDealConversation.id, patch)}
+                                dealContacts={dealContacts}
+                                selectedDealConversationId={selectedDealConversation.id}
+                                onSelectDealConversation={(conversationId) => setActiveId(conversationId)}
                             />
                         ) : (
                             <div className="h-full bg-slate-50 p-4 text-center text-gray-400 text-xs flex flex-col items-center justify-center">
-                                Select a deal to view context.
+                                {loadingDealContext ? 'Loading deal context...' : 'Select a deal contact to view context.'}
                             </div>
                         )
                     )}

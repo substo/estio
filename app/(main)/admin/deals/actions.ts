@@ -62,14 +62,18 @@ export async function getDealContext(id: string) {
         ...deal,
         conversations: conversations.map(c => ({
             id: c.ghlConversationId,
-            contactId: c.contactId,
-            contactName: c.contact.name,
-            contactEmail: c.contact.email,
-            contactPhone: c.contact.phone,
+            contactId: c.contact.ghlContactId || c.contactId,
+            contactName: c.contact.name || "Unknown",
+            contactEmail: c.contact.email || undefined,
+            contactPhone: c.contact.phone || undefined,
             contactType: c.contact.contactType,
-            lastMessageBody: c.lastMessageBody,
-            lastMessageAt: c.lastMessageAt,
-            unreadCount: c.unreadCount
+            status: (c.status as any) || 'open',
+            type: c.lastMessageType || 'TYPE_SMS',
+            lastMessageType: c.lastMessageType || undefined,
+            lastMessageBody: c.lastMessageBody || "",
+            lastMessageDate: Math.floor(new Date(c.lastMessageAt).getTime() / 1000),
+            unreadCount: c.unreadCount,
+            locationId: location.ghlLocationId || "",
         })),
         properties
     };
