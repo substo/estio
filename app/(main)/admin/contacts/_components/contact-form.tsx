@@ -2,7 +2,7 @@
 
 
 import { useRouter } from 'next/navigation';
-import { useState, useEffect, useActionState, useTransition } from 'react';
+import { useState, useEffect, useActionState, useTransition, useRef } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { X, Pencil } from 'lucide-react';
@@ -65,6 +65,7 @@ export type ContactData = {
     propertyRoles?: {
         id: string;
         role: string;
+        propertyId: string;
         property: { title: string; reference?: string | null };
     }[];
     companyRoles?: {
@@ -266,6 +267,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
     // ...
 
     const currentConfig = CONTACT_TYPE_CONFIG[contactType];
+    const entityError = state.errors?.entityIds?.[0] || state.errors?.entityId?.[0];
 
     // Entity Assignment State
     const [entityType, setEntityType] = useState<'property' | 'company'>('property');
@@ -308,6 +310,34 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
         setSelectedDistricts(districts);
         setSelectedAreas(areas);
     };
+
+    const hasPrefilledRoles = useRef(false);
+
+    useEffect(() => {
+        hasPrefilledRoles.current = false;
+    }, [contact?.id]);
+
+    useEffect(() => {
+        if (!contact || hasPrefilledRoles.current) return;
+        const impliedRole = currentConfig.impliedRole?.toLowerCase();
+        if (!impliedRole || currentConfig.entityType !== 'property') {
+            hasPrefilledRoles.current = true;
+            return;
+        }
+
+        const rolePropertyIds = (contact.propertyRoles || [])
+            .filter((role) => (role.role || '').toLowerCase() === impliedRole)
+            .map((role) => role.propertyId)
+            .filter((id): id is string => Boolean(id));
+
+        if (currentConfig.multiEntity) {
+            setSelectedPropertyIds(rolePropertyIds);
+        } else {
+            setSelectedPropertyId(rolePropertyIds[0] || '');
+        }
+
+        hasPrefilledRoles.current = true;
+    }, [contact, currentConfig]);
 
     const handleDeleteRole = async (roleId: string, type: 'property' | 'company') => {
         startTransition(async () => {
@@ -673,6 +703,9 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                     {currentConfig.entityLabel || 'Assign to'}
                                     {currentConfig.entityRequired && <span className="text-red-500 ml-1">*</span>}
                                 </Label>
+                                {entityError && (
+                                    <p className="text-sm text-red-500">{entityError}</p>
+                                )}
 
                                 {/* Hidden inputs for form submission */}
                                 <input type="hidden" name="roleName" value={currentConfig.impliedRole || ''} />

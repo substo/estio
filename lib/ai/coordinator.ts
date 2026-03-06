@@ -372,7 +372,7 @@ export async function generateDraft(context: CoordinationContext) {
         `;
 
         if (contact) {
-            const isSeeker = !['Owner', 'Agent', 'Partner'].includes(contact.contactType);
+            const isSeeker = !['Owner', 'Agent', 'Partner', 'Maintenance'].includes(contact.contactType);
 
             if (isSeeker) {
                 systemPrompt += `\n\nContact Information:

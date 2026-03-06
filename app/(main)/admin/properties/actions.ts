@@ -236,6 +236,7 @@ const propertySchema = z.object({
     agentName: z.string().optional().nullable(),
     agentEmail: z.string().optional().nullable(),
     agentPhone: z.string().optional().nullable(),
+    maintenanceIds: z.preprocess(parseIdArray, z.array(z.string())).optional(),
 
     addressLine1: z.string().optional().nullable(),
     addressLine2: z.string().optional().nullable(),
@@ -296,6 +297,24 @@ const propertySchema = z.object({
     originalCreatedAt: z.preprocess((val) => (val === "" ? null : val), z.coerce.date().optional().nullable()),
     originalUpdatedAt: z.preprocess((val) => (val === "" ? null : val), z.coerce.date().optional().nullable()),
 });
+
+function parseIdArray(val: unknown): string[] | undefined {
+    if (val === undefined) return undefined;
+    if (val === null) return [];
+    if (Array.isArray(val)) return val.map(v => String(v)).filter(Boolean);
+    if (typeof val === 'string') {
+        const trimmed = val.trim();
+        if (!trimmed) return [];
+        try {
+            const parsed = JSON.parse(trimmed);
+            if (Array.isArray(parsed)) return parsed.map(v => String(v)).filter(Boolean);
+            return [String(parsed)];
+        } catch {
+            return trimmed.split(',').map(s => s.trim()).filter(Boolean);
+        }
+    }
+    return [String(val)];
+}
 
 // Helper to convert empty strings to null
 const emptyToNull = (val: FormDataEntryValue | null) => {
@@ -371,6 +390,7 @@ export async function upsertProperty(formData: FormData) {
             agentName: formData.get("agentName"),
             agentEmail: formData.get("agentEmail"),
             agentPhone: formData.get("agentPhone"),
+            maintenanceIds: formData.has("maintenanceIds") ? formData.get("maintenanceIds") : undefined,
 
             addressLine1: formData.get("addressLine1"),
             addressLine2: formData.get("addressLine2"),
@@ -534,6 +554,7 @@ export async function upsertProperty(formData: FormData) {
         delete (data as any).agentPhone;
         delete (data as any).agentPhone;
         delete (data as any).managementCompanyId;
+        delete (data as any).maintenanceIds;
 
         // Remove ID fields that cause issues if passed during update (Prisma strictness)
         delete (data as any).locationId;
@@ -710,11 +731,25 @@ export async function upsertProperty(formData: FormData) {
             }
         };
 
+        const syncPropertyContactRoles = async (propertyId: string, role: string, contactIds: string[] | null | undefined) => {
+            if (contactIds === undefined) return;
+            const uniqueIds = Array.from(new Set((contactIds || []).filter(Boolean)));
+            await db.contactPropertyRole.deleteMany({
+                where: { propertyId, role }
+            });
+            if (uniqueIds.length === 0) return;
+            await db.contactPropertyRole.createMany({
+                data: uniqueIds.map(contactId => ({ contactId, propertyId, role })),
+                skipDuplicates: true
+            });
+        };
+
         // Handle ID-based updates first (Selection from UI)
         await updatePropertyRole(property.id, 'owner', validated.ownerId, 'contact');
         await updatePropertyRole(property.id, 'agent', validated.agentId, 'contact');
         await updatePropertyRole(property.id, 'developer', validated.developerId, 'company');
         await updatePropertyRole(property.id, 'management company', validated.managementCompanyId, 'company');
+        await syncPropertyContactRoles(property.id, 'maintenance', validated.maintenanceIds);
 
         // Handle Legacy/Create New inputs (if IDs are not provided but names are)
         // Only if ID is NOT provided, otherwise ID takes precedence

@@ -18,6 +18,7 @@ import { MediaUploader } from "@/components/ui/media-uploader";
 import { X, Plus, Pencil } from "lucide-react";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { SearchableSelect } from "../../contacts/_components/searchable-select";
+import { MultiPropertySelect } from "../../contacts/_components/multi-property-select";
 // Fetch helpers removed as data is passed via props
 import { useEffect } from "react";
 import { AddCompanyDialog } from "./add-company-dialog";
@@ -138,10 +139,16 @@ export default function PropertyForm({
     const [selectedAgentId, setSelectedAgentId] = useState<string>(
         property?.contactRoles?.find((r: any) => r.role.toLowerCase() === 'agent')?.contact?.id || ""
     );
+    const [selectedMaintenanceIds, setSelectedMaintenanceIds] = useState<string[]>(
+        property?.contactRoles?.filter((r: any) => r.role.toLowerCase() === 'maintenance')
+            .map((r: any) => r.contact?.id)
+            .filter(Boolean) || []
+    );
     const [selectedManagementCompanyId, setSelectedManagementCompanyId] = useState<string>(
         property?.companyRoles?.find((r: any) => r.role.toLowerCase() === 'management company')?.company?.id || ""
     );
     const [selectedProjectId, setSelectedProjectId] = useState<string>(property?.projectId || "");
+    const canCreateMaintenanceContact = !!property?.id;
 
     // Import Metadata State
     const [originalCreatorName, setOriginalCreatorName] = useState<string>(property?.originalCreatorName || "");
@@ -1261,6 +1268,53 @@ export default function PropertyForm({
                                         }}
                                     />
                                 </div>
+                            </div>
+                        </div>
+
+                        {/* Maintenance Contacts Section */}
+                        <div className="space-y-2 p-4 bg-gray-50 rounded-lg border">
+                            <Label className="text-lg font-semibold text-gray-700">Maintenance Contacts</Label>
+                            <div className="space-y-2">
+                                <Label>Select Maintenance Contacts</Label>
+                                <div className="flex gap-2">
+                                    <div className="flex-1">
+                                        <MultiPropertySelect
+                                            name="maintenanceIds"
+                                            options={contacts.map(c => {
+                                                let label = c.name;
+                                                if (c.email) label += ` (${c.email})`;
+                                                if (c.phone) label += ` - ${c.phone}`;
+                                                return { value: c.id, label };
+                                            })}
+                                            value={selectedMaintenanceIds}
+                                            onChange={setSelectedMaintenanceIds}
+                                            placeholder="Select maintenance contacts..."
+                                            searchPlaceholder="Search contacts..."
+                                        />
+                                    </div>
+                                    <ContactDialog
+                                        locationId={locationId}
+                                        roleName="Maintenance"
+                                        contactType="Maintenance"
+                                        roleType="property"
+                                        roleValue="maintenance"
+                                        entityId={property?.id}
+                                        disabled={!canCreateMaintenanceContact}
+                                        onSuccess={(newContact) => {
+                                            setContacts(prev => {
+                                                const exists = prev.some(c => c.id === newContact.id);
+                                                if (exists) {
+                                                    return prev.map(c => c.id === newContact.id ? newContact : c).sort((a, b) => a.name.localeCompare(b.name));
+                                                }
+                                                return [...prev, newContact].sort((a, b) => a.name.localeCompare(b.name));
+                                            });
+                                            setSelectedMaintenanceIds(prev => prev.includes(newContact.id) ? prev : [...prev, newContact.id]);
+                                        }}
+                                    />
+                                </div>
+                                {!canCreateMaintenanceContact && (
+                                    <p className="text-xs text-muted-foreground">Save the property first to add new maintenance contacts.</p>
+                                )}
                             </div>
                         </div>
                     </TabsContent>

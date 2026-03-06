@@ -133,7 +133,7 @@ model Contact {
  ### UI & Logic Handling
  To prevent confusion, the system conditionally handles these fields based on the `contactType`:
  1.  **UI (Forms & Views)**: The `ContactForm` and `ContactView` components check `CONTACT_TYPE_CONFIG`. If a type (like Owner) is configured not to show lead fields (`showLeadFields: false`), those sections are hidden, even though the data exists in the background.
- 2.  **AI Coordinator**: The AI prompt generation logic checks the contact type. It suppresses "Requirement" and "Lead" data for Owners/Agents/Partners to avoid confusing the AI with irrelevant default values.
+ 2.  **AI Coordinator**: The AI prompt generation logic checks the contact type. It suppresses "Requirement" and "Lead" data for Owners/Agents/Partners/Maintenance to avoid confusing the AI with irrelevant default values.
  
  ## Key Features
 
@@ -198,9 +198,9 @@ Several Contact fields serve dual purposes for both CRM agents and authenticated
 > **Implementation**: See [Public Site Architecture - Section 10](./public-site-architecture.md#10-public-user-authentication--features) for server actions and UI components.
 
 ### 3. Property Interest (Roles)
--   **`ContactPropertyRole`**: The primary method for rich property associations (Owner, Buyer, Tenant, Agent).
+-   **`ContactPropertyRole`**: The primary method for rich property associations (Owner, Buyer, Tenant, Agent, Maintenance).
 -   **`ContactPropertyRole`**: All property associations are now handled via this join table.
-    -   **Roles**: "buyer", "tenant", "owner", "agent", "viewer".
+    -   **Roles**: "buyer", "tenant", "owner", "agent", "maintenance", "viewer".
     -   **Metadata**: Stores `stage`, `source`, and gamification metrics per property.
 
 ### 4. Gamification
@@ -232,7 +232,7 @@ The primary filter interface is designed to fit on a single row for desktop user
 -   **Search Bar**: Fixed-width input for searching Name, Email, or Phone.
 -   **View Mode (Category)**: A dropdown selector to switch between context modes:
     -   **Real Estate** (Default): Shows Leads, Contacts, and Tenants. Enables "Priority" filtering.
-    -   **Business**: Shows Agents, Partners, Owners, and Associates.
+    -   **Business**: Shows Agents, Partners, Owners, Associates, and Maintenance.
     -   **All Contacts**: Shows merged list of all contact types.
 -   **Type**: Filters by specific sub-type relevant to the selected Category (or all types if "All Contacts" is selected).
 -   **Priority**: Filters by Lead Priority (Low, Medium, High).
@@ -259,7 +259,7 @@ All filter states are persisted in the URL query parameters (e.g., `?category=re
 In addition to automated widget submissions, contacts can be managed manually via the Dashboard. The Add/Edit interfaces have been significantly enhanced to support the expanded data model.
 
 ### 1. Add/Edit Contact Dialogs
--   **Dynamic Interface**: The form adapts based on the **Contact Type**. Tabs and fields are conditionally shown (e.g., "Properties" tab is hidden for Owners/Agents).
+-   **Dynamic Interface**: The form adapts based on the **Contact Type**. Tabs and fields are conditionally shown (e.g., "Properties" tab is hidden for Owners/Agents/Maintenance).
 -   **Tabbed Interface**: Organized into up to four tabs (depending on configuration):
     1.  **Lead Details**: Basic info (**Full Name, First/Last Name, Email, Phone, DOB, Tags, Address**) plus Goal, Priority, Stage, Source, Next Action, Assigned Agent.
     2.  **Requirements**: Detailed criteria including Price Range, Bedrooms, District, and **Property Types**.

@@ -32,14 +32,33 @@ function SubmitButton({ isEditing }: { isEditing: boolean }) {
 interface ContactDialogProps {
     locationId: string;
     roleName?: string;
+    contactType?: string;
+    roleType?: 'property' | 'company';
+    roleValue?: string;
+    entityId?: string | null;
+    entityIds?: string[];
+    disabled?: boolean;
     contact?: { id: string; name: string; email?: string | null; phone?: string | null; message?: string | null };
     onSuccess?: (contact: { id: string; name: string; email?: string | null; phone?: string | null; message?: string | null }) => void;
     trigger?: React.ReactNode;
 }
 
-export function ContactDialog({ locationId, roleName = 'Contact', contact, onSuccess, trigger }: ContactDialogProps) {
+export function ContactDialog({
+    locationId,
+    roleName = 'Contact',
+    contactType,
+    roleType,
+    roleValue,
+    entityId,
+    entityIds,
+    disabled = false,
+    contact,
+    onSuccess,
+    trigger
+}: ContactDialogProps) {
     const [open, setOpen] = useState(false);
     const isEditing = !!contact;
+    const resolvedRoleValue = roleValue || (roleName ? roleName.toLowerCase() : undefined);
 
     const action = isEditing ? updateContact : createContact;
 
@@ -78,7 +97,7 @@ export function ContactDialog({ locationId, roleName = 'Contact', contact, onSuc
         <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
                 {trigger || (
-                    <Button variant="outline" size="icon" type="button">
+                    <Button variant="outline" size="icon" type="button" disabled={disabled}>
                         <Plus className="h-4 w-4" />
                     </Button>
                 )}
@@ -93,6 +112,13 @@ export function ContactDialog({ locationId, roleName = 'Contact', contact, onSuc
                 <form action={formAction} onSubmit={(e) => e.stopPropagation()} className="grid gap-4 py-4">
                     <input type="hidden" name="locationId" value={locationId} />
                     {isEditing && <input type="hidden" name="contactId" value={contact.id} />}
+                    {contactType && <input type="hidden" name="contactType" value={contactType} />}
+                    {roleType && <input type="hidden" name="roleType" value={roleType} />}
+                    {resolvedRoleValue && <input type="hidden" name="roleName" value={resolvedRoleValue} />}
+                    {entityId && <input type="hidden" name="entityId" value={entityId} />}
+                    {entityIds && entityIds.length > 0 && (
+                        <input type="hidden" name="entityIds" value={JSON.stringify(entityIds)} />
+                    )}
 
                     <div className="grid grid-cols-4 items-center gap-4">
                         <Label htmlFor="name" className="text-right">Name</Label>

@@ -7,7 +7,7 @@ import { auth } from '@clerk/nextjs/server';
 import { verifyUserHasAccessToLocation } from '@/lib/auth/permissions';
 import {
   LEAD_GOALS, LEAD_PRIORITIES, LEAD_STAGES, LEAD_SOURCES,
-  REQUIREMENT_STATUSES, REQUIREMENT_CONDITIONS, CONTACT_TYPES
+  REQUIREMENT_STATUSES, REQUIREMENT_CONDITIONS, CONTACT_TYPES, CONTACT_TYPE_CONFIG, type ContactType
 } from '@/app/(main)/admin/contacts/_components/contact-types';
 import { syncContactToGHL } from '@/lib/ghl/stakeholders';
 import { runGoogleAutoSyncForContact } from '@/lib/google/automation';
@@ -86,6 +86,38 @@ function areValuesEqual(a: any, b: any) {
   const normA = normalizeForDiff(a);
   const normB = normalizeForDiff(b);
   return JSON.stringify(normA) === JSON.stringify(normB);
+}
+
+function getEntityRequirementError(
+  data: ValidatedContactData,
+  existingContactType?: string | null
+): { field: 'entityId' | 'entityIds'; message: string } | null {
+  const resolvedType = (data.contactType || existingContactType || 'Lead') as ContactType;
+  const config = CONTACT_TYPE_CONFIG[resolvedType];
+  if (!config || !config.entityRequired) return null;
+
+  const hasEntityId = !!data.entityId;
+  const hasEntityIds = Array.isArray(data.entityIds) && data.entityIds.length > 0;
+
+  if (config.entityType === 'property') {
+    if (config.multiEntity) {
+      if (!hasEntityIds && !hasEntityId) {
+        return { field: 'entityIds', message: 'Select at least one property.' };
+      }
+    } else if (!hasEntityId) {
+      return { field: 'entityId', message: 'Select a property.' };
+    }
+  } else if (config.entityType === 'company') {
+    if (!hasEntityId) {
+      return { field: 'entityId', message: 'Select a company.' };
+    }
+  } else if (config.entityType === 'either') {
+    if (!hasEntityId && !hasEntityIds) {
+      return { field: 'entityId', message: 'Select a property or company.' };
+    }
+  }
+
+  return null;
 }
 
 async function enrichChangesWithReadableValues(changes: { field: string; old: any; new: any }[]) {
@@ -632,6 +664,15 @@ export async function createContact(
     return { success: false, message: 'Unauthorized: You do not have access to this location.' };
   }
 
+  const entityError = getEntityRequirementError(data);
+  if (entityError) {
+    return {
+      errors: { [entityError.field]: [entityError.message] },
+      message: entityError.message,
+      success: false,
+    };
+  }
+
   // Resolve internal user ID for history logging
   const dbUser = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } });
   const internalUserId = dbUser?.id || null;
@@ -761,11 +802,20 @@ async function updateContactCore(
   // Also verify the contact actually belongs to this location
   const existingContactCheck = await db.contact.findUnique({
     where: { id: data.contactId },
-    select: { locationId: true }
+    select: { locationId: true, contactType: true }
   });
 
   if (!existingContactCheck || existingContactCheck.locationId !== data.locationId) {
     return { success: false, message: 'Contact not found or access denied.' };
+  }
+
+  const entityError = getEntityRequirementError(data, existingContactCheck.contactType);
+  if (entityError) {
+    return {
+      errors: { [entityError.field]: [entityError.message] },
+      message: entityError.message,
+      success: false,
+    };
   }
 
   try {

@@ -222,7 +222,7 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
 
     // 1. Category -> Contact Type filter
     const realEstateTypes = ['Lead', 'Contact', 'Tenant'];
-    const businessTypes = ['Agent', 'Partner', 'Owner', 'Associate'];
+    const businessTypes = ['Agent', 'Partner', 'Owner', 'Associate', 'Maintenance'];
 
     if (type) {
         where.contactType = type;
@@ -396,5 +396,4 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
         </div>
     );
 }
-
 

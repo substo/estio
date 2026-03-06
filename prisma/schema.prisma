@@ -411,7 +411,7 @@ model Contact {
   heatScore           Int      @default(0)
   payload             Json?
   status              String
-  contactType         String   @default("Lead") // Lead, Agent, Partner, Owner, Associate, Contact, Tenant
+  contactType         String   @default("Lead") // Lead, Agent, Partner, Owner, Associate, Maintenance, Contact, Tenant
   error               String?
   location            Location @relation(fields: [locationId], references: [id])
 
