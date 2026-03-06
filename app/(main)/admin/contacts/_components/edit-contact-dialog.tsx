@@ -33,13 +33,13 @@ import { SearchableSelect } from './searchable-select';
 import { HistoryTab } from './history-tab';
 import { DeleteContactDialog } from './delete-contact-dialog';
 
-import { ContactForm, type ContactData } from './contact-form';
+import { ContactForm, type ContactData, type ContactIdentityPatch } from './contact-form';
 import { CONTACT_TYPE_CONFIG, type ContactType } from './contact-types';
 import { MergeContactDialog } from './merge-contact-dialog';
 import { ContactTaskManager } from '@/components/tasks/contact-task-manager';
 import { ContactViewingManager } from '@/components/tasks/contact-viewing-manager';
 
-export function EditContactForm({ contact, onSuccess, onDelete, leadSources, initialMode = 'edit', isOutlookConnected = false, isGoogleConnected = false, isGhlConnected = false }: { contact: ContactData; onSuccess?: () => void; onDelete?: () => void; leadSources: string[]; initialMode?: 'view' | 'edit' | 'create'; isOutlookConnected?: boolean; isGoogleConnected?: boolean; isGhlConnected?: boolean }) {
+export function EditContactForm({ contact, onSuccess, onDelete, onContactSaved, leadSources, initialMode = 'edit', isOutlookConnected = false, isGoogleConnected = false, isGhlConnected = false }: { contact: ContactData; onSuccess?: () => void; onDelete?: () => void; onContactSaved?: (patch: ContactIdentityPatch) => void; leadSources: string[]; initialMode?: 'view' | 'edit' | 'create'; isOutlookConnected?: boolean; isGoogleConnected?: boolean; isGhlConnected?: boolean }) {
     const { toast } = useToast();
     const [isDeleting, setIsDeleting] = useState(false);
 
@@ -110,6 +110,14 @@ export function EditContactForm({ contact, onSuccess, onDelete, leadSources, ini
         try {
             const res = await updateContactAction(contact.id, mergedData);
             if (res.success) {
+                onContactSaved?.({
+                    id: contact.id,
+                    name: mergedData?.name ?? contact.name ?? null,
+                    email: mergedData?.email ?? contact.email ?? null,
+                    phone: mergedData?.phone ?? contact.phone ?? null,
+                    firstName: mergedData?.firstName ?? contact.firstName ?? null,
+                    lastName: mergedData?.lastName ?? contact.lastName ?? null,
+                });
                 toast({ title: "Success", description: "Contact updated successfully" });
                 if (onSuccess) onSuccess(); // Refresh data
             } else {
@@ -132,6 +140,7 @@ export function EditContactForm({ contact, onSuccess, onDelete, leadSources, ini
                 contact={contact}
                 locationId={contact.locationId}
                 onSuccess={onSuccess}
+                onContactSaved={onContactSaved}
                 leadSources={leadSources}
                 isOutlookConnected={isOutlookConnected}
                 additionalTabCount={showViewings ? 3 : 2}
@@ -252,7 +261,7 @@ export function EditContactForm({ contact, onSuccess, onDelete, leadSources, ini
     );
 }
 
-export function EditContactDialog({ contact, leadSources = [], trigger, isOutlookConnected = false, isGoogleConnected = false, isGhlConnected = false }: { contact: ContactData; leadSources?: string[]; trigger?: React.ReactNode; isOutlookConnected?: boolean; isGoogleConnected?: boolean; isGhlConnected?: boolean }) {
+export function EditContactDialog({ contact, leadSources = [], trigger, isOutlookConnected = false, isGoogleConnected = false, isGhlConnected = false, onContactSaved }: { contact: ContactData; leadSources?: string[]; trigger?: React.ReactNode; isOutlookConnected?: boolean; isGoogleConnected?: boolean; isGhlConnected?: boolean; onContactSaved?: (patch: ContactIdentityPatch) => void }) {
     const [open, setOpen] = useState(false);
     const normalizedContact: ContactData = {
         ...contact,
@@ -279,6 +288,7 @@ export function EditContactDialog({ contact, leadSources = [], trigger, isOutloo
                 <EditContactForm
                     contact={normalizedContact}
                     onSuccess={() => setOpen(false)}
+                    onContactSaved={onContactSaved}
                     leadSources={leadSources || []}
                     isOutlookConnected={isOutlookConnected}
                     isGoogleConnected={isGoogleConnected}

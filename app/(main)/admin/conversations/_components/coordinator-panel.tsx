@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Conversation } from "@/lib/ghl/conversations";
 import { generateAIDraft, generateMultiContextDraftAction, getContactContext, generatePlanAction, executeNextTaskAction, getAgentPlan, getAgentExecutions, getTraceTreeAction, getContactInsightsAction, orchestrateAction, getConversationTranscriptUsage, fetchConversationActivityLog } from "../actions";
 import { createPersistentDeal, findExistingDeal, removeConversationFromDeal } from "../../deals/actions";
@@ -20,6 +20,7 @@ import { GroupMembersList } from './group-members-list';
 import { TraceNodeRenderer } from "./trace-node-renderer";
 import { ContactTaskManager } from "@/components/tasks/contact-task-manager";
 import { ContactViewingManager } from "@/components/tasks/contact-viewing-manager";
+import type { ContactIdentityPatch } from "../../contacts/_components/contact-form";
 
 interface CoordinatorPanelProps {
     locationId: string;
@@ -28,6 +29,7 @@ interface CoordinatorPanelProps {
     onDraftApproved: (text: string) => void;
     onDeselect?: (id: string) => void;
     onSuggestionsGenerated?: (suggestions: string[]) => void;
+    onContactSaved?: (patch: ContactIdentityPatch) => void;
 }
 
 interface AgentTask {
@@ -158,7 +160,7 @@ function ActivityLogPanel({ conversationId }: { conversationId: string }) {
     );
 }
 
-export function CoordinatorPanel({ locationId, conversation, selectedConversations, onDraftApproved, onDeselect, onSuggestionsGenerated }: CoordinatorPanelProps) {
+export function CoordinatorPanel({ locationId, conversation, selectedConversations, onDraftApproved, onDeselect, onSuggestionsGenerated, onContactSaved }: CoordinatorPanelProps) {
     const [draft, setDraft] = useState("");
     const [reasoning, setReasoning] = useState("");
     const [generating, setGenerating] = useState(false);
@@ -202,6 +204,11 @@ export function CoordinatorPanel({ locationId, conversation, selectedConversatio
 
     // Transcript usage for this conversation
     const [transcriptUsage, setTranscriptUsage] = useState({ totalTokens: 0, totalCost: 0, transcriptCount: 0, extractionCount: 0 });
+    const conversationIdRef = useRef(conversation.id);
+
+    useEffect(() => {
+        conversationIdRef.current = conversation.id;
+    }, [conversation.id]);
 
     const isContextMode = selectedConversations && selectedConversations.length > 0;
     const traceToolCalls = Array.isArray(rawTrace?.toolCalls) ? rawTrace.toolCalls : [];
@@ -470,6 +477,48 @@ export function CoordinatorPanel({ locationId, conversation, selectedConversatio
         onDeselect?.(conversationId);
     };
 
+    const handleContactSaved = async (patch: ContactIdentityPatch) => {
+        if (!patch?.id) return;
+
+        setContactContext((prev: any) => {
+            if (!prev?.contact || String(prev.contact.id) !== String(patch.id)) return prev;
+            return {
+                ...prev,
+                contact: {
+                    ...prev.contact,
+                    ...patch,
+                },
+            };
+        });
+
+        onContactSaved?.(patch);
+
+        const sourceConversationId = conversation.id;
+        const sourceContactId = conversation.contactId;
+        if (!sourceContactId) return;
+
+        try {
+            const refreshed = await getContactContext(sourceContactId);
+            if (conversationIdRef.current !== sourceConversationId || !refreshed) return;
+
+            setContactContext(refreshed);
+
+            const refreshedContact = (refreshed as any)?.contact;
+            if (refreshedContact?.id) {
+                onContactSaved?.({
+                    id: refreshedContact.id,
+                    name: refreshedContact.name ?? null,
+                    email: refreshedContact.email ?? null,
+                    phone: refreshedContact.phone ?? null,
+                    firstName: refreshedContact.firstName ?? null,
+                    lastName: refreshedContact.lastName ?? null,
+                });
+            }
+        } catch (error) {
+            console.error("Failed to refetch contact context after save", error);
+        }
+    };
+
     return (
         <div className="h-full bg-muted/30 border-l p-3 overflow-y-auto space-y-3 min-w-0 flex flex-col">
             <div className="flex items-center justify-between mb-2 shrink-0">
@@ -506,6 +555,7 @@ export function CoordinatorPanel({ locationId, conversation, selectedConversatio
                                 <EditContactDialog
                                     contact={contactContext.contact}
                                     leadSources={contactContext.leadSources || []}
+                                    onContactSaved={handleContactSaved}
                                 />
                             )}
                         </div>
@@ -519,6 +569,7 @@ export function CoordinatorPanel({ locationId, conversation, selectedConversatio
                                             contact={contactContext.contact}
                                             leadSources={contactContext.leadSources || []}
                                             trigger={<span>{contactContext.contact.name || "Unnamed Contact"}</span>}
+                                            onContactSaved={handleContactSaved}
                                         />
                                     </div>
                                     <div className="text-muted-foreground text-[11px] flex flex-col gap-0.5">

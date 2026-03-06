@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useDebounce } from 'use-debounce';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { Conversation, Message } from '@/lib/ghl/conversations';
+import type { ContactIdentityPatch } from '../../contacts/_components/contact-form';
 import {
     fetchConversations,
     fetchMessages,
@@ -158,6 +159,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const [loadingMoreConversations, setLoadingMoreConversations] = useState(false);
     const loadingMoreConversationsRef = useRef(false);
     const liveSyncInFlightRef = useRef(false);
+    const contactSaveRefreshSeqRef = useRef<Record<string, number>>({});
 
     // Initialize Active ID from URL
     const initialActiveId = searchParams.get('id') || (initialConversations.length > 0 ? initialConversations[0].id : null);
@@ -177,6 +179,13 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const [searchResults, setSearchResults] = useState<Conversation[]>([]);
 
     const [deals, setDeals] = useState<any[]>([]);
+
+    useEffect(() => {
+        setConversations(initialConversations);
+        conversationsRef.current = initialConversations;
+        setConversationListHasMore(!!initialConversationListPageInfo?.hasMore);
+        setConversationListNextCursor(initialConversationListPageInfo?.nextCursor || null);
+    }, [initialConversations, initialConversationListPageInfo?.hasMore, initialConversationListPageInfo?.nextCursor]);
 
     // Global Search Effect
     useEffect(() => {
@@ -792,6 +801,42 @@ export function ConversationInterface({ locationId, initialConversations, initia
         }
     };
 
+    const handleConversationContactSaved = useCallback(async (conversationId: string, patch: ContactIdentityPatch) => {
+        if (!conversationId || !patch?.id) return;
+
+        const sequence = (contactSaveRefreshSeqRef.current[conversationId] || 0) + 1;
+        contactSaveRefreshSeqRef.current[conversationId] = sequence;
+
+        setConversations((prev) => prev.map((conversationItem) => {
+            if (conversationItem.id !== conversationId) return conversationItem;
+
+            return {
+                ...conversationItem,
+                ...(patch.name !== undefined ? { contactName: patch.name || "Unknown" } : {}),
+                ...(patch.email !== undefined ? { contactEmail: patch.email || undefined } : {}),
+                ...(patch.phone !== undefined ? { contactPhone: patch.phone || undefined } : {}),
+            };
+        }));
+
+        try {
+            const fresh = await refreshConversation(conversationId);
+            if (!fresh) return;
+            if (contactSaveRefreshSeqRef.current[conversationId] !== sequence) return;
+
+            setConversations((prev) => prev.map((conversationItem) =>
+                conversationItem.id === conversationId ? {
+                    ...conversationItem,
+                    ...fresh,
+                    ...(patch.name !== undefined ? { contactName: patch.name || "Unknown" } : {}),
+                    ...(patch.email !== undefined ? { contactEmail: patch.email || undefined } : {}),
+                    ...(patch.phone !== undefined ? { contactPhone: patch.phone || undefined } : {}),
+                } : conversationItem
+            ));
+        } catch (error) {
+            console.error("Failed to refresh conversation after contact save:", error);
+        }
+    }, []);
+
     const handleSendMedia = async (file: File, caption: string) => {
         if (!activeConversation) return;
 
@@ -1261,6 +1306,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                                 onDraftApproved={(text) => handleSendMessage(text, getMessageType(activeConversation))}
                                 onDeselect={(id) => handleToggleSelect(id, false)}
                                 onSuggestionsGenerated={setSuggestions}
+                                onContactSaved={(patch) => handleConversationContactSaved(activeConversation.id, patch)}
                             />
                         ) : <div className="h-full bg-slate-50" />
                     ) : (
@@ -1274,6 +1320,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                                 onDraftApproved={(text) => handleSendMessage(text, 'Email')}
                                 onDeselect={() => undefined} // No deselect in deal mode
                                 onSuggestionsGenerated={setSuggestions}
+                                onContactSaved={(patch) => handleConversationContactSaved(dealProxyConversation.id, patch)}
                             />
                         ) : (
                             <div className="h-full bg-slate-50 p-4 text-center text-gray-400 text-xs flex flex-col items-center justify-center">

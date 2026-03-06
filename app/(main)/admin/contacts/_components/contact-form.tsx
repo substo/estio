@@ -122,6 +122,15 @@ export type ContactData = {
     payload?: any;
 };
 
+export type ContactIdentityPatch = {
+    id: string;
+    name?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+};
+
 // Helper to safely display values
 const RenderField = ({
     label,
@@ -172,6 +181,7 @@ interface ContactFormProps {
     leadSources?: string[];
     isOutlookConnected?: boolean;
     initialData?: Partial<ContactData>;
+    onContactSaved?: (patch: ContactIdentityPatch) => void;
 }
 
 function SubmitButton({ isEditing, isCreating, toggler }: { isEditing: boolean, isCreating: boolean, toggler: (e: React.MouseEvent) => void }) {
@@ -202,7 +212,7 @@ function formatDate(date: Date | string | null | undefined) {
     }
 }
 
-export function ContactForm({ initialMode = 'create', contact: initialContact, locationId, onSuccess, additionalTabs, additionalTabContent, editActionsMenuItems, additionalTabCount = 0, leadSources = [], isOutlookConnected = false, initialData }: ContactFormProps) {
+export function ContactForm({ initialMode = 'create', contact: initialContact, locationId, onSuccess, additionalTabs, additionalTabContent, editActionsMenuItems, additionalTabCount = 0, leadSources = [], isOutlookConnected = false, initialData, onContactSaved }: ContactFormProps) {
     // For initialization, merge passed contact with initialData (prefill)
     const baseContact = { ...initialData, ...initialContact } as ContactData | undefined;
 
@@ -380,6 +390,21 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                 setSelectedAreas([]);
                 if (onSuccess) onSuccess();
             } else {
+                const savedIdentityPatch: ContactIdentityPatch | null = state.contact?.id ? {
+                    id: state.contact.id,
+                    name: state.contact.name ?? null,
+                    email: state.contact.email ?? null,
+                    phone: state.contact.phone ?? null,
+                    firstName: state.contact.firstName ?? null,
+                    lastName: state.contact.lastName ?? null,
+                } : null;
+
+                if (savedIdentityPatch) {
+                    setContactPatch((prev) => ({ ...prev, ...savedIdentityPatch }));
+                    setFormRenderKey((prev) => prev + 1);
+                    onContactSaved?.(savedIdentityPatch);
+                }
+
                 // If editing, just toggle back to view mode + refresh
                 setIsEditing(false);
                 router.refresh();
@@ -398,7 +423,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                 variant: 'destructive',
             });
         }
-    }, [state, toast, onSuccess, isCreating]);
+    }, [state, toast, onSuccess, isCreating, onContactSaved, router]);
 
     // Auto-Heal Broken Links (Client Side to prevent render loops)
     const [hasAttemptedHeal, setHasAttemptedHeal] = useState(false);

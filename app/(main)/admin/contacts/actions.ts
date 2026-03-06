@@ -251,7 +251,15 @@ export type CreateContactState = {
   errors?: Record<string, string[] | undefined>;
   message?: string;
   success?: boolean;
-  contact?: { id: string; name: string; email?: string | null; phone?: string | null; message?: string | null };
+  contact?: {
+    id: string;
+    name: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    message?: string | null;
+  };
   duplicateContact?: { id: string; name: string | null; email?: string | null; phone?: string | null };
 };
 
@@ -765,6 +773,8 @@ export async function createContact(
       contact: {
         id: contact.id,
         name: contact.name ?? '',
+        firstName: contact.firstName ?? null,
+        lastName: contact.lastName ?? null,
         email: contact.email,
         phone: contact.phone,
         message: contact.message || null
@@ -1076,6 +1086,8 @@ export async function updateContact(
     contact: {
       id: data.contactId,
       name: data.name,
+      firstName: data.firstName ?? null,
+      lastName: data.lastName ?? null,
       email: data.email || null,
       phone: data.phone || null,
       message: data.message || null
