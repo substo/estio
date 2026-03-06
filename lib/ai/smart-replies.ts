@@ -1,6 +1,10 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
 import { DEFAULT_MODEL } from "@/lib/ai/pricing";
+import {
+    buildDealProtectiveCommunicationContract,
+    resolveCommunicationLanguage
+} from "@/lib/ai/prompts/communication-policy";
 
 export async function generateSmartReplies(conversationId: string) {
     try {
@@ -11,7 +15,8 @@ export async function generateSmartReplies(conversationId: string) {
             where: { id: conversationId },
             include: {
                 messages: { orderBy: { createdAt: 'desc' }, take: 15 },
-                location: { include: { siteConfig: true } }
+                location: { include: { siteConfig: true } },
+                contact: { select: { preferredLang: true } }
             }
         });
 
@@ -42,11 +47,25 @@ export async function generateSmartReplies(conversationId: string) {
         // 3. Prepare Context
         const reversedMessages = [...conversation.messages].reverse();
         let conversationText = "";
+        const latestInboundText = [...reversedMessages]
+            .reverse()
+            .find((m) => m.direction === "inbound" && (m.body || "").trim().length > 0)?.body || "";
         reversedMessages.forEach(m => {
             const sender = m.direction === 'outbound' ? 'Agent' : 'Contact';
             // Only include text messages for now
             if (!m.body) return;
             conversationText += `${sender}: ${m.body}\n`;
+        });
+        const languageResolution = resolveCommunicationLanguage({
+            latestInboundText,
+            contactPreferredLanguage: conversation.contact?.preferredLang ?? null,
+            threadText: conversationText,
+        });
+        const communicationContract = buildDealProtectiveCommunicationContract({
+            expectedLanguage: languageResolution.expectedLanguage,
+            latestInboundLanguage: languageResolution.latestInboundLanguage,
+            contactPreferredLanguage: languageResolution.contactPreferredLanguage,
+            contextLabel: "suggested action labels",
         });
 
         // 4. Prompt
@@ -55,12 +74,16 @@ export async function generateSmartReplies(conversationId: string) {
         You are a helpful assistant for a Real Estate Agent.
         Analyze the following conversation history and suggest 3 short, distinct "next actions" or "intents" for the agent.
         
+        ${communicationContract}
+        
         Conversation History:
         ${conversationText}
 
         Rules:
         - Provide exactly 3 options.
         - Options should be short labels (max 4-5 words) describing the INTENT, not the full message.
+        - Keep labels neutral, factual, and commercially aware.
+        - Avoid pressure language and emotional sales wording.
         - Examples: "Confirm Viewing", "Send Price List", "Ask for Budget", "Say Thanks", "Schedule Call".
         - The intent will be used to generate a full draft later.
         - Output format: JSON array of strings. Example: ["Intent 1", "Intent 2", "Intent 3"]

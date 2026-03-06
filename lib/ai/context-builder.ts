@@ -3,6 +3,10 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
 import { getMessages, getConversation } from "@/lib/ghl/conversations";
 import { DEFAULT_MODEL } from "@/lib/ai/pricing";
+import {
+    buildDealProtectiveCommunicationContract,
+    resolveCommunicationLanguage
+} from "@/lib/ai/prompts/communication-policy";
 
 interface MultiContextParams {
     dealContextId: string;
@@ -51,10 +55,27 @@ export async function generateMultiContextDraft(params: MultiContextParams) {
         const properties = (await Promise.all(propertyPromises)).filter(Boolean);
 
         // 5. Build the "God Mode" Prompt
+        const allMessages = conversations.flatMap((conversation: any) => conversation.messages || []);
+        const latestInboundMessage = [...allMessages]
+            .reverse()
+            .find((message: any) => message?.direction === "inbound" && String(message?.body || "").trim().length > 0)?.body || "";
+        const threadText = allMessages.map((message: any) => String(message?.body || "").trim()).filter(Boolean).join("\n");
+        const languageResolution = resolveCommunicationLanguage({
+            latestInboundText: latestInboundMessage,
+            threadText,
+        });
+        const communicationContract = buildDealProtectiveCommunicationContract({
+            expectedLanguage: languageResolution.expectedLanguage,
+            latestInboundLanguage: languageResolution.latestInboundLanguage,
+            contextLabel: "deal-room outbound drafting",
+        });
+
         let systemPrompt = `You are an expert Real Estate Deal Coordinator. 
         You are looking at a "Deal Room" which contains multiple separate conversations about the same property/deal.
         
         Your Goal: Draft a message to the ${params.targetAudience} that moves the deal forward, based on what you know from ALL parties.
+        
+        ${communicationContract}
         
         CONTEXT - ENTITIES:
         Properties: ${properties.map((p: any) => `${p?.title} (€${p?.price})`).join(", ")}

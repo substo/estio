@@ -642,7 +642,7 @@ export function CoordinatorPanel({ locationId, conversation, selectedConversatio
                                         <span className="font-medium text-indigo-700">{orchestrationResult.sentiment?.emotion}</span>
                                     </div>
                                 </div>
-                                {orchestrationResult.policyResult && !orchestrationResult.policyResult.approved && (
+                                {orchestrationResult.policyResult && (!orchestrationResult.policyResult.approved || orchestrationResult.policyResult.reviewRequired) && (
                                     <div className="mt-1 p-1 bg-red-50 text-red-700 rounded border border-red-100 flex gap-1 items-start">
                                         <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
                                         <span className="leading-tight">{orchestrationResult.policyResult.reason}</span>

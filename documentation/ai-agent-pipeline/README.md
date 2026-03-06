@@ -117,7 +117,7 @@ This implementation targets **Industry Standard (Claude Opus 4.6 / GPT-5.x level
 4. **Programmatic Tool Calling**: Data-heavy skills (Searcher, Coordinator) use code-based orchestration instead of N tool-call round-trips.
 5. **Reflexion Loop**: Critical outputs pass through a Critic step before execution.
 6. **Multi-Model Routing**: The cheapest model that can handle the task is used. Expensive models only for hard problems.
-7. **Governance-First**: Policy Agent validates every outbound message and tool call against business rules.
+7. **Governance-First**: Policy Agent validates every outbound message and tool call against business rules, including the deal-protective multilingual communication policy (language match, authority-safe wording, evidence-based urgency, and non-final phrasing).
 
 ---
 
@@ -127,3 +127,4 @@ This implementation targets **Industry Standard (Claude Opus 4.6 / GPT-5.x level
 - [AI Agentic Conversations Hub](../ai-agentic-conversations-hub.md) — Deal Room and Conversation Management
 - [AI Agent Skills Reference](../ai-agent-with-skills.md) — Progressive Disclosure skill pattern
 - [AI Configuration](../ai-configuration.md) — Model selection and Brand Voice settings
+- [AI Communication Policy](../ai-communication-policy.md) — Shared outbound communication contract and guardrails

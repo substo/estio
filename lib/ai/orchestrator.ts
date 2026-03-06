@@ -6,6 +6,12 @@ import { validateAction } from "./policy";
 import { SkillLoader, executeSkill } from "./skills/loader";
 import { retrieveContext } from "./memory";
 import { reflectOnDraft } from "./reflexion";
+import { shouldRequireHumanApproval } from "./review-gating";
+import {
+    detectLanguageFromText,
+    inferCommunicationEvidenceFromText,
+    resolveCommunicationLanguage
+} from "./prompts/communication-policy";
 
 interface OrchestratorInput {
     conversationId: string;
@@ -25,6 +31,22 @@ export interface OrchestratorResult {
     requiresHumanApproval: boolean;
     reasoning: string;
     policyResult?: any;
+}
+
+function extractLatestInboundMessageFromHistory(conversationHistory: string): string | null {
+    const lines = (conversationHistory || "")
+        .split("\n")
+        .map(line => line.trim())
+        .filter(Boolean);
+
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+        const line = lines[index];
+        if (/^user:\s*/i.test(line)) {
+            return line.replace(/^user:\s*/i, "").trim() || null;
+        }
+    }
+
+    return null;
 }
 
 /**
@@ -53,6 +75,19 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
 
     // ── STEP 4: Route to Skill ──
     let skillResult: any = null;
+    const contactData = await db.contact.findFirst({
+        where: {
+            OR: [{ id: input.contactId }, { ghlContactId: input.contactId }]
+        },
+        include: { location: { include: { siteConfig: true } } }
+    });
+    const latestInboundText = extractLatestInboundMessageFromHistory(input.conversationHistory) || input.message;
+    const languageResolution = resolveCommunicationLanguage({
+        latestInboundText,
+        contactPreferredLanguage: contactData?.preferredLang ?? null,
+        threadText: input.conversationHistory,
+    });
+    const communicationEvidence = inferCommunicationEvidenceFromText(`${input.conversationHistory}\n${input.message}`);
 
     console.log(`[ORCHESTRATOR] Classification: intent=${classification.intent}, skill=${classification.suggestedSkill}, risk=${classification.risk}`);
 
@@ -63,14 +98,6 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
         if (skill) console.log(`[ORCHESTRATOR] Skill tools: ${skill.tools?.join(', ') || 'none'}`);
 
         if (skill) {
-            // Fetch contact + location + siteConfig (reusing existing query, extended)
-            const contactData = await db.contact.findFirst({
-                where: {
-                    OR: [{ id: input.contactId }, { ghlContactId: input.contactId }]
-                },
-                include: { location: { include: { siteConfig: true } } }
-            });
-
             // Fetch the agent identity.
             // Use assigned agent first; if missing, fall back to first user on the location.
             let agentName = "Agent";
@@ -115,6 +142,11 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
                 websiteDomain: contactData?.location?.siteConfig?.domain ?? contactData?.location?.domain ?? undefined,
                 brandVoice: contactData?.location?.siteConfig?.brandVoice ?? undefined,
                 agentUserId,
+                contactPreferredLanguage: contactData?.preferredLang ?? null,
+                latestInboundText,
+                expectedReplyLanguage: languageResolution.expectedLanguage,
+                latestInboundLanguage: languageResolution.latestInboundLanguage,
+                threadDefaultLanguage: languageResolution.threadDefaultLanguage,
             });
 
             console.log(`[ORCHESTRATOR] Skill result:`, JSON.stringify({
@@ -142,12 +174,20 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
 
     // ── STEP 5: Policy Check ──
     const policySpan = await startSpan(trace, "Policy Check", "planning");
+    const draftLanguage = detectLanguageFromText(skillResult?.draftReply ?? null);
     const policyResult = await validateAction({
         intent: classification.intent,
         risk: classification.risk,
         actions: skillResult?.toolCalls ?? [],
         draftReply: skillResult?.draftReply ?? null,
         dealStage: input.dealStage,
+        expectedLanguage: languageResolution.expectedLanguage,
+        latestInboundLanguage: languageResolution.latestInboundLanguage,
+        draftLanguage,
+        hasConfirmedReservation: communicationEvidence.hasConfirmedReservation,
+        hasConfirmedDeposit: communicationEvidence.hasConfirmedDeposit,
+        hasCompetingOfferEvidence: communicationEvidence.hasCompetingOfferEvidence,
+        authoritySource: communicationEvidence.authoritySource,
     });
 
     await endSpan(policySpan.spanId, policySpan.startTime, policyResult.approved ? "success" : "error", {
@@ -160,7 +200,11 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
         skillResult.draftReply = await reflectOnDraft(
             skillResult.draftReply,
             input.conversationHistory,
-            classification.intent
+            classification.intent,
+            {
+                expectedLanguage: languageResolution.expectedLanguage,
+                latestInboundMessage: latestInboundText,
+            }
         );
         await endSpan(reflexionSpan.spanId, reflexionSpan.startTime, "success", {
             output: "Draft refined by critic"
@@ -210,7 +254,7 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
         skillUsed: classification.suggestedSkill,
         actions: skillResult?.toolCalls ?? [],
         draftReply: skillResult?.draftReply ?? null,
-        requiresHumanApproval: classification.risk === "high" || !policyResult.approved,
+        requiresHumanApproval: shouldRequireHumanApproval(classification.risk, policyResult),
         reasoning: skillResult?.thoughtSummary ?? "No specialist skill needed.",
         policyResult
     };

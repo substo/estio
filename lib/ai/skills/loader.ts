@@ -94,6 +94,10 @@ import { callLLMWithMetadata } from "../llm";
 import { toolRegistry } from "../mcp/registry";
 import { SentimentResult } from "../sentiment";
 import { calculateRunCostFromUsage } from "../pricing";
+import {
+    buildDealProtectiveCommunicationContract,
+    resolveCommunicationLanguage
+} from "../prompts/communication-policy";
 
 export interface SkillExecutionContext {
     conversationId: string;
@@ -112,6 +116,11 @@ export interface SkillExecutionContext {
     websiteDomain?: string;
     brandVoice?: string;
     agentUserId?: string;
+    contactPreferredLanguage?: string | null;
+    latestInboundText?: string | null;
+    expectedReplyLanguage?: string | null;
+    latestInboundLanguage?: string | null;
+    threadDefaultLanguage?: string | null;
 }
 
 export interface SkillExecutionResult {
@@ -506,9 +515,23 @@ async function synthesizeReplyFromToolResults(params: {
     if (deterministicLocationReply) {
         return { draft: deterministicLocationReply };
     }
+    const languageResolution = resolveCommunicationLanguage({
+        latestInboundText: params.context.latestInboundText || params.context.message,
+        contactPreferredLanguage: params.context.contactPreferredLanguage || params.context.expectedReplyLanguage || null,
+        threadText: params.context.conversationHistory,
+        fallbackLanguage: params.context.expectedReplyLanguage || params.context.threadDefaultLanguage || null,
+    });
+    const communicationContract = buildDealProtectiveCommunicationContract({
+        expectedLanguage: languageResolution.expectedLanguage,
+        latestInboundLanguage: languageResolution.latestInboundLanguage,
+        contactPreferredLanguage: languageResolution.contactPreferredLanguage,
+        contextLabel: "post-tool synthesized outbound reply",
+    });
 
     const synthesisSystemPrompt = `You are a real estate CRM reply synthesizer.
 Write the FINAL outbound message for the agent using the tool results that were just executed.
+
+${communicationContract}
 
 Rules:
 - Answer the latest user message directly using the tool results.
@@ -640,6 +663,18 @@ export async function executeSkill(
         description: t.description,
         parameters: describeToolSchema(t.inputSchema || {})
     }));
+    const languageResolution = resolveCommunicationLanguage({
+        latestInboundText: context.latestInboundText || context.message,
+        contactPreferredLanguage: context.contactPreferredLanguage || context.expectedReplyLanguage || null,
+        threadText: context.conversationHistory,
+        fallbackLanguage: context.expectedReplyLanguage || context.threadDefaultLanguage || null,
+    });
+    const communicationContract = buildDealProtectiveCommunicationContract({
+        expectedLanguage: languageResolution.expectedLanguage,
+        latestInboundLanguage: languageResolution.latestInboundLanguage || context.latestInboundLanguage || null,
+        contactPreferredLanguage: languageResolution.contactPreferredLanguage,
+        contextLabel: "skill-generated outbound communication",
+    });
 
     // 2. Build System Prompt
     const systemPrompt = `${skill.instructions}
@@ -661,6 +696,9 @@ You are "${context.agentName ?? "Agent"}" from "${context.businessName ?? "the a
 Introduce yourself by name and business only in your first outbound message to a new lead.
 In ongoing conversations, do NOT repeat your introduction or the contact's name in every message.
 Always answer the latest user message first before adding extra context.
+Expected reply language: ${languageResolution.expectedLanguage || "same as contact language"}.
+
+${communicationContract}
 
 ## Current Context
 - Contact ID: ${context.contactId}

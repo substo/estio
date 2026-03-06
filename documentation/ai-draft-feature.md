@@ -5,6 +5,9 @@ The AI Draft feature allows agents to quickly generate professional replies dire
 
 As of Feb 2026, draft generation also applies a **name-greeting cadence rule** to avoid repetitive openers like `Hi George,` in consecutive short-interval messages.
 
+As of Mar 2026, draft generation also enforces the shared **Deal-Protective Multilingual Communication Policy** for language matching, non-binding precision, and hierarchy-safe wording.  
+Source of truth: [AI Communication Policy](./ai-communication-policy.md).
+
 ## 2. Architecture: Local-First Hybrid
 To ensure resilience, speed, and compatibility with both "Synced" (GHL) and "Shadow" (WhatsApp-only) conversations, we use a **Local-First** architecture.
 
@@ -49,6 +52,13 @@ It is critical to distinguish between **Content** and **Metadata**:
   - there was a long break between recent messages (currently `>= 3` hours).
 - For active back-to-back conversation, drafts should start directly with message intent and avoid repeating the contact's name greeting.
 - A safety post-processor strips a leading name greeting when it violates this rule.
+
+### Communication Policy (Mar 2026)
+- Drafts must reply in the contact's language (latest inbound -> `Contact.preferredLang` -> thread default).
+- Tone must stay neutral, factual, commercially aware, and non-pushy.
+- Drafts avoid hard authority/finality claims unless confirmed in context.
+- Urgency wording must be evidence-based (for example, confirmed competing offer activity), not pressure language.
+- Guardrail outcomes are attached to draft metadata for review visibility.
 
 ## 5. Troubleshooting
 

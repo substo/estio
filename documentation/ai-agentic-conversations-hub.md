@@ -134,6 +134,16 @@ To better handle the difference between Email and SMS/WhatsApp channels:
 *   **Email**: The AI is instructed to output **HTML** (e.g., `<b>`, `<br>`) and explicitly forbidden from using Markdown to ensure professional rendering.
 *   **SMS/WhatsApp**: The AI is restricted to **Plain Text Only** to avoid "leaking" markdown asterisks (`**bold**`) into customer messages.
 
+### Communication Policy Guardrails (Mar 2026)
+All outbound AI-generated messaging in the hub (drafts, skill outputs, and post-tool synthesis) now uses a shared deal-protective communication contract:
+- reply in the contact's language,
+- remain neutral/factual/commercially aware,
+- avoid authority overreach and premature finality,
+- use urgency only when supported by context evidence.
+
+Policy checks run in orchestrated flows and can mark outputs as review-required even when hard violations are absent.
+Source of truth: [AI Communication Policy](./ai-communication-policy.md).
+
 ### Email Content Hydration & Sender Resolution
 The default GHL message list endpoint returns stripped-down plaintext bodies and often ambiguous sender information. To ensure high-quality display:
 

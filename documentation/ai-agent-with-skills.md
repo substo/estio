@@ -85,6 +85,20 @@ Instead of a static string, the system prompt is a function that executes at run
 3.  Formats a block: `"- {skill.name}: {skill.description}"`.
 4.  Injects this block into the base system prompt before the LLM inference begins.
 
+### A.1 Global Communication Contract Layer (Mar 2026)
+In addition to skill instructions, outbound skill replies now include a shared communication contract to enforce:
+- contact-language matching,
+- non-binding negotiation phrasing,
+- hierarchy-safe authority handling,
+- factual urgency only.
+
+This contract is generated from a single module and injected in:
+- skill execution prompts,
+- post-tool synthesis prompts,
+- critic/reflexion passes.
+
+Source of truth: [AI Communication Policy](./ai-communication-policy.md).
+
 ### B. The Toolset (The Bridge)
 The agent requires **three** specific tools to navigate the layers.
 

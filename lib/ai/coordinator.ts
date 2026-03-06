@@ -2,6 +2,13 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
 import { getMessages, getConversation } from "@/lib/ghl/conversations";
 import { GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
+import { validateAction } from "@/lib/ai/policy";
+import {
+    buildDealProtectiveCommunicationContract,
+    detectLanguageFromText,
+    inferCommunicationEvidenceFromText,
+    resolveCommunicationLanguage
+} from "@/lib/ai/prompts/communication-policy";
 
 // Remove global init
 // const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY || "");
@@ -300,6 +307,24 @@ export async function generateDraft(context: CoordinationContext) {
             }
         });
         const contactFirstName = (contact?.firstName || contact?.name || "").trim().split(/\s+/)[0] || null;
+        const latestInboundMessage = [...messages]
+            .reverse()
+            .find(m => m.direction === "inbound" && (m.body || "").trim().length > 0)?.body || "";
+        const threadText = messages
+            .map(m => (m.body || "").trim())
+            .filter(Boolean)
+            .join("\n");
+        const languageResolution = resolveCommunicationLanguage({
+            latestInboundText: latestInboundMessage,
+            contactPreferredLanguage: contact?.preferredLang ?? null,
+            threadText,
+        });
+        const communicationContract = buildDealProtectiveCommunicationContract({
+            expectedLanguage: languageResolution.expectedLanguage,
+            latestInboundLanguage: languageResolution.latestInboundLanguage,
+            contactPreferredLanguage: languageResolution.contactPreferredLanguage,
+            contextLabel: "outbound real-estate communication",
+        });
 
         const hasPriorOutbound = messages.some(m => m.direction === "outbound" && m.body.trim().length > 0);
         const isFirstOutreach = !hasPriorOutbound;
@@ -343,6 +368,9 @@ export async function generateDraft(context: CoordinationContext) {
         - Role: Intermediary connecting leads, owners, and agents.
         - Tone: ${isEmail ? 'Professional, clear, polite, human.' : 'Natural, concise, friendly, human.'}
         - Channel: ${channelName}.
+        - Expected reply language: ${languageResolution.expectedLanguage || "same as contact language"}
+
+        ${communicationContract}
 
         HIGH-PRIORITY DRAFTING RULES:
         - Never repeat the contact's name greeting in back-to-back or recent messages.
@@ -479,6 +507,25 @@ export async function generateDraft(context: CoordinationContext) {
         if (text !== withoutRepeatedGreeting) {
             console.log("[AI Draft] Removed manual signature block from draft output.");
         }
+        const draftLanguage = detectLanguageFromText(text);
+        const policyEvidence = inferCommunicationEvidenceFromText(`${conversationText}\n${context.instruction || ""}`);
+        const policyResult = await validateAction({
+            intent: "DRAFT_REPLY",
+            risk: "medium",
+            actions: [],
+            draftReply: text,
+            expectedLanguage: languageResolution.expectedLanguage,
+            latestInboundLanguage: languageResolution.latestInboundLanguage,
+            draftLanguage,
+            hasConfirmedReservation: policyEvidence.hasConfirmedReservation,
+            hasConfirmedDeposit: policyEvidence.hasConfirmedDeposit,
+            hasCompetingOfferEvidence: policyEvidence.hasCompetingOfferEvidence,
+            authoritySource: policyEvidence.authoritySource,
+        });
+        const requiresHumanApproval = !policyResult.approved || policyResult.reviewRequired;
+        const policySummary = requiresHumanApproval
+            ? ` Policy check: ${policyResult.reason}.`
+            : "";
 
         // 5. Track Costs & Usage
         if (response.usageMetadata) {
@@ -510,7 +557,7 @@ export async function generateDraft(context: CoordinationContext) {
                     taskId: "quick-draft",
                     taskTitle: "Quick AI Draft",
                     taskStatus: "done",
-                    thoughtSummary: `Generated draft reply based on conversation context. ${modelAuditNote}.`,
+                    thoughtSummary: `Generated draft reply based on conversation context. ${modelAuditNote}.${policySummary}`,
                     draftReply: text,
                     promptTokens,
                     completionTokens,
@@ -535,8 +582,12 @@ export async function generateDraft(context: CoordinationContext) {
         return {
             draft: text,
             reasoning: requestedModelName === actualModelName
-                ? "Generated based on conversation history and contact interest."
-                : `Generated based on conversation history and contact interest. Fallback used: ${actualModelName} (requested ${requestedModelName}).`
+                ? `Generated based on conversation history and contact interest.${policySummary}`
+                : `Generated based on conversation history and contact interest. Fallback used: ${actualModelName} (requested ${requestedModelName}).${policySummary}`,
+            requiresHumanApproval,
+            policyResult,
+            expectedLanguage: languageResolution.expectedLanguage,
+            draftLanguage,
         };
 
     } catch (error: any) {

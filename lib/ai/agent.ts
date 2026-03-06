@@ -12,6 +12,7 @@ import { startTrace, endTrace, startSpan, endSpan } from "./tracing";
 import { retrieveContext } from "./memory";
 import { shouldUsePTC } from "./ptc/config";
 import { getPtcSystemPrompt } from "./prompts/ptc-instructions";
+import { buildDealProtectiveCommunicationContract } from "./prompts/communication-policy";
 
 const PLANNER_SYSTEM_PROMPT = `
 You are the Estio Real Estate Planner. Your job is to break down a high-level "Ultimate Goal" into a concrete, sequential checklist of tasks.
@@ -41,6 +42,10 @@ Produce a JSON object containing a "plan" array. Each item must have:
 }
 `;
 
+const EXECUTOR_COMMUNICATION_CONTRACT = buildDealProtectiveCommunicationContract({
+    contextLabel: "executor-generated outbound communication",
+});
+
 const getExecutorSystemPrompt = (skillsRegistry: { name: string, description: string }[]) => `
 You are the Estio Real Estate Executor. You have a vast library of "Skills" that you can load on-demand.
 
@@ -48,6 +53,8 @@ You are the Estio Real Estate Executor. You have a vast library of "Skills" that
 - **Task**: The specific item you are working on right now.
 - **Goal**: The ultimate goal of the entire plan.
 - **History**: Full conversation history.
+
+${EXECUTOR_COMMUNICATION_CONTRACT}
 
 ## Skill System (Progressive Disclosure)
 You do NOT have all instructions loaded by default. You must "install" skills to get their tools and workflows.

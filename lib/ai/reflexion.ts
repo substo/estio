@@ -1,5 +1,6 @@
 import { getModelForTask } from "./model-router";
 import { callLLM } from "./llm";
+import { buildDealProtectiveCommunicationContract } from "./prompts/communication-policy";
 
 const CRITIC_PROMPT = `You are a quality control agent for a real estate agency.
 
@@ -18,6 +19,8 @@ Evaluation Criteria:
 3. ACTIONABILITY: Does it move the deal forward? Does it have a clear next step?
 4. BREVITY: Is it concise? Real estate clients prefer short messages.
 5. SAFETY: Does it make any promises or disclose confidential information?
+6. LANGUAGE MATCH: Does it match the contact's language?
+7. DEAL SAFETY: Is wording non-binding, hierarchy-safe, and free from overcommitment/fake urgency?
 
 If the draft is good (score >= 8/10), return it unchanged.
 If it needs improvement, return the refined version.
@@ -33,14 +36,28 @@ Format:
 export async function reflectOnDraft(
     draft: string,
     conversationContext: string,
-    intent: string
+    intent: string,
+    options?: {
+        expectedLanguage?: string | null;
+        latestInboundMessage?: string | null;
+    }
 ): Promise<string> {
     const model = getModelForTask("draft_reply"); // Standard tier used for critic
+    const communicationContract = buildDealProtectiveCommunicationContract({
+        expectedLanguage: options?.expectedLanguage || null,
+        contextLabel: "critic refinement pass",
+    });
 
-    const prompt = CRITIC_PROMPT
+    const prompt = `${CRITIC_PROMPT}
+
+${communicationContract}
+`
         .replace("{intent}", intent)
         .replace("{context}", conversationContext)
-        .replace("{draft}", draft);
+        .replace("{draft}", draft)
+        + (options?.latestInboundMessage
+            ? `\nLatest inbound message:\n"${options.latestInboundMessage}"`
+            : "");
 
     try {
         const response = await callLLM(model, prompt, undefined, { jsonMode: true });
