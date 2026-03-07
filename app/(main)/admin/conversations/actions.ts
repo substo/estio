@@ -40,6 +40,7 @@ import {
     enqueueWhatsAppAudioExtraction,
     initWhatsAppAudioExtractionWorker,
 } from "@/lib/queue/whatsapp-audio-extraction";
+import type { ViewingSyncProviderDecision } from "@/lib/viewings/sync-engine";
 
 const MAX_SELECTION_TEXT_LENGTH = 12000;
 const MAX_CUSTOM_OUTPUT_LENGTH = 2200;
@@ -10336,6 +10337,12 @@ const ApplySelectionViewingSuggestionSchema = z.object({
 
 const ApplySelectionViewingSuggestionBatchSchema = z.array(ApplySelectionViewingSuggestionSchema).min(1).max(MAX_TASK_SUGGESTIONS);
 
+export type ApplySuggestedViewingWarning = {
+    description: string;
+    queuedProviders: string[];
+    skippedProviders: ViewingSyncProviderDecision[];
+};
+
 export async function applySuggestedViewingsFromSelection(
     conversationId: string,
     contactId: string,
@@ -10381,6 +10388,7 @@ export async function applySuggestedViewingsFromSelection(
 
         let createdCount = 0;
         const failed: Array<{ description: string; error: string }> = [];
+        const warnings: ApplySuggestedViewingWarning[] = [];
 
         for (const suggestion of suggestions) {
             const formData = new FormData();
@@ -10402,6 +10410,13 @@ export async function applySuggestedViewingsFromSelection(
 
             if (result?.success) {
                 createdCount += 1;
+                if ((result.skippedProviders?.length || 0) > 0) {
+                    warnings.push({
+                        description: suggestion.propertyDescription,
+                        queuedProviders: Array.isArray(result.queuedProviders) ? result.queuedProviders : [],
+                        skippedProviders: Array.isArray(result.skippedProviders) ? result.skippedProviders : [],
+                    });
+                }
                 continue;
             }
 
@@ -10420,10 +10435,15 @@ export async function applySuggestedViewingsFromSelection(
                 selectedCount: suggestions.length,
                 createdCount,
                 failedCount: failed.length,
+                warningCount: warnings.length,
                 failedDescriptions: failed.map((item) => item.description),
                 failedErrors: failed
                     .map((item) => normalizeSingleLine(item.error, "Unknown error").slice(0, 180))
                     .filter(Boolean),
+                warningDescriptions: warnings.map((item) => item.description),
+                warningReasons: warnings
+                    .flatMap((item) => item.skippedProviders.map((provider) => `${provider.provider}:${provider.reason}`))
+                    .slice(0, 12),
             },
         });
 
@@ -10433,6 +10453,7 @@ export async function applySuggestedViewingsFromSelection(
             createdCount,
             failedCount: failed.length,
             failed,
+            warnings,
         };
     } catch (error: any) {
         const errorMessage = error?.message || "Failed to apply viewing suggestions";

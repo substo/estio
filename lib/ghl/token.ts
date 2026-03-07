@@ -1,5 +1,6 @@
 import db from '@/lib/db';
 import { GHL_CONFIG } from '@/config/ghl';
+import { GHLError } from './client';
 import { GHLTokenResponse } from './types';
 
 /**
@@ -159,10 +160,18 @@ export async function ghlFetchWithAuth<T>(
         const errorMessage = JSON.stringify(errorData);
         if (errorMessage.includes("authorized for this scope")) {
             console.error(`[GHL Auth CRITICAL] Token lacks required scopes for ${endpoint}. User must re-authenticate.`);
-            throw new Error(`GHL Scope Error: The current token does not have permission for this action. Please re-authenticate via the One-Time Setup page.`);
+            throw new GHLError(
+                'GHL Scope Error: The current token does not have permission for this action. Please re-authenticate via the One-Time Setup page.',
+                response.status,
+                errorData
+            );
         }
 
-        throw new Error(`GHL API Error: ${response.status} ${errorMessage}`);
+        throw new GHLError(
+            `GHL API Error: ${response.status} ${errorMessage}`,
+            response.status,
+            errorData
+        );
     }
 
     if (response.status === 204) {

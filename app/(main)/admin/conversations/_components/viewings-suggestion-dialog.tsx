@@ -3,10 +3,15 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
-import { Loader2, Home, ListTodo } from "lucide-react";
+import { Loader2, Home } from "lucide-react";
 import { SearchableSelect } from "@/app/(main)/admin/contacts/_components/searchable-select";
-import { suggestViewingsFromSelection, applySuggestedViewingsFromSelection, type SelectionViewingSuggestion, getDropdownsForViewingsSuggestion } from "@/app/(main)/admin/conversations/actions";
+import {
+    suggestViewingsFromSelection,
+    applySuggestedViewingsFromSelection,
+    type ApplySuggestedViewingWarning,
+    type SelectionViewingSuggestion,
+    getDropdownsForViewingsSuggestion,
+} from "@/app/(main)/admin/conversations/actions";
 import { toast } from "sonner";
 
 interface ViewingsSuggestionDialogProps {
@@ -23,6 +28,15 @@ type SuggestedViewingState = SelectionViewingSuggestion & {
     propertyId?: string;
     userId?: string;
 };
+
+function formatViewingSyncWarning(warning: ApplySuggestedViewingWarning): string {
+    const missingGoogleCalendar = warning.skippedProviders.some(({ provider, reason }) => (
+        provider === "google" && reason === "google_missing_calendar"
+    ));
+
+    if (!missingGoogleCalendar) return "";
+    return `${warning.description}: Google Calendar was skipped because the assigned agent has no target Google calendar selected.`;
+}
 
 export function ViewingsSuggestionDialog({ open, onOpenChange, selectionText, conversationId, activeAiModel }: ViewingsSuggestionDialogProps) {
     const [isSuggesting, setIsSuggesting] = useState(false);
@@ -130,6 +144,14 @@ export function ViewingsSuggestionDialog({ open, onOpenChange, selectionText, co
             if (result.success) {
                 if (result.createdCount > 0) {
                     toast.success(`Created ${result.createdCount} viewing(s) successfully!`);
+                }
+                if ((result.warnings?.length || 0) > 0) {
+                    for (const warning of result.warnings) {
+                        const message = formatViewingSyncWarning(warning);
+                        if (message) {
+                            toast.warning(message);
+                        }
+                    }
                 }
                 if (result.failedCount > 0) {
                     toast.error(`${result.failedCount} viewing(s) failed to create.`);

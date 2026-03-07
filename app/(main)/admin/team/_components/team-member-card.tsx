@@ -197,7 +197,7 @@ export function TeamMemberCard({ user, calendars, isAdmin, isCurrentUser }: Team
                     </div>
                     <div className="flex items-center gap-2">
                         <Calendar className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-sm text-muted-foreground">Calendar:</span>
+                        <span className="text-sm text-muted-foreground">GHL Calendar:</span>
                         <Select
                             value={selectedCalendar}
                             onValueChange={handleCalendarChange}

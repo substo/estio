@@ -1,5 +1,6 @@
 import { Viewing } from '@prisma/client';
 import { google, calendar_v3 } from 'googleapis';
+import db from '@/lib/db';
 import { getValidAccessToken } from '@/lib/google/auth';
 
 export type ViewingSyncOperationResult = {
@@ -44,6 +45,42 @@ export async function listGoogleCalendars(userId: string): Promise<GoogleCalenda
         title: calendar.summary || 'Untitled Calendar',
         isPrimary: calendar.primary || false,
     })).filter(c => c.id);
+}
+
+export async function resolveGoogleCalendarTarget(userId: string, preferredCalendarId?: string | null): Promise<GoogleCalendarOption> {
+    const calendars = await listGoogleCalendars(userId);
+
+    if (preferredCalendarId) {
+        const matched = calendars.find((calendar) => calendar.id === preferredCalendarId);
+        if (matched) return matched;
+    }
+
+    const primary = calendars.find((calendar) => calendar.isPrimary);
+    if (primary) {
+        await db.user.update({
+            where: { id: userId },
+            data: {
+                googleCalendarId: primary.id,
+                googleCalendarTitle: primary.title,
+            },
+        }).catch(() => null);
+        return primary;
+    }
+
+    const fallback = calendars[0];
+    if (!fallback) {
+        throw new Error('No writable Google calendars found for user');
+    }
+
+    await db.user.update({
+        where: { id: userId },
+        data: {
+            googleCalendarId: fallback.id,
+            googleCalendarTitle: fallback.title,
+        },
+    }).catch(() => null);
+
+    return fallback;
 }
 
 function toGoogleEventBody(viewing: HubViewingForGoogle): calendar_v3.Schema$Event {

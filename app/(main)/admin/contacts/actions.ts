@@ -1558,7 +1558,10 @@ const viewingSchema = z.object({
 });
 
 import { createAppointment } from '@/lib/ghl/calendars';
-import { enqueueViewingSyncJobs } from '@/lib/viewings/sync-engine';
+import {
+  enqueueViewingSyncJobs,
+  type EnqueueViewingSyncJobsResult,
+} from '@/lib/viewings/sync-engine';
 
 export async function createViewing(
   prevState: any,
@@ -1609,7 +1612,7 @@ export async function createViewing(
       }
     });
 
-    await enqueueViewingSyncJobs({
+    const syncResult: EnqueueViewingSyncJobsResult = await enqueueViewingSyncJobs({
       viewingId: viewingResult.id,
       operation: 'create',
     });
@@ -1635,7 +1638,12 @@ export async function createViewing(
     //   syncContactToGoogle(currentUserForSync.id, contact.id).catch(e => console.error(e));
     // }
 
-    return { success: true, message: 'Viewing scheduled successfully!' };
+    return {
+      success: true,
+      message: 'Viewing scheduled successfully!',
+      queuedProviders: syncResult.queuedProviders,
+      skippedProviders: syncResult.skippedProviders,
+    };
   } catch (error: any) {
     console.error('Failed to create viewing:', error);
     return { success: false, message: `Failed to create viewing: ${error?.message || String(error)}` };

@@ -12,12 +12,28 @@ import {
     createGoogleCalendarEvent,
     updateGoogleCalendarEvent,
     deleteGoogleCalendarEvent,
+    resolveGoogleCalendarTarget,
     ViewingSyncOperationResult,
 } from './providers/google-calendar';
 import { TaskSyncEngineStats } from '@/lib/tasks/types';
 
 export type ViewingOutboxOperation = 'create' | 'update' | 'delete';
 export type ViewingProvider = 'ghl' | 'google';
+export type ViewingSyncSkipReason =
+    | 'google_missing_calendar'
+    | 'google_missing_credentials'
+    | 'ghl_missing_calendar'
+    | 'ghl_missing_location_connection'
+    | 'viewing_not_found';
+export type ViewingSyncProviderDecision = {
+    provider: ViewingProvider;
+    reason: ViewingSyncSkipReason;
+};
+export type EnqueueViewingSyncJobsResult = {
+    queued: number;
+    queuedProviders: ViewingProvider[];
+    skippedProviders: ViewingSyncProviderDecision[];
+};
 
 const MAX_OUTBOX_ATTEMPTS = 6;
 const STALE_PROCESSING_LOCK_MS = 5 * 60 * 1000;
@@ -90,7 +106,15 @@ function isGhlNotFoundError(error: unknown): boolean {
     return error instanceof GHLError && error.status === 404;
 }
 
+function isGhlSlotUnavailableError(error: unknown): boolean {
+    if (!(error instanceof GHLError) || error.status !== 400) return false;
+    const message = normalizeError(error).toLowerCase();
+    const payload = typeof error.data === 'string' ? error.data.toLowerCase() : JSON.stringify(error.data || {}).toLowerCase();
+    return message.includes('slot you have selected is no longer available') || payload.includes('slot you have selected is no longer available');
+}
+
 function isRetryableSyncError(provider: ViewingProvider, error: unknown): boolean {
+    if (provider === 'ghl' && isGhlSlotUnavailableError(error)) return false;
     const status = getErrorStatusCode(error);
     if (status === null) return true;
     if (status === 408 || status === 409 || status === 425 || status === 429 || status >= 500) return true;
@@ -104,15 +128,32 @@ function hasGoogleCredentials(user?: { googleAccessToken: string | null; googleR
     return Boolean(user.googleAccessToken || user.googleRefreshToken);
 }
 
-function getAvailableProviders(viewing: SyncViewingRecord): ViewingProvider[] {
-    const providers: ViewingProvider[] = [];
+function getProviderEligibility(viewing: SyncViewingRecord): {
+    availableProviders: ViewingProvider[];
+    skippedProviders: ViewingSyncProviderDecision[];
+} {
+    const availableProviders: ViewingProvider[] = [];
+    const skippedProviders: ViewingSyncProviderDecision[] = [];
+
     if (viewing.contact.location.ghlAccessToken && viewing.contact.location.ghlLocationId && viewing.user.ghlCalendarId) {
-        providers.push('ghl');
+        availableProviders.push('ghl');
+    } else {
+        skippedProviders.push({
+            provider: 'ghl',
+            reason: viewing.user.ghlCalendarId ? 'ghl_missing_location_connection' : 'ghl_missing_calendar',
+        });
     }
-    if (hasGoogleCredentials(viewing.user) && viewing.user.googleCalendarId) {
-        providers.push('google');
+
+    if (hasGoogleCredentials(viewing.user)) {
+        availableProviders.push('google');
+    } else {
+        skippedProviders.push({
+            provider: 'google',
+            reason: 'google_missing_credentials',
+        });
     }
-    return providers;
+
+    return { availableProviders, skippedProviders };
 }
 
 async function getViewingSyncRecord(viewingId: string, provider: ViewingProvider) {
@@ -206,13 +247,17 @@ async function syncViewingToGhl(job: ViewingOutbox, viewing: SyncViewingRecord):
 
 async function syncViewingToGoogle(job: ViewingOutbox, viewing: SyncViewingRecord): Promise<ViewingSyncOperationResult> {
     const googleUser = viewing.user;
-    if (!hasGoogleCredentials(googleUser) || !googleUser.googleCalendarId) {
-        throw new Error('Google sync unavailable: no connected user or calendar found for viewing');
+    if (!hasGoogleCredentials(googleUser)) {
+        throw new Error('Google sync unavailable: no connected user found for viewing');
     }
 
     const syncRecord = await getViewingSyncRecord(viewing.id, 'google');
     const providerViewingId = syncRecord?.providerViewingId || null;
-    const providerContainerId = syncRecord?.providerContainerId || (googleUser as any).googleCalendarId;
+    const resolvedCalendar = await resolveGoogleCalendarTarget(
+        googleUser.id,
+        syncRecord?.providerContainerId || (googleUser as any).googleCalendarId || null
+    );
+    const providerContainerId = resolvedCalendar.id;
     const payload = toProviderViewingPayload(viewing);
 
     switch (job.operation as ViewingOutboxOperation) {
@@ -351,7 +396,7 @@ export async function enqueueViewingSyncJobs(options: {
     operation: ViewingOutboxOperation;
     providers?: ViewingProvider[];
     scheduledAt?: Date;
-}) {
+}): Promise<EnqueueViewingSyncJobsResult> {
     const viewing = await db.viewing.findUnique({
         where: { id: options.viewingId },
         include: {
@@ -371,16 +416,28 @@ export async function enqueueViewingSyncJobs(options: {
         },
     });
 
-    if (!viewing) return { queued: 0, skippedProviders: options.providers || [] };
+    if (!viewing) {
+        return {
+            queued: 0,
+            queuedProviders: [],
+            skippedProviders: (options.providers || ['ghl', 'google']).map((provider) => ({
+                provider,
+                reason: 'viewing_not_found',
+            })),
+        };
+    }
 
-    const availableProviders = getAvailableProviders(viewing as any);
+    const { availableProviders, skippedProviders: providerEligibilitySkips } = getProviderEligibility(viewing as any);
     const targetProviders = options.providers?.length
         ? options.providers.filter((provider) => availableProviders.includes(provider))
         : availableProviders;
-
-    const skippedProviders = options.providers?.filter((provider) => !targetProviders.includes(provider)) || [];
+    const skippedProviders = (options.providers?.length
+        ? providerEligibilitySkips.filter((decision) => options.providers?.includes(decision.provider))
+        : providerEligibilitySkips
+    );
 
     let queued = 0;
+    const queuedProviders: ViewingProvider[] = [];
     const scheduledAt = options.scheduledAt || new Date();
 
     for (const provider of targetProviders) {
@@ -399,6 +456,7 @@ export async function enqueueViewingSyncJobs(options: {
                 },
             });
             queued += 1;
+            queuedProviders.push(provider);
 
             await db.viewingSync.upsert({
                 where: { viewingId_provider_providerAccountId: { viewingId: viewing.id, provider, providerAccountId: 'default' } },
@@ -423,7 +481,7 @@ export async function enqueueViewingSyncJobs(options: {
         }
     }
 
-    return { queued, skippedProviders };
+    return { queued, queuedProviders, skippedProviders };
 }
 
 export async function processViewingSyncOutboxBatch(options?: {

@@ -106,7 +106,7 @@ export default async function TeamPage() {
                 <div>
                     <h1 className="text-2xl font-bold">Team Management</h1>
                     <p className="text-gray-500 text-sm">
-                        Manage team access and GHL calendars for {location.name || 'this location'}
+                        Manage team access and GoHighLevel booking calendars for {location.name || 'this location'}
                     </p>
                 </div>
                 {isAdmin && <InviteUserDialog />}
