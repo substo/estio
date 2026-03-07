@@ -265,6 +265,17 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
     });
     const { toast } = useToast();
     const [isPending, startTransition] = useTransition();
+    const onSuccessRef = useRef(onSuccess);
+    const onContactSavedRef = useRef(onContactSaved);
+    const lastHandledStateRef = useRef<typeof state | null>(null);
+
+    useEffect(() => {
+        onSuccessRef.current = onSuccess;
+    }, [onSuccess]);
+
+    useEffect(() => {
+        onContactSavedRef.current = onContactSaved;
+    }, [onContactSaved]);
 
     const toggleEdit = (e?: React.MouseEvent) => {
         if (e) {
@@ -377,6 +388,9 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
 
     // Handle success/error state changes
     useEffect(() => {
+        if (lastHandledStateRef.current === state) return;
+        lastHandledStateRef.current = state;
+
         if (state.success) {
             // Reset form state if creating
             if (isCreating) {
@@ -388,7 +402,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                 setMatchedProperties([]);
                 setSelectedDistricts([]);
                 setSelectedAreas([]);
-                if (onSuccess) onSuccess();
+                if (onSuccessRef.current) onSuccessRef.current();
             } else {
                 const savedIdentityPatch: ContactIdentityPatch | null = state.contact?.id ? {
                     id: state.contact.id,
@@ -402,13 +416,13 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                 if (savedIdentityPatch) {
                     setContactPatch((prev) => ({ ...prev, ...savedIdentityPatch }));
                     setFormRenderKey((prev) => prev + 1);
-                    onContactSaved?.(savedIdentityPatch);
+                    onContactSavedRef.current?.(savedIdentityPatch);
                 }
 
                 // If editing, just toggle back to view mode + refresh
                 setIsEditing(false);
                 router.refresh();
-                if (onSuccess) onSuccess();
+                if (onSuccessRef.current) onSuccessRef.current();
             }
 
             toast({
@@ -423,7 +437,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                 variant: 'destructive',
             });
         }
-    }, [state, toast, onSuccess, isCreating, onContactSaved, router]);
+    }, [state, toast, isCreating, router]);
 
     // Auto-Heal Broken Links (Client Side to prevent render loops)
     const [hasAttemptedHeal, setHasAttemptedHeal] = useState(false);

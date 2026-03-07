@@ -5028,11 +5028,10 @@ export async function getWhatsAppChannelEligibility(conversationId: string) {
 }
 
 export async function getEvolutionStatus() {
-    // Relaxed Auth: Don't require GHL token just to check WhatsApp status
-    const location = await getBasicLocationContext();
-    const instanceName = location.id;
-
     try {
+        // Relaxed Auth: Don't require GHL token just to check WhatsApp status
+        const location = await getBasicLocationContext();
+        const instanceName = location.id;
         const { evolutionClient } = await import("@/lib/evolution/client");
         let instance = await evolutionClient.fetchInstance(instanceName);
 
@@ -5113,11 +5112,10 @@ export async function getEvolutionStatus() {
 }
 
 export async function triggerWhatsAppConnection() {
-    // Relaxed Auth
-    const location = await getBasicLocationContext();
-    const instanceName = location.id;
-
     try {
+        // Relaxed Auth
+        const location = await getBasicLocationContext();
+        const instanceName = location.id;
         const { evolutionClient } = await import("@/lib/evolution/client");
 
         // 1. Create if not exists (Idempotent-ish)
