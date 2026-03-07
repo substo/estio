@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Conversation, Message } from "@/lib/ghl/conversations";
 import { GEMINI_FLASH_LATEST_ALIAS } from "@/lib/ai/models";
 import { cn } from "@/lib/utils";
@@ -145,6 +145,7 @@ export function ChatWindow({
     const [jumpMessageId, setJumpMessageId] = useState<string | null>(null);
     const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
     const jumpHighlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const shouldStickToBottomRef = useRef(true);
     const canUseTranscriptOnDemand = transcriptOnDemandEnabled !== false;
     const [addNoteOpen, setAddNoteOpen] = useState(false);
     const [addNoteText, setAddNoteText] = useState("");
@@ -193,6 +194,7 @@ export function ChatWindow({
         setShowTranscriptSearch(false);
         setJumpMessageId(null);
         messageRefs.current = {};
+        shouldStickToBottomRef.current = true;
     }, [conversation.id]);
 
     useEffect(() => {
@@ -204,12 +206,30 @@ export function ChatWindow({
         };
     }, []);
 
-    // Auto-scroll to bottom
     useEffect(() => {
-        if (scrollRef.current) {
-            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-        }
-    }, [messages, loading]);
+        const container = scrollRef.current;
+        if (!container) return;
+
+        const handleScroll = () => {
+            const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+            shouldStickToBottomRef.current = distanceFromBottom <= 80;
+        };
+
+        handleScroll();
+        container.addEventListener("scroll", handleScroll, { passive: true });
+        return () => container.removeEventListener("scroll", handleScroll);
+    }, [conversation.id]);
+
+    // Snap to the latest message before paint on initial thread load.
+    useLayoutEffect(() => {
+        if (loading) return;
+        if (!messages.length && !activityLog.length) return;
+        if (!shouldStickToBottomRef.current) return;
+
+        const container = scrollRef.current;
+        if (!container) return;
+        container.scrollTop = container.scrollHeight;
+    }, [conversation.id, messages, activityLog, loading]);
 
     const handleAddSelectionToBatch = useCallback((item: SelectionBatchInput) => {
         const normalizedText = normalizeSelectionForBatch(item.text);
