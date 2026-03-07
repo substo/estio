@@ -8,7 +8,8 @@
         "build": "NODE_OPTIONS='--max-old-space-size=8192' next build",
         "start": "next start",
         "lint": "next lint",
-        "perf:conversations:db": "node scripts/perf/conversations-db-load-check.js"
+        "perf:conversations:db": "node scripts/perf/conversations-db-load-check.js",
+        "perf:conversations:e2e": "node scripts/perf/conversations-e2e-smoke.js"
     },
     "dependencies": {
         "@aws-sdk/client-s3": "^3.995.0",
