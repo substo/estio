@@ -195,10 +195,13 @@ export function GoogleSyncManager({
             }
 
             if (res.success) {
-                if (res.syncState || res.contactPatch) {
+                const syncState = 'syncState' in res ? res.syncState : null;
+                const contactPatch = 'contactPatch' in res ? res.contactPatch : null;
+
+                if (syncState || contactPatch) {
                     onSyncStateChange?.({
-                        ...(res.syncState || {}),
-                        ...(res.contactPatch ? { contactPatch: res.contactPatch } : {})
+                        ...(syncState || {}),
+                        ...(contactPatch ? { contactPatch } : {})
                     });
                 }
                 toast({ title: "Success", description: res.message });

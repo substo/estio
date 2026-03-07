@@ -1,5 +1,6 @@
 import db from './db';
 import { GHL_CONFIG } from '@/config/ghl';
+import { withResilience } from '@/lib/external/resilience';
 
 export async function getLocationByGhlContext(ghlAgencyId: string, ghlLocationId: string | null) {
     if (!ghlAgencyId) return null;
@@ -41,12 +42,18 @@ export async function refreshGhlAccessToken(location: any) {
     params.append('grant_type', 'refresh_token');
     params.append('refresh_token', location.ghlRefreshToken);
 
-    const response = await fetch(`${GHL_CONFIG.API_BASE_URL}${GHL_CONFIG.ENDPOINTS.TOKEN}`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: params,
+    const response = await withResilience({
+        breakerKey: `ghl-token-refresh:${location.id || "unknown"}`,
+        timeoutMs: 12_000,
+        timeoutMessage: "GHL token refresh timed out",
+        retry: { attempts: 3, baseDelayMs: 300, maxDelayMs: 2000 },
+        task: async () => fetch(`${GHL_CONFIG.API_BASE_URL}${GHL_CONFIG.ENDPOINTS.TOKEN}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: params,
+        }),
     });
 
     if (!response.ok) {

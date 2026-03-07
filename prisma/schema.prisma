@@ -707,6 +707,7 @@ model Viewing {
   outboxJobs       ViewingOutbox[]
 
   @@index([contactId])
+  @@index([contactId, date(sort: Asc)])
   @@index([propertyId])
   @@index([userId])
 }
@@ -831,6 +832,7 @@ model ContactHistory {
 
   @@index([contactId])
   @@index([createdAt])
+  @@index([contactId, createdAt(sort: Desc)])
 }
 
 model DealContext {
@@ -949,6 +951,9 @@ model Conversation {
   @@index([lastMessageAt])
   @@index([deletedAt])
   @@index([archivedAt])
+  @@index([locationId, deletedAt, archivedAt, lastMessageAt(sort: Desc), id(sort: Desc)])
+  @@index([locationId, deletedAt, lastMessageAt(sort: Desc), id(sort: Desc)])
+  @@index([locationId, updatedAt(sort: Asc), id(sort: Asc)])
 }
 
 model ContactTask {
@@ -987,6 +992,7 @@ model ContactTask {
 
   @@index([locationId, contactId, status, dueAt])
   @@index([conversationId, status, dueAt])
+  @@index([conversationId, deletedAt, status, dueAt])
   @@index([assignedUserId, status, dueAt])
   @@index([deletedAt])
 }
@@ -1146,6 +1152,7 @@ model Message {
 
   @@index([conversationId])
   @@index([createdAt])
+  @@index([conversationId, updatedAt(sort: Desc)])
   @@index([emailThreadId])
 }
 

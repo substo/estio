@@ -1,5 +1,5 @@
 # Conversation Management & Deletion Features
-**Last Updated:** 2026-03-01
+**Last Updated:** 2026-03-07
 
 ## Overview
 This document outlines the architecture and logic for managing conversation lifecycles, including **Soft Deletion**, **Archiving**, **Trash**, and **live inbox/unread state behavior** introduced in Feb 2026.
@@ -121,8 +121,10 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
 - **Unread Badges**: List rows show unread counts from `Conversation.unreadCount`.
 - **Auto Read Reset**: Selecting a conversation marks it read and clears the badge.
 - **Active Thread Live Updates**: While a thread is open, metadata changes trigger silent message refresh; ChatWindow auto-scroll keeps the latest message visible.
-- **Channel Guards**: The composer channel picker disables ineligible channels with a reason tooltip. SMS is blocked when phone is invalid/masked or GHL SMS is not configured; WhatsApp is blocked when eligibility checks fail.
-- **WhatsApp Media Composer**: For WhatsApp-eligible conversations, the composer supports media upload (`image/*`, `audio/*`, and various document types like PDF/CSV) and in-app voice-note recording (`MediaRecorder`). Media is sent through the private R2 -> Evolution `sendMedia` flow and rendered inline (image preview, audio player, or document download link) from signed attachment URLs.
+- **Shared Composer Source of Truth**: Both chats mode and deal mode now render the same reusable composer component (`conversation-composer.tsx`). Composer behavior changes should be implemented once and will apply to `ChatWindow` and `UnifiedTimeline`.
+- **Channel Guards**: The shared composer channel picker disables ineligible channels with a reason tooltip. SMS is blocked when phone is invalid/masked or GHL SMS is not configured; WhatsApp is blocked when eligibility checks fail.
+- **AI Draft Model Picker**: The shared composer loads its model list via `getAiDraftModelPickerStateAction()` and keeps AI Draft plus selection workflows aligned on the same chosen model.
+- **WhatsApp Media Composer**: In any WhatsApp-eligible reply context, the shared composer supports media upload (`image/*`, `audio/*`, and various document types like PDF/CSV) and in-app voice-note recording (`MediaRecorder`). Media is sent through the private R2 -> Evolution `sendMedia` flow and rendered inline (image preview, audio player, or document download link) from signed attachment URLs.
 - **WhatsApp Media Recovery**: Message bubbles now expose `Re-fetch Media` for WhatsApp media messages/placeholders to recover missing or stale attachment storage. Source-of-truth details: [`whatsapp-integration.md`](whatsapp-integration.md#61-media-re-fetch-recovery-mar-2026).
 - **Source of Truth (Selection Workflow)**: This document is the canonical reference for chat text-selection behavior, batch summarize/custom flow, and CRM-log save semantics.
 - **Selection Actions**: Message/email text selection in the chat panel now opens a floating action toolbar with:
@@ -143,6 +145,51 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
   - `Summarize` and `Custom` persist `AgentExecution` records (usage, model, cost estimate, request/response snapshots) and increment conversation token/cost totals.
   - `Paste Lead` persists `Analyze Lead Text` trace metadata when the user confirms import.
   - `Find Contact` is non-AI and does not produce AI usage/trace entries.
+
+## Deal Mode Reply Routing
+This document is also the source of truth for reply-target behavior in `/admin/conversations?mode=deals`.
+
+### Participant Hydration
+- Deal mode no longer relies on the paginated left chat list to infer participants.
+- `getDealContext(id)` returns deal conversation summaries in the same client shape used by the messaging UI:
+  - `id`
+  - `contactId`
+  - `contactName`
+  - `contactPhone`
+  - `contactEmail`
+  - `status`
+  - `type`
+  - `lastMessageType`
+  - `lastMessageDate`
+  - `lastMessageBody`
+  - `unreadCount`
+  - `locationId`
+- The client hydrates the full participant set for the selected deal, even when some participant conversations are outside the currently loaded chat page.
+
+### Deal Contacts Selector
+- Mission Control now renders a **Deal Contacts** section in deal mode.
+- The list is unique by contact, not by conversation row.
+- If one contact has multiple conversations inside the same deal, the UI chooses the newest conversation by `lastMessageDate` as the reply target for that contact.
+- The selected contact drives:
+  - the right-panel details/tasks/viewings/activity context
+  - Mission Control draft approval target
+  - the center-panel composer reply target
+
+### Deterministic Selection Rules
+- If URL `?id=` belongs to a conversation inside the active deal, that participant becomes the selected reply target.
+- Otherwise, the previous in-memory selection is preserved if it is still valid for the deal.
+- Otherwise, the newest participant conversation in the deal is selected.
+
+### Center Panel Behavior In Deal Mode
+- Deal mode keeps the **Unified Timeline** in the center panel.
+- The shared composer is rendered below the unified timeline, not replaced by a single-thread `ChatWindow`.
+- The composer shows `Replying to {contact}` for the currently selected participant.
+- If no valid participant is available yet, the composer is disabled and shows explicit helper text instead of silently disappearing.
+
+### Send Routing Rules
+- Outbound send handlers accept an explicit target conversation rather than assuming the currently active chats-mode thread.
+- Text sends, WhatsApp media sends, and Mission Control draft approvals all route to the currently selected deal participant conversation.
+- Mission Control draft approval derives channel from `getMessageType(selectedConversation)` instead of hardcoding Email.
 
 ## Initiating Conversations
 The `New Conversation` flow acts as a unified entry point to establish threads with local contacts or entirely new leads via external systems.

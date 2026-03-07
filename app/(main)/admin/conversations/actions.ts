@@ -16,9 +16,12 @@ import { z } from "zod";
 import { getModelForTask } from "@/lib/ai/model-router";
 import { callLLM, callLLMWithMetadata } from "@/lib/ai/llm";
 import { auth } from "@clerk/nextjs/server";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag, unstable_cache } from "next/cache";
 import { runGoogleAutoSyncForContact } from "@/lib/google/automation";
 import { createContactTask } from "@/app/(main)/admin/tasks/actions";
+import { createTraceId, withServerTiming } from "@/lib/observability/performance";
+import { getConversationFeatureFlags } from "@/lib/feature-flags";
+import { withResilience } from "@/lib/external/resilience";
 import {
     buildWhatsAppOutboundUploadKey,
     createWhatsAppMediaReadUrl,
@@ -511,6 +514,7 @@ async function persistSelectionLogEntry(args: {
 
     revalidatePath(`/admin/contacts/${conversation.contactId}/view`);
     revalidatePath(`/admin/conversations?id=${encodeURIComponent(conversation.ghlConversationId)}`);
+    invalidateConversationReadCaches(conversation.ghlConversationId);
 
     return {
         success: true as const,
@@ -868,28 +872,255 @@ async function persistTranscriptManualAuditEvent(args: {
     }
 }
 
-async function getAuthenticatedLocation() {
+async function getAuthenticatedLocationReadOnly(options?: { requireGhlToken?: boolean }) {
+    const requireGhlToken = options?.requireGhlToken !== false;
     const location = await getLocationContext();
-    if (!location?.ghlAccessToken) {
+    if (!location) {
+        throw new Error("Unauthorized");
+    }
+    if (requireGhlToken && !location.ghlAccessToken) {
         throw new Error("Unauthorized or GHL not connected");
     }
+    return location;
+}
 
-    // Ensure token is fresh
+async function getAuthenticatedLocationExternal() {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: true });
     try {
-        const refreshed = await refreshGhlAccessToken(location);
-        return refreshed;
+        return await refreshGhlAccessToken(location);
     } catch (e) {
         console.error("Failed to refresh token:", e);
-        // Fallback to existing token if refresh fails (might be valid but API error)
         return location;
     }
 }
+
+// Backward compatibility for existing action implementations.
+async function getAuthenticatedLocation() {
+    return getAuthenticatedLocationExternal();
+}
+
+function mapConversationRowToUi(c: any, location: { ghlLocationId?: string | null }, dealMap?: Map<string, { id: string; title: string }>) {
+    return {
+        id: c.ghlConversationId,
+        contactId: c.contact?.ghlContactId || c.contactId,
+        contactName: c.contact?.name || "Unknown",
+        contactPhone: c.contact?.phone || undefined,
+        contactEmail: c.contact?.email || undefined,
+        lastMessageBody: c.lastMessageBody || "",
+        lastMessageDate: Math.floor(new Date(c.lastMessageAt).getTime() / 1000),
+        unreadCount: c.unreadCount,
+        status: c.status as any,
+        type: c.lastMessageType || 'TYPE_SMS',
+        lastMessageType: c.lastMessageType || undefined,
+        locationId: location.ghlLocationId || "",
+        activeDealId: dealMap?.get(c.ghlConversationId)?.id,
+        activeDealTitle: dealMap?.get(c.ghlConversationId)?.title,
+        suggestedActions: c.suggestedActions || [],
+    } satisfies Conversation;
+}
+
+function buildConversationStatusWhere(status: 'active' | 'archived' | 'trash' | 'tasks' | 'all', locationId: string) {
+    const where: any = { locationId };
+    if (status === 'active') {
+        where.deletedAt = null;
+        where.archivedAt = null;
+    } else if (status === 'archived') {
+        where.deletedAt = null;
+        where.archivedAt = { not: null };
+    } else if (status === 'trash') {
+        where.deletedAt = { not: null };
+    }
+    return where;
+}
+
+function doesConversationMatchStatus(
+    status: 'active' | 'archived' | 'trash' | 'tasks' | 'all',
+    row: { deletedAt: Date | null; archivedAt: Date | null }
+) {
+    if (status === "active") return !row.deletedAt && !row.archivedAt;
+    if (status === "archived") return !row.deletedAt && !!row.archivedAt;
+    if (status === "trash") return !!row.deletedAt;
+    return true;
+}
+
+type ConversationCursor = { id: string; lastMessageAtMs: number };
+type ConversationDeltaCursor = { id: string; updatedAtMs: number };
+
+function encodeConversationDeltaCursor(input: ConversationDeltaCursor) {
+    return Buffer.from(JSON.stringify({
+        id: input.id,
+        updatedAtMs: input.updatedAtMs,
+    }), "utf8").toString("base64");
+}
+
+function decodeConversationDeltaCursor(raw?: string | null): ConversationDeltaCursor | null {
+    if (!raw) return null;
+    try {
+        const parsed = JSON.parse(Buffer.from(raw, "base64").toString("utf8"));
+        const id = String(parsed?.id || "");
+        const updatedAtMs = Number(parsed?.updatedAtMs);
+        if (!Number.isFinite(updatedAtMs)) return null;
+        return { id, updatedAtMs };
+    } catch {
+        return null;
+    }
+}
+
+function decodeConversationCursor(raw?: string | null): ConversationCursor | null {
+    if (!raw) return null;
+    try {
+        const parsed = JSON.parse(Buffer.from(raw, "base64").toString("utf8"));
+        const id = String(parsed?.id || "");
+        const lastMessageAtMs = Number(parsed?.lastMessageAtMs);
+        if (!id || !Number.isFinite(lastMessageAtMs)) return null;
+        return { id, lastMessageAtMs };
+    } catch {
+        return null;
+    }
+}
+
+function encodeConversationCursor(input: { id: string; lastMessageAt: Date }) {
+    return Buffer.from(JSON.stringify({
+        id: input.id,
+        lastMessageAtMs: input.lastMessageAt.getTime(),
+    }), "utf8").toString("base64");
+}
+
+function buildConversationDeltaCursorFromRows(rows: Array<{ id: string; updatedAt: Date }>): string {
+    if (rows.length === 0) {
+        return encodeConversationDeltaCursor({
+            id: "",
+            updatedAtMs: Date.now(),
+        });
+    }
+
+    let latest: ConversationDeltaCursor = {
+        id: "",
+        updatedAtMs: Number.NEGATIVE_INFINITY,
+    };
+
+    for (const row of rows) {
+        const updatedAtMs = new Date(row.updatedAt).getTime();
+        if (
+            updatedAtMs > latest.updatedAtMs
+            || (updatedAtMs === latest.updatedAtMs && String(row.id) > String(latest.id || ""))
+        ) {
+            latest = { id: String(row.id), updatedAtMs };
+        }
+    }
+
+    return encodeConversationDeltaCursor(latest);
+}
+
+function invalidateConversationReadCaches(conversationGhlId?: string | null) {
+    revalidateTag("conversations:list");
+    revalidateTag("conversations:workspace");
+    revalidateTag("conversations:transcript-eligibility");
+    if (conversationGhlId) {
+        revalidatePath(`/admin/conversations?id=${encodeURIComponent(conversationGhlId)}`);
+    }
+}
+
+async function queryConversationListSnapshot(args: {
+    locationId: string;
+    status: "active" | "archived" | "trash" | "tasks" | "all";
+    cursor: ConversationCursor | null;
+    pageSize: number;
+    selectedConversationId?: string | null;
+}) {
+    const where = buildConversationStatusWhere(args.status, args.locationId);
+    const paginatedWhere: any = args.cursor
+        ? {
+            ...where,
+            OR: [
+                { lastMessageAt: { lt: new Date(args.cursor.lastMessageAtMs) } },
+                {
+                    AND: [
+                        { lastMessageAt: { equals: new Date(args.cursor.lastMessageAtMs) } },
+                        { id: { lt: args.cursor.id } },
+                    ],
+                },
+            ],
+        }
+        : where;
+
+    const fetchedRows = await db.conversation.findMany({
+        where: paginatedWhere,
+        orderBy: [{ lastMessageAt: "desc" }, { id: "desc" }],
+        take: args.pageSize + 1,
+        include: { contact: { select: { name: true, email: true, phone: true, ghlContactId: true } } },
+    });
+
+    const hasMore = fetchedRows.length > args.pageSize;
+    const pageRows = hasMore ? fetchedRows.slice(0, args.pageSize) : fetchedRows;
+    const lastRowForCursor = pageRows.length > 0 ? pageRows[pageRows.length - 1] : null;
+    const nextCursor = hasMore && lastRowForCursor
+        ? encodeConversationCursor({ id: lastRowForCursor.id, lastMessageAt: lastRowForCursor.lastMessageAt })
+        : null;
+
+    let rows = pageRows;
+    if (
+        !args.cursor &&
+        args.selectedConversationId &&
+        !rows.some((item: any) => item.ghlConversationId === args.selectedConversationId)
+    ) {
+        const selectedConversation = await db.conversation.findFirst({
+            where: {
+                locationId: args.locationId,
+                ghlConversationId: args.selectedConversationId,
+            },
+            include: { contact: { select: { name: true, email: true, phone: true, ghlContactId: true } } },
+        });
+        if (selectedConversation) {
+            rows = [selectedConversation, ...rows];
+        }
+    }
+
+    const activeDeals = await db.dealContext.findMany({
+        where: {
+            locationId: args.locationId,
+            stage: "ACTIVE",
+            conversationIds: { hasSome: rows.map((item: any) => item.ghlConversationId) },
+        },
+        select: { id: true, title: true, conversationIds: true },
+    });
+
+    const dealMap = new Map<string, { id: string; title: string }>();
+    for (const deal of activeDeals) {
+        for (const conversationId of deal.conversationIds) {
+            dealMap.set(conversationId, { id: deal.id, title: deal.title });
+        }
+    }
+
+    return {
+        rows,
+        hasMore,
+        nextCursor,
+        dealMapEntries: Array.from(dealMap.entries()),
+    };
+}
+
+const getCachedConversationListSnapshot = unstable_cache(
+    async (
+        locationId: string,
+        status: "active" | "archived" | "trash" | "tasks" | "all",
+        cursor: ConversationCursor | null,
+        pageSize: number,
+        selectedConversationId?: string | null
+    ) => queryConversationListSnapshot({ locationId, status, cursor, pageSize, selectedConversationId }),
+    ["conversations:list:snapshot:v2"],
+    {
+        revalidate: 8,
+        tags: ["conversations:list"],
+    }
+);
 
 export async function fetchConversations(
     status: 'active' | 'archived' | 'trash' | 'tasks' | 'all' = 'active',
     selectedConversationId?: string | null,
     options?: { cursor?: string | null; limit?: number | null }
 ) {
+    const traceId = createTraceId();
     try {
         const DEFAULT_PAGE_SIZE = 50;
         const MAX_PAGE_SIZE = 200;
@@ -897,270 +1128,62 @@ export async function fetchConversations(
             Math.max(Number(options?.limit || DEFAULT_PAGE_SIZE) || DEFAULT_PAGE_SIZE, 1),
             MAX_PAGE_SIZE
         );
+        const cursor = decodeConversationCursor(options?.cursor);
+        const location = await getAuthenticatedLocationReadOnly();
+        const flags = getConversationFeatureFlags(location.id);
 
-        const decodeCursor = (raw?: string | null): { id: string; lastMessageAtMs: number } | null => {
-            if (!raw) return null;
-            try {
-                const parsed = JSON.parse(Buffer.from(raw, 'base64').toString('utf8'));
-                const id = String(parsed?.id || '');
-                const lastMessageAtMs = Number(parsed?.lastMessageAtMs);
-                if (!id || !Number.isFinite(lastMessageAtMs)) return null;
-                return { id, lastMessageAtMs };
-            } catch {
-                return null;
-            }
-        };
-
-        const encodeCursor = (input: { id: string; lastMessageAt: Date }) =>
-            Buffer.from(JSON.stringify({
-                id: input.id,
-                lastMessageAtMs: input.lastMessageAt.getTime(),
-            }), 'utf8').toString('base64');
-
-        const cursor = decodeCursor(options?.cursor);
-        const location = await getAuthenticatedLocation();
-
-        const where: any = { locationId: location.id };
-
-        // Apply soft delete and archive filters
-        if (status === 'active') {
-            // Active conversations: not deleted and not archived
-            where.deletedAt = null;
-            where.archivedAt = null;
-        } else if (status === 'archived') {
-            // Archived conversations: not deleted but archived
-            where.deletedAt = null;
-            where.archivedAt = { not: null };
-        } else if (status === 'trash') {
-            // Trash: only deleted conversations
-            where.deletedAt = { not: null };
-        }
-        // 'all' applies no filter (shows everything)
-
-        // Check if we need to bootstrap (Empty DB)
-        const count = await db.conversation.count({ where: { locationId: location.id } });
-
-        if (count === 0 && location.ghlAccessToken && location.ghlLocationId) {
-            console.log("Local conversation DB empty. Bootstrapping from GHL...");
-            try {
-                // Import dynamically to avoid circular deps if any, though likely safe
-                const { syncConversationBatch } = await import("@/lib/ghl/sync");
-                await syncConversationBatch(location.ghlAccessToken, location.ghlLocationId, location.id);
-            } catch (syncErr) {
-                console.error("Bootstrap sync failed:", syncErr);
-            }
-        }
-
-        // 1. Fetch Conversations from DB
-        // We fetch with ghlContactId to potentially simplify mapping
-
-
-        // Re-fetch with ghlContactId
-        const paginatedWhere: any = cursor
-            ? {
-                ...where,
-                OR: [
-                    { lastMessageAt: { lt: new Date(cursor.lastMessageAtMs) } },
-                    {
-                        AND: [
-                            { lastMessageAt: { equals: new Date(cursor.lastMessageAtMs) } },
-                            { id: { lt: cursor.id } }
-                        ]
-                    }
-                ]
-            }
-            : where;
-
-        const fetchedRows = await db.conversation.findMany({
-            where: paginatedWhere,
-            orderBy: [{ lastMessageAt: 'desc' }, { id: 'desc' }],
-            take: pageSize + 1,
-            include: { contact: { select: { name: true, email: true, phone: true, ghlContactId: true } } }
-        });
-
-        const hasMore = fetchedRows.length > pageSize;
-        const pageRows = hasMore ? fetchedRows.slice(0, pageSize) : fetchedRows;
-        const lastRowForCursor = pageRows.length > 0 ? pageRows[pageRows.length - 1] : null;
-        const nextCursor = hasMore && lastRowForCursor
-            ? encodeCursor({ id: lastRowForCursor.id, lastMessageAt: lastRowForCursor.lastMessageAt })
-            : null;
-
-        let conversationsWithGhlId = pageRows;
-
-        // If a conversation is deep-linked via ?id=... but falls outside the top-50 window,
-        // include it so the center/right panels can still render for that selection.
-        if (
-            !cursor &&
-            selectedConversationId &&
-            !conversationsWithGhlId.some((c: any) => c.ghlConversationId === selectedConversationId)
-        ) {
-            const selectedConversation = await db.conversation.findFirst({
-                where: {
-                    locationId: location.id,
-                    ghlConversationId: selectedConversationId,
-                },
-                include: { contact: { select: { name: true, email: true, phone: true, ghlContactId: true } } }
-            });
-
-            if (selectedConversation) {
-                conversationsWithGhlId = [selectedConversation, ...conversationsWithGhlId];
-            }
-        }
-
-        // Optional UX pinning for the legacy CRM notifier thread (same contact thread used for old CRM lead emails).
-        const legacyCrmPinSettings = await db.location.findUnique({
-            where: { id: location.id },
-            select: {
-                legacyCrmLeadEmailPinConversation: true,
-                legacyCrmLeadEmailSenders: true,
-                legacyCrmLeadEmailSenderDomains: true,
-            } as any
-        });
-
-        if ((legacyCrmPinSettings as any)?.legacyCrmLeadEmailPinConversation) {
-            const configuredSenders = (((legacyCrmPinSettings as any)?.legacyCrmLeadEmailSenders || []) as string[])
-                .map((s) => String(s || '').trim().toLowerCase())
-                .filter(Boolean);
-            const configuredDomains = (((legacyCrmPinSettings as any)?.legacyCrmLeadEmailSenderDomains || []) as string[])
-                .map((d) => String(d || '').trim().toLowerCase().replace(/^@/, ''))
-                .filter(Boolean);
-
-            // If the pinned notifier thread falls outside the top page window, inject it so pinning
-            // still works on the default conversations page (same behavior as deep-link inclusion).
-            if (!cursor) {
-                const hasPinnedConversationInWindow = conversationsWithGhlId.some((c: any) => {
-                    const email = String(c.contact?.email || '').trim().toLowerCase();
-                    if (!email) return false;
-                    const matchMode = matchLegacyCrmLeadSender(email, {
-                        senders: configuredSenders,
-                        domains: configuredDomains,
-                    });
-                    return matchMode === 'exact' || matchMode === 'domain';
-                });
-
-                if (!hasPinnedConversationInWindow && (configuredSenders.length > 0 || configuredDomains.length > 0)) {
-                    const emailFilters: any[] = [
-                        ...configuredSenders.map((sender) => ({
-                            contact: {
-                                email: {
-                                    equals: sender,
-                                    mode: 'insensitive'
-                                }
-                            }
-                        })),
-                        ...configuredDomains.flatMap((domain) => ([
-                            {
-                                contact: {
-                                    email: {
-                                        endsWith: `@${domain}`,
-                                        mode: 'insensitive'
-                                    }
-                                }
-                            },
-                            {
-                                contact: {
-                                    email: {
-                                        endsWith: `.${domain}`,
-                                        mode: 'insensitive'
-                                    }
-                                }
-                            }
-                        ]))
-                    ];
-
-                    if (emailFilters.length > 0) {
-                        const pinnedConversationOffWindow = await db.conversation.findFirst({
-                            where: {
-                                ...where,
-                                OR: emailFilters,
-                            },
-                            orderBy: [{ lastMessageAt: 'desc' }, { id: 'desc' }],
-                            include: { contact: { select: { name: true, email: true, phone: true, ghlContactId: true } } }
-                        });
-
-                        if (
-                            pinnedConversationOffWindow &&
-                            !conversationsWithGhlId.some((c: any) => c.id === pinnedConversationOffWindow.id)
-                        ) {
-                            conversationsWithGhlId = [pinnedConversationOffWindow, ...conversationsWithGhlId];
-                        }
-                    }
-                }
-            }
-
-            const pinnedIndex = conversationsWithGhlId.findIndex((c: any) => {
-                const email = String(c.contact?.email || '').trim().toLowerCase();
-                if (!email) return false;
-                const matchMode = matchLegacyCrmLeadSender(email, {
-                    senders: configuredSenders,
-                    domains: configuredDomains,
-                });
-                return matchMode === 'exact' || matchMode === 'domain';
-            });
-
-            if (pinnedIndex > 0) {
-                const [pinnedConversation] = conversationsWithGhlId.splice(pinnedIndex, 1);
-                conversationsWithGhlId.unshift(pinnedConversation);
-            }
-        }
-
-        // 2. Fetch Active Deals relevant to these conversations
-        const activeDeals = await db.dealContext.findMany({
-            where: {
-                locationId: location.id,
-                stage: 'ACTIVE',
-                conversationIds: {
-                    hasSome: conversationsWithGhlId.map((c: any) => c.ghlConversationId)
-                }
-            },
-            select: { id: true, title: true, conversationIds: true }
-        });
-
-        // Map conversation ID to Deal (first match, assuming one active deal per convo usually)
-        const dealMap = new Map<string, { id: string, title: string }>();
-        for (const deal of activeDeals) {
-            for (const id of deal.conversationIds) {
-                // If collision, first one wins or overwrite? Overwrite is fine.
-                dealMap.set(id, { id: deal.id, title: deal.title });
-            }
-        }
-
-        return {
-            conversations: conversationsWithGhlId.map((c: any) => ({
-                id: c.ghlConversationId,
-                contactId: c.contact.ghlContactId || c.contactId, // Fallback to internal ID if GHL ID missing
-                contactName: c.contact.name || "Unknown",
-                contactPhone: c.contact.phone || undefined,
-                contactEmail: c.contact.email || undefined,
-                lastMessageBody: c.lastMessageBody || "",
-                lastMessageDate: Math.floor(c.lastMessageAt.getTime() / 1000),
-                unreadCount: c.unreadCount,
-                status: c.status as any,
-                type: c.lastMessageType || 'TYPE_SMS',
-                lastMessageType: c.lastMessageType || undefined,
-                locationId: location.ghlLocationId || "",
-                // Injected Deal Info
-                activeDealId: dealMap.get(c.ghlConversationId)?.id,
-                activeDealTitle: dealMap.get(c.ghlConversationId)?.title,
-                suggestedActions: c.suggestedActions || []
-            })),
-            total: conversationsWithGhlId.length,
-            hasMore,
-            nextCursor,
+        return await withServerTiming("conversations.fetch_list", {
+            traceId,
+            locationId: location.id,
+            status,
             pageSize,
-        };
+            hasCursor: !!cursor,
+            selectedConversationId: selectedConversationId || null,
+            cached: flags.workspaceV2,
+        }, async () => {
+            const snapshot = flags.workspaceV2
+                ? await getCachedConversationListSnapshot(location.id, status, cursor, pageSize, selectedConversationId || null)
+                : await queryConversationListSnapshot({
+                    locationId: location.id,
+                    status,
+                    cursor,
+                    pageSize,
+                    selectedConversationId,
+                });
+
+            const dealMap = new Map<string, { id: string; title: string }>(snapshot.dealMapEntries);
+            const conversations = snapshot.rows.map((row: any) => mapConversationRowToUi(row, location, dealMap));
+            return {
+                traceId,
+                conversations,
+                total: conversations.length,
+                hasMore: snapshot.hasMore,
+                nextCursor: snapshot.nextCursor,
+                pageSize,
+                deltaCursor: buildConversationDeltaCursorFromRows(snapshot.rows),
+            };
+        });
     } catch (error: any) {
         console.error("fetchConversations error:", error);
-        return { conversations: [], total: 0, hasMore: false, nextCursor: null, pageSize: 0 };
+        return { traceId, conversations: [], total: 0, hasMore: false, nextCursor: null, pageSize: 0, deltaCursor: null };
     }
 }
 
-export async function fetchMessages(conversationId: string) {
-    const location = await getAuthenticatedLocation();
+export async function fetchMessages(
+    conversationId: string,
+    options?: { ensureHistory?: boolean }
+) {
+    const ensureHistory = !!options?.ensureHistory;
+    const location = ensureHistory
+        ? await getAuthenticatedLocationExternal()
+        : await getAuthenticatedLocationReadOnly();
 
     // 1. Find the conversation first to get Contact/Location Context
-    const conversation = await db.conversation.findUnique({
-        where: { ghlConversationId: conversationId },
+    const conversation = await db.conversation.findFirst({
+        where: {
+            ghlConversationId: conversationId,
+            locationId: location.id,
+        },
         include: { contact: true }
     });
 
@@ -1172,8 +1195,8 @@ export async function fetchMessages(conversationId: string) {
         return [];
     }
 
-    // Ensure we have history (Auto-backfill if empty)
-    if (conversation.contactId) {
+    // Optional history backfill. Disabled by default for fast read paths.
+    if (ensureHistory && conversation.contactId && location.ghlAccessToken) {
         await ensureConversationHistory(conversation.contactId, location.id, location.ghlAccessToken!);
     }
 
@@ -1335,6 +1358,655 @@ export async function fetchMessages(conversationId: string) {
         // Hydrated fields for UI
         html: m.body?.includes('<') ? m.body : undefined // Simple check
     }));
+}
+
+type ConversationWorkspaceTaskSummary = {
+    total: number;
+    open: number;
+    completed: number;
+    highPriorityOpen: number;
+    nextDueAt: string | null;
+    latestUpdatedAt: string | null;
+};
+
+type ConversationWorkspaceViewingSummary = {
+    total: number;
+    upcoming: number;
+    completed: number;
+    nextViewingAt: string | null;
+    latestUpdatedAt: string | null;
+};
+
+type ConversationWorkspaceAgentSummary = {
+    hasPlan: boolean;
+    totalPlanSteps: number;
+    completedPlanSteps: number;
+    latestExecutionAt: string | null;
+    latestExecutionStatus: string | null;
+};
+
+type ConversationWorkspaceMetadata = {
+    conversationHeader: Conversation;
+    contactContext: any;
+    taskSummary: ConversationWorkspaceTaskSummary;
+    viewingSummary: ConversationWorkspaceViewingSummary;
+    agentSummary: ConversationWorkspaceAgentSummary;
+    freshness: {
+        generatedAt: string;
+        conversationUpdatedAt: string | null;
+        latestMessageAt: string | null;
+        latestMessageUpdatedAt: string | null;
+        latestActivityAt: string | null;
+        threadStale: boolean;
+    };
+};
+
+type ConversationWorkspaceOptions = {
+    includeMessages?: boolean;
+    includeActivity?: boolean;
+    includeContactContext?: boolean;
+    includeTaskSummary?: boolean;
+    includeViewingSummary?: boolean;
+    includeAgentSummary?: boolean;
+    messageLimit?: number;
+    activityLimit?: number;
+};
+
+const DEFAULT_WORKSPACE_MESSAGE_LIMIT = 200;
+const MAX_WORKSPACE_MESSAGE_LIMIT = 500;
+const DEFAULT_WORKSPACE_ACTIVITY_LIMIT = 120;
+const MAX_WORKSPACE_ACTIVITY_LIMIT = 400;
+const DEFAULT_LIST_DELTA_LIMIT = 150;
+const MAX_LIST_DELTA_LIMIT = 400;
+
+async function getConversationContactContextSnapshot(locationId: string, contactId: string) {
+    const [contact, leadSources] = await Promise.all([
+        db.contact.findFirst({
+            where: {
+                id: contactId,
+                locationId,
+            },
+            include: {
+                propertyRoles: {
+                    include: {
+                        property: {
+                            select: {
+                                id: true,
+                                title: true,
+                                reference: true,
+                                price: true,
+                            },
+                        },
+                    },
+                },
+                viewings: {
+                    take: 5,
+                    orderBy: { date: "desc" },
+                    include: {
+                        property: { select: { title: true } },
+                    },
+                },
+            },
+        }),
+        db.leadSource.findMany({
+            where: { locationId, isActive: true },
+            select: { name: true },
+            orderBy: { name: "asc" },
+        }),
+    ]);
+
+    return {
+        contact,
+        leadSources: leadSources.map((source) => source.name),
+    };
+}
+
+function parsePlanSteps(plan: unknown) {
+    const steps = Array.isArray(plan) ? plan : [];
+    let completed = 0;
+    for (const step of steps) {
+        const status = String((step as any)?.status || "").toLowerCase();
+        if (status === "done" || status === "completed" || status === "success") completed += 1;
+    }
+    return {
+        total: steps.length,
+        completed,
+    };
+}
+
+async function queryConversationWorkspaceMetadata(args: {
+    locationId: string;
+    locationGhlId?: string | null;
+    conversationId: string;
+}) {
+    const conversation = await db.conversation.findFirst({
+        where: {
+            locationId: args.locationId,
+            ghlConversationId: args.conversationId,
+        },
+        include: {
+            contact: {
+                select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                    phone: true,
+                    ghlContactId: true,
+                },
+            },
+        },
+    });
+
+    if (!conversation) return null;
+
+    const [activeDealRows, contactContext, taskMetrics, viewingMetrics, latestExecution, latestMessage, latestActivity] = await Promise.all([
+        db.dealContext.findMany({
+            where: {
+                locationId: args.locationId,
+                stage: "ACTIVE",
+                conversationIds: { has: conversation.ghlConversationId },
+            },
+            select: { id: true, title: true },
+            take: 1,
+        }),
+        getConversationContactContextSnapshot(args.locationId, conversation.contactId),
+        (async () => {
+            const [total, open, completed, highPriorityOpen, nextDueTask, latestTask] = await Promise.all([
+                db.contactTask.count({
+                    where: {
+                        locationId: args.locationId,
+                        conversationId: conversation.id,
+                        deletedAt: null,
+                    },
+                }),
+                db.contactTask.count({
+                    where: {
+                        locationId: args.locationId,
+                        conversationId: conversation.id,
+                        deletedAt: null,
+                        status: { in: ["open", "pending", "in_progress"] },
+                    },
+                }),
+                db.contactTask.count({
+                    where: {
+                        locationId: args.locationId,
+                        conversationId: conversation.id,
+                        deletedAt: null,
+                        status: { in: ["completed", "done"] },
+                    },
+                }),
+                db.contactTask.count({
+                    where: {
+                        locationId: args.locationId,
+                        conversationId: conversation.id,
+                        deletedAt: null,
+                        status: { in: ["open", "pending", "in_progress"] },
+                        priority: "high",
+                    },
+                }),
+                db.contactTask.findFirst({
+                    where: {
+                        locationId: args.locationId,
+                        conversationId: conversation.id,
+                        deletedAt: null,
+                        status: { in: ["open", "pending", "in_progress"] },
+                        dueAt: { not: null },
+                    },
+                    select: { dueAt: true },
+                    orderBy: [{ dueAt: "asc" }],
+                }),
+                db.contactTask.findFirst({
+                    where: {
+                        locationId: args.locationId,
+                        conversationId: conversation.id,
+                        deletedAt: null,
+                    },
+                    select: { updatedAt: true },
+                    orderBy: [{ updatedAt: "desc" }],
+                }),
+            ]);
+
+            return {
+                total,
+                open,
+                completed,
+                highPriorityOpen,
+                nextDueAt: nextDueTask?.dueAt ? new Date(nextDueTask.dueAt).toISOString() : null,
+                latestUpdatedAt: latestTask?.updatedAt ? new Date(latestTask.updatedAt).toISOString() : null,
+            } satisfies ConversationWorkspaceTaskSummary;
+        })(),
+        (async () => {
+            const [total, upcoming, completed, nextViewing, latestViewing] = await Promise.all([
+                db.viewing.count({
+                    where: { contactId: conversation.contactId },
+                }),
+                db.viewing.count({
+                    where: {
+                        contactId: conversation.contactId,
+                        date: { gte: new Date() },
+                    },
+                }),
+                db.viewing.count({
+                    where: {
+                        contactId: conversation.contactId,
+                        status: { in: ["completed", "done"] },
+                    },
+                }),
+                db.viewing.findFirst({
+                    where: {
+                        contactId: conversation.contactId,
+                        date: { gte: new Date() },
+                    },
+                    select: { date: true },
+                    orderBy: [{ date: "asc" }],
+                }),
+                db.viewing.findFirst({
+                    where: {
+                        contactId: conversation.contactId,
+                    },
+                    select: { updatedAt: true },
+                    orderBy: [{ updatedAt: "desc" }],
+                }),
+            ]);
+
+            return {
+                total,
+                upcoming,
+                completed,
+                nextViewingAt: nextViewing?.date ? new Date(nextViewing.date).toISOString() : null,
+                latestUpdatedAt: latestViewing?.updatedAt ? new Date(latestViewing.updatedAt).toISOString() : null,
+            } satisfies ConversationWorkspaceViewingSummary;
+        })(),
+        db.agentExecution.findFirst({
+            where: { conversationId: conversation.id },
+            select: {
+                createdAt: true,
+                status: true,
+            },
+            orderBy: { createdAt: "desc" },
+        }),
+        db.message.findFirst({
+            where: { conversationId: conversation.id },
+            select: { createdAt: true, updatedAt: true },
+            orderBy: { createdAt: "desc" },
+        }),
+        db.contactHistory.findFirst({
+            where: { contactId: conversation.contactId },
+            select: { createdAt: true },
+            orderBy: { createdAt: "desc" },
+        }),
+    ]);
+
+    const dealMap = new Map<string, { id: string; title: string }>();
+    for (const row of activeDealRows) {
+        dealMap.set(conversation.ghlConversationId, { id: row.id, title: row.title });
+    }
+
+    const parsedPlan = parsePlanSteps(conversation.agentPlan);
+    const latestMessageAtIso = conversation.lastMessageAt ? new Date(conversation.lastMessageAt).toISOString() : null;
+    const nowMs = Date.now();
+    const threadStale = isLikelyWhatsAppConversation(conversation.lastMessageType)
+        && (!!latestMessageAtIso && (nowMs - new Date(latestMessageAtIso).getTime()) > 5 * 60 * 1000);
+
+    return {
+        conversationHeader: mapConversationRowToUi(
+            conversation,
+            { ghlLocationId: args.locationGhlId || null },
+            dealMap
+        ),
+        contactContext,
+        taskSummary: taskMetrics,
+        viewingSummary: viewingMetrics,
+        agentSummary: {
+            hasPlan: parsedPlan.total > 0,
+            totalPlanSteps: parsedPlan.total,
+            completedPlanSteps: parsedPlan.completed,
+            latestExecutionAt: latestExecution?.createdAt ? new Date(latestExecution.createdAt).toISOString() : null,
+            latestExecutionStatus: latestExecution?.status || null,
+        },
+        freshness: {
+            generatedAt: new Date().toISOString(),
+            conversationUpdatedAt: conversation.updatedAt ? new Date(conversation.updatedAt).toISOString() : null,
+            latestMessageAt: latestMessageAtIso,
+            latestMessageUpdatedAt: latestMessage?.updatedAt ? new Date(latestMessage.updatedAt).toISOString() : null,
+            latestActivityAt: latestActivity?.createdAt ? new Date(latestActivity.createdAt).toISOString() : null,
+            threadStale,
+        },
+    } satisfies ConversationWorkspaceMetadata;
+}
+
+const getCachedConversationWorkspaceMetadata = unstable_cache(
+    async (locationId: string, locationGhlId: string | null, conversationId: string) =>
+        queryConversationWorkspaceMetadata({ locationId, locationGhlId, conversationId }),
+    ["conversations:workspace:metadata:v1"],
+    {
+        revalidate: 8,
+        tags: ["conversations:workspace"],
+    }
+);
+
+export async function getConversationWorkspace(
+    conversationId: string,
+    options?: ConversationWorkspaceOptions
+) {
+    const traceId = createTraceId();
+    const trimmedConversationId = String(conversationId || "").trim();
+
+    if (!trimmedConversationId) {
+        return {
+            success: false as const,
+            traceId,
+            error: "Missing conversation ID.",
+        };
+    }
+
+    try {
+        const location = await getAuthenticatedLocationReadOnly();
+        const flags = getConversationFeatureFlags(location.id);
+
+        const includeMessages = options?.includeMessages !== false;
+        const includeActivity = options?.includeActivity !== false;
+        const includeContactContext = options?.includeContactContext !== false;
+        const includeTaskSummary = options?.includeTaskSummary !== false;
+        const includeViewingSummary = options?.includeViewingSummary !== false;
+        const includeAgentSummary = options?.includeAgentSummary !== false;
+        const messageLimit = Math.min(
+            Math.max(Number(options?.messageLimit || DEFAULT_WORKSPACE_MESSAGE_LIMIT), 1),
+            MAX_WORKSPACE_MESSAGE_LIMIT
+        );
+        const activityLimit = Math.min(
+            Math.max(Number(options?.activityLimit || DEFAULT_WORKSPACE_ACTIVITY_LIMIT), 1),
+            MAX_WORKSPACE_ACTIVITY_LIMIT
+        );
+
+        return await withServerTiming("conversations.workspace", {
+            traceId,
+            locationId: location.id,
+            conversationId: trimmedConversationId,
+            includeMessages,
+            includeActivity,
+            includeContactContext,
+            includeTaskSummary,
+            includeViewingSummary,
+            includeAgentSummary,
+            workspaceV2: flags.workspaceV2,
+        }, async () => {
+            const metadata = flags.workspaceV2
+                ? await getCachedConversationWorkspaceMetadata(location.id, location.ghlLocationId || null, trimmedConversationId)
+                : await queryConversationWorkspaceMetadata({
+                    locationId: location.id,
+                    locationGhlId: location.ghlLocationId || null,
+                    conversationId: trimmedConversationId,
+                });
+
+            if (!metadata) {
+                return {
+                    success: false as const,
+                    traceId,
+                    error: "Conversation not found.",
+                };
+            }
+
+            const [messages, activityTimeline, transcriptEligibility] = await Promise.all([
+                includeMessages
+                    ? fetchMessages(trimmedConversationId).then((items) => items.slice(-messageLimit))
+                    : Promise.resolve([] as Message[]),
+                includeActivity
+                    ? db.contactHistory.findMany({
+                        where: {
+                            contactId: String(metadata.contactContext?.contact?.id || ""),
+                        },
+                        include: {
+                            user: { select: { name: true, email: true } },
+                        },
+                        orderBy: { createdAt: "desc" },
+                        take: activityLimit,
+                    }).then((rows) =>
+                        rows
+                            .slice()
+                            .reverse()
+                            .map((entry) => ({
+                                id: entry.id,
+                                type: "activity",
+                                createdAt: entry.createdAt.toISOString(),
+                                action: entry.action,
+                                changes: entry.changes,
+                                user: entry.user ? { name: entry.user.name, email: entry.user.email } : null,
+                            }))
+                    )
+                    : Promise.resolve([] as any[]),
+                getWhatsAppTranscriptOnDemandEligibility(trimmedConversationId)
+                    .catch(() => ({
+                        success: false as const,
+                        enabled: false as const,
+                        reason: "Failed to resolve eligibility.",
+                    })),
+            ]);
+
+            return {
+                success: true as const,
+                traceId,
+                conversationHeader: metadata.conversationHeader,
+                messages,
+                activityTimeline,
+                contactContext: includeContactContext ? metadata.contactContext : null,
+                taskSummary: includeTaskSummary ? metadata.taskSummary : null,
+                viewingSummary: includeViewingSummary ? metadata.viewingSummary : null,
+                agentSummary: includeAgentSummary ? metadata.agentSummary : null,
+                transcriptEligibility,
+                freshness: metadata.freshness,
+            };
+        });
+    } catch (error: any) {
+        console.error("[getConversationWorkspace] Error:", error);
+        return {
+            success: false as const,
+            traceId,
+            error: error?.message || "Failed to load workspace.",
+        };
+    }
+}
+
+export async function getConversationListDelta(
+    status: 'active' | 'archived' | 'trash' | 'tasks' | 'all' = 'active',
+    sinceCursor?: string | null,
+    activeConversationId?: string | null,
+    options?: { limit?: number }
+) {
+    const traceId = createTraceId();
+
+    try {
+        const normalizedStatus = status === "tasks" ? "active" : status;
+        const location = await getAuthenticatedLocationReadOnly();
+        const parsedCursor = decodeConversationDeltaCursor(sinceCursor);
+        const limit = Math.min(
+            Math.max(Number(options?.limit || DEFAULT_LIST_DELTA_LIMIT), 1),
+            MAX_LIST_DELTA_LIMIT
+        );
+
+        if (!parsedCursor) {
+            return {
+                success: true as const,
+                traceId,
+                status: normalizedStatus,
+                deltas: [],
+                cursor: encodeConversationDeltaCursor({ id: "", updatedAtMs: Date.now() }),
+                changedCount: 0,
+                activeConversationChanged: false,
+            };
+        }
+
+        return await withServerTiming("conversations.list_delta", {
+            traceId,
+            locationId: location.id,
+            status: normalizedStatus,
+            hasCursor: !!parsedCursor,
+            limit,
+            activeConversationId: activeConversationId || null,
+        }, async () => {
+            const rows = await db.conversation.findMany({
+                where: {
+                    locationId: location.id,
+                    OR: [
+                        { updatedAt: { gt: new Date(parsedCursor.updatedAtMs) } },
+                        {
+                            AND: [
+                                { updatedAt: { equals: new Date(parsedCursor.updatedAtMs) } },
+                                { id: { gt: parsedCursor.id || "" } },
+                            ],
+                        },
+                    ],
+                },
+                orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
+                take: limit,
+                include: {
+                    contact: { select: { name: true, email: true, phone: true, ghlContactId: true } },
+                },
+            });
+
+            if (rows.length === 0) {
+                return {
+                    success: true as const,
+                    traceId,
+                    status: normalizedStatus,
+                    deltas: [],
+                    cursor: encodeConversationDeltaCursor(parsedCursor),
+                    changedCount: 0,
+                    activeConversationChanged: false,
+                };
+            }
+
+            const activeDeals = await db.dealContext.findMany({
+                where: {
+                    locationId: location.id,
+                    stage: "ACTIVE",
+                    conversationIds: {
+                        hasSome: rows.map((item) => item.ghlConversationId),
+                    },
+                },
+                select: { id: true, title: true, conversationIds: true },
+            });
+
+            const dealMap = new Map<string, { id: string; title: string }>();
+            for (const deal of activeDeals) {
+                for (const conversationId of deal.conversationIds) {
+                    dealMap.set(conversationId, { id: deal.id, title: deal.title });
+                }
+            }
+
+            const deltas = rows.map((row) => {
+                const matchesFilter = doesConversationMatchStatus(normalizedStatus, row);
+                return {
+                    id: row.ghlConversationId,
+                    matchesFilter,
+                    unreadCount: row.unreadCount,
+                    lastMessageBody: row.lastMessageBody || "",
+                    lastMessageDate: Math.floor(new Date(row.lastMessageAt).getTime() / 1000),
+                    conversation: matchesFilter ? mapConversationRowToUi(row, location, dealMap) : null,
+                };
+            });
+
+            const lastRow = rows[rows.length - 1];
+            const nextCursor = encodeConversationDeltaCursor({
+                id: lastRow.id,
+                updatedAtMs: new Date(lastRow.updatedAt).getTime(),
+            });
+            const activeConversationChanged = !!activeConversationId && deltas.some((item) => item.id === activeConversationId);
+
+            return {
+                success: true as const,
+                traceId,
+                status: normalizedStatus,
+                deltas,
+                cursor: nextCursor,
+                changedCount: deltas.length,
+                activeConversationChanged,
+            };
+        });
+    } catch (error: any) {
+        console.error("[getConversationListDelta] Error:", error);
+        return {
+            success: false as const,
+            traceId,
+            status,
+            deltas: [],
+            cursor: sinceCursor || null,
+            changedCount: 0,
+            activeConversationChanged: false,
+            error: error?.message || "Failed to load conversation delta.",
+        };
+    }
+}
+
+export async function refreshConversationOnDemand(
+    conversationId: string,
+    mode: "metadata_only" | "full_sync" = "metadata_only"
+) {
+    const traceId = createTraceId();
+    const trimmedConversationId = String(conversationId || "").trim();
+    if (!trimmedConversationId) {
+        return {
+            success: false as const,
+            traceId,
+            mode,
+            error: "Missing conversation ID.",
+        };
+    }
+
+    try {
+        const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: mode === "full_sync" });
+        const conversation = await db.conversation.findFirst({
+            where: {
+                locationId: location.id,
+                ghlConversationId: trimmedConversationId,
+            },
+            select: {
+                id: true,
+                ghlConversationId: true,
+                contactId: true,
+            },
+        });
+
+        if (!conversation) {
+            return {
+                success: false as const,
+                traceId,
+                mode,
+                error: "Conversation not found.",
+            };
+        }
+
+        if (mode === "metadata_only") {
+            const refreshed = await refreshConversation(trimmedConversationId);
+            invalidateConversationReadCaches(trimmedConversationId);
+            return {
+                success: true as const,
+                traceId,
+                mode,
+                conversation: refreshed,
+            };
+        }
+
+        const syncResult = await syncWhatsAppHistory(trimmedConversationId, 50, false, 0);
+        invalidateConversationReadCaches(trimmedConversationId);
+
+        return {
+            success: !!syncResult?.success,
+            traceId,
+            mode,
+            syncedCount: Number(syncResult?.count || 0),
+            skippedCount: Number(syncResult?.skipped || 0),
+            error: syncResult?.success ? null : String(syncResult?.error || "Sync failed."),
+        };
+    } catch (error: any) {
+        console.error("[refreshConversationOnDemand] Error:", error);
+        return {
+            success: false as const,
+            traceId,
+            mode,
+            error: error?.message || "Failed to refresh conversation.",
+        };
+    }
 }
 
 const MAX_TRANSCRIPT_SEARCH_QUERY_LENGTH = 180;
@@ -2309,13 +2981,53 @@ export async function refetchWhatsAppMediaAttachment(
     };
 }
 
+async function queryTranscriptOnDemandEligibilityBase(locationId: string, conversationId: string) {
+    const [enabled, conversation] = await Promise.all([
+        isWhatsAppTranscriptOnDemandEnabledForLocation(locationId),
+        db.conversation.findUnique({
+            where: { ghlConversationId: conversationId },
+            select: {
+                id: true,
+                locationId: true,
+                lastMessageType: true,
+            },
+        }),
+    ]);
+
+    return {
+        enabled,
+        conversation,
+    };
+}
+
+const getCachedTranscriptOnDemandEligibilityBase = unstable_cache(
+    async (locationId: string, conversationId: string) =>
+        queryTranscriptOnDemandEligibilityBase(locationId, conversationId),
+    ["conversations:transcript_eligibility:v1"],
+    {
+        revalidate: 12,
+        tags: ["conversations:transcript-eligibility"],
+    }
+);
+
 export async function getWhatsAppTranscriptOnDemandEligibility(conversationId: string) {
     try {
-        const location = await getAuthenticatedLocation();
-        const enabled = await isWhatsAppTranscriptOnDemandEnabledForLocation(location.id);
-        const manualAccess = await resolveTranscriptManualActionAccess(location.id);
+        const location = await getAuthenticatedLocationReadOnly();
+        const trimmedConversationId = String(conversationId || "").trim();
+        if (!trimmedConversationId) {
+            return {
+                success: false as const,
+                enabled: false as const,
+                reason: "Missing conversation ID.",
+            };
+        }
 
-        if (!enabled) {
+        const [base, manualAccess] = await Promise.all([
+            getCachedTranscriptOnDemandEligibilityBase(location.id, trimmedConversationId),
+            resolveTranscriptManualActionAccess(location.id),
+        ]);
+
+        if (!base.enabled) {
             return {
                 success: true as const,
                 enabled: false as const,
@@ -2331,25 +3043,7 @@ export async function getWhatsAppTranscriptOnDemandEligibility(conversationId: s
             };
         }
 
-        const trimmedConversationId = String(conversationId || "").trim();
-        if (!trimmedConversationId) {
-            return {
-                success: false as const,
-                enabled: false as const,
-                reason: "Missing conversation ID.",
-            };
-        }
-
-        const conversation = await db.conversation.findUnique({
-            where: { ghlConversationId: trimmedConversationId },
-            select: {
-                id: true,
-                locationId: true,
-                lastMessageType: true,
-            },
-        });
-
-        if (!conversation || conversation.locationId !== location.id) {
+        if (!base.conversation || base.conversation.locationId !== location.id) {
             return {
                 success: false as const,
                 enabled: false as const,
@@ -2357,7 +3051,7 @@ export async function getWhatsAppTranscriptOnDemandEligibility(conversationId: s
             };
         }
 
-        if (!isLikelyWhatsAppConversation(conversation.lastMessageType)) {
+        if (!isLikelyWhatsAppConversation(base.conversation.lastMessageType)) {
             return {
                 success: true as const,
                 enabled: false as const,
@@ -3278,10 +3972,13 @@ export async function retryWhatsAppAudioTranscript(
 }
 
 export async function syncWhatsAppHistory(conversationId: string, limit: number = 20, ignoreDuplicates: boolean = false, offset: number = 0) {
-    const location = await getAuthenticatedLocation();
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
 
-    const conversation = await db.conversation.findUnique({
-        where: { ghlConversationId: conversationId },
+    const conversation = await db.conversation.findFirst({
+        where: {
+            ghlConversationId: conversationId,
+            locationId: location.id,
+        },
         include: { contact: true }
     });
 
@@ -3499,6 +4196,9 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
             }
         }
 
+        if (synced > 0) {
+            invalidateConversationReadCaches(conversationId);
+        }
         return { success: true, count: synced, skipped };
     } catch (e: any) {
         console.error("Manual sync failed:", e);
@@ -3866,7 +4566,13 @@ export async function sendWhatsAppMediaReply(
         }
 
         const { evolutionClient } = await import("@/lib/evolution/client");
-        const instanceState = await evolutionClient.fetchInstance(location.evolutionInstanceId!);
+        const instanceState = await withResilience({
+            breakerKey: `evolution:send_media_status:${location.evolutionInstanceId}`,
+            timeoutMs: 8_000,
+            timeoutMessage: "Timed out checking WhatsApp connection status.",
+            retry: { attempts: 2, baseDelayMs: 250, maxDelayMs: 1500 },
+            task: async () => evolutionClient.fetchInstance(location.evolutionInstanceId!),
+        });
         const instanceData = Array.isArray(instanceState) ? instanceState[0] : instanceState;
         const connStatus = instanceData?.instance?.connectionStatus || instanceData?.connectionStatus || instanceData?.status;
 
@@ -3988,6 +4694,7 @@ export async function sendWhatsAppMediaReply(
             })();
         }
 
+        invalidateConversationReadCaches(conversationId);
         return { success: true, messageId: created.id };
     } catch (err: any) {
         console.error("Evolution API media send failed:", err);
@@ -4129,7 +4836,13 @@ export async function sendReply(conversationId: string, contactId: string, messa
                     const { evolutionClient } = await import("@/lib/evolution/client");
 
                     // Verify connection is actually alive (DB status can be stale)
-                    const instanceState = await evolutionClient.fetchInstance(location.evolutionInstanceId!);
+                    const instanceState = await withResilience({
+                        breakerKey: `evolution:send_message_status:${location.evolutionInstanceId}`,
+                        timeoutMs: 8_000,
+                        timeoutMessage: "Timed out checking WhatsApp connection status.",
+                        retry: { attempts: 2, baseDelayMs: 250, maxDelayMs: 1500 },
+                        task: async () => evolutionClient.fetchInstance(location.evolutionInstanceId!),
+                    });
                     // Handle different response structures (array or object)
                     const instanceData = Array.isArray(instanceState) ? instanceState[0] : instanceState;
                     const connStatus = instanceData?.instance?.connectionStatus || instanceData?.connectionStatus || instanceData?.status;
@@ -4254,6 +4967,7 @@ export async function sendReply(conversationId: string, contactId: string, messa
                             console.warn('[sendReply] No access token available for GHL sync.');
                         }
 
+                        invalidateConversationReadCaches(conversationId);
                         return { success: true };
                     } else {
                         return { success: false, error: "Message sent but no confirmation received." };
@@ -4313,6 +5027,7 @@ export async function sendReply(conversationId: string, contactId: string, messa
                         };
 
                         await syncMessageFromWebhook(msgData);
+                        invalidateConversationReadCaches(conversationId);
                         return { success: true };
                     }
                 }
@@ -4375,6 +5090,7 @@ export async function sendReply(conversationId: string, contactId: string, messa
             await syncMessageFromWebhook(msgData);
         }
 
+        invalidateConversationReadCaches(conversationId);
         return { success: true };
     } catch (error) {
         console.error("sendMessage error:", error);
@@ -4627,8 +5343,11 @@ export async function generateMultiContextDraftAction(dealContextId: string, tar
     });
 }
 
-export async function getContactContext(contactId: string) {
-    const location = await getAuthenticatedLocation();
+export async function getContactContext(contactId: string, options?: { refreshExternal?: boolean }) {
+    const refreshExternal = !!options?.refreshExternal;
+    const location = refreshExternal
+        ? await getAuthenticatedLocationExternal()
+        : await getAuthenticatedLocationReadOnly();
 
     if (!contactId || contactId === 'unknown') return null;
 
@@ -4664,9 +5383,8 @@ export async function getContactContext(contactId: string) {
         }
     });
 
-    // 2. If found locally and has GHL ID, try to Refresh (JIT Sync)
-    // We wrap this in try-catch so we don't block the UI if GHL is down/slow
-    if (contact && contact.ghlContactId) {
+    // Optional external refresh when explicitly requested.
+    if (refreshExternal && contact && contact.ghlContactId && location.ghlAccessToken) {
         try {
             await ensureLocalContactSynced(contact.ghlContactId, location.id, location.ghlAccessToken!);
         } catch (e) {
@@ -4675,7 +5393,7 @@ export async function getContactContext(contactId: string) {
     }
 
     // 3. If NOT found locally, assume it's a GHL ID and try to import it
-    if (!contact) {
+    if (!contact && refreshExternal && location.ghlAccessToken) {
         try {
             const synced = await ensureLocalContactSynced(contactId, location.id, location.ghlAccessToken!);
             if (synced) {
@@ -5028,12 +5746,24 @@ export async function getWhatsAppChannelEligibility(conversationId: string) {
 }
 
 export async function getEvolutionStatus() {
+    const traceId = createTraceId();
     try {
         // Relaxed Auth: Don't require GHL token just to check WhatsApp status
         const location = await getBasicLocationContext();
         const instanceName = location.id;
         const { evolutionClient } = await import("@/lib/evolution/client");
-        let instance = await evolutionClient.fetchInstance(instanceName);
+        let instance = await withServerTiming("conversations.evolution_status", {
+            traceId,
+            locationId: location.id,
+            instanceName,
+            step: "fetch_instance",
+        }, async () => withResilience({
+            breakerKey: `evolution:status:${instanceName}`,
+            timeoutMs: 8_000,
+            timeoutMessage: "Evolution status check timed out",
+            retry: { attempts: 2, baseDelayMs: 250, maxDelayMs: 1500 },
+            task: async () => evolutionClient.fetchInstance(instanceName),
+        }));
 
         // Auto-Revival Logic:
         // If Evolution API restarted, it might forget the instance handle but keep the session on disk.
@@ -5041,16 +5771,13 @@ export async function getEvolutionStatus() {
         if (!instance) {
             console.log(`Instance ${instanceName} not found. Attempting to revive...`);
             try {
-                // Determine webhook URL
-                const origin = process.env.APP_BASE_URL || 'https://estio.co';
-                const webhookUrl = `${origin}/api/webhooks/evolution`;
-
-                // Try to create (which loads from disk if exists)
-                // We use a simplified call here implicitly relying on client.ts default behavior
-
-
-                // But the client.ts `createInstance` is robust enough.
-                const reviveRes = await evolutionClient.createInstance(location.id, instanceName);
+                const reviveRes = await withResilience({
+                    breakerKey: `evolution:revive:${instanceName}`,
+                    timeoutMs: 12_000,
+                    timeoutMessage: "Evolution instance revive timed out",
+                    retry: { attempts: 2, baseDelayMs: 400, maxDelayMs: 2000 },
+                    task: async () => evolutionClient.createInstance(location.id, instanceName),
+                });
                 if (reviveRes) {
                     console.log(`Instance ${instanceName} revived successfully.`);
                     // Use the result as the instance
@@ -5791,7 +6518,7 @@ export async function getConversationTranscriptUsage(conversationId: string) {
 
 
 export async function refreshConversation(conversationId: string) {
-    const location = await getAuthenticatedLocation();
+    const location = await getAuthenticatedLocationReadOnly();
 
     // Fetch from DB to get latest fields like suggestedActions
     const conversation = await db.conversation.findUnique({
@@ -5820,7 +6547,7 @@ export async function refreshConversation(conversationId: string) {
 }
 
 export async function markConversationAsRead(conversationId: string) {
-    const location = await getAuthenticatedLocation();
+    const location = await getAuthenticatedLocationReadOnly();
 
     if (!conversationId) {
         return { success: false, error: "Missing conversationId" };
@@ -5836,7 +6563,7 @@ export async function markConversationAsRead(conversationId: string) {
                 unreadCount: 0,
             }
         });
-
+        invalidateConversationReadCaches(conversationId);
         return { success: true };
     } catch (error: any) {
         console.error("markConversationAsRead error:", error);
@@ -5845,7 +6572,7 @@ export async function markConversationAsRead(conversationId: string) {
 }
 
 export async function deleteConversations(conversationIds: string[]) {
-    const location = await getAuthenticatedLocation();
+    const location = await getAuthenticatedLocationReadOnly();
 
     if (!conversationIds || conversationIds.length === 0) {
         return { success: false, error: "No conversations selected" };
@@ -5868,6 +6595,7 @@ export async function deleteConversations(conversationIds: string[]) {
         });
 
         console.log(`[Soft Delete] Moved ${result.count} conversations to trash.`);
+        invalidateConversationReadCaches();
         return { success: true, count: result.count };
 
     } catch (error: any) {
@@ -5877,7 +6605,7 @@ export async function deleteConversations(conversationIds: string[]) {
 }
 
 export async function restoreConversations(conversationIds: string[]) {
-    const location = await getAuthenticatedLocation();
+    const location = await getAuthenticatedLocationReadOnly();
 
     if (!conversationIds || conversationIds.length === 0) {
         return { success: false, error: "No conversations selected" };
@@ -5898,6 +6626,7 @@ export async function restoreConversations(conversationIds: string[]) {
         });
 
         console.log(`[Restore] Restored ${result.count} conversations from trash.`);
+        invalidateConversationReadCaches();
         return { success: true, count: result.count };
 
     } catch (error: any) {
@@ -5907,7 +6636,7 @@ export async function restoreConversations(conversationIds: string[]) {
 }
 
 export async function permanentlyDeleteConversations(conversationIds: string[]) {
-    const location = await getAuthenticatedLocation();
+    const location = await getAuthenticatedLocationReadOnly();
 
     if (!conversationIds || conversationIds.length === 0) {
         return { success: false, error: "No conversations selected" };
@@ -5925,6 +6654,7 @@ export async function permanentlyDeleteConversations(conversationIds: string[]) 
         });
 
         console.log(`[Permanent Delete] Permanently deleted ${result.count} conversations.`);
+        invalidateConversationReadCaches();
         return { success: true, count: result.count };
 
     } catch (error: any) {
@@ -5934,7 +6664,7 @@ export async function permanentlyDeleteConversations(conversationIds: string[]) 
 }
 
 export async function archiveConversations(conversationIds: string[]) {
-    const location = await getAuthenticatedLocation();
+    const location = await getAuthenticatedLocationReadOnly();
 
     if (!conversationIds || conversationIds.length === 0) {
         return { success: false, error: "No conversations selected" };
@@ -5955,6 +6685,7 @@ export async function archiveConversations(conversationIds: string[]) {
         });
 
         console.log(`[Archive] Archived ${result.count} conversations.`);
+        invalidateConversationReadCaches();
         return { success: true, count: result.count };
 
     } catch (error: any) {
@@ -5964,7 +6695,7 @@ export async function archiveConversations(conversationIds: string[]) {
 }
 
 export async function unarchiveConversations(conversationIds: string[]) {
-    const location = await getAuthenticatedLocation();
+    const location = await getAuthenticatedLocationReadOnly();
 
     if (!conversationIds || conversationIds.length === 0) {
         return { success: false, error: "No conversations selected" };
@@ -5984,6 +6715,7 @@ export async function unarchiveConversations(conversationIds: string[]) {
         });
 
         console.log(`[Unarchive] Unarchived ${result.count} conversations.`);
+        invalidateConversationReadCaches();
         return { success: true, count: result.count };
 
     } catch (error: any) {
@@ -5993,7 +6725,7 @@ export async function unarchiveConversations(conversationIds: string[]) {
 }
 
 export async function emptyTrash() {
-    const location = await getAuthenticatedLocation();
+    const location = await getAuthenticatedLocationReadOnly();
 
     try {
         // Permanently delete all conversations in trash
@@ -6005,6 +6737,7 @@ export async function emptyTrash() {
         });
 
         console.log(`[Empty Trash] Permanently deleted ${result.count} conversations from trash.`);
+        invalidateConversationReadCaches();
         return { success: true, count: result.count };
 
     } catch (error: any) {
@@ -9129,14 +9862,16 @@ export async function processLegacyCrmLeadEmailAction(
 }
 export async function searchConversations(query: string, options?: { limit?: number }) {
     try {
-        const location = await getAuthenticatedLocation();
+        const location = await getAuthenticatedLocationReadOnly();
+        const traceId = createTraceId();
         const MAX_SEARCH_LIMIT = 50;
         const limit = Math.min(Math.max(Number(options?.limit || 20), 1), MAX_SEARCH_LIMIT);
 
-        const q = String(query || "").trim();
+        const q = String(query || "").trim().replace(/\s+/g, " ");
         if (!q) {
             return {
                 success: true,
+                traceId,
                 conversations: [],
                 total: 0,
                 hasMore: false,
@@ -9145,100 +9880,165 @@ export async function searchConversations(query: string, options?: { limit?: num
             };
         }
 
-        // Phase 1: Contact matching
-        // We look for contacts matching the query in various fields
-        const contactMatches = await db.contact.findMany({
-            where: {
+        const likeQuery = `%${q}%`;
+        let rankedRows: Array<{ conversationId: string; score: number }> = [];
+        try {
+            rankedRows = await withServerTiming("conversations.search", {
+                traceId,
                 locationId: location.id,
-                OR: [
-                    { name: { contains: q, mode: 'insensitive' } },
-                    { firstName: { contains: q, mode: 'insensitive' } },
-                    { lastName: { contains: q, mode: 'insensitive' } },
-                    { email: { contains: q, mode: 'insensitive' } },
-                    { phone: { contains: q, mode: 'insensitive' } },
-                    { notes: { contains: q, mode: 'insensitive' } },
-                    { leadGoal: { contains: q, mode: 'insensitive' } },
-                    { requirementOtherDetails: { contains: q, mode: 'insensitive' } },
-                    // Tags array is tricky to search directly with contains, but Prisma 
-                    // supports `has` or string casting sometimes. For text search, 
-                    // we'll rely on the other fields or require exact tag match if used.
-                ]
-            },
-            select: {
-                id: true,
-            },
-            take: limit
-        });
-
-        const contactIds = contactMatches.map(c => c.id);
-
-        // Find conversations for these contacts
-        const contactConversations = await db.conversation.findMany({
-            where: {
-                locationId: location.id,
-                deletedAt: null, // Only search active/archived
-                contactId: { in: contactIds }
-            },
-            select: { id: true }
-        });
-
-        // Phase 2: Message & Transcript matching
-        // Search message bodies
-        const messageMatches = await db.message.findMany({
-            where: {
-                conversation: {
+                limit,
+                queryLength: q.length,
+            }, async () => db.$queryRaw<Array<{ conversationId: string; score: number }>>`
+            WITH search_term AS (
+                SELECT ${q}::text AS q, plainto_tsquery('simple', ${q}) AS tsq
+            ),
+            contact_hits AS (
+                SELECT
+                    c.id AS "conversationId",
+                    GREATEST(
+                        similarity(COALESCE(ct.name, ''), st.q),
+                        similarity(COALESCE(ct.email, ''), st.q),
+                        similarity(COALESCE(ct.phone, ''), st.q)
+                    ) + 0.8 * ts_rank_cd(
+                        to_tsvector(
+                            'simple',
+                            COALESCE(ct.name, '') || ' ' ||
+                            COALESCE(ct."firstName", '') || ' ' ||
+                            COALESCE(ct."lastName", '') || ' ' ||
+                            COALESCE(ct.email, '') || ' ' ||
+                            COALESCE(ct.phone, '') || ' ' ||
+                            COALESCE(ct.notes, '') || ' ' ||
+                            COALESCE(ct."requirementOtherDetails", '')
+                        ),
+                        st.tsq
+                    ) AS score
+                FROM "Conversation" c
+                JOIN "Contact" ct ON ct.id = c."contactId"
+                CROSS JOIN search_term st
+                WHERE c."locationId" = ${location.id}
+                  AND c."deletedAt" IS NULL
+                  AND (
+                    to_tsvector(
+                        'simple',
+                        COALESCE(ct.name, '') || ' ' ||
+                        COALESCE(ct."firstName", '') || ' ' ||
+                        COALESCE(ct."lastName", '') || ' ' ||
+                        COALESCE(ct.email, '') || ' ' ||
+                        COALESCE(ct.phone, '') || ' ' ||
+                        COALESCE(ct.notes, '') || ' ' ||
+                        COALESCE(ct."requirementOtherDetails", '')
+                    ) @@ st.tsq
+                    OR COALESCE(ct.name, '') ILIKE ${likeQuery}
+                    OR COALESCE(ct.email, '') ILIKE ${likeQuery}
+                    OR COALESCE(ct.phone, '') ILIKE ${likeQuery}
+                  )
+            ),
+            conversation_hits AS (
+                SELECT
+                    c.id AS "conversationId",
+                    0.7 + similarity(COALESCE(c."lastMessageBody", ''), st.q)
+                    + 0.4 * ts_rank_cd(to_tsvector('simple', COALESCE(c."lastMessageBody", '')), st.tsq) AS score
+                FROM "Conversation" c
+                CROSS JOIN search_term st
+                WHERE c."locationId" = ${location.id}
+                  AND c."deletedAt" IS NULL
+                  AND (
+                    to_tsvector('simple', COALESCE(c."lastMessageBody", '')) @@ st.tsq
+                    OR COALESCE(c."lastMessageBody", '') ILIKE ${likeQuery}
+                  )
+            ),
+            message_hits AS (
+                SELECT
+                    m."conversationId" AS "conversationId",
+                    MAX(
+                        0.6 + similarity(COALESCE(m.body, ''), st.q)
+                        + 0.35 * ts_rank_cd(to_tsvector('simple', COALESCE(m.body, '')), st.tsq)
+                    ) AS score
+                FROM "Message" m
+                JOIN "Conversation" c ON c.id = m."conversationId"
+                CROSS JOIN search_term st
+                WHERE c."locationId" = ${location.id}
+                  AND c."deletedAt" IS NULL
+                  AND (
+                    to_tsvector('simple', COALESCE(m.body, '')) @@ st.tsq
+                    OR COALESCE(m.body, '') ILIKE ${likeQuery}
+                  )
+                GROUP BY m."conversationId"
+            ),
+            transcript_hits AS (
+                SELECT
+                    m."conversationId" AS "conversationId",
+                    MAX(
+                        0.5 + similarity(COALESCE(mt.text, ''), st.q)
+                        + 0.3 * ts_rank_cd(to_tsvector('simple', COALESCE(mt.text, '')), st.tsq)
+                    ) AS score
+                FROM "MessageTranscript" mt
+                JOIN "Message" m ON m.id = mt."messageId"
+                JOIN "Conversation" c ON c.id = m."conversationId"
+                CROSS JOIN search_term st
+                WHERE c."locationId" = ${location.id}
+                  AND c."deletedAt" IS NULL
+                  AND (
+                    to_tsvector('simple', COALESCE(mt.text, '')) @@ st.tsq
+                    OR COALESCE(mt.text, '') ILIKE ${likeQuery}
+                  )
+                GROUP BY m."conversationId"
+            ),
+            combined AS (
+                SELECT * FROM contact_hits
+                UNION ALL
+                SELECT * FROM conversation_hits
+                UNION ALL
+                SELECT * FROM message_hits
+                UNION ALL
+                SELECT * FROM transcript_hits
+            )
+            SELECT
+                "conversationId",
+                MAX(score) AS score
+            FROM combined
+            GROUP BY "conversationId"
+            ORDER BY MAX(score) DESC
+            LIMIT ${limit};
+        `);
+        } catch (rawSearchError) {
+            console.warn("[searchConversations] Falling back to Prisma search path:", rawSearchError);
+            const fallbackRows = await db.conversation.findMany({
+                where: {
                     locationId: location.id,
-                    deletedAt: null
+                    deletedAt: null,
+                    OR: [
+                        { lastMessageBody: { contains: q, mode: "insensitive" } },
+                        {
+                            contact: {
+                                OR: [
+                                    { name: { contains: q, mode: "insensitive" } },
+                                    { firstName: { contains: q, mode: "insensitive" } },
+                                    { lastName: { contains: q, mode: "insensitive" } },
+                                    { email: { contains: q, mode: "insensitive" } },
+                                    { phone: { contains: q, mode: "insensitive" } },
+                                    { notes: { contains: q, mode: "insensitive" } },
+                                    { requirementOtherDetails: { contains: q, mode: "insensitive" } },
+                                ],
+                            },
+                        },
+                    ],
                 },
-                body: { contains: q, mode: 'insensitive' }
-            },
-            select: {
-                conversationId: true
-            },
-            take: limit
-        });
+                select: { id: true, lastMessageAt: true },
+                orderBy: [{ lastMessageAt: "desc" }, { id: "desc" }],
+                take: limit,
+            });
+            rankedRows = fallbackRows.map((row, index) => ({
+                conversationId: row.id,
+                score: limit - index,
+            }));
+        }
 
-        // Search transcripts
-        const transcriptMatches = await db.messageTranscript.findMany({
-            where: {
-                message: {
-                    conversation: {
-                        locationId: location.id,
-                        deletedAt: null
-                    }
-                },
-                text: { contains: q, mode: 'insensitive' }
-            },
-            select: {
-                message: {
-                    select: { conversationId: true }
-                }
-            },
-            take: limit
-        });
-
-        // Search conversation last messages
-        const lastMessageMatches = await db.conversation.findMany({
-            where: {
-                locationId: location.id,
-                deletedAt: null,
-                lastMessageBody: { contains: q, mode: 'insensitive' }
-            },
-            select: { id: true },
-            take: limit
-        });
-
-        // Combine unique conversation IDs
-        const matchedConversationIds = new Set<string>([
-            ...contactConversations.map(c => c.id),
-            ...messageMatches.map(m => m.conversationId),
-            ...transcriptMatches.map(t => t.message.conversationId),
-            ...lastMessageMatches.map(c => c.id)
-        ]);
-
-        if (matchedConversationIds.size === 0) {
+        const rankedConversationIds = rankedRows.map((row) => String(row.conversationId));
+        if (rankedConversationIds.length === 0) {
             return {
                 success: true,
+                traceId,
                 conversations: [],
                 total: 0,
                 hasMore: false,
@@ -9246,62 +10046,51 @@ export async function searchConversations(query: string, options?: { limit?: num
                 pageSize: limit,
             };
         }
-
-        // Build the final query to fetch the full conversation objects
-        // similar to fetchConversations
-        const finalLimit = Math.min(matchedConversationIds.size, limit);
 
         const fetchedRows = await db.conversation.findMany({
             where: {
-                id: { in: Array.from(matchedConversationIds) }
+                id: { in: rankedConversationIds },
             },
-            orderBy: [{ lastMessageAt: 'desc' }, { id: 'desc' }],
-            take: finalLimit,
-            include: { contact: { select: { name: true, email: true, phone: true, ghlContactId: true } } }
+            include: {
+                contact: { select: { name: true, email: true, phone: true, ghlContactId: true } },
+            },
         });
 
-        // Fetch active deals as well
         const activeDeals = await db.dealContext.findMany({
             where: {
                 locationId: location.id,
-                stage: 'ACTIVE',
+                stage: "ACTIVE",
                 conversationIds: {
-                    hasSome: fetchedRows.map((c: any) => c.ghlConversationId)
-                }
+                    hasSome: fetchedRows.map((row) => row.ghlConversationId),
+                },
             },
-            select: { id: true, title: true, conversationIds: true }
+            select: { id: true, title: true, conversationIds: true },
         });
 
-        const dealMap = new Map<string, { id: string, title: string }>();
+        const dealMap = new Map<string, { id: string; title: string }>();
         for (const deal of activeDeals) {
-            for (const id of deal.conversationIds) {
-                dealMap.set(id, { id: deal.id, title: deal.title });
+            for (const conversationId of deal.conversationIds) {
+                dealMap.set(conversationId, { id: deal.id, title: deal.title });
             }
         }
 
+        const rankIndex = new Map<string, number>();
+        rankedConversationIds.forEach((id, idx) => rankIndex.set(id, idx));
+        const sortedRows = fetchedRows.sort((a, b) => {
+            const left = rankIndex.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+            const right = rankIndex.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+            if (left !== right) return left - right;
+            return b.lastMessageAt.getTime() - a.lastMessageAt.getTime();
+        });
+
         return {
             success: true,
-            conversations: fetchedRows.map((c: any) => ({
-                id: c.ghlConversationId,
-                contactId: c.contact.ghlContactId || c.contactId,
-                contactName: c.contact.name || "Unknown",
-                contactPhone: c.contact.phone || undefined,
-                contactEmail: c.contact.email || undefined,
-                lastMessageBody: c.lastMessageBody || "",
-                lastMessageDate: Math.floor(c.lastMessageAt.getTime() / 1000),
-                unreadCount: c.unreadCount,
-                status: c.status as any,
-                type: c.lastMessageType || 'TYPE_SMS',
-                lastMessageType: c.lastMessageType || undefined,
-                locationId: location.ghlLocationId || "",
-                activeDealId: dealMap.get(c.ghlConversationId)?.id,
-                activeDealTitle: dealMap.get(c.ghlConversationId)?.title,
-                suggestedActions: c.suggestedActions || []
-            })),
-            total: fetchedRows.length,
-            hasMore: false, // Search doesn't paginate for now to keep UI simple
+            traceId,
+            conversations: sortedRows.map((row) => mapConversationRowToUi(row, location, dealMap)),
+            total: sortedRows.length,
+            hasMore: false,
             nextCursor: null,
-            pageSize: finalLimit,
+            pageSize: limit,
         };
 
     } catch (error: any) {
@@ -9943,7 +10732,7 @@ export async function getViewingsSuggestionFunnelMetrics(input?: z.input<typeof 
 
 export async function getDropdownsForViewingsSuggestion() {
     try {
-        const location = await getAuthenticatedLocation();
+        const location = await getAuthenticatedLocationReadOnly();
         if (!location?.id) return { properties: [], users: [] };
 
         const [properties, users] = await Promise.all([
@@ -9966,7 +10755,7 @@ export async function getDropdownsForViewingsSuggestion() {
 }
 
 export async function fetchConversationActivityLog(conversationId: string) {
-    const location = await getAuthenticatedLocation();
+    const location = await getAuthenticatedLocationReadOnly();
     if (!location?.id) return [];
 
     const conversation = await db.conversation.findFirst({
@@ -10004,7 +10793,7 @@ export async function addConversationActivityEntry(conversationId: string, entry
     const { userId: clerkUserId } = await auth();
     if (!clerkUserId) throw new Error("Unauthorized");
 
-    const location = await getAuthenticatedLocation();
+    const location = await getAuthenticatedLocationReadOnly();
 
     const user = await db.user.findUnique({
         where: { clerkId: clerkUserId },
@@ -10043,6 +10832,7 @@ export async function addConversationActivityEntry(conversationId: string, entry
 
     revalidatePath(`/admin/contacts/${conversation.contactId}/view`);
     revalidatePath(`/admin/conversations?id=${encodeURIComponent(conversation.ghlConversationId)}`);
+    invalidateConversationReadCaches(conversation.ghlConversationId);
 
     return { success: true };
 }

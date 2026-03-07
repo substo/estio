@@ -8,6 +8,9 @@ import type { ContactIdentityPatch } from '../../contacts/_components/contact-fo
 import {
     fetchConversations,
     fetchMessages,
+    getConversationWorkspace,
+    getConversationListDelta,
+    refreshConversationOnDemand,
     sendReply,
     createWhatsAppMediaUploadUrl,
     sendWhatsAppMediaReply,
@@ -25,7 +28,6 @@ import {
     requestWhatsAppAudioTranscript,
     bulkRequestWhatsAppAudioTranscripts,
     extractWhatsAppViewingNotes,
-    getWhatsAppTranscriptOnDemandEligibility,
     searchConversations,
     fetchConversationActivityLog,
     addConversationActivityEntry,
@@ -52,6 +54,7 @@ import {
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
+import type { ConversationFeatureFlags } from '@/lib/feature-flags';
 
 
 interface ConversationInterfaceProps {
@@ -60,7 +63,9 @@ interface ConversationInterfaceProps {
     initialConversationListPageInfo?: {
         hasMore: boolean;
         nextCursor: string | null;
+        deltaCursor?: string | null;
     };
+    featureFlags: ConversationFeatureFlags;
 }
 
 /**
@@ -162,7 +167,7 @@ function buildDealContactOptions(participants: Conversation[]): DealContactOptio
     return Array.from(byContact.values()).sort((a, b) => b.lastMessageDate - a.lastMessageDate);
 }
 
-export function ConversationInterface({ locationId, initialConversations, initialConversationListPageInfo }: ConversationInterfaceProps) {
+export function ConversationInterface({ locationId, initialConversations, initialConversationListPageInfo, featureFlags }: ConversationInterfaceProps) {
     const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();
@@ -198,10 +203,18 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const [activityLog, setActivityLog] = useState<any[]>([]);
     const [conversationListHasMore, setConversationListHasMore] = useState<boolean>(!!initialConversationListPageInfo?.hasMore);
     const [conversationListNextCursor, setConversationListNextCursor] = useState<string | null>(initialConversationListPageInfo?.nextCursor || null);
+    const [conversationDeltaCursor, setConversationDeltaCursor] = useState<string | null>(initialConversationListPageInfo?.deltaCursor || null);
+    const conversationDeltaCursorRef = useRef<string | null>(initialConversationListPageInfo?.deltaCursor || null);
     const [loadingMoreConversations, setLoadingMoreConversations] = useState(false);
     const loadingMoreConversationsRef = useRef(false);
-    const liveSyncInFlightRef = useRef(false);
     const contactSaveRefreshSeqRef = useRef<Record<string, number>>({});
+    const backgroundSyncByConversationRef = useRef<Record<string, number>>({});
+    const [isTabVisible, setIsTabVisible] = useState(true);
+    const [workspaceContactContext, setWorkspaceContactContext] = useState<any>(null);
+    const [workspaceTaskSummary, setWorkspaceTaskSummary] = useState<any>(null);
+    const [workspaceViewingSummary, setWorkspaceViewingSummary] = useState<any>(null);
+    const [workspaceAgentSummary, setWorkspaceAgentSummary] = useState<any>(null);
+    const clientRequestCountRef = useRef<Record<string, number>>({});
 
     // Initialize Active ID from URL
     const initialActiveId = searchParams.get('id') || (initialConversations.length > 0 ? initialConversations[0].id : null);
@@ -231,7 +244,9 @@ export function ConversationInterface({ locationId, initialConversations, initia
         conversationsRef.current = initialConversations;
         setConversationListHasMore(!!initialConversationListPageInfo?.hasMore);
         setConversationListNextCursor(initialConversationListPageInfo?.nextCursor || null);
-    }, [initialConversations, initialConversationListPageInfo?.hasMore, initialConversationListPageInfo?.nextCursor]);
+        setConversationDeltaCursor(initialConversationListPageInfo?.deltaCursor || null);
+        conversationDeltaCursorRef.current = initialConversationListPageInfo?.deltaCursor || null;
+    }, [initialConversations, initialConversationListPageInfo?.hasMore, initialConversationListPageInfo?.nextCursor, initialConversationListPageInfo?.deltaCursor]);
 
     // Global Search Effect
     useEffect(() => {
@@ -302,6 +317,28 @@ export function ConversationInterface({ locationId, initialConversations, initia
     useEffect(() => {
         messagesRef.current = messages;
     }, [messages]);
+
+    useEffect(() => {
+        conversationDeltaCursorRef.current = conversationDeltaCursor;
+    }, [conversationDeltaCursor]);
+
+    const trackClientRequest = useCallback((kind: string, metadata?: Record<string, unknown>) => {
+        const nextCount = (clientRequestCountRef.current[kind] || 0) + 1;
+        clientRequestCountRef.current[kind] = nextCount;
+        console.log("[perf:conversations.client_request]", JSON.stringify({
+            kind,
+            count: nextCount,
+            ts: new Date().toISOString(),
+            ...(metadata || {}),
+        }));
+    }, []);
+
+    useEffect(() => {
+        const onVisibility = () => setIsTabVisible(typeof document === 'undefined' ? true : !document.hidden);
+        onVisibility();
+        document.addEventListener('visibilitychange', onVisibility);
+        return () => document.removeEventListener('visibilitychange', onVisibility);
+    }, []);
 
     // Fetch Deals when switching mode
     useEffect(() => {
@@ -387,7 +424,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [isSelectionMode, setIsSelectionMode] = useState(false);
 
-    const isFirstLoad = useRef(true);
+    const hasHydratedListRef = useRef(false);
 
     const mergeConversationLists = useCallback((existing: Conversation[], incoming: Conversation[]) => {
         const seen = new Set<string>();
@@ -415,31 +452,74 @@ export function ConversationInterface({ locationId, initialConversations, initia
         setConversations(Array.isArray(data?.conversations) ? data.conversations : []);
         setConversationListHasMore(!!data?.hasMore);
         setConversationListNextCursor(typeof data?.nextCursor === 'string' ? data.nextCursor : null);
+        if (typeof data?.deltaCursor === 'string' || data?.deltaCursor === null) {
+            setConversationDeltaCursor(data?.deltaCursor || null);
+            conversationDeltaCursorRef.current = data?.deltaCursor || null;
+        }
     }, []);
 
     const appendConversationPageFromResponse = useCallback((data: any) => {
         setConversations(prev => mergeConversationLists(prev, Array.isArray(data?.conversations) ? data.conversations : []));
         setConversationListHasMore(!!data?.hasMore);
         setConversationListNextCursor(typeof data?.nextCursor === 'string' ? data.nextCursor : null);
+        if (typeof data?.deltaCursor === 'string' || data?.deltaCursor === null) {
+            setConversationDeltaCursor(data?.deltaCursor || null);
+            conversationDeltaCursorRef.current = data?.deltaCursor || null;
+        }
     }, [mergeConversationLists]);
 
-    // Fetch Conversations when View Filter changes
+    const applyConversationDeltaPayload = useCallback((deltaPayload: any) => {
+        const deltas = Array.isArray(deltaPayload?.deltas) ? deltaPayload.deltas : [];
+        if (deltas.length === 0) {
+            if (typeof deltaPayload?.cursor === 'string' || deltaPayload?.cursor === null) {
+                setConversationDeltaCursor(deltaPayload?.cursor || null);
+                conversationDeltaCursorRef.current = deltaPayload?.cursor || null;
+            }
+            return;
+        }
+
+        const incoming = deltas
+            .filter((item: any) => !!item?.matchesFilter && !!item?.conversation)
+            .map((item: any) => item.conversation);
+        const removedIds = new Set(
+            deltas
+                .filter((item: any) => item && item.matchesFilter === false && item.id)
+                .map((item: any) => item.id)
+        );
+        if (activeIdRef.current && removedIds.has(activeIdRef.current)) {
+            setActiveId(null);
+        }
+
+        setConversations((prev) => {
+            const withoutRemoved = removedIds.size > 0
+                ? prev.filter((conversation) => !removedIds.has(conversation.id))
+                : prev;
+            if (incoming.length === 0) return withoutRemoved;
+            return mergeConversationListsWithIncomingFirst(withoutRemoved, incoming);
+        });
+
+        if (typeof deltaPayload?.cursor === 'string' || deltaPayload?.cursor === null) {
+            setConversationDeltaCursor(deltaPayload?.cursor || null);
+            conversationDeltaCursorRef.current = deltaPayload?.cursor || null;
+        }
+    }, [mergeConversationListsWithIncomingFirst]);
+
+    // Fetch Conversations when View Filter changes (skip first load to avoid duplicate SSR refetch).
     useEffect(() => {
+        if (!hasHydratedListRef.current) {
+            hasHydratedListRef.current = true;
+            return;
+        }
+
         // Tasks view uses its own data source (GlobalTaskList), skip conversation fetching.
         if (viewFilter === 'tasks') return;
 
-        // Preserve a deep-linked/off-window selection during the initial hydration fetch and view switches.
-        // fetchConversations() can include the selected conversation even if it falls outside the top list window.
         fetchConversations(viewFilter, activeIdRef.current || undefined)
             .then(data => {
                 replaceConversationListFromResponse(data);
-
-                if (isFirstLoad.current) {
-                    isFirstLoad.current = false;
-                    // Preserve deep linked ID on first load
-                } else {
-                    setActiveId(null); // Deselect when switching views manually
-                }
+                setActiveId(null); // Deselect when switching views manually
+                setMessages([]);
+                setActivityLog([]);
             })
             .catch((err: any) => {
                 console.error("Failed to fetch conversations:", err);
@@ -563,153 +643,294 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const selectedConversations = conversations.filter(c => selectedIds.has(c.id));
     const selectedDealConversation = activeDealParticipants.find((conversation) => conversation.id === activeId) || null;
 
+    // Fetch Messages when active selection changes
     useEffect(() => {
-        let cancelled = false;
-        if (!activeConversation) {
+        if (viewMode !== 'chats') return;
+        if (!activeId) {
+            setMessages([]);
+            setActivityLog([]);
             setTranscriptOnDemandEnabled(false);
+            setWorkspaceContactContext(null);
+            setWorkspaceTaskSummary(null);
+            setWorkspaceViewingSummary(null);
+            setWorkspaceAgentSummary(null);
             return;
         }
 
-        getWhatsAppTranscriptOnDemandEligibility(activeConversation.id)
-            .then((res) => {
-                if (cancelled) return;
-                setTranscriptOnDemandEnabled(!!res?.success && !!res?.enabled);
+        let cancelled = false;
+        const selectedConversationId = activeId;
+        setMessages([]);
+        setActivityLog([]);
+        setTranscriptOnDemandEnabled(false);
+        setWorkspaceContactContext(null);
+        setWorkspaceTaskSummary(null);
+        setWorkspaceViewingSummary(null);
+        setWorkspaceAgentSummary(null);
+        setLoadingMessages(true);
+
+        if (!featureFlags.workspaceV2) {
+            trackClientRequest("legacy_selection_load", { conversationId: selectedConversationId });
+            Promise.all([
+                fetchMessages(selectedConversationId),
+                fetchConversationActivityLog(selectedConversationId),
+                refreshConversation(selectedConversationId),
+            ])
+                .then(([nextMessages, nextActivity, freshConversation]) => {
+                    if (cancelled || activeIdRef.current !== selectedConversationId) return;
+                    setMessages(nextMessages || []);
+                    messageSignatureRef.current = getMessageSignature(nextMessages || []);
+                    setActivityLog(nextActivity || []);
+                    if (freshConversation) {
+                        setConversations((prev) => prev.map((item) =>
+                            item.id === selectedConversationId ? { ...item, ...(freshConversation as any) } : item
+                        ));
+                    }
+                    setWorkspaceContactContext(null);
+                    setWorkspaceTaskSummary(null);
+                    setWorkspaceViewingSummary(null);
+                    setWorkspaceAgentSummary(null);
+                    void markConversationReadInUi(selectedConversationId);
+                })
+                .catch((err) => {
+                    if (cancelled) return;
+                    console.error("Legacy selection load failed:", err);
+                    toast({ title: "Error", description: "Failed to load conversation.", variant: "destructive" });
+                })
+                .finally(() => {
+                    if (!cancelled) setLoadingMessages(false);
+                });
+
+            return () => {
+                cancelled = true;
+            };
+        }
+
+        trackClientRequest("workspace_load", { conversationId: selectedConversationId });
+        getConversationWorkspace(selectedConversationId, {
+            includeMessages: true,
+            includeActivity: true,
+            includeContactContext: true,
+            includeTaskSummary: true,
+            includeViewingSummary: true,
+            includeAgentSummary: true,
+            messageLimit: 250,
+            activityLimit: 180,
+        })
+            .then(async (workspace) => {
+                if (cancelled || activeIdRef.current !== selectedConversationId) return;
+                if (!workspace?.success) {
+                    throw new Error(workspace?.error || "Failed to load conversation workspace");
+                }
+
+                const nextMessages = Array.isArray(workspace?.messages) ? workspace.messages : [];
+                const nextActivity = Array.isArray(workspace?.activityTimeline) ? workspace.activityTimeline : [];
+
+                setMessages(nextMessages);
+                messageSignatureRef.current = getMessageSignature(nextMessages);
+                setActivityLog(nextActivity);
+
+                setWorkspaceContactContext(workspace?.contactContext || null);
+                setWorkspaceTaskSummary(workspace?.taskSummary || null);
+                setWorkspaceViewingSummary(workspace?.viewingSummary || null);
+                setWorkspaceAgentSummary(workspace?.agentSummary || null);
+                setTranscriptOnDemandEnabled(!!workspace?.transcriptEligibility?.success && !!workspace?.transcriptEligibility?.enabled);
+
+                const header = workspace?.conversationHeader;
+                if (header?.id) {
+                    setConversations((prev) => {
+                        if (prev.some((item) => item.id === header.id)) {
+                            return prev.map((item) => item.id === header.id ? { ...item, ...header } : item);
+                        }
+                        return [header, ...prev];
+                    });
+                }
+
+                void markConversationReadInUi(selectedConversationId);
+
+                // Optional background sync for stale threads, throttled per conversation (once / 5 minutes).
+                if (featureFlags.workspaceV2 && workspace?.freshness?.threadStale) {
+                    const nowMs = Date.now();
+                    const lastSyncedMs = backgroundSyncByConversationRef.current[selectedConversationId] || 0;
+                    if (nowMs - lastSyncedMs >= 5 * 60 * 1000) {
+                        backgroundSyncByConversationRef.current[selectedConversationId] = nowMs;
+                        void refreshConversationOnDemand(selectedConversationId, "full_sync")
+                            .then(async (syncRes: any) => {
+                                if (!syncRes?.success || Number(syncRes?.syncedCount || 0) <= 0) return;
+                                const refreshed = await fetchMessages(selectedConversationId);
+                                if (activeIdRef.current !== selectedConversationId) return;
+                                setMessages(refreshed);
+                                messageSignatureRef.current = getMessageSignature(refreshed);
+                                void markConversationReadInUi(selectedConversationId);
+                            })
+                            .catch((err) => console.error("[Workspace Background Sync] Error:", err));
+                    }
+                }
             })
             .catch((err) => {
                 if (cancelled) return;
-                console.error("Failed to resolve transcript on-demand eligibility:", err);
-                setTranscriptOnDemandEnabled(false);
+                console.error("Failed to load conversation workspace:", err);
+                toast({ title: "Error", description: "Failed to load conversation workspace.", variant: "destructive" });
+            })
+            .finally(() => {
+                if (!cancelled) setLoadingMessages(false);
             });
 
         return () => {
             cancelled = true;
         };
-    }, [activeConversation?.id]);
-
-    // Fetch Messages when active selection changes
-    useEffect(() => {
-        if (viewMode !== 'chats') return;
-        if (!activeId) return;
-
-        const selectedConversationId = activeId;
-        setMessages([]); // Clear previous messages immediately!
-        setLoadingMessages(true);
-        fetchMessages(selectedConversationId)
-            .then(msgs => {
-                if (activeIdRef.current !== selectedConversationId) return;
-                setMessages(msgs); // Keep chronological order (Oldest -> Newest)
-                messageSignatureRef.current = getMessageSignature(msgs);
-                void markConversationReadInUi(selectedConversationId);
-
-                // Fetch activity log for this conversation
-                fetchConversationActivityLog(selectedConversationId)
-                    .then(log => {
-                        if (activeIdRef.current !== selectedConversationId) return;
-                        setActivityLog(log);
-                    })
-                    .catch(err => console.error("Failed to fetch activity log:", err));
-
-                // Refresh conversation details (status, suggests, etc)
-                refreshConversation(selectedConversationId).then(fresh => {
-                    if (activeIdRef.current !== selectedConversationId) return;
-                    if (fresh) {
-                        setConversations(prev => prev.map(c => c.id === selectedConversationId ? { ...c, ...fresh } : c));
-                    }
-                });
-
-                // [Background Sync] Smart Sync for selected conversation
-                // This answers: "conversation that is highlighted selected get to be synched in the background"
-                // It runs silently and stops after finding duplicates.
-                if (msgs && msgs.length >= 0) {
-                    // We run this without awaiting or loading state
-                    syncWhatsAppHistory(selectedConversationId, 20).then(res => {
-                        if (res.success && res.count && res.count > 0) {
-                            console.log(`[Smart Sync] Found ${res.count} new messages.`);
-                            // Refresh quietly
-                            fetchMessages(selectedConversationId).then((freshMessages) => {
-                                if (activeIdRef.current !== selectedConversationId) return;
-                                setMessages(freshMessages);
-                                messageSignatureRef.current = getMessageSignature(freshMessages);
-                                void markConversationReadInUi(selectedConversationId);
-                            });
-                        }
-                    }).catch(err => console.error("[Smart Sync] Error:", err));
-                }
-            })
-            .catch(err => console.error(err))
-            .finally(() => setLoadingMessages(false));
-    }, [viewMode, activeId, markConversationReadInUi]);
+    }, [viewMode, activeId, markConversationReadInUi, featureFlags.workspaceV2, trackClientRequest]);
 
     useEffect(() => {
-        if (viewMode !== 'chats' || viewFilter !== 'active') return;
+        if (viewMode !== 'chats' || viewFilter === 'tasks') return;
+        if (!isTabVisible) return;
+        if (debouncedSearchQuery.trim()) return;
 
         let cancelled = false;
+        const intervalMs = featureFlags.balancedPolling ? 15_000 : 3_000;
 
-        const runLiveSync = async () => {
-            if (liveSyncInFlightRef.current) return;
-            liveSyncInFlightRef.current = true;
+        const runListDeltaSync = async () => {
+            try {
+                const selectedConversationId = activeIdRef.current || undefined;
+                if (!featureFlags.workspaceV2) {
+                    trackClientRequest("legacy_list_poll", { viewFilter });
+                    const snapshot = await fetchConversations(viewFilter, selectedConversationId);
+                    if (cancelled) return;
+                    replaceConversationListFromResponse(snapshot);
+                    return;
+                }
+
+                trackClientRequest("list_delta_poll", { viewFilter });
+                const delta = await getConversationListDelta(
+                    viewFilter,
+                    conversationDeltaCursorRef.current,
+                    selectedConversationId
+                );
+                if (cancelled || !delta?.success) return;
+                applyConversationDeltaPayload(delta);
+
+                if (selectedConversationId && Array.isArray(delta?.deltas)) {
+                    const activeDelta = delta.deltas.find((item: any) => item?.id === selectedConversationId);
+                    if (activeDelta && Number(activeDelta.unreadCount || 0) > 0) {
+                        void markConversationReadInUi(selectedConversationId);
+                    }
+                }
+            } catch (err) {
+                if (!cancelled) {
+                    console.error("List delta sync failed:", err);
+                }
+            }
+        };
+
+        runListDeltaSync();
+        const intervalId = setInterval(runListDeltaSync, intervalMs);
+
+        return () => {
+            cancelled = true;
+            clearInterval(intervalId);
+        };
+    }, [viewMode, viewFilter, isTabVisible, debouncedSearchQuery, featureFlags.balancedPolling, featureFlags.workspaceV2, applyConversationDeltaPayload, markConversationReadInUi, replaceConversationListFromResponse, trackClientRequest]);
+
+    useEffect(() => {
+        if (viewMode !== 'chats' || !activeId) return;
+        if (!isTabVisible) return;
+
+        let cancelled = false;
+        const pendingTranscripts = hasPendingTranscripts(messagesRef.current);
+        const intervalMs = featureFlags.balancedPolling
+            ? (pendingTranscripts ? 8_000 : 20_000)
+            : 3_000;
+
+        const runActiveConversationDelta = async () => {
+            const selectedConversationId = activeIdRef.current;
+            if (!selectedConversationId) return;
 
             try {
-                const selectedConversationId = activeIdRef.current;
-                const currentList = conversationsRef.current;
-                const currentActive = selectedConversationId
-                    ? currentList.find((c) => c.id === selectedConversationId)
-                    : null;
+                if (!featureFlags.workspaceV2) {
+                    trackClientRequest("legacy_active_poll", { conversationId: selectedConversationId, pendingTranscripts });
+                    const [latestMessages, latestActivity, freshConversation] = await Promise.all([
+                        fetchMessages(selectedConversationId),
+                        fetchConversationActivityLog(selectedConversationId),
+                        refreshConversation(selectedConversationId),
+                    ]);
+                    if (cancelled || activeIdRef.current !== selectedConversationId) return;
 
-                const data = await fetchConversations('active', selectedConversationId || undefined);
-                if (cancelled) return;
-
-                const incoming = Array.isArray(data?.conversations) ? data.conversations : [];
-                if (incoming.length === 0) return;
-
-                setConversations(prev => mergeConversationListsWithIncomingFirst(prev, incoming));
-
-                if (!selectedConversationId) return;
-
-                const incomingActive = incoming.find((c) => c.id === selectedConversationId);
-                if (!incomingActive) return;
-
-                const hasActiveConversationChanged =
-                    !currentActive ||
-                    incomingActive.lastMessageDate !== currentActive.lastMessageDate ||
-                    incomingActive.lastMessageBody !== currentActive.lastMessageBody;
-
-                const shouldPollPendingTranscripts = hasPendingTranscripts(messagesRef.current);
-
-                if (!hasActiveConversationChanged && !shouldPollPendingTranscripts) {
-                    if ((incomingActive.unreadCount || 0) > 0) {
-                        void markConversationReadInUi(selectedConversationId);
+                    const latestSignature = getMessageSignature(latestMessages || []);
+                    if (latestSignature !== messageSignatureRef.current) {
+                        messageSignatureRef.current = latestSignature;
+                        setMessages(latestMessages || []);
+                    }
+                    setActivityLog(latestActivity || []);
+                    if (freshConversation) {
+                        setConversations((prev) =>
+                            prev.map((conversation) =>
+                                conversation.id === selectedConversationId
+                                    ? { ...conversation, ...(freshConversation as any) }
+                                    : conversation
+                            )
+                        );
+                        if (Number((freshConversation as any)?.unreadCount || 0) > 0) {
+                            void markConversationReadInUi(selectedConversationId);
+                        }
                     }
                     return;
                 }
 
-                const latestMessages = await fetchMessages(selectedConversationId);
-                if (cancelled || activeIdRef.current !== selectedConversationId) return;
+                trackClientRequest("active_delta_poll", { conversationId: selectedConversationId, pendingTranscripts });
+                const workspace = await getConversationWorkspace(selectedConversationId, {
+                    includeMessages: true,
+                    includeActivity: true,
+                    includeContactContext: false,
+                    includeTaskSummary: false,
+                    includeViewingSummary: false,
+                    includeAgentSummary: false,
+                    messageLimit: 250,
+                    activityLimit: 180,
+                });
+                if (cancelled || !workspace?.success || activeIdRef.current !== selectedConversationId) return;
 
+                if (workspace?.conversationHeader?.id) {
+                    setConversations((prev) =>
+                        prev.map((conversation) =>
+                            conversation.id === workspace.conversationHeader.id
+                                ? { ...conversation, ...workspace.conversationHeader }
+                                : conversation
+                        )
+                    );
+                }
+
+                const latestMessages = Array.isArray(workspace?.messages) ? workspace.messages : [];
                 const latestSignature = getMessageSignature(latestMessages);
                 if (latestSignature !== messageSignatureRef.current) {
                     messageSignatureRef.current = latestSignature;
                     setMessages(latestMessages);
                 }
 
-                if ((incomingActive.unreadCount || 0) > 0) {
+                if (Array.isArray(workspace?.activityTimeline)) {
+                    setActivityLog(workspace.activityTimeline);
+                }
+
+                if (workspace?.transcriptEligibility) {
+                    setTranscriptOnDemandEnabled(!!workspace.transcriptEligibility.success && !!workspace.transcriptEligibility.enabled);
+                }
+
+                if ((workspace?.conversationHeader?.unreadCount || 0) > 0) {
                     void markConversationReadInUi(selectedConversationId);
                 }
             } catch (err) {
-                console.error("Live conversation sync failed:", err);
-            } finally {
-                liveSyncInFlightRef.current = false;
+                if (!cancelled) {
+                    console.error("Active conversation delta sync failed:", err);
+                }
             }
         };
 
-        runLiveSync();
-        const intervalId = setInterval(runLiveSync, 3000);
+        runActiveConversationDelta();
+        const intervalId = setInterval(runActiveConversationDelta, intervalMs);
 
         return () => {
             cancelled = true;
             clearInterval(intervalId);
         };
-    }, [viewMode, viewFilter, mergeConversationListsWithIncomingFirst, markConversationReadInUi]);
+    }, [viewMode, activeId, isTabVisible, featureFlags.balancedPolling, featureFlags.workspaceV2, markConversationReadInUi, trackClientRequest]);
 
     // Handle clicking a conversation in the list
     const handleSelect = (id: string) => {
@@ -1480,6 +1701,12 @@ export function ConversationInterface({ locationId, initialConversations, initia
                                 locationId={locationId}
                                 conversation={activeConversation}
                                 selectedConversations={isSelectionMode ? selectedConversations : undefined}
+                                activityLog={activityLog}
+                                initialContactContext={workspaceContactContext}
+                                initialTaskSummary={workspaceTaskSummary}
+                                initialViewingSummary={workspaceViewingSummary}
+                                initialAgentSummary={workspaceAgentSummary}
+                                lazySidebarDataEnabled={featureFlags.lazySidebarData}
                                 onDraftApproved={(text) => handleSendMessage(text, getMessageType(activeConversation))}
                                 onDeselect={(id) => handleToggleSelect(id, false)}
                                 onSuggestionsGenerated={setSuggestions}
@@ -1493,6 +1720,12 @@ export function ConversationInterface({ locationId, initialConversations, initia
                                 locationId={locationId}
                                 conversation={selectedDealConversation}
                                 selectedConversations={activeDealParticipants}
+                                activityLog={activityLog}
+                                initialContactContext={workspaceContactContext}
+                                initialTaskSummary={workspaceTaskSummary}
+                                initialViewingSummary={workspaceViewingSummary}
+                                initialAgentSummary={workspaceAgentSummary}
+                                lazySidebarDataEnabled={featureFlags.lazySidebarData}
                                 onDraftApproved={(text) => handleSendMessage(text, getMessageType(selectedDealConversation), selectedDealConversation)}
                                 onDeselect={() => undefined} // No deselect in deal mode
                                 onSuggestionsGenerated={setSuggestions}

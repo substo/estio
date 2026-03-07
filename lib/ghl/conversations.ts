@@ -14,6 +14,8 @@ export interface Conversation {
     contactName?: string; // Often enriched or separate
     contactPhone?: string; // For SMS/WhatsApp display
     contactEmail?: string; // For Email display
+    activeDealId?: string;
+    activeDealTitle?: string;
     lastMessageDirection?: 'inbound' | 'outbound';
     lastMessageId?: string;
     suggestedActions?: string[];

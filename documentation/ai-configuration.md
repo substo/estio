@@ -1,6 +1,6 @@
 # AI Configuration & Integration
 
-**Last Updated:** 2026-02-27
+**Last Updated:** 2026-03-07
 
 Estio uses Google Gemini models across conversation drafting, selection actions, content generation, and import flows. This document reflects the current model-resolution logic used in production.
 
@@ -53,7 +53,7 @@ If not configured:
 ### UI Consumers
 
 - `/admin/settings/ai` loads picker defaults from `getAiModelPickerDefaultsAction()`.
-- Chat window AI draft picker uses `getAiDraftModelPickerStateAction()`.
+- The shared conversation composer (`conversation-composer.tsx`) uses `getAiDraftModelPickerStateAction()` for both chats mode and deal mode.
 
 This keeps picker defaults consistent across screens.
 
@@ -90,7 +90,9 @@ For user-facing pickers and chat defaults, the effective model is resolved throu
 - `app/(main)/admin/settings/ai/actions.ts`
 - `app/(main)/admin/settings/ai/ai-settings-form.tsx`
 - `app/(main)/admin/conversations/actions.ts`
+- `app/(main)/admin/conversations/_components/conversation-composer.tsx`
 - `app/(main)/admin/conversations/_components/chat-window.tsx`
+- `app/(main)/admin/conversations/_components/unified-timeline.tsx`
 
 ## Related Docs
 

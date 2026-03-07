@@ -89,7 +89,8 @@ export async function getLocationContext(): Promise<Location | null> {
                     email: email,
                     firstName: clerkUser.firstName,
                     lastName: clerkUser.lastName,
-                }
+                },
+                include: { locations: { take: 1 } }
             });
         }
     }

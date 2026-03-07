@@ -2,6 +2,7 @@ import { Suspense } from 'react';
 import { getLocationContext } from '@/lib/auth/location-context';
 import { fetchConversations } from './actions';
 import { ConversationInterface } from './_components/conversation-interface';
+import { getConversationFeatureFlags } from '@/lib/feature-flags';
 import { hasScopesForFeature, getMissingScopes, describeMissingScopes } from '@/lib/ghl/scope-validator';
 import { AlertTriangle, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -82,6 +83,7 @@ export default async function ConversationsPage({ searchParams }: { searchParams
         initialConversationStatus === 'tasks' ? 'active' : initialConversationStatus,
         selectedConversationId
     );
+    const featureFlags = getConversationFeatureFlags(location.id);
 
     return (
         <div className="h-[calc(100vh-64px)] w-full max-w-full min-w-0 overflow-hidden flex flex-col">
@@ -95,7 +97,9 @@ export default async function ConversationsPage({ searchParams }: { searchParams
                         initialConversationListPageInfo={{
                             hasMore: !!initialConversationsData.hasMore,
                             nextCursor: initialConversationsData.nextCursor || null,
+                            deltaCursor: initialConversationsData.deltaCursor || null,
                         }}
+                        featureFlags={featureFlags}
                     />
                 </Suspense>
             </main>

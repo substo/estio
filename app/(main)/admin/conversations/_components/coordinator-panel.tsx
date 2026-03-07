@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Conversation } from "@/lib/ghl/conversations";
-import { generateAIDraft, generateMultiContextDraftAction, getContactContext, generatePlanAction, executeNextTaskAction, getAgentPlan, getAgentExecutions, getTraceTreeAction, getContactInsightsAction, orchestrateAction, getConversationTranscriptUsage, fetchConversationActivityLog } from "../actions";
+import { generateAIDraft, generateMultiContextDraftAction, getContactContext, generatePlanAction, executeNextTaskAction, getAgentPlan, getAgentExecutions, getTraceTreeAction, getContactInsightsAction, orchestrateAction, getConversationTranscriptUsage } from "../actions";
 import { createPersistentDeal, findExistingDeal, removeConversationFromDeal } from "../../deals/actions";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,12 @@ interface CoordinatorPanelProps {
     dealContacts?: DealContactOption[];
     selectedDealConversationId?: string | null;
     onSelectDealConversation?: (conversationId: string) => void;
+    activityLog?: any[];
+    initialContactContext?: any;
+    initialTaskSummary?: any;
+    initialViewingSummary?: any;
+    initialAgentSummary?: any;
+    lazySidebarDataEnabled?: boolean;
     onDraftApproved: (text: string) => void;
     onDeselect?: (id: string) => void;
     onSuggestionsGenerated?: (suggestions: string[]) => void;
@@ -59,32 +65,8 @@ interface ThoughtStep {
     conclusion: string;
 }
 
-function ActivityLogPanel({ conversationId }: { conversationId: string }) {
-    const [entries, setEntries] = useState<any[]>([]);
-    const [loading, setLoading] = useState(false);
+function ActivityLogPanel({ entries }: { entries: any[] }) {
     const [expanded, setExpanded] = useState(false);
-
-    useEffect(() => {
-        let cancelled = false;
-        setLoading(true);
-        fetchConversationActivityLog(conversationId)
-            .then(log => {
-                if (!cancelled) setEntries(log);
-            })
-            .catch(err => console.error("Failed to fetch activity log for panel:", err))
-            .finally(() => { if (!cancelled) setLoading(false); });
-        return () => { cancelled = true; };
-    }, [conversationId]);
-
-    if (loading) {
-        return (
-            <Card className="shadow-none border-border/50">
-                <CardContent className="p-3 text-center">
-                    <Loader2 className="h-4 w-4 animate-spin mx-auto text-slate-400" />
-                </CardContent>
-            </Card>
-        );
-    }
 
     if (entries.length === 0) return null;
 
@@ -181,6 +163,12 @@ export function CoordinatorPanel({
     dealContacts,
     selectedDealConversationId,
     onSelectDealConversation,
+    activityLog,
+    initialContactContext,
+    initialTaskSummary,
+    initialViewingSummary,
+    initialAgentSummary,
+    lazySidebarDataEnabled = true,
     onDraftApproved,
     onDeselect,
     onSuggestionsGenerated,
@@ -212,8 +200,19 @@ export function CoordinatorPanel({
     const [dealContextId, setDealContextId] = useState<string | null>(null);
 
     // Context Display State
-    const [contactContext, setContactContext] = useState<any>(null);
+    const [contactContext, setContactContext] = useState<any>(initialContactContext || null);
     const [loadingContext, setLoadingContext] = useState(false);
+    const [sidebarTab, setSidebarTab] = useState<'overview' | 'tasks' | 'viewings'>('overview');
+    const [loadedSidebarTabs, setLoadedSidebarTabs] = useState<{ overview: boolean; tasks: boolean; viewings: boolean }>({
+        overview: true,
+        tasks: !lazySidebarDataEnabled,
+        viewings: !lazySidebarDataEnabled,
+    });
+    const taskOpenCount = Number(initialTaskSummary?.open || 0);
+    const upcomingViewingCount = Number(initialViewingSummary?.upcoming || 0);
+    const planProgressLabel = initialAgentSummary?.hasPlan
+        ? `${Number(initialAgentSummary?.completedPlanSteps || 0)}/${Number(initialAgentSummary?.totalPlanSteps || 0)}`
+        : null;
 
     // Orchestrator State (Phase 1)
     const [orchestrating, setOrchestrating] = useState(false);
@@ -234,6 +233,18 @@ export function CoordinatorPanel({
     useEffect(() => {
         conversationIdRef.current = conversation.id;
     }, [conversation.id]);
+
+    useEffect(() => {
+        if (!lazySidebarDataEnabled) {
+            setLoadedSidebarTabs({ overview: true, tasks: true, viewings: true });
+            return;
+        }
+        setLoadedSidebarTabs((prev) => ({ ...prev, [sidebarTab]: true }));
+    }, [sidebarTab, lazySidebarDataEnabled]);
+
+    useEffect(() => {
+        setContactContext(initialContactContext || null);
+    }, [initialContactContext, conversation.id]);
 
     const isContextMode = selectedConversations && selectedConversations.length > 0;
     const traceToolCalls = Array.isArray(rawTrace?.toolCalls) ? rawTrace.toolCalls : [];
@@ -349,13 +360,17 @@ export function CoordinatorPanel({
     // Fetch Context on Load or Conversation Change
     useEffect(() => {
         if (!conversation?.contactId) return;
+        if (initialContactContext?.contact) {
+            setContactContext(initialContactContext);
+            return;
+        }
 
         setLoadingContext(true);
-        getContactContext(conversation.contactId)
+        getContactContext(conversation.contactId, { refreshExternal: false })
             .then(data => setContactContext(data))
             .catch(err => console.error("Failed to load context", err))
             .finally(() => setLoadingContext(false));
-    }, [conversation.contactId]);
+    }, [conversation.contactId, initialContactContext]);
 
     const handleOrchestrate = async () => {
         setOrchestrating(true);
@@ -550,6 +565,11 @@ export function CoordinatorPanel({
                 <div className="flex items-center gap-2">
                     <ListTodo className="h-4 w-4 text-primary" />
                     <h3 className="font-semibold text-sm text-foreground">Mission Control</h3>
+                    {planProgressLabel && (
+                        <Badge variant="secondary" className="text-[9px] h-4 px-1">
+                            {planProgressLabel}
+                        </Badge>
+                    )}
                 </div>
                 <TooltipProvider>
                     <Tooltip>
@@ -567,6 +587,38 @@ export function CoordinatorPanel({
                     </Tooltip>
                 </TooltipProvider>
             </div>
+
+            {lazySidebarDataEnabled && (
+                <div className="grid grid-cols-3 gap-1.5 mb-1 shrink-0">
+                    <Button
+                        type="button"
+                        variant={sidebarTab === "overview" ? "default" : "outline"}
+                        size="sm"
+                        className="h-7 text-[11px]"
+                        onClick={() => setSidebarTab("overview")}
+                    >
+                        Overview
+                    </Button>
+                    <Button
+                        type="button"
+                        variant={sidebarTab === "tasks" ? "default" : "outline"}
+                        size="sm"
+                        className="h-7 text-[11px]"
+                        onClick={() => setSidebarTab("tasks")}
+                    >
+                        Tasks{taskOpenCount > 0 ? ` (${taskOpenCount})` : ''}
+                    </Button>
+                    <Button
+                        type="button"
+                        variant={sidebarTab === "viewings" ? "default" : "outline"}
+                        size="sm"
+                        className="h-7 text-[11px]"
+                        onClick={() => setSidebarTab("viewings")}
+                    >
+                        Viewings{upcomingViewingCount > 0 ? ` (${upcomingViewingCount})` : ''}
+                    </Button>
+                </div>
+            )}
 
             {dealContacts && dealContacts.length > 0 && onSelectDealConversation && (
                 <Card className="shadow-none border-border/50">
@@ -612,10 +664,11 @@ export function CoordinatorPanel({
             )}
 
             {/* Contact Details / Group Members Card */}
-            {(contactContext?.contact?.contactType === 'WhatsAppGroup' || contactContext?.contact?.phone?.includes('@g.us')) ? (
-                <GroupMembersList conversationId={conversation.id} />
-            ) : (
-                <Card className="shadow-none border-border/50">
+            <div className={cn(lazySidebarDataEnabled && sidebarTab !== 'overview' ? 'hidden' : 'block')}>
+                {(contactContext?.contact?.contactType === 'WhatsAppGroup' || contactContext?.contact?.phone?.includes('@g.us')) ? (
+                    <GroupMembersList conversationId={conversation.id} />
+                ) : (
+                    <Card className="shadow-none border-border/50">
                     <CardHeader className="p-3 pb-1.5">
                         <div className="flex justify-between items-center pr-4">
                             <CardTitle className="text-xs font-semibold">Details</CardTitle>
@@ -703,38 +756,47 @@ export function CoordinatorPanel({
                             </div>
                         )}
                     </CardContent>
-                </Card>
+                    </Card>
+                )}
+            </div>
+
+            {(!lazySidebarDataEnabled || loadedSidebarTabs.tasks) && (
+                <div className={cn(lazySidebarDataEnabled && sidebarTab !== 'tasks' ? 'hidden' : 'block')}>
+                    <Card className="shadow-none border-border/50">
+                        <CardContent className="p-3">
+                            <ContactTaskManager
+                                contactId={contactContext?.contact?.id || ''}
+                                conversationId={conversation.id}
+                                compact
+                                title="Contact Tasks"
+                            />
+                        </CardContent>
+                    </Card>
+                </div>
             )}
 
-            <Card className="shadow-none border-border/50">
-                <CardContent className="p-3">
-                    <ContactTaskManager
-                        contactId={contactContext?.contact?.id || ''}
-                        conversationId={conversation.id}
-                        compact
-                        title="Contact Tasks"
-                    />
-                </CardContent>
-            </Card>
+            {(!lazySidebarDataEnabled || loadedSidebarTabs.viewings) && (
+                <div className={cn(lazySidebarDataEnabled && sidebarTab !== 'viewings' ? 'hidden' : 'block')}>
+                    <Card className="shadow-none border-border/50">
+                        <CardContent className="p-3">
+                            <ContactViewingManager
+                                contactId={contactContext?.contact?.id || ''}
+                                locationId={locationId}
+                                compact
+                                title="Property Viewings"
+                                isEditing={true}
+                            />
+                        </CardContent>
+                    </Card>
+                </div>
+            )}
 
-            <Card className="shadow-none border-border/50">
-                <CardContent className="p-3">
-                    {/* Viewings Manager */}
-                    <ContactViewingManager
-                        contactId={contactContext?.contact?.id || ''}
-                        locationId={locationId}
-                        compact
-                        title="Property Viewings"
-                        isEditing={true}
-                    />
-                </CardContent>
-            </Card>
+            <div className={cn(lazySidebarDataEnabled && sidebarTab !== 'overview' ? 'hidden' : 'block')}>
+                <ActivityLogPanel entries={Array.isArray(activityLog) ? activityLog : []} />
+            </div>
 
-            {/* Activity Log Section */}
-            <ActivityLogPanel conversationId={conversation.id} />
-
-            {/* PLANNER SECTION */}
-            <div className="flex-1 min-h-0 flex flex-col space-y-3">
+            <div className={cn("flex-1 min-h-0 flex flex-col space-y-3", lazySidebarDataEnabled && sidebarTab !== 'overview' ? 'hidden' : '')}>
+                {/* PLANNER SECTION */}
                 {plan.length === 0 ? (
                     <div className="space-y-2 p-3 bg-card border rounded-md shadow-sm">
                         <div className="flex items-center gap-2 mb-1 text-purple-600 font-semibold text-sm">

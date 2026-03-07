@@ -77,13 +77,16 @@ We have evolved the system from a 1:1 chat interface to a **Many-to-One Persiste
 1.  **Unified Timeline**: When a Deal is selected, the center pane transforms into a merged chronological stream of interactions from ALL stakeholders (Lead Emails + Owner SMS + System Notes). This provides a single source of truth for the deal's history.
 2.  **Persistent `DealContext`**: Deals are now permanent database records with Stages (Active, Negotiation, Closed) and Health Scores, not just temporary session contexts.
 3.  **Smart Linking**: The system automatically serves as a "Deal Binding" layer. Agents can "Bind" a conversation to a deal, and the system automatically links the contact's future messages to that deal context.
-4.  **Coordinator Panel Integration**: The right-hand panel adapts to the active mode. In "Deal Mode", it becomes the **AI Coordinator**, reasoning across the entire deal history rather than a single thread.
+4.  **Coordinator Panel Integration**: The right-hand panel adapts to the active mode. In "Deal Mode", it becomes the **AI Coordinator**, reasoning across the entire deal history while the details/tasks/viewings/activity cards stay bound to the currently selected deal participant.
+5.  **Composer Parity in Deal Mode (Mar 2026)**: Deal mode now renders the same full-featured reusable composer as chats mode, below the unified timeline. AI draft, model picker, channel guards, media upload, voice note, suggestions, and keyboard send shortcut behave the same in both modes.
+6.  **Participant Routing (Mar 2026)**: Mission Control now shows all unique contacts linked to the deal, lets the agent switch the active participant, and routes sends/draft approvals to that selected participant instead of a single proxy conversation.
 
 ### Workflow
 1.  **Toggle "Deals"**: In `/admin/conversations`, switch to Deals mode.
 2.  **Select Deal**: Click a deal to view the Unified Timeline.
-3.  **AI Analysis**: The Coordinator Panel analyzes the latest updates from all parties.
-4.  **Agentic Action**: The AI suggests the next move (e.g., "Draft update to Owner", "Search Properties").
+3.  **Choose Participant**: Use the **Deal Contacts** list in Mission Control to choose who you are replying to.
+4.  **AI Analysis**: The Coordinator Panel analyzes the latest updates from all parties while showing contact-specific operational data for the selected participant.
+5.  **Agentic Action**: The AI suggests the next move (e.g., "Draft update to Owner", "Search Properties"), and approvals send to the selected participant on that participant's active channel.
 
 ## 3. Channel & Sync Management (New)
 
@@ -169,6 +172,7 @@ To support direct linking, bookmarking, and browser navigation, the hub now sync
     *   The client now preserves the selected conversation during list refetches (for example after mount/view changes), so deep links do not disappear from the center panel when the selected item is outside the currently loaded page.
 *   **View Persistence**: The active view (Inbox, Archived, Trash) is persisted via `?view=archived`.
 *   **Deal Mode**: Direct access to deal rooms via `?mode=deals&dealId=DEAL_ID`.
+    *   If `?id=` belongs to a participant conversation inside that deal, it is used as the initial reply target in Mission Control and the shared composer.
 *   **Browser History**: Back and Forward buttons correctly navigate through conversation selection history.
 
 ### Conversation List Pagination (Infinite Scroll)
@@ -219,6 +223,13 @@ We refactored the message display into a shared component (`_components/message-
     *   `Custom` (runs a user instruction over selected text context, returns editable output, and can save to CRM log)
     *   **Model Consistency**: These actions reuse the currently selected AI model from the chat toolbar so drafts and selection-based actions run on the same model by default.
     *   **Reference**: Full behavior details (cross-message selection, batch controls, dedupe rules) are documented in `documentation/conversation-management.md`.
+
+### Shared Composer
+The reply box is also shared now:
+*   **Single Reusable Composer**: `conversation-composer.tsx` is used by both `ChatWindow` and `UnifiedTimeline`.
+*   **Deal Mode Parity**: The deal timeline no longer loses advanced composer features relative to chats mode.
+*   **Reply Indicator**: In deal mode, the composer explicitly shows which contact is the current reply target.
+*   **Reference**: Full reply-routing and participant-selection rules are documented in `documentation/conversation-management.md`.
 
 ### Selection-Based Conversation Operations (Replaces Legacy CRM Email Buttons)
 The old message-level legacy CRM notification processing actions (`Process Lead`, `Reprocess`, `Old CRM`) were removed from the message bubble UI in favor of explicit text selection actions.
