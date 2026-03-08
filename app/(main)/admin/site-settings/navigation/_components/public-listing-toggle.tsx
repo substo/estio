@@ -5,7 +5,7 @@ import { useState, useTransition } from "react";
 import { savePublicListingEnabled } from "../actions";
 import { toast } from "sonner";
 
-export function PublicListingToggle({ initialValue }: { initialValue: boolean }) {
+export function PublicListingToggle({ locationId, initialValue }: { locationId: string, initialValue: boolean }) {
     const [enabled, setEnabled] = useState(initialValue);
     const [isPending, startTransition] = useTransition();
 
@@ -13,7 +13,7 @@ export function PublicListingToggle({ initialValue }: { initialValue: boolean })
         setEnabled(checked);
         startTransition(async () => {
             try {
-                await savePublicListingEnabled(checked);
+                await savePublicListingEnabled(locationId, checked);
                 toast.success(checked ? "Public listings enabled" : "Public listings disabled");
             } catch (error) {
                 setEnabled(!checked); // Revert

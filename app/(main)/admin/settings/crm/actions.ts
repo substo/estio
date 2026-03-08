@@ -4,9 +4,20 @@ import { puppeteerService } from '@/lib/crm/puppeteer-service';
 
 import db from '@/lib/db';
 import { auth } from '@clerk/nextjs/server';
-import { verifyUserHasAccessToLocation } from '@/lib/auth/permissions';
+import { verifyUserIsLocationAdmin } from '@/lib/auth/permissions';
 import { revalidatePath } from 'next/cache';
 import { pullLeadFromCrm, previewCrmLead } from '@/lib/crm/crm-lead-puller';
+import { getLocationContext } from '@/lib/auth/location-context';
+import { settingsService } from '@/lib/settings/service';
+import {
+    SETTINGS_DOMAINS,
+    SETTINGS_SECRET_KEYS,
+    isSettingsDualWriteLegacyEnabled,
+    isSettingsParityCheckEnabled,
+} from '@/lib/settings/constants';
+import { SettingsVersionConflictError } from '@/lib/settings/errors';
+
+const MASKED_SECRET = "********";
 
 function parseStringList(input: unknown, { lower = false }: { lower?: boolean } = {}) {
     if (input === null || input === undefined) return [];
@@ -24,6 +35,43 @@ function parseCheckbox(input: unknown) {
     if (input === null || input === undefined) return false;
     const value = String(input).toLowerCase().trim();
     return value === 'on' || value === 'true' || value === '1' || value === 'yes';
+}
+
+function parseOptionalVersion(input: unknown): number | undefined {
+    if (input === null || input === undefined || input === "") return undefined;
+    const parsed = Number(input);
+    if (!Number.isInteger(parsed) || parsed < 0) {
+        throw new Error("Invalid settings version");
+    }
+    return parsed;
+}
+
+async function resolveAdminContext(locationIdInput?: string | null) {
+    const { userId } = await auth();
+    if (!userId) {
+        throw new Error("Unauthorized");
+    }
+
+    const contextLocation = await getLocationContext();
+    const locationId = locationIdInput || contextLocation?.id;
+    if (!locationId) {
+        throw new Error("No location found");
+    }
+
+    const isAdmin = await verifyUserIsLocationAdmin(userId, locationId);
+    if (!isAdmin) {
+        throw new Error("Unauthorized");
+    }
+
+    const user = await db.user.findUnique({
+        where: { clerkId: userId },
+        select: { id: true, crmUsername: true, crmPassword: true }
+    });
+    if (!user?.id) {
+        throw new Error("User not found");
+    }
+
+    return { clerkUserId: userId, localUserId: user.id, locationId, user };
 }
 
 export async function pullLead(crmLeadId: string) {
@@ -57,37 +105,13 @@ export async function previewLeadAction(crmLeadId: string) {
     }
 }
 
-export async function addLeadSource(name: string) {
+export async function addLeadSource(name: string, locationId?: string | null) {
     try {
-        const { userId } = await auth();
-        if (!userId) return { success: false, message: 'Unauthorized' };
-
-        // Assume context is current location, but settings usually managed by admins with specific access
-        // We need to know WHICH location. 
-        // For simpler "Global" or "Current Context" settings, we often fetch user's primary or currently selected location.
-        // However, usually these actions are called from a page that knows the location.
-        // But for this specific app structure, let's fetch the first location the user has admin access to, or check if we can pass locationId.
-
-        // Checking how settings page works. It usually loads config for a specific location.
-        // Let's assume we fetch the user's location via relationship or cookie. 
-        // For now, I'll fetch the first location linked to the user.
-
-        const user = await db.user.findUnique({
-            where: { clerkId: userId },
-            include: { locations: { take: 1 } }
-        });
-
-        const locationId = user?.locations[0]?.id;
-
-        if (!locationId) return { success: false, message: 'No location found' };
-
-        // Verify Access
-        const hasAccess = await verifyUserHasAccessToLocation(userId, locationId);
-        if (!hasAccess) return { success: false, message: 'Unauthorized' };
+        const context = await resolveAdminContext(locationId);
 
         const source = await db.leadSource.create({
             data: {
-                locationId,
+                locationId: context.locationId,
                 name: name.trim(),
                 isActive: true
             }
@@ -109,8 +133,8 @@ export async function toggleLeadSource(id: string, isActive: boolean) {
         const source = await db.leadSource.findUnique({ where: { id } });
         if (!source) return { success: false, message: 'Source not found' };
 
-        const hasAccess = await verifyUserHasAccessToLocation(userId, source.locationId);
-        if (!hasAccess) return { success: false, message: 'Unauthorized' };
+        const isAdmin = await verifyUserIsLocationAdmin(userId, source.locationId);
+        if (!isAdmin) return { success: false, message: 'Unauthorized' };
 
         await db.leadSource.update({
             where: { id },
@@ -125,21 +149,12 @@ export async function toggleLeadSource(id: string, isActive: boolean) {
     }
 }
 
-export async function getLeadSources() {
+export async function getLeadSources(locationId?: string | null) {
     try {
-        const { userId } = await auth();
-        if (!userId) return { success: false, message: 'Unauthorized' };
-
-        const user = await db.user.findUnique({
-            where: { clerkId: userId },
-            include: { locations: { take: 1 } }
-        });
-        const locationId = user?.locations[0]?.id;
-
-        if (!locationId) return { success: false, message: 'No location found' };
+        const context = await resolveAdminContext(locationId);
 
         const sources = await db.leadSource.findMany({
-            where: { locationId },
+            where: { locationId: context.locationId },
             orderBy: { name: 'asc' }
         });
 
@@ -152,20 +167,9 @@ export async function getLeadSources() {
 }
 
 export async function saveLegacyCrmLeadEmailSettings(data: any) {
-    const { userId } = await auth();
-    if (!userId) throw new Error("Unauthorized");
-
     try {
-        const user = await db.user.findUnique({
-            where: { clerkId: userId },
-            include: { locations: { take: 1 } }
-        });
-
-        const locationId = user?.locations?.[0]?.id;
-        if (!locationId) throw new Error("No location found");
-
-        const hasAccess = await verifyUserHasAccessToLocation(userId, locationId);
-        if (!hasAccess) throw new Error("Unauthorized");
+        const context = await resolveAdminContext(data.locationId || null);
+        const expectedVersion = parseOptionalVersion(data.settingsVersion);
 
         const senders = parseStringList(data.legacyCrmLeadEmailSenders, { lower: true });
         const senderDomains = parseStringList(data.legacyCrmLeadEmailSenderDomains, { lower: true }).map((d) =>
@@ -173,129 +177,258 @@ export async function saveLegacyCrmLeadEmailSettings(data: any) {
         );
         const subjectPatterns = parseStringList(data.legacyCrmLeadEmailSubjectPatterns, { lower: true });
 
-        await db.location.update({
-            where: { id: locationId },
-            data: {
-                legacyCrmLeadEmailEnabled: parseCheckbox(data.legacyCrmLeadEmailEnabled),
-                legacyCrmLeadEmailSenders: senders,
-                legacyCrmLeadEmailSenderDomains: senderDomains,
-                legacyCrmLeadEmailSubjectPatterns: subjectPatterns,
-                legacyCrmLeadEmailPinConversation: parseCheckbox(data.legacyCrmLeadEmailPinConversation),
-                legacyCrmLeadEmailAutoProcess: parseCheckbox(data.legacyCrmLeadEmailAutoProcess),
-                legacyCrmLeadEmailAutoDraftFirstContact: parseCheckbox(data.legacyCrmLeadEmailAutoDraftFirstContact),
-            } as any
+        const existingDoc = await settingsService.getDocument<any>({
+            scopeType: "LOCATION",
+            scopeId: context.locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_CRM,
         });
+        const existingPayload = existingDoc?.payload || {};
+        const payload = {
+            ...existingPayload,
+            legacyCrmLeadEmailEnabled: parseCheckbox(data.legacyCrmLeadEmailEnabled),
+            legacyCrmLeadEmailSenders: senders,
+            legacyCrmLeadEmailSenderDomains: senderDomains,
+            legacyCrmLeadEmailSubjectPatterns: subjectPatterns,
+            legacyCrmLeadEmailPinConversation: parseCheckbox(data.legacyCrmLeadEmailPinConversation),
+            legacyCrmLeadEmailAutoProcess: parseCheckbox(data.legacyCrmLeadEmailAutoProcess),
+            legacyCrmLeadEmailAutoDraftFirstContact: parseCheckbox(data.legacyCrmLeadEmailAutoDraftFirstContact),
+            crmUrl: existingPayload.crmUrl || null,
+            crmEditUrlPattern: existingPayload.crmEditUrlPattern || null,
+            crmLeadUrlPattern: existingPayload.crmLeadUrlPattern || null,
+            crmSchema: existingPayload.crmSchema || null,
+            crmLeadSchema: existingPayload.crmLeadSchema || null,
+        };
+
+        await settingsService.upsertDocument({
+            scopeType: "LOCATION",
+            scopeId: context.locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_CRM,
+            payload,
+            actorUserId: context.localUserId,
+            expectedVersion,
+            schemaVersion: 1,
+        });
+
+        if (isSettingsDualWriteLegacyEnabled()) {
+            await db.location.update({
+                where: { id: context.locationId },
+                data: {
+                    legacyCrmLeadEmailEnabled: payload.legacyCrmLeadEmailEnabled,
+                    legacyCrmLeadEmailSenders: payload.legacyCrmLeadEmailSenders,
+                    legacyCrmLeadEmailSenderDomains: payload.legacyCrmLeadEmailSenderDomains,
+                    legacyCrmLeadEmailSubjectPatterns: payload.legacyCrmLeadEmailSubjectPatterns,
+                    legacyCrmLeadEmailPinConversation: payload.legacyCrmLeadEmailPinConversation,
+                    legacyCrmLeadEmailAutoProcess: payload.legacyCrmLeadEmailAutoProcess,
+                    legacyCrmLeadEmailAutoDraftFirstContact: payload.legacyCrmLeadEmailAutoDraftFirstContact,
+                } as any
+            });
+        }
+
+        if (isSettingsDualWriteLegacyEnabled() && isSettingsParityCheckEnabled()) {
+            await settingsService.checkDocumentParity({
+                scopeType: "LOCATION",
+                scopeId: context.locationId,
+                domain: SETTINGS_DOMAINS.LOCATION_CRM,
+                legacyPayload: payload,
+                actorUserId: context.localUserId,
+            });
+        }
 
         revalidatePath('/admin/settings/crm');
         return { success: true };
     } catch (error: any) {
+        if (error instanceof SettingsVersionConflictError) {
+            return { success: false, error: "Settings were updated by another user. Refresh and try again." };
+        }
         console.error("Failed to save legacy CRM lead email settings:", error);
         return { success: false, error: error.message || "Failed to save settings" };
     }
 }
 
 export async function saveCrmCredentials(data: any) {
-    const { userId } = await auth();
-    if (!userId) throw new Error("Unauthorized");
-
-    // Basic validation
-    if (!data.crmUsername || !data.crmPassword) {
-        throw new Error("Missing credentials");
-    }
-
     try {
-        // Get user's primary location
-        const user = await db.user.findUnique({
-            where: { clerkId: userId },
-            include: { locations: { take: 1 } }
+        const context = await resolveAdminContext(data.locationId || null);
+        const expectedVersion = parseOptionalVersion(data.settingsVersion);
+        const crmUsername = String(data.crmUsername || "").trim();
+        const crmPasswordInput = String(data.crmPassword || "").trim();
+        const clearCrmPassword = parseCheckbox(data.clearCrmPassword);
+        const shouldUpdatePassword = crmPasswordInput.length > 0 && crmPasswordInput !== MASKED_SECRET;
+
+        if (!crmUsername) {
+            throw new Error("Missing username");
+        }
+
+        const existingLocationDoc = await settingsService.getDocument<any>({
+            scopeType: "LOCATION",
+            scopeId: context.locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_CRM,
+        });
+        const existingLocationPayload = existingLocationDoc?.payload || {};
+        const locationPayload = {
+            ...existingLocationPayload,
+            crmUrl: data.crmUrl || null,
+            crmEditUrlPattern: data.crmEditUrlPattern || null,
+            crmLeadUrlPattern: data.crmLeadUrlPattern || null,
+            crmSchema: existingLocationPayload.crmSchema || null,
+            crmLeadSchema: existingLocationPayload.crmLeadSchema || null,
+            legacyCrmLeadEmailEnabled: existingLocationPayload.legacyCrmLeadEmailEnabled ?? false,
+            legacyCrmLeadEmailSenders: existingLocationPayload.legacyCrmLeadEmailSenders || [],
+            legacyCrmLeadEmailSenderDomains: existingLocationPayload.legacyCrmLeadEmailSenderDomains || [],
+            legacyCrmLeadEmailSubjectPatterns: existingLocationPayload.legacyCrmLeadEmailSubjectPatterns || [],
+            legacyCrmLeadEmailPinConversation: existingLocationPayload.legacyCrmLeadEmailPinConversation ?? true,
+            legacyCrmLeadEmailAutoProcess: existingLocationPayload.legacyCrmLeadEmailAutoProcess ?? false,
+            legacyCrmLeadEmailAutoDraftFirstContact: existingLocationPayload.legacyCrmLeadEmailAutoDraftFirstContact ?? false,
+        };
+
+        await settingsService.upsertDocument({
+            scopeType: "LOCATION",
+            scopeId: context.locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_CRM,
+            payload: locationPayload,
+            actorUserId: context.localUserId,
+            expectedVersion,
+            schemaVersion: 1,
         });
 
-        if (!user) throw new Error("User not found");
-
-        // Save credentials to User
-        await db.user.update({
-            where: { clerkId: userId },
-            data: {
-                crmUsername: data.crmUsername,
-                crmPassword: data.crmPassword,
-            }
+        await settingsService.upsertDocument({
+            scopeType: "USER",
+            scopeId: context.localUserId,
+            domain: SETTINGS_DOMAINS.USER_CRM,
+            payload: { crmUsername },
+            actorUserId: context.localUserId,
+            schemaVersion: 1,
         });
 
-        // Save URL and pattern to Location (if provided and user has a location)
-        if (user.locations[0] && (data.crmUrl || data.crmEditUrlPattern)) {
-            await db.location.update({
-                where: { id: user.locations[0].id },
+        if (clearCrmPassword) {
+            await settingsService.clearSecret({
+                scopeType: "USER",
+                scopeId: context.localUserId,
+                domain: SETTINGS_DOMAINS.USER_CRM,
+                secretKey: SETTINGS_SECRET_KEYS.CRM_PASSWORD,
+                actorUserId: context.localUserId,
+            });
+        } else if (shouldUpdatePassword) {
+            await settingsService.setSecret({
+                scopeType: "USER",
+                scopeId: context.localUserId,
+                domain: SETTINGS_DOMAINS.USER_CRM,
+                secretKey: SETTINGS_SECRET_KEYS.CRM_PASSWORD,
+                plaintext: crmPasswordInput,
+                actorUserId: context.localUserId,
+            });
+        }
+
+        if (isSettingsDualWriteLegacyEnabled()) {
+            await db.user.update({
+                where: { id: context.localUserId },
                 data: {
-                    crmUrl: data.crmUrl || undefined,
-                    crmEditUrlPattern: data.crmEditUrlPattern || undefined,
-                    crmLeadUrlPattern: data.crmLeadUrlPattern || undefined,
+                    crmUsername,
+                    ...(shouldUpdatePassword ? { crmPassword: crmPasswordInput } : {}),
+                    ...(clearCrmPassword ? { crmPassword: null } : {}),
                 }
+            });
+
+            await db.location.update({
+                where: { id: context.locationId },
+                data: {
+                    crmUrl: locationPayload.crmUrl || undefined,
+                    crmEditUrlPattern: locationPayload.crmEditUrlPattern || undefined,
+                    crmLeadUrlPattern: locationPayload.crmLeadUrlPattern || undefined,
+                }
+            });
+        }
+
+        if (isSettingsDualWriteLegacyEnabled() && isSettingsParityCheckEnabled()) {
+            await settingsService.checkDocumentParity({
+                scopeType: "LOCATION",
+                scopeId: context.locationId,
+                domain: SETTINGS_DOMAINS.LOCATION_CRM,
+                legacyPayload: locationPayload,
+                actorUserId: context.localUserId,
+            });
+            await settingsService.checkDocumentParity({
+                scopeType: "USER",
+                scopeId: context.localUserId,
+                domain: SETTINGS_DOMAINS.USER_CRM,
+                legacyPayload: { crmUsername },
+                actorUserId: context.localUserId,
             });
         }
 
         revalidatePath('/admin/settings/crm');
         return { success: true };
     } catch (error) {
+        if (error instanceof SettingsVersionConflictError) {
+            return { success: false, error: "Settings were updated by another user. Refresh and try again." };
+        }
         console.error("Failed to save credentials:", error);
-        throw new Error("Failed to save credentials");
+        return { success: false, error: "Failed to save credentials" };
     }
 }
 
-export async function getCrmSettings() {
-    const { userId } = await auth();
-    if (!userId) return null;
-
+export async function getCrmSettings(locationId?: string | null) {
     try {
-        // Get user with their first location and credentials
-        const user = await db.user.findUnique({
-            where: { clerkId: userId },
-            select: {
-                crmUsername: true,
-                crmPassword: true,
-                locations: {
-                    take: 1,
-                    select: {
-                        id: true,
-                        crmUrl: true,
-                        crmEditUrlPattern: true,
-                        crmLeadUrlPattern: true,
-                        crmSchema: true,
-                        crmLeadSchema: true,
-                        legacyCrmLeadEmailEnabled: true,
-                        legacyCrmLeadEmailSenders: true,
-                        legacyCrmLeadEmailSenderDomains: true,
-                        legacyCrmLeadEmailSubjectPatterns: true,
-                        legacyCrmLeadEmailPinConversation: true,
-                        legacyCrmLeadEmailAutoProcess: true,
-                        legacyCrmLeadEmailAutoDraftFirstContact: true,
-                    } as any
-                }
-            }
-        });
+        const context = await resolveAdminContext(locationId || null);
+        const [location, locationDoc, userDoc, hasCrmPassword] = await Promise.all([
+            db.location.findUnique({
+                where: { id: context.locationId },
+                select: {
+                    id: true,
+                    crmUrl: true,
+                    crmEditUrlPattern: true,
+                    crmLeadUrlPattern: true,
+                    crmSchema: true,
+                    crmLeadSchema: true,
+                    legacyCrmLeadEmailEnabled: true,
+                    legacyCrmLeadEmailSenders: true,
+                    legacyCrmLeadEmailSenderDomains: true,
+                    legacyCrmLeadEmailSubjectPatterns: true,
+                    legacyCrmLeadEmailPinConversation: true,
+                    legacyCrmLeadEmailAutoProcess: true,
+                    legacyCrmLeadEmailAutoDraftFirstContact: true,
+                } as any
+            }),
+            settingsService.getDocument<any>({
+                scopeType: "LOCATION",
+                scopeId: context.locationId,
+                domain: SETTINGS_DOMAINS.LOCATION_CRM,
+            }),
+            settingsService.getDocument<any>({
+                scopeType: "USER",
+                scopeId: context.localUserId,
+                domain: SETTINGS_DOMAINS.USER_CRM,
+            }),
+            settingsService.hasSecret({
+                scopeType: "USER",
+                scopeId: context.localUserId,
+                domain: SETTINGS_DOMAINS.USER_CRM,
+                secretKey: SETTINGS_SECRET_KEYS.CRM_PASSWORD,
+            }).catch(() => false),
+        ]);
 
-        if (!user) return null;
+        const locationPayload = locationDoc?.payload || {};
+        const userPayload = userDoc?.payload || {};
 
-        const location = user.locations[0];
-
-        // Merge location config with user credentials
         return {
             // Location-level settings
             locationId: location?.id || null,
-            crmUrl: location?.crmUrl || null,
-            crmEditUrlPattern: location?.crmEditUrlPattern || null,
-            crmLeadUrlPattern: location?.crmLeadUrlPattern || null,
-            crmSchema: location?.crmSchema || null,
-            crmLeadSchema: location?.crmLeadSchema || null,
-            legacyCrmLeadEmailEnabled: (location as any)?.legacyCrmLeadEmailEnabled ?? false,
-            legacyCrmLeadEmailSenders: (location as any)?.legacyCrmLeadEmailSenders || [],
-            legacyCrmLeadEmailSenderDomains: (location as any)?.legacyCrmLeadEmailSenderDomains || [],
-            legacyCrmLeadEmailSubjectPatterns: (location as any)?.legacyCrmLeadEmailSubjectPatterns || [],
-            legacyCrmLeadEmailPinConversation: (location as any)?.legacyCrmLeadEmailPinConversation ?? true,
-            legacyCrmLeadEmailAutoProcess: (location as any)?.legacyCrmLeadEmailAutoProcess ?? false,
-            legacyCrmLeadEmailAutoDraftFirstContact: (location as any)?.legacyCrmLeadEmailAutoDraftFirstContact ?? false,
+            settingsVersion: locationDoc?.version ?? 0,
+            crmUrl: locationPayload.crmUrl ?? location?.crmUrl ?? null,
+            crmEditUrlPattern: locationPayload.crmEditUrlPattern ?? location?.crmEditUrlPattern ?? null,
+            crmLeadUrlPattern: locationPayload.crmLeadUrlPattern ?? location?.crmLeadUrlPattern ?? null,
+            crmSchema: locationPayload.crmSchema ?? location?.crmSchema ?? null,
+            crmLeadSchema: locationPayload.crmLeadSchema ?? location?.crmLeadSchema ?? null,
+            legacyCrmLeadEmailEnabled: locationPayload.legacyCrmLeadEmailEnabled ?? ((location as any)?.legacyCrmLeadEmailEnabled ?? false),
+            legacyCrmLeadEmailSenders: locationPayload.legacyCrmLeadEmailSenders ?? ((location as any)?.legacyCrmLeadEmailSenders || []),
+            legacyCrmLeadEmailSenderDomains: locationPayload.legacyCrmLeadEmailSenderDomains ?? ((location as any)?.legacyCrmLeadEmailSenderDomains || []),
+            legacyCrmLeadEmailSubjectPatterns: locationPayload.legacyCrmLeadEmailSubjectPatterns ?? ((location as any)?.legacyCrmLeadEmailSubjectPatterns || []),
+            legacyCrmLeadEmailPinConversation: locationPayload.legacyCrmLeadEmailPinConversation ?? ((location as any)?.legacyCrmLeadEmailPinConversation ?? true),
+            legacyCrmLeadEmailAutoProcess: locationPayload.legacyCrmLeadEmailAutoProcess ?? ((location as any)?.legacyCrmLeadEmailAutoProcess ?? false),
+            legacyCrmLeadEmailAutoDraftFirstContact: locationPayload.legacyCrmLeadEmailAutoDraftFirstContact ?? ((location as any)?.legacyCrmLeadEmailAutoDraftFirstContact ?? false),
             // User-level credentials
-            crmUsername: user.crmUsername || null,
-            crmPassword: user.crmPassword || null
+            crmUsername: userPayload.crmUsername ?? context.user.crmUsername ?? null,
+            crmPassword: null,
+            hasCrmPassword: hasCrmPassword || Boolean(context.user.crmPassword),
         };
     } catch (error) {
         console.error("Failed to fetch settings:", error);
@@ -303,60 +436,85 @@ export async function getCrmSettings() {
     }
 }
 
-export async function saveLeadSchema(schema: any) {
+export async function saveLeadSchema(schema: any, locationId?: string | null) {
     try {
-        const { userId } = await auth();
-        if (!userId) throw new Error("Unauthorized");
+        const context = await resolveAdminContext(locationId || null);
+        const existing = await settingsService.getDocument<any>({
+            scopeType: "LOCATION",
+            scopeId: context.locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_CRM,
+        });
+        const payload = {
+            ...(existing?.payload || {}),
+            crmLeadSchema: schema,
+        };
 
-        // Get user's primary location
-        const user = await db.user.findUnique({
-            where: { clerkId: userId },
-            include: { locations: { take: 1 } }
+        const saved = await settingsService.upsertDocument({
+            scopeType: "LOCATION",
+            scopeId: context.locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_CRM,
+            payload,
+            actorUserId: context.localUserId,
+            schemaVersion: 1,
         });
 
-        if (!user?.locations[0]) {
-            throw new Error("No location found for user");
+        if (isSettingsDualWriteLegacyEnabled()) {
+            await db.location.update({
+                where: { id: context.locationId },
+                data: { crmLeadSchema: schema },
+            });
         }
 
-        await db.location.update({
-            where: { id: user.locations[0].id },
-            data: { crmLeadSchema: schema },
-        });
-
-        return { success: true };
+        return { success: true, version: saved.version };
     } catch (error: any) {
+        if (error instanceof SettingsVersionConflictError) {
+            return { success: false, error: "Settings were updated by another user. Refresh and try again." };
+        }
         console.error("Failed to save lead schema:", error);
         return { success: false, error: error.message };
     }
 }
 
-export async function analyzeLeadSchema(testUrl: string) {
+export async function analyzeLeadSchema(testUrl: string, locationId?: string | null) {
     console.log("[Server Action] analyzeLeadSchema called for URL:", testUrl);
     try {
         const { userId } = await auth();
         console.log("[Server Action] User ID:", userId);
         if (!userId) return { success: false, error: "Unauthorized" };
 
-        // Get user credentials and location config
-        const user = await db.user.findUnique({
-            where: { clerkId: userId },
-            select: {
-                crmUsername: true,
-                crmPassword: true,
-                locations: {
-                    take: 1,
-                    select: { crmUrl: true }
-                }
-            }
-        });
+        const context = await resolveAdminContext(locationId || null);
+        const [locationDoc, userDoc, crmPasswordSecret, location] = await Promise.all([
+            settingsService.getDocument<any>({
+                scopeType: "LOCATION",
+                scopeId: context.locationId,
+                domain: SETTINGS_DOMAINS.LOCATION_CRM,
+            }),
+            settingsService.getDocument<any>({
+                scopeType: "USER",
+                scopeId: context.localUserId,
+                domain: SETTINGS_DOMAINS.USER_CRM,
+            }),
+            settingsService.getSecret({
+                scopeType: "USER",
+                scopeId: context.localUserId,
+                domain: SETTINGS_DOMAINS.USER_CRM,
+                secretKey: SETTINGS_SECRET_KEYS.CRM_PASSWORD,
+            }).catch(() => null),
+            db.location.findUnique({
+                where: { id: context.locationId },
+                select: { crmUrl: true },
+            }),
+        ]);
 
-        const crmUrl = user?.locations[0]?.crmUrl;
+        const crmUrl = locationDoc?.payload?.crmUrl || location?.crmUrl || null;
+        const crmUsername = userDoc?.payload?.crmUsername || context.user.crmUsername || null;
+        const crmPassword = crmPasswordSecret || context.user.crmPassword || null;
 
-        if (!crmUrl || !user?.crmUsername || !user?.crmPassword) {
+        if (!crmUrl || !crmUsername || !crmPassword) {
             const missing = [];
             if (!crmUrl) missing.push("CRM URL (set in Location)");
-            if (!user?.crmUsername) missing.push("Username");
-            if (!user?.crmPassword) missing.push("Password");
+            if (!crmUsername) missing.push("Username");
+            if (!crmPassword) missing.push("Password");
             return { success: false, error: `MISSING_CREDENTIALS: ${missing.join(', ')}. Please save credentials first.` };
         }
 
@@ -364,7 +522,7 @@ export async function analyzeLeadSchema(testUrl: string) {
         await puppeteerService.init();
 
         // Login
-        await puppeteerService.login(crmUrl, user.crmUsername, user.crmPassword);
+        await puppeteerService.login(crmUrl, crmUsername, crmPassword);
 
         // Navigate to Test URL
         const page = await puppeteerService.getPage();

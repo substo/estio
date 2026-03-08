@@ -8,10 +8,11 @@ import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 
 interface MenuStyleSelectorProps {
+    locationId: string;
     initialStyle: "side" | "top";
 }
 
-export function MenuStyleSelector({ initialStyle }: MenuStyleSelectorProps) {
+export function MenuStyleSelector({ locationId, initialStyle }: MenuStyleSelectorProps) {
     const [style, setStyle] = useState<"side" | "top">(initialStyle);
     const [loading, setLoading] = useState(false);
 
@@ -21,7 +22,7 @@ export function MenuStyleSelector({ initialStyle }: MenuStyleSelectorProps) {
         setStyle(newStyle);
 
         try {
-            await saveNavigationStyle(newStyle);
+            await saveNavigationStyle(locationId, newStyle);
             toast.success("Menu style saved successfully");
         } catch (error) {
             console.error(error);

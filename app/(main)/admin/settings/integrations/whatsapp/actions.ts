@@ -4,92 +4,205 @@ import db from "@/lib/db";
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import axios from "axios";
-import Cryptr from "cryptr";
 import { evolutionClient } from "@/lib/evolution/client";
 import { getLocationContext } from "@/lib/auth/location-context";
 import { parseEvolutionMessageContent } from "@/lib/whatsapp/evolution-media";
+import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
+import { settingsService } from "@/lib/settings/service";
+import {
+    SETTINGS_DOMAINS,
+    SETTINGS_SECRET_KEYS,
+    isSettingsDualWriteLegacyEnabled,
+    isSettingsParityCheckEnabled,
+} from "@/lib/settings/constants";
+import { getLegacyCryptr } from "@/lib/security/legacy-cryptr";
 
-// Simple encryption
-const secret = process.env.ENCRYPTION_KEY || "dev-secret-key-change-me";
-const cryptr = new Cryptr(secret);
+const MASKED_SECRET = "********";
 
-export async function updateWhatsAppSettings(formData: FormData) {
+async function resolveAdminContext(locationIdInput?: string | null) {
     const { userId } = await auth();
     if (!userId) throw new Error("Unauthorized");
 
-    const user = await db.user.findUnique({
-        where: { clerkId: userId },
-        include: { locations: true },
-    });
+    const contextLocation = await getLocationContext();
+    const locationId = locationIdInput || contextLocation?.id;
+    if (!locationId) throw new Error("No location found");
 
-    if (!user || !user.locations.length) throw new Error("No location found");
-    const locationId = user.locations[0].id;
+    const isAdmin = await verifyUserIsLocationAdmin(userId, locationId);
+    if (!isAdmin) throw new Error("Unauthorized");
+
+    const [user, location] = await Promise.all([
+        db.user.findUnique({
+            where: { clerkId: userId },
+            select: { id: true, phone: true },
+        }),
+        db.location.findUnique({ where: { id: locationId } }),
+    ]);
+
+    if (!user?.id || !location) {
+        throw new Error("No location found");
+    }
+
+    return { clerkUserId: userId, localUserId: user.id, userPhone: user.phone || "", location };
+}
+
+export async function updateWhatsAppSettings(formData: FormData) {
+    const locationId = String(formData.get("locationId") || "").trim();
+    const { location, localUserId } = await resolveAdminContext(locationId || null);
+    const resolvedLocationId = location.id;
 
     // Meta Credentials
     const businessAccountId = formData.get("businessAccountId") as string;
     const phoneNumberId = formData.get("phoneNumberId") as string;
-    const accessToken = formData.get("accessToken") as string;
+    const accessTokenInput = String(formData.get("accessToken") || "").trim();
     const webhookSecret = formData.get("webhookSecret") as string;
 
     // Twilio Credentials
     const twilioAccountSid = formData.get("twilioAccountSid") as string;
-    const twilioAuthToken = formData.get("twilioAuthToken") as string;
+    const twilioAuthTokenInput = String(formData.get("twilioAuthToken") || "").trim();
     const twilioWhatsAppFrom = formData.get("twilioWhatsAppFrom") as string;
+    const clearWhatsAppAccessToken = formData.get("clearWhatsAppAccessToken") === "on";
+    const clearTwilioAuthToken = formData.get("clearTwilioAuthToken") === "on";
 
-    const updateData: any = {};
+    const payload = {
+        whatsappBusinessAccountId: businessAccountId || null,
+        whatsappPhoneNumberId: phoneNumberId || null,
+        whatsappWebhookSecret: webhookSecret || null,
+        twilioAccountSid: twilioAccountSid || null,
+        twilioWhatsAppFrom: twilioWhatsAppFrom || null,
+        evolutionInstanceId: location.evolutionInstanceId || null,
+        evolutionApiToken: location.evolutionApiToken || null,
+        evolutionConnectionStatus: location.evolutionConnectionStatus || null,
+    };
 
-    // Meta Update
-    if (businessAccountId !== undefined) updateData.whatsappBusinessAccountId = businessAccountId;
-    if (phoneNumberId !== undefined) updateData.whatsappPhoneNumberId = phoneNumberId;
-    if (webhookSecret !== undefined) updateData.whatsappWebhookSecret = webhookSecret;
-    if (accessToken) {
-        updateData.whatsappAccessToken = cryptr.encrypt(accessToken);
-    }
-
-    // Twilio Update
-    if (twilioAccountSid !== undefined) updateData.twilioAccountSid = twilioAccountSid;
-    if (twilioWhatsAppFrom !== undefined) updateData.twilioWhatsAppFrom = twilioWhatsAppFrom;
-    if (twilioAuthToken) {
-        updateData.twilioAuthToken = cryptr.encrypt(twilioAuthToken);
-    }
-
-    await db.location.update({
-        where: { id: locationId },
-        data: updateData
+    await settingsService.upsertDocument({
+        scopeType: "LOCATION",
+        scopeId: resolvedLocationId,
+        domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+        payload,
+        actorUserId: localUserId,
+        schemaVersion: 1,
     });
+
+    const shouldUpdateAccessToken = accessTokenInput.length > 0 && accessTokenInput !== MASKED_SECRET;
+    const shouldUpdateTwilioAuthToken = twilioAuthTokenInput.length > 0 && twilioAuthTokenInput !== MASKED_SECRET;
+
+    if (clearWhatsAppAccessToken) {
+        await settingsService.clearSecret({
+            scopeType: "LOCATION",
+            scopeId: resolvedLocationId,
+            domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+            secretKey: SETTINGS_SECRET_KEYS.WHATSAPP_ACCESS_TOKEN,
+            actorUserId: localUserId,
+        });
+    } else if (shouldUpdateAccessToken) {
+        await settingsService.setSecret({
+            scopeType: "LOCATION",
+            scopeId: resolvedLocationId,
+            domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+            secretKey: SETTINGS_SECRET_KEYS.WHATSAPP_ACCESS_TOKEN,
+            plaintext: accessTokenInput,
+            actorUserId: localUserId,
+        });
+    }
+
+    if (clearTwilioAuthToken) {
+        await settingsService.clearSecret({
+            scopeType: "LOCATION",
+            scopeId: resolvedLocationId,
+            domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+            secretKey: SETTINGS_SECRET_KEYS.TWILIO_AUTH_TOKEN,
+            actorUserId: localUserId,
+        });
+    } else if (shouldUpdateTwilioAuthToken) {
+        await settingsService.setSecret({
+            scopeType: "LOCATION",
+            scopeId: resolvedLocationId,
+            domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+            secretKey: SETTINGS_SECRET_KEYS.TWILIO_AUTH_TOKEN,
+            plaintext: twilioAuthTokenInput,
+            actorUserId: localUserId,
+        });
+    }
+
+    if (isSettingsDualWriteLegacyEnabled()) {
+        const updateData: any = {
+            whatsappBusinessAccountId: payload.whatsappBusinessAccountId,
+            whatsappPhoneNumberId: payload.whatsappPhoneNumberId,
+            whatsappWebhookSecret: payload.whatsappWebhookSecret,
+            twilioAccountSid: payload.twilioAccountSid,
+            twilioWhatsAppFrom: payload.twilioWhatsAppFrom,
+        };
+
+        const cryptr = getLegacyCryptr();
+        if (shouldUpdateAccessToken) {
+            updateData.whatsappAccessToken = cryptr.encrypt(accessTokenInput);
+        } else if (clearWhatsAppAccessToken) {
+            updateData.whatsappAccessToken = null;
+        }
+
+        if (shouldUpdateTwilioAuthToken) {
+            updateData.twilioAuthToken = cryptr.encrypt(twilioAuthTokenInput);
+        } else if (clearTwilioAuthToken) {
+            updateData.twilioAuthToken = null;
+        }
+
+        await db.location.update({
+            where: { id: resolvedLocationId },
+            data: updateData
+        });
+    }
+
+    if (isSettingsDualWriteLegacyEnabled() && isSettingsParityCheckEnabled()) {
+        await settingsService.checkDocumentParity({
+            scopeType: "LOCATION",
+            scopeId: resolvedLocationId,
+            domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+            legacyPayload: payload,
+            actorUserId: localUserId,
+        });
+    }
 
     revalidatePath("/admin/settings/integrations/whatsapp");
     return { success: true };
 }
 
-export async function getWhatsAppSettings() {
-    const { userId } = await auth();
-    if (!userId) throw new Error("Unauthorized");
+export async function getWhatsAppSettings(locationId?: string | null) {
+    const { location: contextLocation } = await resolveAdminContext(locationId || null);
+    const location = contextLocation;
+    const [doc, hasAccessToken, hasTwilioAuthToken] = await Promise.all([
+        settingsService.getDocument<any>({
+            scopeType: "LOCATION",
+            scopeId: location.id,
+            domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+        }),
+        settingsService.hasSecret({
+            scopeType: "LOCATION",
+            scopeId: location.id,
+            domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+            secretKey: SETTINGS_SECRET_KEYS.WHATSAPP_ACCESS_TOKEN,
+        }).catch(() => false),
+        settingsService.hasSecret({
+            scopeType: "LOCATION",
+            scopeId: location.id,
+            domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+            secretKey: SETTINGS_SECRET_KEYS.TWILIO_AUTH_TOKEN,
+        }).catch(() => false),
+    ]);
 
-    const user = await db.user.findUnique({
-        where: { clerkId: userId },
-        include: { locations: true },
-    });
-
-    if (!user || !user.locations.length) return null;
-    const location = user.locations[0];
-
-    let decryptedAccessToken = "";
-    if (location.whatsappAccessToken) {
-        try { decryptedAccessToken = cryptr.decrypt(location.whatsappAccessToken); } catch (e) { }
-    }
+    const payload = doc?.payload || {};
 
     // Evolution Status Check (Lazy Sync)
     // If DB says "close" or "connecting", double check with API in case webhook failed
-    let evolutionStatus = location.evolutionConnectionStatus || "close";
-    if (location.evolutionInstanceId && evolutionStatus !== "open") {
+    const payloadInstanceId = payload.evolutionInstanceId || location.evolutionInstanceId;
+    let evolutionStatus = payload.evolutionConnectionStatus || location.evolutionConnectionStatus || "close";
+    if (payloadInstanceId && evolutionStatus !== "open") {
         try {
             // Only try to fetch if we have an instance ID
-            const instanceData = await evolutionClient.fetchInstance(location.evolutionInstanceId);
+            const instanceData = await evolutionClient.fetchInstance(payloadInstanceId);
             let realStatus = "unknown";
 
             if (Array.isArray(instanceData)) {
-                const ref = instanceData.find((i: any) => i.instance?.instanceName === location.evolutionInstanceId) || instanceData[0];
+                const ref = instanceData.find((i: any) => i.instance?.instanceName === payloadInstanceId) || instanceData[0];
                 realStatus = ref?.instance?.status || ref?.connectionStatus || "unknown";
             } else if (instanceData) {
                 realStatus = instanceData.instance?.status || instanceData.connectionStatus || "unknown";
@@ -110,34 +223,28 @@ export async function getWhatsAppSettings() {
 
     return {
         // Meta
-        businessAccountId: location.whatsappBusinessAccountId || "",
-        phoneNumberId: location.whatsappPhoneNumberId || "",
-        accessToken: decryptedAccessToken,
-        webhookSecret: location.whatsappWebhookSecret || "",
+        businessAccountId: payload.whatsappBusinessAccountId || location.whatsappBusinessAccountId || "",
+        phoneNumberId: payload.whatsappPhoneNumberId || location.whatsappPhoneNumberId || "",
+        accessToken: "",
+        hasAccessToken: hasAccessToken || Boolean(location.whatsappAccessToken),
+        webhookSecret: payload.whatsappWebhookSecret || location.whatsappWebhookSecret || "",
 
         // Twilio
-        twilioAccountSid: location.twilioAccountSid || "",
-        twilioAuthToken: location.twilioAuthToken ? "********" : "", // Masked
-        twilioWhatsAppFrom: location.twilioWhatsAppFrom || "",
+        twilioAccountSid: payload.twilioAccountSid || location.twilioAccountSid || "",
+        twilioAuthToken: "",
+        hasTwilioAuthToken: hasTwilioAuthToken || Boolean(location.twilioAuthToken),
+        twilioWhatsAppFrom: payload.twilioWhatsAppFrom || location.twilioWhatsAppFrom || "",
 
         // Evolution
-        evolutionInstanceId: location.evolutionInstanceId || "",
+        evolutionInstanceId: payloadInstanceId || "",
         evolutionConnectionStatus: evolutionStatus,
 
         locationId: location.id,
     };
 }
 
-export async function connectEvolutionDevice() {
-    const { userId } = await auth();
-    if (!userId) throw new Error("Unauthorized");
-
-    const user = await db.user.findUnique({
-        where: { clerkId: userId },
-        include: { locations: true },
-    });
-    if (!user || !user.locations.length) throw new Error("No location found");
-    const location = user.locations[0];
+export async function connectEvolutionDevice(locationId?: string | null) {
+    const { location, userPhone } = await resolveAdminContext(locationId || null);
 
     try {
 
@@ -222,7 +329,7 @@ export async function connectEvolutionDevice() {
                         console.log("Instance is ALREADY OPEN/CONNECTED!");
 
                         // SECURITY CHECK: Verify Owner Match
-                        const cleanUserPhone = (user.phone || '').replace(/\D/g, '');
+                        const cleanUserPhone = (userPhone || '').replace(/\D/g, '');
                         const cleanOwnerPhone = ownerJid ? ownerJid.replace(/\D/g, '').replace('@s.whatsapp.net', '') : '';
 
                         // We check if the owner phone ENDS WITH the user phone (to handle country codes somewhat gracefully if user didn't include them, though exact match is better)
@@ -235,7 +342,7 @@ export async function connectEvolutionDevice() {
                             await evolutionClient.logoutInstance(instanceName);
                             return {
                                 success: false,
-                                error: `Security Mismatch: The connected WhatsApp number (${cleanOwnerPhone}) does not match your profile number (${user.phone}). Please scan with the correct device.`
+                                error: `Security Mismatch: The connected WhatsApp number (${cleanOwnerPhone}) does not match your profile number (${userPhone}). Please scan with the correct device.`
                             };
                         }
 
@@ -280,16 +387,8 @@ export async function connectEvolutionDevice() {
 
 }
 
-export async function logoutEvolutionInstance() {
-    const { userId } = await auth();
-    if (!userId) throw new Error("Unauthorized");
-
-    const user = await db.user.findUnique({
-        where: { clerkId: userId },
-        include: { locations: true },
-    });
-    if (!user || !user.locations.length) throw new Error("No location found");
-    const location = user.locations[0];
+export async function logoutEvolutionInstance(locationId?: string | null) {
+    const { location } = await resolveAdminContext(locationId || null);
 
     try {
         if (location.evolutionInstanceId) {
@@ -310,16 +409,8 @@ export async function logoutEvolutionInstance() {
     }
 }
 
-export async function syncEvolutionChats() {
-    const { userId } = await auth();
-    if (!userId) throw new Error("Unauthorized");
-
-    const user = await db.user.findUnique({
-        where: { clerkId: userId },
-        include: { locations: true },
-    });
-    if (!user || !user.locations.length) throw new Error("No location found");
-    const location = user.locations[0];
+export async function syncEvolutionChats(locationId?: string | null) {
+    const { location } = await resolveAdminContext(locationId || null);
 
     if (!location.evolutionInstanceId) {
         return { success: false, error: "No WhatsApp instance connected" };
@@ -397,15 +488,7 @@ export async function syncEvolutionChats() {
  * Fetch messages for a specific conversation from Evolution API (on-demand)
  */
 export async function fetchConversationHistory(conversationId: string) {
-    const { userId } = await auth();
-    if (!userId) throw new Error("Unauthorized");
-
-    const user = await db.user.findUnique({
-        where: { clerkId: userId },
-        include: { locations: true },
-    });
-    if (!user || !user.locations.length) throw new Error("No location found");
-    const location = user.locations[0];
+    const { location } = await resolveAdminContext(null);
 
     if (!location.evolutionInstanceId) {
         return { success: false, error: "No WhatsApp instance connected" };
@@ -485,24 +568,15 @@ export async function exchangeSystemUserToken(
     authCodeOrToken: string,
     appId: string,
     redirectUri?: string,
-    isDirectToken: boolean = false
+    isDirectToken: boolean = false,
+    locationId?: string | null
 ) {
-    const { userId } = await auth();
-    if (!userId) throw new Error("Unauthorized");
-
     const appSecret = process.env.META_APP_SECRET;
     if (!appSecret) throw new Error("Server Misconfiguration: META_APP_SECRET is missing.");
+    const { location, localUserId } = await resolveAdminContext(locationId || null);
+    const resolvedLocationId = location.id;
 
-    // 1. Get Location Context
-    const user = await db.user.findUnique({
-        where: { clerkId: userId },
-        include: { locations: true },
-    });
-
-    if (!user || !user.locations.length) throw new Error("No location found");
-    const locationId = user.locations[0].id;
-
-    console.log("🔄 Starting Token Processing for Location:", locationId);
+    console.log("🔄 Starting Token Processing for Location:", resolvedLocationId);
     console.log("📍 Mode:", isDirectToken ? "Direct Token" : "Code Exchange");
 
     try {
@@ -611,23 +685,66 @@ export async function exchangeSystemUserToken(
         const displayPhoneNumber = phones[0].display_phone_number;
         console.log("✅ Found Phone ID:", phoneNumberId, "Display:", displayPhoneNumber);
 
-        // 5. Encrypt Token
-        const encryptedAccessToken = cryptr.encrypt(accessToken);
+        // 5. Save encrypted token in settings secrets
+        await settingsService.setSecret({
+            scopeType: "LOCATION",
+            scopeId: resolvedLocationId,
+            domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+            secretKey: SETTINGS_SECRET_KEYS.WHATSAPP_ACCESS_TOKEN,
+            plaintext: accessToken,
+            actorUserId: localUserId,
+        });
 
-        // 6. Save to DB
+        const integrationPayload = {
+            whatsappBusinessAccountId: wabaId,
+            whatsappPhoneNumberId: phoneNumberId,
+            whatsappWebhookSecret: location.whatsappWebhookSecret || crypto.randomUUID(),
+            twilioAccountSid: location.twilioAccountSid || null,
+            twilioWhatsAppFrom: location.twilioWhatsAppFrom || null,
+            evolutionInstanceId: location.evolutionInstanceId || null,
+            evolutionApiToken: location.evolutionApiToken || null,
+            evolutionConnectionStatus: location.evolutionConnectionStatus || null,
+        };
+
+        await settingsService.upsertDocument({
+            scopeType: "LOCATION",
+            scopeId: resolvedLocationId,
+            domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+            payload: integrationPayload,
+            actorUserId: localUserId,
+            schemaVersion: 1,
+        });
+
+        // 6. Dual-write to legacy columns
         // Ensure webhook secret is set if missing
-        const currentSettings = await db.location.findUnique({ where: { id: locationId }, select: { whatsappWebhookSecret: true } });
+        const currentSettings = await db.location.findUnique({ where: { id: resolvedLocationId }, select: { whatsappWebhookSecret: true } });
         const webhookSecret = currentSettings?.whatsappWebhookSecret || crypto.randomUUID();
 
-        await db.location.update({
-            where: { id: locationId },
-            data: {
-                whatsappBusinessAccountId: wabaId,
-                whatsappPhoneNumberId: phoneNumberId,
-                whatsappAccessToken: encryptedAccessToken,
-                whatsappWebhookSecret: webhookSecret
-            }
-        });
+        if (isSettingsDualWriteLegacyEnabled()) {
+            const encryptedAccessToken = getLegacyCryptr().encrypt(accessToken);
+            await db.location.update({
+                where: { id: resolvedLocationId },
+                data: {
+                    whatsappBusinessAccountId: wabaId,
+                    whatsappPhoneNumberId: phoneNumberId,
+                    whatsappAccessToken: encryptedAccessToken,
+                    whatsappWebhookSecret: webhookSecret
+                }
+            });
+        }
+
+        if (isSettingsDualWriteLegacyEnabled() && isSettingsParityCheckEnabled()) {
+            await settingsService.checkDocumentParity({
+                scopeType: "LOCATION",
+                scopeId: resolvedLocationId,
+                domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+                legacyPayload: {
+                    ...integrationPayload,
+                    whatsappWebhookSecret: webhookSecret,
+                },
+                actorUserId: localUserId,
+            });
+        }
 
         console.log("🎉 WhatsApp Settings Updated Successfully!");
 
@@ -643,21 +760,11 @@ export async function exchangeSystemUserToken(
     }
 }
 
-export async function checkInstanceHealth() {
-    const { userId } = await auth();
-    if (!userId) throw new Error("Unauthorized");
-
-    const user = await db.user.findUnique({
-        where: { clerkId: userId },
-        include: { locations: true },
-    });
-    if (!user || !user.locations.length) return { success: false, error: "No location" };
-    const location = user.locations[0];
+export async function checkInstanceHealth(locationId?: string | null) {
+    const { location } = await resolveAdminContext(locationId || null);
     try {
-        const location = await getLocationContext();
-        if (!location || !location.evolutionInstanceId) return { success: false, error: "No instance ID" };
+        if (!location.evolutionInstanceId) return { success: false, error: "No instance ID" };
 
-        const { evolutionClient } = await import("@/lib/evolution/client");
         const instance = await evolutionClient.fetchInstance(location.evolutionInstanceId);
 
         // Fetch contacts count & chats count if supported
@@ -713,10 +820,8 @@ export async function checkInstanceHealth() {
 
 export async function resetWebhookUrl() {
     try {
-        const location = await getLocationContext();
-        if (!location || !location.evolutionInstanceId) return { success: false, error: "No instance ID" };
-
-        const { evolutionClient } = await import("@/lib/evolution/client");
+        const { location } = await resolveAdminContext(null);
+        if (!location.evolutionInstanceId) return { success: false, error: "No instance ID" };
         const res = await evolutionClient.updateWebhook(location.evolutionInstanceId);
 
         return { success: true, url: res.url };
@@ -726,15 +831,12 @@ export async function resetWebhookUrl() {
     }
 }
 
-export async function repairEvolutionConnection() {
-    const { userId } = await auth();
-    if (!userId) throw new Error("Unauthorized");
-
+export async function repairEvolutionConnection(locationId?: string | null) {
     console.log("🛠️ Starting Repair Process...");
 
     // 1. Logout/Delete
     try {
-        await logoutEvolutionInstance();
+        await logoutEvolutionInstance(locationId || null);
     } catch (e) {
         console.warn("Logout failed during repair (might be already gone):", e);
     }
@@ -743,5 +845,5 @@ export async function repairEvolutionConnection() {
     // Add a small delay to ensure cleanup
     await new Promise(resolve => setTimeout(resolve, 1000));
 
-    return await connectEvolutionDevice();
+    return await connectEvolutionDevice(locationId || null);
 }

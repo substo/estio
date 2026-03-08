@@ -209,7 +209,17 @@ function SortableLinkItem({
 
 // --- Main Menu Builder Component ---
 
-export function MenuBuilder({ type, initialLinks, availablePages = [] }: { type: 'nav' | 'footer' | 'legal' | 'social', initialLinks: any[], availablePages?: PageOption[] }) {
+export function MenuBuilder({
+    locationId,
+    type,
+    initialLinks,
+    availablePages = []
+}: {
+    locationId: string,
+    type: 'nav' | 'footer' | 'legal' | 'social',
+    initialLinks: any[],
+    availablePages?: PageOption[]
+}) {
     const [links, setLinks] = useState<LinkItem[]>([]);
     const [saving, setSaving] = useState(false);
     const [activeId, setActiveId] = useState<UniqueIdentifier | null>(null);
@@ -469,7 +479,7 @@ export function MenuBuilder({ type, initialLinks, availablePages = [] }: { type:
                 }));
             };
 
-            await saveNavigation(type, strip(links));
+            await saveNavigation(locationId, type, strip(links));
             toast.success("Menu saved");
         } catch (e) {
             toast.error("Failed to save menu");

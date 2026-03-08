@@ -28,7 +28,15 @@ const initialState = {
     message: "",
 };
 
-export function PageForm({ initialData, siteConfig }: { initialData?: any; siteConfig?: any }) {
+export function PageForm({
+    initialData,
+    siteConfig,
+    locationId,
+}: {
+    initialData?: any;
+    siteConfig?: any;
+    locationId: string;
+}) {
     const [title, setTitle] = useState(initialData?.title || "");
     const [slug, setSlug] = useState(initialData?.slug || "");
     const [previewMode, setPreviewMode] = useState(false);
@@ -216,6 +224,7 @@ export function PageForm({ initialData, siteConfig }: { initialData?: any; siteC
 
             <form action={formAction} className="space-y-6">
                 <input type="hidden" name="id" value={initialData?.id || ""} />
+                <input type="hidden" name="locationId" value={locationId} />
 
                 {/* Hidden input to submit blocks as JSON string */}
                 <input type="hidden" name="blocks" value={JSON.stringify(blocks)} />

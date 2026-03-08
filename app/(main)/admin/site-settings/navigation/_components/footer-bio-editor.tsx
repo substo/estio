@@ -8,14 +8,14 @@ import { Save } from "lucide-react";
 import { saveFooterBio } from "../actions";
 import { toast } from "sonner";
 
-export function FooterBioEditor({ initialText }: { initialText: string }) {
+export function FooterBioEditor({ locationId, initialText }: { locationId: string, initialText: string }) {
     const [text, setText] = useState(initialText || "");
     const [saving, setSaving] = useState(false);
 
     const handleSave = async () => {
         setSaving(true);
         try {
-            await saveFooterBio(text);
+            await saveFooterBio(locationId, text);
             toast.success("Footer description saved");
         } catch (e) {
             toast.error("Failed to save description");

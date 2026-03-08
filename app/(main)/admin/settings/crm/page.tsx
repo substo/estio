@@ -20,9 +20,12 @@ export default function CrmSettingsPage() {
     const [isLeadAnalyzing, setIsLeadAnalyzing] = useState(false);
     const [schema, setSchema] = useState<any>(null);
     const [defaultValues, setDefaultValues] = useState({
+        locationId: "",
+        settingsVersion: 0,
         crmUrl: "https://www.downtowncyprus.com/admin",
         crmUsername: "",
         crmPassword: "",
+        hasCrmPassword: false,
         crmEditUrlPattern: "",
         crmLeadUrlPattern: "",
         legacyCrmLeadEmailEnabled: false,
@@ -42,9 +45,12 @@ export default function CrmSettingsPage() {
                 const settings: any = await getCrmSettings();
                 if (settings) {
                     setDefaultValues({
+                        locationId: settings.locationId || "",
+                        settingsVersion: Number(settings.settingsVersion || 0),
                         crmUrl: settings.crmUrl || "https://www.downtowncyprus.com/admin",
                         crmUsername: settings.crmUsername || "",
-                        crmPassword: settings.crmPassword || "",
+                        crmPassword: "",
+                        hasCrmPassword: Boolean(settings.hasCrmPassword),
                         crmEditUrlPattern: settings.crmEditUrlPattern || "",
                         crmLeadUrlPattern: settings.crmLeadUrlPattern || "",
                         legacyCrmLeadEmailEnabled: !!settings.legacyCrmLeadEmailEnabled,
@@ -97,6 +103,13 @@ export default function CrmSettingsPage() {
             const result = await saveLegacyCrmLeadEmailSettings(data);
             if (result?.success) {
                 toast.success("Legacy CRM lead email settings saved");
+                const settings: any = await getCrmSettings(defaultValues.locationId || null);
+                if (settings) {
+                    setDefaultValues((prev) => ({
+                        ...prev,
+                        settingsVersion: Number(settings.settingsVersion || prev.settingsVersion || 0),
+                    }));
+                }
             } else {
                 toast.error(result?.error || "Failed to save settings");
             }
@@ -117,7 +130,7 @@ export default function CrmSettingsPage() {
         setIsLeadAnalyzing(true);
         try {
             console.log("Calling server action analyzeLeadSchema with:", leadAnalysisUrl);
-            const result = await analyzeLeadSchema(leadAnalysisUrl);
+            const result = await analyzeLeadSchema(leadAnalysisUrl, defaultValues.locationId || null);
             console.log("Server action result:", result);
             if (result.success) {
                 setLeadAnalysisResult(result.analysis);
@@ -141,8 +154,21 @@ export default function CrmSettingsPage() {
         const data = Object.fromEntries(formData);
 
         try {
-            await saveCrmCredentials(data);
+            const result = await saveCrmCredentials(data);
+            if (!result?.success) {
+                toast.error(result?.error || "Failed to save credentials");
+                return;
+            }
             toast.success("Credentials saved successfully");
+            const settings: any = await getCrmSettings(defaultValues.locationId || null);
+            if (settings) {
+                setDefaultValues((prev) => ({
+                    ...prev,
+                    settingsVersion: Number(settings.settingsVersion || prev.settingsVersion || 0),
+                    hasCrmPassword: Boolean(settings.hasCrmPassword),
+                    crmPassword: "",
+                }));
+            }
         } catch (error) {
             toast.error("Failed to save credentials");
             console.error(error);
@@ -165,6 +191,8 @@ export default function CrmSettingsPage() {
                 </CardHeader>
                 <CardContent>
                     <form onSubmit={onSubmit} className="space-y-4">
+                        <input type="hidden" name="locationId" value={defaultValues.locationId} />
+                        <input type="hidden" name="settingsVersion" value={String(defaultValues.settingsVersion)} />
                         <div className="space-y-2">
                             <Label htmlFor="crmUrl">CRM URL</Label>
                             <Input
@@ -226,8 +254,21 @@ export default function CrmSettingsPage() {
                                 type="password"
                                 defaultValue={defaultValues.crmPassword}
                                 key={`pass-${defaultValues.crmPassword}`}
-                                required
+                                placeholder={defaultValues.hasCrmPassword ? "Leave blank to keep existing password" : "Enter CRM password"}
                             />
+                            <p className="text-xs text-muted-foreground">
+                                {defaultValues.hasCrmPassword
+                                    ? "Password is already configured. Leave blank to keep it."
+                                    : "No password configured yet."}
+                            </p>
+                            <label className="flex items-center gap-2 text-sm">
+                                <input
+                                    type="checkbox"
+                                    name="clearCrmPassword"
+                                    className="h-4 w-4"
+                                />
+                                Clear stored password
+                            </label>
                         </div>
 
                         <Button type="submit" disabled={isSaving}>
@@ -246,6 +287,8 @@ export default function CrmSettingsPage() {
                 </CardHeader>
                 <CardContent>
                     <form onSubmit={onSubmitLegacyCrmLeadEmail} className="space-y-4">
+                        <input type="hidden" name="locationId" value={defaultValues.locationId} />
+                        <input type="hidden" name="settingsVersion" value={String(defaultValues.settingsVersion)} />
                         <div className="rounded-md border p-4 space-y-3">
                             <div className="flex items-start gap-3">
                                 <input
@@ -440,9 +483,15 @@ export default function CrmSettingsPage() {
                                 onClick={async () => {
                                     setIsLeadAnalyzing(true);
                                     try {
-                                        const result = await saveLeadSchema(leadAnalysisResult);
+                                        const result = await saveLeadSchema(leadAnalysisResult, defaultValues.locationId || null);
                                         if (result.success) {
                                             toast.success("Lead schema saved successfully!");
+                                            if (typeof result.version === "number") {
+                                                setDefaultValues((prev) => ({
+                                                    ...prev,
+                                                    settingsVersion: result.version,
+                                                }));
+                                            }
                                         } else {
                                             toast.error("Failed to save lead schema: " + result.error);
                                         }
@@ -483,29 +532,34 @@ export default function CrmSettingsPage() {
                 {/* Re-evaluating: convert page to server component? It has a lot of state. 
                     Let's just fetch via action for now to avoid big refactor.
                  */}
-                <LeadSourceManagerWrapper />
+                <LeadSourceManagerWrapper locationId={defaultValues.locationId} />
             </div>
         </div >
     );
 }
 
-function LeadSourceManagerWrapper() {
+function LeadSourceManagerWrapper({ locationId }: { locationId: string }) {
     const [sources, setSources] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        if (!locationId) {
+            setLoading(false);
+            return;
+        }
+        setLoading(true);
         // We need an action to fetch sources
         import('./actions').then(({ getLeadSources }) => {
-            getLeadSources().then((res) => {
+            getLeadSources(locationId).then((res) => {
                 if (res.success && res.sources) {
                     setSources(res.sources);
                 }
                 setLoading(false);
             });
         });
-    }, []);
+    }, [locationId]);
 
     if (loading) return <div>Loading Lead Sources...</div>;
 
-    return <LeadSourceManager initialSources={sources} />;
+    return <LeadSourceManager initialSources={sources} locationId={locationId} />;
 }

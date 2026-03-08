@@ -25,7 +25,7 @@ export default async function PageEditor(props: { params: Promise<{ id: string }
     return (
         <div className="p-6">
             <h1 className="text-2xl font-bold mb-6">{page ? "Edit Page" : "New Page"}</h1>
-            <PageForm initialData={page} siteConfig={siteConfig} />
+            <PageForm initialData={page} siteConfig={siteConfig} locationId={orgId} />
         </div>
     );
 }

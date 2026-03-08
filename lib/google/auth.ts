@@ -1,6 +1,12 @@
 
 import { google } from 'googleapis';
 import db from '@/lib/db';
+import { settingsService } from '@/lib/settings/service';
+import {
+    SETTINGS_DOMAINS,
+    SETTINGS_SECRET_KEYS,
+    isSettingsDualWriteLegacyEnabled,
+} from '@/lib/settings/constants';
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
@@ -45,18 +51,89 @@ export async function handleGoogleCallback(code: string, userId: string, baseUrl
 
     if (!tokens.access_token) throw new Error('Failed to retrieve access token');
 
-    // Save tokens to DB
-    await db.user.update({
+    const user = await db.user.findUnique({
         where: { id: userId },
-        data: {
-            googleAccessToken: tokens.access_token,
-            googleRefreshToken: tokens.refresh_token, // Only present on first consent or forced consent
-            googleSyncEnabled: true,
+        select: {
+            googleSyncDirection: true,
+            googleAutoSyncEnabled: true,
+            googleAutoSyncLeadCapture: true,
+            googleAutoSyncContactForm: true,
+            googleAutoSyncWhatsAppInbound: true,
+            googleAutoSyncMode: true,
+            googleAutoSyncPushUpdates: true,
+            googleTasklistId: true,
+            googleTasklistTitle: true,
+            googleCalendarId: true,
+            googleCalendarTitle: true,
         }
     });
+    if (!user) {
+        throw new Error("User not found");
+    }
 
-    client.setCredentials(tokens);
-    client.setCredentials(tokens);
+    await settingsService.upsertDocument({
+        scopeType: "USER",
+        scopeId: userId,
+        domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
+        payload: {
+            googleSyncEnabled: true,
+            googleSyncDirection: user.googleSyncDirection ?? null,
+            googleAutoSyncEnabled: user.googleAutoSyncEnabled ?? false,
+            googleAutoSyncLeadCapture: user.googleAutoSyncLeadCapture ?? false,
+            googleAutoSyncContactForm: user.googleAutoSyncContactForm ?? false,
+            googleAutoSyncWhatsAppInbound: user.googleAutoSyncWhatsAppInbound ?? false,
+            googleAutoSyncMode: user.googleAutoSyncMode ?? "LINK_ONLY",
+            googleAutoSyncPushUpdates: user.googleAutoSyncPushUpdates ?? false,
+            googleTasklistId: user.googleTasklistId ?? null,
+            googleTasklistTitle: user.googleTasklistTitle ?? null,
+            googleCalendarId: user.googleCalendarId ?? null,
+            googleCalendarTitle: user.googleCalendarTitle ?? null,
+        },
+        actorUserId: userId,
+        schemaVersion: 1,
+    });
+    await settingsService.setSecret({
+        scopeType: "USER",
+        scopeId: userId,
+        domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
+        secretKey: SETTINGS_SECRET_KEYS.GOOGLE_ACCESS_TOKEN,
+        plaintext: tokens.access_token,
+        actorUserId: userId,
+    });
+    if (tokens.refresh_token) {
+        await settingsService.setSecret({
+            scopeType: "USER",
+            scopeId: userId,
+            domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
+            secretKey: SETTINGS_SECRET_KEYS.GOOGLE_REFRESH_TOKEN,
+            plaintext: tokens.refresh_token,
+            actorUserId: userId,
+        });
+    }
+
+    if (isSettingsDualWriteLegacyEnabled()) {
+        // Save tokens to legacy columns for compatibility during migration window.
+        await db.user.update({
+            where: { id: userId },
+            data: {
+                googleAccessToken: tokens.access_token,
+                googleRefreshToken: tokens.refresh_token, // Only present on first consent or forced consent
+                googleSyncEnabled: true,
+            }
+        });
+    } else {
+        await db.user.update({
+            where: { id: userId },
+            data: {
+                googleSyncEnabled: true,
+            }
+        });
+    }
+
+    client.setCredentials({
+        access_token: tokens.access_token || undefined,
+        refresh_token: tokens.refresh_token || undefined,
+    });
 
     // Start Watching immediately
     // Import dynamically to avoid circular dep if needed, or just import at top if clean.
@@ -76,12 +153,29 @@ export async function handleGoogleCallback(code: string, userId: string, baseUrl
 }
 
 export async function getValidAccessToken(userId: string) {
-    const user = await db.user.findUnique({
+    const [user, newAccessToken, newRefreshToken] = await Promise.all([
+        db.user.findUnique({
         where: { id: userId },
         select: { googleAccessToken: true, googleRefreshToken: true }
-    });
+        }),
+        settingsService.getSecret({
+            scopeType: "USER",
+            scopeId: userId,
+            domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
+            secretKey: SETTINGS_SECRET_KEYS.GOOGLE_ACCESS_TOKEN,
+        }).catch(() => null),
+        settingsService.getSecret({
+            scopeType: "USER",
+            scopeId: userId,
+            domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
+            secretKey: SETTINGS_SECRET_KEYS.GOOGLE_REFRESH_TOKEN,
+        }).catch(() => null),
+    ]);
 
-    if (!user || (!user.googleAccessToken && !user.googleRefreshToken)) {
+    const accessToken = newAccessToken || user?.googleAccessToken || null;
+    const refreshToken = newRefreshToken || user?.googleRefreshToken || null;
+
+    if (!user || (!accessToken && !refreshToken)) {
         throw new Error('User not connected to Google');
     }
 
@@ -90,21 +184,41 @@ export async function getValidAccessToken(userId: string) {
     // For refresh, Redirect URI is not sent.
     const client = createOAuth2Client();
     client.setCredentials({
-        access_token: user.googleAccessToken,
-        refresh_token: user.googleRefreshToken || undefined
+        access_token: accessToken || undefined,
+        refresh_token: refreshToken || undefined
     });
 
     // Handle token refresh events for this specific client instance
     client.on('tokens', async (tokens) => {
         if (tokens.access_token) {
-            await db.user.update({
-                where: { id: userId },
-                data: {
-                    googleAccessToken: tokens.access_token,
-                    // Only update refresh token if a new one is returned
-                    ...(tokens.refresh_token && { googleRefreshToken: tokens.refresh_token })
-                }
+            await settingsService.setSecret({
+                scopeType: "USER",
+                scopeId: userId,
+                domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
+                secretKey: SETTINGS_SECRET_KEYS.GOOGLE_ACCESS_TOKEN,
+                plaintext: tokens.access_token,
+                actorUserId: userId,
             });
+            if (tokens.refresh_token) {
+                await settingsService.setSecret({
+                    scopeType: "USER",
+                    scopeId: userId,
+                    domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
+                    secretKey: SETTINGS_SECRET_KEYS.GOOGLE_REFRESH_TOKEN,
+                    plaintext: tokens.refresh_token,
+                    actorUserId: userId,
+                });
+            }
+
+            if (isSettingsDualWriteLegacyEnabled()) {
+                await db.user.update({
+                    where: { id: userId },
+                    data: {
+                        googleAccessToken: tokens.access_token,
+                        ...(tokens.refresh_token && { googleRefreshToken: tokens.refresh_token })
+                    }
+                });
+            }
         }
     });
 

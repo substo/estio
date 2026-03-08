@@ -8,14 +8,14 @@ import { Save } from "lucide-react";
 import { saveFooterDisclaimer } from "../actions";
 import { toast } from "sonner";
 
-export function FooterDisclaimerEditor({ initialText }: { initialText: string }) {
+export function FooterDisclaimerEditor({ locationId, initialText }: { locationId: string, initialText: string }) {
     const [text, setText] = useState(initialText || "");
     const [saving, setSaving] = useState(false);
 
     const handleSave = async () => {
         setSaving(true);
         try {
-            await saveFooterDisclaimer(text);
+            await saveFooterDisclaimer(locationId, text);
             toast.success("Footer disclaimer saved");
         } catch (e) {
             toast.error("Failed to save disclaimer");

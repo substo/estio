@@ -2,15 +2,24 @@
 
 import db from "@/lib/db";
 import { auth } from "@clerk/nextjs/server";
-import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
+import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
 import { revalidatePath } from "next/cache";
 import { normalizeIanaTimeZoneOrThrow, ViewingDateTimeValidationError } from "@/lib/viewings/datetime";
+import { settingsService } from "@/lib/settings/service";
+import {
+    SETTINGS_DOMAINS,
+    isSettingsDualWriteLegacyEnabled,
+    isSettingsParityCheckEnabled,
+} from "@/lib/settings/constants";
+import { SettingsVersionConflictError } from "@/lib/settings/errors";
 
 interface SiteSettingsState {
     message?: string;
+    version?: number;
     errors?: {
         domain?: string[];
         locationTimeZone?: string[];
+        _version?: string[];
         _form?: string[];
     };
 }
@@ -27,9 +36,9 @@ export async function updateSiteSettings(
         return { message: "Location ID is missing" };
     }
 
-    const hasAccess = await verifyUserHasAccessToLocation(userId, locationId);
-    if (!hasAccess) {
-        return { message: "Unauthorized: You do not have access to this location." };
+    const isAdmin = await verifyUserIsLocationAdmin(userId, locationId);
+    if (!isAdmin) {
+        return { message: "Unauthorized: Admin access is required to update settings." };
     }
 
     const domain = formData.get("domain") as string;
@@ -56,9 +65,21 @@ export async function updateSiteSettings(
     const contactLandline = formData.get("contactLandline") as string;
     const contactEmail = formData.get("contactEmail") as string;
 
-    // Fetch existing config to preserve menuStyle
+    const localUser = await db.user.findUnique({
+        where: { clerkId: userId },
+        select: { id: true }
+    });
+
+    const settingsDoc = await settingsService.getDocument<any>({
+        scopeType: "LOCATION",
+        scopeId: locationId,
+        domain: SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE,
+    });
     const existingConfig = await db.siteConfig.findUnique({ where: { locationId } });
-    const existingTheme = (existingConfig?.theme as any) || {};
+    const existingTheme =
+        (settingsDoc?.payload as any)?.theme
+        || (existingConfig?.theme as any)
+        || {};
 
     const themeData = {
         primaryColor,
@@ -112,6 +133,10 @@ export async function updateSiteSettings(
     }
     // If formData.has("navLinksJson") is FALSE (field removed from UI), navLinksForUpdate remains undefined.
 
+    const expectedVersionRaw = (formData.get("settingsVersion") as string | null)?.trim();
+    const expectedVersionCandidate = expectedVersionRaw ? Number(expectedVersionRaw) : null;
+    const expectedVersion = Number.isFinite(expectedVersionCandidate) ? expectedVersionCandidate : null;
+
     try {
         // If domain is empty string, we should probably set it to null/undefined
         const domainVal = domain && domain.trim() !== "" ? domain.trim() : null;
@@ -134,21 +159,47 @@ export async function updateSiteSettings(
             updateData.navLinks = navLinksForUpdate;
         }
 
-        await db.siteConfig.upsert({
-            where: { locationId },
-            create: {
-                locationId,
-                domain: domainVal,
-                theme: themeData,
-                contactInfo: contactData,
+        const payload = {
+            domain: domainVal,
+            locationName,
+            locationTimeZone: validatedLocationTimeZone,
+            theme: themeData,
+            contactInfo: contactData,
+            navLinks: navLinksForUpdate ?? navLinksForCreate,
+            footerLinks: (existingConfig?.footerLinks as any[]) || [],
+            socialLinks: (existingConfig?.socialLinks as any[]) || [],
+            legalLinks: (existingConfig?.legalLinks as any[]) || [],
+            footerDisclaimer: existingConfig?.footerDisclaimer || null,
+            footerBio: existingConfig?.footerBio || null,
+            publicListingEnabled: existingConfig?.publicListingEnabled ?? true,
+        };
 
-                navLinks: navLinksForCreate, // Use default or provided
-                primaryColor,
-                secondaryColor,
-                accentColor,
-            },
-            update: updateData,
+        const savedDoc = await settingsService.upsertDocument({
+            scopeType: "LOCATION",
+            scopeId: locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE,
+            payload,
+            expectedVersion,
+            actorUserId: localUser?.id,
+            schemaVersion: 1,
         });
+
+        if (isSettingsDualWriteLegacyEnabled()) {
+            await db.siteConfig.upsert({
+                where: { locationId },
+                create: {
+                    locationId,
+                    domain: domainVal,
+                    theme: themeData,
+                    contactInfo: contactData,
+                    navLinks: navLinksForCreate,
+                    primaryColor,
+                    secondaryColor,
+                    accentColor,
+                },
+                update: updateData,
+            });
+        }
 
         // Also sync the domain to the Location table for consistency
         await db.location.update({
@@ -173,10 +224,23 @@ export async function updateSiteSettings(
             }
         }
 
+        if (isSettingsDualWriteLegacyEnabled() && isSettingsParityCheckEnabled()) {
+            await settingsService.checkDocumentParity({
+                scopeType: "LOCATION",
+                scopeId: locationId,
+                domain: SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE,
+                legacyPayload: payload,
+                actorUserId: localUser?.id,
+            });
+        }
+
         revalidatePath("/admin/site-settings");
-        return { message: "Settings saved successfully" };
+        return { message: "Settings saved successfully", version: savedDoc.version };
     } catch (error: any) {
         console.error(error);
+        if (error instanceof SettingsVersionConflictError) {
+            return { errors: { _version: ["This form is out of date. Refresh and try again."] } };
+        }
         if (error instanceof ViewingDateTimeValidationError && error.code === "INVALID_TIMEZONE") {
             return { errors: { locationTimeZone: ["Please enter a valid IANA timezone (e.g. Europe/Nicosia)."] } };
         }

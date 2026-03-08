@@ -25,7 +25,17 @@ function SubmitButton() {
     );
 }
 
-export function AiSettingsForm({ initialData, locationId }: { initialData: any, locationId: string }) {
+export function AiSettingsForm({
+    initialData,
+    locationId,
+    settingsVersion,
+    hasGoogleAiApiKey,
+}: {
+    initialData: any,
+    locationId: string,
+    settingsVersion: number,
+    hasGoogleAiApiKey: boolean
+}) {
     const [state, action] = useActionState(updateAiSettings, initialState);
 
     // Local state for research URL since it's not persisted in DB directly here
@@ -115,6 +125,7 @@ export function AiSettingsForm({ initialData, locationId }: { initialData: any, 
 
             <form action={action} className="space-y-8">
                 <input type="hidden" name="locationId" value={locationId} />
+                <input type="hidden" name="settingsVersion" value={String(settingsVersion)} />
 
                 {/* API Keys */}
                 <div className="space-y-4">
@@ -127,11 +138,24 @@ export function AiSettingsForm({ initialData, locationId }: { initialData: any, 
                                 name="googleAiApiKey"
                                 type="password"
                                 placeholder="AIza..."
-                                defaultValue={initialData?.googleAiApiKey || ""}
                             />
                             <p className="text-sm text-muted-foreground">
-                                Required for AI content generation features. Get your key from Google AI Studio.
+                                Required for AI content generation features. Existing keys are encrypted at rest and are never returned in plaintext.
                             </p>
+                            {hasGoogleAiApiKey && (
+                                <div className="flex items-center gap-2 text-xs text-emerald-700">
+                                    <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                                    API key is configured.
+                                </div>
+                            )}
+                            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <input
+                                    type="checkbox"
+                                    name="clearGoogleAiApiKey"
+                                    className="h-3.5 w-3.5 rounded border-gray-300 text-red-600"
+                                />
+                                Clear saved API key
+                            </label>
                         </div>
                     </div>
                 </div>
@@ -458,6 +482,11 @@ Ask for their email address to set up automated property alerts.`}
                 {state?.errors?._form && (
                     <div className="p-3 bg-red-100 text-red-700 text-sm rounded-md">
                         {state.errors._form}
+                    </div>
+                )}
+                {state?.errors?._version && (
+                    <div className="p-3 bg-red-100 text-red-700 text-sm rounded-md">
+                        {state.errors._version}
                     </div>
                 )}
 

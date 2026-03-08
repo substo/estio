@@ -32,3 +32,39 @@ export async function verifyUserHasAccessToLocation(userId: string, locationId: 
         return false;
     }
 }
+
+/**
+ * Strict admin check for settings writes.
+ * Uses UserLocationRole and does not rely on Clerk metadata.
+ */
+export async function verifyUserIsLocationAdmin(userId: string, locationId: string): Promise<boolean> {
+    if (!userId || !locationId) {
+        return false;
+    }
+
+    try {
+        const user = await db.user.findUnique({
+            where: { clerkId: userId },
+            select: { id: true }
+        });
+
+        if (!user?.id) {
+            return false;
+        }
+
+        const role = await db.userLocationRole.findUnique({
+            where: {
+                userId_locationId: {
+                    userId: user.id,
+                    locationId,
+                }
+            },
+            select: { role: true }
+        });
+
+        return role?.role === "ADMIN";
+    } catch (error) {
+        console.error('[verifyUserIsLocationAdmin] Error checking admin permissions:', error);
+        return false;
+    }
+}

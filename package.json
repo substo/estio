@@ -8,6 +8,8 @@
         "build": "NODE_OPTIONS='--max-old-space-size=8192' next build",
         "start": "next start",
         "lint": "next lint",
+        "settings:backfill": "tsx scripts/settings/backfill.ts",
+        "settings:rotate-secrets": "tsx scripts/settings/rotate-secrets.ts",
         "perf:conversations:db": "node scripts/perf/conversations-db-load-check.js",
         "perf:conversations:e2e": "node scripts/perf/conversations-e2e-smoke.js"
     },

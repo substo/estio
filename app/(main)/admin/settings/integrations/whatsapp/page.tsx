@@ -32,16 +32,20 @@ export default function WhatsAppSettingsPage() {
         businessAccountId: "",
         phoneNumberId: "",
         accessToken: "",
+        hasAccessToken: false,
         webhookSecret: "",
         locationId: "",
         // Twilio
         twilioAccountSid: "",
         twilioAuthToken: "",
+        hasTwilioAuthToken: false,
         twilioWhatsAppFrom: "",
         // Evolution
         evolutionInstanceId: "",
         evolutionConnectionStatus: "close",
     });
+    const [clearWhatsAppAccessToken, setClearWhatsAppAccessToken] = useState(false);
+    const [clearTwilioAuthToken, setClearTwilioAuthToken] = useState(false);
 
     // Health Check State
     const [healthStatus, setHealthStatus] = useState<{
@@ -81,12 +85,29 @@ export default function WhatsAppSettingsPage() {
         setUseBridge(!isSafe);
     }, []);
 
+    const applyServerSettings = (data: any) => {
+        setSettings({
+            businessAccountId: data.businessAccountId || "",
+            phoneNumberId: data.phoneNumberId || "",
+            accessToken: data.accessToken || "",
+            hasAccessToken: Boolean(data.hasAccessToken),
+            webhookSecret: data.webhookSecret || crypto.randomUUID(),
+            locationId: data.locationId || "",
+            twilioAccountSid: data.twilioAccountSid || "",
+            twilioAuthToken: data.twilioAuthToken || "",
+            hasTwilioAuthToken: Boolean(data.hasTwilioAuthToken),
+            twilioWhatsAppFrom: data.twilioWhatsAppFrom || "",
+            evolutionInstanceId: data.evolutionInstanceId || "",
+            evolutionConnectionStatus: data.evolutionConnectionStatus || "close",
+        });
+    };
+
     const performHealthCheck = async () => {
         if (settings.evolutionConnectionStatus !== 'open') return;
 
         setHealthStatus(prev => ({ ...prev, status: 'checking' }));
         try {
-            const res = await checkInstanceHealth();
+            const res = await checkInstanceHealth(settings.locationId || null);
             // @ts-ignore
             if (res && res.success) {
                 // @ts-ignore
@@ -118,7 +139,7 @@ export default function WhatsAppSettingsPage() {
         toast({ title: "Starting Repair", description: "Disconnecting and preparing new session..." });
 
         try {
-            const res = await repairEvolutionConnection();
+            const res = await repairEvolutionConnection(settings.locationId || null);
             if (res.success && res.qrCode) {
                 setSettings(prev => ({ ...prev, evolutionConnectionStatus: 'close' }));
                 setQrCode(res.qrCode);
@@ -147,26 +168,13 @@ export default function WhatsAppSettingsPage() {
         if (code) {
             // System User Access Token flow - exchange code for token
             try {
-                const result = await exchangeSystemUserToken(code, appId);
+                const result = await exchangeSystemUserToken(code, appId, undefined, false, settings.locationId || null);
 
                 if (result.success) {
                     setConnectionStatus({ type: 'success', message: result.message });
                     toast({ title: "Success", description: result.message });
-                    const data = await getWhatsAppSettings();
-                    if (data) {
-                        setSettings({
-                            businessAccountId: data.businessAccountId || "",
-                            phoneNumberId: data.phoneNumberId || "",
-                            accessToken: data.accessToken || "",
-                            webhookSecret: data.webhookSecret || "",
-                            locationId: data.locationId || "",
-                            twilioAccountSid: data.twilioAccountSid || "",
-                            twilioAuthToken: data.twilioAuthToken || "",
-                            twilioWhatsAppFrom: data.twilioWhatsAppFrom || "",
-                            evolutionInstanceId: data.evolutionInstanceId || "",
-                            evolutionConnectionStatus: data.evolutionConnectionStatus || "close",
-                        });
-                    }
+                    const data = await getWhatsAppSettings(settings.locationId || null);
+                    if (data) applyServerSettings(data);
                 } else {
                     setConnectionStatus({ type: 'error', message: result.message });
                     toast({ title: "Setup Failed", description: result.message, variant: "destructive" });
@@ -180,26 +188,13 @@ export default function WhatsAppSettingsPage() {
         } else if (accessToken) {
             // User Access Token flow - use token directly to fetch WABA info
             try {
-                const result = await exchangeSystemUserToken(accessToken, appId, undefined, true);
+                const result = await exchangeSystemUserToken(accessToken, appId, undefined, true, settings.locationId || null);
 
                 if (result.success) {
                     setConnectionStatus({ type: 'success', message: result.message });
                     toast({ title: "Success", description: result.message });
-                    const data = await getWhatsAppSettings();
-                    if (data) {
-                        setSettings({
-                            businessAccountId: data.businessAccountId || "",
-                            phoneNumberId: data.phoneNumberId || "",
-                            accessToken: data.accessToken || "",
-                            webhookSecret: data.webhookSecret || "",
-                            locationId: data.locationId || "",
-                            twilioAccountSid: data.twilioAccountSid || "",
-                            twilioAuthToken: data.twilioAuthToken || "",
-                            twilioWhatsAppFrom: data.twilioWhatsAppFrom || "",
-                            evolutionInstanceId: data.evolutionInstanceId || "",
-                            evolutionConnectionStatus: data.evolutionConnectionStatus || "close",
-                        });
-                    }
+                    const data = await getWhatsAppSettings(settings.locationId || null);
+                    if (data) applyServerSettings(data);
                 } else {
                     setConnectionStatus({ type: 'error', message: result.message });
                     toast({ title: "Setup Failed", description: result.message, variant: "destructive" });
@@ -233,22 +228,9 @@ export default function WhatsAppSettingsPage() {
 
 
     useEffect(() => {
-        getWhatsAppSettings().then((data) => {
+        getWhatsAppSettings(null).then((data) => {
             if (data) {
-                setSettings({
-                    businessAccountId: data.businessAccountId || "",
-                    phoneNumberId: data.phoneNumberId || "",
-                    accessToken: data.accessToken || "",
-                    webhookSecret: data.webhookSecret || crypto.randomUUID(),
-                    locationId: data.locationId || "",
-                    // Twilio
-                    twilioAccountSid: data.twilioAccountSid || "",
-                    twilioAuthToken: data.twilioAuthToken || "",
-                    twilioWhatsAppFrom: data.twilioWhatsAppFrom || "",
-                    // Evolution
-                    evolutionInstanceId: data.evolutionInstanceId || "",
-                    evolutionConnectionStatus: data.evolutionConnectionStatus || "close",
-                });
+                applyServerSettings(data);
             }
             setLoading(false);
         });
@@ -259,7 +241,7 @@ export default function WhatsAppSettingsPage() {
         if (!qrCode) return;
 
         const interval = setInterval(async () => {
-            const data = await getWhatsAppSettings();
+            const data = await getWhatsAppSettings(settings.locationId || null);
             if (data && data.evolutionConnectionStatus === 'open') {
                 setSettings(prev => ({ ...prev, evolutionConnectionStatus: 'open' }));
                 setQrCode(null); // Clear QR code to show success state
@@ -275,19 +257,26 @@ export default function WhatsAppSettingsPage() {
         e.preventDefault();
         setSaving(true);
         const formData = new FormData();
+        formData.append("locationId", settings.locationId);
         formData.append("businessAccountId", settings.businessAccountId);
         formData.append("phoneNumberId", settings.phoneNumberId);
         formData.append("accessToken", settings.accessToken);
+        formData.append("clearWhatsAppAccessToken", clearWhatsAppAccessToken ? "on" : "off");
         formData.append("webhookSecret", settings.webhookSecret);
 
         // Twilio
         formData.append("twilioAccountSid", settings.twilioAccountSid);
         formData.append("twilioAuthToken", settings.twilioAuthToken);
+        formData.append("clearTwilioAuthToken", clearTwilioAuthToken ? "on" : "off");
         formData.append("twilioWhatsAppFrom", settings.twilioWhatsAppFrom);
 
         try {
             await updateWhatsAppSettings(formData);
             toast({ title: "Settings saved", description: "WhatsApp configuration updated successfully." });
+            const data = await getWhatsAppSettings(settings.locationId || null);
+            if (data) applyServerSettings(data);
+            setClearTwilioAuthToken(false);
+            setClearWhatsAppAccessToken(false);
         } catch (error) {
             toast({ title: "Error", description: "Failed to save settings.", variant: "destructive" });
         } finally {
@@ -546,7 +535,7 @@ export default function WhatsAppSettingsPage() {
                                                 className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
                                                 onClick={async () => {
                                                     setSaving(true);
-                                                    await logoutEvolutionInstance();
+                                                    await logoutEvolutionInstance(settings.locationId || null);
                                                     setSettings(prev => ({ ...prev, evolutionConnectionStatus: 'close' }));
                                                     setHealthStatus({ status: 'disconnected', contacts: 0, chats: 0 });
                                                     setSaving(false);
@@ -596,14 +585,14 @@ export default function WhatsAppSettingsPage() {
                                             onClick={async () => {
                                                 setSaving(true);
                                                 try {
-                                                    const res = await connectEvolutionDevice();
+                                                    const res = await connectEvolutionDevice(settings.locationId || null);
                                                     if (res.success && res.qrCode) {
                                                         setQrCode(res.qrCode);
                                                         toast({ title: "Scan QR Code", description: "QR Code generated successfully." });
                                                     } else if (res.success) {
                                                         toast({ title: "Connected", description: "Instance seems already connected or connecting." });
                                                         // Refresh settings
-                                                        const data = await getWhatsAppSettings();
+                                                        const data = await getWhatsAppSettings(settings.locationId || null);
                                                         if (data) setSettings(prev => ({ ...prev, evolutionConnectionStatus: data.evolutionConnectionStatus || 'close' }));
                                                     } else {
                                                         toast({ title: "Error", description: res.error || "Failed to generate QR", variant: "destructive" });
@@ -711,8 +700,19 @@ export default function WhatsAppSettingsPage() {
                                     type="password"
                                     value={settings.twilioAuthToken}
                                     onChange={(e) => setSettings({ ...settings, twilioAuthToken: e.target.value })}
-                                    placeholder={settings.twilioAuthToken ? "********" : "Enter Auth Token"}
+                                    placeholder={settings.hasTwilioAuthToken ? "Configured (enter new value to replace)" : "Enter Auth Token"}
                                 />
+                                {settings.hasTwilioAuthToken && (
+                                    <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                                        <input
+                                            type="checkbox"
+                                            checked={clearTwilioAuthToken}
+                                            onChange={(e) => setClearTwilioAuthToken(e.target.checked)}
+                                            className="h-3.5 w-3.5 rounded border-gray-300"
+                                        />
+                                        Clear saved Twilio Auth Token
+                                    </label>
+                                )}
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="twilio-from">WhatsApp Sender Number</Label>
@@ -807,8 +807,19 @@ export default function WhatsAppSettingsPage() {
                                             type="password"
                                             value={settings.accessToken}
                                             onChange={(e) => setSettings({ ...settings, accessToken: e.target.value })}
-                                            placeholder="Roughly 200 characters..."
+                                            placeholder={settings.hasAccessToken ? "Configured (enter new value to replace)" : "Roughly 200 characters..."}
                                         />
+                                        {settings.hasAccessToken && (
+                                            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={clearWhatsAppAccessToken}
+                                                    onChange={(e) => setClearWhatsAppAccessToken(e.target.checked)}
+                                                    className="h-3.5 w-3.5 rounded border-gray-300"
+                                                />
+                                                Clear saved WhatsApp Access Token
+                                            </label>
+                                        )}
                                     </div>
 
                                     <div className="pt-4 flex justify-end">
@@ -858,4 +869,3 @@ export default function WhatsAppSettingsPage() {
         </div>
     );
 }
-

@@ -1,6 +1,8 @@
 import { Client } from '@microsoft/microsoft-graph-client';
 import { refreshMicrosoftToken } from './auth';
 import db from '@/lib/db';
+import { settingsService } from '@/lib/settings/service';
+import { SETTINGS_DOMAINS, SETTINGS_SECRET_KEYS } from '@/lib/settings/constants';
 import 'isomorphic-fetch';
 
 /**
@@ -9,16 +11,26 @@ import 'isomorphic-fetch';
  */
 export async function getGraphClient(userId: string) {
     // Fetch user credentials
-    const user = await db.user.findUnique({
+    const [user, accessToken] = await Promise.all([
+        db.user.findUnique({
         where: { id: userId },
         select: {
             outlookAccessToken: true,
             outlookRefreshToken: true,
             outlookSyncEnabled: true,
         }
-    });
+        }),
+        settingsService.getSecret({
+            scopeType: "USER",
+            scopeId: userId,
+            domain: SETTINGS_DOMAINS.USER_MICROSOFT_INTEGRATIONS,
+            secretKey: SETTINGS_SECRET_KEYS.OUTLOOK_ACCESS_TOKEN,
+        }).catch(() => null),
+    ]);
 
-    if (!user || !user.outlookSyncEnabled || !user.outlookAccessToken) {
+    const resolvedAccessToken = accessToken || user?.outlookAccessToken || null;
+
+    if (!user || !user.outlookSyncEnabled || !resolvedAccessToken) {
         throw new Error('User is not connected to Outlook or sync is disabled.');
     }
 
@@ -40,7 +52,7 @@ export async function getGraphClient(userId: string) {
                 // Let's implement a "check logic" if we stored expiry, but we didn't store expiry in schema (just refresh token).
                 // So we will return the token.
 
-                done(null, user.outlookAccessToken as string);
+                done(null, resolvedAccessToken);
             } catch (err: any) {
                 done(err, null);
             }
@@ -79,9 +91,18 @@ export async function withGraphClient(
             if (statusCode === 401 || error.body?.code === 'InvalidAuthenticationToken') {
                 if (attempt < maxRetries) {
                     console.log(`[GraphClient] Token expired for user ${userId}, refreshing... (attempt ${attempt + 1})`);
-                    const user = await db.user.findUnique({ where: { id: userId } });
-                    if (user?.outlookRefreshToken) {
-                        await refreshMicrosoftToken(userId, user.outlookRefreshToken);
+                    const [user, refreshToken] = await Promise.all([
+                        db.user.findUnique({ where: { id: userId }, select: { outlookRefreshToken: true } }),
+                        settingsService.getSecret({
+                            scopeType: "USER",
+                            scopeId: userId,
+                            domain: SETTINGS_DOMAINS.USER_MICROSOFT_INTEGRATIONS,
+                            secretKey: SETTINGS_SECRET_KEYS.OUTLOOK_REFRESH_TOKEN,
+                        }).catch(() => null),
+                    ]);
+                    const resolvedRefreshToken = refreshToken || user?.outlookRefreshToken || null;
+                    if (resolvedRefreshToken) {
+                        await refreshMicrosoftToken(userId, resolvedRefreshToken);
                         client = await getGraphClient(userId);
                         continue; // Retry immediately after token refresh
                     }
@@ -120,4 +141,3 @@ export async function withGraphClient(
 function sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
-

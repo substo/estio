@@ -7,36 +7,45 @@ import { SocialLinksEditor } from "./_components/social-links-editor";
 import { getLivePages } from "./actions";
 import { MenuStyleSelector } from "./_components/menu-style-selector";
 import { PublicListingToggle } from "./_components/public-listing-toggle";
+import { settingsService } from "@/lib/settings/service";
+import { SETTINGS_DOMAINS, isSettingsReadFromNewEnabled } from "@/lib/settings/constants";
+import { getLocationContext } from "@/lib/auth/location-context";
+import { cookies } from "next/headers";
 
 export default async function NavigationSettingsPage() {
     const { userId } = await auth();
     if (!userId) return null;
-    const user = await db.user.findUnique({ where: { clerkId: userId }, include: { locations: true } });
-    const orgId = user?.locations[0]?.id;
+    const cookieStore = await cookies();
+    const contextLocation = await getLocationContext();
+    const orgId = contextLocation?.id || cookieStore.get("crm_location_id")?.value || null;
 
     if (!orgId) return null;
 
-    const config = await db.siteConfig.findUnique({
-        where: { locationId: orgId },
-    });
+    const [config, navigationDoc] = await Promise.all([
+        db.siteConfig.findUnique({
+            where: { locationId: orgId },
+        }),
+        settingsService.getDocument<any>({
+            scopeType: "LOCATION",
+            scopeId: orgId,
+            domain: SETTINGS_DOMAINS.LOCATION_NAVIGATION,
+        }),
+    ]);
 
-    const livePages = await getLivePages();
-
-    const navLinks = (config?.navLinks as any[]) || [];
-    // @ts-ignore: footerLinks exists in schema
-    const footerLinks = (config?.footerLinks as any[]) || [];
-    // @ts-ignore: socialLinks exists in schema
-    const socialLinks = (config?.socialLinks as any[]) || [];
-    // @ts-ignore: legalLinks exists in schema
-    const legalLinks = (config?.legalLinks as any[]) || [];
-    // @ts-ignore: footerDisclaimer exists in schema
-    const footerDisclaimer = (config?.footerDisclaimer as string) || "";
-    // @ts-ignore: footerBio exists in schema
-    const footerBio = (config?.footerBio as string) || "";
-
-    // @ts-ignore: theme exists in schema
+    const livePages = await getLivePages(orgId);
+    const readNew = isSettingsReadFromNewEnabled() && Boolean(navigationDoc);
     const theme = (config?.theme as any) || {};
-    const menuStyle = theme.menuStyle || "side";
+
+    const navLinks = readNew ? (navigationDoc?.payload?.navLinks || []) : ((config?.navLinks as any[]) || []);
+    const footerLinks = readNew ? (navigationDoc?.payload?.footerLinks || []) : ((config?.footerLinks as any[]) || []);
+    const socialLinks = readNew ? (navigationDoc?.payload?.socialLinks || []) : ((config?.socialLinks as any[]) || []);
+    const legalLinks = readNew ? (navigationDoc?.payload?.legalLinks || []) : ((config?.legalLinks as any[]) || []);
+    const footerDisclaimer = readNew ? (navigationDoc?.payload?.footerDisclaimer || "") : ((config?.footerDisclaimer as string) || "");
+    const footerBio = readNew ? (navigationDoc?.payload?.footerBio || "") : ((config?.footerBio as string) || "");
+    const menuStyle = readNew ? (navigationDoc?.payload?.menuStyle || "side") : (theme.menuStyle || "side");
+    const publicListingEnabled = readNew
+        ? (navigationDoc?.payload?.publicListingEnabled ?? true)
+        : (config?.publicListingEnabled ?? true);
 
     return (
         <div className="p-6 space-y-8 max-w-4xl">
@@ -46,9 +55,9 @@ export default async function NavigationSettingsPage() {
             </div>
 
             <div className="grid gap-8">
-                <MenuStyleSelector initialStyle={menuStyle} />
-                <MenuBuilder type="nav" initialLinks={navLinks} availablePages={livePages} />
-                <MenuBuilder type="footer" initialLinks={footerLinks} availablePages={livePages} />
+                <MenuStyleSelector locationId={orgId} initialStyle={menuStyle} />
+                <MenuBuilder locationId={orgId} type="nav" initialLinks={navLinks} availablePages={livePages} />
+                <MenuBuilder locationId={orgId} type="footer" initialLinks={footerLinks} availablePages={livePages} />
 
                 <div className="border-t my-4 py-4" />
                 <h2 className="text-xl font-bold">Public Contributions</h2>
@@ -62,15 +71,15 @@ export default async function NavigationSettingsPage() {
                         </p>
                     </div>
                     {/* We need a client component here. I will just render it. */}
-                    <PublicListingToggle initialValue={config?.publicListingEnabled ?? true} />
+                    <PublicListingToggle locationId={orgId} initialValue={publicListingEnabled} />
                 </div>
 
                 <div className="border-t my-4 py-4" />
                 <h2 className="text-xl font-bold">Bottom Footer</h2>
-                <MenuBuilder type="legal" initialLinks={legalLinks} availablePages={livePages} />
-                <FooterBioEditor initialText={footerBio} />
-                <FooterDisclaimerEditor initialText={footerDisclaimer} />
-                <SocialLinksEditor initialLinks={socialLinks} />
+                <MenuBuilder locationId={orgId} type="legal" initialLinks={legalLinks} availablePages={livePages} />
+                <FooterBioEditor locationId={orgId} initialText={footerBio} />
+                <FooterDisclaimerEditor locationId={orgId} initialText={footerDisclaimer} />
+                <SocialLinksEditor locationId={orgId} initialLinks={socialLinks} />
             </div>
         </div>
     );

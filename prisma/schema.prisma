@@ -167,6 +167,7 @@ model User {
   assignedContactTasks ContactTask[]    @relation("ContactTaskAssignedUser")
   createdContactTasks  ContactTask[]    @relation("ContactTaskCreatedByUser")
   updatedContactTasks  ContactTask[]    @relation("ContactTaskUpdatedByUser")
+  settingsAuditLogs    SettingsAuditLog[] @relation("SettingsAuditActor")
 
   // Google Contact Sync Credentials
   googleAccessToken             String?         @db.Text
@@ -627,6 +628,74 @@ enum MediaKind {
 enum UserRole {
   ADMIN // Full access, can manage other users
   MEMBER // Standard access
+}
+
+enum SettingsScopeType {
+  LOCATION
+  USER
+}
+
+enum SettingsAuditOperation {
+  UPSERT
+  DELETE
+  ROTATE
+  PARITY_MISMATCH
+  BACKFILL
+}
+
+model SettingsDocument {
+  id            String            @id @default(cuid())
+  scopeType     SettingsScopeType @map("scope_type")
+  scopeId       String            @map("scope_id")
+  domain        String
+  payload       Json
+  version       Int               @default(1)
+  schemaVersion Int               @default(1) @map("schema_version")
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+
+  @@unique([scopeType, scopeId, domain], map: "settings_documents_scope_domain_key")
+  @@index([scopeType, scopeId], map: "settings_documents_scope_idx")
+  @@map("settings_documents")
+}
+
+model SettingsSecret {
+  id         String            @id @default(cuid())
+  scopeType  SettingsScopeType @map("scope_type")
+  scopeId    String            @map("scope_id")
+  domain     String
+  secretKey  String            @map("secret_key")
+  ciphertext String            @db.Text
+  iv         String
+  authTag    String            @map("auth_tag")
+  alg        String            @default("AES-256-GCM")
+  keyId      String            @map("key_id")
+  encryptedAt DateTime         @default(now()) @map("encrypted_at")
+  rotatedAt  DateTime?         @map("rotated_at")
+  createdAt  DateTime          @default(now()) @map("created_at")
+  updatedAt  DateTime          @updatedAt @map("updated_at")
+
+  @@unique([scopeType, scopeId, domain, secretKey], map: "settings_secrets_scope_domain_secret_key")
+  @@index([scopeType, scopeId], map: "settings_secrets_scope_idx")
+  @@map("settings_secrets")
+}
+
+model SettingsAuditLog {
+  id         String                 @id @default(cuid())
+  actorUserId String?               @map("actor_user_id")
+  actorUser  User?                  @relation("SettingsAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  scopeType  SettingsScopeType      @map("scope_type")
+  scopeId    String                 @map("scope_id")
+  domain     String
+  operation  SettingsAuditOperation
+  beforeJson Json?                  @map("before_json")
+  afterJson  Json?                  @map("after_json")
+  requestId  String?                @map("request_id")
+  createdAt  DateTime               @default(now()) @map("created_at")
+
+  @@index([scopeType, scopeId, domain], map: "settings_audit_scope_domain_idx")
+  @@index([createdAt], map: "settings_audit_created_at_idx")
+  @@map("settings_audit_log")
 }
 
 model UserLocationRole {

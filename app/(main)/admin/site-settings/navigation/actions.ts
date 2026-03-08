@@ -3,42 +3,161 @@
 import { auth } from "@clerk/nextjs/server";
 import db from "@/lib/db";
 import { revalidatePath } from "next/cache";
+import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
+import { settingsService } from "@/lib/settings/service";
+import {
+    SETTINGS_DOMAINS,
+    isSettingsDualWriteLegacyEnabled,
+    isSettingsParityCheckEnabled,
+} from "@/lib/settings/constants";
 
-export async function saveNavigation(type: 'nav' | 'footer' | 'social' | 'legal', links: any[]) {
+type NavigationPayload = {
+    navLinks: any[];
+    footerLinks: any[];
+    socialLinks: any[];
+    legalLinks: any[];
+    footerDisclaimer: string | null;
+    footerBio: string | null;
+    menuStyle: "side" | "top";
+    publicListingEnabled: boolean;
+};
+
+async function assertAdmin(locationId: string): Promise<string> {
     const { userId } = await auth();
-    if (!userId) { throw new Error("Unauthorized"); }
-    const user = await db.user.findUnique({ where: { clerkId: userId }, include: { locations: true } });
-    const orgId = user?.locations[0]?.id;
+    if (!userId) {
+        throw new Error("Unauthorized");
+    }
 
-    if (!orgId) { throw new Error("Unauthorized"); }
+    const isAdmin = await verifyUserIsLocationAdmin(userId, locationId);
+    if (!isAdmin) {
+        throw new Error("Unauthorized");
+    }
 
-    const data = type === 'nav'
-        ? { navLinks: links }
-        : type === 'footer'
-            ? { footerLinks: links }
-            : type === 'social'
-                ? { socialLinks: links }
-                : { legalLinks: links };
-
-    await db.siteConfig.update({
-        where: { locationId: orgId },
-        data: data,
+    const localUser = await db.user.findUnique({
+        where: { clerkId: userId },
+        select: { id: true }
     });
-
-    revalidatePath("/admin/site-settings/navigation");
+    if (!localUser?.id) {
+        throw new Error("Unauthorized");
+    }
+    return localUser.id;
 }
 
-export async function getLivePages() {
-    const { userId } = await auth();
-    if (!userId) { return []; }
-    const user = await db.user.findUnique({ where: { clerkId: userId }, include: { locations: true } });
-    const orgId = user?.locations[0]?.id;
+async function getNavigationPayload(locationId: string): Promise<{ payload: NavigationPayload; version: number }> {
+    const [doc, config] = await Promise.all([
+        settingsService.getDocument<NavigationPayload>({
+            scopeType: "LOCATION",
+            scopeId: locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_NAVIGATION,
+        }),
+        db.siteConfig.findUnique({ where: { locationId } }),
+    ]);
 
-    if (!orgId) { return []; }
+    const theme = (config?.theme as any) || {};
 
+    if (doc) {
+        return { payload: doc.payload, version: doc.version };
+    }
+
+    return {
+        payload: {
+            navLinks: (config?.navLinks as any[]) || [],
+            footerLinks: (config?.footerLinks as any[]) || [],
+            socialLinks: (config?.socialLinks as any[]) || [],
+            legalLinks: (config?.legalLinks as any[]) || [],
+            footerDisclaimer: config?.footerDisclaimer || null,
+            footerBio: config?.footerBio || null,
+            menuStyle: theme.menuStyle === "top" ? "top" : "side",
+            publicListingEnabled: config?.publicListingEnabled ?? true,
+        },
+        version: 0,
+    };
+}
+
+async function saveNavigationPayload(
+    locationId: string,
+    actorUserId: string,
+    payload: NavigationPayload
+) {
+    const saved = await settingsService.upsertDocument({
+        scopeType: "LOCATION",
+        scopeId: locationId,
+        domain: SETTINGS_DOMAINS.LOCATION_NAVIGATION,
+        payload,
+        actorUserId,
+        schemaVersion: 1,
+    });
+
+    if (isSettingsDualWriteLegacyEnabled()) {
+        const existing = await db.siteConfig.findUnique({ where: { locationId } });
+        const currentTheme = (existing?.theme as any) || {};
+        await db.siteConfig.upsert({
+            where: { locationId },
+            create: {
+                locationId,
+                navLinks: payload.navLinks,
+                footerLinks: payload.footerLinks,
+                socialLinks: payload.socialLinks,
+                legalLinks: payload.legalLinks,
+                footerDisclaimer: payload.footerDisclaimer || null,
+                footerBio: payload.footerBio || null,
+                publicListingEnabled: payload.publicListingEnabled,
+                theme: {
+                    ...currentTheme,
+                    menuStyle: payload.menuStyle,
+                },
+            },
+            update: {
+                navLinks: payload.navLinks,
+                footerLinks: payload.footerLinks,
+                socialLinks: payload.socialLinks,
+                legalLinks: payload.legalLinks,
+                footerDisclaimer: payload.footerDisclaimer || null,
+                footerBio: payload.footerBio || null,
+                publicListingEnabled: payload.publicListingEnabled,
+                theme: {
+                    ...currentTheme,
+                    menuStyle: payload.menuStyle,
+                },
+            },
+        });
+    }
+
+    if (isSettingsDualWriteLegacyEnabled() && isSettingsParityCheckEnabled()) {
+        await settingsService.checkDocumentParity({
+            scopeType: "LOCATION",
+            scopeId: locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_NAVIGATION,
+            legacyPayload: payload,
+            actorUserId,
+        });
+    }
+
+    return saved;
+}
+
+export async function saveNavigation(locationId: string, type: "nav" | "footer" | "social" | "legal", links: any[]) {
+    const actorUserId = await assertAdmin(locationId);
+    const { payload } = await getNavigationPayload(locationId);
+
+    const nextPayload: NavigationPayload = {
+        ...payload,
+        ...(type === "nav" ? { navLinks: links } : {}),
+        ...(type === "footer" ? { footerLinks: links } : {}),
+        ...(type === "social" ? { socialLinks: links } : {}),
+        ...(type === "legal" ? { legalLinks: links } : {}),
+    };
+
+    await saveNavigationPayload(locationId, actorUserId, nextPayload);
+    revalidatePath("/admin/site-settings/navigation");
+    revalidatePath("/admin/site-settings");
+}
+
+export async function getLivePages(locationId: string) {
+    await assertAdmin(locationId);
     const pages = await db.contentPage.findMany({
         where: {
-            locationId: orgId,
+            locationId,
             published: true,
         },
         select: {
@@ -59,76 +178,45 @@ export async function getLivePages() {
 
     return [...systemPages, ...contentPages];
 }
-export async function saveFooterDisclaimer(text: string) {
-    const { userId } = await auth();
-    if (!userId) { throw new Error("Unauthorized"); }
-    const user = await db.user.findUnique({ where: { clerkId: userId }, include: { locations: true } });
-    const orgId = user?.locations[0]?.id;
 
-    if (!orgId) { throw new Error("Unauthorized"); }
-
-    await db.siteConfig.update({
-        where: { locationId: orgId },
-        data: { footerDisclaimer: text },
+export async function saveFooterDisclaimer(locationId: string, text: string) {
+    const actorUserId = await assertAdmin(locationId);
+    const { payload } = await getNavigationPayload(locationId);
+    await saveNavigationPayload(locationId, actorUserId, {
+        ...payload,
+        footerDisclaimer: text || null,
     });
-
     revalidatePath("/admin/site-settings/navigation");
 }
 
-export async function saveFooterBio(text: string) {
-    const { userId } = await auth();
-    if (!userId) { throw new Error("Unauthorized"); }
-    const user = await db.user.findUnique({ where: { clerkId: userId }, include: { locations: true } });
-    const orgId = user?.locations[0]?.id;
-
-    if (!orgId) { throw new Error("Unauthorized"); }
-
-    await db.siteConfig.update({
-        where: { locationId: orgId },
-        data: { footerBio: text },
+export async function saveFooterBio(locationId: string, text: string) {
+    const actorUserId = await assertAdmin(locationId);
+    const { payload } = await getNavigationPayload(locationId);
+    await saveNavigationPayload(locationId, actorUserId, {
+        ...payload,
+        footerBio: text || null,
     });
-    // Force revalidation of types
     revalidatePath("/admin/site-settings/navigation");
 }
 
-export async function saveNavigationStyle(style: 'side' | 'top') {
-    const { userId } = await auth();
-    if (!userId) { throw new Error("Unauthorized"); }
-    const user = await db.user.findUnique({ where: { clerkId: userId }, include: { locations: true } });
-    const orgId = user?.locations[0]?.id;
-
-    if (!orgId) { throw new Error("Unauthorized"); }
-
-    const currentConfig = await db.siteConfig.findUnique({ where: { locationId: orgId } });
-    const currentTheme = (currentConfig?.theme as any) || {};
-
-    await db.siteConfig.update({
-        where: { locationId: orgId },
-        data: {
-            theme: {
-                ...currentTheme,
-                menuStyle: style
-            }
-        },
+export async function saveNavigationStyle(locationId: string, style: "side" | "top") {
+    const actorUserId = await assertAdmin(locationId);
+    const { payload } = await getNavigationPayload(locationId);
+    await saveNavigationPayload(locationId, actorUserId, {
+        ...payload,
+        menuStyle: style,
     });
-
     revalidatePath("/admin/site-settings/navigation");
     revalidatePath("/admin/site-settings");
 }
 
-export async function savePublicListingEnabled(enabled: boolean) {
-    const { userId } = await auth();
-    if (!userId) { throw new Error("Unauthorized"); }
-    const user = await db.user.findUnique({ where: { clerkId: userId }, include: { locations: true } });
-    const orgId = user?.locations[0]?.id;
-
-    if (!orgId) { throw new Error("Unauthorized"); }
-
-    await db.siteConfig.update({
-        where: { locationId: orgId },
-        data: { publicListingEnabled: enabled },
+export async function savePublicListingEnabled(locationId: string, enabled: boolean) {
+    const actorUserId = await assertAdmin(locationId);
+    const { payload } = await getNavigationPayload(locationId);
+    await saveNavigationPayload(locationId, actorUserId, {
+        ...payload,
+        publicListingEnabled: enabled,
     });
-
     revalidatePath("/admin/site-settings/navigation");
-    revalidatePath("/", "layout"); // Revalidate all public pages potentially
+    revalidatePath("/", "layout");
 }

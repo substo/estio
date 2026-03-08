@@ -4,10 +4,50 @@ import { auth } from "@clerk/nextjs/server";
 import db from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { Prisma } from "@prisma/client";
+import { verifyUserHasAccessToLocation, verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
+import { settingsService } from "@/lib/settings/service";
+import {
+    SETTINGS_DOMAINS,
+    isSettingsDualWriteLegacyEnabled,
+    isSettingsParityCheckEnabled,
+} from "@/lib/settings/constants";
 
 // Reserved slugs to prevent breaking the app
 const RESERVED_SLUGS = ["search", "property", "blog", "api", "dashboard", "sign-in"];
+
+function nullableString(value: FormDataEntryValue | null): string | null {
+    if (value === null || value === undefined) return null;
+    const str = String(value).trim();
+    return str ? str : null;
+}
+
+async function resolveUserContext() {
+    const { userId } = await auth();
+    if (!userId) {
+        return null;
+    }
+
+    const user = await db.user.findUnique({
+        where: { clerkId: userId },
+        select: { id: true },
+    });
+
+    if (!user?.id) {
+        return null;
+    }
+
+    return { clerkUserId: userId, localUserId: user.id };
+}
+
+async function assertLocationAccess(clerkUserId: string, locationId: string) {
+    const hasAccess = await verifyUserHasAccessToLocation(clerkUserId, locationId);
+    return hasAccess;
+}
+
+async function assertLocationAdmin(clerkUserId: string, locationId: string) {
+    const isAdmin = await verifyUserIsLocationAdmin(clerkUserId, locationId);
+    return isAdmin;
+}
 
 // Helper to extract Cloudflare Image IDs from blocks
 function extractImageIds(blocks: any): Set<string> {
@@ -33,20 +73,23 @@ function extractImageIds(blocks: any): Set<string> {
 }
 
 export async function upsertPage(prevState: any, formData: FormData) {
-    const { userId } = await auth();
-    console.log("[upsertPage] userId:", userId);
+    const context = await resolveUserContext();
+    if (!context) return { message: "Unauthorized: No user" };
 
-    if (!userId) return { message: "Unauthorized: No userId" };
+    const id = (formData.get("id") as string | null) || null;
+    const locationIdInput = String(formData.get("locationId") || "").trim();
+    let locationId = locationIdInput;
+    if (!locationId && id) {
+        const existing = await db.contentPage.findUnique({
+            where: { id },
+            select: { locationId: true },
+        });
+        locationId = existing?.locationId || "";
+    }
+    if (!locationId) return { message: "Unauthorized: No Location" };
 
-    const user = await db.user.findUnique({ where: { clerkId: userId }, include: { locations: true } });
-    console.log("[upsertPage] user locations count:", user?.locations?.length);
-
-    const orgId = user?.locations[0]?.id;
-    console.log("[upsertPage] Resolved orgId:", orgId);
-
-    // Check if user has access to location (implicit via locationId being on user)
-    if (!orgId) return { message: "Unauthorized: No Location" };
-
+    const hasAccess = await assertLocationAccess(context.clerkUserId, locationId);
+    if (!hasAccess) return { message: "Unauthorized" };
 
     const title = formData.get("title") as string;
     let slug = formData.get("slug") as string;
@@ -57,8 +100,6 @@ export async function upsertPage(prevState: any, formData: FormData) {
     const heroImage = formData.get("heroImage") as string || null;
     const metaTitle = formData.get("metaTitle") as string || null;
     const metaDescription = formData.get("metaDescription") as string || null;
-    const id = formData.get("id") as string | null;
-
     let blocks: any = null;
     if (blocksJson) {
         try {
@@ -77,17 +118,18 @@ export async function upsertPage(prevState: any, formData: FormData) {
 
     try {
         if (id) {
+            const existingScoped = await db.contentPage.findFirst({
+                where: { id, locationId },
+                select: { id: true, blocks: true },
+            });
+            if (!existingScoped) {
+                return { message: "Unauthorized" };
+            }
+
             // --- IMAGE CLEANUP LOGIC ---
             // 1. Fetch existing page to get old blocks
-            // Cast to any to handle potential stale Prisma definitions for 'blocks'
-            // @ts-ignore
-            const existingPage = await (db.contentPage as any).findUnique({
-                where: { id },
-                select: { blocks: true }
-            });
-
-            if (existingPage && existingPage.blocks) {
-                const oldIds = extractImageIds(existingPage.blocks);
+            if (existingScoped.blocks) {
+                const oldIds = extractImageIds(existingScoped.blocks);
                 const newIds = extractImageIds(blocks);
 
                 // Find IDs present in Old but NOT in New
@@ -117,7 +159,7 @@ export async function upsertPage(prevState: any, formData: FormData) {
             // @ts-ignore
             await (db.contentPage as any).create({
                 data: {
-                    locationId: orgId,
+                    locationId,
                     title,
                     slug,
                     content,
@@ -140,20 +182,21 @@ export async function upsertPage(prevState: any, formData: FormData) {
 }
 
 export async function deletePage(id: string) {
-    const { userId } = await auth();
-    if (!userId) return { message: "Unauthorized" };
-    const user = await db.user.findUnique({ where: { clerkId: userId }, include: { locations: true } });
-    const orgId = user?.locations[0]?.id;
+    const context = await resolveUserContext();
+    if (!context) return { message: "Unauthorized" };
 
-    // Check if user has access to location (implicit via locationId being on user)
-    if (!orgId) return { message: "Unauthorized: No Location" };
+    const page = await db.contentPage.findUnique({
+        where: { id },
+        select: { id: true, locationId: true },
+    });
+    if (!page) return { message: "Error deleting page" };
+
+    const hasAccess = await assertLocationAccess(context.clerkUserId, page.locationId);
+    if (!hasAccess) return { message: "Unauthorized" };
 
     try {
         await db.contentPage.delete({
-            where: {
-                id,
-                locationId: orgId, // Ensure ownership
-            },
+            where: { id: page.id },
         });
         revalidatePath("/admin/content/pages");
         return { message: "Success" };
@@ -163,21 +206,29 @@ export async function deletePage(id: string) {
 }
 
 export async function upsertPost(prevState: any, formData: FormData) {
-    const { userId } = await auth();
-    if (!userId) return { message: "Unauthorized" };
-    const user = await db.user.findUnique({ where: { clerkId: userId }, include: { locations: true } });
-    const orgId = user?.locations[0]?.id;
+    const context = await resolveUserContext();
+    if (!context) return { message: "Unauthorized" };
 
-    // Check if user has access to location (implicit via locationId being on user)
-    if (!orgId) return { message: "Unauthorized: No Location" };
+    const id = (formData.get("id") as string | null) || null;
+    const locationIdInput = String(formData.get("locationId") || "").trim();
+    let locationId = locationIdInput;
+    if (!locationId && id) {
+        const existing = await db.blogPost.findUnique({
+            where: { id },
+            select: { locationId: true },
+        });
+        locationId = existing?.locationId || "";
+    }
+    if (!locationId) return { message: "Unauthorized: No Location" };
+
+    const hasAccess = await assertLocationAccess(context.clerkUserId, locationId);
+    if (!hasAccess) return { message: "Unauthorized" };
 
     const title = formData.get("title") as string;
     let slug = formData.get("slug") as string;
     const content = formData.get("content") as string;
     const coverImage = formData.get("coverImage") as string;
     const published = formData.get("published") === "on";
-    const id = formData.get("id") as string | null;
-
     slug = slug.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 
     if (RESERVED_SLUGS.includes(slug)) {
@@ -186,7 +237,7 @@ export async function upsertPost(prevState: any, formData: FormData) {
 
     try {
         const data = {
-            locationId: orgId,
+            locationId,
             title,
             slug,
             content,
@@ -196,6 +247,14 @@ export async function upsertPost(prevState: any, formData: FormData) {
         };
 
         if (id) {
+            const existing = await db.blogPost.findFirst({
+                where: { id, locationId },
+                select: { id: true },
+            });
+            if (!existing) {
+                return { message: "Unauthorized" };
+            }
+
             // Don't overwrite publishedAt if already set, unless unpublishing? 
             // Simplified: Just update fields
             await db.blogPost.update({
@@ -214,17 +273,21 @@ export async function upsertPost(prevState: any, formData: FormData) {
 }
 
 export async function deletePost(id: string) {
-    const { userId } = await auth();
-    if (!userId) return { message: "Unauthorized" };
-    const user = await db.user.findUnique({ where: { clerkId: userId }, include: { locations: true } });
-    const orgId = user?.locations[0]?.id;
+    const context = await resolveUserContext();
+    if (!context) return { message: "Unauthorized" };
 
-    // Check if user has access to location (implicit via locationId being on user)
-    if (!orgId) return { message: "Unauthorized: No Location" };
+    const post = await db.blogPost.findUnique({
+        where: { id },
+        select: { id: true, locationId: true },
+    });
+    if (!post) return { message: "Error deleting post" };
+
+    const hasAccess = await assertLocationAccess(context.clerkUserId, post.locationId);
+    if (!hasAccess) return { message: "Unauthorized" };
 
     try {
         await db.blogPost.delete({
-            where: { id, locationId: orgId },
+            where: { id: post.id },
         });
         revalidatePath("/admin/content/posts");
         return { message: "Success" };
@@ -234,17 +297,16 @@ export async function deletePost(id: string) {
 }
 
 export async function updateHomeConfig(prevState: any, formData: FormData) {
-    const { userId } = await auth();
-    if (!userId) return { message: "Unauthorized", success: false };
+    const context = await resolveUserContext();
+    if (!context) return { message: "Unauthorized", success: false };
 
-    const locationId = formData.get("locationId") as string;
+    const locationId = String(formData.get("locationId") || "").trim();
     const blocksJson = formData.get("blocks") as string;
 
     if (!locationId) return { message: "Internal Error: No Location ID", success: false };
 
-    // Verify ownership
-    const user = await db.user.findUnique({ where: { clerkId: userId }, include: { locations: true } });
-    if (!user?.locations.some(l => l.id === locationId)) {
+    const isAdmin = await assertLocationAdmin(context.clerkUserId, locationId);
+    if (!isAdmin) {
         return { message: "Unauthorized", success: false };
     }
 
@@ -294,13 +356,68 @@ export async function updateHomeConfig(prevState: any, formData: FormData) {
     }
 
     try {
-        await db.siteConfig.update({
-            where: { locationId },
-            data: {
-                heroContent: heroContent as any, // Cast to any for JSON
-                homeSections: homeSections as any
-            } as any
+        const existingDoc = await settingsService.getDocument<any>({
+            scopeType: "LOCATION",
+            scopeId: locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_CONTENT,
         });
+        const existingPayload = existingDoc?.payload || {};
+
+        const payload = {
+            ...existingPayload,
+            heroContent: heroContent as any,
+            homeSections: homeSections as any,
+        };
+
+        await settingsService.upsertDocument({
+            scopeType: "LOCATION",
+            scopeId: locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_CONTENT,
+            payload,
+            actorUserId: context.localUserId,
+            schemaVersion: 1,
+        });
+
+        if (isSettingsDualWriteLegacyEnabled()) {
+            await db.siteConfig.upsert({
+                where: { locationId },
+                create: {
+                    locationId,
+                    heroContent: heroContent as any,
+                    homeSections: homeSections as any,
+                },
+                update: {
+                    heroContent: heroContent as any,
+                    homeSections: homeSections as any,
+                },
+            });
+        }
+
+        if (isSettingsDualWriteLegacyEnabled() && isSettingsParityCheckEnabled()) {
+            const legacySiteConfig = await db.siteConfig.findUnique({
+                where: { locationId },
+                select: {
+                    heroContent: true,
+                    homeSections: true,
+                    favoritesConfig: true,
+                    searchConfig: true,
+                    submissionsConfig: true,
+                },
+            });
+            await settingsService.checkDocumentParity({
+                scopeType: "LOCATION",
+                scopeId: locationId,
+                domain: SETTINGS_DOMAINS.LOCATION_CONTENT,
+                legacyPayload: {
+                    heroContent: legacySiteConfig?.heroContent ?? null,
+                    homeSections: legacySiteConfig?.homeSections ?? [],
+                    favoritesConfig: legacySiteConfig?.favoritesConfig ?? null,
+                    searchConfig: legacySiteConfig?.searchConfig ?? null,
+                    submissionsConfig: legacySiteConfig?.submissionsConfig ?? null,
+                },
+                actorUserId: context.localUserId,
+            });
+        }
     } catch (e) {
         console.error("Failed to update home config", e);
         return { message: "Database update failed", success: false };
@@ -313,28 +430,78 @@ export async function updateHomeConfig(prevState: any, formData: FormData) {
 }
 
 export async function updateFavoritesConfig(prevState: any, formData: FormData) {
-    const { userId } = await auth();
-    if (!userId) return { success: false, message: "Unauthorized" };
+    const context = await resolveUserContext();
+    if (!context) return { success: false, message: "Unauthorized" };
 
-    const locationId = formData.get("locationId") as string;
+    const locationId = String(formData.get("locationId") || "").trim();
+    if (!locationId) return { success: false, message: "Missing location" };
+
+    const isAdmin = await assertLocationAdmin(context.clerkUserId, locationId);
+    if (!isAdmin) return { success: false, message: "Unauthorized" };
 
     const favoritesConfig = {
-        title: formData.get("title"),
-        emptyTitle: formData.get("emptyTitle"),
-        emptyBody: formData.get("emptyBody"),
-        headerStyle: formData.get("headerStyle"),
-        heroImage: formData.get("heroImage"),
-        metaTitle: formData.get("metaTitle"),
-        metaDescription: formData.get("metaDescription"),
+        title: nullableString(formData.get("title")),
+        emptyTitle: nullableString(formData.get("emptyTitle")),
+        emptyBody: nullableString(formData.get("emptyBody")),
+        headerStyle: nullableString(formData.get("headerStyle")),
+        heroImage: nullableString(formData.get("heroImage")),
+        metaTitle: nullableString(formData.get("metaTitle")),
+        metaDescription: nullableString(formData.get("metaDescription")),
     };
 
     try {
-        await db.siteConfig.update({
-            where: { locationId },
-            data: {
-                favoritesConfig
-            } as any
+        const existingDoc = await settingsService.getDocument<any>({
+            scopeType: "LOCATION",
+            scopeId: locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_CONTENT,
         });
+        const payload = {
+            ...(existingDoc?.payload || {}),
+            favoritesConfig,
+        };
+
+        await settingsService.upsertDocument({
+            scopeType: "LOCATION",
+            scopeId: locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_CONTENT,
+            payload,
+            actorUserId: context.localUserId,
+            schemaVersion: 1,
+        });
+
+        if (isSettingsDualWriteLegacyEnabled()) {
+            await db.siteConfig.upsert({
+                where: { locationId },
+                create: { locationId, favoritesConfig },
+                update: { favoritesConfig },
+            });
+        }
+
+        if (isSettingsDualWriteLegacyEnabled() && isSettingsParityCheckEnabled()) {
+            const legacySiteConfig = await db.siteConfig.findUnique({
+                where: { locationId },
+                select: {
+                    heroContent: true,
+                    homeSections: true,
+                    favoritesConfig: true,
+                    searchConfig: true,
+                    submissionsConfig: true,
+                },
+            });
+            await settingsService.checkDocumentParity({
+                scopeType: "LOCATION",
+                scopeId: locationId,
+                domain: SETTINGS_DOMAINS.LOCATION_CONTENT,
+                legacyPayload: {
+                    heroContent: legacySiteConfig?.heroContent ?? null,
+                    homeSections: legacySiteConfig?.homeSections ?? [],
+                    favoritesConfig: legacySiteConfig?.favoritesConfig ?? null,
+                    searchConfig: legacySiteConfig?.searchConfig ?? null,
+                    submissionsConfig: legacySiteConfig?.submissionsConfig ?? null,
+                },
+                actorUserId: context.localUserId,
+            });
+        }
 
         revalidatePath(`/admin/content/favorites`);
         return { success: true, message: "Favorites configuration saved" };
@@ -345,27 +512,77 @@ export async function updateFavoritesConfig(prevState: any, formData: FormData) 
 }
 
 export async function updateSearchConfig(prevState: any, formData: FormData) {
-    const { userId } = await auth();
-    if (!userId) return { success: false, message: "Unauthorized" };
+    const context = await resolveUserContext();
+    if (!context) return { success: false, message: "Unauthorized" };
 
-    const locationId = formData.get("locationId") as string;
+    const locationId = String(formData.get("locationId") || "").trim();
+    if (!locationId) return { success: false, message: "Missing location" };
+
+    const isAdmin = await assertLocationAdmin(context.clerkUserId, locationId);
+    if (!isAdmin) return { success: false, message: "Unauthorized" };
 
     const searchConfig = {
-        metaTitle: formData.get("metaTitle"),
-        metaDescription: formData.get("metaDescription"),
-        emptyTitle: formData.get("emptyTitle"),
-        emptyBody: formData.get("emptyBody"),
-        headerStyle: formData.get("headerStyle"),
-        heroImage: formData.get("heroImage"),
+        metaTitle: nullableString(formData.get("metaTitle")),
+        metaDescription: nullableString(formData.get("metaDescription")),
+        emptyTitle: nullableString(formData.get("emptyTitle")),
+        emptyBody: nullableString(formData.get("emptyBody")),
+        headerStyle: nullableString(formData.get("headerStyle")),
+        heroImage: nullableString(formData.get("heroImage")),
     };
 
     try {
-        await db.siteConfig.update({
-            where: { locationId },
-            data: {
-                searchConfig
-            } as any
+        const existingDoc = await settingsService.getDocument<any>({
+            scopeType: "LOCATION",
+            scopeId: locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_CONTENT,
         });
+        const payload = {
+            ...(existingDoc?.payload || {}),
+            searchConfig,
+        };
+
+        await settingsService.upsertDocument({
+            scopeType: "LOCATION",
+            scopeId: locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_CONTENT,
+            payload,
+            actorUserId: context.localUserId,
+            schemaVersion: 1,
+        });
+
+        if (isSettingsDualWriteLegacyEnabled()) {
+            await db.siteConfig.upsert({
+                where: { locationId },
+                create: { locationId, searchConfig },
+                update: { searchConfig },
+            });
+        }
+
+        if (isSettingsDualWriteLegacyEnabled() && isSettingsParityCheckEnabled()) {
+            const legacySiteConfig = await db.siteConfig.findUnique({
+                where: { locationId },
+                select: {
+                    heroContent: true,
+                    homeSections: true,
+                    favoritesConfig: true,
+                    searchConfig: true,
+                    submissionsConfig: true,
+                },
+            });
+            await settingsService.checkDocumentParity({
+                scopeType: "LOCATION",
+                scopeId: locationId,
+                domain: SETTINGS_DOMAINS.LOCATION_CONTENT,
+                legacyPayload: {
+                    heroContent: legacySiteConfig?.heroContent ?? null,
+                    homeSections: legacySiteConfig?.homeSections ?? [],
+                    favoritesConfig: legacySiteConfig?.favoritesConfig ?? null,
+                    searchConfig: legacySiteConfig?.searchConfig ?? null,
+                    submissionsConfig: legacySiteConfig?.submissionsConfig ?? null,
+                },
+                actorUserId: context.localUserId,
+            });
+        }
 
         revalidatePath(`/admin/content/search`);
         return { success: true, message: "Search configuration saved" };
@@ -376,28 +593,78 @@ export async function updateSearchConfig(prevState: any, formData: FormData) {
 }
 
 export async function updateSubmissionsConfig(prevState: any, formData: FormData) {
-    const { userId } = await auth();
-    if (!userId) return { success: false, message: "Unauthorized" };
+    const context = await resolveUserContext();
+    if (!context) return { success: false, message: "Unauthorized" };
 
-    const locationId = formData.get("locationId") as string;
+    const locationId = String(formData.get("locationId") || "").trim();
+    if (!locationId) return { success: false, message: "Missing location" };
+
+    const isAdmin = await assertLocationAdmin(context.clerkUserId, locationId);
+    if (!isAdmin) return { success: false, message: "Unauthorized" };
 
     const submissionsConfig = {
-        title: formData.get("title"),
-        metaTitle: formData.get("metaTitle"),
-        metaDescription: formData.get("metaDescription"),
-        emptyTitle: formData.get("emptyTitle"),
-        emptyBody: formData.get("emptyBody"),
-        headerStyle: formData.get("headerStyle"),
-        heroImage: formData.get("heroImage"),
+        title: nullableString(formData.get("title")),
+        metaTitle: nullableString(formData.get("metaTitle")),
+        metaDescription: nullableString(formData.get("metaDescription")),
+        emptyTitle: nullableString(formData.get("emptyTitle")),
+        emptyBody: nullableString(formData.get("emptyBody")),
+        headerStyle: nullableString(formData.get("headerStyle")),
+        heroImage: nullableString(formData.get("heroImage")),
     };
 
     try {
-        await db.siteConfig.update({
-            where: { locationId },
-            data: {
-                submissionsConfig
-            } as any
+        const existingDoc = await settingsService.getDocument<any>({
+            scopeType: "LOCATION",
+            scopeId: locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_CONTENT,
         });
+        const payload = {
+            ...(existingDoc?.payload || {}),
+            submissionsConfig,
+        };
+
+        await settingsService.upsertDocument({
+            scopeType: "LOCATION",
+            scopeId: locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_CONTENT,
+            payload,
+            actorUserId: context.localUserId,
+            schemaVersion: 1,
+        });
+
+        if (isSettingsDualWriteLegacyEnabled()) {
+            await db.siteConfig.upsert({
+                where: { locationId },
+                create: { locationId, submissionsConfig },
+                update: { submissionsConfig },
+            });
+        }
+
+        if (isSettingsDualWriteLegacyEnabled() && isSettingsParityCheckEnabled()) {
+            const legacySiteConfig = await db.siteConfig.findUnique({
+                where: { locationId },
+                select: {
+                    heroContent: true,
+                    homeSections: true,
+                    favoritesConfig: true,
+                    searchConfig: true,
+                    submissionsConfig: true,
+                },
+            });
+            await settingsService.checkDocumentParity({
+                scopeType: "LOCATION",
+                scopeId: locationId,
+                domain: SETTINGS_DOMAINS.LOCATION_CONTENT,
+                legacyPayload: {
+                    heroContent: legacySiteConfig?.heroContent ?? null,
+                    homeSections: legacySiteConfig?.homeSections ?? [],
+                    favoritesConfig: legacySiteConfig?.favoritesConfig ?? null,
+                    searchConfig: legacySiteConfig?.searchConfig ?? null,
+                    submissionsConfig: legacySiteConfig?.submissionsConfig ?? null,
+                },
+                actorUserId: context.localUserId,
+            });
+        }
 
         revalidatePath(`/admin/content/submissions`);
         return { success: true, message: "Submissions configuration saved" };

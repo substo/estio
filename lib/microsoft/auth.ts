@@ -1,6 +1,12 @@
 import { Client } from '@microsoft/microsoft-graph-client';
 import { randomUUID } from 'crypto';
 import db from '@/lib/db';
+import { settingsService } from '@/lib/settings/service';
+import {
+    SETTINGS_DOMAINS,
+    SETTINGS_SECRET_KEYS,
+    isSettingsDualWriteLegacyEnabled,
+} from '@/lib/settings/constants';
 import 'isomorphic-fetch';
 
 const CLIENT_ID = process.env.MICROSOFT_CLIENT_ID;
@@ -83,18 +89,77 @@ export async function handleMicrosoftCallback(code: string, userId: string, base
 
     const tokens = await response.json();
 
-    // Tokens: access_token, refresh_token, expires_in (seconds)
-    // Save to DB
-    await db.user.update({
+    const user = await db.user.findUnique({
         where: { id: userId },
-        data: {
-            outlookAccessToken: tokens.access_token,
-            outlookRefreshToken: tokens.refresh_token,
-            outlookAuthMethod: 'oauth',
-            outlookSyncEnabled: true,
-            // We can also trigger the initial sync here or let the user do it
+        select: {
+            outlookSubscriptionId: true,
+            outlookSubscriptionExpiry: true,
+            outlookEmail: true,
+            outlookSessionExpiry: true,
         }
     });
+    if (!user) {
+        throw new Error("User not found");
+    }
+
+    await settingsService.upsertDocument({
+        scopeType: "USER",
+        scopeId: userId,
+        domain: SETTINGS_DOMAINS.USER_MICROSOFT_INTEGRATIONS,
+        payload: {
+            outlookSyncEnabled: true,
+            outlookSubscriptionId: user.outlookSubscriptionId ?? null,
+            outlookSubscriptionExpiry: user.outlookSubscriptionExpiry
+                ? user.outlookSubscriptionExpiry.toISOString()
+                : null,
+            outlookAuthMethod: "oauth",
+            outlookEmail: user.outlookEmail ?? null,
+            outlookSessionExpiry: user.outlookSessionExpiry
+                ? user.outlookSessionExpiry.toISOString()
+                : null,
+        },
+        actorUserId: userId,
+        schemaVersion: 1,
+    });
+    await settingsService.setSecret({
+        scopeType: "USER",
+        scopeId: userId,
+        domain: SETTINGS_DOMAINS.USER_MICROSOFT_INTEGRATIONS,
+        secretKey: SETTINGS_SECRET_KEYS.OUTLOOK_ACCESS_TOKEN,
+        plaintext: tokens.access_token,
+        actorUserId: userId,
+    });
+    if (tokens.refresh_token) {
+        await settingsService.setSecret({
+            scopeType: "USER",
+            scopeId: userId,
+            domain: SETTINGS_DOMAINS.USER_MICROSOFT_INTEGRATIONS,
+            secretKey: SETTINGS_SECRET_KEYS.OUTLOOK_REFRESH_TOKEN,
+            plaintext: tokens.refresh_token,
+            actorUserId: userId,
+        });
+    }
+
+    if (isSettingsDualWriteLegacyEnabled()) {
+        // Save to legacy columns for compatibility during migration window.
+        await db.user.update({
+            where: { id: userId },
+            data: {
+                outlookAccessToken: tokens.access_token,
+                outlookRefreshToken: tokens.refresh_token,
+                outlookAuthMethod: 'oauth',
+                outlookSyncEnabled: true,
+            }
+        });
+    } else {
+        await db.user.update({
+            where: { id: userId },
+            data: {
+                outlookAuthMethod: 'oauth',
+                outlookSyncEnabled: true,
+            }
+        });
+    }
 
     // Optional: Trigger Initial Sync via Queue or return success
     console.log(`Microsoft Auth Success for User ${userId}`);
@@ -128,6 +193,22 @@ export async function refreshMicrosoftToken(userId: string, refreshToken: string
     if (!response.ok) {
         // If refresh fails (e.g. revoked), we should update the user status
         if (response.status === 400 || response.status === 401) {
+            const existingDoc = await settingsService.getDocument<any>({
+                scopeType: "USER",
+                scopeId: userId,
+                domain: SETTINGS_DOMAINS.USER_MICROSOFT_INTEGRATIONS,
+            });
+            await settingsService.upsertDocument({
+                scopeType: "USER",
+                scopeId: userId,
+                domain: SETTINGS_DOMAINS.USER_MICROSOFT_INTEGRATIONS,
+                payload: {
+                    ...(existingDoc?.payload || {}),
+                    outlookSyncEnabled: false,
+                },
+                actorUserId: userId,
+                schemaVersion: 1,
+            });
             await db.user.update({
                 where: { id: userId },
                 data: { outlookSyncEnabled: false } // Session expired
@@ -138,14 +219,34 @@ export async function refreshMicrosoftToken(userId: string, refreshToken: string
 
     const tokens = await response.json();
 
-    // Update DB
-    await db.user.update({
-        where: { id: userId },
-        data: {
-            outlookAccessToken: tokens.access_token,
-            outlookRefreshToken: tokens.refresh_token || refreshToken, // specific: sometimes refresh token is rotated, sometimes not
-        }
+    const nextRefreshToken = tokens.refresh_token || refreshToken;
+
+    await settingsService.setSecret({
+        scopeType: "USER",
+        scopeId: userId,
+        domain: SETTINGS_DOMAINS.USER_MICROSOFT_INTEGRATIONS,
+        secretKey: SETTINGS_SECRET_KEYS.OUTLOOK_ACCESS_TOKEN,
+        plaintext: tokens.access_token,
+        actorUserId: userId,
     });
+    await settingsService.setSecret({
+        scopeType: "USER",
+        scopeId: userId,
+        domain: SETTINGS_DOMAINS.USER_MICROSOFT_INTEGRATIONS,
+        secretKey: SETTINGS_SECRET_KEYS.OUTLOOK_REFRESH_TOKEN,
+        plaintext: nextRefreshToken,
+        actorUserId: userId,
+    });
+
+    if (isSettingsDualWriteLegacyEnabled()) {
+        await db.user.update({
+            where: { id: userId },
+            data: {
+                outlookAccessToken: tokens.access_token,
+                outlookRefreshToken: nextRefreshToken,
+            }
+        });
+    }
 
     return tokens.access_token;
 }

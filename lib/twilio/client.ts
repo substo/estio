@@ -1,32 +1,49 @@
 
 import db from "@/lib/db";
 import twilio from "twilio";
-
-// For decryption - we'll reuse the same mechanism as other integrations
-// Ideally this should be a shared utility, but for now we'll import if available or note the need for it.
-import Cryptr from "cryptr";
-
-const secret = process.env.ENCRYPTION_KEY || "dev-secret-key-change-me";
-const cryptr = new Cryptr(secret);
+import { settingsService } from "@/lib/settings/service";
+import { SETTINGS_DOMAINS, SETTINGS_SECRET_KEYS } from "@/lib/settings/constants";
+import { getLegacyCryptr } from "@/lib/security/legacy-cryptr";
 
 export async function getTwilioCredentials(locationId: string) {
-    const location = await db.location.findUnique({
-        where: { id: locationId },
-        select: {
-            twilioAccountSid: true,
-            twilioAuthToken: true,
-            twilioWhatsAppFrom: true,
-        },
-    });
+    const [location, integrationDoc] = await Promise.all([
+        db.location.findUnique({
+            where: { id: locationId },
+            select: {
+                twilioAccountSid: true,
+                twilioAuthToken: true,
+                twilioWhatsAppFrom: true,
+            },
+        }),
+        settingsService.getDocument<any>({
+            scopeType: "LOCATION",
+            scopeId: locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+        }).catch(() => null),
+    ]);
 
-    if (!location?.twilioAccountSid || !location?.twilioAuthToken || !location?.twilioWhatsAppFrom) {
+    const accountSid = integrationDoc?.payload?.twilioAccountSid || location?.twilioAccountSid || "";
+    const from = integrationDoc?.payload?.twilioWhatsAppFrom || location?.twilioWhatsAppFrom || "";
+
+    let authToken = await settingsService.getSecret({
+        scopeType: "LOCATION",
+        scopeId: locationId,
+        domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+        secretKey: SETTINGS_SECRET_KEYS.TWILIO_AUTH_TOKEN,
+    }).catch(() => null);
+
+    if (!authToken && location?.twilioAuthToken) {
+        authToken = getLegacyCryptr().decrypt(location.twilioAuthToken);
+    }
+
+    if (!accountSid || !authToken || !from) {
         throw new Error("Twilio WhatsApp credentials not found for this location");
     }
 
     return {
-        accountSid: location.twilioAccountSid,
-        authToken: cryptr.decrypt(location.twilioAuthToken),
-        from: location.twilioWhatsAppFrom,
+        accountSid,
+        authToken,
+        from,
     };
 }
 

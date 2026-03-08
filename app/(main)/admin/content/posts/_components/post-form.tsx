@@ -30,6 +30,7 @@ export function PostForm({ initialData, locationId }: { initialData?: any, locat
     return (
         <form action={formAction} className="space-y-6 max-w-3xl">
             <input type="hidden" name="id" value={initialData?.id || ""} />
+            <input type="hidden" name="locationId" value={locationId} />
 
             <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">

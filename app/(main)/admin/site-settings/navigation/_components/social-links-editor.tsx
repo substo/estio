@@ -36,7 +36,7 @@ const PLATFORMS = [
     { value: "other", label: "Other", icon: LinkIcon },
 ];
 
-export function SocialLinksEditor({ initialLinks = [] }: { initialLinks?: SocialLink[] }) {
+export function SocialLinksEditor({ locationId, initialLinks = [] }: { locationId: string, initialLinks?: SocialLink[] }) {
     const [links, setLinks] = useState<SocialLink[]>(initialLinks || []);
     const [saving, setSaving] = useState(false);
 
@@ -55,7 +55,7 @@ export function SocialLinksEditor({ initialLinks = [] }: { initialLinks?: Social
     const handleSave = async () => {
         setSaving(true);
         try {
-            await saveNavigation('social', links);
+            await saveNavigation(locationId, 'social', links);
             toast.success("Social links saved");
         } catch (e) {
             toast.error("Failed to save social links");

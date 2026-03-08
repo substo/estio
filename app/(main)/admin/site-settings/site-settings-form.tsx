@@ -36,12 +36,14 @@ export function SiteSettingsForm({
     initialData,
     locationId,
     locationName,
-    locationTimeZone
+    locationTimeZone,
+    settingsVersion,
 }: {
     initialData: any,
     locationId: string,
     locationName: string,
-    locationTimeZone: string
+    locationTimeZone: string,
+    settingsVersion: number
 }) {
     const [state, action] = useActionState(updateSiteSettings, initialState);
     const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -240,6 +242,7 @@ export function SiteSettingsForm({
 
             <form action={action} className="space-y-8">
                 <input type="hidden" name="locationId" value={locationId} />
+                <input type="hidden" name="settingsVersion" value={String(settingsVersion)} />
 
 
                 {/* Domain Section */}
@@ -693,6 +696,11 @@ export function SiteSettingsForm({
                 {state?.errors?._form && (
                     <div className="p-3 bg-red-100 text-red-700 text-sm rounded-md">
                         {state.errors._form}
+                    </div>
+                )}
+                {state?.errors?._version && (
+                    <div className="p-3 bg-red-100 text-red-700 text-sm rounded-md">
+                        {state.errors._version}
                     </div>
                 )}
 

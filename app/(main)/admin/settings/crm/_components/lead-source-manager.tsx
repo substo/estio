@@ -18,9 +18,10 @@ type LeadSource = {
 
 interface LeadSourceManagerProps {
     initialSources: LeadSource[];
+    locationId: string;
 }
 
-export function LeadSourceManager({ initialSources }: LeadSourceManagerProps) {
+export function LeadSourceManager({ initialSources, locationId }: LeadSourceManagerProps) {
     const [sources, setSources] = useState(initialSources);
     const [newSource, setNewSource] = useState('');
     const [isPending, startTransition] = useTransition();
@@ -29,7 +30,7 @@ export function LeadSourceManager({ initialSources }: LeadSourceManagerProps) {
         if (!newSource.trim()) return;
 
         startTransition(async () => {
-            const result = await addLeadSource(newSource);
+            const result = await addLeadSource(newSource, locationId || null);
             if (result.success && result.source) {
                 setSources([...sources, result.source]);
                 setNewSource('');
