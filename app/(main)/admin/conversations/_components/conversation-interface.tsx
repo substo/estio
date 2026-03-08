@@ -53,6 +53,7 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
 import type { ConversationFeatureFlags } from '@/lib/feature-flags';
 
@@ -171,6 +172,8 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();
+    const [isMobileViewport, setIsMobileViewport] = useState(false);
+    const [mobileMissionOpen, setMobileMissionOpen] = useState(false);
 
     // -- Clean Helper for URL updates --
     // We use a callback to ensure we always have the latest params
@@ -289,6 +292,23 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const [activeDealId, setActiveDealId] = useState<string | null>(initialDealId);
     const [transcriptOnDemandEnabled, setTranscriptOnDemandEnabled] = useState(false);
 
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const mediaQuery = window.matchMedia('(max-width: 1023px)');
+        const updateViewport = () => setIsMobileViewport(mediaQuery.matches);
+        updateViewport();
+        mediaQuery.addEventListener('change', updateViewport);
+        return () => mediaQuery.removeEventListener('change', updateViewport);
+    }, []);
+
+    useEffect(() => {
+        if (!isMobileViewport) return;
+        if (viewMode === 'deals') return;
+        if (urlConversationId) return;
+        if (!activeIdRef.current) return;
+        setActiveId(null);
+    }, [isMobileViewport, viewMode, urlConversationId]);
+
     // Sync View Mode & Deal ID to URL
     useEffect(() => {
         updateUrl({
@@ -321,6 +341,20 @@ export function ConversationInterface({ locationId, initialConversations, initia
     useEffect(() => {
         conversationDeltaCursorRef.current = conversationDeltaCursor;
     }, [conversationDeltaCursor]);
+
+    useEffect(() => {
+        if (!isMobileViewport) {
+            setMobileMissionOpen(false);
+            return;
+        }
+        if (viewMode === 'chats' && !activeId) {
+            setMobileMissionOpen(false);
+            return;
+        }
+        if (viewMode === 'deals' && !activeDealId) {
+            setMobileMissionOpen(false);
+        }
+    }, [isMobileViewport, viewMode, activeId, activeDealId]);
 
     const trackClientRequest = useCallback((kind: string, metadata?: Record<string, unknown>) => {
         const nextCount = (clientRequestCountRef.current[kind] || 0) + 1;
@@ -935,6 +969,30 @@ export function ConversationInterface({ locationId, initialConversations, initia
     // Handle clicking a conversation in the list
     const handleSelect = (id: string) => {
         setActiveId(id);
+        if (isMobileViewport) {
+            setMobileMissionOpen(false);
+        }
+    };
+
+    const handleSelectDeal = (id: string) => {
+        setActiveDealId(id);
+        if (isMobileViewport) {
+            setMobileMissionOpen(false);
+        }
+    };
+
+    const handleBackToList = () => {
+        if (viewMode === 'deals') {
+            setActiveDealId(null);
+        } else {
+            setActiveId(null);
+        }
+        setMobileMissionOpen(false);
+    };
+
+    const handleOpenMissionControl = () => {
+        if (!isMobileViewport) return;
+        setMobileMissionOpen(true);
     };
 
     // Handle toggling context mode IDs
@@ -1528,227 +1586,258 @@ export function ConversationInterface({ locationId, initialConversations, initia
         setSuggestions([]);
     }, [activeId]);
 
+    const conversationListPane = (
+        <ConversationList
+            conversations={debouncedSearchQuery.trim() ? searchResults : conversations}
+            selectedId={viewMode === 'chats' ? activeId : activeDealId}
+            onSelect={handleSelect}
+            hasMore={viewMode === 'chats' ? conversationListHasMore : false}
+            isLoadingMore={viewMode === 'chats' ? loadingMoreConversations : false}
+            onLoadMore={viewMode === 'chats' ? loadMoreConversations : undefined}
+
+            // Selection / Generic Mode Props
+            isSelectionMode={isSelectionMode}
+            onToggleSelectionMode={setIsSelectionMode}
+            selectedIds={selectedIds}
+            onToggleSelect={handleToggleSelect}
+            onDelete={handleDelete}
+            onSelectAll={(select) => {
+                if (select) {
+                    setSelectedIds(new Set(conversations.map(c => c.id)));
+                } else {
+                    setSelectedIds(new Set());
+                }
+            }}
+
+            // Deal Mode Props
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+            viewFilter={viewFilter}
+            onViewFilterChange={setViewFilter}
+            deals={deals}
+            onSelectDeal={handleSelectDeal}
+            onImportClick={() => setImportModalOpen(true)}
+            onBind={handleBindClick}
+            onArchive={viewFilter === 'active' ? handleArchive : undefined}
+            onNewConversationClick={() => setNewConversationOpen(true)}
+            onSyncAllClick={() => setSyncAllOpen(true)}
+            disablePreviewCard={isMobileViewport}
+        />
+    );
+
+    const conversationMainPane = viewMode === 'chats' ? (
+        activeConversation ? (
+            <ChatWindow
+                key={activeConversation.id} // Force remount to reset internal state/scroll
+                conversation={activeConversation}
+                messages={messages}
+                activityLog={activityLog}
+                loading={loadingMessages}
+                onBack={isMobileViewport ? handleBackToList : undefined}
+                onOpenMissionControl={isMobileViewport ? handleOpenMissionControl : undefined}
+                onSendMessage={handleSendMessage}
+                onSendMedia={handleSendMedia}
+                onRefetchMedia={handleRefetchMedia}
+                onRequestTranscript={handleRequestTranscript}
+                onExtractViewingNotes={handleExtractViewingNotes}
+                onRetryTranscript={handleRetryTranscript}
+                onBulkTranscribeUnprocessedAudio={handleBulkTranscribeUnprocessedAudio}
+                transcriptOnDemandEnabled={transcriptOnDemandEnabled}
+                onSync={handleSync}
+                onAddActivityEntry={async (entryText: string, dateIso: string) => {
+                    await addConversationActivityEntry(activeConversation.id, entryText, dateIso);
+                    // Refresh the activity log after adding
+                    const log = await fetchConversationActivityLog(activeConversation.id);
+                    setActivityLog(log);
+                }}
+                onFetchHistory={async () => {
+                    setLoadingMessages(true);
+                    try {
+                        toast({ title: "Fetching History", description: "Checking Gmail for recent messages..." });
+                        // Dynamic import or passed prop action
+                        const { fetchContactHistory } = await import('@/lib/google/actions');
+                        const res = await fetchContactHistory(activeConversation.contactId);
+
+                        if (res.success) {
+                            toast({ title: "History Fetched", description: `Found ${res.count} messages.` });
+                            const msgs = await fetchMessages(activeConversation.id);
+                            setMessages(msgs);
+                        } else {
+                            toast({ title: "Fetch Failed", description: res.error, variant: "destructive" });
+                        }
+                    } catch (e: any) {
+                        toast({ title: "Error", description: e.message, variant: "destructive" });
+                    } finally {
+                        setLoadingMessages(false);
+                    }
+                }}
+                suggestions={[...(activeConversation?.suggestedActions || []), ...suggestions]}
+                onGenerateDraft={async (instruction?: string, model?: string) => {
+                    try {
+                        const res = await generateAIDraft(
+                            activeConversation.id,
+                            activeConversation.contactId,
+                            instruction,
+                            model,
+                            { mode: "chat" }
+                        );
+                        if (res.reasoning) {
+                            toast({ title: "Draft Generated", description: res.reasoning });
+                        }
+                        return res.draft;
+                    } catch (e: any) {
+                        toast({ title: "Draft Failed", description: e.message, variant: "destructive" });
+                        return null;
+                    }
+                }}
+            />
+        ) : (
+            <div className="h-full flex items-center justify-center text-gray-400 bg-slate-50">
+                Select a conversation
+            </div>
+        )
+    ) : (
+        activeDealId ? (
+            <UnifiedTimeline
+                dealId={activeDealId}
+                refreshToken={dealTimelineRefreshToken}
+                composerConversation={selectedDealConversation}
+                onBack={isMobileViewport ? handleBackToList : undefined}
+                onOpenMissionControl={isMobileViewport && selectedDealConversation ? handleOpenMissionControl : undefined}
+                onSendMessage={(text, type) => handleSendMessage(text, type, selectedDealConversation || undefined)}
+                onSendMedia={(file, caption) => handleSendMedia(file, caption, selectedDealConversation || undefined)}
+                onGenerateDraft={async (instruction?: string, model?: string) => {
+                    if (!selectedDealConversation) return null;
+                    try {
+                        const res = await generateAIDraft(
+                            selectedDealConversation.id,
+                            selectedDealConversation.contactId,
+                            instruction,
+                            model,
+                            { mode: "deal", dealId: activeDealId }
+                        );
+                        if (res.reasoning) {
+                            toast({ title: "Draft Generated", description: res.reasoning });
+                        }
+                        return res.draft;
+                    } catch (error: any) {
+                        toast({ title: "Draft Failed", description: error?.message || "Failed to generate draft", variant: "destructive" });
+                        return null;
+                    }
+                }}
+                suggestions={suggestions}
+                composerDisabled={loadingDealContext || !selectedDealConversation}
+                composerDisabledReason={
+                    loadingDealContext
+                        ? "Loading deal participants..."
+                        : "Select a contact in Mission Control to reply."
+                }
+                replyingToLabel={selectedDealConversation?.contactName || undefined}
+            />
+        ) : (
+            <div className="h-full flex items-center justify-center text-gray-400 bg-slate-50">
+                Select a deal to view timeline
+            </div>
+        )
+    );
+
+    const missionControlPane = viewMode === 'chats' ? (
+        activeConversation ? (
+            <CoordinatorPanel
+                locationId={locationId}
+                conversation={activeConversation}
+                selectedConversations={isSelectionMode ? selectedConversations : undefined}
+                activityLog={activityLog}
+                initialContactContext={workspaceContactContext}
+                initialTaskSummary={workspaceTaskSummary}
+                initialViewingSummary={workspaceViewingSummary}
+                initialAgentSummary={workspaceAgentSummary}
+                lazySidebarDataEnabled={featureFlags.lazySidebarData}
+                onDraftApproved={(text) => handleSendMessage(text, getMessageType(activeConversation))}
+                onDeselect={(id) => handleToggleSelect(id, false)}
+                onSuggestionsGenerated={setSuggestions}
+                onContactSaved={(patch) => handleConversationContactSaved(activeConversation.id, patch)}
+            />
+        ) : <div className="h-full bg-slate-50" />
+    ) : (
+        selectedDealConversation ? (
+            <CoordinatorPanel
+                locationId={locationId}
+                conversation={selectedDealConversation}
+                selectedConversations={activeDealParticipants}
+                activityLog={activityLog}
+                initialContactContext={workspaceContactContext}
+                initialTaskSummary={workspaceTaskSummary}
+                initialViewingSummary={workspaceViewingSummary}
+                initialAgentSummary={workspaceAgentSummary}
+                lazySidebarDataEnabled={featureFlags.lazySidebarData}
+                onDraftApproved={(text) => handleSendMessage(text, getMessageType(selectedDealConversation), selectedDealConversation)}
+                onDeselect={() => undefined} // No deselect in deal mode
+                onSuggestionsGenerated={setSuggestions}
+                onContactSaved={(patch) => handleConversationContactSaved(selectedDealConversation.id, patch)}
+                dealContacts={dealContacts}
+                selectedDealConversationId={selectedDealConversation.id}
+                onSelectDealConversation={(conversationId) => setActiveId(conversationId)}
+            />
+        ) : (
+            <div className="h-full bg-slate-50 p-4 text-center text-gray-400 text-xs flex flex-col items-center justify-center">
+                {loadingDealContext ? 'Loading deal context...' : 'Select a deal contact to view context.'}
+            </div>
+        )
+    );
+
+    const isMobileThreadOpen = viewMode === 'chats'
+        ? !!activeConversation
+        : !!activeDealId;
+
     return (
         <>
-            <PanelGroup orientation="horizontal" className="h-full w-full max-w-full overflow-hidden">
-                {/* Left: List */}
-                <Panel
-                    defaultSize={24}
-                    minSize={18}
-                    className="overflow-hidden min-w-0"
-                >
-                    <ConversationList
-                        conversations={debouncedSearchQuery.trim() ? searchResults : conversations}
-                        selectedId={viewMode === 'chats' ? activeId : activeDealId}
-                        onSelect={handleSelect}
-                        hasMore={viewMode === 'chats' ? conversationListHasMore : false}
-                        isLoadingMore={viewMode === 'chats' ? loadingMoreConversations : false}
-                        onLoadMore={viewMode === 'chats' ? loadMoreConversations : undefined}
+            {isMobileViewport ? (
+                <div className="h-full w-full overflow-hidden">
+                    {isMobileThreadOpen ? conversationMainPane : conversationListPane}
+                </div>
+            ) : (
+                <PanelGroup orientation="horizontal" className="h-full w-full max-w-full overflow-hidden">
+                    {/* Left: List */}
+                    <Panel
+                        defaultSize={24}
+                        minSize={18}
+                        className="overflow-hidden min-w-0"
+                    >
+                        {conversationListPane}
+                    </Panel>
 
-                        // Selection / Generic Mode Props
-                        isSelectionMode={isSelectionMode}
-                        onToggleSelectionMode={setIsSelectionMode}
-                        selectedIds={selectedIds}
-                        onToggleSelect={handleToggleSelect}
-                        onDelete={handleDelete}
-                        onSelectAll={(select) => {
-                            if (select) {
-                                setSelectedIds(new Set(conversations.map(c => c.id)));
-                            } else {
-                                setSelectedIds(new Set());
-                            }
-                        }}
-
-                        // Deal Mode Props
-                        viewMode={viewMode}
-                        onViewModeChange={setViewMode}
-                        viewFilter={viewFilter}
-                        onViewFilterChange={setViewFilter}
-                        deals={deals}
-                        onSelectDeal={setActiveDealId}
-                        onImportClick={() => setImportModalOpen(true)}
-                        onBind={handleBindClick}
-                        onArchive={viewFilter === 'active' ? handleArchive : undefined}
-                        onNewConversationClick={() => setNewConversationOpen(true)}
-                        onSyncAllClick={() => setSyncAllOpen(true)}
+                    <PanelResizeHandle
+                        className="w-1 bg-gray-200 hover:bg-blue-400 transition-colors z-50 flex flex-col justify-center"
+                        style={{ width: '2px', cursor: 'col-resize' }}
                     />
-                </Panel>
 
-                <PanelResizeHandle
-                    className="w-1 bg-gray-200 hover:bg-blue-400 transition-colors z-50 flex flex-col justify-center"
-                    style={{ width: '2px', cursor: 'col-resize' }}
-                />
+                    {/* Center: Chat */}
+                    <Panel defaultSize={52} minSize={36} className="overflow-hidden min-w-0">
+                        {conversationMainPane}
+                    </Panel>
 
-                {/* Center: Chat */}
-                <Panel defaultSize={52} minSize={36} className="overflow-hidden min-w-0">
-                    {viewMode === 'chats' ? (
-                        activeConversation ? (
-                            <ChatWindow
-                                key={activeConversation.id} // Force remount to reset internal state/scroll
-                                conversation={activeConversation}
-                                messages={messages}
-                                activityLog={activityLog}
-                                loading={loadingMessages}
-                                onSendMessage={handleSendMessage}
-                                onSendMedia={handleSendMedia}
-                                onRefetchMedia={handleRefetchMedia}
-                                onRequestTranscript={handleRequestTranscript}
-                                onExtractViewingNotes={handleExtractViewingNotes}
-                                onRetryTranscript={handleRetryTranscript}
-                                onBulkTranscribeUnprocessedAudio={handleBulkTranscribeUnprocessedAudio}
-                                transcriptOnDemandEnabled={transcriptOnDemandEnabled}
-                                onSync={handleSync}
-                                onAddActivityEntry={async (entryText: string, dateIso: string) => {
-                                    await addConversationActivityEntry(activeConversation.id, entryText, dateIso);
-                                    // Refresh the activity log after adding
-                                    const log = await fetchConversationActivityLog(activeConversation.id);
-                                    setActivityLog(log);
-                                }}
-                                onFetchHistory={async () => {
-                                    setLoadingMessages(true);
-                                    try {
-                                        toast({ title: "Fetching History", description: "Checking Gmail for recent messages..." });
-                                        // Dynamic import or passed prop action
-                                        const { fetchContactHistory } = await import('@/lib/google/actions');
-                                        const res = await fetchContactHistory(activeConversation.contactId);
+                    <PanelResizeHandle
+                        className="w-1 bg-gray-200 hover:bg-blue-400 transition-colors z-50"
+                        style={{ width: '1px', cursor: 'col-resize' }}
+                    />
 
-                                        if (res.success) {
-                                            toast({ title: "History Fetched", description: `Found ${res.count} messages.` });
-                                            const msgs = await fetchMessages(activeConversation.id);
-                                            setMessages(msgs);
-                                        } else {
-                                            toast({ title: "Fetch Failed", description: res.error, variant: "destructive" });
-                                        }
-                                    } catch (e: any) {
-                                        toast({ title: "Error", description: e.message, variant: "destructive" });
-                                    } finally {
-                                        setLoadingMessages(false);
-                                    }
-                                }}
-                                suggestions={[...(activeConversation?.suggestedActions || []), ...suggestions]}
-                                onGenerateDraft={async (instruction?: string, model?: string) => {
-                                    try {
-                                        const res = await generateAIDraft(
-                                            activeConversation.id,
-                                            activeConversation.contactId,
-                                            instruction,
-                                            model,
-                                            { mode: "chat" }
-                                        );
-                                        if (res.reasoning) {
-                                            toast({ title: "Draft Generated", description: res.reasoning });
-                                        }
-                                        return res.draft;
-                                    } catch (e: any) {
-                                        toast({ title: "Draft Failed", description: e.message, variant: "destructive" });
-                                        return null;
-                                    }
-                                }}
-                            />
-                        ) : (
-                            <div className="h-full flex items-center justify-center text-gray-400 bg-slate-50">
-                                Select a conversation
-                            </div>
-                        )
-                    ) : (
-                        // Deal Mode
-                        activeDealId ? (
-                            <UnifiedTimeline
-                                dealId={activeDealId}
-                                refreshToken={dealTimelineRefreshToken}
-                                composerConversation={selectedDealConversation}
-                                onSendMessage={(text, type) => handleSendMessage(text, type, selectedDealConversation || undefined)}
-                                onSendMedia={(file, caption) => handleSendMedia(file, caption, selectedDealConversation || undefined)}
-                                onGenerateDraft={async (instruction?: string, model?: string) => {
-                                    if (!selectedDealConversation) return null;
-                                    try {
-                                        const res = await generateAIDraft(
-                                            selectedDealConversation.id,
-                                            selectedDealConversation.contactId,
-                                            instruction,
-                                            model,
-                                            { mode: "deal", dealId: activeDealId }
-                                        );
-                                        if (res.reasoning) {
-                                            toast({ title: "Draft Generated", description: res.reasoning });
-                                        }
-                                        return res.draft;
-                                    } catch (error: any) {
-                                        toast({ title: "Draft Failed", description: error?.message || "Failed to generate draft", variant: "destructive" });
-                                        return null;
-                                    }
-                                }}
-                                suggestions={suggestions}
-                                composerDisabled={loadingDealContext || !selectedDealConversation}
-                                composerDisabledReason={
-                                    loadingDealContext
-                                        ? "Loading deal participants..."
-                                        : "Select a contact in Mission Control to reply."
-                                }
-                                replyingToLabel={selectedDealConversation?.contactName || undefined}
-                            />
-                        ) : (
-                            <div className="h-full flex items-center justify-center text-gray-400 bg-slate-50">
-                                Select a deal to view timeline
-                            </div>
-                        )
-                    )}
-                </Panel>
+                    {/* Right: AI Coordinator */}
+                    <Panel defaultSize={24} minSize={20} className="min-w-0">
+                        {missionControlPane}
+                    </Panel>
+                </PanelGroup>
+            )}
 
-                <PanelResizeHandle
-                    className="w-1 bg-gray-200 hover:bg-blue-400 transition-colors z-50"
-                    style={{ width: '1px', cursor: 'col-resize' }}
-                />
-
-                {/* Right: AI Coordinator */}
-                <Panel defaultSize={24} minSize={20} className="min-w-0">
-                    {viewMode === 'chats' ? (
-                        activeConversation ? (
-                            <CoordinatorPanel
-                                locationId={locationId}
-                                conversation={activeConversation}
-                                selectedConversations={isSelectionMode ? selectedConversations : undefined}
-                                activityLog={activityLog}
-                                initialContactContext={workspaceContactContext}
-                                initialTaskSummary={workspaceTaskSummary}
-                                initialViewingSummary={workspaceViewingSummary}
-                                initialAgentSummary={workspaceAgentSummary}
-                                lazySidebarDataEnabled={featureFlags.lazySidebarData}
-                                onDraftApproved={(text) => handleSendMessage(text, getMessageType(activeConversation))}
-                                onDeselect={(id) => handleToggleSelect(id, false)}
-                                onSuggestionsGenerated={setSuggestions}
-                                onContactSaved={(patch) => handleConversationContactSaved(activeConversation.id, patch)}
-                            />
-                        ) : <div className="h-full bg-slate-50" />
-                    ) : (
-                        // Deal Mode - Coordinator
-                        selectedDealConversation ? (
-                            <CoordinatorPanel
-                                locationId={locationId}
-                                conversation={selectedDealConversation}
-                                selectedConversations={activeDealParticipants}
-                                activityLog={activityLog}
-                                initialContactContext={workspaceContactContext}
-                                initialTaskSummary={workspaceTaskSummary}
-                                initialViewingSummary={workspaceViewingSummary}
-                                initialAgentSummary={workspaceAgentSummary}
-                                lazySidebarDataEnabled={featureFlags.lazySidebarData}
-                                onDraftApproved={(text) => handleSendMessage(text, getMessageType(selectedDealConversation), selectedDealConversation)}
-                                onDeselect={() => undefined} // No deselect in deal mode
-                                onSuggestionsGenerated={setSuggestions}
-                                onContactSaved={(patch) => handleConversationContactSaved(selectedDealConversation.id, patch)}
-                                dealContacts={dealContacts}
-                                selectedDealConversationId={selectedDealConversation.id}
-                                onSelectDealConversation={(conversationId) => setActiveId(conversationId)}
-                            />
-                        ) : (
-                            <div className="h-full bg-slate-50 p-4 text-center text-gray-400 text-xs flex flex-col items-center justify-center">
-                                {loadingDealContext ? 'Loading deal context...' : 'Select a deal contact to view context.'}
-                            </div>
-                        )
-                    )}
-                </Panel>
-            </PanelGroup>
+            {isMobileViewport && (
+                <Sheet open={mobileMissionOpen} onOpenChange={setMobileMissionOpen}>
+                    <SheetContent side="right" className="h-full w-full max-w-full p-0 sm:max-w-[420px]">
+                        <div className="h-full min-h-0">
+                            {missionControlPane}
+                        </div>
+                    </SheetContent>
+                </Sheet>
+            )}
 
             <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
                 <AlertDialogContent>

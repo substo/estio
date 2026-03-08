@@ -86,7 +86,7 @@ export default async function ConversationsPage({ searchParams }: { searchParams
     const featureFlags = getConversationFeatureFlags(location.id);
 
     return (
-        <div className="h-[calc(100vh-64px)] w-full max-w-full min-w-0 overflow-hidden flex flex-col">
+        <div className="h-[calc(100dvh-56px)] lg:h-[calc(100dvh-55px)] w-full max-w-full min-w-0 overflow-hidden flex flex-col">
 
 
             <main className="flex-1 overflow-hidden relative">

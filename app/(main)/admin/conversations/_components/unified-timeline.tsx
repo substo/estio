@@ -6,7 +6,8 @@ import { Conversation } from '@/lib/ghl/conversations';
 import { GEMINI_FLASH_LATEST_ALIAS } from '@/lib/ai/models';
 
 import { MessageBubble } from './message-bubble';
-import { MessageSquare, Sparkles } from "lucide-react";
+import { MessageSquare, Sparkles, ArrowLeft, ListTodo } from "lucide-react";
+import { Button } from '@/components/ui/button';
 import { ConversationComposer } from './conversation-composer';
 import { ActivityLogEntry } from "./activity-log-entry";
 
@@ -14,6 +15,8 @@ interface UnifiedTimelineProps {
     dealId: string;
     refreshToken?: number;
     composerConversation?: Conversation | null;
+    onBack?: () => void;
+    onOpenMissionControl?: () => void;
     onSendMessage?: (text: string, type: 'SMS' | 'Email' | 'WhatsApp') => void | Promise<void>;
     onSendMedia?: (file: File, caption: string) => void | Promise<void>;
     onGenerateDraft?: (instruction?: string, model?: string) => Promise<string | null>;
@@ -27,6 +30,8 @@ export function UnifiedTimeline({
     dealId,
     refreshToken = 0,
     composerConversation = null,
+    onBack,
+    onOpenMissionControl,
     onSendMessage,
     onSendMedia,
     onGenerateDraft,
@@ -63,13 +68,37 @@ export function UnifiedTimeline({
 
     return (
         <div className="flex-1 bg-slate-200/50 p-0 flex flex-col relative overflow-hidden h-full min-w-0 w-full">
-            <div className="h-14 border-b bg-white flex items-center px-4 justify-between shrink-0">
-                <div className="flex items-center gap-2 text-gray-700">
-                    <MessageSquare className="w-4 h-4" />
-                    <span className="font-semibold text-sm">Unified Timeline</span>
+            <div className="h-14 border-b bg-white flex items-center px-3 sm:px-4 justify-between shrink-0 gap-2">
+                <div className="flex items-center gap-2 text-gray-700 min-w-0">
+                    {onBack && (
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 shrink-0"
+                            onClick={onBack}
+                            title="Back to deals"
+                        >
+                            <ArrowLeft className="h-4 w-4 text-gray-500" />
+                        </Button>
+                    )}
+                    <MessageSquare className="w-4 h-4 shrink-0" />
+                    <span className="font-semibold text-sm truncate">Unified Timeline</span>
                 </div>
-                <div className="text-xs text-muted-foreground">
-                    {timelineMessages.length} events
+                <div className="flex items-center gap-2">
+                    <div className="text-xs text-muted-foreground hidden sm:block">
+                        {timelineMessages.length} events
+                    </div>
+                    {onOpenMissionControl && (
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={onOpenMissionControl}
+                            title="Open Mission Control"
+                        >
+                            <ListTodo className="h-4 w-4 text-gray-500" />
+                        </Button>
+                    )}
                 </div>
             </div>
 

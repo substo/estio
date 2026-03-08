@@ -4,7 +4,7 @@ import { GEMINI_FLASH_LATEST_ALIAS } from "@/lib/ai/models";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, MessageSquare, RefreshCw, FileText, Trash2, Search, AudioLines, NotebookPen } from "lucide-react";
+import { Loader2, MessageSquare, RefreshCw, FileText, Trash2, Search, AudioLines, NotebookPen, ArrowLeft, ListTodo } from "lucide-react";
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -32,6 +32,8 @@ interface ChatWindowProps {
     messages: Message[];
     activityLog?: ActivityLogItem[];
     loading: boolean;
+    onBack?: () => void;
+    onOpenMissionControl?: () => void;
     onSendMessage: (text: string, type: 'SMS' | 'Email' | 'WhatsApp') => void | Promise<void>;
     onSendMedia?: (file: File, caption: string) => void | Promise<void>;
     onRefetchMedia?: (messageId: string) => void | Promise<void>;
@@ -116,6 +118,8 @@ export function ChatWindow({
     messages,
     activityLog = [],
     loading,
+    onBack,
+    onOpenMissionControl,
     onSendMessage,
     onSendMedia,
     onRefetchMedia,
@@ -362,17 +366,41 @@ export function ChatWindow({
     return (
         <div className="h-full flex flex-col bg-white min-w-0 overflow-hidden">
             {/* Header */}
-            <div className="h-16 border-b flex items-center px-6 shrink-0 justify-between bg-white z-10 shadow-sm">
-                <div>
-                    <h3 className="font-bold text-gray-900">{conversation.contactName || "Unknown Contact"}</h3>
-                    <div className="flex items-center gap-2 mt-0.5">
-                        <span className="flex h-2 w-2 rounded-full bg-green-500" />
-                        <p className="text-xs text-gray-500 font-medium">
-                            {getChannelName(conversation.lastMessageType || conversation.type)} • {conversation.status}
-                        </p>
+            <div className="h-16 border-b flex items-center px-3 sm:px-6 shrink-0 justify-between bg-white z-10 shadow-sm gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                    {onBack && (
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 shrink-0"
+                            onClick={onBack}
+                            title="Back to conversations"
+                        >
+                            <ArrowLeft className="h-4 w-4 text-gray-500" />
+                        </Button>
+                    )}
+                    <div className="min-w-0">
+                        <h3 className="font-bold text-gray-900 truncate">{conversation.contactName || "Unknown Contact"}</h3>
+                        <div className="flex items-center gap-2 mt-0.5">
+                            <span className="flex h-2 w-2 rounded-full bg-green-500 shrink-0" />
+                            <p className="text-xs text-gray-500 font-medium truncate">
+                                {getChannelName(conversation.lastMessageType || conversation.type)} • {conversation.status}
+                            </p>
+                        </div>
                     </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1 sm:gap-2 overflow-x-auto">
+                    {onOpenMissionControl && (
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 shrink-0"
+                            onClick={onOpenMissionControl}
+                            title="Open Mission Control"
+                        >
+                            <ListTodo className="h-4 w-4 text-gray-500" />
+                        </Button>
+                    )}
                     {selectionBatch.length > 0 && (
                         <>
                             <Button
@@ -579,7 +607,7 @@ export function ChatWindow({
             )}
 
             {/* Messages Area */}
-            <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50/50 scroll-smooth">
+            <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-4 sm:space-y-6 bg-slate-50/50 scroll-smooth">
                 {loading && (
                     <div className="flex justify-center p-8">
                         <Loader2 className="h-8 w-8 animate-spin text-blue-500/50" />

@@ -45,6 +45,7 @@ interface ConversationListProps {
     searchQuery?: string;
     onSearchChange?: (q: string) => void;
     isSearching?: boolean;
+    disablePreviewCard?: boolean;
 }
 
 /**
@@ -95,7 +96,8 @@ export function ConversationList({
     onSyncAllClick,
     searchQuery = "",
     onSearchChange,
-    isSearching = false
+    isSearching = false,
+    disablePreviewCard = false
 }: ConversationListProps) {
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -481,78 +483,83 @@ export function ConversationList({
                 {conversations.map((c) => {
                     const channel = getChannelInfo(c.lastMessageType || c.type);
                     const isChecked = selectedIds?.has(c.id);
+                    const row = (
+                        <div
+                            className={cn(
+                                "border-b transition-colors flex items-start py-2 pl-2 pr-3 cursor-pointer",
+                                selectedId === c.id && !isSelectionMode ? "bg-slate-100 border-l-blue-500" : "border-l-transparent",
+                                isSelectionMode && isChecked ? "bg-indigo-50" : "hover:bg-slate-50",
+                                selectedId === c.id ? "border-l-4" : "border-l-4"
+                            )}
+                            // In Selection Mode, clicking the row toggles selection (UX choice)
+                            // OR clicking the row still selects it for view, but clicking Checkbox selects for action.
+                            // Usually Select Mode implies clicking row selects for action.
+                            onClick={() => {
+                                if (isSelectionMode && onToggleSelect) {
+                                    onToggleSelect(c.id, !isChecked);
+                                } else {
+                                    onSelect(c.id);
+                                }
+                            }}
+                        >
+                            {/* Checkbox for Selection Mode */}
+                            {isSelectionMode && onToggleSelect && (
+                                <div
+                                    className="mr-3 pt-1"
+                                    onClick={(e) => e.stopPropagation()}
+                                >
+                                    <Checkbox
+                                        checked={isChecked}
+                                        onCheckedChange={(checked: boolean | string) => onToggleSelect(c.id, checked === true)}
+                                    />
+                                </div>
+                            )}
+
+                            <div className="flex-1 min-w-0">
+                                {/* Contact name */}
+                                <div className="flex items-center justify-between">
+                                    <h4 className="font-semibold text-sm truncate flex-1">
+                                        {c.contactName || c.contactId || "Unknown Contact"}
+                                    </h4>
+                                    <div className="ml-2 mr-0.5 shrink-0 flex items-center gap-1">
+                                        {c.unreadCount > 0 && (
+                                            <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] leading-[18px] text-center font-semibold">
+                                                {c.unreadCount > 99 ? "99+" : c.unreadCount}
+                                            </span>
+                                        )}
+                                        {(c as any).activeDealId && (
+                                            <div title={`Linked to Deal: ${(c as any).activeDealTitle}`}>
+                                                <LinkIcon className="h-3 w-3 text-indigo-500" />
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                                {/* Channel icon */}
+                                <div className="flex items-center gap-1 mt-1">
+                                    {channel.icon}
+                                    <span className="text-[10px] text-gray-500">{channel.name}</span>
+                                </div>
+                            </div>
+                        </div>
+                    );
 
                     return (
                         <div key={c.id}>
-                            <HoverCard openDelay={300} closeDelay={100}>
-                                <HoverCardTrigger asChild>
-                                    <div
-                                        className={cn(
-                                            "border-b transition-colors flex items-start py-2 pl-2 pr-3 cursor-pointer",
-                                            selectedId === c.id && !isSelectionMode ? "bg-slate-100 border-l-blue-500" : "border-l-transparent",
-                                            isSelectionMode && isChecked ? "bg-indigo-50" : "hover:bg-slate-50",
-                                            selectedId === c.id ? "border-l-4" : "border-l-4"
-                                        )}
-                                        // In Selection Mode, clicking the row toggles selection (UX choice)
-                                        // OR clicking the row still selects it for view, but clicking Checkbox selects for action.
-                                        // Usually Select Mode implies clicking row selects for action.
-                                        onClick={() => {
-                                            if (isSelectionMode && onToggleSelect) {
-                                                onToggleSelect(c.id, !isChecked);
-                                            } else {
-                                                onSelect(c.id);
-                                            }
-                                        }}
+                            {disablePreviewCard ? row : (
+                                <HoverCard openDelay={300} closeDelay={100}>
+                                    <HoverCardTrigger asChild>
+                                        {row}
+                                    </HoverCardTrigger>
+                                    <HoverCardContent
+                                        side="right"
+                                        align="start"
+                                        sideOffset={8}
+                                        className="w-80 p-0"
                                     >
-                                        {/* Checkbox for Selection Mode */}
-                                        {isSelectionMode && onToggleSelect && (
-                                            <div
-                                                className="mr-3 pt-1"
-                                                onClick={(e) => e.stopPropagation()}
-                                            >
-                                                <Checkbox
-                                                    checked={isChecked}
-                                                    onCheckedChange={(checked: boolean | string) => onToggleSelect(c.id, checked === true)}
-                                                />
-                                            </div>
-                                        )}
-
-                                        <div className="flex-1 min-w-0">
-                                            {/* Contact name */}
-                                            <div className="flex items-center justify-between">
-                                                <h4 className="font-semibold text-sm truncate flex-1">
-                                                    {c.contactName || c.contactId || "Unknown Contact"}
-                                                </h4>
-                                                <div className="ml-2 mr-0.5 shrink-0 flex items-center gap-1">
-                                                    {c.unreadCount > 0 && (
-                                                        <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] leading-[18px] text-center font-semibold">
-                                                            {c.unreadCount > 99 ? "99+" : c.unreadCount}
-                                                        </span>
-                                                    )}
-                                                    {(c as any).activeDealId && (
-                                                        <div title={`Linked to Deal: ${(c as any).activeDealTitle}`}>
-                                                            <LinkIcon className="h-3 w-3 text-indigo-500" />
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                            {/* Channel icon */}
-                                            <div className="flex items-center gap-1 mt-1">
-                                                {channel.icon}
-                                                <span className="text-[10px] text-gray-500">{channel.name}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </HoverCardTrigger>
-                                <HoverCardContent
-                                    side="right"
-                                    align="start"
-                                    sideOffset={8}
-                                    className="w-80 p-0"
-                                >
-                                    <ConversationPreviewCard conversation={c} />
-                                </HoverCardContent>
-                            </HoverCard>
+                                        <ConversationPreviewCard conversation={c} />
+                                    </HoverCardContent>
+                                </HoverCard>
+                            )}
                         </div>
                     );
                 })}

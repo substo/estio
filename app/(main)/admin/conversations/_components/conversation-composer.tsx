@@ -408,7 +408,7 @@ export function ConversationComposer({
                 : undefined;
 
     return (
-        <div className="border-t bg-white">
+        <div className="border-t bg-white pb-[env(safe-area-inset-bottom)]">
             <SuggestionBubbles
                 suggestions={suggestions}
                 onSelect={(text) => handleAiDraft(text)}

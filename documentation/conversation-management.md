@@ -1,5 +1,5 @@
 # Conversation Management & Deletion Features
-**Last Updated:** 2026-03-08
+**Last Updated:** 2026-03-09
 
 ## Overview
 This document is the source of truth for `/admin/conversations`, including conversation lifecycles, inbox state management, deal-mode reply routing, and the Mar 2026 performance rollout (`workspaceV2`, delta polling, ranked search, and supporting indexes/observability).
@@ -199,6 +199,12 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
 - **Unread Badges**: List rows show unread counts from `Conversation.unreadCount`.
 - **Auto Read Reset**: Selecting a conversation marks it read and clears the badge.
 - **Active Thread Live Updates**: While a thread is open, metadata changes trigger silent message refresh. The UI keeps the latest message visible only when the agent is already following the live edge; otherwise it preserves the current reading position.
+- **Mobile-First Navigation (Mar 2026)**:
+  - On mobile viewports (`<1024px`), the conversations list occupies the full page by default.
+  - Selecting a conversation/deal transitions to a full-screen thread/timeline pane.
+  - The thread header exposes an explicit **Back** action to return to the full-screen list.
+  - Mission Control is opened separately via a dedicated header button and rendered in a right-side sheet.
+  - Desktop (`>=1024px`) retains the resizable tri-panel layout.
 - **Shared Composer Source of Truth**: Both chats mode and deal mode now render the same reusable composer component (`conversation-composer.tsx`). Composer behavior changes should be implemented once and will apply to `ChatWindow` and `UnifiedTimeline`.
 - **Channel Guards**: The shared composer channel picker disables ineligible channels with a reason tooltip. SMS is blocked when phone is invalid/masked or GHL SMS is not configured; WhatsApp is blocked when eligibility checks fail.
 - **AI Draft Model Picker**: The shared composer loads its model list via `getAiDraftModelPickerStateAction()` and keeps AI Draft plus selection workflows aligned on the same chosen model.
