@@ -10554,6 +10554,8 @@ const ApplySelectionViewingSuggestionSchema = z.object({
     date: z.string().min(1),
     time: z.string().optional().nullable(),
     scheduledAtIso: z.string().optional().nullable(),
+    scheduledLocal: z.string().optional().nullable(),
+    scheduledTimeZone: z.string().optional().nullable(),
     notes: z.string().optional().nullable(),
 });
 
@@ -10618,25 +10620,33 @@ export async function applySuggestedViewingsFromSelection(
             formData.append('propertyId', suggestion.propertyId);
             formData.append('userId', suggestion.userId);
 
-            let finalDate = String(suggestion.scheduledAtIso || "").trim();
-            if (finalDate) {
-                const parsedScheduledAt = new Date(finalDate);
+            const scheduledLocalFromSuggestion = String(suggestion.scheduledLocal || "").trim();
+            const scheduledTimeZoneFromSuggestion = String(suggestion.scheduledTimeZone || "").trim();
+            const derivedLocal = (
+                scheduledLocalFromSuggestion ||
+                (suggestion.date && suggestion.time ? `${suggestion.date}T${suggestion.time}` : "")
+            ).trim();
+
+            let scheduledAtIso = String(suggestion.scheduledAtIso || "").trim();
+            if (scheduledAtIso) {
+                const parsedScheduledAt = new Date(scheduledAtIso);
                 if (Number.isNaN(parsedScheduledAt.getTime())) {
-                    finalDate = "";
+                    scheduledAtIso = "";
                 }
             }
 
-            if (!finalDate) {
-                finalDate = suggestion.date;
+            if (derivedLocal) {
+                formData.append('scheduledLocal', derivedLocal);
+            }
+            if (scheduledTimeZoneFromSuggestion) {
+                formData.append('scheduledTimeZone', scheduledTimeZoneFromSuggestion);
+            }
+            if (scheduledAtIso) {
+                formData.append('scheduledAtIso', scheduledAtIso);
             }
 
-            if (!String(suggestion.scheduledAtIso || "").trim() && suggestion.time && finalDate) {
-                finalDate = `${finalDate}T${suggestion.time}`;
-            } else if (!finalDate) {
-                finalDate = new Date().toISOString();
-            }
-
-            formData.append('date', finalDate);
+            // Backward-compatible fallback field consumed by hardened parser as a secondary source.
+            formData.append('date', scheduledAtIso || derivedLocal || new Date().toISOString());
             formData.append('notes', suggestion.notes || '');
 
             const result = await createViewing(null, formData);
@@ -10997,11 +11007,16 @@ export async function getDropdownsForViewingsSuggestion() {
             }),
             db.user.findMany({
                 where: { locations: { some: { id: location.id } } },
-                select: { id: true, name: true, email: true },
+                select: { id: true, name: true, email: true, timeZone: true },
                 orderBy: { name: 'asc' },
             })
         ]);
-        return { properties, users };
+        const fallbackTimeZone = (location as any).timeZone || null;
+        const usersWithTimeZone = users.map((user) => ({
+            ...user,
+            effectiveTimeZone: user.timeZone || fallbackTimeZone,
+        }));
+        return { properties, users: usersWithTimeZone };
     } catch (error) {
         console.error("Failed to fetch dropdowns for viewings suggestion:", error);
         return { properties: [], users: [] };

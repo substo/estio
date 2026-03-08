@@ -1,8 +1,8 @@
 # Conversation Management & Deletion Features
-**Last Updated:** 2026-03-07
+**Last Updated:** 2026-03-08
 
 ## Overview
-This document outlines the architecture and logic for managing conversation lifecycles, including **Soft Deletion**, **Archiving**, **Trash**, and **live inbox/unread state behavior** introduced in Feb 2026.
+This document is the source of truth for `/admin/conversations`, including conversation lifecycles, inbox state management, deal-mode reply routing, and the Mar 2026 performance rollout (`workspaceV2`, delta polling, ranked search, and supporting indexes/observability).
 
 ## Data Model Changes
 We updated the `Conversation` model in `prisma/schema.prisma` to support these features without losing data:
@@ -18,6 +18,18 @@ model Conversation {
   @@index([archivedAt])
 }
 ```
+
+### Performance-Oriented Indexes (Mar 2026)
+The conversations performance rollout also added list, delta, timeline, and search indexes:
+
+- `Conversation(locationId, deletedAt, archivedAt, lastMessageAt DESC, id DESC)` for inbox/archive/trash list reads.
+- `Conversation(locationId, updatedAt ASC, id ASC)` for delta-cursor polling.
+- `Message(conversationId, updatedAt DESC)` for thread refreshes.
+- `ContactHistory(contactId, createdAt DESC)` for workspace activity timelines.
+- `ContactTask(conversationId, deletedAt, status, dueAt)` and `Viewing(contactId, date ASC)` for sidebar summaries.
+- Trigram + full-text search indexes for ranked conversation search across contacts, last-message previews, message bodies, and transcripts.
+
+SQL rollout helper: `prisma/sql/conversations-performance-indexes.sql`
 
 ## Feature Logic
 
@@ -38,15 +50,75 @@ The Conversations list (`/admin/conversations`) is now **cursor-paginated** and 
 - **UI Loading**: The left conversation panel uses **infinite scroll** (IntersectionObserver) and a manual **Load more** fallback button.
 - **Deep Links**: If a URL-selected conversation (`?id=...`) is outside the current page window, the server injects it into the initial payload so the center/right panels can still render.
 
-### 1.2 Live Inbox Refresh, Reordering, and Unread State
-The inbox now updates on-page without requiring a manual refresh:
+### 1.2 Workspace V2 Snapshot Payload
+When `workspaceV2` is enabled for the current location, the conversations page uses a server-composed snapshot/workspace model instead of separately stitching every panel from multiple client requests.
 
-- **Live Polling (Inbox only)**: In `view=active` + chats mode, the client polls `fetchConversations('active', activeId)` on a short interval.
+- **Initial List Snapshot**: `fetchConversations(...)` returns the paginated list plus `deltaCursor`.
+- **Thread Workspace**: `getConversationWorkspace(...)` returns:
+  - `conversationHeader`
+  - `messages`
+  - `activityTimeline`
+  - `contactContext`
+  - `taskSummary`
+  - `viewingSummary`
+  - `agentSummary`
+  - `transcriptEligibility`
+  - `freshness`
+- **Read Path**: Workspace reads are location-scoped and use DB-first read-only auth helpers.
+- **Caching**: When `workspaceV2` is on, list snapshots and workspace metadata use cache wrappers plus explicit invalidation on write paths.
+
+### 1.2.1 Shared Timeline Event Pipeline (Mar 2026)
+Timeline rendering and AI draft context now share one normalized assembler service.
+
+- **Normalized event kinds**:
+  - `message`
+  - `activity`
+- **Supported activity coverage**:
+  - notes / manual CRM entries
+  - existing contact-history activity that should appear in timeline context
+  - canonical viewing events
+  - derived task state events
+- **Task visibility rule**:
+  - show only `TASK_OPEN` for active tasks
+  - show only `TASK_DONE` for completed tasks
+  - do not surface task update/delete noise in the timeline
+- **Scope rules**:
+  - chats mode timeline = selected conversation + related contact activity scope
+  - deal mode timeline = merged deal-aware participant timeline
+
+This shared event model is also the source used by AI Draft context assembly. For prompt compaction details, see [ai-draft-feature.md](/Users/martingreen/Projects/IDX/documentation/ai-draft-feature.md).
+
+### 1.3 Live Inbox Refresh, Reordering, and Unread State
+The inbox updates on-page without requiring a manual refresh:
+
+- **Delta Polling**: In workspace v2, the client polls `getConversationListDelta(viewFilter, deltaCursor, activeId)` instead of refetching the whole list.
+- **Legacy Fallback**: If `workspaceV2` is disabled, the client falls back to full-list polling via `fetchConversations(...)`.
 - **Live Reordering**: Incoming rows are merged **incoming-first** so conversations with newer `lastMessageAt` naturally move to the top immediately.
 - **Unread Badges**: Each row displays `Conversation.unreadCount` as a compact badge (`99+` cap).
 - **Read Reset on Open Thread**: Opening a thread (and live-refreshing an already open thread) calls `markConversationAsRead(conversationId)` to reset unread count to `0`.
-- **Active Thread Live Refresh**: If the selected conversation’s `lastMessageDate` or `lastMessageBody` changes during polling, messages are re-fetched silently.
-- **Auto-scroll**: ChatWindow auto-scrolls to the bottom whenever the message array changes, so fresh inbound messages are visible immediately when viewing that thread.
+- **Active Thread Refresh**:
+  - legacy mode refreshes messages when selected-thread metadata changes
+  - workspace v2 refreshes the whole workspace on a slower balanced interval
+  - stale WhatsApp threads can trigger `refreshConversationOnDemand(conversationId, "full_sync")` in the background, throttled per conversation
+- **Thread Scroll Behavior**: When opening a conversation, ChatWindow snaps directly to the latest message on first paint. While viewing a thread, new messages only auto-scroll when the user is already near the bottom; if the user has scrolled up to read history, the current scroll position is preserved.
+- **Visibility/Search Guards**: Background polling pauses when the tab is hidden or when a search query is active.
+
+### 1.4 Feature Flags
+The rollout is controlled by `lib/feature-flags.ts` per location.
+
+Supported flags:
+
+- `workspaceV2`
+- `balancedPolling`
+- `lazySidebarData`
+
+Supported env values per flag:
+
+- `on`
+- `off`
+- `canary`
+
+Canary mode enables the flag only for location IDs listed in `CONVERSATIONS_CANARY_LOCATIONS` (or the legacy alias env keys handled in code).
 
 ### 2. Formatting & Actions
 
@@ -101,6 +173,9 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
 | Function | Purpose |
 | :--- | :--- |
 | `fetchConversations(status, selectedConversationId?, options?)` | Fetches a paginated list based on filter (`active`, `archived`, `trash`, `all`) and returns `hasMore` / `nextCursor` for infinite scroll. |
+| `getConversationWorkspace(conversationId, options?)` | Returns the unified thread workspace payload for the center/right panels. |
+| `getConversationListDelta(status, sinceCursor?, activeConversationId?, options?)` | Returns changed conversation rows since the last `deltaCursor`. |
+| `refreshConversationOnDemand(conversationId, mode)` | Refreshes metadata only or runs a full WhatsApp history sync for stale threads. |
 | `deleteConversations(ids)` | Performs **Soft Delete** (sets `deletedAt`). |
 | `permanentlyDeleteConversations(ids)` | Performs **Hard Delete** (removes record). |
 | `restoreConversations(ids)` | Resets `deletedAt` to NULL. |
@@ -118,9 +193,12 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
 - **Infinite Scroll**: The left list auto-loads more conversations near the bottom using a sentinel + `IntersectionObserver`, with a visible "Load more" fallback.
 - **Deep-Link Stability**: URL-selected conversations are preserved during list refreshes and view changes, preventing the center panel from dropping back to "Select a conversation" when the selected item is older than the first page.
 - **Live Inbox Reordering**: Inbox updates are merged with incoming-first ordering so newly active conversations move to top in real time.
+- **Workspace V2 Panel Loading**: When enabled, the center/right panel is hydrated from a single workspace response instead of multiple unrelated round trips.
+- **Lazy Sidebar Data**: Tasks/viewings/contact context cards can defer secondary work behind the workspace feature flag instead of forcing eager list-time hydration.
+- **Timeline Parity**: The activity timeline and AI Draft prompt now use the same normalized event feed, so notes, viewing events, and task state entries are aligned between what the agent sees and what AI reads.
 - **Unread Badges**: List rows show unread counts from `Conversation.unreadCount`.
 - **Auto Read Reset**: Selecting a conversation marks it read and clears the badge.
-- **Active Thread Live Updates**: While a thread is open, metadata changes trigger silent message refresh; ChatWindow auto-scroll keeps the latest message visible.
+- **Active Thread Live Updates**: While a thread is open, metadata changes trigger silent message refresh. The UI keeps the latest message visible only when the agent is already following the live edge; otherwise it preserves the current reading position.
 - **Shared Composer Source of Truth**: Both chats mode and deal mode now render the same reusable composer component (`conversation-composer.tsx`). Composer behavior changes should be implemented once and will apply to `ChatWindow` and `UnifiedTimeline`.
 - **Channel Guards**: The shared composer channel picker disables ineligible channels with a reason tooltip. SMS is blocked when phone is invalid/masked or GHL SMS is not configured; WhatsApp is blocked when eligibility checks fail.
 - **AI Draft Model Picker**: The shared composer loads its model list via `getAiDraftModelPickerStateAction()` and keeps AI Draft plus selection workflows aligned on the same chosen model.
@@ -131,14 +209,16 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
   - `Paste Lead` for AI-assisted structured lead import.
   - `Add` to queue the current snippet into a multi-message summary/custom batch.
   - `Find Contact` for phone/email/full-name lookup.
+  - `Suggest Viewing` to open the AI viewing suggestion dialog from selected text.
   - `Summarize` to generate and save a CRM log note into contact history.
   - `Custom` to run a user-provided prompt against selected text and optionally save the output to CRM log.
+- **Viewing Suggestion Reference**: Relative-date anchoring, exact property auto-match, and timezone-safe `scheduledAtIso` apply behavior are documented in [viewing-creation-architecture.md](/Users/martingreen/Projects/IDX/documentation/viewing-creation-architecture.md).
 - **Cross-Message Selection (Phase 1 Quick Win)**: Drag-selection can span multiple message bubbles/email blocks in the visible chat window; the toolbar accepts the combined selection text.
 - **Batch Selection Flow (Phase 2)**:
   - The batch is conversation-scoped and dedupes repeated snippet adds from the same message/selection hash.
   - Chat header exposes `Summarize Batch (N)` plus a clear button for quick logging without opening each message.
   - `Summarize` and `Custom` dialogs switch into batch mode when snippets are queued, show a queued-snippets list, and allow per-item remove/clear.
-- **Selection Model Consistency**: `Paste Lead`/`Summarize`/`Custom` use the currently selected AI model from the chat toolbar, keeping tone/behavior consistent with AI Draft.
+- **Selection Model Consistency**: `Paste Lead`/`Suggest Viewing`/`Summarize`/`Custom` use the currently selected AI model from the chat toolbar, keeping tone/behavior consistent with AI Draft.
 - **CRM Log Save Format**: Selection-based CRM log entries are saved as `MANUAL_ENTRY` in `ContactHistory` using format `DD.MM.YY FirstName: summary`.
 - **CRM Log Dedupe Guard**: Before writing `MANUAL_ENTRY` for `Summarize` or `Custom`, the system checks the latest 30 manual entries for likely duplicates (exact/contains/high token overlap). Duplicate entries are skipped and the existing entry is returned.
 - **Selection Observability**:
@@ -186,6 +266,14 @@ This document is also the source of truth for reply-target behavior in `/admin/c
 - The composer shows `Replying to {contact}` for the currently selected participant.
 - If no valid participant is available yet, the composer is disabled and shows explicit helper text instead of silently disappearing.
 
+### Unified Timeline Event Coverage
+- The deal unified timeline now renders both `message` and `activity` events in chronological order.
+- Activity coverage includes:
+  - notes / CRM manual entries
+  - canonical viewing events
+  - current-state task events (`TASK_OPEN`, `TASK_DONE`)
+- This replaces the earlier messages-only behavior, so the center timeline now matches the broader deal context used for AI reasoning.
+
 ### Send Routing Rules
 - Outbound send handlers accept an explicit target conversation rather than assuming the currently active chats-mode thread.
 - Text sends, WhatsApp media sends, and Mission Control draft approvals all route to the currently selected deal participant conversation.
@@ -211,3 +299,27 @@ We support importing `.txt` chat exports from WhatsApp directly into a specific 
 - Parses file using `import-parser.ts`.
 - Inserts messages mapped to `ownerAuthor` (outbound) and others (inbound).
 - Updates `lastMessageAt` for the conversation.
+
+## Ranked Search (Mar 2026)
+Conversation search now prefers a SQL-ranked search path over the older Prisma-only substring scan.
+
+- **Primary path**: raw SQL with `plainto_tsquery`, `ts_rank_cd`, and `pg_trgm` similarity.
+- **Search corpus**:
+  - contact identity fields
+  - `Conversation.lastMessageBody`
+  - `Message.body`
+  - `MessageTranscript.text`
+- **Result shaping**:
+  - rows are ranked first, then fetched as full conversation records
+  - active deal metadata is reattached before returning UI rows
+- **Fallback**: if the raw SQL path fails, the action falls back to a Prisma substring search path.
+
+## Observability & Perf Tooling (Mar 2026)
+- `lib/observability/performance.ts` provides `createTraceId()` and `withServerTiming(...)` wrappers for list, workspace, delta, and search actions.
+- Client-side request counters log `[perf:conversations.client_request]` events during list/workspace polling.
+- DB/index verification script: `npm run perf:conversations:db`
+
+## Related Docs
+- High-level product/AI framing: [ai-agentic-conversations-hub.md](/Users/martingreen/Projects/IDX/documentation/ai-agentic-conversations-hub.md)
+- Model picker / AI defaults: [ai-configuration.md](/Users/martingreen/Projects/IDX/documentation/ai-configuration.md)
+- AI draft prompt construction and timeline compaction: [ai-draft-feature.md](/Users/martingreen/Projects/IDX/documentation/ai-draft-feature.md)

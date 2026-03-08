@@ -168,6 +168,7 @@ function toProviderViewingPayload(viewing: SyncViewingRecord) {
         date: viewing.date,
         notes: viewing.notes,
         status: viewing.status,
+        scheduledTimeZone: (viewing as any).scheduledTimeZone || null,
         propertyTitle: viewing.property.title,
         contactName,
         userId: viewing.userId,

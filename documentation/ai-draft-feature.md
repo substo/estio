@@ -15,8 +15,22 @@ To ensure resilience, speed, and compatibility with both "Synced" (GHL) and "Sha
 When a user clicks generic draft:
 1.  **Source**: We read conversation history primarily from the **Local Database** (`db.conversation` + `db.message`).
 2.  **Fallback**: We only attempt to fetch from GoHighLevel (GHL) if the local conversation is completely empty or missing.
-3.  **Timing Context**: Message timestamps are included in prompt context so AI can respect greeting cadence rules.
-4.  **Why**: This prevents `400 Bad Request` errors caused by sending internal IDs to GHL and ensures the UI remains responsive even if GHL's API is slow or down.
+3.  **Timeline-Parity Context (Mar 2026)**: Draft generation now reads from the same normalized timeline event pipeline used by the UI, not messages alone.
+4.  **Scope Rules**:
+    *   **Chats mode** uses the selected thread timeline only.
+    *   **Deal mode** uses a deal-aware merged timeline across all participant conversations linked to the active deal.
+5.  **Included Timeline Entities**:
+    *   messages / emails
+    *   manual notes and other relevant contact-history activity entries
+    *   canonical viewing events
+    *   task state events
+6.  **Task Noise Policy**:
+    *   open or in-progress tasks appear as `TASK_OPEN`
+    *   completed tasks appear as `TASK_DONE`
+    *   task update/delete churn is intentionally excluded from prompt context
+7.  **Compaction**: Older timeline events are summarized deterministically, while recent timeline events remain verbatim in the prompt. This keeps token usage bounded without losing older deal/thread state.
+8.  **Timing Context**: Greeting-cadence logic still derives from actual message timestamps only, even though the wider timeline is now included.
+9.  **Why**: This prevents `400 Bad Request` errors caused by sending internal IDs to GHL, keeps UI and AI context aligned, and ensures the UI remains responsive even if GHL's API is slow or down.
 
 ### 2.2 The "Write" Path (Sending Messages)
 When the user sends the message, we ensure data consistency using a **Just-In-Time (JIT) Upsync** pattern:
@@ -60,6 +74,12 @@ It is critical to distinguish between **Content** and **Metadata**:
 - Urgency wording must be evidence-based (for example, confirmed competing offer activity), not pressure language.
 - Guardrail outcomes are attached to draft metadata for review visibility.
 
+### Timeline Context Rules (Mar 2026)
+- Suggestion bubbles and explicit `AI Draft` actions both flow through the same draft generator and therefore use the same timeline-parity context rules.
+- Deal-mode drafts receive cross-participant deal timeline context, but send approval still routes to the currently selected participant conversation.
+- Contact enrichment still includes related properties, requirements, and viewings in addition to the normalized timeline feed.
+- Prompt construction logs timeline inclusion/truncation counts so coverage is auditable in server logs.
+
 ## 5. Troubleshooting
 
 ### Logs to Watch
@@ -68,6 +88,10 @@ Search server logs for the tag `[AI Draft]`.
 -   **Success (Normal)**:
     ```
     [AI Draft] Local DB Fetch Success. Found 20 messages.
+    ```
+-   **Timeline Compaction (Normal)**:
+    ```
+    [AI Draft] Timeline compaction stats: ...
     ```
 -   **Fallback (Rare)**:
     ```
@@ -101,11 +125,14 @@ Users can override the default AI model directly from the Chat Window before gen
 
 ### Model Reuse in Selection Actions (New)
 The same active model selection is also reused by message text-selection actions in the Chat Window:
+- `Suggest Viewing`: `suggestViewingsFromSelection(conversationId, selection, model?, context?)`
 - `Paste Lead`: `parseLeadFromText(selection, model?)`
 - `Summarize`: `summarizeSelectionToCrmLog(conversationId, selection, model?)`
 - `Custom`: `runCustomSelectionPrompt(conversationId, selection, instruction, model?)`
 
 This keeps selection-based outputs aligned with the tone/capability of the current draft model.
+
+Viewing-specific extraction rules such as message-timestamp anchoring for `today`/`tomorrow`, exact property reference matching, and timezone-safe apply behavior are documented in [viewing-creation-architecture.md](/Users/martingreen/Projects/IDX/documentation/viewing-creation-architecture.md).
 
 ### Configuration
 -   **Default Model**: Resolved server-side for AI Draft (`Settings > AI Agent` override first; else `gemini-flash-latest`; fallback to pinned Flash if alias unavailable).
@@ -123,7 +150,8 @@ The system automatically analyzes inbound WhatsApp messages to suggest 3 quick "
 3.  **AI Generation**: Gemini reads the last 15 messages and generates 3 short intents (JSON).
 4.  **Storage**: Suggestions are stored in `Conversation.suggestedActions`.
 5.  **UI Update**: When the agent views the conversation, the bubbles appear.
-6.  **Action**: Clicking a bubble uses the intent text as the **Instruction** for the AI Draft generator.
+6.  **Action**: Clicking a bubble uses the intent text as the **Instruction** for the same `generateAIDraft` pipeline used by the main draft button.
+7.  **Context Parity**: Bubble-triggered drafts therefore receive the same normalized timeline context as manual draft generation, including notes, viewing events, and task state events when present in the active chat/deal scope.
 
 ### Example
 -   **User**: "Is the 2-bed in Paphos still available?"

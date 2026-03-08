@@ -381,6 +381,8 @@ export async function assembleTimelineEvents(options: AssembleTimelineOptions): 
                 viewingId: viewing.id,
                 property: propertyLabel,
                 date: toIso(viewing.date),
+                scheduledLocal: viewing.scheduledLocal || null,
+                timeZone: viewing.scheduledTimeZone || null,
                 status: viewing.status,
                 notes: viewing.notes || null,
                 agent: viewing.user?.name || viewing.user?.email || null,

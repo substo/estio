@@ -39,6 +39,11 @@ import {
 } from '@/app/(main)/admin/contacts/actions';
 import { getContactViewings, getPropertiesForSelect, getUsersForSelect } from '@/app/(main)/admin/contacts/fetch-helpers';
 import { SearchableSelect } from '@/app/(main)/admin/contacts/_components/searchable-select';
+import {
+    formatDateTimeLocalInTimeZone,
+    formatViewingDateTimeWithTimeZoneLabel,
+    getTimeZoneShortLabel,
+} from '@/lib/viewings/datetime';
 
 // Reuse the badge logic from Tasks, adapting it for viewings
 const VIEWING_SYNC_MAX_ATTEMPTS = 6;
@@ -202,7 +207,7 @@ export function ContactViewingManager({
 }) {
     const [viewings, setViewings] = useState<any[]>([]);
     const [properties, setProperties] = useState<{ id: string; title: string; unitNumber?: string | null }[]>([]);
-    const [users, setUsers] = useState<{ id: string; name: string | null; email: string; ghlCalendarId?: string | null }[]>([]);
+    const [users, setUsers] = useState<{ id: string; name: string | null; email: string; ghlCalendarId?: string | null; timeZone?: string | null; effectiveTimeZone?: string | null }[]>([]);
     const [loading, setLoading] = useState(true);
 
     const [modalOpen, setModalOpen] = useState(false);
@@ -227,6 +232,7 @@ export function ContactViewingManager({
     const [interestedProps, setInterestedProps] = useState<string[]>([]);
 
     const loadRequestIdRef = useRef(0);
+    const browserTimeZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC', []);
 
     const loadData = useCallback(async (options?: { silent?: boolean }) => {
         const silent = options?.silent ?? false;
@@ -267,7 +273,24 @@ export function ContactViewingManager({
         // No specific viewing mutated event logic yet, could add window event listener here
     }, [loadData]);
 
-    const canSubmit = useMemo(() => viewingDate && viewingPropertyId && viewingUserId && !submitting, [viewingDate, viewingPropertyId, viewingUserId, submitting]);
+    const selectedViewingAgentTimeZone = useMemo(() => {
+        const selectedUser = users.find((user) => user.id === viewingUserId);
+        return selectedUser?.effectiveTimeZone || selectedUser?.timeZone || null;
+    }, [users, viewingUserId]);
+
+    const selectedViewingAgentTimeZoneLabel = useMemo(() => {
+        if (!selectedViewingAgentTimeZone) return null;
+        try {
+            return getTimeZoneShortLabel(new Date(), selectedViewingAgentTimeZone);
+        } catch {
+            return null;
+        }
+    }, [selectedViewingAgentTimeZone]);
+
+    const canSubmit = useMemo(
+        () => Boolean(viewingDate && viewingPropertyId && viewingUserId && selectedViewingAgentTimeZone && !submitting),
+        [viewingDate, viewingPropertyId, viewingUserId, selectedViewingAgentTimeZone, submitting]
+    );
 
     const handleSubmit = async () => {
         if (!canSubmit) return;
@@ -284,6 +307,11 @@ export function ContactViewingManager({
         formData.append('contactId', contactId);
         formData.append('propertyId', viewingPropertyId);
         formData.append('userId', viewingUserId);
+        formData.append('scheduledLocal', viewingDate);
+        if (selectedViewingAgentTimeZone) {
+            formData.append('scheduledTimeZone', selectedViewingAgentTimeZone);
+        }
+        // Legacy fallback field still accepted by server action.
         formData.append('date', viewingDate);
         formData.append('title', viewingTitle);
         formData.append('description', viewingDescription);
@@ -315,9 +343,19 @@ export function ContactViewingManager({
 
     const handleEdit = (viewing: any) => {
         setEditingViewingId(viewing.id);
-        const dateObj = new Date(viewing.date);
-        const offset = dateObj.getTimezoneOffset() * 60000;
-        const localISOTime = (new Date(dateObj.getTime() - offset)).toISOString().slice(0, 16);
+        const fallbackTimeZone = users.find((user) => user.id === viewing.userId)?.effectiveTimeZone
+            || users.find((user) => user.id === viewing.userId)?.timeZone
+            || browserTimeZone;
+        const targetTimeZone = viewing.scheduledTimeZone || fallbackTimeZone;
+
+        let localISOTime = '';
+        try {
+            localISOTime = formatDateTimeLocalInTimeZone(viewing.date, targetTimeZone);
+        } catch {
+            const dateObj = new Date(viewing.date);
+            const offset = dateObj.getTimezoneOffset() * 60000;
+            localISOTime = (new Date(dateObj.getTime() - offset)).toISOString().slice(0, 16);
+        }
 
         setViewingDate(localISOTime);
         setViewingPropertyId(viewing.propertyId);
@@ -403,7 +441,16 @@ export function ContactViewingManager({
                     <div className="text-xs text-muted-foreground py-2">No viewings recorded.</div>
                 ) : (
                     viewings.map((viewing) => {
-                        const dateLabel = formatDueLabel(viewing.date);
+                        const fallbackTimeZone = users.find((user) => user.id === viewing.userId)?.effectiveTimeZone
+                            || users.find((user) => user.id === viewing.userId)?.timeZone
+                            || browserTimeZone;
+                        const viewingTimeZone = viewing.scheduledTimeZone || fallbackTimeZone;
+                        let dateLabel = formatDueLabel(viewing.date);
+                        try {
+                            dateLabel = formatViewingDateTimeWithTimeZoneLabel(viewing.date, viewingTimeZone);
+                        } catch {
+                            // Keep local browser fallback if timezone metadata is missing/invalid.
+                        }
                         const providerBadges = buildProviderBadges(viewing.syncRecords, viewing.outboxJobs);
                         const propertyName = viewing.property.unitNumber ? `[${viewing.property.unitNumber}] ${viewing.property.title}` : viewing.property.title;
 
@@ -516,6 +563,14 @@ export function ContactViewingManager({
                                     value={viewingDate}
                                     onChange={e => setViewingDate(e.target.value)}
                                 />
+                                <div className={cn(
+                                    "text-[11px]",
+                                    selectedViewingAgentTimeZone ? "text-muted-foreground" : "text-red-600"
+                                )}>
+                                    {selectedViewingAgentTimeZone
+                                        ? `Interpreted in ${selectedViewingAgentTimeZoneLabel || "local"} (${selectedViewingAgentTimeZone}).`
+                                        : "Missing timezone for selected agent/location. Configure timezone before saving."}
+                                </div>
                             </div>
                             <div className="space-y-2">
                                 <Label>Duration</Label>

@@ -54,6 +54,7 @@ If not configured:
 
 - `/admin/settings/ai` loads picker defaults from `getAiModelPickerDefaultsAction()`.
 - The shared conversation composer (`conversation-composer.tsx`) uses `getAiDraftModelPickerStateAction()` for both chats mode and deal mode.
+- Under `workspaceV2`, the selected thread still uses the same shared composer/model picker path, so the performance rollout does not introduce a second conversation-model source of truth.
 
 This keeps picker defaults consistent across screens.
 
@@ -99,3 +100,5 @@ For user-facing pickers and chat defaults, the effective model is resolved throu
 - `documentation/ai-draft-feature.md`
 - `documentation/ai-agentic-conversations-hub.md`
 - `documentation/conversation-management.md`
+
+For exact conversations workspace/polling/search behavior, use `documentation/conversation-management.md` as the canonical reference.

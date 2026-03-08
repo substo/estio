@@ -14,6 +14,11 @@ import { runGoogleAutoSyncForContact } from '@/lib/google/automation';
 import { getLocationContext } from '@/lib/auth/location-context';
 import { parseEvolutionMessageContent } from '@/lib/whatsapp/evolution-media';
 import { seedConversationFromContactLeadText } from '@/lib/conversations/bootstrap';
+import {
+  normalizeIanaTimeZoneOrThrow,
+  parseViewingDateTimeInput,
+  ViewingDateTimeValidationError,
+} from '@/lib/viewings/datetime';
 
 async function resolvePreferredChannelTypeForPhone(
   location: { evolutionInstanceId?: string | null },
@@ -1549,13 +1554,110 @@ const viewingSchema = z.object({
   contactId: z.string().min(1, 'Contact ID is required'),
   propertyId: z.string().min(1, 'Property ID is required'),
   userId: z.string().min(1, 'Agent/User ID is required'),
-  date: z.string().min(1, 'Date is required'),
+  date: z.string().optional(),
+  scheduledAtIso: z.string().optional(),
+  scheduledLocal: z.string().optional(),
+  scheduledTimeZone: z.string().optional(),
   notes: z.string().optional(),
   title: z.string().optional(),
   description: z.string().optional(),
   location: z.string().optional(),
   duration: z.coerce.number().int().min(5).max(480).default(60),
 });
+
+type ResolvedViewingAgentTimeZone =
+  | { ok: true; timeZone: string; source: 'user' | 'location' }
+  | { ok: false; message: string };
+
+async function resolveViewingAgentTimeZone(params: {
+  agentUserId: string;
+  contactId: string;
+}): Promise<ResolvedViewingAgentTimeZone> {
+  const [agent, contact] = await Promise.all([
+    db.user.findUnique({
+      where: { id: params.agentUserId },
+      select: { id: true, timeZone: true },
+    }),
+    db.contact.findUnique({
+      where: { id: params.contactId },
+      select: {
+        id: true,
+        location: {
+          select: {
+            id: true,
+            timeZone: true,
+          },
+        },
+      },
+    }),
+  ]);
+
+  if (!agent?.id) {
+    return { ok: false, message: 'Assigned agent not found.' };
+  }
+
+  if (!contact?.id) {
+    return { ok: false, message: 'Contact not found.' };
+  }
+
+  if (agent.timeZone) {
+    try {
+      return { ok: true, timeZone: normalizeIanaTimeZoneOrThrow(agent.timeZone), source: 'user' };
+    } catch {
+      return {
+        ok: false,
+        message: `Assigned agent timezone is invalid (${agent.timeZone}). Update the agent profile timezone.`,
+      };
+    }
+  }
+
+  if (contact.location?.timeZone) {
+    try {
+      return { ok: true, timeZone: normalizeIanaTimeZoneOrThrow(contact.location.timeZone), source: 'location' };
+    } catch {
+      return {
+        ok: false,
+        message: `Location timezone is invalid (${contact.location.timeZone}). Update the location timezone.`,
+      };
+    }
+  }
+
+  return {
+    ok: false,
+    message: 'Missing timezone for viewing scheduling. Set agent timezone first, or set the location timezone as fallback.',
+  };
+}
+
+function getViewingDateTimeTelemetryBucket(error: unknown): string {
+  if (!(error instanceof ViewingDateTimeValidationError)) return 'unknown';
+
+  if (error.code === 'MISSING_TIMEZONE' || error.code === 'INVALID_TIMEZONE') return 'missing_timezone';
+  if (error.code === 'DST_AMBIGUOUS_LOCAL_TIME') return 'dst_ambiguous_local_time';
+  if (error.code === 'DST_INVALID_LOCAL_TIME') return 'invalid_local_time_dst_gap';
+  if (error.code === 'INVALID_LOCAL_DATETIME') return 'invalid_local_time';
+  if (error.code === 'INVALID_ABSOLUTE_DATETIME') return 'invalid_absolute_time';
+  return 'unknown';
+}
+
+function toViewingDateTimeErrorMessage(error: unknown): string {
+  if (!(error instanceof ViewingDateTimeValidationError)) {
+    return 'Failed to parse viewing datetime.';
+  }
+
+  if (error.code === 'MISSING_TIMEZONE' || error.code === 'INVALID_TIMEZONE') {
+    return 'Missing or invalid timezone for viewing scheduling. Set agent timezone first, or location timezone as fallback.';
+  }
+  if (error.code === 'DST_AMBIGUOUS_LOCAL_TIME') {
+    return 'Selected local time is ambiguous due to DST change. Please choose a different time.';
+  }
+  if (error.code === 'DST_INVALID_LOCAL_TIME') {
+    return 'Selected local time does not exist due to DST change. Please choose a different time.';
+  }
+  if (error.code === 'INVALID_LOCAL_DATETIME' || error.code === 'INVALID_ABSOLUTE_DATETIME') {
+    return 'Invalid viewing date/time format.';
+  }
+  return error.message || 'Failed to parse viewing datetime.';
+}
 
 import { createAppointment } from '@/lib/ghl/calendars';
 import {
@@ -1571,7 +1673,10 @@ export async function createViewing(
     contactId: formData.get('contactId'),
     propertyId: formData.get('propertyId'),
     userId: formData.get('userId'),
-    date: formData.get('date'),
+    date: formData.get('date') || undefined,
+    scheduledAtIso: formData.get('scheduledAtIso') || undefined,
+    scheduledLocal: formData.get('scheduledLocal') || undefined,
+    scheduledTimeZone: formData.get('scheduledTimeZone') || undefined,
     notes: formData.get('notes') || undefined,
     title: formData.get('title') || undefined,
     description: formData.get('description') || undefined,
@@ -1588,6 +1693,13 @@ export async function createViewing(
   }
 
   const data = validatedFields.data;
+  if (!data.date && !data.scheduledAtIso && !data.scheduledLocal) {
+    return {
+      message: 'Date is required to schedule a viewing.',
+      success: false,
+    };
+  }
+
   const { userId: currentUserId } = await auth();
   if (!currentUserId) return { success: false, message: 'Unauthorized' };
 
@@ -1595,19 +1707,82 @@ export async function createViewing(
   const dbUser = await db.user.findUnique({ where: { clerkId: currentUserId }, select: { id: true } });
   const internalUserId = dbUser?.id || null;
 
+  const resolvedAgentTimeZone = await resolveViewingAgentTimeZone({
+    agentUserId: data.userId,
+    contactId: data.contactId,
+  });
+  if (!resolvedAgentTimeZone.ok) {
+    return { success: false, message: resolvedAgentTimeZone.message };
+  }
+
+  let parsedSchedule;
   try {
+    if (data.scheduledTimeZone && data.scheduledTimeZone !== resolvedAgentTimeZone.timeZone) {
+      console.warn('[viewing_datetime_timezone_mismatch]', {
+        operation: 'create',
+        contactId: data.contactId,
+        propertyId: data.propertyId,
+        agentUserId: data.userId,
+        scheduledTimeZoneInput: data.scheduledTimeZone,
+        resolvedAgentTimeZone: resolvedAgentTimeZone.timeZone,
+      });
+    }
+
+    parsedSchedule = parseViewingDateTimeInput({
+      scheduledLocal: data.scheduledLocal || null,
+      scheduledAtIso: data.scheduledAtIso || data.date || null,
+      scheduledTimeZone: resolvedAgentTimeZone.timeZone,
+      agentTimeZone: resolvedAgentTimeZone.timeZone,
+    });
+
+    console.info('[viewing_datetime_parse]', {
+      operation: 'create',
+      contactId: data.contactId,
+      propertyId: data.propertyId,
+      agentUserId: data.userId,
+      localInput: data.scheduledLocal || data.date || null,
+      timeZoneInput: data.scheduledTimeZone || null,
+      resolvedAgentTimeZone: resolvedAgentTimeZone.timeZone,
+      resolvedTimeZoneSource: resolvedAgentTimeZone.source,
+      parsedSource: parsedSchedule.source,
+      parsedScheduledLocal: parsedSchedule.scheduledLocal,
+      parsedUtc: parsedSchedule.utcDate.toISOString(),
+    });
+  } catch (error) {
+    console.warn('[viewing_datetime_error]', {
+      operation: 'create',
+      contactId: data.contactId,
+      propertyId: data.propertyId,
+      agentUserId: data.userId,
+      localInput: data.scheduledLocal || data.date || null,
+      timeZoneInput: data.scheduledTimeZone || null,
+      resolvedAgentTimeZone: resolvedAgentTimeZone.timeZone,
+      bucket: getViewingDateTimeTelemetryBucket(error),
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    return {
+      success: false,
+      message: toViewingDateTimeErrorMessage(error),
+    };
+  }
+
+  try {
+    const endAt = new Date(parsedSchedule.utcDate.getTime() + data.duration * 60 * 1000);
     const viewingResult = await db.viewing.create({
       data: {
         contactId: data.contactId,
         propertyId: data.propertyId,
         userId: data.userId,
-        date: new Date(data.date),
+        date: parsedSchedule.utcDate,
+        scheduledTimeZone: parsedSchedule.scheduledTimeZone,
+        scheduledLocal: parsedSchedule.scheduledLocal,
         notes: data.notes,
         title: data.title || null,
         description: data.description || null,
         location: data.location || null,
         duration: data.duration,
-        endAt: new Date(new Date(data.date).getTime() + data.duration * 60 * 1000),
+        endAt,
         status: 'scheduled',
       }
     });
@@ -1622,7 +1797,13 @@ export async function createViewing(
     const propertyRef = propertyForLog?.reference || propertyForLog?.title || 'Unknown Property';
 
     // Log Viewing Added
-    await logContactHistory(db, data.contactId, internalUserId, 'VIEWING_ADDED', { property: propertyRef, date: data.date, notes: data.notes });
+    await logContactHistory(db, data.contactId, internalUserId, 'VIEWING_ADDED', {
+      property: propertyRef,
+      date: parsedSchedule.utcDate.toISOString(),
+      scheduledLocal: parsedSchedule.scheduledLocal,
+      timeZone: parsedSchedule.scheduledTimeZone,
+      notes: data.notes,
+    });
 
     revalidatePath(`/admin/properties/${data.propertyId}`);
     revalidatePath(`/admin/properties/${data.propertyId}`);
@@ -1659,7 +1840,10 @@ export async function updateViewing(
     contactId: formData.get('contactId'),
     propertyId: formData.get('propertyId'),
     userId: formData.get('userId'),
-    date: formData.get('date'),
+    date: formData.get('date') || undefined,
+    scheduledAtIso: formData.get('scheduledAtIso') || undefined,
+    scheduledLocal: formData.get('scheduledLocal') || undefined,
+    scheduledTimeZone: formData.get('scheduledTimeZone') || undefined,
     notes: formData.get('notes') || undefined,
     title: formData.get('title') || undefined,
     description: formData.get('description') || undefined,
@@ -1675,6 +1859,13 @@ export async function updateViewing(
     };
   }
 
+  if (!validatedFields.data.date && !validatedFields.data.scheduledAtIso && !validatedFields.data.scheduledLocal) {
+    return {
+      message: 'Date is required to update viewing.',
+      success: false,
+    };
+  }
+
   const { userId: currentUserId } = await auth();
   if (!currentUserId) return { success: false, message: 'Unauthorized' };
 
@@ -1682,11 +1873,77 @@ export async function updateViewing(
   const dbUser = await db.user.findUnique({ where: { clerkId: currentUserId }, select: { id: true } });
   const internalUserId = dbUser?.id || null;
 
+  const resolvedAgentTimeZone = await resolveViewingAgentTimeZone({
+    agentUserId: validatedFields.data.userId,
+    contactId: validatedFields.data.contactId,
+  });
+  if (!resolvedAgentTimeZone.ok) {
+    return { success: false, message: resolvedAgentTimeZone.message };
+  }
+
+  let parsedSchedule;
   try {
+    if (validatedFields.data.scheduledTimeZone && validatedFields.data.scheduledTimeZone !== resolvedAgentTimeZone.timeZone) {
+      console.warn('[viewing_datetime_timezone_mismatch]', {
+        operation: 'update',
+        viewingId,
+        contactId: validatedFields.data.contactId,
+        propertyId: validatedFields.data.propertyId,
+        agentUserId: validatedFields.data.userId,
+        scheduledTimeZoneInput: validatedFields.data.scheduledTimeZone,
+        resolvedAgentTimeZone: resolvedAgentTimeZone.timeZone,
+      });
+    }
+
+    parsedSchedule = parseViewingDateTimeInput({
+      scheduledLocal: validatedFields.data.scheduledLocal || null,
+      scheduledAtIso: validatedFields.data.scheduledAtIso || validatedFields.data.date || null,
+      scheduledTimeZone: resolvedAgentTimeZone.timeZone,
+      agentTimeZone: resolvedAgentTimeZone.timeZone,
+    });
+
+    console.info('[viewing_datetime_parse]', {
+      operation: 'update',
+      viewingId,
+      contactId: validatedFields.data.contactId,
+      propertyId: validatedFields.data.propertyId,
+      agentUserId: validatedFields.data.userId,
+      localInput: validatedFields.data.scheduledLocal || validatedFields.data.date || null,
+      timeZoneInput: validatedFields.data.scheduledTimeZone || null,
+      resolvedAgentTimeZone: resolvedAgentTimeZone.timeZone,
+      resolvedTimeZoneSource: resolvedAgentTimeZone.source,
+      parsedSource: parsedSchedule.source,
+      parsedScheduledLocal: parsedSchedule.scheduledLocal,
+      parsedUtc: parsedSchedule.utcDate.toISOString(),
+    });
+  } catch (error) {
+    console.warn('[viewing_datetime_error]', {
+      operation: 'update',
+      viewingId,
+      contactId: validatedFields.data.contactId,
+      propertyId: validatedFields.data.propertyId,
+      agentUserId: validatedFields.data.userId,
+      localInput: validatedFields.data.scheduledLocal || validatedFields.data.date || null,
+      timeZoneInput: validatedFields.data.scheduledTimeZone || null,
+      resolvedAgentTimeZone: resolvedAgentTimeZone.timeZone,
+      bucket: getViewingDateTimeTelemetryBucket(error),
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    return {
+      success: false,
+      message: toViewingDateTimeErrorMessage(error),
+    };
+  }
+
+  try {
+    const endAt = new Date(parsedSchedule.utcDate.getTime() + validatedFields.data.duration * 60 * 1000);
     await db.viewing.update({
       where: { id: viewingId },
       data: {
-        date: new Date(validatedFields.data.date),
+        date: parsedSchedule.utcDate,
+        scheduledTimeZone: parsedSchedule.scheduledTimeZone,
+        scheduledLocal: parsedSchedule.scheduledLocal,
         notes: validatedFields.data.notes,
         userId: validatedFields.data.userId,
         propertyId: validatedFields.data.propertyId,
@@ -1694,7 +1951,7 @@ export async function updateViewing(
         description: validatedFields.data.description || null,
         location: validatedFields.data.location || null,
         duration: validatedFields.data.duration,
-        endAt: new Date(new Date(validatedFields.data.date).getTime() + validatedFields.data.duration * 60 * 1000),
+        endAt,
       }
     });
 
@@ -1712,7 +1969,13 @@ export async function updateViewing(
       const propertyForLog = await db.property.findUnique({ where: { id: validatedFields.data.propertyId }, select: { reference: true, title: true } });
       const propertyRef = propertyForLog?.reference || propertyForLog?.title || 'Unknown Property';
 
-      await logContactHistory(db, contactId, internalUserId, 'VIEWING_UPDATED', { property: propertyRef, date: validatedFields.data.date, notes: validatedFields.data.notes });
+      await logContactHistory(db, contactId, internalUserId, 'VIEWING_UPDATED', {
+        property: propertyRef,
+        date: parsedSchedule.utcDate.toISOString(),
+        scheduledLocal: parsedSchedule.scheduledLocal,
+        timeZone: parsedSchedule.scheduledTimeZone,
+        notes: validatedFields.data.notes,
+      });
 
       // Trigger Google Sync for Visual ID Update (only if current user has Google connected)
       const currentUserForSync = await db.user.findUnique({

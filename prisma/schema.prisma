@@ -22,6 +22,7 @@ model Location {
   ghlScopes                     String? // Space-separated list of granted OAuth scopes
   name                          String?
   domain                        String?
+  timeZone                      String? // IANA timezone, e.g. "Europe/Nicosia"
   lastSsoValidation             DateTime?
   lastSsoUserId                 String?
   companies                     Company[]
@@ -150,6 +151,7 @@ model User {
   clerkId       String?  @unique
   ghlUserId     String?
   ghlCalendarId String?
+  timeZone      String? // IANA timezone, e.g. "Europe/Nicosia"
 
   // CRM Credentials (User-specific login)
   crmUsername String?
@@ -684,6 +686,8 @@ model Viewing {
 
   date  DateTime
   notes String?
+  scheduledTimeZone String? // IANA timezone used to interpret local scheduled input
+  scheduledLocal    String? // Local datetime snapshot at write time (YYYY-MM-DDTHH:mm[:ss])
 
   title       String?   // e.g. "Viewing: 3BR Villa in Limassol"
   description String?   @db.Text  // Detailed agenda / notes for the event

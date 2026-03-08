@@ -309,11 +309,22 @@ registerTool(
     {
         contactId: z.string(),
         propertyId: z.string(),
-        date: z.string().describe("ISO date string for viewing time"),
+        date: z.string().optional().describe("Preferred: ISO datetime with timezone offset, e.g. 2026-03-09T13:00:00+02:00"),
+        scheduledLocal: z.string().optional().describe("Alternative local datetime, e.g. 2026-03-09T13:00"),
+        scheduledTimeZone: z.string().optional().describe("IANA timezone for scheduledLocal, e.g. Europe/Nicosia"),
         notes: z.string().optional()
     },
     async (params: any) => {
-        const result = await tools.createViewing(params.contactId, params.propertyId, params.date, params.notes);
+        const result = await tools.createViewing(
+            params.contactId,
+            params.propertyId,
+            params.date || "",
+            params.notes,
+            {
+                scheduledLocal: params.scheduledLocal,
+                scheduledTimeZone: params.scheduledTimeZone,
+            }
+        );
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
     }
 );

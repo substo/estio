@@ -18,6 +18,7 @@ export type HubViewingForGoogle = Pick<Viewing, 'date' | 'notes'> & {
     description?: string | null;
     location?: string | null;
     duration?: number | null;
+    scheduledTimeZone?: string | null;
 };
 
 export async function getGoogleCalendarClient(userId: string) {
@@ -101,9 +102,11 @@ function toGoogleEventBody(viewing: HubViewingForGoogle): calendar_v3.Schema$Eve
         location: viewing.location || undefined,
         start: {
             dateTime: startTime.toISOString(),
+            timeZone: viewing.scheduledTimeZone || 'UTC',
         },
         end: {
             dateTime: endTime.toISOString(),
+            timeZone: viewing.scheduledTimeZone || 'UTC',
         },
     };
 }

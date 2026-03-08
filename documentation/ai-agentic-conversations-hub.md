@@ -46,6 +46,17 @@ We chose to build this **internally** rather than relying on GoHighLevel's nativ
     *   **Deal Mode Toggle**: Users can switch between standard chat view and "Deal Mode" to manage complex negotiations.
     *   **Instant Switching**: The UI uses internal state caching to switch conversations instantly, showing a loader only for the message content.
 
+### Mar 2026 Performance Rollout
+The hub now has a performance-oriented read path for larger inboxes:
+
+*   **Workspace V2**: the selected thread loads through `getConversationWorkspace(...)`, which bundles messages, activity, contact context, task/viewing summaries, agent summary, and transcript eligibility into one server response.
+*   **Delta List Polling**: the left conversation list no longer requires full snapshot refetches on every poll when `workspaceV2` is enabled. It advances from a `deltaCursor` via `getConversationListDelta(...)`.
+*   **Balanced Polling**: background refresh slows down when the balanced flag is enabled and pauses while the tab is hidden or search is active.
+*   **Ranked Search**: search now uses a hybrid full-text + trigram SQL ranking path with a Prisma fallback.
+
+Source of truth for the exact UI/API behavior and feature flags:
+[conversation-management.md](/Users/martingreen/Projects/IDX/documentation/conversation-management.md)
+
 ### Key Components
 
 *   **`lib/ghl/sync.ts`**: (New) The core synchronization engine. Handles webhook processing, batch history fetching, and the **Inference Engine** which robustly determines message direction.
@@ -74,12 +85,15 @@ A core challenge with multi-source email sync (GHL API, Gmail, Outlook) is ambig
 We have evolved the system from a 1:1 chat interface to a **Many-to-One Persistent Deal Room**. This solves the "Middleman" problem where an agent needs to coordinate between a Buyer and a Seller over weeks or months.
 
 ### Features
-1.  **Unified Timeline**: When a Deal is selected, the center pane transforms into a merged chronological stream of interactions from ALL stakeholders (Lead Emails + Owner SMS + System Notes). This provides a single source of truth for the deal's history.
+1.  **Unified Timeline**: When a Deal is selected, the center pane transforms into a merged chronological stream of interactions from ALL stakeholders (Lead Emails + Owner SMS + timeline activity such as notes, viewing events, and task-state events). This provides a single source of truth for the deal's history.
 2.  **Persistent `DealContext`**: Deals are now permanent database records with Stages (Active, Negotiation, Closed) and Health Scores, not just temporary session contexts.
 3.  **Smart Linking**: The system automatically serves as a "Deal Binding" layer. Agents can "Bind" a conversation to a deal, and the system automatically links the contact's future messages to that deal context.
 4.  **Coordinator Panel Integration**: The right-hand panel adapts to the active mode. In "Deal Mode", it becomes the **AI Coordinator**, reasoning across the entire deal history while the details/tasks/viewings/activity cards stay bound to the currently selected deal participant.
 5.  **Composer Parity in Deal Mode (Mar 2026)**: Deal mode now renders the same full-featured reusable composer as chats mode, below the unified timeline. AI draft, model picker, channel guards, media upload, voice note, suggestions, and keyboard send shortcut behave the same in both modes.
 6.  **Participant Routing (Mar 2026)**: Mission Control now shows all unique contacts linked to the deal, lets the agent switch the active participant, and routes sends/draft approvals to that selected participant instead of a single proxy conversation.
+
+Source of truth for exact timeline coverage and AI draft context rules:
+[conversation-management.md](/Users/martingreen/Projects/IDX/documentation/conversation-management.md) and [ai-draft-feature.md](/Users/martingreen/Projects/IDX/documentation/ai-draft-feature.md)
 
 ### Workflow
 1.  **Toggle "Deals"**: In `/admin/conversations`, switch to Deals mode.

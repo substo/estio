@@ -3,6 +3,11 @@ import db from "@/lib/db";
 import { syncContactToGHL } from "@/lib/ghl/stakeholders";
 import { createAppointment } from "@/lib/ghl/calendars";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import {
+    normalizeIanaTimeZoneOrThrow,
+    parseViewingDateTimeInput,
+    ViewingDateTimeValidationError,
+} from "@/lib/viewings/datetime";
 
 type GoogleMapsLinkResult = {
     url: string | null;
@@ -785,8 +790,12 @@ export async function resolveViewingPropertyContext(params: {
 export async function createViewing(
     contactId: string,
     propertyId: string,
-    date: string, // ISO string
-    notes: string = "AI Scheduled Viewing"
+    date: string, // Prefer ISO with timezone offset
+    notes: string = "AI Scheduled Viewing",
+    options?: {
+        scheduledLocal?: string | null;
+        scheduledTimeZone?: string | null;
+    }
 ) {
     try {
         const contact = await db.contact.findFirst({
@@ -815,6 +824,90 @@ export async function createViewing(
 
         const agent = await db.user.findUnique({ where: { id: userId } });
 
+        const agentTimeZoneRaw = agent?.timeZone || contact.location?.timeZone || null;
+        if (!agentTimeZoneRaw) {
+            return {
+                success: false,
+                message: "Missing timezone for assigned agent/location. Configure agent timezone first.",
+            };
+        }
+
+        let agentTimeZone: string;
+        try {
+            agentTimeZone = normalizeIanaTimeZoneOrThrow(agentTimeZoneRaw);
+        } catch {
+            return {
+                success: false,
+                message: `Invalid agent/location timezone (${agentTimeZoneRaw}).`,
+            };
+        }
+
+        const scheduledLocalInput = String(options?.scheduledLocal || "").trim() || null;
+        const scheduledTimeZoneInput = String(options?.scheduledTimeZone || "").trim() || null;
+        const dateInput = String(date || "").trim();
+        const dateHasExplicitOffset = /(Z|[+-]\d{2}:?\d{2})$/i.test(dateInput);
+
+        if (!scheduledLocalInput && !dateHasExplicitOffset) {
+            return {
+                success: false,
+                message: "createViewing requires ISO datetime with timezone offset, or scheduledLocal + scheduledTimeZone.",
+            };
+        }
+
+        if (scheduledLocalInput && !scheduledTimeZoneInput) {
+            return {
+                success: false,
+                message: "Missing scheduledTimeZone. Provide local datetime with explicit timezone.",
+            };
+        }
+
+        if (scheduledTimeZoneInput && scheduledTimeZoneInput !== agentTimeZone) {
+            console.warn("[ai_create_viewing_timezone_mismatch]", {
+                contactId: contact.id,
+                propertyId,
+                agentUserId: userId,
+                providedTimeZone: scheduledTimeZoneInput,
+                resolvedAgentTimeZone: agentTimeZone,
+            });
+        }
+
+        let parsedSchedule;
+        try {
+            parsedSchedule = parseViewingDateTimeInput({
+                scheduledLocal: scheduledLocalInput,
+                scheduledAtIso: dateInput || null,
+                scheduledTimeZone: agentTimeZone,
+                agentTimeZone,
+            });
+        } catch (error) {
+            if (error instanceof ViewingDateTimeValidationError) {
+                console.warn("[ai_create_viewing_datetime_error]", {
+                    contactId: contact.id,
+                    propertyId,
+                    agentUserId: userId,
+                    localInput: scheduledLocalInput,
+                    dateInput: dateInput || null,
+                    resolvedAgentTimeZone: agentTimeZone,
+                    code: error.code,
+                    message: error.message,
+                });
+                return { success: false, message: error.message };
+            }
+            throw error;
+        }
+
+        console.info("[ai_create_viewing_datetime_parse]", {
+            contactId: contact.id,
+            propertyId,
+            agentUserId: userId,
+            localInput: scheduledLocalInput,
+            dateInput: dateInput || null,
+            resolvedAgentTimeZone: agentTimeZone,
+            source: parsedSchedule.source,
+            scheduledLocal: parsedSchedule.scheduledLocal,
+            utc: parsedSchedule.utcDate.toISOString(),
+        });
+
         let ghlAppointmentId: string | undefined;
 
         // GHL Sync Logic
@@ -837,7 +930,7 @@ export async function createViewing(
                         calendarId: agent.ghlCalendarId,
                         locationId: contact.locationId,
                         contactId: ghlContactId,
-                        startTime: date,
+                        startTime: parsedSchedule.utcDate.toISOString(),
                         title: `Viewing: ${propertyId}`, // Ideally fetch property ref
                         appointmentStatus: "confirmed",
                         toNotify: true
@@ -854,7 +947,10 @@ export async function createViewing(
                 contactId: contact.id,
                 propertyId,
                 userId,
-                date: new Date(date),
+                date: parsedSchedule.utcDate,
+                scheduledTimeZone: parsedSchedule.scheduledTimeZone,
+                scheduledLocal: parsedSchedule.scheduledLocal,
+                endAt: new Date(parsedSchedule.utcDate.getTime() + 60 * 60 * 1000),
                 notes: `${notes} (Scheduled by AI)`,
                 ghlAppointmentId,
                 status: "scheduled"

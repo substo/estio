@@ -47,7 +47,7 @@ export function ViewingsSuggestionDialog({ open, onOpenChange, selectionText, co
 
     // Dropdown data
     const [properties, setProperties] = useState<{ id: string; title: string; reference?: string | null; unitNumber?: string | null }[]>([]);
-    const [users, setUsers] = useState<{ id: string; name: string | null; email: string; }[]>([]);
+    const [users, setUsers] = useState<{ id: string; name: string | null; email: string; timeZone?: string | null; effectiveTimeZone?: string | null }[]>([]);
 
     const loadDropdowns = useCallback(async () => {
         try {
@@ -121,6 +121,12 @@ export function ViewingsSuggestionDialog({ open, onOpenChange, selectionText, co
                 toast.error(`Please select an assigned agent for viewing: ${s.propertyDescription}`);
                 return;
             }
+            const selectedAgent = users.find((user) => user.id === s.userId);
+            const scheduledTimeZone = selectedAgent?.effectiveTimeZone || selectedAgent?.timeZone || null;
+            if (!scheduledTimeZone) {
+                toast.error(`Missing timezone for selected agent: ${selectedAgent?.name || selectedAgent?.email || s.userId}`);
+                return;
+            }
             if (!s.date || !s.time) {
                 toast.error(`Please specify date and time for viewing: ${s.propertyDescription}`);
                 return;
@@ -137,10 +143,9 @@ export function ViewingsSuggestionDialog({ open, onOpenChange, selectionText, co
             }
 
             const suggestionsPayload = selectedSuggestions.map((s) => {
-                const localDateTime = s.date && s.time ? new Date(`${s.date}T${s.time}:00`) : null;
-                const scheduledAtIso = localDateTime && !Number.isNaN(localDateTime.getTime())
-                    ? localDateTime.toISOString()
-                    : null;
+                const selectedAgent = users.find((user) => user.id === s.userId);
+                const scheduledLocal = s.date && s.time ? `${s.date}T${s.time}` : null;
+                const scheduledTimeZone = selectedAgent?.effectiveTimeZone || selectedAgent?.timeZone || null;
 
                 return {
                     propertyId: s.propertyId!,
@@ -148,7 +153,9 @@ export function ViewingsSuggestionDialog({ open, onOpenChange, selectionText, co
                     userId: s.userId!,
                     date: s.date!,
                     time: s.time || null,
-                    scheduledAtIso,
+                    scheduledAtIso: null,
+                    scheduledLocal,
+                    scheduledTimeZone,
                     notes: s.notes || null,
                 };
             });

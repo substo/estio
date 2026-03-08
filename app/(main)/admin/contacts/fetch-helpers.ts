@@ -75,16 +75,27 @@ export async function getUsersForSelect(locationId: string) {
             return [];
         }
 
-        const users = await db.user.findMany({
-            where: {
-                locations: {
-                    some: { id: locationId }
-                }
-            },
-            select: { id: true, name: true, email: true, ghlCalendarId: true },
-            orderBy: { name: 'asc' },
-        });
-        return users;
+        const [location, users] = await Promise.all([
+            db.location.findUnique({
+                where: { id: locationId },
+                select: { timeZone: true },
+            }),
+            db.user.findMany({
+                where: {
+                    locations: {
+                        some: { id: locationId }
+                    }
+                },
+                select: { id: true, name: true, email: true, ghlCalendarId: true, timeZone: true },
+                orderBy: { name: 'asc' },
+            }),
+        ]);
+
+        const fallbackTimeZone = location?.timeZone || null;
+        return users.map((user) => ({
+            ...user,
+            effectiveTimeZone: user.timeZone || fallbackTimeZone,
+        }));
     } catch (error) {
         console.error('Failed to fetch users:', error);
         return [];

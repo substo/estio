@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Pencil, UserPlus, Home, Merge, Import, NotebookPen, HelpCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState } from 'react';
+import { formatViewingDateTimeWithTimeZoneLabel } from '@/lib/viewings/datetime';
 
 interface ActivityLogEntryProps {
     item: {
@@ -27,6 +28,22 @@ function formatFieldName(field: string): string {
     const result = field.replace(/([A-Z])/g, " $1");
     const final = result.charAt(0).toUpperCase() + result.slice(1);
     return final;
+}
+
+function formatViewingWhen(changes: Array<{ field?: string; new?: unknown }>): string | null {
+    const rawDate = changes.find((change) => change.field === "date")?.new;
+    if (!rawDate) return null;
+
+    const rawTimeZone = changes.find((change) => change.field === "timeZone")?.new;
+    if (!rawTimeZone || typeof rawTimeZone !== "string") {
+        return String(rawDate);
+    }
+
+    try {
+        return formatViewingDateTimeWithTimeZoneLabel(new Date(String(rawDate)), rawTimeZone);
+    } catch {
+        return String(rawDate);
+    }
 }
 
 export function ActivityLogEntry({ item, contactName }: ActivityLogEntryProps) {
@@ -101,20 +118,28 @@ export function ActivityLogEntry({ item, contactName }: ActivityLogEntryProps) {
             actionLabel = "Viewing Scheduled";
             
             const p = changes.find(c => c.field === 'property')?.new;
-            if (p) description = String(p);
+            const whenAdded = formatViewingWhen(changes as any);
+            if (p && whenAdded) description = `${String(p)} at ${whenAdded}`;
+            else if (p) description = String(p);
+            else if (whenAdded) description = whenAdded;
             break;
             
         case 'VIEWING_UPDATED':
             Icon = Home;
             iconColor = "text-purple-600 bg-purple-100";
             actionLabel = "Viewing Updated";
+            const whenUpdated = formatViewingWhen(changes as any);
+            if (whenUpdated) description = whenUpdated;
             break;
 
         case 'VIEWING_SCHEDULED':
             Icon = Home;
             iconColor = "text-purple-600 bg-purple-100";
             actionLabel = "Viewing Scheduled";
-            description = String(changes.find(c => c.field === 'property')?.new || '');
+            const propertyScheduled = String(changes.find(c => c.field === 'property')?.new || '');
+            const whenScheduled = formatViewingWhen(changes as any);
+            if (propertyScheduled && whenScheduled) description = `${propertyScheduled} at ${whenScheduled}`;
+            else description = propertyScheduled || whenScheduled || '';
             break;
 
         case 'VIEWING_COMPLETED':
