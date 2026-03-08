@@ -4,6 +4,7 @@ import db from '@/lib/db';
 import { auth, clerkClient } from '@clerk/nextjs/server';
 import { revalidatePath } from 'next/cache';
 import { updateGHLUser } from '@/lib/ghl/users';
+import { normalizeIanaTimeZoneOrThrow, ViewingDateTimeValidationError } from '@/lib/viewings/datetime';
 
 export async function completeUserProfile(formData: FormData) {
     const { userId: clerkUserId } = await auth();
@@ -14,9 +15,20 @@ export async function completeUserProfile(formData: FormData) {
     const firstName = formData.get('firstName') as string;
     const lastName = formData.get('lastName') as string;
     const phone = (formData.get('phone') as string) || null;
+    const rawTimeZone = (formData.get('timeZone') as string) || '';
 
     if (!firstName || !lastName) {
         return { success: false, error: 'First name and last name are required' };
+    }
+
+    let timeZone = '';
+    try {
+        timeZone = normalizeIanaTimeZoneOrThrow(rawTimeZone);
+    } catch (error) {
+        if (error instanceof ViewingDateTimeValidationError) {
+            return { success: false, error: 'Please enter a valid IANA timezone (e.g. Europe/Nicosia).' };
+        }
+        return { success: false, error: 'Invalid timezone value.' };
     }
 
     try {
@@ -26,6 +38,7 @@ export async function completeUserProfile(formData: FormData) {
             data: {
                 firstName: firstName.trim(),
                 lastName: lastName.trim(),
+                timeZone,
                 // Phone is now managed via verified sync only
                 // phone: phone?.trim() || null 
             },
@@ -87,7 +100,7 @@ export async function getUserProfileStatus() {
     try {
         const user = await db.user.findUnique({
             where: { clerkId: clerkUserId },
-            select: { firstName: true, lastName: true, phone: true }
+            select: { firstName: true, lastName: true, phone: true, timeZone: true }
         });
 
         if (!user) {
@@ -100,7 +113,8 @@ export async function getUserProfileStatus() {
             existingData: {
                 firstName: user.firstName || '',
                 lastName: user.lastName || '',
-                phone: user.phone || ''
+                phone: user.phone || '',
+                timeZone: user.timeZone || ''
             }
         };
     } catch (error) {

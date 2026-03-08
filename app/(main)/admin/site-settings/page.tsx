@@ -26,7 +26,7 @@ export default async function SiteSettingsPage(props: { searchParams: Promise<{ 
         }),
         db.location.findUnique({
             where: { id: locationId },
-            select: { name: true },
+            select: { name: true, timeZone: true },
         }),
     ]);
 
@@ -44,6 +44,7 @@ export default async function SiteSettingsPage(props: { searchParams: Promise<{ 
                     initialData={siteConfig}
                     locationId={locationId}
                     locationName={location?.name || ""}
+                    locationTimeZone={location?.timeZone || ""}
                 />
             </div>
 

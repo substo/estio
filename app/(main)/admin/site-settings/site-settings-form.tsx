@@ -35,13 +35,16 @@ function SubmitButton() {
 export function SiteSettingsForm({
     initialData,
     locationId,
-    locationName
+    locationName,
+    locationTimeZone
 }: {
     initialData: any,
     locationId: string,
-    locationName: string
+    locationName: string,
+    locationTimeZone: string
 }) {
     const [state, action] = useActionState(updateSiteSettings, initialState);
+    const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
     // Safe access to JSON fields
     const theme = initialData?.theme as any || {};
@@ -267,6 +270,30 @@ export function SiteSettingsForm({
                         </p>
                         {state?.errors?.domain && (
                             <p className="text-sm text-red-500">{state.errors.domain[0]}</p>
+                        )}
+                    </div>
+                    <div className="grid gap-2">
+                        <Label htmlFor="locationTimeZone">Default Location Timezone (IANA)</Label>
+                        <Input
+                            id="locationTimeZone"
+                            name="locationTimeZone"
+                            placeholder="e.g. Europe/Nicosia"
+                            defaultValue={locationTimeZone || browserTimeZone}
+                            list="location-timezone-options"
+                        />
+                        <datalist id="location-timezone-options">
+                            <option value="Europe/Nicosia" />
+                            <option value="Europe/Athens" />
+                            <option value="Europe/London" />
+                            <option value="UTC" />
+                            <option value="Asia/Dubai" />
+                            <option value="America/New_York" />
+                        </datalist>
+                        <p className="text-sm text-muted-foreground">
+                            Organization-level fallback for scheduling when an agent profile has no timezone.
+                        </p>
+                        {state?.errors?.locationTimeZone && (
+                            <p className="text-sm text-red-500">{state.errors.locationTimeZone[0]}</p>
                         )}
                     </div>
                 </div>

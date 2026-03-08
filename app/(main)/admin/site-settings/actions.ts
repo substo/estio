@@ -4,11 +4,13 @@ import db from "@/lib/db";
 import { auth } from "@clerk/nextjs/server";
 import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
 import { revalidatePath } from "next/cache";
+import { normalizeIanaTimeZoneOrThrow, ViewingDateTimeValidationError } from "@/lib/viewings/datetime";
 
 interface SiteSettingsState {
     message?: string;
     errors?: {
         domain?: string[];
+        locationTimeZone?: string[];
         _form?: string[];
     };
 }
@@ -33,6 +35,8 @@ export async function updateSiteSettings(
     const domain = formData.get("domain") as string;
     const locationNameRaw = formData.get("locationName") as string;
     const locationName = locationNameRaw?.trim() ? locationNameRaw.trim() : null;
+    const locationTimeZoneRaw = (formData.get("locationTimeZone") as string) || "";
+    const locationTimeZone = locationTimeZoneRaw.trim();
     const primaryColor = formData.get("primaryColor") as string;
     // New Advanced Colors
     const secondaryColor = formData.get("secondaryColor") as string;
@@ -111,6 +115,10 @@ export async function updateSiteSettings(
     try {
         // If domain is empty string, we should probably set it to null/undefined
         const domainVal = domain && domain.trim() !== "" ? domain.trim() : null;
+        let validatedLocationTimeZone: string | null = null;
+        if (locationTimeZone) {
+            validatedLocationTimeZone = normalizeIanaTimeZoneOrThrow(locationTimeZone);
+        }
 
         const updateData: any = {
             domain: domainVal,
@@ -147,7 +155,8 @@ export async function updateSiteSettings(
             where: { id: locationId },
             data: {
                 domain: domainVal,
-                name: locationName
+                name: locationName,
+                timeZone: validatedLocationTimeZone
             }
         });
 
@@ -168,6 +177,9 @@ export async function updateSiteSettings(
         return { message: "Settings saved successfully" };
     } catch (error: any) {
         console.error(error);
+        if (error instanceof ViewingDateTimeValidationError && error.code === "INVALID_TIMEZONE") {
+            return { errors: { locationTimeZone: ["Please enter a valid IANA timezone (e.g. Europe/Nicosia)."] } };
+        }
         if (error.code === 'P2002') {
             return { errors: { domain: ["This domain is already taken."] } };
         }

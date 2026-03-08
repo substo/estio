@@ -23,7 +23,8 @@ const UserProfilePage = async () => {
                 firstName: true,
                 lastName: true,
                 phone: true,
-                email: true
+                email: true,
+                timeZone: true
             }
         });
     }
@@ -32,7 +33,8 @@ const UserProfilePage = async () => {
         firstName: dbUser?.firstName || user?.firstName || '',
         lastName: dbUser?.lastName || user?.lastName || '',
         phone: dbUser?.phone || '',
-        email: dbUser?.email || user?.emailAddresses[0]?.emailAddress || ''
+        email: dbUser?.email || user?.emailAddresses[0]?.emailAddress || '',
+        timeZone: dbUser?.timeZone || ''
     };
 
     return (

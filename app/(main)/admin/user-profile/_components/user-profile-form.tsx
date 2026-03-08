@@ -15,6 +15,7 @@ interface UserProfileFormProps {
         lastName: string;
         phone: string;
         email: string;
+        timeZone: string;
     };
 }
 
@@ -101,6 +102,29 @@ export function UserProfileForm({ initialData }: UserProfileFormProps) {
                                 Email is managed via your account settings.
                             </p>
                         </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <Label htmlFor="timeZone">Timezone (IANA)</Label>
+                        <Input
+                            id="timeZone"
+                            name="timeZone"
+                            defaultValue={initialData.timeZone}
+                            placeholder="e.g. Europe/Nicosia"
+                            required
+                            list="common-timezones"
+                        />
+                        <datalist id="common-timezones">
+                            <option value="Europe/Nicosia" />
+                            <option value="Europe/Athens" />
+                            <option value="Europe/London" />
+                            <option value="UTC" />
+                            <option value="Asia/Dubai" />
+                            <option value="America/New_York" />
+                        </datalist>
+                        <p className="text-[10px] text-muted-foreground">
+                            Used for viewing scheduling. Must be a valid IANA timezone.
+                        </p>
                     </div>
 
                     <div className="flex justify-end pt-2">
