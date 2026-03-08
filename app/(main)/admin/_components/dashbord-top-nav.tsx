@@ -8,7 +8,7 @@ import { UserProfile } from '@/components/user-profile'
 import { AICostBadge } from '@/components/ai-cost-badge'
 import config from '@/config'
 import { HamburgerMenuIcon } from '@radix-ui/react-icons'
-import { Home, Settings, List, FileText } from 'lucide-react'
+import { Home, Settings, List, FileText, MessageSquare, Building, LayoutTemplate } from 'lucide-react'
 import Link from 'next/link'
 import { ReactNode } from 'react'
 import { APP_NAME } from "@/components/app-logo"
@@ -40,6 +40,14 @@ export default function DashboardTopNav({ children }: { children: ReactNode }) {
                 </Link>
               </SheetClose>
               <SheetClose asChild>
+                <Link href="/admin/conversations">
+                  <Button variant="outline" className="w-full">
+                    <MessageSquare className="mr-2 h-4 w-4" />
+                    Conversations
+                  </Button>
+                </Link>
+              </SheetClose>
+              <SheetClose asChild>
                 <Link href="/admin/properties">
                   <Button variant="outline" className="w-full">
                     <List className="mr-2 h-4 w-4" />
@@ -55,7 +63,47 @@ export default function DashboardTopNav({ children }: { children: ReactNode }) {
                   </Button>
                 </Link>
               </SheetClose>
+              <SheetClose asChild>
+                <Link href="/admin/companies">
+                  <Button variant="outline" className="w-full">
+                    <Building className="mr-2 h-4 w-4" />
+                    Companies
+                  </Button>
+                </Link>
+              </SheetClose>
+              <SheetClose asChild>
+                <Link href="/admin/projects">
+                  <Button variant="outline" className="w-full">
+                    <Building className="mr-2 h-4 w-4" />
+                    Projects
+                  </Button>
+                </Link>
+              </SheetClose>
+              <SheetClose asChild>
+                <Link href="/admin/content/pages">
+                  <Button variant="outline" className="w-full">
+                    <FileText className="mr-2 h-4 w-4" />
+                    Pages
+                  </Button>
+                </Link>
+              </SheetClose>
+              <SheetClose asChild>
+                <Link href="/admin/content/posts">
+                  <Button variant="outline" className="w-full">
+                    <LayoutTemplate className="mr-2 h-4 w-4" />
+                    Blog
+                  </Button>
+                </Link>
+              </SheetClose>
               <Separator className="my-3" />
+              <SheetClose asChild>
+                <Link href="/admin/site-settings/navigation">
+                  <Button variant="outline" className="w-full">
+                    <List className="mr-2 h-4 w-4" />
+                    Menus
+                  </Button>
+                </Link>
+              </SheetClose>
               <SheetClose asChild>
                 <Link href="/admin/settings">
                   <Button variant="outline" className="w-full">
@@ -77,4 +125,3 @@ export default function DashboardTopNav({ children }: { children: ReactNode }) {
     </div>
   )
 }
-
