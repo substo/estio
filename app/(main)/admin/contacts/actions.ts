@@ -1664,6 +1664,7 @@ import {
   enqueueViewingSyncJobs,
   type EnqueueViewingSyncJobsResult,
 } from '@/lib/viewings/sync-engine';
+import { triggerTaskSyncCronNow } from '@/lib/cron/task-sync-trigger';
 
 export async function createViewing(
   prevState: any,
@@ -1960,6 +1961,19 @@ export async function updateViewing(
       viewingId,
       operation: 'update',
     });
+
+    // Trigger cron immediately so sync doesn't wait for the next scheduler tick.
+    void triggerTaskSyncCronNow({
+      source: 'viewing_update',
+      viewingId,
+      timeoutMs: 3500,
+    })
+      .catch((syncError) => {
+        console.warn('[viewing_sync_trigger_failed]', {
+          viewingId,
+          error: syncError instanceof Error ? syncError.message : String(syncError),
+        });
+      });
 
     // Log Viewing Updated
     // We need contactId here, but it's in formData as optional/string. The schema validates it.
