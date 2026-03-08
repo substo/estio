@@ -1941,6 +1941,7 @@ export async function updateViewing(
     await db.viewing.update({
       where: { id: viewingId },
       data: {
+        syncVersion: { increment: 1 },
         date: parsedSchedule.utcDate,
         scheduledTimeZone: parsedSchedule.scheduledTimeZone,
         scheduledLocal: parsedSchedule.scheduledLocal,

@@ -469,10 +469,35 @@ export async function enqueueViewingSyncJobs(options: {
 
             const existingOutbox = await db.viewingOutbox.findUnique({
                 where: { idempotencyKey },
-                select: { status: true },
+                select: { id: true, status: true },
             });
 
             if (existingOutbox && (existingOutbox.status === 'pending' || existingOutbox.status === 'failed' || existingOutbox.status === 'processing')) {
+                await db.viewingSync.upsert({
+                    where: { viewingId_provider_providerAccountId: { viewingId: viewing.id, provider, providerAccountId: 'default' } },
+                    create: { viewingId: viewing.id, provider, providerAccountId: 'default', status: 'pending', attemptCount: 0, lastError: null },
+                    update: { status: 'pending', lastError: null },
+                });
+                continue;
+            }
+
+            if (existingOutbox && (existingOutbox.status === 'completed' || existingOutbox.status === 'dead')) {
+                await db.viewingOutbox.update({
+                    where: { id: existingOutbox.id },
+                    data: {
+                        status: 'pending',
+                        attemptCount: 0,
+                        lastError: null,
+                        scheduledAt,
+                        processedAt: null,
+                        lockedAt: null,
+                        lockedBy: null,
+                    },
+                });
+
+                queued += 1;
+                queuedProviders.push(provider);
+
                 await db.viewingSync.upsert({
                     where: { viewingId_provider_providerAccountId: { viewingId: viewing.id, provider, providerAccountId: 'default' } },
                     create: { viewingId: viewing.id, provider, providerAccountId: 'default', status: 'pending', attemptCount: 0, lastError: null },
