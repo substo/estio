@@ -5,6 +5,7 @@ import { getLocationContext } from "@/lib/auth/location-context";
 import { refreshGhlAccessToken } from "@/lib/location";
 import { ensureLocalContactSynced } from "@/lib/crm/contact-sync";
 import { getConversation } from "@/lib/ghl/conversations";
+import { assembleTimelineEvents } from "@/lib/conversations/timeline-events";
 
 async function getAuthenticatedLocation() {
     const location = await getLocationContext();
@@ -227,64 +228,13 @@ export async function removeConversationFromDeal(dealId: string, conversationId:
 
 export async function fetchDealTimeline(dealId: string) {
     const location = await getAuthenticatedLocation();
-
-    // 1. Get Deal to find involved conversations
-    const deal = await db.dealContext.findUnique({
-        where: { id: dealId, locationId: location.id },
-        select: { conversationIds: true }
+    const timeline = await assembleTimelineEvents({
+        mode: "deal",
+        locationId: location.id,
+        dealId,
+        includeMessages: true,
+        includeActivities: true,
     });
 
-    if (!deal) throw new Error("Deal not found");
-
-    // 2. Resolve internal Conversation IDs from GHL IDs
-    const conversations = await db.conversation.findMany({
-        where: {
-            ghlConversationId: { in: deal.conversationIds },
-            locationId: location.id
-        },
-        select: {
-            id: true,
-            ghlConversationId: true,
-            contact: { select: { id: true, name: true, email: true, phone: true } }
-        }
-    });
-
-    const internalConvIds = conversations.map(c => c.id);
-
-    // 3. Fetch Messages
-    const messages = await db.message.findMany({
-        where: {
-            conversationId: { in: internalConvIds }
-        },
-        orderBy: { createdAt: 'asc' },
-        include: {
-            conversation: {
-                select: {
-                    contact: { select: { id: true, name: true, email: true, ghlContactId: true } }
-                }
-            }
-        }
-    });
-
-    // 4. Transform for UI
-    // We want a unified feed format
-    return messages.map(m => ({
-        id: m.id,
-        body: m.body || "",
-        createdAt: m.createdAt,
-        dateAdded: m.createdAt, // Alias for MessageBubble compatibility
-        direction: m.direction,
-        type: m.type,
-
-        // Extended fields for MessageBubble
-        subject: m.subject,
-        emailFrom: m.emailFrom,
-        emailTo: m.emailTo,
-        conversationId: m.conversationId,
-
-        senderName: m.direction === 'outbound' ? 'You' : (m.conversation.contact.name || "Unknown Contact"),
-        senderEmail: m.conversation.contact.email,
-        contactId: m.conversation.contact.id || m.conversation.contact.ghlContactId,
-        getStatus: m.status
-    }));
+    return timeline.events;
 }

@@ -8,6 +8,7 @@ import { GEMINI_FLASH_LATEST_ALIAS } from '@/lib/ai/models';
 import { MessageBubble } from './message-bubble';
 import { MessageSquare, Sparkles } from "lucide-react";
 import { ConversationComposer } from './conversation-composer';
+import { ActivityLogEntry } from "./activity-log-entry";
 
 interface UnifiedTimelineProps {
     dealId: string;
@@ -84,16 +85,34 @@ export function UnifiedTimeline({
                         <p className="text-sm">No activity yet. Start a conversation!</p>
                     </div>
                 ) : (
-                    timelineMessages.map((msg) => (
-                        <MessageBubble
-                            key={msg.id}
-                            message={msg}
-                            contactName={msg.senderName}
-                            // UnifiedTimeline messages have senderEmail on them from the action
-                            contactEmail={msg.senderEmail}
-                            aiModel={selectedModel}
-                        />
-                    ))
+                    timelineMessages.map((event) => {
+                        if (event?.kind === "activity") {
+                            return (
+                                <ActivityLogEntry
+                                    key={event.id}
+                                    item={{
+                                        id: event.id,
+                                        createdAt: event.createdAt,
+                                        action: event.action,
+                                        changes: event.changes,
+                                        user: event.user || null,
+                                    }}
+                                    contactName={event.contactName || undefined}
+                                />
+                            );
+                        }
+
+                        const message = event?.kind === "message" ? event.message : event;
+                        return (
+                            <MessageBubble
+                                key={event?.id || message?.id}
+                                message={message}
+                                contactName={message?.senderName || message?.contactName}
+                                contactEmail={message?.senderEmail || message?.contactEmail}
+                                aiModel={selectedModel}
+                            />
+                        );
+                    })
                 )}
             </div>
 

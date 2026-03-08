@@ -3,6 +3,7 @@ import db from "@/lib/db";
 import { getMessages, getConversation } from "@/lib/ghl/conversations";
 import { GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 import { validateAction } from "@/lib/ai/policy";
+import { assembleTimelineEvents, type TimelineEvent } from "@/lib/conversations/timeline-events";
 import {
     buildDealProtectiveCommunicationContract,
     detectLanguageFromText,
@@ -19,6 +20,8 @@ interface CoordinationContext {
     locationId: string;
     contactId: string;
     accessToken: string;
+    mode?: "chat" | "deal";
+    dealId?: string;
     agentName?: string;
     businessName?: string;
     instruction?: string;
@@ -34,6 +37,8 @@ type DraftMessage = {
 };
 
 const NAME_GREETING_LONG_BREAK_HOURS = 3;
+const TIMELINE_RECENT_EVENT_WINDOW = 70;
+const TIMELINE_LINE_MAX_CHARS = 340;
 const SIGN_OFF_PHRASES = new Set([
     "best regards",
     "kind regards",
@@ -148,6 +153,189 @@ function stripManualSignatureBlock(text: string): string {
     }
 
     return trimmed;
+}
+
+type TimelineBucket = "messages" | "notes" | "viewings" | "tasks";
+
+type TimelineBucketCounts = {
+    messages: number;
+    notes: number;
+    viewings: number;
+    tasks: number;
+};
+
+function emptyTimelineBucketCounts(): TimelineBucketCounts {
+    return { messages: 0, notes: 0, viewings: 0, tasks: 0 };
+}
+
+function normalizeSpace(value: string): string {
+    return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function truncateText(value: string, maxChars: number): string {
+    const normalized = normalizeSpace(value);
+    if (normalized.length <= maxChars) return normalized;
+    return `${normalized.slice(0, Math.max(0, maxChars - 3))}...`;
+}
+
+function parseMaybeJson(value: unknown): any {
+    if (!value) return null;
+    if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        try {
+            return JSON.parse(trimmed);
+        } catch {
+            return value;
+        }
+    }
+    return value;
+}
+
+function extractChangeField(changes: unknown, field: string): string | null {
+    const parsed = parseMaybeJson(changes);
+    if (!parsed) return null;
+
+    if (Array.isArray(parsed)) {
+        const match = parsed.find((item: any) => String(item?.field || "") === field);
+        if (!match) return null;
+        const raw = match?.new ?? match?.value ?? null;
+        return raw == null ? null : String(raw);
+    }
+
+    if (typeof parsed === "object") {
+        const raw = (parsed as any)[field];
+        if (raw == null) return null;
+        if (typeof raw === "object" && "new" in raw) {
+            const next = (raw as any).new;
+            return next == null ? null : String(next);
+        }
+        return String(raw);
+    }
+
+    return null;
+}
+
+function getTimelineBucket(event: TimelineEvent): TimelineBucket {
+    if (event.kind === "message") return "messages";
+    const action = String(event.action || "").toUpperCase();
+    if (action.startsWith("TASK_")) return "tasks";
+    if (action.startsWith("VIEWING_")) return "viewings";
+    return "notes";
+}
+
+function summarizeActivityForPrompt(event: Extract<TimelineEvent, { kind: "activity" }>): string {
+    const action = String(event.action || "").toUpperCase();
+    const fallback = truncateText(JSON.stringify(event.changes || {}), 220);
+
+    if (action === "MANUAL_ENTRY") {
+        const entry = extractChangeField(event.changes, "entry");
+        return entry ? truncateText(entry, 220) : fallback;
+    }
+
+    if (action === "TASK_OPEN" || action === "TASK_DONE") {
+        const title = extractChangeField(event.changes, "title") || "Task";
+        const dueAt = extractChangeField(event.changes, "dueAt");
+        const dueLabel = dueAt ? ` (due ${dueAt})` : "";
+        return `${title}${dueLabel}`;
+    }
+
+    if (action.startsWith("VIEWING_")) {
+        const property = extractChangeField(event.changes, "property") || "Property";
+        const date = extractChangeField(event.changes, "date");
+        const status = extractChangeField(event.changes, "status");
+        const bits = [property, date ? `at ${date}` : "", status ? `[${status}]` : ""].filter(Boolean);
+        return bits.join(" ");
+    }
+
+    return fallback;
+}
+
+function formatTimelineEventForPrompt(event: TimelineEvent): string {
+    if (event.kind === "message") {
+        const directionLabel = event.message.direction === "outbound"
+            ? `Agent -> ${event.contactName || "Contact"}`
+            : `${event.contactName || "Contact"} -> Agent`;
+        const channel = String(event.message.type || "MESSAGE");
+        const body = truncateText(event.message.body || "[no text body]", TIMELINE_LINE_MAX_CHARS);
+        return `[${event.createdAt}] MESSAGE ${channel} ${directionLabel}: ${body}`;
+    }
+
+    const contactLabel = event.contactName ? ` (${event.contactName})` : "";
+    const detail = summarizeActivityForPrompt(event);
+    return `[${event.createdAt}] ACTIVITY${contactLabel} ${event.action}: ${detail}`;
+}
+
+function getViewingDateFromEvent(event: TimelineEvent): Date | null {
+    if (event.kind !== "activity") return null;
+    const action = String(event.action || "").toUpperCase();
+    if (!action.startsWith("VIEWING_")) return null;
+    const raw = extractChangeField(event.changes, "date") || event.createdAt;
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function buildTimelineCompaction(events: TimelineEvent[]) {
+    const recentEvents = events.slice(-TIMELINE_RECENT_EVENT_WINDOW);
+    const olderEvents = events.slice(0, Math.max(0, events.length - TIMELINE_RECENT_EVENT_WINDOW));
+
+    const totals = emptyTimelineBucketCounts();
+    const included = emptyTimelineBucketCounts();
+
+    for (const event of events) {
+        totals[getTimelineBucket(event)] += 1;
+    }
+    for (const event of recentEvents) {
+        included[getTimelineBucket(event)] += 1;
+    }
+
+    const truncated: TimelineBucketCounts = {
+        messages: Math.max(0, totals.messages - included.messages),
+        notes: Math.max(0, totals.notes - included.notes),
+        viewings: Math.max(0, totals.viewings - included.viewings),
+        tasks: Math.max(0, totals.tasks - included.tasks),
+    };
+
+    const openTasks = events.filter(
+        (event) => event.kind === "activity" && String(event.action || "").toUpperCase() === "TASK_OPEN"
+    ).length;
+    const completedTasks = events.filter(
+        (event) => event.kind === "activity" && String(event.action || "").toUpperCase() === "TASK_DONE"
+    ).length;
+
+    const now = new Date();
+    const nearestViewing = events
+        .map(getViewingDateFromEvent)
+        .filter((date): date is Date => !!date && date.getTime() >= now.getTime())
+        .sort((a, b) => a.getTime() - b.getTime())[0] || null;
+
+    const latestNoteEvent = [...events]
+        .reverse()
+        .find((event) => event.kind === "activity" && getTimelineBucket(event) === "notes");
+
+    const olderSummaryLines = [
+        olderEvents.length > 0
+            ? `Older events omitted from raw section: ${olderEvents.length} (messages ${truncated.messages}, notes ${truncated.notes}, viewings ${truncated.viewings}, tasks ${truncated.tasks}).`
+            : "No older timeline events were omitted.",
+        `Current task state from timeline: ${openTasks} open, ${completedTasks} completed.`,
+        `Nearest upcoming viewing: ${nearestViewing ? nearestViewing.toISOString() : "none"}.`,
+        `Latest note/activity timestamp: ${latestNoteEvent ? latestNoteEvent.createdAt : "none"}.`,
+    ];
+
+    return {
+        recentEvents,
+        olderEvents,
+        olderSummary: olderSummaryLines.join("\n"),
+        recentTimelineText: recentEvents.map(formatTimelineEventForPrompt).join("\n"),
+        stats: {
+            total: totals,
+            included,
+            truncated,
+            totalEvents: events.length,
+            includedEvents: recentEvents.length,
+            omittedEvents: olderEvents.length,
+        },
+    };
 }
 
 export async function generateDraft(context: CoordinationContext) {
@@ -307,6 +495,51 @@ export async function generateDraft(context: CoordinationContext) {
             }
         });
         const contactFirstName = (contact?.firstName || contact?.name || "").trim().split(/\s+/)[0] || null;
+        const requestedTimelineMode = context.mode === "deal" && context.dealId ? "deal" : "chat";
+        let timelineScopeLabel = requestedTimelineMode === "deal"
+            ? `Deal-aware hybrid timeline (dealId=${context.dealId})`
+            : "Selected conversation timeline";
+        let timelineEvents: TimelineEvent[] = [];
+
+        try {
+            const timelineResult = requestedTimelineMode === "deal"
+                ? await assembleTimelineEvents({
+                    mode: "deal",
+                    locationId: context.locationId,
+                    dealId: String(context.dealId),
+                    includeMessages: true,
+                    includeActivities: true,
+                })
+                : await assembleTimelineEvents({
+                    mode: "chat",
+                    locationId: context.locationId,
+                    conversationId: context.conversationId,
+                    includeMessages: true,
+                    includeActivities: true,
+                });
+
+            timelineEvents = timelineResult.events;
+            timelineScopeLabel = requestedTimelineMode === "deal"
+                ? `Deal-aware hybrid timeline across ${timelineResult.conversations.length} participant conversation(s)`
+                : "Selected conversation timeline";
+        } catch (timelineError: any) {
+            console.warn("[AI Draft] Timeline assembly failed:", timelineError?.message || timelineError);
+        }
+
+        const timelineCompaction = buildTimelineCompaction(timelineEvents);
+        console.log("[AI Draft] Timeline compaction stats:", JSON.stringify({
+            mode: requestedTimelineMode,
+            scope: timelineScopeLabel,
+            totalEvents: timelineCompaction.stats.totalEvents,
+            includedEvents: timelineCompaction.stats.includedEvents,
+            omittedEvents: timelineCompaction.stats.omittedEvents,
+            totals: timelineCompaction.stats.total,
+            included: timelineCompaction.stats.included,
+            truncated: timelineCompaction.stats.truncated,
+        }));
+
+        const timelineRecentText = timelineCompaction.recentTimelineText || "[No timeline events found]";
+        const timelineOlderSummary = timelineCompaction.olderSummary;
         const latestInboundMessage = [...messages]
             .reverse()
             .find(m => m.direction === "inbound" && (m.body || "").trim().length > 0)?.body || "";
@@ -444,11 +677,21 @@ export async function generateDraft(context: CoordinationContext) {
             const timestampPrefix = m.createdAt ? `[${m.createdAt.toISOString()}] ` : "";
             conversationText += `${timestampPrefix}${sender}: ${m.body || ""}\n`;
         });
+        const threadConversationText = conversationText.trim() || "[No recent thread messages found]";
 
         const fullPrompt = `${systemPrompt}
 
-        Recent Conversation History:
-        ${conversationText}
+        Selected Thread Messages (for cadence/language behavior):
+        ${threadConversationText}
+
+        Timeline Context Scope:
+        ${timelineScopeLabel}
+
+        Older Timeline Summary:
+        ${timelineOlderSummary}
+
+        Recent Timeline Events (raw):
+        ${timelineRecentText}
 
         Task:
         Draft a suggested reply for the Agent to send back to the Contact via ${channelName}.
@@ -508,7 +751,7 @@ export async function generateDraft(context: CoordinationContext) {
             console.log("[AI Draft] Removed manual signature block from draft output.");
         }
         const draftLanguage = detectLanguageFromText(text);
-        const policyEvidence = inferCommunicationEvidenceFromText(`${conversationText}\n${context.instruction || ""}`);
+        const policyEvidence = inferCommunicationEvidenceFromText(`${conversationText}\n${timelineRecentText}\n${context.instruction || ""}`);
         const policyResult = await validateAction({
             intent: "DRAFT_REPLY",
             risk: "medium",
@@ -533,7 +776,7 @@ export async function generateDraft(context: CoordinationContext) {
             completionTokens = response.usageMetadata.candidatesTokenCount;
         } else {
             // Fallback estimate if API doesn't return usage
-            promptTokens = Math.ceil(fullPrompt.length / 4);
+            promptTokens = Math.ceil(finalPrompt.length / 4);
             completionTokens = Math.ceil(text.length / 4);
         }
 

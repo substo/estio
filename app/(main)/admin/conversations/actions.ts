@@ -22,6 +22,7 @@ import { createContactTask } from "@/app/(main)/admin/tasks/actions";
 import { createTraceId, withServerTiming } from "@/lib/observability/performance";
 import { getConversationFeatureFlags } from "@/lib/feature-flags";
 import { withResilience } from "@/lib/external/resilience";
+import { assembleTimelineEvents } from "@/lib/conversations/timeline-events";
 import {
     buildWhatsAppOutboundUploadKey,
     createWhatsAppMediaReadUrl,
@@ -1753,28 +1754,25 @@ export async function getConversationWorkspace(
                     ? fetchMessages(trimmedConversationId).then((items) => items.slice(-messageLimit))
                     : Promise.resolve([] as Message[]),
                 includeActivity
-                    ? db.contactHistory.findMany({
-                        where: {
-                            contactId: String(metadata.contactContext?.contact?.id || ""),
-                        },
-                        include: {
-                            user: { select: { name: true, email: true } },
-                        },
-                        orderBy: { createdAt: "desc" },
-                        take: activityLimit,
-                    }).then((rows) =>
-                        rows
-                            .slice()
-                            .reverse()
+                    ? assembleTimelineEvents({
+                        mode: "chat",
+                        locationId: location.id,
+                        conversationId: trimmedConversationId,
+                        includeMessages: false,
+                        includeActivities: true,
+                    }).then((timeline) => {
+                        const activityEvents = timeline.events.filter((event) => event.kind === "activity");
+                        return activityEvents
+                            .slice(-activityLimit)
                             .map((entry) => ({
                                 id: entry.id,
                                 type: "activity",
-                                createdAt: entry.createdAt.toISOString(),
+                                createdAt: entry.createdAt,
                                 action: entry.action,
                                 changes: entry.changes,
-                                user: entry.user ? { name: entry.user.name, email: entry.user.email } : null,
-                            }))
-                    )
+                                user: entry.user || null,
+                            }));
+                    })
                     : Promise.resolve([] as any[]),
                 getWhatsAppTranscriptOnDemandEligibility(trimmedConversationId)
                     .catch(() => ({
@@ -5099,7 +5097,18 @@ export async function sendReply(conversationId: string, contactId: string, messa
     }
 }
 
-export async function generateAIDraft(conversationId: string, contactId: string, instruction?: string, model?: string) {
+type GenerateAIDraftOptions = {
+    mode?: "chat" | "deal";
+    dealId?: string;
+};
+
+export async function generateAIDraft(
+    conversationId: string,
+    contactId: string,
+    instruction?: string,
+    model?: string,
+    options?: GenerateAIDraftOptions
+) {
     const location = await getAuthenticatedLocation();
     if (!location?.ghlAccessToken) {
         throw new Error("Unauthorized");
@@ -5153,7 +5162,9 @@ export async function generateAIDraft(conversationId: string, contactId: string,
         agentName,
         businessName: location.name || undefined,
         instruction,
-        model: resolvedDraftModel
+        model: resolvedDraftModel,
+        mode: options?.mode || "chat",
+        dealId: options?.dealId || undefined,
     });
 
     return result;
@@ -10779,34 +10790,23 @@ export async function fetchConversationActivityLog(conversationId: string) {
     const location = await getAuthenticatedLocationReadOnly();
     if (!location?.id) return [];
 
-    const conversation = await db.conversation.findFirst({
-        where: {
-            locationId: location.id,
-            OR: [
-                { id: conversationId },
-                { ghlConversationId: conversationId },
-            ]
-        },
-        select: { contactId: true, contact: { select: { firstName: true, name: true } } }
+    const timeline = await assembleTimelineEvents({
+        mode: "chat",
+        locationId: location.id,
+        conversationId,
+        includeMessages: false,
+        includeActivities: true,
     });
 
-    if (!conversation?.contactId) return [];
-
-    const history = await db.contactHistory.findMany({
-        where: { contactId: conversation.contactId },
-        include: {
-            user: { select: { name: true, email: true } }
-        },
-        orderBy: { createdAt: 'asc' }
-    });
-
-    return history.map(h => ({
-        id: h.id,
+    return timeline.events
+        .filter((event) => event.kind === "activity")
+        .map((event) => ({
+        id: event.id,
         type: 'activity',
-        createdAt: h.createdAt.toISOString(),
-        action: h.action,
-        changes: h.changes,
-        user: h.user ? { name: h.user.name, email: h.user.email } : null,
+        createdAt: event.createdAt,
+        action: event.action,
+        changes: event.changes,
+        user: event.user || null,
     }));
 }
 

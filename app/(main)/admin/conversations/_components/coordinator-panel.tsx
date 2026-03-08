@@ -80,6 +80,11 @@ function ActivityLogPanel({ entries }: { entries: any[] }) {
             case 'UPDATED': return 'Updated';
             case 'VIEWING_ADDED': return 'Viewing';
             case 'VIEWING_UPDATED': return 'Viewing Updated';
+            case 'VIEWING_SCHEDULED': return 'Viewing Scheduled';
+            case 'VIEWING_COMPLETED': return 'Viewing Completed';
+            case 'VIEWING_CANCELLED': return 'Viewing Cancelled';
+            case 'TASK_OPEN': return 'Task Open';
+            case 'TASK_DONE': return 'Task Done';
             case 'MERGED_FROM': return 'Merged';
             case 'CREATED_FROM_GOOGLE': return 'Google Import';
             default: return action;
@@ -93,6 +98,11 @@ function ActivityLogPanel({ entries }: { entries: any[] }) {
             case 'UPDATED': return 'bg-amber-100 text-amber-700';
             case 'VIEWING_ADDED':
             case 'VIEWING_UPDATED': return 'bg-purple-100 text-purple-700';
+            case 'VIEWING_SCHEDULED': return 'bg-purple-100 text-purple-700';
+            case 'VIEWING_COMPLETED': return 'bg-emerald-100 text-emerald-700';
+            case 'VIEWING_CANCELLED': return 'bg-rose-100 text-rose-700';
+            case 'TASK_OPEN': return 'bg-amber-100 text-amber-700';
+            case 'TASK_DONE': return 'bg-emerald-100 text-emerald-700';
             case 'MERGED_FROM': return 'bg-slate-100 text-slate-700';
             default: return 'bg-gray-100 text-gray-700';
         }
@@ -419,7 +429,7 @@ export function CoordinatorPanel({
                 setDraft(res.draft);
                 setReasoning(res.reasoning);
             } else {
-                const res = await generateAIDraft(conversation.id, conversation.contactId);
+                const res = await generateAIDraft(conversation.id, conversation.contactId, undefined, undefined, { mode: "chat" });
                 setDraft(res.draft);
                 setReasoning(res.reasoning);
             }

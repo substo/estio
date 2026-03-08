@@ -109,6 +109,41 @@ export function ActivityLogEntry({ item, contactName }: ActivityLogEntryProps) {
             iconColor = "text-purple-600 bg-purple-100";
             actionLabel = "Viewing Updated";
             break;
+
+        case 'VIEWING_SCHEDULED':
+            Icon = Home;
+            iconColor = "text-purple-600 bg-purple-100";
+            actionLabel = "Viewing Scheduled";
+            description = String(changes.find(c => c.field === 'property')?.new || '');
+            break;
+
+        case 'VIEWING_COMPLETED':
+            Icon = Home;
+            iconColor = "text-emerald-600 bg-emerald-100";
+            actionLabel = "Viewing Completed";
+            description = String(changes.find(c => c.field === 'property')?.new || '');
+            break;
+
+        case 'VIEWING_CANCELLED':
+            Icon = Home;
+            iconColor = "text-rose-600 bg-rose-100";
+            actionLabel = "Viewing Cancelled";
+            description = String(changes.find(c => c.field === 'property')?.new || '');
+            break;
+
+        case 'TASK_OPEN':
+            Icon = NotebookPen;
+            iconColor = "text-amber-700 bg-amber-100";
+            actionLabel = "Task Open";
+            description = String(changes.find(c => c.field === 'title')?.new || '');
+            break;
+
+        case 'TASK_DONE':
+            Icon = NotebookPen;
+            iconColor = "text-emerald-700 bg-emerald-100";
+            actionLabel = "Task Done";
+            description = String(changes.find(c => c.field === 'title')?.new || '');
+            break;
             
         case 'MERGED_FROM':
             Icon = Merge;
@@ -139,6 +174,11 @@ export function ActivityLogEntry({ item, contactName }: ActivityLogEntryProps) {
                         <span className="text-[10px] text-slate-400 capitalize">
                             by {userLabel}
                         </span>
+                        {contactName ? (
+                            <span className="text-[10px] text-slate-400 truncate max-w-[120px]" title={contactName}>
+                                · {contactName}
+                            </span>
+                        ) : null}
                         <span className="text-[10px] tabular-nums font-mono text-slate-400 ml-1 whitespace-nowrap">
                             {format(new Date(item.createdAt), 'MMM d, h:mm a')}
                         </span>

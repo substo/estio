@@ -1628,7 +1628,13 @@ export function ConversationInterface({ locationId, initialConversations, initia
                                 suggestions={[...(activeConversation?.suggestedActions || []), ...suggestions]}
                                 onGenerateDraft={async (instruction?: string, model?: string) => {
                                     try {
-                                        const res = await generateAIDraft(activeConversation.id, activeConversation.contactId, instruction, model);
+                                        const res = await generateAIDraft(
+                                            activeConversation.id,
+                                            activeConversation.contactId,
+                                            instruction,
+                                            model,
+                                            { mode: "chat" }
+                                        );
                                         if (res.reasoning) {
                                             toast({ title: "Draft Generated", description: res.reasoning });
                                         }
@@ -1660,7 +1666,8 @@ export function ConversationInterface({ locationId, initialConversations, initia
                                             selectedDealConversation.id,
                                             selectedDealConversation.contactId,
                                             instruction,
-                                            model
+                                            model,
+                                            { mode: "deal", dealId: activeDealId }
                                         );
                                         if (res.reasoning) {
                                             toast({ title: "Draft Generated", description: res.reasoning });
