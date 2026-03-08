@@ -32,9 +32,13 @@ To avoid blocking the UI while awaiting external APIs:
 
 Viewings can be scheduled via natural language selection within a conversation (WhatsApp/SMS/Email thread).
 1.  **Trigger**: Highlighting text reveals the `MessageSelectionActions` popover, where the user can click "Suggest Viewing" (an `Eye` icon).
-2.  **Orchestration**: `suggestViewingsFromSelection` (in `conversations/actions.ts`) passes the selected text, recent conversation history, and contact context to the LLM (OpenAI `gpt-4o-mini`).
-3.  **Structured Output**: The LLM adheres to an exclusive `Zod` schema (`viewingRecommendationSchema`), extracting parameters like intended `date`, `duration`, `notes`, and specific `propertyId`.
-4.  **Funnel Metrics**: Interaction states are explicitly tracked and logged to telemetry endpoints (Funnel `start`, `success`, `error`, `cancel`) for visibility into AI adoption rates.
+2.  **Orchestration**: `suggestViewingsFromSelection` (in `conversations/actions.ts`) passes selected text, contact context, and an anchor context (`anchorMessageId`, `clientNowIso`, `clientTimeZone`) to the LLM and deterministic post-processors.
+3.  **Structured Output + Deterministic Repair**: The LLM returns `propertyDescription`, `date`, `time`, and `notes`. Server-side post-processing then:
+    - resolves relative date language (`today`, `tomorrow`, weekdays) to absolute `YYYY-MM-DD` using anchor date + timezone
+    - parses explicit clock-time text if AI misses/invalidates time
+    - attempts exact property auto-match by `reference` or `slug` and sets `propertyId` only on deterministic match
+4.  **Apply Path Time Safety**: The client sends `scheduledAtIso` (browser-local `date+time` converted to UTC ISO) when applying suggestions, preventing server-timezone drift.
+5.  **Funnel Metrics**: Generation and apply steps are logged with resolution telemetry, including `dateResolutionSource` (`llm|deterministic|fallback`) and `propertyResolutionSource` (`exact_ref|exact_slug|none`).
 
 ## Critical Debugging Artifact: "Viewing_contactId_fkey" Constraint
 

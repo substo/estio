@@ -42,6 +42,18 @@ import {
     initWhatsAppAudioExtractionWorker,
 } from "@/lib/queue/whatsapp-audio-extraction";
 import type { ViewingSyncProviderDecision } from "@/lib/viewings/sync-engine";
+import {
+    extractClockTimeFromText,
+    extractPropertyRefsFromText,
+    extractPropertySlugCandidatesFromText,
+    extractPropertySlugsFromUrls,
+    formatIsoDateInTimeZone,
+    normalizeIanaTimeZone,
+    normalizeViewingDate,
+    normalizeViewingTime,
+    resolveRelativeViewingDateFromText,
+    shiftIsoDate,
+} from "@/lib/viewings/suggestion-parsing";
 
 const MAX_SELECTION_TEXT_LENGTH = 12000;
 const MAX_CUSTOM_OUTPUT_LENGTH = 2200;
@@ -10119,9 +10131,117 @@ export async function searchConversations(query: string, options?: { limit?: num
     }
 }
 
+type SuggestViewingsContextInput = {
+    anchorMessageId?: string | null;
+    clientNowIso?: string | null;
+    clientTimeZone?: string | null;
+};
+
+type ViewingDateResolutionSource = "llm" | "deterministic" | "fallback";
+type ViewingPropertyResolutionSource = "exact_ref" | "exact_slug" | "none";
+
+function parseClientNowIso(rawIso?: string | null): Date | null {
+    const trimmed = String(rawIso || "").trim();
+    if (!trimmed) return null;
+    const parsed = new Date(trimmed);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed;
+}
+
+function countSources(values: string[]): Record<string, number> {
+    return values.reduce<Record<string, number>>((acc, value) => {
+        const key = String(value || "unknown");
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+    }, {});
+}
+
+async function resolveViewingAnchorDate(args: {
+    conversationInternalId: string;
+    anchorMessageId?: string | null;
+    clientNowIso?: string | null;
+}) {
+    const desiredMessageId = String(args.anchorMessageId || "").trim();
+    if (desiredMessageId) {
+        const anchorMessage = await db.message.findFirst({
+            where: {
+                id: desiredMessageId,
+                conversationId: args.conversationInternalId,
+            },
+            select: { id: true, createdAt: true },
+        });
+
+        if (anchorMessage?.createdAt) {
+            return {
+                anchorDate: anchorMessage.createdAt,
+                anchorSource: "message" as const,
+                anchorMessageId: anchorMessage.id,
+            };
+        }
+    }
+
+    const clientNow = parseClientNowIso(args.clientNowIso);
+    if (clientNow) {
+        return {
+            anchorDate: clientNow,
+            anchorSource: "client_now" as const,
+            anchorMessageId: null,
+        };
+    }
+
+    return {
+        anchorDate: new Date(),
+        anchorSource: "server_now" as const,
+        anchorMessageId: null,
+    };
+}
+
+async function resolveExactViewingPropertyMatch(locationId: string, sourceText: string): Promise<{
+    propertyId: string | null;
+    source: ViewingPropertyResolutionSource;
+}> {
+    const refs = extractPropertyRefsFromText(sourceText);
+    if (refs.length > 0) {
+        const refMatch = await db.property.findFirst({
+            where: {
+                locationId,
+                OR: refs.map((reference) => ({
+                    reference: { equals: reference, mode: "insensitive" },
+                })),
+            },
+            select: { id: true },
+        });
+        if (refMatch?.id) {
+            return { propertyId: refMatch.id, source: "exact_ref" };
+        }
+    }
+
+    const slugCandidates = Array.from(new Set([
+        ...extractPropertySlugsFromUrls(sourceText),
+        ...extractPropertySlugCandidatesFromText(sourceText),
+    ])).slice(0, 30);
+
+    if (slugCandidates.length > 0) {
+        const slugMatch = await db.property.findFirst({
+            where: {
+                locationId,
+                OR: slugCandidates.map((slug) => ({
+                    slug: { equals: slug, mode: "insensitive" },
+                })),
+            },
+            select: { id: true },
+        });
+        if (slugMatch?.id) {
+            return { propertyId: slugMatch.id, source: "exact_slug" };
+        }
+    }
+
+    return { propertyId: null, source: "none" };
+}
 
 const SelectionViewingSuggestionSchema = z.object({
     propertyDescription: z.string().describe("The name, title, reference, or description of the property being viewed."),
+    propertyId: z.string().optional().nullable().describe("Resolved property ID for exact reference/slug matches. Null if no deterministic match."),
     date: z.string().optional().nullable().describe("The date of the viewing, in ISO 8601 format (YYYY-MM-DD). If no clear date is mentioned, leave null."),
     time: z.string().optional().nullable().describe("The time of the viewing, in HH:mm format (24-hour). If no clear time is mentioned, leave null."),
     notes: z.string().optional().nullable().describe("Any additional notes or context about the viewing, such as the person attending or specific requirements."),
@@ -10136,7 +10256,8 @@ export type SelectionViewingSuggestion = z.infer<typeof SelectionViewingSuggesti
 export async function suggestViewingsFromSelection(
     conversationId: string,
     selectionText: string,
-    requestedModelId?: string
+    requestedModelId?: string,
+    contextInput?: SuggestViewingsContextInput
 ) {
     const { userId: clerkUserId } = await auth();
     if (!clerkUserId) {
@@ -10152,8 +10273,12 @@ export async function suggestViewingsFromSelection(
         return { success: false, error: "Selection is too short to suggest viewings." as const };
     }
 
-    const conversation = await db.conversation.findUnique({
-        where: { id: conversationId },
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const conversation = await db.conversation.findFirst({
+        where: {
+            id: conversationId,
+            locationId: location.id,
+        },
         select: {
             id: true,
             contactId: true,
@@ -10181,6 +10306,16 @@ export async function suggestViewingsFromSelection(
         return { success: false, error: "Conversation not found" as const };
     }
 
+    const context = contextInput || {};
+    const clientTimeZone = normalizeIanaTimeZone(context.clientTimeZone);
+    const anchorContext = await resolveViewingAnchorDate({
+        conversationInternalId: conversation.id,
+        anchorMessageId: context.anchorMessageId,
+        clientNowIso: context.clientNowIso,
+    });
+    const anchorDateIso = formatIsoDateInTimeZone(anchorContext.anchorDate, clientTimeZone);
+    const anchorTomorrowIso = shiftIsoDate(anchorDateIso, 1) || anchorDateIso;
+
     const modelId = requestedModelId || getModelForTask("suggest_viewings");
 
     await persistViewingsSuggestionFunnelEvent({
@@ -10191,6 +10326,10 @@ export async function suggestViewingsFromSelection(
             source: "selection_toolbar",
             selectedTextLength: trimmedText.length,
             modelId,
+            anchorSource: anchorContext.anchorSource,
+            anchorMessageId: anchorContext.anchorMessageId,
+            anchorDateIso,
+            clientTimeZone,
         },
     });
 
@@ -10200,12 +10339,21 @@ Extract the property description, date (YYYY-MM-DD), time (HH:mm), and any relev
 If multiple viewings are mentioned, extract them all.
 Return a maximum of ${MAX_TASK_SUGGESTIONS} suggestions.
 
+DATE RESOLUTION RULES:
+- Relative dates must be converted to absolute dates using this anchor timezone and date:
+  - Timezone: ${clientTimeZone}
+  - Anchor date ("today"): ${anchorDateIso}
+  - "tomorrow": ${anchorTomorrowIso}
+- For weekday names (e.g. Monday), resolve to the next upcoming weekday after the anchor date.
+- Never return relative words like "today" or "tomorrow" in the date field.
+
 OUTPUT FORMAT:
 You must return a valid JSON object matching this schema:
 {
   "suggestions": [
     {
       "propertyDescription": "string",
+      "propertyId": "string or null",
       "date": "YYYY-MM-DD or null",
       "time": "HH:mm or null",
       "notes": "string or null"
@@ -10247,6 +10395,13 @@ ${interestedPropertiesText}
 Contact's Real Estate Requirements:
 ${reqs}
 
+Anchor Context:
+- Anchor Source: ${anchorContext.anchorSource}
+- Anchor Message ID: ${anchorContext.anchorMessageId || "none"}
+- Anchor Date (today): ${anchorDateIso}
+- Tomorrow Date: ${anchorTomorrowIso}
+- Timezone: ${clientTimeZone}
+
 Text Snippet:
 """
 ${trimmedText}
@@ -10282,6 +10437,49 @@ ${trimmedText}
             throw new Error("AI returned data that didn't match the expected schema.");
         }
 
+        const resolvedSuggestions = await Promise.all(validation.data.suggestions.map(async (rawSuggestion) => {
+            const sourceText = [
+                rawSuggestion.propertyDescription,
+                rawSuggestion.notes,
+                trimmedText,
+            ].filter(Boolean).join("\n");
+
+            const propertyMatch = await resolveExactViewingPropertyMatch(location.id, sourceText);
+            const llmDate = normalizeViewingDate(rawSuggestion.date);
+
+            let date = llmDate;
+            let dateResolutionSource: ViewingDateResolutionSource = llmDate ? "llm" : "fallback";
+            if (!date) {
+                const deterministicDate = resolveRelativeViewingDateFromText({
+                    text: sourceText,
+                    anchorDate: anchorContext.anchorDate,
+                    timeZone: clientTimeZone,
+                });
+                if (deterministicDate) {
+                    date = deterministicDate;
+                    dateResolutionSource = "deterministic";
+                }
+            }
+
+            const time = normalizeViewingTime(rawSuggestion.time) || extractClockTimeFromText(sourceText);
+
+            return {
+                suggestion: {
+                    propertyDescription: String(rawSuggestion.propertyDescription || "").trim(),
+                    propertyId: propertyMatch.propertyId,
+                    date: date || null,
+                    time: time || null,
+                    notes: rawSuggestion.notes || null,
+                },
+                dateResolutionSource,
+                propertyResolutionSource: propertyMatch.source,
+            };
+        }));
+
+        const dateResolutionSources = resolvedSuggestions.map((item) => item.dateResolutionSource);
+        const propertyResolutionSources = resolvedSuggestions.map((item) => item.propertyResolutionSource);
+        const normalizedSuggestions = resolvedSuggestions.map((item) => item.suggestion);
+
         await persistSelectionAiExecution({
             conversationInternalId: conversation.id,
             taskTitle: "Suggest Viewings from Selection",
@@ -10289,7 +10487,14 @@ ${trimmedText}
             modelId,
             promptText: `${systemPrompt}\n\n${promptText}`,
             rawOutput: rawJsonRaw,
-            normalizedOutput: JSON.stringify(validation.data),
+            normalizedOutput: JSON.stringify({
+                suggestions: normalizedSuggestions,
+                dateResolutionSources,
+                propertyResolutionSources,
+                anchorSource: anchorContext.anchorSource,
+                anchorDateIso,
+                clientTimeZone,
+            }),
             usage: {
                 promptTokens: result.usage.promptTokens,
                 completionTokens: result.usage.completionTokens,
@@ -10303,15 +10508,20 @@ ${trimmedText}
             contactId: conversation.contactId,
             payload: {
                 source: "selection_toolbar",
-                suggestionCount: validation.data.suggestions.length,
+                suggestionCount: normalizedSuggestions.length,
                 modelId,
                 latencyMs,
+                anchorSource: anchorContext.anchorSource,
+                anchorDateIso,
+                clientTimeZone,
+                dateResolutionSourceCounts: countSources(dateResolutionSources),
+                propertyResolutionSourceCounts: countSources(propertyResolutionSources),
             },
         });
 
         return {
             success: true as const,
-            suggestions: validation.data.suggestions,
+            suggestions: normalizedSuggestions,
             contactId: conversation.contactId,
         };
 
@@ -10343,6 +10553,7 @@ const ApplySelectionViewingSuggestionSchema = z.object({
     userId: z.string().min(1),
     date: z.string().min(1),
     time: z.string().optional().nullable(),
+    scheduledAtIso: z.string().optional().nullable(),
     notes: z.string().optional().nullable(),
 });
 
@@ -10407,8 +10618,19 @@ export async function applySuggestedViewingsFromSelection(
             formData.append('propertyId', suggestion.propertyId);
             formData.append('userId', suggestion.userId);
 
-            let finalDate = suggestion.date;
-            if (suggestion.time && finalDate) {
+            let finalDate = String(suggestion.scheduledAtIso || "").trim();
+            if (finalDate) {
+                const parsedScheduledAt = new Date(finalDate);
+                if (Number.isNaN(parsedScheduledAt.getTime())) {
+                    finalDate = "";
+                }
+            }
+
+            if (!finalDate) {
+                finalDate = suggestion.date;
+            }
+
+            if (!String(suggestion.scheduledAtIso || "").trim() && suggestion.time && finalDate) {
                 finalDate = `${finalDate}T${suggestion.time}`;
             } else if (!finalDate) {
                 finalDate = new Date().toISOString();

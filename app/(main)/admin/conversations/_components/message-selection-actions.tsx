@@ -1572,6 +1572,7 @@ export function MessageSelectionActions({
                 selectionText={suggestSelectionText}
                 conversationId={conversationId || undefined}
                 activeAiModel={activeAiModel || undefined}
+                anchorMessageId={messageId || undefined}
             />
         </>
     );

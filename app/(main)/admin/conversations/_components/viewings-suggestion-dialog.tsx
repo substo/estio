@@ -20,12 +20,13 @@ interface ViewingsSuggestionDialogProps {
     selectionText: string;
     conversationId?: string;
     activeAiModel?: string;
+    anchorMessageId?: string;
 }
 
 type SuggestedViewingState = SelectionViewingSuggestion & {
     id: string;
     selected: boolean;
-    propertyId?: string;
+    propertyId?: string | null;
     userId?: string;
 };
 
@@ -38,14 +39,14 @@ function formatViewingSyncWarning(warning: ApplySuggestedViewingWarning): string
     return `${warning.description}: Google Calendar was skipped because the assigned agent has no target Google calendar selected.`;
 }
 
-export function ViewingsSuggestionDialog({ open, onOpenChange, selectionText, conversationId, activeAiModel }: ViewingsSuggestionDialogProps) {
+export function ViewingsSuggestionDialog({ open, onOpenChange, selectionText, conversationId, activeAiModel, anchorMessageId }: ViewingsSuggestionDialogProps) {
     const [isSuggesting, setIsSuggesting] = useState(false);
     const [isApplying, setIsApplying] = useState(false);
     const [suggestions, setSuggestions] = useState<SuggestedViewingState[]>([]);
     const [resolvedContactId, setResolvedContactId] = useState<string | null>(null);
 
     // Dropdown data
-    const [properties, setProperties] = useState<{ id: string; title: string; unitNumber?: string | null }[]>([]);
+    const [properties, setProperties] = useState<{ id: string; title: string; reference?: string | null; unitNumber?: string | null }[]>([]);
     const [users, setUsers] = useState<{ id: string; name: string | null; email: string; }[]>([]);
 
     const loadDropdowns = useCallback(async () => {
@@ -64,7 +65,16 @@ export function ViewingsSuggestionDialog({ open, onOpenChange, selectionText, co
         setSuggestions([]);
 
         try {
-            const result = await suggestViewingsFromSelection(conversationId, selectionText, activeAiModel);
+            const result = await suggestViewingsFromSelection(
+                conversationId,
+                selectionText,
+                activeAiModel,
+                {
+                    anchorMessageId,
+                    clientNowIso: new Date().toISOString(),
+                    clientTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || undefined,
+                }
+            );
             if (result.success && result.suggestions) {
                 if (result.contactId) setResolvedContactId(result.contactId);
                 setSuggestions(result.suggestions.map((s, idx) => ({
@@ -80,7 +90,7 @@ export function ViewingsSuggestionDialog({ open, onOpenChange, selectionText, co
         } finally {
             setIsSuggesting(false);
         }
-    }, [selectionText, conversationId, activeAiModel]);
+    }, [selectionText, conversationId, activeAiModel, anchorMessageId]);
 
     useEffect(() => {
         if (open) {
@@ -126,14 +136,22 @@ export function ViewingsSuggestionDialog({ open, onOpenChange, selectionText, co
                 return;
             }
 
-            const suggestionsPayload = selectedSuggestions.map((s) => ({
-                propertyId: s.propertyId!,
-                propertyDescription: s.propertyDescription,
-                userId: s.userId!,
-                date: s.date!,
-                time: s.time || null,
-                notes: s.notes || null,
-            }));
+            const suggestionsPayload = selectedSuggestions.map((s) => {
+                const localDateTime = s.date && s.time ? new Date(`${s.date}T${s.time}:00`) : null;
+                const scheduledAtIso = localDateTime && !Number.isNaN(localDateTime.getTime())
+                    ? localDateTime.toISOString()
+                    : null;
+
+                return {
+                    propertyId: s.propertyId!,
+                    propertyDescription: s.propertyDescription,
+                    userId: s.userId!,
+                    date: s.date!,
+                    time: s.time || null,
+                    scheduledAtIso,
+                    notes: s.notes || null,
+                };
+            });
 
             const result = await applySuggestedViewingsFromSelection(
                 conversationId,
@@ -173,7 +191,7 @@ export function ViewingsSuggestionDialog({ open, onOpenChange, selectionText, co
 
     const propertyOptions = properties.map(p => ({
         value: p.id,
-        label: `${(p as any).reference ? `[${(p as any).reference}] ` : ""}${(p as any).unitNumber ? `Unit ${(p as any).unitNumber} - ` : ""}${p.title}`
+        label: `${p.reference ? `[${p.reference}] ` : ""}${p.unitNumber ? `Unit ${p.unitNumber} - ` : ""}${p.title}`
     }));
 
     return (
