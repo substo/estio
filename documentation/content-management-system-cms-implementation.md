@@ -3,6 +3,8 @@
 ## Overview
 The application now includes a "Simple CMS" (Content Management System) that allows Tenants (Agencies) to create generic content pages and manage a blog. This transforms the app from a pure "Listing Engine" into a "Website Builder".
 
+Settings storage details for CMS-linked system pages are defined in [site-settings-platform.md](/Users/martingreen/Projects/IDX/documentation/site-settings-platform.md).
+
 ## Data Model
 
 Two new models were added to `prisma/schema.prisma` to support this feature.
@@ -23,7 +25,7 @@ Used for static pages like "About Us", "Sellers Guide", "Privacy Policy".
 
 ### 2. Home Page Configuration (New Phase 7)
 The Home Page is a special "System Page" managed via the same Block Editor UI.
-*   **Storage:** Instead of a `ContentPage` row, it updates `SiteConfig.homeSections` and `SiteConfig.heroContent`.
+*   **Storage:** Instead of a `ContentPage` row, it updates `location.content` settings (`homeSections`, `heroContent`) via `SettingsService`. Legacy `SiteConfig` can be dual-written during migration.
 *   **Capabilities:**
     *   **Reorder Sections:** Drag & drop Hero, Featured Properties, Partners, etc.
     *   **Edit Content:** Customize Hero text/images directly.
@@ -45,13 +47,9 @@ Used for time-sensitive updates like "Market Analysis Q1" or "New Development La
 
 ### authentication & Multi-Tenancy
 *   **Location Resolution**:
-    *   We do not rely on Clerk's metadata for `locationId` due to synchronization latency.
-    *   Instead, we resolve the `locationId` dynamically on every Server Action by querying the `User` model and including the `locations` relation:
-        ```typescript
-        const user = await db.user.findUnique({ where: { clerkId: userId }, include: { locations: true } });
-        const orgId = user?.locations[0]?.id;
-        ```
-    *   This ensures actions are always performed against the user's active database location.
+    *   Actions resolve explicit location context (`getLocationContext` and/or request-supplied `locationId`).
+    *   Writes require strict location-admin authorization with `verifyUserIsLocationAdmin` (backed by `UserLocationRole.ADMIN`).
+    *   This avoids implicit `user.locations[0]` behavior and enforces scoped writes per location.
 
 ### Forms & Error Handling
 *   **Hooks**: We use `useFormState` (from `react-dom`) to handle Server Action responses.
@@ -75,7 +73,7 @@ Used for time-sensitive updates like "Market Analysis Q1" or "New Development La
     *   URL Pattern: `https://imagedelivery.net/<ACCOUNT_HASH>/<IMAGE_ID>/public`.
 
 ### Site Settings (Navigation)
-*   **Footer Links**: A new JSON field `footerLinks` was added to `SiteConfig` to manage footer menus independently of the header.
+*   **Footer Links**: Stored in `location.navigation.footerLinks` (with optional legacy mirror to `SiteConfig.footerLinks` while dual-write is enabled).
 *   **Menu Builder (Drag & Drop)**:
     *   Implemented a drag-and-drop interface (`@dnd-kit`) for the Main Menu, Footer Menu, and Legal Menu.
     *   Supports reordering of both internal page links and custom external URLs.

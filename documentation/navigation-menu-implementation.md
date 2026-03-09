@@ -7,20 +7,24 @@ The Navigation Menu system allows Tenants (Agencies) to customize the links in t
 
 The system features a **Drag-and-Drop** interface for intuitive reordering.
 
-## Data Model
-Menus are stored as JSON arrays within the `SiteConfig` model in the PostgreSQL database. This allows for flexibility without complex relational tables for simple lists.
+Storage and migration model details are documented in [site-settings-platform.md](/Users/martingreen/Projects/IDX/documentation/site-settings-platform.md).
 
-### Schema (`prisma/schema.prisma`)
-```prisma
-model SiteConfig {
-  // ...
-  navLinks       Json?  // Main Header Menu
-  footerLinks    Json?  // Footer Menu
-  socialLinks    Json?  // Social Media Icons
-  legalLinks     Json?  // Bottom Legal Menu
-  // ...
-}
-```
+## Data Model
+Menus are persisted in `settings_documents` through `SettingsService`:
+
+- Scope: `LOCATION`
+- Domain: `location.navigation`
+- Payload keys:
+  - `navLinks`
+  - `footerLinks`
+  - `socialLinks`
+  - `legalLinks`
+  - `footerDisclaimer`
+  - `footerBio`
+  - `menuStyle`
+  - `publicListingEnabled`
+
+Legacy `SiteConfig` is still dual-written only when `SETTINGS_DUAL_WRITE_LEGACY=true`.
 
 ### JSON Structure
 The stored JSON structure is clean and minimal. We do **not** store unique IDs in the database to keep the data portable and simple.
@@ -86,9 +90,10 @@ We use `@dnd-kit` for its headless, accessible, and robust drag-and-drop primiti
 Located at: `app/(main)/admin/site-settings/navigation/actions.ts`
 
 1.  **Authentication**: Verifies the current user and resolves their `locationId`.
-2.  **Validation**: Ensures the user belongs to the location they are trying to update.
-3.  **Update**: Performs a `db.siteConfig.update` with the cleaned JSON array.
-4.  **Revalidation**: Crucially, it calls `revalidatePath("/admin/site-settings/navigation")` to ensure the UI updates immediately.
+2.  **Authorization**: Enforces strict location-admin access (`verifyUserIsLocationAdmin`).
+3.  **Update**: Upserts `location.navigation` via `settingsService.upsertDocument`.
+4.  **Compatibility Window**: Optionally dual-writes to `SiteConfig` while migration flags are enabled.
+5.  **Revalidation**: Calls `revalidatePath("/admin/site-settings/navigation")` so UI updates immediately.
 
 ### Forms & Persistence
 - **Site Settings Form**: For the main settings page (`/admin/site-settings`), which also includes a menu editor, we manually serialize the links to a hidden JSON input (`navLinksJson`) to pass them through the standard `FormData` submission flow.
@@ -101,7 +106,7 @@ The system allows admins to choose the animation style for the mobile/tablet nav
 
 **Implementation**:
 - **Selector**: `MenuStyleSelector` component in `app/(main)/admin/site-settings/navigation/_components/menu-style-selector.tsx`.
-- **Storage**: `SiteConfig.theme.menuStyle` ("side" | "top").
+- **Storage**: `location.navigation.menuStyle` ("side" | "top"), with legacy mirror to `SiteConfig.theme.menuStyle` when dual-write is enabled.
 - **Components**:
     - **Side**: Standard vertical list.
     - **Top**: Uses Shadcn `NavigationMenu` for horizontal layout with hover-triggered dropdowns.

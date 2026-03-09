@@ -423,7 +423,7 @@ export function ChatWindow({
     );
 
     return (
-        <div className="h-full flex flex-col bg-white min-w-0 overflow-hidden">
+        <div data-chat-active-conversation-id={conversation.id} className="h-full flex flex-col bg-white min-w-0 overflow-hidden">
             {/* Header */}
             <div className="h-16 border-b flex items-center px-3 sm:px-6 shrink-0 justify-between bg-white z-10 shadow-sm gap-2">
                 <div className="flex items-center gap-2 min-w-0 flex-1">

@@ -110,7 +110,8 @@ Search server logs for the tag `[AI Draft]`.
 
 ### Common Issues
 1.  **"Error generating draft"**:
-    -   Check if the Google Gemini API Key is configured in `SiteConfig` or `.env`.
+    -   Check if the Google Gemini API key exists in `settings_secrets` (`location.ai` / `google_ai_api_key`) or fallback `.env` where applicable.
+    -   Verify settings encryption env vars are set (`SETTINGS_ENCRYPTION_KEYS`, `SETTINGS_ENCRYPTION_PRIMARY_KEY_ID`).
 
 ## 6. AI Model Selection
 

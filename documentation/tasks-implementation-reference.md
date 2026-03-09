@@ -197,6 +197,10 @@ Cron endpoint: [`app/api/cron/task-sync/route.ts`](/Users/martingreen/Projects/I
 - Optional bearer secret check via `CRON_SECRET`
 - Uses `CronGuard` lock/resource checks to avoid overlap and high-load runs
 - Processes batch with `processTaskSyncOutboxBatch({ batchSize: 25 })`
+- Also processes viewing outbox jobs with `processViewingSyncOutboxBatch({ batchSize: 25 })`
+
+> [!NOTE]
+> Viewing updates can trigger this cron endpoint immediately via an authenticated server-side request, so viewing sync does not always wait for the next scheduler tick. Full details live in [viewing-creation-architecture.md](/Users/martingreen/Projects/IDX/documentation/viewing-creation-architecture.md).
 
 ## UI Surfaces
 

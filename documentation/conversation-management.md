@@ -207,6 +207,16 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
     - conversation/timeline ⟷ mission control
   - Pane-swipe is edge-scoped (24px left/right edge zones) with gesture arbitration so normal scroll/pan in content does not change panes.
   - Gesture guards ignore text-input and `data-no-pane-swipe` zones, and they defer to explicit horizontal scrollers marked with `data-horizontal-scroll`.
+  - The mobile gesture recognizer requires horizontal dominance plus distance/velocity thresholds before changing panes. Vertical scroll intent blocks pane switching.
+  - Mobile pane roots are treated as `min-w-0`, `max-w-full`, and `overflow-x-hidden`; the UI should wrap or truncate content before introducing horizontal scroll.
+  - The conversation list header is split for mobile density:
+    - search stays on its own row
+    - lower-priority list actions move into an overflow menu
+  - The thread header keeps only critical actions visible on mobile. Secondary actions move into a `More` menu instead of forcing horizontal action-strip scrolling.
+  - The shared composer wraps on mobile and uses reduced control widths so channel/model selectors do not widen the pane.
+  - Message body content prefers wrapping over horizontal scrolling. Explicit horizontal scrolling is reserved for marked inner containers only (for example audio controls).
+  - HTML email rendering inside the iframe is width-constrained (`html/body/table/pre/code` hardening) so wide email markup does not force the entire thread pane beyond the viewport.
+  - Development-only overflow diagnostics log when the active mobile pane exceeds viewport width, including the most likely overflowing descendant.
   - The thread header exposes an explicit **Back** action to return to the full-screen list.
   - Mission Control exposes a top-left **Back** action to return to the conversation/timeline pane.
   - Desktop (`>=1024px`) retains the resizable tri-panel layout.

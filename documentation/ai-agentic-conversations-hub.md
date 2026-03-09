@@ -45,6 +45,7 @@ We chose to build this **internally** rather than relying on GoHighLevel's nativ
     *   **Unified Hub**: A single interface managing both individual "Chats" and multi-party "Deals".
     *   **Deal Mode Toggle**: Users can switch between standard chat view and "Deal Mode" to manage complex negotiations.
     *   **Instant Switching**: The UI uses internal state caching to switch conversations instantly, showing a loader only for the message content.
+    *   **Mobile Contract**: Mobile uses full-screen panes for list, thread/timeline, and Mission Control. Exact mobile layout, gesture arbitration, and overflow rules are documented in [conversation-management.md](/Users/martingreen/Projects/IDX/documentation/conversation-management.md).
 
 ### Mar 2026 Performance Rollout
 The hub now has a performance-oriented read path for larger inboxes:

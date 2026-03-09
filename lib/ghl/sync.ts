@@ -2,6 +2,7 @@ import db from "@/lib/db";
 import { getMessages, getConversations, getConversation } from "./conversations";
 import { ensureLocalContactSynced } from "@/lib/crm/contact-sync";
 import { Prisma } from "@prisma/client";
+import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-events";
 
 function isLocalSyntheticConversationId(id: string | null | undefined) {
     const value = String(id || "").trim();
@@ -163,6 +164,17 @@ export async function syncMessageFromWebhook(payload: any) {
             source: payload.source,
             createdAt: dateAdded
         }
+    });
+
+    void publishConversationRealtimeEvent({
+        locationId: location.id,
+        conversationId: conversation.ghlConversationId,
+        type: direction === "inbound" ? "message.inbound" : "message.outbound",
+        payload: {
+            messageId: ghlMessageId,
+            messageType,
+            direction,
+        },
     });
 }
 

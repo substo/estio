@@ -8,11 +8,17 @@ Estio uses Google Gemini models across conversation drafting, selection actions,
 
 **Path:** `/admin/settings/ai`
 
-The settings page stores model and API configuration in `SiteConfig`.
+The settings page now writes through `SettingsService`:
 
-## Core Fields in `SiteConfig`
+- Non-secret model configuration is stored in `settings_documents` under domain `location.ai`.
+- The API key is stored in `settings_secrets` under secret key `google_ai_api_key` (encrypted at rest).
+- During migration windows, legacy `SiteConfig` dual-write may still be enabled via feature flags.
 
-- `googleAiApiKey`
+For storage architecture, migration flags, and encryption/key rotation procedures, see [site-settings-platform.md](/Users/martingreen/Projects/IDX/documentation/site-settings-platform.md).
+
+## Core Fields in `location.ai`
+
+- `googleAiApiKey` (stored as encrypted secret in `settings_secrets`)
 - `googleAiModel` (general / draft default)
 - `googleAiModelExtraction` (stage 1 extraction)
 - `googleAiModelDesign` (stage 2 design)

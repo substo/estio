@@ -18,6 +18,7 @@ interface ConversationListProps {
     conversations: Conversation[];
     selectedId: string | null;
     onSelect: (id: string) => void;
+    onHoverConversation?: (id: string) => void;
     hasMore?: boolean;
     isLoadingMore?: boolean;
     onLoadMore?: () => void;
@@ -74,6 +75,7 @@ export function ConversationList({
     conversations,
     selectedId,
     onSelect,
+    onHoverConversation,
     hasMore = false,
     isLoadingMore = false,
     onLoadMore,
@@ -531,6 +533,7 @@ export function ConversationList({
                     const isChecked = selectedIds?.has(c.id);
                     const row = (
                         <div
+                            data-conversation-id={c.id}
                             className={cn(
                                 "border-b transition-colors flex items-start py-2 pl-2 pr-3 cursor-pointer w-full min-w-0",
                                 selectedId === c.id && !isSelectionMode ? "bg-slate-100 border-l-blue-500" : "border-l-transparent",
@@ -547,6 +550,7 @@ export function ConversationList({
                                     onSelect(c.id);
                                 }
                             }}
+                            onMouseEnter={() => onHoverConversation?.(c.id)}
                         >
                             {/* Checkbox for Selection Mode */}
                             {isSelectionMode && onToggleSelect && (

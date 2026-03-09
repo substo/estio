@@ -1,6 +1,14 @@
 # Theming & Branding
 
-Estio allows agencies (Tenants) to fully customize the look and feel of their public site and dashboard. This configuration is stored in the `SiteConfig` model under the `theme` JSON field.
+Estio allows agencies (Tenants) to fully customize the look and feel of their public site and dashboard. Public-site branding settings are now persisted through the centralized settings platform:
+
+- `location.public_site` for domain, theme, contact, and core branding payload
+- `location.navigation` for navigation/footer/social/legal items
+- `location.content` for system-page content configs (favorites/search/submissions)
+
+Legacy `SiteConfig` writes may still occur during migration windows when dual-write is enabled.
+
+For the canonical storage/encryption/migration model, see [site-settings-platform.md](/Users/martingreen/Projects/IDX/documentation/site-settings-platform.md).
 
 ## 1. Logo System (Dual Logo Support)
 
@@ -52,7 +60,7 @@ The Footer follows a prioritization logic similar to the Header:
 
 ### Footer Bio
 The text appearing below the logo in the footer is customizable via **Admin > Site Settings > Navigation**.
-*   **Field**: `footerBio` (SiteConfig).
+*   **Field**: `footerBio` (`location.navigation` settings domain).
 *   **Default**: "Your trusted partner in real estate. We bring professionalism and local expertise to every transaction."
 *   **Style**: Renders with `whitespace-pre-wrap` to preserve line breaks.
 
@@ -69,7 +77,7 @@ All logos are hosted on **Cloudflare Images** for performance and optimization.
 The system supports configurable header styles, allowing agencies to choose how the navigation bar interacts with the page content.
 
 ### Global Configuration
-Configured in **Admin > Site Settings > Header Configuration**, stored in `SiteConfig.theme.headerStyle`.
+Configured in **Admin > Site Settings > Header Configuration**, stored in `location.public_site.theme.headerStyle`.
 
 *   **Transparent (Overlay)**:
     *   **Default Behavior**: The header background is transparent, overlaying the hero image or top content.
@@ -95,7 +103,7 @@ When a page uses **Transparent** header style, a **Hero Background Image** is re
     *   Browse previously uploaded images.
     *   Upload new images directly.
     *   See a thumbnail preview of the selected image.
-*   **Storage**: Stored as a full Cloudflare Image URL in `ContentPage.heroImage` or `SiteConfig.favoritesConfig.heroImage` / `SiteConfig.searchConfig.heroImage`.
+*   **Storage**: Stored as a full Cloudflare Image URL in `ContentPage.heroImage` or `location.content.favoritesConfig.heroImage` / `location.content.searchConfig.heroImage`.
 
 ### Button Styling
 The header buttons adapt to the header state to ensure contrast and hierarchy:

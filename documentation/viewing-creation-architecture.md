@@ -2,26 +2,77 @@
 
 ## Overview
 
-The Viewings system in Estio allows agents and administrators to schedule property viewings for contacts. Viewings are deeply integrated into the contact's CRM history, the `Property` model, the AI Suggestion Engine, and are synchronously linked to the agent's connected Google Calendar.
+The Viewings system in Estio allows agents and administrators to schedule property viewings for contacts. Viewings are deeply integrated into contact history, the `Property` model, the AI suggestion pipeline, and provider sync-out for Google Calendar and GHL.
 
-This document outlines the architecture, data models, integration components, UI, AI pipeline, and specific debugging hurdles overcome during implementation.
+This document is the source of truth for viewing scheduling, timezone handling, and provider sync behavior.
 
 ## Data Models
 
-The feature uses a robust, asynchronous synchronization pattern (matching the `Task` architecture) to ensure that backend database operations complete quickly, while external API calls (like Google Calendar) are handled safely via an outbox queue.
+The feature uses a durable outbox architecture so local DB writes finish first and external provider mutations run safely afterward.
 
-1.  **`Viewing`**: The core application model storing `date`, `duration`, `endAt`, `notes`, `title`, `description`, `location`, `status`, `userId` (agent assigned), `contactId` (the client), and `propertyId`.
-2.  **`ViewingOutbox`**: A staging table where local viewing mutations (create, update, delete) are queued as jobs.
-3.  **`ViewingSync`**: A registry tracking the synchronization state of a given `Viewing` per external provider (e.g., Google Calendar), holding the external `providerId` (the Google Event ID), timestamps, and error states.
+1. **`Viewing`**
+   - Local source of truth.
+   - Stores canonical UTC instant in `date`.
+   - Stores timezone metadata in `scheduledTimeZone` and `scheduledLocal` so local-time intent can be rendered deterministically later.
+   - Stores sync-related metadata including `calendarEventId`, `ghlAppointmentId`, `syncVersion`, `syncRecords`, and `outboxJobs`.
+2. **`ViewingOutbox`**
+   - Durable provider job queue for `create`, `update`, and `delete`.
+   - Uses unique `idempotencyKey` in the shape `viewingId:provider:operation:v{syncVersion}`.
+3. **`ViewingSync`**
+   - Provider sync state per viewing/provider/account.
+   - Tracks `providerContainerId`, `providerViewingId`, `status`, `lastSyncedAt`, attempts, and last error.
+
+Current Prisma schema reference:
+
+- `Viewing`: [`prisma/schema.prisma`](/Users/martingreen/Projects/IDX/prisma/schema.prisma)
+- `ViewingSync`: [`prisma/schema.prisma`](/Users/martingreen/Projects/IDX/prisma/schema.prisma)
+- `ViewingOutbox`: [`prisma/schema.prisma`](/Users/martingreen/Projects/IDX/prisma/schema.prisma)
+
+## Timezone Source of Truth
+
+Viewing scheduling now uses **agent timezone** as the source of truth.
+
+1. The server resolves timezone in this order:
+   - `User.timeZone`
+   - fallback `Location.timeZone`
+   - otherwise validation fails
+2. Local scheduling input is parsed with an explicit IANA timezone and converted to canonical UTC.
+3. The original local value is retained in `scheduledLocal` and the zone is retained in `scheduledTimeZone`.
+4. Invalid or ambiguous DST times are rejected rather than guessed.
+
+Current admin surfaces:
+
+- Agent timezone: `/admin/user-profile`
+- Location fallback timezone: `/admin/site-settings`
+- Google Calendar target selection: `/admin/settings/integrations/google`
 
 ## The Synchronization Engine
 
-To avoid blocking the UI while awaiting external APIs:
+The sync path is intentionally split into local mutation, enqueue, and worker execution.
 
-1.  **Server Actions** (`app/(main)/admin/contacts/actions.ts`): Functions like `createViewing` and `updateViewing` transact directly with Prisma to mutate the `Viewing` table.
-2.  **Enqueueing**: Upon a successful DB mutation, the action immediately calls `enqueueViewingSyncJobs({ viewingId, operation })` from `lib/viewings/sync-engine.ts`. This inserts a record into the `ViewingOutbox`.
-3.  **Cron Processing**: A background worker (e.g., `api/cron/sync-worker`) polls the `ViewingOutbox` and executes the appropriate adapter functions (e.g., `lib/viewings/providers/google-calendar.ts`) to mutate the Google Calendar event.
-4.  **Provider Registration**: The agent configures their preferred Google Calendar via `/admin/settings/integrations/google`, which saves `googleCalendarId` on their `User` record. The sync engine references this ID when publishing events.
+1. **Server Actions**
+   - `createViewing` and `updateViewing` in [`app/(main)/admin/contacts/actions.ts`](/Users/martingreen/Projects/IDX/app/(main)/admin/contacts/actions.ts) write to Prisma first.
+2. **Enqueueing**
+   - After the write succeeds, the action calls `enqueueViewingSyncJobs({ viewingId, operation })`.
+3. **Immediate Trigger**
+   - On viewing update, the app also sends an authenticated best-effort request to `GET /api/cron/task-sync` via [`lib/cron/task-sync-trigger.ts`](/Users/martingreen/Projects/IDX/lib/cron/task-sync-trigger.ts).
+   - This reduces visible lag without making the save path depend on provider API latency.
+4. **Cron Worker**
+   - [`app/api/cron/task-sync/route.ts`](/Users/martingreen/Projects/IDX/app/api/cron/task-sync/route.ts) processes both task outbox jobs and viewing outbox jobs.
+5. **Provider Adapters**
+   - Google Calendar: [`lib/viewings/providers/google-calendar.ts`](/Users/martingreen/Projects/IDX/lib/viewings/providers/google-calendar.ts)
+   - GHL: [`lib/viewings/providers/ghl.ts`](/Users/martingreen/Projects/IDX/lib/viewings/providers/ghl.ts)
+6. **Provider Registration**
+   - The assigned agent chooses a preferred Google Calendar, stored on `User.googleCalendarId`.
+   - Existing synced viewings stay on their original remote calendar using `ViewingSync.providerContainerId`.
+
+### Reliability Rules
+
+1. `syncVersion` increments on local viewing updates.
+2. Outbox idempotency is versioned by `syncVersion`.
+3. If a duplicate outbox key is encountered for a row already in `completed` or `dead`, the sync engine re-queues that row instead of silently skipping it.
+
+This prevents the historical failure mode where a later viewing edit reused the old `...:update:v1` key and never produced a fresh Google update.
 
 ## Frontend UI Components
 
@@ -37,10 +88,16 @@ Viewings can be scheduled via natural language selection within a conversation (
     - resolves relative date language (`today`, `tomorrow`, weekdays) to absolute `YYYY-MM-DD` using anchor date + timezone
     - parses explicit clock-time text if AI misses/invalidates time
     - attempts exact property auto-match by `reference` or `slug` and sets `propertyId` only on deterministic match
-4.  **Apply Path Time Safety**: The client sends `scheduledAtIso` (browser-local `date+time` converted to UTC ISO) when applying suggestions, preventing server-timezone drift.
-5.  **Funnel Metrics**: Generation and apply steps are logged with resolution telemetry, including `dateResolutionSource` (`llm|deterministic|fallback`) and `propertyResolutionSource` (`exact_ref|exact_slug|none`).
+4. **Apply Path Time Safety**
+   - Suggestion apply and manual scheduling now send explicit timezone context (`scheduledLocal` + `scheduledTimeZone`, with absolute ISO fallback support where needed).
+   - The server parses with the resolved agent timezone and stores UTC + timezone metadata.
+5. **Funnel Metrics**
+   - Generation and apply steps are logged with resolution telemetry, including `dateResolutionSource` (`llm|deterministic|fallback`) and `propertyResolutionSource` (`exact_ref|exact_slug|none`).
 
-## Critical Debugging Artifact: "Viewing_contactId_fkey" Constraint
+## Legacy Debugging Artifact: `Viewing_contactId_fkey`
+
+> [!NOTE]
+> This section documents an older production hardening issue. It remains relevant as background, but it is not the primary scheduling or sync failure mode anymore.
 
 ### The Problem
 During development, a persistent and critical production bug emerged:

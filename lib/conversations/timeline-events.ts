@@ -9,6 +9,8 @@ type AssembleTimelineOptions =
         conversationId: string;
         includeMessages?: boolean;
         includeActivities?: boolean;
+        take?: number;
+        beforeCursor?: string | null;
     }
     | {
         mode: "deal";
@@ -16,6 +18,8 @@ type AssembleTimelineOptions =
         dealId: string;
         includeMessages?: boolean;
         includeActivities?: boolean;
+        take?: number;
+        beforeCursor?: string | null;
     };
 
 type TimelineMessagePayload = {
@@ -107,6 +111,30 @@ function normalizeViewingAction(status: string): string {
     if (normalized === "completed" || normalized === "done") return "VIEWING_COMPLETED";
     if (normalized === "cancelled" || normalized === "canceled" || normalized === "no_show") return "VIEWING_CANCELLED";
     return "VIEWING_SCHEDULED";
+}
+
+type TimelineCursor = {
+    createdAtMs: number;
+    id: string;
+};
+
+function decodeTimelineCursor(cursor?: string | null): TimelineCursor | null {
+    const value = String(cursor || "").trim();
+    if (!value) return null;
+    const [createdAtPart, idPart] = value.split("::");
+    const createdAtMs = Number(createdAtPart);
+    if (!Number.isFinite(createdAtMs) || createdAtMs <= 0 || !idPart) return null;
+    return {
+        createdAtMs,
+        id: idPart,
+    };
+}
+
+function resolvePerSourceTake(take?: number): number | undefined {
+    const numeric = Number(take);
+    if (!Number.isFinite(numeric) || numeric <= 0) return undefined;
+    const normalized = Math.max(1, Math.floor(numeric));
+    return Math.min(Math.max(normalized * 2, normalized), 500);
 }
 
 async function resolveConversations(options: AssembleTimelineOptions): Promise<ResolvedConversation[]> {
@@ -207,6 +235,8 @@ export async function assembleTimelineEvents(options: AssembleTimelineOptions): 
 }> {
     const includeMessages = options.includeMessages !== false;
     const includeActivities = options.includeActivities !== false;
+    const cursor = decodeTimelineCursor(options.beforeCursor);
+    const perSourceTake = resolvePerSourceTake(options.take);
 
     const conversations = await resolveConversations(options);
     if (conversations.length === 0) {
@@ -217,11 +247,57 @@ export async function assembleTimelineEvents(options: AssembleTimelineOptions): 
     const contactIds = Array.from(new Set(conversations.map((item) => item.contactId)));
     const conversationByContact = buildConversationByContact(conversations);
 
+    const messageWhere: any = { conversationId: { in: conversationIds } };
+    const historyWhere: any = { contactId: { in: contactIds } };
+    const viewingWhere: any = { contactId: { in: contactIds } };
+    const taskWhere: any = { contactId: { in: contactIds }, deletedAt: null };
+
+    if (cursor) {
+        const cursorDate = new Date(cursor.createdAtMs);
+        messageWhere.OR = [
+            { createdAt: { lt: cursorDate } },
+            {
+                AND: [
+                    { createdAt: { equals: cursorDate } },
+                    { id: { lt: cursor.id } },
+                ],
+            },
+        ];
+        historyWhere.OR = [
+            { createdAt: { lt: cursorDate } },
+            {
+                AND: [
+                    { createdAt: { equals: cursorDate } },
+                    { id: { lt: cursor.id } },
+                ],
+            },
+        ];
+        viewingWhere.OR = [
+            { date: { lt: cursorDate } },
+            {
+                AND: [
+                    { date: { equals: cursorDate } },
+                    { id: { lt: cursor.id } },
+                ],
+            },
+        ];
+        taskWhere.OR = [
+            { createdAt: { lt: cursorDate } },
+            {
+                AND: [
+                    { createdAt: { equals: cursorDate } },
+                    { id: { lt: cursor.id } },
+                ],
+            },
+        ];
+    }
+
     const [messageRows, historyRows, viewingRows, taskRows] = await Promise.all([
         includeMessages
             ? db.message.findMany({
-                where: { conversationId: { in: conversationIds } },
-                orderBy: { createdAt: "asc" },
+                where: messageWhere,
+                orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+                ...(perSourceTake ? { take: perSourceTake } : {}),
                 include: {
                     conversation: {
                         select: {
@@ -241,21 +317,18 @@ export async function assembleTimelineEvents(options: AssembleTimelineOptions): 
             : Promise.resolve([] as any[]),
         includeActivities
             ? db.contactHistory.findMany({
-                where: {
-                    contactId: { in: contactIds },
-                },
+                where: historyWhere,
                 include: {
                     user: { select: { name: true, email: true } },
                     contact: { select: { id: true, name: true } },
                 },
-                orderBy: { createdAt: "asc" },
+                orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+                ...(perSourceTake ? { take: perSourceTake } : {}),
             })
             : Promise.resolve([] as any[]),
         includeActivities
             ? db.viewing.findMany({
-                where: {
-                    contactId: { in: contactIds },
-                },
+                where: viewingWhere,
                 include: {
                     property: {
                         select: {
@@ -277,15 +350,13 @@ export async function assembleTimelineEvents(options: AssembleTimelineOptions): 
                         },
                     },
                 },
-                orderBy: { date: "asc" },
+                orderBy: [{ date: "desc" }, { id: "desc" }],
+                ...(perSourceTake ? { take: perSourceTake } : {}),
             })
             : Promise.resolve([] as any[]),
         includeActivities
             ? db.contactTask.findMany({
-                where: {
-                    contactId: { in: contactIds },
-                    deletedAt: null,
-                },
+                where: taskWhere,
                 include: {
                     contact: {
                         select: {
@@ -300,7 +371,8 @@ export async function assembleTimelineEvents(options: AssembleTimelineOptions): 
                         },
                     },
                 },
-                orderBy: [{ createdAt: "asc" }],
+                orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+                ...(perSourceTake ? { take: perSourceTake } : {}),
             })
             : Promise.resolve([] as any[]),
     ]);
@@ -461,9 +533,14 @@ export async function assembleTimelineEvents(options: AssembleTimelineOptions): 
         return ta - tb;
     });
 
+    const normalizedTake = Number(options.take);
+    const boundedEvents = Number.isFinite(normalizedTake) && normalizedTake > 0
+        ? events.slice(-Math.floor(normalizedTake))
+        : events;
+
     return {
         mode: options.mode,
-        events,
+        events: boundedEvents,
         conversations,
     };
 }

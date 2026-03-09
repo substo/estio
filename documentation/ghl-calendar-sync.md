@@ -2,7 +2,10 @@
 
 ## Overview
 
-This feature integrates GoHighLevel (GHL) Calendars into the IDX application, allowing for seamless synchronization of viewing appointments. When a viewing is created in IDX, it automatically reserves a slot in the corresponding GHL Calendar for the assigned agent.
+This feature integrates GoHighLevel (GHL) Calendars into the IDX application for viewing synchronization. This document covers GHL-specific setup and operator expectations only.
+
+> [!NOTE]
+> The full viewing scheduling architecture, timezone model, Google sync behavior, and outbox worker flow are documented in [viewing-creation-architecture.md](/Users/martingreen/Projects/IDX/documentation/viewing-creation-architecture.md).
 
 ## Implementation Details
 
@@ -31,10 +34,10 @@ A dedicated service handles all interactions with the GHL Calendar API:
 > The old `/admin/settings/team` page has been deprecated and consolidated into `/admin/team` (Dec 2025).
 
 ### 4. Viewing Synchronization
-*   **`createViewing` Action**: When a viewing is created:
-    1.  The system checks if the assigned agent has a `ghlCalendarId`.
-    2.  If yes, it calls the GHL API to book the appointment.
-    3.  If successful, the `ghlAppointmentId` is saved to the Viewing record.
+*   Viewing sync now uses the shared `ViewingOutbox` + `ViewingSync` architecture.
+*   On create/update/delete, local mutations enqueue provider jobs first.
+*   GHL sync runs through the shared task-sync cron worker (`/api/cron/task-sync`).
+*   If the assigned agent has a `ghlCalendarId`, the GHL provider attempts to create or update the remote appointment and stores the remote appointment id in sync state.
 
 ## Setup & Configuration
 
@@ -57,8 +60,11 @@ To implement full synchronization (changes in GHL reflecting in IDX), we need to
 *   Update the `Viewing` status in IDX based on the webhook payload.
 
 ### 2. Appointment Management
-*   **Rescheduling**: Implementing update logic in `editViewing` to move GHL appointments when local times change.
-*   **cancellation**: Deleting the GHL appointment when a viewing is cancelled.
+*   **Rescheduling**: Supported through the shared viewing sync engine. Local viewing updates enqueue `update` jobs.
+*   **Cancellation**: Supported through `delete` sync jobs.
+
+> [!WARNING]
+> GHL may still reject a reschedule when the selected slot is no longer available. In that case the outbox row becomes `dead` with the provider error preserved in `ViewingSync.lastError`.
 
 ### 3. Advanced Calendar Configuration
 *   Expose more GHL Calendar settings in the "Create Calendar" dialog (e.g., Availability, Buffers, Notification details).

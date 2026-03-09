@@ -4,6 +4,9 @@ export type ConversationFeatureFlags = {
     workspaceV2: boolean;
     balancedPolling: boolean;
     lazySidebarData: boolean;
+    workspaceSplit: boolean;
+    realtimeSse: boolean;
+    shallowUrlSync: boolean;
     canaryMatch: boolean;
 };
 
@@ -63,11 +66,26 @@ export function getConversationFeatureFlags(locationId?: string | null): Convers
         readEnv("CONVERSATIONS_LAZY_SIDEBAR_DATA", "lazy_sidebar_data", "LAZY_SIDEBAR_DATA"),
         "on"
     );
+    const workspaceSplitMode = parseMode(
+        readEnv("CONVERSATIONS_WORKSPACE_SPLIT", "workspace_split", "WORKSPACE_SPLIT"),
+        "on"
+    );
+    const realtimeSseMode = parseMode(
+        readEnv("CONVERSATIONS_REALTIME_SSE", "realtime_sse", "REALTIME_SSE"),
+        "on"
+    );
+    const shallowUrlSyncMode = parseMode(
+        readEnv("CONVERSATIONS_SHALLOW_URL_SYNC", "shallow_url_sync", "SHALLOW_URL_SYNC"),
+        "on"
+    );
 
     return {
         workspaceV2: evaluateMode(workspaceMode, isCanaryLocation),
         balancedPolling: evaluateMode(pollingMode, isCanaryLocation),
         lazySidebarData: evaluateMode(lazySidebarMode, isCanaryLocation),
+        workspaceSplit: evaluateMode(workspaceSplitMode, isCanaryLocation),
+        realtimeSse: evaluateMode(realtimeSseMode, isCanaryLocation),
+        shallowUrlSync: evaluateMode(shallowUrlSyncMode, isCanaryLocation),
         canaryMatch: isCanaryLocation,
     };
 }

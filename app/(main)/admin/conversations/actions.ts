@@ -21,6 +21,7 @@ import { runGoogleAutoSyncForContact } from "@/lib/google/automation";
 import { createContactTask } from "@/app/(main)/admin/tasks/actions";
 import { createTraceId, withServerTiming } from "@/lib/observability/performance";
 import { getConversationFeatureFlags } from "@/lib/feature-flags";
+import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-events";
 import { withResilience } from "@/lib/external/resilience";
 import { assembleTimelineEvents } from "@/lib/conversations/timeline-events";
 import {
@@ -1029,10 +1030,26 @@ function buildConversationDeltaCursorFromRows(rows: Array<{ id: string; updatedA
 function invalidateConversationReadCaches(conversationGhlId?: string | null) {
     revalidateTag("conversations:list");
     revalidateTag("conversations:workspace");
+    revalidateTag("conversations:workspace:core");
+    revalidateTag("conversations:workspace:sidebar");
     revalidateTag("conversations:transcript-eligibility");
     if (conversationGhlId) {
         revalidatePath(`/admin/conversations?id=${encodeURIComponent(conversationGhlId)}`);
     }
+}
+
+function emitConversationRealtimeEvent(args: {
+    locationId: string;
+    conversationId?: string | null;
+    type: string;
+    payload?: Record<string, unknown>;
+}) {
+    void publishConversationRealtimeEvent({
+        locationId: args.locationId,
+        conversationId: args.conversationId || null,
+        type: args.type,
+        payload: args.payload || {},
+    });
 }
 
 async function queryConversationListSnapshot(args: {
@@ -1183,16 +1200,43 @@ export async function fetchConversations(
     }
 }
 
+type MessagePaginationCursor = {
+    createdAtMs: number;
+    id: string;
+};
+
+function decodeMessagePaginationCursor(cursor?: string | null): MessagePaginationCursor | null {
+    const value = String(cursor || "").trim();
+    if (!value) return null;
+    const [createdAtPart, idPart] = value.split("::");
+    const createdAtMs = Number(createdAtPart);
+    if (!Number.isFinite(createdAtMs) || createdAtMs <= 0 || !idPart) return null;
+    return {
+        createdAtMs,
+        id: idPart,
+    };
+}
+
 export async function fetchMessages(
     conversationId: string,
-    options?: { ensureHistory?: boolean }
+    options?: {
+        ensureHistory?: boolean;
+        take?: number | null;
+        beforeCursor?: string | null;
+        includeLegacyEmailMeta?: boolean;
+    }
 ) {
     const ensureHistory = !!options?.ensureHistory;
+    const requestedTake = Number(options?.take);
+    const boundedTake = Number.isFinite(requestedTake) && requestedTake > 0
+        ? Math.min(Math.max(Math.floor(requestedTake), 1), 500)
+        : null;
+    const includeLegacyEmailMeta = options?.includeLegacyEmailMeta !== false;
+    const paginationCursor = decodeMessagePaginationCursor(options?.beforeCursor);
     const location = ensureHistory
         ? await getAuthenticatedLocationExternal()
         : await getAuthenticatedLocationReadOnly();
 
-    // 1. Find the conversation first to get Contact/Location Context
     const conversation = await db.conversation.findFirst({
         where: {
             ghlConversationId: conversationId,
@@ -1201,28 +1245,35 @@ export async function fetchMessages(
         include: { contact: true }
     });
 
-    // If not found, it might be that we haven't synced the conversation list yet?
-    // Or it's a new conversation.
     if (!conversation) {
-        // Fallback: Return empty or try to fetch from API?
-        // Let's try to return empty and let the 'ensure' logic handle it if called properly.
         return [];
     }
 
-    // Optional history backfill. Disabled by default for fast read paths.
     if (ensureHistory && conversation.contactId && location.ghlAccessToken) {
         await ensureConversationHistory(conversation.contactId, location.id, location.ghlAccessToken!);
     }
 
-    // [Evolution History Fetch] Removed automatic fetch on read to improve performance.
-    // Use syncWhatsAppHistory(conversationId) for manual sync.
+    const messageWhere: any = { conversationId: conversation.id };
+    if (paginationCursor) {
+        const cursorDate = new Date(paginationCursor.createdAtMs);
+        messageWhere.OR = [
+            { createdAt: { lt: cursorDate } },
+            {
+                AND: [
+                    { createdAt: { equals: cursorDate } },
+                    { id: { lt: paginationCursor.id } },
+                ],
+            },
+        ];
+    }
 
-
-
-    // 4. Fetch messages from DB
-    const messages = await db.message.findMany({
-        where: { conversationId: conversation.id },
-        orderBy: { createdAt: 'asc' },
+    const readDescending = !!boundedTake || !!paginationCursor;
+    const messageRows = await db.message.findMany({
+        where: messageWhere,
+        orderBy: readDescending
+            ? [{ createdAt: "desc" }, { id: "desc" }]
+            : [{ createdAt: "asc" }, { id: "asc" }],
+        ...(boundedTake ? { take: boundedTake } : {}),
         include: {
             attachments: {
                 include: {
@@ -1236,28 +1287,33 @@ export async function fetchMessages(
                     },
                 },
             },
-            legacyCrmLeadEmailProcessing: {
-                select: {
-                    status: true,
-                    classification: true,
-                    senderEmail: true,
-                    legacyLeadUrl: true,
-                    legacyLeadId: true,
-                    error: true,
-                    attempts: true,
-                    processedAt: true,
-                    processedContactId: true,
-                    processedConversationId: true,
-                    extracted: true,
-                    processResult: true,
+            ...(includeLegacyEmailMeta ? {
+                legacyCrmLeadEmailProcessing: {
+                    select: {
+                        status: true,
+                        classification: true,
+                        senderEmail: true,
+                        legacyLeadUrl: true,
+                        legacyLeadId: true,
+                        error: true,
+                        attempts: true,
+                        processedAt: true,
+                        processedContactId: true,
+                        processedConversationId: true,
+                        extracted: true,
+                        processResult: true,
+                    }
                 }
-            }
+            } : {}),
         }
     });
 
+    const messages = readDescending ? [...messageRows].reverse() : messageRows;
     console.log(`[DB Read] Fetched ${messages.length} messages from local database for conversation ${conversation.ghlConversationId}`);
 
-    const hasEmailMessages = messages.some((m: any) => String(m.type || '').toUpperCase().includes('EMAIL'));
+    const hasEmailMessages = includeLegacyEmailMeta
+        ? messages.some((m: any) => String(m.type || '').toUpperCase().includes('EMAIL'))
+        : false;
     const legacyCrmSettings = hasEmailMessages
         ? await db.location.findUnique({
             where: { id: location.id },
@@ -1279,6 +1335,7 @@ export async function fetchMessages(
 
     return messages.map((m: any) => ({
         ...(() => {
+            if (!includeLegacyEmailMeta) return {};
             const isEmail = String(m.type || '').toUpperCase().includes('EMAIL');
             if (!isEmail) return {};
 
@@ -1415,6 +1472,18 @@ type ConversationWorkspaceMetadata = {
     };
 };
 
+type ConversationWorkspaceCoreMetadata = {
+    conversationHeader: Conversation;
+    freshness: {
+        generatedAt: string;
+        conversationUpdatedAt: string | null;
+        latestMessageAt: string | null;
+        latestMessageUpdatedAt: string | null;
+        latestActivityAt: string | null;
+        threadStale: boolean;
+    };
+};
+
 type ConversationWorkspaceOptions = {
     includeMessages?: boolean;
     includeActivity?: boolean;
@@ -1486,6 +1555,80 @@ function parsePlanSteps(plan: unknown) {
         total: steps.length,
         completed,
     };
+}
+
+async function queryConversationWorkspaceCoreMetadata(args: {
+    locationId: string;
+    locationGhlId?: string | null;
+    conversationId: string;
+}) {
+    const conversation = await db.conversation.findFirst({
+        where: {
+            locationId: args.locationId,
+            ghlConversationId: args.conversationId,
+        },
+        include: {
+            contact: {
+                select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                    phone: true,
+                    ghlContactId: true,
+                },
+            },
+        },
+    });
+
+    if (!conversation) return null;
+
+    const [activeDealRows, latestMessage, latestActivity] = await Promise.all([
+        db.dealContext.findMany({
+            where: {
+                locationId: args.locationId,
+                stage: "ACTIVE",
+                conversationIds: { has: conversation.ghlConversationId },
+            },
+            select: { id: true, title: true },
+            take: 1,
+        }),
+        db.message.findFirst({
+            where: { conversationId: conversation.id },
+            select: { createdAt: true, updatedAt: true },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        }),
+        db.contactHistory.findFirst({
+            where: { contactId: conversation.contactId },
+            select: { createdAt: true },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        }),
+    ]);
+
+    const dealMap = new Map<string, { id: string; title: string }>();
+    for (const row of activeDealRows) {
+        dealMap.set(conversation.ghlConversationId, { id: row.id, title: row.title });
+    }
+
+    const latestMessageAtIso = conversation.lastMessageAt ? new Date(conversation.lastMessageAt).toISOString() : null;
+    const nowMs = Date.now();
+    const threadStale = isLikelyWhatsAppConversation(conversation.lastMessageType)
+        && (!!latestMessageAtIso && (nowMs - new Date(latestMessageAtIso).getTime()) > 5 * 60 * 1000);
+
+    return {
+        conversationHeader: mapConversationRowToUi(
+            conversation,
+            { ghlLocationId: args.locationGhlId || null },
+            dealMap
+        ),
+        freshness: {
+            generatedAt: new Date().toISOString(),
+            conversationUpdatedAt: conversation.updatedAt ? new Date(conversation.updatedAt).toISOString() : null,
+            latestMessageAt: latestMessageAtIso,
+            latestMessageUpdatedAt: latestMessage?.updatedAt ? new Date(latestMessage.updatedAt).toISOString() : null,
+            latestActivityAt: latestActivity?.createdAt ? new Date(latestActivity.createdAt).toISOString() : null,
+            threadStale,
+        },
+    } satisfies ConversationWorkspaceCoreMetadata;
 }
 
 async function queryConversationWorkspaceMetadata(args: {
@@ -1689,19 +1832,33 @@ async function queryConversationWorkspaceMetadata(args: {
     } satisfies ConversationWorkspaceMetadata;
 }
 
-const getCachedConversationWorkspaceMetadata = unstable_cache(
+const getCachedConversationWorkspaceCoreMetadata = unstable_cache(
     async (locationId: string, locationGhlId: string | null, conversationId: string) =>
-        queryConversationWorkspaceMetadata({ locationId, locationGhlId, conversationId }),
-    ["conversations:workspace:metadata:v1"],
+        queryConversationWorkspaceCoreMetadata({ locationId, locationGhlId, conversationId }),
+    ["conversations:workspace:core:metadata:v1"],
     {
         revalidate: 8,
-        tags: ["conversations:workspace"],
+        tags: ["conversations:workspace", "conversations:workspace:core"],
     }
 );
 
-export async function getConversationWorkspace(
+const getCachedConversationWorkspaceSidebarMetadata = unstable_cache(
+    async (locationId: string, locationGhlId: string | null, conversationId: string) =>
+        queryConversationWorkspaceMetadata({ locationId, locationGhlId, conversationId }),
+    ["conversations:workspace:sidebar:metadata:v1"],
+    {
+        revalidate: 15,
+        tags: ["conversations:workspace", "conversations:workspace:sidebar"],
+    }
+);
+
+type ConversationWorkspaceCoreOptions = Pick<ConversationWorkspaceOptions, "includeMessages" | "includeActivity" | "messageLimit" | "activityLimit"> & {
+    activityBeforeCursor?: string | null;
+};
+
+export async function getConversationWorkspaceCore(
     conversationId: string,
-    options?: ConversationWorkspaceOptions
+    options?: ConversationWorkspaceCoreOptions
 ) {
     const traceId = createTraceId();
     const trimmedConversationId = String(conversationId || "").trim();
@@ -1720,10 +1877,6 @@ export async function getConversationWorkspace(
 
         const includeMessages = options?.includeMessages !== false;
         const includeActivity = options?.includeActivity !== false;
-        const includeContactContext = options?.includeContactContext !== false;
-        const includeTaskSummary = options?.includeTaskSummary !== false;
-        const includeViewingSummary = options?.includeViewingSummary !== false;
-        const includeAgentSummary = options?.includeAgentSummary !== false;
         const messageLimit = Math.min(
             Math.max(Number(options?.messageLimit || DEFAULT_WORKSPACE_MESSAGE_LIMIT), 1),
             MAX_WORKSPACE_MESSAGE_LIMIT
@@ -1733,21 +1886,19 @@ export async function getConversationWorkspace(
             MAX_WORKSPACE_ACTIVITY_LIMIT
         );
 
-        return await withServerTiming("conversations.workspace", {
+        return await withServerTiming("conversations.workspace_core", {
             traceId,
             locationId: location.id,
             conversationId: trimmedConversationId,
             includeMessages,
             includeActivity,
-            includeContactContext,
-            includeTaskSummary,
-            includeViewingSummary,
-            includeAgentSummary,
+            messageLimit,
+            activityLimit,
             workspaceV2: flags.workspaceV2,
         }, async () => {
             const metadata = flags.workspaceV2
-                ? await getCachedConversationWorkspaceMetadata(location.id, location.ghlLocationId || null, trimmedConversationId)
-                : await queryConversationWorkspaceMetadata({
+                ? await getCachedConversationWorkspaceCoreMetadata(location.id, location.ghlLocationId || null, trimmedConversationId)
+                : await queryConversationWorkspaceCoreMetadata({
                     locationId: location.id,
                     locationGhlId: location.ghlLocationId || null,
                     conversationId: trimmedConversationId,
@@ -1763,7 +1914,7 @@ export async function getConversationWorkspace(
 
             const [messages, activityTimeline, transcriptEligibility] = await Promise.all([
                 includeMessages
-                    ? fetchMessages(trimmedConversationId).then((items) => items.slice(-messageLimit))
+                    ? fetchMessages(trimmedConversationId, { take: messageLimit })
                     : Promise.resolve([] as Message[]),
                 includeActivity
                     ? assembleTimelineEvents({
@@ -1772,18 +1923,18 @@ export async function getConversationWorkspace(
                         conversationId: trimmedConversationId,
                         includeMessages: false,
                         includeActivities: true,
+                        take: activityLimit,
+                        beforeCursor: options?.activityBeforeCursor || null,
                     }).then((timeline) => {
                         const activityEvents = timeline.events.filter((event) => event.kind === "activity");
-                        return activityEvents
-                            .slice(-activityLimit)
-                            .map((entry) => ({
-                                id: entry.id,
-                                type: "activity",
-                                createdAt: entry.createdAt,
-                                action: entry.action,
-                                changes: entry.changes,
-                                user: entry.user || null,
-                            }));
+                        return activityEvents.map((entry) => ({
+                            id: entry.id,
+                            type: "activity",
+                            createdAt: entry.createdAt,
+                            action: entry.action,
+                            changes: entry.changes,
+                            user: entry.user || null,
+                        }));
                     })
                     : Promise.resolve([] as any[]),
                 getWhatsAppTranscriptOnDemandEligibility(trimmedConversationId)
@@ -1800,22 +1951,132 @@ export async function getConversationWorkspace(
                 conversationHeader: metadata.conversationHeader,
                 messages,
                 activityTimeline,
-                contactContext: includeContactContext ? metadata.contactContext : null,
-                taskSummary: includeTaskSummary ? metadata.taskSummary : null,
-                viewingSummary: includeViewingSummary ? metadata.viewingSummary : null,
-                agentSummary: includeAgentSummary ? metadata.agentSummary : null,
                 transcriptEligibility,
                 freshness: metadata.freshness,
             };
         });
     } catch (error: any) {
-        console.error("[getConversationWorkspace] Error:", error);
+        console.error("[getConversationWorkspaceCore] Error:", error);
         return {
             success: false as const,
             traceId,
-            error: error?.message || "Failed to load workspace.",
+            error: error?.message || "Failed to load workspace core.",
         };
     }
+}
+
+export async function getConversationWorkspaceSidebar(conversationId: string) {
+    const traceId = createTraceId();
+    const trimmedConversationId = String(conversationId || "").trim();
+
+    if (!trimmedConversationId) {
+        return {
+            success: false as const,
+            traceId,
+            error: "Missing conversation ID.",
+        };
+    }
+
+    try {
+        const location = await getAuthenticatedLocationReadOnly();
+        const flags = getConversationFeatureFlags(location.id);
+
+        return await withServerTiming("conversations.workspace_sidebar", {
+            traceId,
+            locationId: location.id,
+            conversationId: trimmedConversationId,
+            workspaceV2: flags.workspaceV2,
+        }, async () => {
+            const metadata = flags.workspaceV2
+                ? await getCachedConversationWorkspaceSidebarMetadata(location.id, location.ghlLocationId || null, trimmedConversationId)
+                : await queryConversationWorkspaceMetadata({
+                    locationId: location.id,
+                    locationGhlId: location.ghlLocationId || null,
+                    conversationId: trimmedConversationId,
+                });
+
+            if (!metadata) {
+                return {
+                    success: false as const,
+                    traceId,
+                    error: "Conversation not found.",
+                };
+            }
+
+            return {
+                success: true as const,
+                traceId,
+                contactContext: metadata.contactContext,
+                taskSummary: metadata.taskSummary,
+                viewingSummary: metadata.viewingSummary,
+                agentSummary: metadata.agentSummary,
+            };
+        });
+    } catch (error: any) {
+        console.error("[getConversationWorkspaceSidebar] Error:", error);
+        return {
+            success: false as const,
+            traceId,
+            error: error?.message || "Failed to load workspace sidebar.",
+        };
+    }
+}
+
+export async function getConversationWorkspace(
+    conversationId: string,
+    options?: ConversationWorkspaceOptions
+) {
+    const traceId = createTraceId();
+    const includeMessages = options?.includeMessages !== false;
+    const includeActivity = options?.includeActivity !== false;
+    const includeContactContext = options?.includeContactContext !== false;
+    const includeTaskSummary = options?.includeTaskSummary !== false;
+    const includeViewingSummary = options?.includeViewingSummary !== false;
+    const includeAgentSummary = options?.includeAgentSummary !== false;
+
+    const core = await getConversationWorkspaceCore(conversationId, {
+        includeMessages,
+        includeActivity,
+        messageLimit: options?.messageLimit,
+        activityLimit: options?.activityLimit,
+    });
+
+    if (!core?.success) {
+        return {
+            success: false as const,
+            traceId,
+            error: core?.error || "Failed to load workspace core.",
+        };
+    }
+
+    const shouldLoadSidebar = includeContactContext || includeTaskSummary || includeViewingSummary || includeAgentSummary;
+    const sidebar = shouldLoadSidebar
+        ? await getConversationWorkspaceSidebar(conversationId)
+        : null;
+
+    if (shouldLoadSidebar && !sidebar?.success) {
+        return {
+            success: false as const,
+            traceId,
+            error: sidebar?.error || "Failed to load workspace sidebar.",
+        };
+    }
+
+    const sidebarData = shouldLoadSidebar && sidebar && sidebar.success ? sidebar : null;
+
+    return {
+        success: true as const,
+        traceId,
+        conversationHeader: core.conversationHeader,
+        messages: core.messages,
+        activityTimeline: core.activityTimeline,
+        contactContext: includeContactContext ? sidebarData?.contactContext || null : null,
+        taskSummary: includeTaskSummary ? sidebarData?.taskSummary || null : null,
+        viewingSummary: includeViewingSummary ? sidebarData?.viewingSummary || null : null,
+        agentSummary: includeAgentSummary ? sidebarData?.agentSummary || null : null,
+        transcriptEligibility: core.transcriptEligibility,
+        freshness: core.freshness,
+    };
 }
 
 export async function getConversationListDelta(
@@ -1990,6 +2251,12 @@ export async function refreshConversationOnDemand(
         if (mode === "metadata_only") {
             const refreshed = await refreshConversation(trimmedConversationId);
             invalidateConversationReadCaches(trimmedConversationId);
+            emitConversationRealtimeEvent({
+                locationId: location.id,
+                conversationId: trimmedConversationId,
+                type: "conversation.refreshed",
+                payload: { mode },
+            });
             return {
                 success: true as const,
                 traceId,
@@ -2000,6 +2267,12 @@ export async function refreshConversationOnDemand(
 
         const syncResult = await syncWhatsAppHistory(trimmedConversationId, 50, false, 0);
         invalidateConversationReadCaches(trimmedConversationId);
+        emitConversationRealtimeEvent({
+            locationId: location.id,
+            conversationId: trimmedConversationId,
+            type: "conversation.refreshed",
+            payload: { mode, syncedCount: Number(syncResult?.count || 0) },
+        });
 
         return {
             success: !!syncResult?.success,
@@ -4706,6 +4979,12 @@ export async function sendWhatsAppMediaReply(
         }
 
         invalidateConversationReadCaches(conversationId);
+        emitConversationRealtimeEvent({
+            locationId: location.id,
+            conversationId,
+            type: "message.outbound",
+            payload: { channel: "whatsapp", mode: "media" },
+        });
         return { success: true, messageId: created.id };
     } catch (err: any) {
         console.error("Evolution API media send failed:", err);
@@ -4979,6 +5258,12 @@ export async function sendReply(conversationId: string, contactId: string, messa
                         }
 
                         invalidateConversationReadCaches(conversationId);
+                        emitConversationRealtimeEvent({
+                            locationId: location.id,
+                            conversationId,
+                            type: "message.outbound",
+                            payload: { channel: "whatsapp", mode: "text" },
+                        });
                         return { success: true };
                     } else {
                         return { success: false, error: "Message sent but no confirmation received." };
@@ -5039,6 +5324,12 @@ export async function sendReply(conversationId: string, contactId: string, messa
 
                         await syncMessageFromWebhook(msgData);
                         invalidateConversationReadCaches(conversationId);
+                        emitConversationRealtimeEvent({
+                            locationId: location.id,
+                            conversationId,
+                            type: "message.outbound",
+                            payload: { channel: hasTwilio ? "twilio_whatsapp" : "meta_whatsapp" },
+                        });
                         return { success: true };
                     }
                 }
@@ -5102,6 +5393,12 @@ export async function sendReply(conversationId: string, contactId: string, messa
         }
 
         invalidateConversationReadCaches(conversationId);
+        emitConversationRealtimeEvent({
+            locationId: location.id,
+            conversationId,
+            type: "message.outbound",
+            payload: { channel: type.toLowerCase() },
+        });
         return { success: true };
     } catch (error) {
         console.error("sendMessage error:", error);
@@ -6588,6 +6885,12 @@ export async function markConversationAsRead(conversationId: string) {
             }
         });
         invalidateConversationReadCaches(conversationId);
+        emitConversationRealtimeEvent({
+            locationId: location.id,
+            conversationId,
+            type: "conversation.read_reset",
+            payload: { unreadCount: 0 },
+        });
         return { success: true };
     } catch (error: any) {
         console.error("markConversationAsRead error:", error);
@@ -6620,6 +6923,13 @@ export async function deleteConversations(conversationIds: string[]) {
 
         console.log(`[Soft Delete] Moved ${result.count} conversations to trash.`);
         invalidateConversationReadCaches();
+        conversationIds.forEach((conversationId) => {
+            emitConversationRealtimeEvent({
+                locationId: location.id,
+                conversationId,
+                type: "conversation.deleted_soft",
+            });
+        });
         return { success: true, count: result.count };
 
     } catch (error: any) {
@@ -6651,6 +6961,13 @@ export async function restoreConversations(conversationIds: string[]) {
 
         console.log(`[Restore] Restored ${result.count} conversations from trash.`);
         invalidateConversationReadCaches();
+        conversationIds.forEach((conversationId) => {
+            emitConversationRealtimeEvent({
+                locationId: location.id,
+                conversationId,
+                type: "conversation.restored",
+            });
+        });
         return { success: true, count: result.count };
 
     } catch (error: any) {
@@ -6679,6 +6996,13 @@ export async function permanentlyDeleteConversations(conversationIds: string[]) 
 
         console.log(`[Permanent Delete] Permanently deleted ${result.count} conversations.`);
         invalidateConversationReadCaches();
+        conversationIds.forEach((conversationId) => {
+            emitConversationRealtimeEvent({
+                locationId: location.id,
+                conversationId,
+                type: "conversation.deleted_hard",
+            });
+        });
         return { success: true, count: result.count };
 
     } catch (error: any) {
@@ -6710,6 +7034,13 @@ export async function archiveConversations(conversationIds: string[]) {
 
         console.log(`[Archive] Archived ${result.count} conversations.`);
         invalidateConversationReadCaches();
+        conversationIds.forEach((conversationId) => {
+            emitConversationRealtimeEvent({
+                locationId: location.id,
+                conversationId,
+                type: "conversation.archived",
+            });
+        });
         return { success: true, count: result.count };
 
     } catch (error: any) {
@@ -6740,6 +7071,13 @@ export async function unarchiveConversations(conversationIds: string[]) {
 
         console.log(`[Unarchive] Unarchived ${result.count} conversations.`);
         invalidateConversationReadCaches();
+        conversationIds.forEach((conversationId) => {
+            emitConversationRealtimeEvent({
+                locationId: location.id,
+                conversationId,
+                type: "conversation.unarchived",
+            });
+        });
         return { success: true, count: result.count };
 
     } catch (error: any) {
@@ -6753,6 +7091,14 @@ export async function emptyTrash() {
 
     try {
         // Permanently delete all conversations in trash
+        const deletedRows = await db.conversation.findMany({
+            where: {
+                locationId: location.id,
+                deletedAt: { not: null }
+            },
+            select: { ghlConversationId: true },
+        });
+
         const result = await db.conversation.deleteMany({
             where: {
                 locationId: location.id,
@@ -6762,6 +7108,14 @@ export async function emptyTrash() {
 
         console.log(`[Empty Trash] Permanently deleted ${result.count} conversations from trash.`);
         invalidateConversationReadCaches();
+        deletedRows.forEach((row) => {
+            emitConversationRealtimeEvent({
+                locationId: location.id,
+                conversationId: row.ghlConversationId,
+                type: "conversation.deleted_hard",
+                payload: { source: "empty_trash" },
+            });
+        });
         return { success: true, count: result.count };
 
     } catch (error: any) {
@@ -11091,6 +11445,11 @@ export async function addConversationActivityEntry(conversationId: string, entry
     revalidatePath(`/admin/contacts/${conversation.contactId}/view`);
     revalidatePath(`/admin/conversations?id=${encodeURIComponent(conversation.ghlConversationId)}`);
     invalidateConversationReadCaches(conversation.ghlConversationId);
+    emitConversationRealtimeEvent({
+        locationId: location.id,
+        conversationId: conversation.ghlConversationId,
+        type: "activity.created",
+    });
 
     return { success: true };
 }

@@ -1,5 +1,6 @@
 import db from "@/lib/db";
 import { generateSmartReplies } from "@/lib/ai/smart-replies";
+import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-events";
 
 const LID_RETRY_INTERVAL_MS = Number(process.env.WHATSAPP_LID_RETRY_INTERVAL_MS || 30000);
 const LID_RETRY_MAX_ATTEMPTS = Number(process.env.WHATSAPP_LID_MAX_ATTEMPTS || 240);
@@ -882,6 +883,17 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
             }).catch(e => console.error("[Semi-Auto] Event emission error:", e));
         }).catch(e => console.error("[Semi-Auto] Event bus import error:", e));
     }
+
+    void publishConversationRealtimeEvent({
+        locationId,
+        conversationId: conversation.ghlConversationId,
+        type: direction === "inbound" ? "message.inbound" : "message.outbound",
+        payload: {
+            direction,
+            messageType: "whatsapp",
+            messageId: wamId,
+        },
+    });
 
     return { status: 'processed' };
 }

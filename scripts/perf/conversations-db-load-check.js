@@ -168,7 +168,7 @@ async function main() {
       });
     };
 
-    const workspaceQuery = async () => {
+    const workspaceCoreQuery = async () => {
       const [conversation] = await Promise.all([
         db.conversation.findUnique({
           where: { id: activeConversation.id },
@@ -190,23 +190,27 @@ async function main() {
       await Promise.all([
         db.message.findMany({
           where: { conversationId: conversation.id },
-          orderBy: { createdAt: "asc" },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           take: messageTake,
         }),
         db.contactHistory.findMany({
           where: { contactId: conversation.contactId },
-          orderBy: { createdAt: "desc" },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           take: activityTake,
         }),
-        db.contactTask.count({
+        db.contactTask.findMany({
           where: {
-            locationId: location.id,
+            contactId: conversation.contactId,
             conversationId: conversation.id,
             deletedAt: null,
           },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          take: activityTake,
         }),
-        db.viewing.count({
+        db.viewing.findMany({
           where: { contactId: conversation.contactId },
+          orderBy: [{ date: "desc" }, { id: "desc" }],
+          take: activityTake,
         }),
       ]);
     };
@@ -236,17 +240,17 @@ async function main() {
 
     // Warmup
     await runBatched(10, Math.min(concurrency, 4), listQuery);
-    await runBatched(10, Math.min(concurrency, 4), workspaceQuery);
+    await runBatched(10, Math.min(concurrency, 4), workspaceCoreQuery);
     await runBatched(10, Math.min(concurrency, 4), deltaQuery);
 
-    const [listSamples, workspaceSamples, deltaSamples] = await Promise.all([
+    const [listSamples, workspaceCoreSamples, deltaSamples] = await Promise.all([
       runBatched(iterations, concurrency, listQuery),
-      runBatched(iterations, concurrency, workspaceQuery),
+      runBatched(iterations, concurrency, workspaceCoreQuery),
       runBatched(iterations, concurrency, deltaQuery),
     ]);
 
     const listStats = summarize(listSamples);
-    const workspaceStats = summarize(workspaceSamples);
+    const workspaceCoreStats = summarize(workspaceCoreSamples);
     const deltaStats = summarize(deltaSamples);
 
     const output = {
@@ -262,16 +266,18 @@ async function main() {
       },
       results: {
         listRefresh: listStats,
-        conversationSwitchWorkspace: workspaceStats,
+        conversationSwitchWorkspaceCore: workspaceCoreStats,
         listDelta: deltaStats,
       },
       targets: {
         listRefreshP95LtMs: 700,
-        conversationSwitchP95LtMs: 1200,
+        conversationSwitchWorkspaceCoreP95LtMs: 700,
+        listDeltaP95LtMs: 500,
       },
       passFail: {
         listRefresh: listStats.p95Ms < 700,
-        conversationSwitchWorkspace: workspaceStats.p95Ms < 1200,
+        conversationSwitchWorkspaceCore: workspaceCoreStats.p95Ms < 700,
+        listDelta: deltaStats.p95Ms < 500,
       },
     };
 
