@@ -561,13 +561,13 @@ export function ConversationList({
                                 </div>
                             )}
 
-                            <div className="flex-1 min-w-0">
+                            <div className="flex-1 min-w-0 w-0 overflow-hidden">
                                 {/* Contact name */}
                                 <div className="flex items-center justify-between gap-2 min-w-0">
-                                    <h4 className="font-semibold text-sm truncate flex-1 min-w-0">
+                                    <h4 className="block w-full min-w-0 flex-1 truncate font-semibold text-sm">
                                         {c.contactName || c.contactId || "Unknown Contact"}
                                     </h4>
-                                    <div className="ml-2 mr-0.5 shrink-0 flex items-center gap-1 max-w-[35%]">
+                                    <div className="ml-2 mr-0.5 flex-none shrink-0 flex items-center gap-1">
                                         {c.unreadCount > 0 && (
                                             <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] leading-[18px] text-center font-semibold">
                                                 {c.unreadCount > 99 ? "99+" : c.unreadCount}

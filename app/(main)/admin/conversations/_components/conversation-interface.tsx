@@ -83,7 +83,7 @@ type MobileGestureState = {
     blocked: boolean;
 };
 
-const MOBILE_EDGE_SWIPE_ZONE_PX = 24;
+const MOBILE_EDGE_SWIPE_ZONE_PX = 16;
 const MOBILE_MIN_SWIPE_DISTANCE_PX = 72;
 const MOBILE_MIN_SWIPE_VELOCITY = 0.32; // px / ms
 const MOBILE_HORIZONTAL_DOMINANCE_RATIO = 1.2;

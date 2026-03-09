@@ -364,7 +364,7 @@ export function MessageBubble({
                         isOutbound ? "bg-blue-700/30 text-blue-100 border-blue-500/50" : "bg-gray-50 text-gray-500 border-gray-100"
                     )}>
                         <Smartphone className="h-3 w-3 shrink-0" />
-                        <span className="truncate min-w-0">
+                        <span className="flex-1 w-0 min-w-0 truncate">
                             {isOutbound
                                 ? `To: ${contactPhone || contactName || "Contact"}`
                                 : `From: ${contactPhone || contactName || "Contact"}`

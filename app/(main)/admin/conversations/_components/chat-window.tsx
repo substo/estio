@@ -388,11 +388,11 @@ export function ChatWindow({
                             <ArrowLeft className="h-4 w-4 text-gray-500" />
                         </Button>
                     )}
-                    <div className="min-w-0">
-                        <h3 className="font-bold text-gray-900 truncate">{conversation.contactName || "Unknown Contact"}</h3>
-                        <div className="flex items-center gap-2 mt-0.5">
+                    <div className="w-0 flex-1 min-w-0 overflow-hidden">
+                        <h3 className="block w-full truncate font-bold text-gray-900">{conversation.contactName || "Unknown Contact"}</h3>
+                        <div className="flex items-center gap-2 mt-0.5 min-w-0">
                             <span className="flex h-2 w-2 rounded-full bg-green-500 shrink-0" />
-                            <p className="text-xs text-gray-500 font-medium truncate">
+                            <p className="text-xs text-gray-500 font-medium truncate min-w-0 flex-1">
                                 {getChannelName(conversation.lastMessageType || conversation.type)} • {conversation.status}
                             </p>
                         </div>
