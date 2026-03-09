@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { Loader2, Sparkles, Check, Info, Layers, Users, Home, Link as LinkIcon, AlertCircle, ExternalLink, X, ListTodo, Play, CheckCircle2, Circle, Brain, ChevronDown, ChevronUp, Expand, Clock, Wrench, History, Database, Activity, AlertTriangle, CheckCircle, XCircle, ArrowRight, Mic } from "lucide-react";
+import { Loader2, Sparkles, Check, Info, Layers, Users, Home, Link as LinkIcon, AlertCircle, ExternalLink, X, ListTodo, Play, CheckCircle2, Circle, Brain, ChevronDown, ChevronUp, Expand, Clock, Wrench, History, Database, Activity, AlertTriangle, CheckCircle, XCircle, ArrowRight, ArrowLeft, Mic } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +35,7 @@ interface CoordinatorPanelProps {
     initialViewingSummary?: any;
     initialAgentSummary?: any;
     lazySidebarDataEnabled?: boolean;
+    onBackToConversation?: () => void;
     onDraftApproved: (text: string) => void;
     onDeselect?: (id: string) => void;
     onSuggestionsGenerated?: (suggestions: string[]) => void;
@@ -179,6 +180,7 @@ export function CoordinatorPanel({
     initialViewingSummary,
     initialAgentSummary,
     lazySidebarDataEnabled = true,
+    onBackToConversation,
     onDraftApproved,
     onDeselect,
     onSuggestionsGenerated,
@@ -572,7 +574,19 @@ export function CoordinatorPanel({
     return (
         <div className="h-full bg-muted/30 border-l p-3 overflow-y-auto space-y-3 min-w-0 flex flex-col">
             <div className="flex items-center justify-between mb-2 shrink-0">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1">
+                    {onBackToConversation && (
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-primary"
+                            onClick={onBackToConversation}
+                            title="Back to conversation"
+                        >
+                            <ArrowLeft className="h-4 w-4" />
+                        </Button>
+                    )}
+                    <div className="flex items-center gap-2">
                     <ListTodo className="h-4 w-4 text-primary" />
                     <h3 className="font-semibold text-sm text-foreground">Mission Control</h3>
                     {planProgressLabel && (
@@ -580,6 +594,7 @@ export function CoordinatorPanel({
                             {planProgressLabel}
                         </Badge>
                     )}
+                    </div>
                 </div>
                 <TooltipProvider>
                     <Tooltip>

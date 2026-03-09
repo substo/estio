@@ -202,8 +202,11 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
 - **Mobile-First Navigation (Mar 2026)**:
   - On mobile viewports (`<1024px`), the conversations list occupies the full page by default.
   - Selecting a conversation/deal transitions to a full-screen thread/timeline pane.
+  - Horizontal swipe gestures support pane navigation on mobile:
+    - list ⟷ conversation/timeline
+    - conversation/timeline ⟷ mission control
   - The thread header exposes an explicit **Back** action to return to the full-screen list.
-  - Mission Control is opened separately via a dedicated header button and rendered in a right-side sheet.
+  - Mission Control exposes a top-left **Back** action to return to the conversation/timeline pane.
   - Desktop (`>=1024px`) retains the resizable tri-panel layout.
 - **Shared Composer Source of Truth**: Both chats mode and deal mode now render the same reusable composer component (`conversation-composer.tsx`). Composer behavior changes should be implemented once and will apply to `ChatWindow` and `UnifiedTimeline`.
 - **Channel Guards**: The shared composer channel picker disables ineligible channels with a reason tooltip. SMS is blocked when phone is invalid/masked or GHL SMS is not configured; WhatsApp is blocked when eligibility checks fail.

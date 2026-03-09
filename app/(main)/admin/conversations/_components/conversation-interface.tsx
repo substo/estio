@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, type TouchEvent as ReactTouchEvent, type ReactNode } from 'react';
 import { useDebounce } from 'use-debounce';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { Conversation, Message } from '@/lib/ghl/conversations';
@@ -53,7 +53,6 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
 import type { ConversationFeatureFlags } from '@/lib/feature-flags';
 
@@ -68,6 +67,8 @@ interface ConversationInterfaceProps {
     };
     featureFlags: ConversationFeatureFlags;
 }
+
+type MobilePane = 'list' | 'window' | 'mission';
 
 /**
  * Derive the message type from the conversation's lastMessageType
@@ -173,7 +174,9 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const pathname = usePathname();
     const searchParams = useSearchParams();
     const [isMobileViewport, setIsMobileViewport] = useState(false);
-    const [mobileMissionOpen, setMobileMissionOpen] = useState(false);
+    const [mobilePane, setMobilePane] = useState<MobilePane>('list');
+    const hasInitializedMobilePaneRef = useRef(false);
+    const mobileTouchStartRef = useRef<{ x: number; y: number } | null>(null);
 
     // -- Clean Helper for URL updates --
     // We use a callback to ensure we always have the latest params
@@ -309,6 +312,22 @@ export function ConversationInterface({ locationId, initialConversations, initia
         setActiveId(null);
     }, [isMobileViewport, viewMode, urlConversationId]);
 
+    useEffect(() => {
+        if (!isMobileViewport) {
+            hasInitializedMobilePaneRef.current = false;
+            setMobilePane('list');
+            return;
+        }
+
+        if (hasInitializedMobilePaneRef.current) return;
+        hasInitializedMobilePaneRef.current = true;
+        if (viewMode === 'deals') {
+            setMobilePane(activeDealId ? 'window' : 'list');
+            return;
+        }
+        setMobilePane(urlConversationId ? 'window' : 'list');
+    }, [isMobileViewport, viewMode, activeDealId, urlConversationId]);
+
     // Sync View Mode & Deal ID to URL
     useEffect(() => {
         updateUrl({
@@ -343,18 +362,12 @@ export function ConversationInterface({ locationId, initialConversations, initia
     }, [conversationDeltaCursor]);
 
     useEffect(() => {
-        if (!isMobileViewport) {
-            setMobileMissionOpen(false);
-            return;
+        if (!isMobileViewport) return;
+        const hasWindowPane = viewMode === 'deals' ? !!activeDealId : !!activeId;
+        if (!hasWindowPane && mobilePane !== 'list') {
+            setMobilePane('list');
         }
-        if (viewMode === 'chats' && !activeId) {
-            setMobileMissionOpen(false);
-            return;
-        }
-        if (viewMode === 'deals' && !activeDealId) {
-            setMobileMissionOpen(false);
-        }
-    }, [isMobileViewport, viewMode, activeId, activeDealId]);
+    }, [isMobileViewport, viewMode, activeId, activeDealId, mobilePane]);
 
     const trackClientRequest = useCallback((kind: string, metadata?: Record<string, unknown>) => {
         const nextCount = (clientRequestCountRef.current[kind] || 0) + 1;
@@ -970,30 +983,74 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const handleSelect = (id: string) => {
         setActiveId(id);
         if (isMobileViewport) {
-            setMobileMissionOpen(false);
+            setMobilePane('window');
         }
     };
 
     const handleSelectDeal = (id: string) => {
         setActiveDealId(id);
         if (isMobileViewport) {
-            setMobileMissionOpen(false);
+            setMobilePane('window');
         }
     };
 
     const handleBackToList = () => {
-        if (viewMode === 'deals') {
-            setActiveDealId(null);
-        } else {
-            setActiveId(null);
-        }
-        setMobileMissionOpen(false);
+        setMobilePane('list');
+    };
+
+    const handleBackToConversation = () => {
+        setMobilePane('window');
     };
 
     const handleOpenMissionControl = () => {
         if (!isMobileViewport) return;
-        setMobileMissionOpen(true);
+        setMobilePane('mission');
     };
+
+    const handleMobileTouchStart = useCallback((event: ReactTouchEvent<HTMLDivElement>) => {
+        if (!isMobileViewport) return;
+        const touch = event.changedTouches[0];
+        if (!touch) return;
+        mobileTouchStartRef.current = { x: touch.clientX, y: touch.clientY };
+    }, [isMobileViewport]);
+
+    const handleMobileTouchEnd = useCallback((event: ReactTouchEvent<HTMLDivElement>) => {
+        if (!isMobileViewport) return;
+        const start = mobileTouchStartRef.current;
+        mobileTouchStartRef.current = null;
+        if (!start) return;
+
+        const touch = event.changedTouches[0];
+        if (!touch) return;
+
+        const deltaX = touch.clientX - start.x;
+        const deltaY = touch.clientY - start.y;
+        const absDeltaX = Math.abs(deltaX);
+        const absDeltaY = Math.abs(deltaY);
+
+        if (absDeltaX < 70 || absDeltaY > 90) return;
+
+        const hasWindowPane = viewMode === 'deals' ? !!activeDealId : !!activeId;
+        if (!hasWindowPane) return;
+
+        if (deltaX < 0) {
+            if (mobilePane === 'list') {
+                setMobilePane('window');
+            } else if (mobilePane === 'window') {
+                setMobilePane('mission');
+            }
+            return;
+        }
+
+        if (mobilePane === 'mission') {
+            setMobilePane('window');
+            return;
+        }
+
+        if (mobilePane === 'window') {
+            setMobilePane('list');
+        }
+    }, [isMobileViewport, viewMode, activeDealId, activeId, mobilePane]);
 
     // Handle toggling context mode IDs
     const handleToggleSelect = (id: string, checked: boolean) => {
@@ -1703,7 +1760,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 refreshToken={dealTimelineRefreshToken}
                 composerConversation={selectedDealConversation}
                 onBack={isMobileViewport ? handleBackToList : undefined}
-                onOpenMissionControl={isMobileViewport && selectedDealConversation ? handleOpenMissionControl : undefined}
+                onOpenMissionControl={isMobileViewport ? handleOpenMissionControl : undefined}
                 onSendMessage={(text, type) => handleSendMessage(text, type, selectedDealConversation || undefined)}
                 onSendMedia={(file, caption) => handleSendMedia(file, caption, selectedDealConversation || undefined)}
                 onGenerateDraft={async (instruction?: string, model?: string) => {
@@ -1753,6 +1810,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 initialViewingSummary={workspaceViewingSummary}
                 initialAgentSummary={workspaceAgentSummary}
                 lazySidebarDataEnabled={featureFlags.lazySidebarData}
+                onBackToConversation={isMobileViewport ? handleBackToConversation : undefined}
                 onDraftApproved={(text) => handleSendMessage(text, getMessageType(activeConversation))}
                 onDeselect={(id) => handleToggleSelect(id, false)}
                 onSuggestionsGenerated={setSuggestions}
@@ -1771,6 +1829,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 initialViewingSummary={workspaceViewingSummary}
                 initialAgentSummary={workspaceAgentSummary}
                 lazySidebarDataEnabled={featureFlags.lazySidebarData}
+                onBackToConversation={isMobileViewport ? handleBackToConversation : undefined}
                 onDraftApproved={(text) => handleSendMessage(text, getMessageType(selectedDealConversation), selectedDealConversation)}
                 onDeselect={() => undefined} // No deselect in deal mode
                 onSuggestionsGenerated={setSuggestions}
@@ -1789,12 +1848,42 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const isMobileThreadOpen = viewMode === 'chats'
         ? !!activeConversation
         : !!activeDealId;
+    const mobilePaneHint = (() => {
+        if (viewMode === 'deals') {
+            if (!activeDealId) return null;
+            if (mobilePane === 'list') return 'Swipe left to open timeline';
+            if (mobilePane === 'window') return 'Swipe left for Mission Control';
+            return 'Swipe right to return to timeline';
+        }
+        if (!activeConversation) return null;
+        if (mobilePane === 'list') return 'Swipe left to open conversation';
+        if (mobilePane === 'window') return 'Swipe left for Mission Control';
+        return 'Swipe right to return to conversation';
+    })();
+
+    const currentMobilePane: MobilePane = isMobileThreadOpen
+        ? mobilePane
+        : 'list';
+    const mobilePaneContent: Record<MobilePane, ReactNode> = {
+        list: conversationListPane,
+        window: conversationMainPane,
+        mission: missionControlPane,
+    };
 
     return (
         <>
             {isMobileViewport ? (
-                <div className="h-full w-full overflow-hidden">
-                    {isMobileThreadOpen ? conversationMainPane : conversationListPane}
+                <div
+                    className="relative h-full w-full overflow-hidden touch-pan-y"
+                    onTouchStart={handleMobileTouchStart}
+                    onTouchEnd={handleMobileTouchEnd}
+                >
+                    {mobilePaneContent[currentMobilePane]}
+                    {mobilePaneHint && (
+                        <div className="pointer-events-none absolute bottom-2 left-1/2 z-20 -translate-x-1/2 rounded-full bg-slate-900/75 px-3 py-1 text-[10px] font-medium text-white">
+                            {mobilePaneHint}
+                        </div>
+                    )}
                 </div>
             ) : (
                 <PanelGroup orientation="horizontal" className="h-full w-full max-w-full overflow-hidden">
@@ -1827,16 +1916,6 @@ export function ConversationInterface({ locationId, initialConversations, initia
                         {missionControlPane}
                     </Panel>
                 </PanelGroup>
-            )}
-
-            {isMobileViewport && (
-                <Sheet open={mobileMissionOpen} onOpenChange={setMobileMissionOpen}>
-                    <SheetContent side="right" className="h-full w-full max-w-full p-0 sm:max-w-[420px]">
-                        <div className="h-full min-h-0">
-                            {missionControlPane}
-                        </div>
-                    </SheetContent>
-                </Sheet>
             )}
 
             <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
