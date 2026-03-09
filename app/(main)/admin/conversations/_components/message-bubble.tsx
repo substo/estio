@@ -465,7 +465,7 @@ export function MessageBubble({
                                 key={`audio-${i}-${attachment.url}`}
                                 data-horizontal-scroll
                                 className={cn(
-                                    "rounded-lg border border-black/10 bg-black/5 p-2 overflow-x-auto",
+                                    "rounded-lg border border-black/10 bg-black/5 p-2 overflow-x-auto w-full max-w-full min-w-0",
                                     isOutbound && !isEmail ? "bg-white/10 border-white/20" : "bg-black/[0.03]"
                                 )}
                                 onClick={(e) => e.stopPropagation()}
@@ -474,15 +474,15 @@ export function MessageBubble({
                                     controls
                                     preload="metadata"
                                     src={attachment.url}
-                                    className="w-full max-w-[320px]"
+                                    className="w-full max-w-full min-w-0 sm:max-w-[320px]"
                                 />
-                                <div className="mt-1 flex items-center gap-2 text-[11px]">
-                                    <span className="truncate">{attachment.fileName || `Audio attachment ${i + 1}`}</span>
+                                <div className="mt-1 flex items-center gap-2 text-[11px] min-w-0">
+                                    <span className="min-w-0 flex-1 truncate">{attachment.fileName || `Audio attachment ${i + 1}`}</span>
                                     <a
                                         href={getDownloadUrl(attachment.url)}
                                         download={attachment.fileName || `audio-${i + 1}`}
                                         className={cn(
-                                            "ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-black/10",
+                                            "ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-black/10 shrink-0",
                                             isOutbound && !isEmail ? "text-blue-100 hover:bg-white/20" : "text-gray-600"
                                         )}
                                     >
@@ -741,12 +741,12 @@ export function MessageBubble({
                                 rel="noreferrer"
                                 onClick={(e) => e.stopPropagation()}
                                 className={cn(
-                                    "flex items-center gap-2 text-xs p-2 rounded hover:bg-black/5 transition-colors truncate max-w-full",
+                                    "flex min-w-0 w-full max-w-full items-center gap-2 text-xs p-2 rounded hover:bg-black/5 transition-colors",
                                     isOutbound && !isEmail ? "text-blue-100 hover:bg-white/20" : "text-gray-600"
                                 )}
                             >
                                 <Paperclip className="h-3 w-3 shrink-0" />
-                                <span className="truncate">{attachment.fileName || `Attachment ${i + 1}`}</span>
+                                <span className="min-w-0 flex-1 truncate">{attachment.fileName || `Attachment ${i + 1}`}</span>
                                 <ExternalLink className="h-3 w-3 shrink-0 ml-auto opacity-50" />
                             </a>
                         ))}

@@ -693,11 +693,12 @@ export function ChatWindow({
                 {timelineItems.map((item) => {
                     if (item.kind === 'activity') {
                         return (
-                            <ActivityLogEntry
-                                key={`activity-${item.activity.id}`}
-                                item={item.activity}
-                                contactName={conversation.contactName}
-                            />
+                            <div key={`activity-${item.activity.id}`} className="min-w-0 max-w-full overflow-x-hidden">
+                                <ActivityLogEntry
+                                    item={item.activity}
+                                    contactName={conversation.contactName}
+                                />
+                            </div>
                         );
                     }
                     const m = item.message!;
@@ -708,7 +709,7 @@ export function ChatWindow({
                                 messageRefs.current[m.id] = node;
                             }}
                             className={cn(
-                                "rounded-xl transition-colors",
+                                "rounded-xl transition-colors min-w-0 max-w-full overflow-x-hidden",
                                 jumpMessageId === m.id && "ring-2 ring-blue-300 bg-blue-50/60"
                             )}
                         >

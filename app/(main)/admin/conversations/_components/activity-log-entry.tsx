@@ -188,23 +188,23 @@ export function ActivityLogEntry({ item, contactName }: ActivityLogEntryProps) {
             {/* Horizontal Line Container */}
             <div className="flex items-center w-full justify-center opacity-50 relative">
                 <div className="flex-1 border-t border-slate-300"></div>
-                <div className="px-3">
-                    <div className="flex items-center gap-1.5 px-3 py-1 bg-white rounded-full border border-slate-200 shadow-sm transition-all hover:bg-slate-50 hover:shadow" onClick={() => hasChanges ? setExpanded(!expanded) : null} style={{ cursor: hasChanges ? 'pointer' : 'default' }}>
+                <div className="px-3 min-w-0 max-w-full">
+                    <div className="flex flex-wrap sm:flex-nowrap items-center gap-1.5 px-3 py-1 bg-white rounded-full border border-slate-200 shadow-sm transition-all hover:bg-slate-50 hover:shadow min-w-0 max-w-full overflow-hidden" onClick={() => hasChanges ? setExpanded(!expanded) : null} style={{ cursor: hasChanges ? 'pointer' : 'default' }}>
                         <div className={cn("flex items-center justify-center p-1 rounded-full", iconColor)}>
                             <Icon className="w-3.5 h-3.5" />
                         </div>
-                        <span className="text-[11px] font-medium text-slate-700 whitespace-nowrap">
+                        <span className="text-[11px] font-medium text-slate-700 sm:whitespace-nowrap">
                             {actionLabel}
                         </span>
-                        <span className="text-[10px] text-slate-400 capitalize">
+                        <span className="text-[10px] text-slate-400 capitalize min-w-0 truncate max-w-[36vw] sm:max-w-[180px]">
                             by {userLabel}
                         </span>
                         {contactName ? (
-                            <span className="text-[10px] text-slate-400 truncate max-w-[120px]" title={contactName}>
+                            <span className="text-[10px] text-slate-400 min-w-0 flex-1 truncate" title={contactName}>
                                 · {contactName}
                             </span>
                         ) : null}
-                        <span className="text-[10px] tabular-nums font-mono text-slate-400 ml-1 whitespace-nowrap">
+                        <span className="text-[10px] tabular-nums font-mono text-slate-400 ml-1 shrink-0 sm:whitespace-nowrap">
                             {format(new Date(item.createdAt), 'MMM d, h:mm a')}
                         </span>
                     </div>
@@ -232,18 +232,18 @@ export function ActivityLogEntry({ item, contactName }: ActivityLogEntryProps) {
                             {changes.map((change, idx) => (
                                 <div key={idx} className="flex flex-col gap-0.5">
                                     {item.action === 'UPDATED' ? (
-                                        <div className="grid grid-cols-[auto_1fr] items-baseline gap-2">
-                                            <span className="font-semibold text-slate-500 min-w-[100px] text-right">{formatFieldName(change.field)}:</span>
-                                            <div className="flex items-center gap-1.5 flex-wrap">
-                                                <span className="text-slate-400 line-through">{formatChangeValue(change.old)}</span>
+                                        <div className="grid min-w-0 grid-cols-[minmax(72px,auto)_minmax(0,1fr)] sm:grid-cols-[minmax(100px,auto)_minmax(0,1fr)] items-baseline gap-2">
+                                            <span className="font-semibold text-slate-500 min-w-[72px] sm:min-w-[100px] text-right">{formatFieldName(change.field)}:</span>
+                                            <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                                                <span className="text-slate-400 line-through break-words [overflow-wrap:anywhere]">{formatChangeValue(change.old)}</span>
                                                 <span className="text-slate-400">→</span>
-                                                <span className="text-slate-700 font-medium">{formatChangeValue(change.new)}</span>
+                                                <span className="text-slate-700 font-medium break-words [overflow-wrap:anywhere]">{formatChangeValue(change.new)}</span>
                                             </div>
                                         </div>
                                     ) : (
-                                        <div className="grid grid-cols-[auto_1fr] items-baseline gap-2">
-                                            <span className="font-semibold text-slate-500 min-w-[100px] text-right">{formatFieldName(change.field)}:</span>
-                                            <span className="text-slate-700 font-medium">{formatChangeValue(change.new)}</span>
+                                        <div className="grid min-w-0 grid-cols-[minmax(72px,auto)_minmax(0,1fr)] sm:grid-cols-[minmax(100px,auto)_minmax(0,1fr)] items-baseline gap-2">
+                                            <span className="font-semibold text-slate-500 min-w-[72px] sm:min-w-[100px] text-right">{formatFieldName(change.field)}:</span>
+                                            <span className="text-slate-700 font-medium break-words [overflow-wrap:anywhere]">{formatChangeValue(change.new)}</span>
                                         </div>
                                     )}
                                 </div>
