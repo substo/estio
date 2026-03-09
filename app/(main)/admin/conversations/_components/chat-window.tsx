@@ -136,6 +136,7 @@ export function ChatWindow({
     suggestions = [],
 }: ChatWindowProps & { suggestions?: string[] }) {
     const scrollRef = useRef<HTMLDivElement>(null);
+    const timelineContentRef = useRef<HTMLDivElement>(null);
     const [selectedModel, setSelectedModel] = useState(GEMINI_FLASH_LATEST_ALIAS);
     const [selectionBatch, setSelectionBatch] = useState<SelectionBatchItem[]>([]);
     const [isSummarizingBatch, setIsSummarizingBatch] = useState(false);
@@ -151,6 +152,7 @@ export function ChatWindow({
     const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
     const jumpHighlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const shouldStickToBottomRef = useRef(true);
+    const hasForcedInitialBottomSnapRef = useRef(false);
     const canUseTranscriptOnDemand = transcriptOnDemandEnabled !== false;
     const [addNoteOpen, setAddNoteOpen] = useState(false);
     const [addNoteText, setAddNoteText] = useState("");
@@ -171,6 +173,12 @@ export function ChatWindow({
         }));
         return [...msgItems, ...actItems].sort((a, b) => a.sortDate - b.sortDate);
     }, [messages, activityLog]);
+
+    const snapToBottom = useCallback(() => {
+        const container = scrollRef.current;
+        if (!container) return;
+        container.scrollTop = container.scrollHeight;
+    }, []);
 
     const handleAddNote = async () => {
         if (!addNoteText.trim() || !onAddActivityEntry) return;
@@ -200,6 +208,7 @@ export function ChatWindow({
         setJumpMessageId(null);
         messageRefs.current = {};
         shouldStickToBottomRef.current = true;
+        hasForcedInitialBottomSnapRef.current = false;
     }, [conversation.id]);
 
     useEffect(() => {
@@ -225,16 +234,57 @@ export function ChatWindow({
         return () => container.removeEventListener("scroll", handleScroll);
     }, [conversation.id]);
 
-    // Snap to the latest message before paint on initial thread load.
+    // Always force a bottom snap the first time this conversation's timeline is hydrated.
+    useLayoutEffect(() => {
+        if (loading) return;
+        if (!timelineItems.length) return;
+        if (hasForcedInitialBottomSnapRef.current) return;
+
+        hasForcedInitialBottomSnapRef.current = true;
+        shouldStickToBottomRef.current = true;
+        snapToBottom();
+        requestAnimationFrame(() => {
+            if (!shouldStickToBottomRef.current) return;
+            snapToBottom();
+        });
+    }, [conversation.id, loading, timelineItems.length, snapToBottom]);
+
+    // Keep snapped to latest when new items arrive while user is still near bottom.
     useLayoutEffect(() => {
         if (loading) return;
         if (!messages.length && !activityLog.length) return;
         if (!shouldStickToBottomRef.current) return;
+        snapToBottom();
+    }, [conversation.id, messages, activityLog, loading, snapToBottom]);
 
+    // Stick to bottom through late layout changes (images, audio controls, iframe height updates),
+    // but only while user hasn't manually scrolled away from bottom.
+    useEffect(() => {
         const container = scrollRef.current;
-        if (!container) return;
-        container.scrollTop = container.scrollHeight;
-    }, [conversation.id, messages, activityLog, loading]);
+        const content = timelineContentRef.current;
+        if (!container || !content) return;
+        if (typeof ResizeObserver === "undefined") return;
+
+        let rafId: number | null = null;
+        const scheduleSnap = () => {
+            if (!shouldStickToBottomRef.current) return;
+            if (rafId !== null) cancelAnimationFrame(rafId);
+            rafId = requestAnimationFrame(() => {
+                if (!shouldStickToBottomRef.current) return;
+                snapToBottom();
+            });
+        };
+
+        const observer = new ResizeObserver(() => scheduleSnap());
+        observer.observe(content);
+        observer.observe(container);
+        scheduleSnap();
+
+        return () => {
+            if (rafId !== null) cancelAnimationFrame(rafId);
+            observer.disconnect();
+        };
+    }, [conversation.id, snapToBottom]);
 
     const handleAddSelectionToBatch = useCallback((item: SelectionBatchInput) => {
         const normalizedText = normalizeSelectionForBatch(item.text);
@@ -674,63 +724,65 @@ export function ChatWindow({
             )}
 
             {/* Messages Area */}
-            <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 space-y-4 sm:space-y-6 bg-slate-50/50 scroll-smooth">
-                {loading && (
-                    <div className="flex justify-center p-8">
-                        <Loader2 className="h-8 w-8 animate-spin text-blue-500/50" />
-                    </div>
-                )}
-
-                {!loading && messages.length === 0 && (
-                    <div className="flex flex-col items-center justify-center h-full text-center text-gray-400 space-y-4">
-                        <div className="h-12 w-12 rounded-full bg-gray-100 flex items-center justify-center">
-                            <MessageSquare className="h-6 w-6 text-gray-300" />
+            <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 bg-slate-50/50 scroll-smooth">
+                <div ref={timelineContentRef} className="space-y-4 sm:space-y-6 min-w-0 max-w-full">
+                    {loading && (
+                        <div className="flex justify-center p-8">
+                            <Loader2 className="h-8 w-8 animate-spin text-blue-500/50" />
                         </div>
-                        <p>No messages yet. Start the conversation!</p>
-                    </div>
-                )}
+                    )}
 
-                {timelineItems.map((item) => {
-                    if (item.kind === 'activity') {
+                    {!loading && messages.length === 0 && (
+                        <div className="flex flex-col items-center justify-center h-full text-center text-gray-400 space-y-4">
+                            <div className="h-12 w-12 rounded-full bg-gray-100 flex items-center justify-center">
+                                <MessageSquare className="h-6 w-6 text-gray-300" />
+                            </div>
+                            <p>No messages yet. Start the conversation!</p>
+                        </div>
+                    )}
+
+                    {timelineItems.map((item) => {
+                        if (item.kind === 'activity') {
+                            return (
+                                <div key={`activity-${item.activity.id}`} className="min-w-0 max-w-full overflow-x-hidden">
+                                    <ActivityLogEntry
+                                        item={item.activity}
+                                        contactName={conversation.contactName}
+                                    />
+                                </div>
+                            );
+                        }
+                        const m = item.message!;
                         return (
-                            <div key={`activity-${item.activity.id}`} className="min-w-0 max-w-full overflow-x-hidden">
-                                <ActivityLogEntry
-                                    item={item.activity}
+                            <div
+                                key={m.id}
+                                ref={(node) => {
+                                    messageRefs.current[m.id] = node;
+                                }}
+                                className={cn(
+                                    "rounded-xl transition-colors min-w-0 max-w-full overflow-x-hidden",
+                                    jumpMessageId === m.id && "ring-2 ring-blue-300 bg-blue-50/60"
+                                )}
+                            >
+                                <MessageBubble
+                                    message={m}
+                                    contactPhone={conversation.contactPhone}
+                                    contactEmail={conversation.contactEmail}
                                     contactName={conversation.contactName}
+                                    onRefetchMedia={onRefetchMedia}
+                                    onRequestTranscript={canUseTranscriptOnDemand ? onRequestTranscript : undefined}
+                                    onExtractViewingNotes={canUseTranscriptOnDemand ? onExtractViewingNotes : undefined}
+                                    onRetryTranscript={canUseTranscriptOnDemand ? onRetryTranscript : undefined}
+                                    aiModel={selectedModel}
+                                    selectionBatch={selectionBatch}
+                                    onAddSelectionToBatch={handleAddSelectionToBatch}
+                                    onRemoveSelectionBatchItem={handleRemoveSelectionBatchItem}
+                                    onClearSelectionBatch={handleClearSelectionBatch}
                                 />
                             </div>
                         );
-                    }
-                    const m = item.message!;
-                    return (
-                        <div
-                            key={m.id}
-                            ref={(node) => {
-                                messageRefs.current[m.id] = node;
-                            }}
-                            className={cn(
-                                "rounded-xl transition-colors min-w-0 max-w-full overflow-x-hidden",
-                                jumpMessageId === m.id && "ring-2 ring-blue-300 bg-blue-50/60"
-                            )}
-                        >
-                            <MessageBubble
-                                message={m}
-                                contactPhone={conversation.contactPhone}
-                                contactEmail={conversation.contactEmail}
-                                contactName={conversation.contactName}
-                                onRefetchMedia={onRefetchMedia}
-                                onRequestTranscript={canUseTranscriptOnDemand ? onRequestTranscript : undefined}
-                                onExtractViewingNotes={canUseTranscriptOnDemand ? onExtractViewingNotes : undefined}
-                                onRetryTranscript={canUseTranscriptOnDemand ? onRetryTranscript : undefined}
-                                aiModel={selectedModel}
-                                selectionBatch={selectionBatch}
-                                onAddSelectionToBatch={handleAddSelectionToBatch}
-                                onRemoveSelectionBatchItem={handleRemoveSelectionBatchItem}
-                                onClearSelectionBatch={handleClearSelectionBatch}
-                            />
-                        </div>
-                    );
-                })}
+                    })}
+                </div>
             </div>
 
             <ConversationComposer
