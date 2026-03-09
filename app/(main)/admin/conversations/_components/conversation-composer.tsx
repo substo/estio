@@ -408,13 +408,13 @@ export function ConversationComposer({
                 : undefined;
 
     return (
-        <div className="border-t bg-white pb-[env(safe-area-inset-bottom)]">
+        <div className="border-t bg-white pb-[env(safe-area-inset-bottom)]" data-no-pane-swipe>
             <SuggestionBubbles
                 suggestions={suggestions}
                 onSelect={(text) => handleAiDraft(text)}
             />
 
-            <div className="px-3 py-2 max-w-4xl mx-auto">
+            <div className="px-3 py-2 max-w-4xl mx-auto min-w-0">
                 {replyingToLabel ? (
                     <div className="px-1 pb-1 text-[11px] text-slate-500">
                         Replying to <span className="font-medium text-slate-700">{replyingToLabel}</span>
@@ -435,7 +435,7 @@ export function ConversationComposer({
                     onChange={handleMediaSelected}
                 />
 
-                <div className="relative rounded-xl border bg-white shadow-sm focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-300 transition-all">
+                <div className="relative rounded-xl border bg-white shadow-sm focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-300 transition-all min-w-0">
                     <Textarea
                         value={draft}
                         onChange={(e) => setDraft(e.target.value)}
@@ -450,8 +450,8 @@ export function ConversationComposer({
                         }}
                     />
 
-                    <div className="flex items-center justify-between px-2 pb-1.5 gap-1">
-                        <div className="flex items-center gap-1">
+                    <div className="flex flex-wrap items-center gap-1 px-2 pb-1.5 sm:flex-nowrap sm:justify-between">
+                        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 sm:flex-nowrap">
                             <Select
                                 value={selectedChannel}
                                 onValueChange={(v: ComposerChannel) => {
@@ -463,7 +463,7 @@ export function ConversationComposer({
                                 disabled={isUnavailable}
                             >
                                 <SelectTrigger
-                                    className="h-7 w-auto min-w-[85px] text-[11px] border-0 bg-slate-50 hover:bg-slate-100 focus:ring-0 px-2"
+                                    className="h-7 w-[78px] sm:w-auto sm:min-w-[85px] text-[11px] border-0 bg-slate-50 hover:bg-slate-100 focus:ring-0 px-2"
                                     title={channelSelectorTitle}
                                 >
                                     <SelectValue />
@@ -487,7 +487,7 @@ export function ConversationComposer({
                                         }}
                                         disabled={isUnavailable}
                                     >
-                                        <SelectTrigger className="h-7 w-[110px] text-[11px] border-0 bg-slate-50 hover:bg-slate-100 focus:ring-0 px-2">
+                                        <SelectTrigger className="h-7 w-[94px] sm:w-[110px] text-[11px] border-0 bg-slate-50 hover:bg-slate-100 focus:ring-0 px-2">
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
@@ -503,7 +503,7 @@ export function ConversationComposer({
                                         size="sm"
                                         onClick={() => handleAiDraft()}
                                         disabled={isUnavailable || generatingDraft}
-                                        className="h-7 text-[11px] font-medium text-purple-600 hover:text-purple-700 hover:bg-purple-50 gap-1 px-2"
+                                        className="h-7 text-[11px] font-medium text-purple-600 hover:text-purple-700 hover:bg-purple-50 gap-1 px-1.5 sm:px-2"
                                     >
                                         {generatingDraft ? (
                                             <Loader2 className="w-3 h-3 animate-spin" />
@@ -516,7 +516,7 @@ export function ConversationComposer({
                             )}
                         </div>
 
-                        <div className="flex items-center gap-1.5">
+                        <div className="ml-auto flex w-full items-center justify-end gap-1.5 sm:w-auto">
                             <span className="text-[10px] text-slate-400 hidden sm:inline">⌘↵</span>
                             {selectedChannel === "WhatsApp" && onSendMedia && (
                                 <>

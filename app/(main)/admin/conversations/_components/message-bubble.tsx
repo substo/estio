@@ -360,11 +360,11 @@ export function MessageBubble({
                 {/* SMS/WhatsApp Header */}
                 {(isSMS || isWhatsApp) && (
                     <div className={cn(
-                        "px-3 py-1.5 text-[11px] flex items-center gap-2 border-b",
+                        "px-3 py-1.5 text-[11px] flex items-center gap-2 border-b min-w-0",
                         isOutbound ? "bg-blue-700/30 text-blue-100 border-blue-500/50" : "bg-gray-50 text-gray-500 border-gray-100"
                     )}>
                         <Smartphone className="h-3 w-3 shrink-0" />
-                        <span>
+                        <span className="truncate min-w-0">
                             {isOutbound
                                 ? `To: ${contactPhone || contactName || "Contact"}`
                                 : `From: ${contactPhone || contactName || "Contact"}`
@@ -408,10 +408,10 @@ export function MessageBubble({
 
                 {/* Content Area */}
                 <div className={cn(
-                    "w-full break-words overflow-x-auto max-w-full transition-all duration-300 ease-in-out relative",
+                    "w-full max-w-full overflow-x-hidden transition-all duration-300 ease-in-out relative break-words [overflow-wrap:anywhere]",
                     isEmail ? "bg-white text-black" : "", // Force white background for emails
                     isEmail && "p-4",
-                    !isEmail && "whitespace-pre-wrap"
+                    !isEmail && "whitespace-pre-wrap [word-break:break-word]"
                 )}
                     ref={contentRef}
                     onMouseUp={handleContentSelection}
@@ -463,8 +463,9 @@ export function MessageBubble({
                         {audioAttachments.map((attachment, i) => (
                             <div
                                 key={`audio-${i}-${attachment.url}`}
+                                data-horizontal-scroll
                                 className={cn(
-                                    "rounded-lg border border-black/10 bg-black/5 p-2",
+                                    "rounded-lg border border-black/10 bg-black/5 p-2 overflow-x-auto",
                                     isOutbound && !isEmail ? "bg-white/10 border-white/20" : "bg-black/[0.03]"
                                 )}
                                 onClick={(e) => e.stopPropagation()}
@@ -559,7 +560,7 @@ export function MessageBubble({
                                                 ) : (
                                                     <>
                                                         <p className={cn(
-                                                            "whitespace-pre-wrap leading-relaxed",
+                                                            "whitespace-pre-wrap leading-relaxed [overflow-wrap:anywhere] [word-break:break-word]",
                                                             isOutbound && !isEmail ? "text-blue-50" : "text-gray-700"
                                                         )}>
                                                             {(() => {
@@ -716,7 +717,7 @@ export function MessageBubble({
                                                             Viewing notes are hidden by policy.
                                                         </p>
                                                     ) : (
-                                                        <div className="mt-1 space-y-0.5">
+                                                        <div className="mt-1 space-y-0.5 [overflow-wrap:anywhere] [word-break:break-word]">
                                                             <p>Prospects: {formatExtractionList((attachment.transcript.extraction.payload as any)?.prospects).join("; ") || "None"}</p>
                                                             <p>Requirements: {formatExtractionList((attachment.transcript.extraction.payload as any)?.requirements).join("; ") || "None"}</p>
                                                             <p>Budget: {String((attachment.transcript.extraction.payload as any)?.budget || "").trim() || "Not specified"}</p>

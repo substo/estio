@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { Conversation } from "@/lib/ghl/conversations";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
-import { Mail, MessageSquare, MessageCircle, Layers, Link as LinkIcon, Upload, Trash2, X, CheckSquare, Inbox, Archive, Plus, CloudDownload, Loader2, Search } from "lucide-react";
+import { Mail, MessageSquare, MessageCircle, Layers, Link as LinkIcon, Trash2, X, CheckSquare, Inbox, Archive, Plus, CloudDownload, Loader2, Search, MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card";
@@ -147,94 +147,119 @@ export function ConversationList({
     const UnifiedHeader = () => {
         const isAllSelected = conversations.length > 0 && selectedIds?.size === conversations.length;
         const isPartiallySelected = selectedIds && selectedIds.size > 0 && selectedIds.size < conversations.length;
+        const selectedIdsList = Array.from(selectedIds || []);
+        const showSearch = effectiveViewMode === 'chats' && onSearchChange !== undefined;
+        const showActiveInboxActions = viewFilter === 'active';
 
-        // Selection Mode Header
         if (isSelectionMode && effectiveViewMode === 'chats') {
             return (
-                <div className="p-2 border-b bg-indigo-50/50 flex items-center justify-start gap-1 h-[50px] overflow-hidden">
-                    <div className="flex items-center gap-2 pl-1 shrink-0">
-                        <Checkbox
-                            id="select-all"
-                            checked={isAllSelected || (isPartiallySelected ? "indeterminate" : false)}
-                            onCheckedChange={(checked) => onSelectAll?.(checked === true)}
-                        />
-                        <span className="text-xs font-medium text-indigo-900 truncate">
-                            {selectedIds?.size || 0} selected
-                        </span>
-                    </div>
+                <div className="border-b bg-indigo-50/50 p-2 min-w-0">
+                    <div className="flex items-center justify-between gap-2 min-w-0">
+                        <div className="flex items-center gap-2 min-w-0">
+                            <Checkbox
+                                id="select-all"
+                                checked={isAllSelected || (isPartiallySelected ? "indeterminate" : false)}
+                                onCheckedChange={(checked) => onSelectAll?.(checked === true)}
+                            />
+                            <span className="truncate text-xs font-medium text-indigo-900">
+                                {selectedIds?.size || 0} selected
+                            </span>
+                        </div>
 
-                    <div className="flex items-center gap-0 shrink-0 ml-2">
-                        {/* Actions for selection mode */}
-                        {onBind && (
-                            <TooltipProvider delayDuration={200}>
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-8 w-8 text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50"
-                                            onClick={() => onBind(Array.from(selectedIds || []))}
-                                        >
-                                            <Layers className="w-4 h-4" />
-                                        </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent>Bind to New Deal</TooltipContent>
-                                </Tooltip>
-                            </TooltipProvider>
-                        )}
+                        <div className="flex items-center gap-1 shrink-0">
+                            <div className="hidden sm:flex items-center gap-0">
+                                {onBind && (
+                                    <TooltipProvider delayDuration={200}>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-8 w-8 text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50"
+                                                    onClick={() => onBind(selectedIdsList)}
+                                                >
+                                                    <Layers className="w-4 h-4" />
+                                                </Button>
+                                            </TooltipTrigger>
+                                            <TooltipContent>Bind to New Deal</TooltipContent>
+                                        </Tooltip>
+                                    </TooltipProvider>
+                                )}
 
-                        {onArchive && (
-                            <TooltipProvider delayDuration={200}>
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-8 w-8 text-gray-600 hover:text-gray-900 hover:bg-gray-100"
-                                            onClick={() => onArchive(Array.from(selectedIds || []))}
-                                        >
-                                            <Archive className="w-4 h-4" />
-                                        </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent>Archive Selected</TooltipContent>
-                                </Tooltip>
-                            </TooltipProvider>
-                        )}
+                                {onArchive && (
+                                    <TooltipProvider delayDuration={200}>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-8 w-8 text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+                                                    onClick={() => onArchive(selectedIdsList)}
+                                                >
+                                                    <Archive className="w-4 h-4" />
+                                                </Button>
+                                            </TooltipTrigger>
+                                            <TooltipContent>Archive Selected</TooltipContent>
+                                        </Tooltip>
+                                    </TooltipProvider>
+                                )}
 
-                        <TooltipProvider delayDuration={200}>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        // ... Delete button ...
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
-                                        onClick={() => onDelete?.(Array.from(selectedIds || []))}
-                                    >
-                                        <Trash2 className="w-4 h-4" />
+                                <TooltipProvider delayDuration={200}>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                                onClick={() => onDelete?.(selectedIdsList)}
+                                            >
+                                                <Trash2 className="w-4 h-4" />
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent>Delete Selected</TooltipContent>
+                                    </Tooltip>
+                                </TooltipProvider>
+                            </div>
+
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="h-8 w-8 sm:hidden">
+                                        <MoreHorizontal className="w-4 h-4" />
                                     </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Delete Selected</TooltipContent>
-                            </Tooltip>
-                        </TooltipProvider>
-                    </div>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-44">
+                                    {onBind && (
+                                        <DropdownMenuItem onClick={() => onBind(selectedIdsList)} className="gap-2">
+                                            <Layers className="w-4 h-4" />
+                                            Bind to Deal
+                                        </DropdownMenuItem>
+                                    )}
+                                    {onArchive && (
+                                        <DropdownMenuItem onClick={() => onArchive(selectedIdsList)} className="gap-2">
+                                            <Archive className="w-4 h-4" />
+                                            Archive Selected
+                                        </DropdownMenuItem>
+                                    )}
+                                    <DropdownMenuItem onClick={() => onDelete?.(selectedIdsList)} className="gap-2 text-red-600 focus:text-red-600">
+                                        <Trash2 className="w-4 h-4" />
+                                        Delete Selected
+                                    </DropdownMenuItem>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
 
-                    <div className="ml-1">
-                        <Button variant="ghost" size="sm" onClick={() => onToggleSelectionMode?.(false)}>
-                            Cancel
-                        </Button>
+                            <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => onToggleSelectionMode?.(false)}>
+                                Cancel
+                            </Button>
+                        </div>
                     </div>
                 </div>
             );
         }
 
-        // Standard Header with Mode Toggle + Filter + Actions
         return (
-            <div className="p-2 border-b bg-slate-50 flex items-center justify-start gap-1 h-[50px] overflow-hidden">
-
-                {/* Search Bar - only in chats mode */}
-                {effectiveViewMode === 'chats' && onSearchChange !== undefined && (
-                    <div className="flex-1 relative mx-1">
+            <div className="border-b bg-slate-50 p-2 min-w-0">
+                {showSearch && (
+                    <div className="relative mb-1 sm:mb-0 sm:mr-1" data-no-pane-swipe>
                         <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none">
                             <Search className="h-3 w-3 text-slate-400" />
                         </div>
@@ -256,138 +281,159 @@ export function ConversationList({
                     </div>
                 )}
 
+                <div className="flex items-center justify-between gap-1 min-w-0">
+                    <div className="flex items-center gap-1 min-w-0">
+                        {onViewModeChange && (
+                            <Tabs value={effectiveViewMode} onValueChange={(v: string) => onViewModeChange(v as 'chats' | 'deals')} className="shrink-0">
+                                <TabsList className="h-8">
+                                    <TabsTrigger value="chats" className="text-xs px-1.5 sm:px-2 h-7 gap-1" title="Chats">
+                                        <MessageSquare className="w-3 h-3" />
+                                        <span className="hidden sm:inline">Chats</span>
+                                    </TabsTrigger>
+                                    <TabsTrigger value="deals" className="text-xs px-1.5 sm:px-2 h-7 gap-1" title="Deals">
+                                        <Layers className="w-3 h-3" />
+                                        <span className="hidden sm:inline">Deals</span>
+                                    </TabsTrigger>
+                                </TabsList>
+                            </Tabs>
+                        )}
 
-                {/* Segmented Control for Mode Toggle */}
-                {onViewModeChange && (
-                    <Tabs value={effectiveViewMode} onValueChange={(v: string) => onViewModeChange(v as 'chats' | 'deals')} className="flex-shrink-0">
-                        <TabsList className="h-8">
-                            <TabsTrigger value="chats" className="text-xs px-2 h-7 gap-1">
-                                <MessageSquare className="w-3 h-3" /> Chats
-                            </TabsTrigger>
-                            <TabsTrigger value="deals" className="text-xs px-2 h-7 gap-1">
-                                <Layers className="w-3 h-3" /> Deals
-                            </TabsTrigger>
-                        </TabsList>
-                    </Tabs>
-                )}
+                        {effectiveViewMode === 'chats' && onViewFilterChange && (
+                            <TooltipProvider delayDuration={200}>
+                                <div
+                                    onMouseEnter={handleMouseEnter}
+                                    onMouseLeave={handleMouseLeave}
+                                    className="flex items-center"
+                                >
+                                    <DropdownMenu open={isMenuOpen} onOpenChange={setIsMenuOpen}>
+                                        <DropdownMenuTrigger asChild>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-7 w-7 text-slate-600 hover:text-slate-900"
+                                            >
+                                                {viewFilter === 'active' && <Inbox className="w-4 h-4" />}
+                                                {viewFilter === 'archived' && <Archive className="w-4 h-4" />}
+                                                {viewFilter === 'trash' && <Trash2 className="w-4 h-4" />}
+                                                {viewFilter === 'tasks' && <CheckSquare className="w-4 h-4 text-emerald-600" />}
+                                            </Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent
+                                            align="start"
+                                            className="w-32"
+                                            onMouseEnter={handleMouseEnter}
+                                            onMouseLeave={handleMouseLeave}
+                                        >
+                                            <DropdownMenuItem onClick={() => { onViewFilterChange('active'); setIsMenuOpen(false); }} className="gap-2">
+                                                <Inbox className="w-4 h-4" /> Inbox
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => { onViewFilterChange('tasks'); setIsMenuOpen(false); }} className="gap-2">
+                                                <CheckSquare className="w-4 h-4 text-emerald-600" /> Tasks
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => { onViewFilterChange('archived'); setIsMenuOpen(false); }} className="gap-2">
+                                                <Archive className="w-4 h-4" /> Archived
+                                            </DropdownMenuItem>
+                                            <DropdownMenuSeparator />
+                                            <DropdownMenuItem onClick={() => { onViewFilterChange('trash'); setIsMenuOpen(false); }} className="gap-2 text-red-600 focus:text-red-600">
+                                                <Trash2 className="w-4 h-4" /> Trash
+                                            </DropdownMenuItem>
+                                        </DropdownMenuContent>
+                                    </DropdownMenu>
+                                </div>
+                            </TooltipProvider>
+                        )}
+                    </div>
 
-                {/* View Filter Icon Buttons - only show in Chats mode */}
-                {effectiveViewMode === 'chats' && onViewFilterChange && (
-                    <TooltipProvider delayDuration={200}>
-                        <div className="flex items-center gap-1">
-                            {/* Vertical Dropdown Toggle - Hoverable */}
-                            <div
-                                onMouseEnter={handleMouseEnter}
-                                onMouseLeave={handleMouseLeave}
-                                className="flex items-center"
-                            >
-                                <DropdownMenu open={isMenuOpen} onOpenChange={setIsMenuOpen}>
-                                    <DropdownMenuTrigger asChild>
+                    {effectiveViewMode === 'chats' && onToggleSelectionMode && (
+                        <TooltipProvider delayDuration={200}>
+                            <div className="flex items-center gap-0.5 shrink-0">
+                                {showActiveInboxActions && (
+                                    <>
+                                        <div className="hidden sm:flex items-center gap-0.5">
+                                            <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-7 w-7 text-green-600 hover:text-green-700 hover:bg-green-50"
+                                                        onClick={onNewConversationClick}
+                                                    >
+                                                        <Plus className="w-4 h-4" />
+                                                    </Button>
+                                                </TooltipTrigger>
+                                                <TooltipContent side="bottom">New Conversation</TooltipContent>
+                                            </Tooltip>
+
+                                            <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-7 w-7"
+                                                        onClick={onSyncAllClick}
+                                                    >
+                                                        <CloudDownload className="w-3.5 h-3.5" />
+                                                    </Button>
+                                                </TooltipTrigger>
+                                                <TooltipContent side="bottom">Sync All WhatsApp Chats</TooltipContent>
+                                            </Tooltip>
+
+                                            <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-7 w-7"
+                                                        onClick={() => onToggleSelectionMode(true)}
+                                                    >
+                                                        <Layers className="w-3.5 h-3.5" />
+                                                    </Button>
+                                                </TooltipTrigger>
+                                                <TooltipContent side="bottom">Bind to Deal</TooltipContent>
+                                            </Tooltip>
+                                        </div>
+
+                                        <DropdownMenu>
+                                            <DropdownMenuTrigger asChild>
+                                                <Button variant="ghost" size="icon" className="h-7 w-7 sm:hidden">
+                                                    <MoreHorizontal className="w-4 h-4" />
+                                                </Button>
+                                            </DropdownMenuTrigger>
+                                            <DropdownMenuContent align="end" className="w-44">
+                                                <DropdownMenuItem onClick={onNewConversationClick} className="gap-2">
+                                                    <Plus className="w-4 h-4" />
+                                                    New Conversation
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem onClick={onSyncAllClick} className="gap-2">
+                                                    <CloudDownload className="w-4 h-4" />
+                                                    Sync All WhatsApp Chats
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem onClick={() => onToggleSelectionMode(true)} className="gap-2">
+                                                    <Layers className="w-4 h-4" />
+                                                    Bind to Deal
+                                                </DropdownMenuItem>
+                                            </DropdownMenuContent>
+                                        </DropdownMenu>
+                                    </>
+                                )}
+
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
                                         <Button
                                             variant="ghost"
                                             size="icon"
-                                            className="h-7 w-7 text-slate-600 hover:text-slate-900 mx-0.5"
+                                            className="h-7 w-7"
+                                            onClick={() => onToggleSelectionMode(true)}
                                         >
-                                            {viewFilter === 'active' && <Inbox className="w-4 h-4" />}
-                                            {viewFilter === 'archived' && <Archive className="w-4 h-4" />}
-                                            {viewFilter === 'trash' && <Trash2 className="w-4 h-4" />}
-                                            {viewFilter === 'tasks' && <CheckSquare className="w-4 h-4 text-emerald-600" />}
+                                            <CheckSquare className="w-3.5 h-3.5" />
                                         </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent
-                                        align="start"
-                                        className="w-32"
-                                        onMouseEnter={handleMouseEnter}
-                                        onMouseLeave={handleMouseLeave}
-                                    >
-                                        <DropdownMenuItem onClick={() => { onViewFilterChange('active'); setIsMenuOpen(false); }} className="gap-2">
-                                            <Inbox className="w-4 h-4" /> Inbox
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => { onViewFilterChange('tasks'); setIsMenuOpen(false); }} className="gap-2">
-                                            <CheckSquare className="w-4 h-4 text-emerald-600" /> Tasks
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => { onViewFilterChange('archived'); setIsMenuOpen(false); }} className="gap-2">
-                                            <Archive className="w-4 h-4" /> Archived
-                                        </DropdownMenuItem>
-                                        <DropdownMenuSeparator />
-                                        <DropdownMenuItem onClick={() => { onViewFilterChange('trash'); setIsMenuOpen(false); }} className="gap-2 text-red-600 focus:text-red-600">
-                                            <Trash2 className="w-4 h-4" /> Trash
-                                        </DropdownMenuItem>
-                                    </DropdownMenuContent>
-                                </DropdownMenu>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="bottom">Select / Delete</TooltipContent>
+                                </Tooltip>
                             </div>
-                        </div>
-                    </TooltipProvider>
-                )}
-
-                {/* Action Buttons - only show in Chats mode */}
-                {effectiveViewMode === 'chats' && onToggleSelectionMode && (
-                    <TooltipProvider delayDuration={200}>
-                        <div className="flex gap-0 shrink-0">
-                            {/* Action buttons - only show on Inbox */}
-                            {viewFilter === 'active' && (
-                                <>
-                                    <Tooltip>
-                                        <TooltipTrigger asChild>
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                className="h-7 w-7 text-green-600 hover:text-green-700 hover:bg-green-50"
-                                                onClick={onNewConversationClick}
-                                            >
-                                                <Plus className="w-4 h-4" />
-                                            </Button>
-                                        </TooltipTrigger>
-                                        <TooltipContent side="bottom">New Conversation</TooltipContent>
-                                    </Tooltip>
-
-                                    <Tooltip>
-                                        <TooltipTrigger asChild>
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                className="h-7 w-7"
-                                                onClick={onSyncAllClick}
-                                            >
-                                                <CloudDownload className="w-3.5 h-3.5" />
-                                            </Button>
-                                        </TooltipTrigger>
-                                        <TooltipContent side="bottom">Sync All WhatsApp Chats</TooltipContent>
-                                    </Tooltip>
-
-                                    <Tooltip>
-                                        <TooltipTrigger asChild>
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                className="h-7 w-7"
-                                                onClick={() => onToggleSelectionMode(true)}
-                                            >
-                                                <Layers className="w-3.5 h-3.5" />
-                                            </Button>
-                                        </TooltipTrigger>
-                                        <TooltipContent side="bottom">Bind to Deal</TooltipContent>
-                                    </Tooltip>
-                                </>
-                            )}
-
-                            {/* Select/Delete - always shown in Chats mode */}
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-7 w-7"
-                                        onClick={() => onToggleSelectionMode(true)}
-                                    >
-                                        <CheckSquare className="w-3.5 h-3.5" />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent side="bottom">Select / Delete</TooltipContent>
-                            </Tooltip>
-                        </div>
-                    </TooltipProvider>
-                )}
+                        </TooltipProvider>
+                    )}
+                </div>
             </div>
         );
     };
@@ -395,7 +441,7 @@ export function ConversationList({
     if (effectiveViewMode === 'deals' && deals && deals.length > 0) {
         // RENDER DEALS LIST
         return (
-            <div className="h-full flex flex-col border-r">
+            <div className="h-full flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden">
                 {/* Status Bar */}
                 <WhatsAppStatus />
 
@@ -403,7 +449,7 @@ export function ConversationList({
                 <UnifiedHeader />
 
 
-                <div className="flex-1 overflow-y-auto overflow-x-hidden pr-1 [scrollbar-gutter:stable]">
+                <div className="flex-1 overflow-y-auto overflow-x-hidden sm:pr-1 [scrollbar-gutter:stable] min-w-0">
                     {deals.map(d => (
                         <div
                             key={d.id}
@@ -437,7 +483,7 @@ export function ConversationList({
 
     if (isSearching) {
         return (
-            <div className="h-full flex flex-col border-r">
+            <div className="h-full flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden">
                 <WhatsAppStatus />
                 <UnifiedHeader />
                 <div className="p-8 flex flex-col items-center justify-center text-slate-500">
@@ -450,7 +496,7 @@ export function ConversationList({
 
     if (viewFilter === 'tasks') {
         return (
-            <div className="h-full flex flex-col border-r">
+            <div className="h-full flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden">
                 <WhatsAppStatus />
                 <UnifiedHeader />
                 <GlobalTaskList
@@ -463,7 +509,7 @@ export function ConversationList({
 
     if (conversations.length === 0 && effectiveViewMode === 'chats') {
         return (
-            <div className="h-full flex flex-col border-r">
+            <div className="h-full flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden">
                 <WhatsAppStatus />
                 <UnifiedHeader />
                 <div className="p-4 text-center text-gray-500">No conversations found.</div>
@@ -472,21 +518,21 @@ export function ConversationList({
     }
 
     return (
-        <div className="h-full flex flex-col border-r">
+        <div className="h-full flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden">
             {/* Status Bar */}
             <WhatsAppStatus />
 
             {/* Unified Header with Mode Toggle + Action Buttons */}
             <UnifiedHeader />
 
-            <div ref={listScrollRef} className="flex-1 overflow-y-auto overflow-x-hidden pr-1 [scrollbar-gutter:stable]">
+            <div ref={listScrollRef} className="flex-1 overflow-y-auto overflow-x-hidden sm:pr-1 [scrollbar-gutter:stable] min-w-0">
                 {conversations.map((c) => {
                     const channel = getChannelInfo(c.lastMessageType || c.type);
                     const isChecked = selectedIds?.has(c.id);
                     const row = (
                         <div
                             className={cn(
-                                "border-b transition-colors flex items-start py-2 pl-2 pr-3 cursor-pointer",
+                                "border-b transition-colors flex items-start py-2 pl-2 pr-3 cursor-pointer w-full min-w-0",
                                 selectedId === c.id && !isSelectionMode ? "bg-slate-100 border-l-blue-500" : "border-l-transparent",
                                 isSelectionMode && isChecked ? "bg-indigo-50" : "hover:bg-slate-50",
                                 selectedId === c.id ? "border-l-4" : "border-l-4"
@@ -517,11 +563,11 @@ export function ConversationList({
 
                             <div className="flex-1 min-w-0">
                                 {/* Contact name */}
-                                <div className="flex items-center justify-between">
-                                    <h4 className="font-semibold text-sm truncate flex-1">
+                                <div className="flex items-center justify-between gap-2 min-w-0">
+                                    <h4 className="font-semibold text-sm truncate flex-1 min-w-0">
                                         {c.contactName || c.contactId || "Unknown Contact"}
                                     </h4>
-                                    <div className="ml-2 mr-0.5 shrink-0 flex items-center gap-1">
+                                    <div className="ml-2 mr-0.5 shrink-0 flex items-center gap-1 max-w-[35%]">
                                         {c.unreadCount > 0 && (
                                             <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] leading-[18px] text-center font-semibold">
                                                 {c.unreadCount > 99 ? "99+" : c.unreadCount}

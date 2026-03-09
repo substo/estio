@@ -205,6 +205,8 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
   - Horizontal swipe gestures support pane navigation on mobile:
     - list ⟷ conversation/timeline
     - conversation/timeline ⟷ mission control
+  - Pane-swipe is edge-scoped (24px left/right edge zones) with gesture arbitration so normal scroll/pan in content does not change panes.
+  - Gesture guards ignore text-input and `data-no-pane-swipe` zones, and they defer to explicit horizontal scrollers marked with `data-horizontal-scroll`.
   - The thread header exposes an explicit **Back** action to return to the full-screen list.
   - Mission Control exposes a top-left **Back** action to return to the conversation/timeline pane.
   - Desktop (`>=1024px`) retains the resizable tri-panel layout.

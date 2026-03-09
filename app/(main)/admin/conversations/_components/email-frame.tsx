@@ -52,14 +52,28 @@ export function EmailFrame({ html, onSelectionChange }: EmailFrameProps) {
             <head>
                 <base target="_blank">
                 <style>
+                    html {
+                        width: 100%;
+                        max-width: 100%;
+                        overflow-x: hidden;
+                    }
                     body {
                         margin: 0;
                         padding: 0;
+                        width: 100%;
+                        max-width: 100%;
                         font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
                         font-size: 14px;
                         line-height: 1.5;
                         color: #1f2937; /* text-gray-800 */
+                        overflow-x: hidden;
                         overflow-y: hidden; /* Hide scrollbar inside iframe */
+                        overflow-wrap: anywhere;
+                        word-break: break-word;
+                    }
+                    * {
+                        box-sizing: border-box;
+                        max-width: 100%;
                     }
                     img {
                         max-width: 100%;
@@ -67,7 +81,23 @@ export function EmailFrame({ html, onSelectionChange }: EmailFrameProps) {
                     }
                     /* Ensure table layouts don't break out */
                     table {
-                        max-width: 100%;
+                        width: 100% !important;
+                        max-width: 100% !important;
+                        table-layout: fixed;
+                    }
+                    td, th {
+                        white-space: normal;
+                        overflow-wrap: anywhere;
+                        word-break: break-word;
+                    }
+                    pre, code {
+                        white-space: pre-wrap;
+                        overflow-wrap: anywhere;
+                        word-break: break-word;
+                    }
+                    a {
+                        overflow-wrap: anywhere;
+                        word-break: break-word;
                     }
                 </style>
             </head>

@@ -4,18 +4,19 @@ import { GEMINI_FLASH_LATEST_ALIAS } from "@/lib/ai/models";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, MessageSquare, RefreshCw, FileText, Trash2, Search, AudioLines, NotebookPen, ArrowLeft, ListTodo } from "lucide-react";
+import { Loader2, MessageSquare, RefreshCw, FileText, Trash2, Search, AudioLines, NotebookPen, ArrowLeft, ListTodo, MoreHorizontal } from "lucide-react";
 import {
     DropdownMenu,
     DropdownMenuContent,
-    DropdownMenuItem,
     DropdownMenuLabel,
+    DropdownMenuItem,
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ActivityLogEntry } from "./activity-log-entry";
 
 export interface ActivityLogItem {
@@ -361,13 +362,21 @@ export function ChatWindow({
         }
     };
 
-    const isWhatsAppConversation = String(conversation.lastMessageType || conversation.type || "").toUpperCase().includes("WHATSAPP");
+    const conversationType = String(conversation.lastMessageType || conversation.type || "").toUpperCase();
+    const isWhatsAppConversation = conversationType.includes("WHATSAPP");
+    const isEmailConversation = conversation.type === 'Email' || conversation.lastMessageType === 'TYPE_EMAIL' || conversationType.includes("EMAIL");
+    const hasMobileMoreActions = (
+        selectionBatch.length > 0
+        || (!!isWhatsAppConversation && !!onSync)
+        || (!!isWhatsAppConversation && !!canUseTranscriptOnDemand && !!onBulkTranscribeUnprocessedAudio)
+        || (!!isEmailConversation && !!onFetchHistory)
+    );
 
     return (
         <div className="h-full flex flex-col bg-white min-w-0 overflow-hidden">
             {/* Header */}
             <div className="h-16 border-b flex items-center px-3 sm:px-6 shrink-0 justify-between bg-white z-10 shadow-sm gap-2">
-                <div className="flex items-center gap-2 min-w-0">
+                <div className="flex items-center gap-2 min-w-0 flex-1">
                     {onBack && (
                         <Button
                             variant="ghost"
@@ -389,7 +398,7 @@ export function ChatWindow({
                         </div>
                     </div>
                 </div>
-                <div className="flex items-center gap-1 sm:gap-2 overflow-x-auto">
+                <div className="flex items-center gap-1 sm:gap-2 shrink-0 min-w-0">
                     {onOpenMissionControl && (
                         <Button
                             variant="ghost"
@@ -403,21 +412,36 @@ export function ChatWindow({
                     )}
                     {selectionBatch.length > 0 && (
                         <>
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-8 gap-1.5 px-2 text-[11px]"
-                                onClick={handleSummarizeBatch}
-                                disabled={isSummarizingBatch}
-                                title="Summarize all queued snippets into one CRM log entry"
-                            >
-                                {isSummarizingBatch ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
-                                {isSummarizingBatch ? "Summarizing..." : `Summarize Batch (${selectionBatch.length})`}
-                            </Button>
+                            <TooltipProvider delayDuration={200}>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-8 gap-1 px-2 text-[11px]"
+                                            onClick={handleSummarizeBatch}
+                                            disabled={isSummarizingBatch}
+                                            title="Summarize all queued snippets into one CRM log entry"
+                                        >
+                                            {isSummarizingBatch ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                                            {isSummarizingBatch ? (
+                                                "..."
+                                            ) : (
+                                                <>
+                                                    <span className="sm:hidden">Batch ({selectionBatch.length})</span>
+                                                    <span className="hidden sm:inline">Summarize Batch ({selectionBatch.length})</span>
+                                                </>
+                                            )}
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>Summarize all queued snippets</TooltipContent>
+                                </Tooltip>
+                            </TooltipProvider>
+
                             <Button
                                 variant="ghost"
                                 size="icon"
-                                className="h-8 w-8"
+                                className="h-8 w-8 hidden sm:inline-flex"
                                 onClick={handleClearSelectionBatch}
                                 title="Clear queued summary snippets"
                             >
@@ -426,7 +450,7 @@ export function ChatWindow({
                         </>
                     )}
                     {isWhatsAppConversation && onSync && (
-                        <Button variant="ghost" size="icon" onClick={onSync} title="Sync WhatsApp History">
+                        <Button variant="ghost" size="icon" className="hidden sm:inline-flex" onClick={onSync} title="Sync WhatsApp History">
                             <RefreshCw className="h-4 w-4 text-gray-500" />
                         </Button>
                     )}
@@ -438,7 +462,7 @@ export function ChatWindow({
                                     <Button
                                         variant="ghost"
                                         size="icon"
-                                        className="h-8 w-8"
+                                        className="h-8 w-8 hidden sm:inline-flex"
                                         disabled={isBulkTranscribingAudio}
                                         title="Transcribe unprocessed audio"
                                     >
@@ -513,16 +537,59 @@ export function ChatWindow({
                     >
                         <Search className="h-4 w-4 text-gray-500" />
                     </Button>
-                    {(conversation.type === 'Email' || conversation.lastMessageType === 'TYPE_EMAIL') && onFetchHistory && (
-                        <Button variant="ghost" size="icon" onClick={onFetchHistory} title="Fetch Gmail History">
+                    {isEmailConversation && onFetchHistory && (
+                        <Button variant="ghost" size="icon" className="hidden sm:inline-flex" onClick={onFetchHistory} title="Fetch Gmail History">
                             <RefreshCw className="h-4 w-4 text-gray-500" />
                         </Button>
+                    )}
+
+                    {hasMobileMoreActions && (
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 sm:hidden" title="More actions">
+                                    <MoreHorizontal className="h-4 w-4 text-gray-500" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-52">
+                                {selectionBatch.length > 0 && (
+                                    <DropdownMenuItem onClick={handleClearSelectionBatch} className="gap-2">
+                                        <Trash2 className="h-4 w-4" />
+                                        Clear batch snippets
+                                    </DropdownMenuItem>
+                                )}
+                                {isWhatsAppConversation && onSync && (
+                                    <DropdownMenuItem onClick={onSync} className="gap-2">
+                                        <RefreshCw className="h-4 w-4" />
+                                        Sync WhatsApp History
+                                    </DropdownMenuItem>
+                                )}
+                                {isWhatsAppConversation && canUseTranscriptOnDemand && onBulkTranscribeUnprocessedAudio && (
+                                    <>
+                                        <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground">
+                                            Backfill transcripts
+                                        </DropdownMenuLabel>
+                                        <DropdownMenuItem onClick={() => handleBulkTranscribeUnprocessedAudio("30d")} className="text-xs">
+                                            Last 30 days
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => handleBulkTranscribeUnprocessedAudio("all")} className="text-xs">
+                                            All in conversation
+                                        </DropdownMenuItem>
+                                    </>
+                                )}
+                                {isEmailConversation && onFetchHistory && (
+                                    <DropdownMenuItem onClick={onFetchHistory} className="gap-2">
+                                        <RefreshCw className="h-4 w-4" />
+                                        Fetch Gmail History
+                                    </DropdownMenuItem>
+                                )}
+                            </DropdownMenuContent>
+                        </DropdownMenu>
                     )}
                 </div>
             </div>
 
             {showTranscriptSearch && (
-                <div className="border-b bg-slate-50/80 px-4 py-3 space-y-3">
+                <div className="border-b bg-slate-50/80 px-4 py-3 space-y-3" data-no-pane-swipe>
                     {showTranscriptSearch && (
                         <div className="rounded-md border border-slate-200 bg-white p-3 space-y-2">
                             <div className="flex items-center gap-2">
@@ -607,7 +674,7 @@ export function ChatWindow({
             )}
 
             {/* Messages Area */}
-            <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-4 sm:space-y-6 bg-slate-50/50 scroll-smooth">
+            <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 space-y-4 sm:space-y-6 bg-slate-50/50 scroll-smooth">
                 {loading && (
                     <div className="flex justify-center p-8">
                         <Loader2 className="h-8 w-8 animate-spin text-blue-500/50" />
