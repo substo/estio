@@ -19,7 +19,12 @@ interface UnifiedTimelineProps {
     onOpenMissionControl?: () => void;
     onSendMessage?: (text: string, type: 'SMS' | 'Email' | 'WhatsApp') => void | Promise<void>;
     onSendMedia?: (file: File, caption: string) => void | Promise<void>;
-    onGenerateDraft?: (instruction?: string, model?: string, replyLanguage?: string | null) => Promise<string | null>;
+    onGenerateDraft?: (
+        instruction?: string,
+        model?: string,
+        replyLanguage?: string | null,
+        onChunk?: (chunk: string) => void
+    ) => Promise<string | null>;
     onSetReplyLanguageOverride?: (replyLanguage: string | null) => Promise<{ success: boolean; error?: string; replyLanguageOverride?: string | null }>;
     suggestions?: string[];
     composerDisabled?: boolean;

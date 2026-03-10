@@ -5434,11 +5434,6 @@ export async function generateAIDraft(
     }
 
     const explicitModel = typeof model === "string" && model.trim() ? model.trim() : undefined;
-    let resolvedDraftModel = explicitModel;
-    if (!resolvedDraftModel) {
-        const { resolveAiDraftDefaultModel } = await import("@/lib/ai/fetch-models");
-        resolvedDraftModel = await resolveAiDraftDefaultModel(location.id);
-    }
 
     // [JIT Sync] Ensure contact exists locally before asking AI
     // Resolve GHL ID if possible, otherwise rely on local data
@@ -5477,7 +5472,7 @@ export async function generateAIDraft(
         agentName,
         businessName: location.name || undefined,
         instruction,
-        model: resolvedDraftModel,
+        model: explicitModel,
         mode: options?.mode || "chat",
         dealId: options?.dealId || undefined,
         replyLanguageOverride: options?.replyLanguage,

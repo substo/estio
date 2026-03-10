@@ -40,7 +40,12 @@ interface ConversationComposerProps {
     conversation: Conversation | null;
     onSendMessage: (text: string, type: ComposerChannel) => void | Promise<void>;
     onSendMedia?: (file: File, caption: string) => void | Promise<void>;
-    onGenerateDraft?: (instruction?: string, model?: string, replyLanguage?: string | null) => Promise<string | null>;
+    onGenerateDraft?: (
+        instruction?: string,
+        model?: string,
+        replyLanguage?: string | null,
+        onChunk?: (chunk: string) => void
+    ) => Promise<string | null>;
     onSetReplyLanguageOverride?: (replyLanguage: string | null) => Promise<{ success: boolean; error?: string; replyLanguageOverride?: string | null }>;
     suggestions?: string[];
     disabled?: boolean;
@@ -410,9 +415,21 @@ export function ConversationComposer({
             const replyLanguageOverride = selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE
                 ? null
                 : selectedReplyLanguage;
-            const text = await onGenerateDraft(instruction, modelOverride, replyLanguageOverride);
+            let streamedBuffer = "";
+            const text = await onGenerateDraft(
+                instruction,
+                modelOverride,
+                replyLanguageOverride,
+                (chunk) => {
+                    if (!chunk) return;
+                    streamedBuffer += chunk;
+                    setDraft(streamedBuffer);
+                }
+            );
             if (text) {
                 setDraft(text);
+            } else if (streamedBuffer) {
+                setDraft(streamedBuffer);
             }
         } catch (e) {
             console.error("Draft generation failed", e);

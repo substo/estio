@@ -1,5 +1,6 @@
 import db from "@/lib/db";
 import {
+    GEMINI_DRAFT_FAST_DEFAULT,
     GEMINI_FLASH_LATEST_ALIAS,
     GEMINI_FLASH_STABLE_FALLBACK,
     GOOGLE_AI_MODELS as FALLBACK_MODELS,
@@ -137,11 +138,18 @@ function buildModelOptions(apiModels: NonNullable<ModelsApiResponse["models"]>):
     return dedupeModelOptions([...discovered, ...FALLBACK_MODELS]);
 }
 
+function isDeprecatedDraftModelId(value: string): boolean {
+    const id = String(value || "").trim().toLowerCase();
+    if (!id) return false;
+    return id.startsWith("gemini-2.0-");
+}
+
 function isDraftPickerModel(model: ModelOption): boolean {
     const id = model.value.toLowerCase();
     if (!id.includes("gemini")) return false;
     if (id.includes("embedding")) return false;
     if (id.includes("robotics")) return false;
+    if (isDeprecatedDraftModelId(id)) return false;
     return true;
 }
 
@@ -239,10 +247,32 @@ export async function resolveAiModelDefault(
 ): Promise<string> {
     const configuredFields = await getConfiguredAiModelFields(locationId);
     const configured = getConfiguredDefaultForKind(configuredFields, kind);
-    if (configured) return configured;
+    if (configured && !(kind === "draft" && isDeprecatedDraftModelId(configured))) {
+        return configured;
+    }
 
     const available = models && models.length > 0 ? models : await getAvailableModels(locationId);
     const values = new Set(available.map((m) => m.value));
+
+    if (kind === "draft") {
+        if (values.has(GEMINI_DRAFT_FAST_DEFAULT)) {
+            return GEMINI_DRAFT_FAST_DEFAULT;
+        }
+
+        if (values.has(GEMINI_FLASH_STABLE_FALLBACK)) {
+            return GEMINI_FLASH_STABLE_FALLBACK;
+        }
+
+        const firstFastDraft = available.find((m) => {
+            const id = m.value.toLowerCase();
+            if (!id.includes("flash")) return false;
+            if (isDeprecatedDraftModelId(id)) return false;
+            return true;
+        });
+        if (firstFastDraft) return firstFastDraft.value;
+
+        return GEMINI_FLASH_STABLE_FALLBACK;
+    }
 
     if (values.has(GEMINI_FLASH_LATEST_ALIAS)) {
         return GEMINI_FLASH_LATEST_ALIAS;

@@ -2232,6 +2232,92 @@ export function ConversationInterface({ locationId, initialConversations, initia
         setSuggestions([]);
     }, [activeId]);
 
+    const streamDraftViaApi = useCallback(async (args: {
+        conversationId: string;
+        contactId: string;
+        instruction?: string;
+        model?: string;
+        mode: "chat" | "deal";
+        dealId?: string;
+        replyLanguage?: string | null;
+        onChunk?: (chunk: string) => void;
+    }) => {
+        const response = await fetch("/api/conversations/draft-stream", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                conversationId: args.conversationId,
+                contactId: args.contactId,
+                instruction: args.instruction,
+                model: args.model,
+                options: {
+                    mode: args.mode,
+                    dealId: args.dealId,
+                    replyLanguage: args.replyLanguage ?? null,
+                },
+            }),
+        });
+
+        if (!response.ok) {
+            const payload = await response.json().catch(() => null);
+            const fallbackMessage = `Draft stream request failed (${response.status})`;
+            throw new Error(payload?.error || payload?.message || fallbackMessage);
+        }
+
+        if (!response.body) {
+            throw new Error("Draft stream response body was empty.");
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let finalResult: any = null;
+
+        const parseLine = (line: string) => {
+            if (!line.trim()) return;
+            let payload: any = null;
+            try {
+                payload = JSON.parse(line);
+            } catch {
+                return;
+            }
+
+            if (payload?.type === "chunk" && typeof payload.text === "string") {
+                args.onChunk?.(payload.text);
+                return;
+            }
+
+            if (payload?.type === "error") {
+                throw new Error(String(payload?.message || "Draft stream failed."));
+            }
+
+            if (payload?.type === "complete") {
+                finalResult = payload.result || null;
+            }
+        };
+
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            let newlineIndex = buffer.indexOf("\n");
+            while (newlineIndex >= 0) {
+                const line = buffer.slice(0, newlineIndex);
+                buffer = buffer.slice(newlineIndex + 1);
+                parseLine(line);
+                newlineIndex = buffer.indexOf("\n");
+            }
+        }
+
+        buffer += decoder.decode();
+        if (buffer.trim()) {
+            parseLine(buffer.trim());
+        }
+
+        return finalResult;
+    }, []);
+
     const conversationListPane = (
         <ConversationList
             conversations={debouncedSearchQuery.trim() ? searchResults : conversations}
@@ -2319,15 +2405,40 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     }
                 }}
                 suggestions={[...(activeConversation?.suggestedActions || []), ...suggestions]}
-                onGenerateDraft={async (instruction?: string, model?: string, replyLanguage?: string | null) => {
+                onGenerateDraft={async (
+                    instruction?: string,
+                    model?: string,
+                    replyLanguage?: string | null,
+                    onChunk?: (chunk: string) => void
+                ) => {
                     try {
-                        const res = await generateAIDraft(
-                            activeConversation.id,
-                            activeConversation.contactId,
-                            instruction,
-                            model,
-                            { mode: "chat", replyLanguage }
-                        );
+                        let res: any = null;
+                        if (onChunk) {
+                            try {
+                                res = await streamDraftViaApi({
+                                    conversationId: activeConversation.id,
+                                    contactId: activeConversation.contactId,
+                                    instruction,
+                                    model,
+                                    mode: "chat",
+                                    replyLanguage,
+                                    onChunk,
+                                });
+                            } catch (streamError) {
+                                console.warn("[AI Draft] Stream path failed, falling back to server action.", streamError);
+                            }
+                        }
+
+                        if (!res) {
+                            res = await generateAIDraft(
+                                activeConversation.id,
+                                activeConversation.contactId,
+                                instruction,
+                                model,
+                                { mode: "chat", replyLanguage }
+                            );
+                        }
+
                         if (res.reasoning) {
                             toast({ title: "Draft Generated", description: res.reasoning });
                         }
@@ -2360,16 +2471,42 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 onOpenMissionControl={isMobileViewport ? handleOpenMissionControl : undefined}
                 onSendMessage={(text, type) => handleSendMessage(text, type, selectedDealConversation || undefined)}
                 onSendMedia={(file, caption) => handleSendMedia(file, caption, selectedDealConversation || undefined)}
-                onGenerateDraft={async (instruction?: string, model?: string, replyLanguage?: string | null) => {
+                onGenerateDraft={async (
+                    instruction?: string,
+                    model?: string,
+                    replyLanguage?: string | null,
+                    onChunk?: (chunk: string) => void
+                ) => {
                     if (!selectedDealConversation) return null;
                     try {
-                        const res = await generateAIDraft(
-                            selectedDealConversation.id,
-                            selectedDealConversation.contactId,
-                            instruction,
-                            model,
-                            { mode: "deal", dealId: activeDealId, replyLanguage }
-                        );
+                        let res: any = null;
+                        if (onChunk) {
+                            try {
+                                res = await streamDraftViaApi({
+                                    conversationId: selectedDealConversation.id,
+                                    contactId: selectedDealConversation.contactId,
+                                    instruction,
+                                    model,
+                                    mode: "deal",
+                                    dealId: activeDealId || undefined,
+                                    replyLanguage,
+                                    onChunk,
+                                });
+                            } catch (streamError) {
+                                console.warn("[AI Draft] Deal stream path failed, falling back to server action.", streamError);
+                            }
+                        }
+
+                        if (!res) {
+                            res = await generateAIDraft(
+                                selectedDealConversation.id,
+                                selectedDealConversation.contactId,
+                                instruction,
+                                model,
+                                { mode: "deal", dealId: activeDealId, replyLanguage }
+                            );
+                        }
+
                         if (res.reasoning) {
                             toast({ title: "Draft Generated", description: res.reasoning });
                         }

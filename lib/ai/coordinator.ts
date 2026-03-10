@@ -1,19 +1,19 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
 import { getMessages, getConversation } from "@/lib/ghl/conversations";
-import { GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
+import {
+    GEMINI_DRAFT_FAST_DEFAULT,
+    GEMINI_FLASH_LATEST_ALIAS,
+    GEMINI_FLASH_STABLE_FALLBACK,
+} from "@/lib/ai/models";
 import { validateAction } from "@/lib/ai/policy";
 import { assembleTimelineEvents, type TimelineEvent } from "@/lib/conversations/timeline-events";
+import { getDraftModelWithCachedContext } from "@/lib/ai/draft-context-cache";
 import {
     buildDealProtectiveCommunicationContract,
     detectLanguageFromText,
     inferCommunicationEvidenceFromText,
     resolveCommunicationLanguage
 } from "@/lib/ai/prompts/communication-policy";
-
-// Remove global init
-// const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY || "");
-// const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
 interface CoordinationContext {
     conversationId: string;
@@ -27,9 +27,11 @@ interface CoordinationContext {
     instruction?: string;
     model?: string;
     replyLanguageOverride?: string | null;
+    stream?: boolean;
+    onToken?: (chunk: string) => void;
 }
 
-import { calculateRunCost, DEFAULT_MODEL } from "@/lib/ai/pricing";
+import { calculateRunCost } from "@/lib/ai/pricing";
 
 type DraftMessage = {
     direction: string;
@@ -38,8 +40,31 @@ type DraftMessage = {
 };
 
 const NAME_GREETING_LONG_BREAK_HOURS = 3;
-const TIMELINE_RECENT_EVENT_WINDOW = 70;
-const TIMELINE_LINE_MAX_CHARS = 340;
+const TIMELINE_RECENT_EVENT_WINDOW = 36;
+const TIMELINE_LINE_MAX_CHARS = 220;
+const TIMELINE_FETCH_TAKE = 96;
+const DRAFT_MAX_OUTPUT_TOKENS_SIMPLE = 160;
+const DRAFT_MAX_OUTPUT_TOKENS_COMPLEX = 220;
+const DRAFT_THINKING_BUDGET_SIMPLE = 0;
+const DRAFT_THINKING_BUDGET_COMPLEX = 128;
+const DRAFT_RETRY_BASE_DELAY_MS = 260;
+const DRAFT_MAX_RETRIES_ON_429 = 2;
+const DRAFT_STATIC_CONTEXT_VERSION = "v1";
+
+const DRAFT_STATIC_CONTEXT_PROMPT = `You are an expert real-estate message drafting assistant.
+Write the exact outbound message the agent should send next, not analysis.
+
+Core rules:
+- Keep tone professional, clear, and human.
+- Avoid repetitive greeting patterns in active threads.
+- Do not include internal analysis, labels, JSON, or tool traces.
+- Use context facts exactly; do not invent property status, pricing, or commitments.
+- If availability is uncertain, state uncertainty and ask for confirmation.
+- If a requested property is unavailable, acknowledge this clearly and propose a practical next step.
+- Keep outputs concise while preserving clarity.
+- Avoid manipulative urgency and hard-finality claims unless explicitly supported by context evidence.
+- Never include automatic signature blocks unless explicitly asked.
+- Preserve channel-appropriate style (chat vs email) as instructed in runtime context.`;
 const SIGN_OFF_PHRASES = new Set([
     "best regards",
     "kind regards",
@@ -61,6 +86,20 @@ function isModelUnavailableError(error: unknown): boolean {
         message.includes("invalid model") ||
         message.includes("unsupported model")
     );
+}
+
+function isRateLimitError(error: unknown): boolean {
+    const message = (error instanceof Error ? error.message : String(error || "")).toLowerCase();
+    return message.includes("429") || message.includes("rate limit");
+}
+
+function wait(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getUsageInt(meta: Record<string, unknown>, key: string): number {
+    const value = Number(meta[key]);
+    return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 }
 
 function parseMessageTimestamp(value: unknown): Date | null {
@@ -340,11 +379,87 @@ function buildTimelineCompaction(events: TimelineEvent[]) {
 }
 
 export async function generateDraft(context: CoordinationContext) {
-    let modelName = DEFAULT_MODEL; // Modern default
     let promptTokens = 0;
     let completionTokens = 0;
+    const overallStartedAt = Date.now();
+
+    const telemetry: {
+        stageMs: {
+            contextAssemblyMs: number;
+            geminiMs: number;
+            postProcessingMs: number;
+            totalMs: number;
+            firstTokenMs: number | null;
+        };
+        prompt: {
+            chars: number;
+            threadMessageCount: number;
+            timelineIncludedEvents: number;
+            timelineOmittedEvents: number;
+            mode: "chat" | "deal";
+            complexDraft: boolean;
+        };
+        usage: {
+            promptTokens: number;
+            completionTokens: number;
+            totalTokens: number;
+            thoughtsTokens: number;
+            cachedContentTokens: number;
+            toolUsePromptTokens: number;
+        };
+        model: {
+            requested: string;
+            actual: string;
+            fallbackUsed: boolean;
+            streamed: boolean;
+            maxOutputTokens: number;
+            thinkingBudget: number;
+        };
+        cache: {
+            state: "hit" | "miss" | "disabled" | "error";
+            name: string | null;
+        };
+    } = {
+        stageMs: {
+            contextAssemblyMs: 0,
+            geminiMs: 0,
+            postProcessingMs: 0,
+            totalMs: 0,
+            firstTokenMs: null,
+        },
+        prompt: {
+            chars: 0,
+            threadMessageCount: 0,
+            timelineIncludedEvents: 0,
+            timelineOmittedEvents: 0,
+            mode: context.mode === "deal" && context.dealId ? "deal" : "chat",
+            complexDraft: false,
+        },
+        usage: {
+            promptTokens: 0,
+            completionTokens: 0,
+            totalTokens: 0,
+            thoughtsTokens: 0,
+            cachedContentTokens: 0,
+            toolUsePromptTokens: 0,
+        },
+        model: {
+            requested: context.model || GEMINI_DRAFT_FAST_DEFAULT,
+            actual: context.model || GEMINI_DRAFT_FAST_DEFAULT,
+            fallbackUsed: false,
+            streamed: false,
+            maxOutputTokens: DRAFT_MAX_OUTPUT_TOKENS_SIMPLE,
+            thinkingBudget: DRAFT_THINKING_BUDGET_SIMPLE,
+        },
+        cache: {
+            state: "disabled",
+            name: null,
+        },
+    };
 
     try {
+        const contextAssemblyStartedAt = Date.now();
+
         // 0. Fetch Config
         const siteConfig = await db.siteConfig.findUnique({
             where: { locationId: context.locationId }
@@ -356,26 +471,26 @@ export async function generateDraft(context: CoordinationContext) {
             ? configAny.domain.trim()
             : null;
 
-        // Use config model if present, otherwise default
-        if (configAny?.googleAiModel) {
-            modelName = configAny.googleAiModel;
-        }
-
-        // Override with explicit request
-        if (context.model) {
-            modelName = context.model;
-        }
+        // Model preference order: explicit request -> location-configured default -> draft fast default.
+        const explicitRequestedModel = typeof context.model === "string" && context.model.trim()
+            ? context.model.trim()
+            : "";
+        const configuredDraftModel = typeof configAny?.googleAiModel === "string" && configAny.googleAiModel.trim()
+            ? configAny.googleAiModel.trim()
+            : "";
+        let requestedModelName = explicitRequestedModel || configuredDraftModel || GEMINI_DRAFT_FAST_DEFAULT;
+        let actualModelName = requestedModelName;
 
         if (!apiKey) {
             return {
                 draft: "Error: No AI API Key configured.",
-                reasoning: "Please configure Google AI in Settings."
+                reasoning: "Please configure Google AI in Settings.",
+                telemetry,
             };
         }
 
-        const genAI = new GoogleGenerativeAI(apiKey);
-        const requestedModelName = modelName;
-        let actualModelName = modelName;
+        telemetry.model.requested = requestedModelName;
+        telemetry.model.actual = actualModelName;
 
         console.log(`[AI Draft] Starting generation for Conversation: ${context.conversationId}, Requested Model: ${requestedModelName}`);
 
@@ -512,6 +627,7 @@ export async function generateDraft(context: CoordinationContext) {
                     dealId: String(context.dealId),
                     includeMessages: true,
                     includeActivities: true,
+                    take: TIMELINE_FETCH_TAKE,
                 })
                 : await assembleTimelineEvents({
                     mode: "chat",
@@ -519,6 +635,7 @@ export async function generateDraft(context: CoordinationContext) {
                     conversationId: context.conversationId,
                     includeMessages: true,
                     includeActivities: true,
+                    take: TIMELINE_FETCH_TAKE,
                 });
 
             timelineEvents = timelineResult.events;
@@ -594,56 +711,72 @@ export async function generateDraft(context: CoordinationContext) {
                         ? `The conversation resumed after a ${hoursBetweenLastTwoMessages?.toFixed(1)} hour break.`
                         : "Recent messages are close together in the same active thread.";
 
-        // 3. Construct Prompt
-        let systemPrompt = `You are an expert real estate message drafter for a live agent.
-        Write the exact outbound message the agent should send next (not analysis).
+        const normalizedInstruction = String(context.instruction || "").trim();
+        const shortInstruction = normalizedInstruction.length > 0 && normalizedInstruction.length <= 180;
+        const isComplexDraft =
+            requestedTimelineMode === "deal"
+            || timelineCompaction.stats.totalEvents > 90
+            || normalizedInstruction.length > 220
+            || !shortInstruction;
+        telemetry.prompt.complexDraft = isComplexDraft;
 
-        Agent Identity:
+        if (!explicitRequestedModel && !configuredDraftModel) {
+            actualModelName = isComplexDraft
+                ? GEMINI_FLASH_STABLE_FALLBACK
+                : GEMINI_DRAFT_FAST_DEFAULT;
+            requestedModelName = actualModelName;
+            telemetry.model.requested = requestedModelName;
+        }
+
+        const maxOutputTokens = isComplexDraft
+            ? DRAFT_MAX_OUTPUT_TOKENS_COMPLEX
+            : DRAFT_MAX_OUTPUT_TOKENS_SIMPLE;
+        const thinkingBudget = isComplexDraft
+            ? DRAFT_THINKING_BUDGET_COMPLEX
+            : DRAFT_THINKING_BUDGET_SIMPLE;
+        const generationConfig: Record<string, unknown> = {
+            responseMimeType: "text/plain",
+            candidateCount: 1,
+            maxOutputTokens,
+            thinkingConfig: {
+                thinkingBudget,
+            },
+        };
+
+        telemetry.model.maxOutputTokens = maxOutputTokens;
+        telemetry.model.thinkingBudget = thinkingBudget;
+
+        // 3. Construct Prompt
+        let runtimeInstruction = `Runtime Context:
         - Agent Name: ${agentName || "Unknown"}
         - Business Name: ${businessName}
         ${websiteDomain ? `- Website: https://${websiteDomain}` : "- Website: Unknown"}
         ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
-
-        Context:
         - Role: Intermediary connecting leads, owners, and agents.
-        - Tone: ${isEmail ? 'Professional, clear, polite, human.' : 'Natural, concise, friendly, human.'}
-        - Channel: ${channelName}.
+        - Tone: ${isEmail ? "Professional, clear, polite, human." : "Natural, concise, friendly, human."}
+        - Channel: ${channelName}
         - Expected reply language: ${languageResolution.expectedLanguage || "same as contact language"}
 
         ${communicationContract}
 
-        HIGH-PRIORITY DRAFTING RULES:
-        - Never repeat the contact's name greeting in back-to-back or recent messages.
-        - Only use a name greeting (e.g. "Hi ${contactFirstName || "there"},") when this is first outreach OR the conversation resumed after a long break/new day.
-        - Greeting decision for this draft: ${allowNameGreeting ? "Name greeting is ALLOWED." : "Name greeting is NOT ALLOWED."}
-        - Greeting decision reason: ${greetingDecisionReason}
+        Greeting Cadence:
+        - Greeting decision: ${allowNameGreeting ? "Name greeting is ALLOWED." : "Name greeting is NOT ALLOWED."}
+        - Reason: ${greetingDecisionReason}
         ${!allowNameGreeting ? '- Start directly with the message purpose and do NOT open with "Hi {FirstName},".' : ""}
-        - Do NOT include manual signature blocks in the draft.
-        ${isEmail
-                ? '- Email-specific: Do NOT add sign-offs like "Best regards, [Name], [Company]". Signature is appended automatically by the sending system.'
-                : '- Messaging-specific: Never add email-style signatures or full name/company sign-offs in WhatsApp/SMS.'}
-        - If this appears to be a first outreach or imported lead enquiry (notes/listing details but no real typed message), write a proactive first response.
-        - If agent name and business name are available, introduce the agent naturally in first outreach (e.g. "It's ${agentName || "the agent"} at ${businessName} here.").
-        - If a property is marked rented/sold/unavailable in the context, say that clearly early in the message.
-        - Reference the specific property title/ref/location/listing URL when present.
-        - Offer a next step (e.g. suggest similar properties / ask preferences) when the requested property is unavailable.
-        - Avoid generic canned openings like "Hello! Thank you for your inquiry." unless the user specifically asks for that tone.
-        - Sound like a real agent typed this manually. Do not sound like customer support automation.
 
-        IMPORTANT FORMATTING RULES:
+        Formatting:
         ${isEmail
-                ? '- Output MUST be in HTML format (e.g. use <br> for line breaks, <b> for emphasis).'
-                : '- Output MUST be in Plain Text.'}
-        - Do NOT use Markdown (no **bold** asterisks, no headers #).
-        ${!isEmail ? '- Do NOT use HTML tags.' : ''}
-        - Output ONLY the message body (no analysis, no JSON, no labels).
-        `;
+                ? "- Output should be valid lightweight HTML for email body (use <br> line breaks only when useful)."
+                : "- Output must be plain text only."}
+        - Do NOT use Markdown.
+        ${!isEmail ? "- Do NOT use HTML tags." : ""}
+        - Output only the message body text, no metadata.`;
 
         if (contact) {
             const isSeeker = !['Owner', 'Agent', 'Partner', 'Maintenance'].includes(contact.contactType);
 
             if (isSeeker) {
-                systemPrompt += `\n\nContact Information:
+                runtimeInstruction += `\n\nContact Information:
                 - Name: ${contact.name}
                 - First Name (preferred for greeting): ${contactFirstName}
                 - Phone: ${contact.phone}
@@ -665,7 +798,7 @@ export async function generateDraft(context: CoordinationContext) {
                 `;
             } else {
                 // For Owners/Agents/Partners - Focus on their roles
-                systemPrompt += `\n\nContact Information (Type: ${contact.contactType}):
+                runtimeInstruction += `\n\nContact Information (Type: ${contact.contactType}):
                 - Name: ${contact.name}
                 - First Name (preferred for greeting): ${contactFirstName}
                 - Phone: ${contact.phone}
@@ -686,7 +819,7 @@ export async function generateDraft(context: CoordinationContext) {
         });
         const threadConversationText = conversationText.trim() || "[No recent thread messages found]";
 
-        const fullPrompt = `${systemPrompt}
+        const fullPrompt = `${runtimeInstruction}
 
         Selected Thread Messages (for cadence/language behavior):
         ${threadConversationText}
@@ -713,29 +846,112 @@ export async function generateDraft(context: CoordinationContext) {
         Just the draft message text the agent should send next.
         `;
 
-        // Add specific user instruction if provided
-        // Add specific user instruction if provided
+        // Add specific user instruction if provided.
         let finalPrompt = fullPrompt;
-        if (context.instruction) {
-            finalPrompt += `\n\nSPECIFIC USER INSTRUCTION:\nThe user has provided a sketch/instruction for this reply: "${context.instruction}"\n\nYour Draft MUST:\n1. Follow this instruction precisely.\n2. Expand it into a full, polished message suitable for the channel.\n3. Do NOT just repeat the instruction; write the actual message the agent would send.`;
+        if (normalizedInstruction) {
+            finalPrompt += `\n\nSPECIFIC USER INSTRUCTION:\nThe user provided: "${normalizedInstruction}"\n\nYour draft MUST:\n1. Follow this instruction precisely.\n2. Expand it into a polished channel-appropriate message.\n3. Do not repeat the instruction; write the actual message the agent should send.`;
         }
 
-        console.log("--- [AI Draft] FULL PROMPT START ---");
-        console.log(finalPrompt);
-        console.log("--- [AI Draft] FULL PROMPT END ---");
+        telemetry.prompt.chars = finalPrompt.length;
+        telemetry.prompt.threadMessageCount = messages.length;
+        telemetry.prompt.timelineIncludedEvents = timelineCompaction.stats.includedEvents;
+        telemetry.prompt.timelineOmittedEvents = timelineCompaction.stats.omittedEvents;
+        telemetry.model.actual = actualModelName;
+        telemetry.stageMs.contextAssemblyMs = Date.now() - contextAssemblyStartedAt;
 
-        // 4. Call Gemini (with one-time alias fallback)
+        console.log("[AI Draft] Prompt stats:", JSON.stringify({
+            conversationId: context.conversationId,
+            mode: requestedTimelineMode,
+            requestedModel: requestedModelName,
+            resolvedModel: actualModelName,
+            promptChars: telemetry.prompt.chars,
+            threadMessages: telemetry.prompt.threadMessageCount,
+            timelineIncludedEvents: telemetry.prompt.timelineIncludedEvents,
+            timelineOmittedEvents: telemetry.prompt.timelineOmittedEvents,
+            isComplexDraft,
+            maxOutputTokens,
+            thinkingBudget,
+        }));
+
+        const cachedStaticContext = `${DRAFT_STATIC_CONTEXT_PROMPT}
+
+Business Profile:
+- Agent Name: ${agentName || "Unknown"}
+- Business Name: ${businessName}
+${websiteDomain ? `- Website: https://${websiteDomain}` : "- Website: Unknown"}
+${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
+- Channel: ${channelName}
+- Tone style: ${isEmail ? "Professional Email" : "Conversational Messaging"}
+- Static context version: ${DRAFT_STATIC_CONTEXT_VERSION}`;
+
+        // 4. Call Gemini (with one-time model fallback and 429 backoff).
         const generateWithModel = async (candidateModel: string) => {
-            const model = genAI.getGenerativeModel({ model: candidateModel });
-            return model.generateContent(finalPrompt);
+            const cacheModel = await getDraftModelWithCachedContext({
+                apiKey,
+                modelName: candidateModel,
+                generationConfig,
+                cacheKey: [
+                    DRAFT_STATIC_CONTEXT_VERSION,
+                    context.locationId,
+                    isEmail ? "email" : "chat",
+                    businessName.toLowerCase(),
+                ].join(":"),
+                staticContextText: cachedStaticContext,
+                ttlSeconds: 45 * 60,
+            });
+            telemetry.cache.state = cacheModel.cacheState;
+            telemetry.cache.name = cacheModel.cacheName || null;
+
+            let attempt = 0;
+            while (true) {
+                try {
+                    if (context.stream && typeof context.onToken === "function") {
+                        telemetry.model.streamed = true;
+                        const streamStartedAt = Date.now();
+                        const streamResult = await cacheModel.model.generateContentStream(finalPrompt);
+                        let rawText = "";
+                        let firstTokenSeen = false;
+
+                        for await (const chunk of streamResult.stream) {
+                            const delta = chunk.text();
+                            if (!delta) continue;
+                            rawText += delta;
+                            if (!firstTokenSeen) {
+                                firstTokenSeen = true;
+                                telemetry.stageMs.firstTokenMs = Date.now() - streamStartedAt;
+                            }
+                            context.onToken(delta);
+                        }
+
+                        const response = await streamResult.response;
+                        if (!rawText) {
+                            rawText = response.text();
+                        }
+
+                        return { response, rawText };
+                    }
+
+                    const result = await cacheModel.model.generateContent(finalPrompt);
+                    return { response: result.response, rawText: result.response.text() };
+                } catch (error) {
+                    const shouldRetry = isRateLimitError(error) && attempt < DRAFT_MAX_RETRIES_ON_429;
+                    if (!shouldRetry) throw error;
+
+                    const jitterMs = Math.floor(Math.random() * 90);
+                    const delayMs = DRAFT_RETRY_BASE_DELAY_MS * (2 ** attempt) + jitterMs;
+                    await wait(delayMs);
+                    attempt += 1;
+                }
+            }
         };
 
-        let result;
+        const geminiStartedAt = Date.now();
+        let generationResult: { response: any; rawText: string };
         try {
-            result = await generateWithModel(actualModelName);
+            generationResult = await generateWithModel(actualModelName);
         } catch (error) {
             const canRetryWithPinnedFlash =
-                actualModelName === GEMINI_FLASH_LATEST_ALIAS &&
+                (actualModelName === GEMINI_FLASH_LATEST_ALIAS || actualModelName === GEMINI_DRAFT_FAST_DEFAULT) &&
                 isModelUnavailableError(error);
 
             if (!canRetryWithPinnedFlash) {
@@ -743,12 +959,17 @@ export async function generateDraft(context: CoordinationContext) {
             }
 
             actualModelName = GEMINI_FLASH_STABLE_FALLBACK;
+            telemetry.model.actual = actualModelName;
+            telemetry.model.fallbackUsed = true;
             console.warn(`[AI Draft] Requested model ${requestedModelName} unavailable; retrying with ${actualModelName}.`);
-            result = await generateWithModel(actualModelName);
+            generationResult = await generateWithModel(actualModelName);
         }
+        telemetry.stageMs.geminiMs = Date.now() - geminiStartedAt;
 
-        const response = result.response;
-        const rawText = response.text();
+        const postProcessingStartedAt = Date.now();
+
+        const response = generationResult.response;
+        const rawText = generationResult.rawText;
         const withoutRepeatedGreeting = stripLeadingNameGreeting(rawText, contactFirstName, allowNameGreeting);
         if (withoutRepeatedGreeting !== rawText) {
             console.log("[AI Draft] Removed leading name greeting based on timing rule.");
@@ -779,12 +1000,23 @@ export async function generateDraft(context: CoordinationContext) {
 
         // 5. Track Costs & Usage
         if (response.usageMetadata) {
-            promptTokens = response.usageMetadata.promptTokenCount;
-            completionTokens = response.usageMetadata.candidatesTokenCount;
+            const usageMeta = (response.usageMetadata || {}) as Record<string, unknown>;
+            promptTokens = getUsageInt(usageMeta, "promptTokenCount");
+            completionTokens = getUsageInt(usageMeta, "candidatesTokenCount");
+            telemetry.usage.totalTokens = getUsageInt(usageMeta, "totalTokenCount");
+            telemetry.usage.thoughtsTokens = getUsageInt(usageMeta, "thoughtsTokenCount");
+            telemetry.usage.cachedContentTokens = getUsageInt(usageMeta, "cachedContentTokenCount");
+            telemetry.usage.toolUsePromptTokens = getUsageInt(usageMeta, "toolUsePromptTokenCount");
         } else {
             // Fallback estimate if API doesn't return usage
             promptTokens = Math.ceil(finalPrompt.length / 4);
             completionTokens = Math.ceil(text.length / 4);
+            telemetry.usage.totalTokens = promptTokens + completionTokens;
+        }
+        telemetry.usage.promptTokens = promptTokens;
+        telemetry.usage.completionTokens = completionTokens;
+        if (!telemetry.usage.totalTokens) {
+            telemetry.usage.totalTokens = promptTokens + completionTokens;
         }
 
         const cost = calculateRunCost(actualModelName, promptTokens, completionTokens);
@@ -808,6 +1040,24 @@ export async function generateDraft(context: CoordinationContext) {
                     taskTitle: "Quick AI Draft",
                     taskStatus: "done",
                     thoughtSummary: `Generated draft reply based on conversation context. ${modelAuditNote}.${policySummary}`,
+                    latencyMs: Math.max(1, Date.now() - overallStartedAt),
+                    status: "done",
+                    toolCalls: [{
+                        tool: "gemini.generateContent",
+                        arguments: {
+                            model: actualModelName,
+                            streamed: telemetry.model.streamed,
+                            maxOutputTokens,
+                            thinkingBudget,
+                            cacheState: telemetry.cache.state,
+                        },
+                        result: {
+                            usage: telemetry.usage,
+                            latencyMs: telemetry.stageMs.geminiMs,
+                            firstTokenMs: telemetry.stageMs.firstTokenMs,
+                            cacheName: telemetry.cache.name,
+                        }
+                    }] as any,
                     draftReply: text,
                     promptTokens,
                     completionTokens,
@@ -829,6 +1079,9 @@ export async function generateDraft(context: CoordinationContext) {
             });
         }
 
+        telemetry.stageMs.postProcessingMs = Date.now() - postProcessingStartedAt;
+        telemetry.stageMs.totalMs = Date.now() - overallStartedAt;
+
         return {
             draft: text,
             reasoning: requestedModelName === actualModelName
@@ -838,6 +1091,7 @@ export async function generateDraft(context: CoordinationContext) {
             policyResult,
             expectedLanguage: languageResolution.expectedLanguage,
             draftLanguage,
+            telemetry,
         };
 
     } catch (error: any) {
@@ -847,10 +1101,12 @@ export async function generateDraft(context: CoordinationContext) {
         let message = "Error generating draft.";
         if (error.message?.includes("API key")) message = "Invalid or missing API Key.";
         if (error.message?.includes("429")) message = "AI Rate limit exceeded. Try again later.";
+        telemetry.stageMs.totalMs = Date.now() - overallStartedAt;
 
         return {
             draft: message,
-            reasoning: `Technical Error: ${error.message || "Unknown error"}`
+            reasoning: `Technical Error: ${error.message || "Unknown error"}`,
+            telemetry,
         };
     }
 }
