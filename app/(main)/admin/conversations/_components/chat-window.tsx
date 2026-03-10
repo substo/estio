@@ -83,6 +83,7 @@ import {
 } from "@/app/(main)/admin/conversations/actions";
 import type { SelectionBatchInput, SelectionBatchItem } from "./message-selection-actions";
 import { ConversationComposer } from "./conversation-composer";
+import { calculatePrependScrollTop } from "@/lib/conversations/thread-hydration";
 
 type TranscriptSearchResult = Awaited<ReturnType<typeof searchConversationTranscriptMatches>>;
 type TranscriptSearchSuccess = Extract<TranscriptSearchResult, { success: true }>;
@@ -160,6 +161,13 @@ export function ChatWindow({
     const jumpHighlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const shouldStickToBottomRef = useRef(true);
     const hasForcedInitialBottomSnapRef = useRef(false);
+    const previousMessageIdsRef = useRef<string[]>([]);
+    const previousScrollHeightRef = useRef(0);
+    const previousScrollTopRef = useRef(0);
+    const knownMessageIdsRef = useRef<Set<string>>(new Set());
+    const previousTailMessageIdRef = useRef<string | null>(null);
+    const hasInitializedKnownMessagesRef = useRef(false);
+    const [isTimelineReady, setIsTimelineReady] = useState(false);
     const canUseTranscriptOnDemand = transcriptOnDemandEnabled !== false;
     const [addNoteOpen, setAddNoteOpen] = useState(false);
     const [addNoteText, setAddNoteText] = useState("");
@@ -185,6 +193,8 @@ export function ChatWindow({
         const container = scrollRef.current;
         if (!container) return;
         container.scrollTop = container.scrollHeight;
+        previousScrollTopRef.current = container.scrollTop;
+        previousScrollHeightRef.current = container.scrollHeight;
     }, []);
 
     const handleAddNote = async () => {
@@ -216,6 +226,13 @@ export function ChatWindow({
         messageRefs.current = {};
         shouldStickToBottomRef.current = true;
         hasForcedInitialBottomSnapRef.current = false;
+        previousMessageIdsRef.current = [];
+        previousScrollHeightRef.current = 0;
+        previousScrollTopRef.current = 0;
+        knownMessageIdsRef.current = new Set();
+        previousTailMessageIdRef.current = null;
+        hasInitializedKnownMessagesRef.current = false;
+        setIsTimelineReady(false);
     }, [conversation.id]);
 
     useEffect(() => {
@@ -234,12 +251,64 @@ export function ChatWindow({
         const handleScroll = () => {
             const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
             shouldStickToBottomRef.current = distanceFromBottom <= 80;
+            previousScrollTopRef.current = container.scrollTop;
+            previousScrollHeightRef.current = container.scrollHeight;
         };
 
         handleScroll();
         container.addEventListener("scroll", handleScroll, { passive: true });
         return () => container.removeEventListener("scroll", handleScroll);
     }, [conversation.id]);
+
+    useLayoutEffect(() => {
+        const container = scrollRef.current;
+        if (!container) return;
+
+        const previousIds = previousMessageIdsRef.current;
+        const nextIds = messages.map((message) => message.id);
+        const previousFirstId = previousIds[0] || null;
+        const previousLastId = previousIds[previousIds.length - 1] || null;
+        const nextFirstId = nextIds[0] || null;
+        const nextLastId = nextIds[nextIds.length - 1] || null;
+
+        const didPrependOlderMessages = (
+            previousIds.length > 0
+            && nextIds.length > previousIds.length
+            && !!previousFirstId
+            && !!previousLastId
+            && nextLastId === previousLastId
+            && nextFirstId !== previousFirstId
+        );
+
+        if (didPrependOlderMessages) {
+            const compensatedTop = calculatePrependScrollTop(
+                previousScrollTopRef.current,
+                previousScrollHeightRef.current,
+                container.scrollHeight
+            );
+            container.scrollTop = compensatedTop;
+            previousScrollTopRef.current = compensatedTop;
+        }
+
+        previousMessageIdsRef.current = nextIds;
+        previousScrollHeightRef.current = container.scrollHeight;
+        previousScrollTopRef.current = container.scrollTop;
+    }, [conversation.id, messages]);
+
+    useEffect(() => {
+        const currentIds = messages.map((message) => message.id);
+        if (!hasInitializedKnownMessagesRef.current) {
+            knownMessageIdsRef.current = new Set(currentIds);
+            previousTailMessageIdRef.current = currentIds[currentIds.length - 1] || null;
+            if (currentIds.length > 0 || !loading) {
+                hasInitializedKnownMessagesRef.current = true;
+            }
+            return;
+        }
+
+        knownMessageIdsRef.current = new Set(currentIds);
+        previousTailMessageIdRef.current = currentIds[currentIds.length - 1] || null;
+    }, [conversation.id, messages, loading]);
 
     // Always force a bottom snap the first time this conversation's timeline is hydrated.
     useLayoutEffect(() => {
@@ -251,10 +320,18 @@ export function ChatWindow({
         shouldStickToBottomRef.current = true;
         snapToBottom();
         requestAnimationFrame(() => {
-            if (!shouldStickToBottomRef.current) return;
-            snapToBottom();
+            if (shouldStickToBottomRef.current) {
+                snapToBottom();
+            }
+            setIsTimelineReady(true);
         });
     }, [conversation.id, loading, timelineItems.length, snapToBottom]);
+
+    useEffect(() => {
+        if (!loading && timelineItems.length === 0) {
+            setIsTimelineReady(true);
+        }
+    }, [loading, timelineItems.length]);
 
     // Keep snapped to latest when new items arrive while user is still near bottom.
     useLayoutEffect(() => {
@@ -395,6 +472,17 @@ export function ChatWindow({
     }, [handleTranscriptSearch]);
 
     const batchContextText = useMemo(() => buildBatchContextText(selectionBatch), [selectionBatch]);
+    const previousTailMessageId = previousTailMessageIdRef.current;
+    const previousTailIndex = previousTailMessageId
+        ? messages.findIndex((message) => message.id === previousTailMessageId)
+        : -1;
+    const messageIndexById = useMemo(() => {
+        const indexMap = new Map<string, number>();
+        messages.forEach((message, index) => {
+            indexMap.set(message.id, index);
+        });
+        return indexMap;
+    }, [messages]);
 
     const handleSummarizeBatch = async () => {
         if (!selectionBatch.length) return;
@@ -731,8 +819,14 @@ export function ChatWindow({
             )}
 
             {/* Messages Area */}
-            <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 bg-slate-50/50 scroll-smooth">
-                <div ref={timelineContentRef} className="space-y-4 sm:space-y-6 min-w-0 max-w-full">
+            <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 bg-slate-50/50">
+                <div
+                    ref={timelineContentRef}
+                    className={cn(
+                        "space-y-4 sm:space-y-6 min-w-0 max-w-full",
+                        !loading && timelineItems.length > 0 && !isTimelineReady && "opacity-0"
+                    )}
+                >
                     {loading && (
                         <div className="flex justify-center p-8">
                             <Loader2 className="h-8 w-8 animate-spin text-blue-500/50" />
@@ -760,6 +854,13 @@ export function ChatWindow({
                             );
                         }
                         const m = item.message!;
+                        const messageIndex = messageIndexById.get(m.id) ?? -1;
+                        const enableMountAnimation = (
+                            hasInitializedKnownMessagesRef.current
+                            && !knownMessageIdsRef.current.has(m.id)
+                            && previousTailIndex >= 0
+                            && messageIndex > previousTailIndex
+                        );
                         return (
                             <div
                                 key={m.id}
@@ -785,6 +886,7 @@ export function ChatWindow({
                                     onAddSelectionToBatch={handleAddSelectionToBatch}
                                     onRemoveSelectionBatchItem={handleRemoveSelectionBatchItem}
                                     onClearSelectionBatch={handleClearSelectionBatch}
+                                    enableMountAnimation={enableMountAnimation}
                                 />
                             </div>
                         );

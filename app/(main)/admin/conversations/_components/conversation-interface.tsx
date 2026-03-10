@@ -8,7 +8,6 @@ import type { ContactIdentityPatch } from '../../contacts/_components/contact-fo
 import {
     fetchConversations,
     fetchMessages,
-    getConversationWorkspace,
     getConversationWorkspaceCore,
     getConversationWorkspaceSidebar,
     getConversationListDelta,
@@ -42,6 +41,13 @@ import {
     getWorkspaceCoreCacheEntry,
     setWorkspaceCoreCacheEntry,
 } from '@/lib/conversations/workspace-core-cache';
+import {
+    THREAD_INITIAL_FALLBACK_MESSAGES,
+    THREAD_TARGET_MESSAGE_COUNT,
+    buildMessageCursorFromMessage,
+    computeInitialMessageLimitFromViewport,
+    mergePrependMessagesDedupe,
+} from '@/lib/conversations/thread-hydration';
 import { UnifiedTimeline } from './unified-timeline';
 import { ConversationList } from './conversation-list';
 import { ChatWindow } from './chat-window';
@@ -194,15 +200,96 @@ function hasPendingTranscripts(messages: Message[]): boolean {
     );
 }
 
+type WorkspaceHydrationStatus = 'partial' | 'full';
+
+type WorkspaceHydrationState = {
+    status: WorkspaceHydrationStatus;
+    oldestCursor: string | null;
+    newestCursor: string | null;
+    initialCount: number;
+    targetCount: number;
+    requestedLimit: number;
+};
+
 type WorkspaceCoreSnapshot = {
     conversationHeader: Conversation | null;
     messages: Message[];
     activityTimeline: any[];
     transcriptOnDemandEnabled: boolean;
+    hydration: WorkspaceHydrationState;
 };
 
 const WORKSPACE_CACHE_LIMIT = 30;
+const WORKSPACE_ACTIVITY_LIMIT = 180;
 const ACTIVE_POLL_GRACE_MS = 2500;
+
+type WorkspaceMessageWindowLike = {
+    oldestCursor?: string | null;
+    newestCursor?: string | null;
+    count?: number;
+    requestedLimit?: number;
+} | null | undefined;
+
+function createWorkspaceHydrationState(args: {
+    status?: WorkspaceHydrationStatus;
+    messages: Message[];
+    messageWindow?: WorkspaceMessageWindowLike;
+    initialCount?: number;
+    targetCount?: number;
+    requestedLimit?: number;
+}): WorkspaceHydrationState {
+    const messages = Array.isArray(args.messages) ? args.messages : [];
+    const messageWindow = args.messageWindow;
+    const derivedInitialCount = Number(args.initialCount);
+    const derivedTargetCount = Number(args.targetCount);
+    const derivedRequestedLimit = Number(args.requestedLimit);
+    const resolvedCount = Number(messageWindow?.count);
+    const resolvedRequestedLimit = Number(messageWindow?.requestedLimit);
+
+    return {
+        status: args.status || 'full',
+        oldestCursor: messageWindow?.oldestCursor || buildMessageCursorFromMessage(messages[0]) || null,
+        newestCursor: messageWindow?.newestCursor || buildMessageCursorFromMessage(messages[messages.length - 1]) || null,
+        initialCount: Number.isFinite(derivedInitialCount)
+            ? Math.max(0, Math.floor(derivedInitialCount))
+            : (Number.isFinite(resolvedCount) ? Math.max(0, Math.floor(resolvedCount)) : messages.length),
+        targetCount: Number.isFinite(derivedTargetCount)
+            ? Math.max(1, Math.floor(derivedTargetCount))
+            : THREAD_TARGET_MESSAGE_COUNT,
+        requestedLimit: Number.isFinite(derivedRequestedLimit)
+            ? Math.max(1, Math.floor(derivedRequestedLimit))
+            : (Number.isFinite(resolvedRequestedLimit)
+                ? Math.max(1, Math.floor(resolvedRequestedLimit))
+                : Math.max(messages.length || 0, THREAD_INITIAL_FALLBACK_MESSAGES)),
+    };
+}
+
+function createWorkspaceCoreSnapshot(args: {
+    conversationHeader?: Conversation | null;
+    messages?: Message[];
+    activityTimeline?: any[];
+    transcriptEligibility?: { success?: boolean; enabled?: boolean } | null;
+    transcriptOnDemandEnabled?: boolean;
+    hydration: WorkspaceHydrationState;
+}): WorkspaceCoreSnapshot {
+    return {
+        conversationHeader: args.conversationHeader || null,
+        messages: Array.isArray(args.messages) ? args.messages : [],
+        activityTimeline: Array.isArray(args.activityTimeline) ? args.activityTimeline : [],
+        transcriptOnDemandEnabled: typeof args.transcriptOnDemandEnabled === 'boolean'
+            ? args.transcriptOnDemandEnabled
+            : (!!args.transcriptEligibility?.success && !!args.transcriptEligibility?.enabled),
+        hydration: args.hydration,
+    };
+}
+
+function estimateThreadViewportHeightPx(): number | null {
+    if (typeof window === 'undefined') return null;
+    const viewportHeight = Number(window.innerHeight);
+    if (!Number.isFinite(viewportHeight) || viewportHeight <= 0) return null;
+    // Approximate header/composer/padding chrome to derive visible thread area.
+    return Math.max(viewportHeight - 280, 320);
+}
 
 interface DealContactOption {
     conversationId: string;
@@ -317,6 +404,9 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const clientRequestCountRef = useRef<Record<string, number>>({});
     const workspaceCoreCacheRef = useRef<Map<string, WorkspaceCoreSnapshot>>(new Map());
     const workspaceCoreInFlightRef = useRef<Set<string>>(new Set());
+    const workspaceInitialHydrationInFlightRef = useRef<Set<string>>(new Set());
+    const workspaceBackfillInFlightRef = useRef<Set<string>>(new Set());
+    const workspaceActivityHydrationInFlightRef = useRef<Set<string>>(new Set());
     const initialWorkspaceLoadedAtRef = useRef<Record<string, number>>({});
     const [realtimeMode, setRealtimeMode] = useState<'disabled' | 'connecting' | 'connected' | 'fallback'>(
         featureFlags.realtimeSse ? 'connecting' : 'disabled'
@@ -525,6 +615,16 @@ export function ConversationInterface({ locationId, initialConversations, initia
         }));
     }, []);
 
+    const isWorkspaceHydrationBusy = useCallback((conversationId?: string | null) => {
+        const key = String(conversationId || "");
+        if (!key) return false;
+        return (
+            workspaceInitialHydrationInFlightRef.current.has(key)
+            || workspaceBackfillInFlightRef.current.has(key)
+            || workspaceActivityHydrationInFlightRef.current.has(key)
+        );
+    }, []);
+
     const cacheWorkspaceCoreSnapshot = useCallback((conversationId: string, snapshot: WorkspaceCoreSnapshot) => {
         setWorkspaceCoreCacheEntry(
             workspaceCoreCacheRef.current,
@@ -562,33 +662,43 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
     const prefetchWorkspaceCore = useCallback(async (conversationId: string) => {
         if (!conversationId) return;
-        if (!featureFlags.workspaceSplit) return;
         if (workspaceCoreCacheRef.current.has(conversationId)) return;
         if (workspaceCoreInFlightRef.current.has(conversationId)) return;
 
         workspaceCoreInFlightRef.current.add(conversationId);
         try {
             trackClientRequest("workspace_core_prefetch", { conversationId });
+            const prefetchedLimit = computeInitialMessageLimitFromViewport(estimateThreadViewportHeightPx());
             const workspace = await getConversationWorkspaceCore(conversationId, {
                 includeMessages: true,
-                includeActivity: true,
-                messageLimit: 250,
-                activityLimit: 180,
+                includeActivity: false,
+                messageLimit: prefetchedLimit,
+                activityLimit: WORKSPACE_ACTIVITY_LIMIT,
             });
             if (!workspace?.success) return;
 
-            cacheWorkspaceCoreSnapshot(conversationId, {
-                conversationHeader: workspace?.conversationHeader || null,
-                messages: Array.isArray(workspace?.messages) ? workspace.messages : [],
-                activityTimeline: Array.isArray(workspace?.activityTimeline) ? workspace.activityTimeline : [],
-                transcriptOnDemandEnabled: !!workspace?.transcriptEligibility?.success && !!workspace?.transcriptEligibility?.enabled,
+            const prefetchedMessages = Array.isArray(workspace?.messages) ? workspace.messages : [];
+            const hydration = createWorkspaceHydrationState({
+                status: prefetchedMessages.length >= THREAD_TARGET_MESSAGE_COUNT ? 'full' : 'partial',
+                messages: prefetchedMessages,
+                messageWindow: workspace?.messageWindow,
+                initialCount: prefetchedMessages.length,
+                targetCount: THREAD_TARGET_MESSAGE_COUNT,
+                requestedLimit: prefetchedLimit,
             });
+            cacheWorkspaceCoreSnapshot(conversationId, createWorkspaceCoreSnapshot({
+                conversationHeader: workspace?.conversationHeader || null,
+                messages: prefetchedMessages,
+                activityTimeline: [],
+                transcriptEligibility: workspace?.transcriptEligibility,
+                hydration,
+            }));
         } catch (error) {
             console.error("Workspace prefetch failed:", error);
         } finally {
             workspaceCoreInFlightRef.current.delete(conversationId);
         }
-    }, [cacheWorkspaceCoreSnapshot, featureFlags.workspaceSplit, trackClientRequest]);
+    }, [cacheWorkspaceCoreSnapshot, trackClientRequest]);
 
     useEffect(() => {
         const onVisibility = () => setIsTabVisible(typeof document === 'undefined' ? true : !document.hidden);
@@ -791,19 +901,32 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
                 const targetConversationId = String(conversationId || "");
                 if (targetConversationId && targetConversationId === activeIdRef.current) {
+                    if (isWorkspaceHydrationBusy(targetConversationId)) {
+                        trackClientRequest("realtime_refresh_skipped_hydration", { conversationId: targetConversationId });
+                        return;
+                    }
                     const workspace = await getConversationWorkspaceCore(targetConversationId, {
                         includeMessages: true,
                         includeActivity: true,
-                        messageLimit: 250,
-                        activityLimit: 180,
+                        messageLimit: THREAD_TARGET_MESSAGE_COUNT,
+                        activityLimit: WORKSPACE_ACTIVITY_LIMIT,
                     });
                     if (workspace?.success && activeIdRef.current === targetConversationId) {
-                        const snapshot: WorkspaceCoreSnapshot = {
+                        const workspaceMessages = Array.isArray(workspace?.messages) ? workspace.messages : [];
+                        const snapshot = createWorkspaceCoreSnapshot({
                             conversationHeader: workspace?.conversationHeader || null,
-                            messages: Array.isArray(workspace?.messages) ? workspace.messages : [],
+                            messages: workspaceMessages,
                             activityTimeline: Array.isArray(workspace?.activityTimeline) ? workspace.activityTimeline : [],
-                            transcriptOnDemandEnabled: !!workspace?.transcriptEligibility?.success && !!workspace?.transcriptEligibility?.enabled,
-                        };
+                            transcriptEligibility: workspace?.transcriptEligibility,
+                            hydration: createWorkspaceHydrationState({
+                                status: 'full',
+                                messages: workspaceMessages,
+                                messageWindow: workspace?.messageWindow,
+                                initialCount: workspaceMessages.length,
+                                targetCount: THREAD_TARGET_MESSAGE_COUNT,
+                                requestedLimit: THREAD_TARGET_MESSAGE_COUNT,
+                            }),
+                        });
                         cacheWorkspaceCoreSnapshot(targetConversationId, snapshot);
                         applyWorkspaceCoreSnapshot(targetConversationId, snapshot);
                         initialWorkspaceLoadedAtRef.current[targetConversationId] = Date.now();
@@ -818,7 +941,9 @@ export function ConversationInterface({ locationId, initialConversations, initia
         applyWorkspaceCoreSnapshot,
         cacheWorkspaceCoreSnapshot,
         debouncedSearchQuery,
+        isWorkspaceHydrationBusy,
         isTabVisible,
+        trackClientRequest,
         viewFilter,
         viewMode,
     ]);
@@ -1026,12 +1151,19 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     setMessages(nextMessages || []);
                     messageSignatureRef.current = getMessageSignature(nextMessages || []);
                     setActivityLog(nextActivity || []);
-                    cacheWorkspaceCoreSnapshot(selectedConversationId, {
+                    cacheWorkspaceCoreSnapshot(selectedConversationId, createWorkspaceCoreSnapshot({
                         conversationHeader: freshConversation as Conversation | null,
                         messages: nextMessages || [],
                         activityTimeline: nextActivity || [],
                         transcriptOnDemandEnabled: false,
-                    });
+                        hydration: createWorkspaceHydrationState({
+                            status: 'full',
+                            messages: nextMessages || [],
+                            initialCount: (nextMessages || []).length,
+                            targetCount: THREAD_TARGET_MESSAGE_COUNT,
+                            requestedLimit: (nextMessages || []).length || THREAD_INITIAL_FALLBACK_MESSAGES,
+                        }),
+                    }));
                     initialWorkspaceLoadedAtRef.current[selectedConversationId] = Date.now();
                     if (freshConversation) {
                         setConversations((prev) => prev.map((item) =>
@@ -1054,15 +1186,83 @@ export function ConversationInterface({ locationId, initialConversations, initia
             };
         }
 
+        let deferredHydrationTimeout: ReturnType<typeof setTimeout> | null = null;
+        let deferredHydrationIdleHandle: number | null = null;
+
+        const clearDeferredHydrationTimer = () => {
+            if (deferredHydrationTimeout) {
+                clearTimeout(deferredHydrationTimeout);
+                deferredHydrationTimeout = null;
+            }
+            if (deferredHydrationIdleHandle !== null && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+                (window as any).cancelIdleCallback(deferredHydrationIdleHandle);
+                deferredHydrationIdleHandle = null;
+            }
+        };
+
+        const scheduleDeferredHydration = (task: () => void) => {
+            clearDeferredHydrationTimer();
+            if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+                deferredHydrationIdleHandle = (window as any).requestIdleCallback(() => {
+                    deferredHydrationIdleHandle = null;
+                    task();
+                }, { timeout: 1200 });
+                return;
+            }
+            deferredHydrationTimeout = setTimeout(() => {
+                deferredHydrationTimeout = null;
+                task();
+            }, 300);
+        };
+
+        const runThreadStaleBackgroundSync = (baseSnapshot: WorkspaceCoreSnapshot, threadStale: boolean | undefined) => {
+            if (!featureFlags.workspaceV2 || !threadStale) return;
+            const nowMs = Date.now();
+            const lastSyncedMs = backgroundSyncByConversationRef.current[selectedConversationId] || 0;
+            if (nowMs - lastSyncedMs < 5 * 60 * 1000) return;
+
+            backgroundSyncByConversationRef.current[selectedConversationId] = nowMs;
+            void refreshConversationOnDemand(selectedConversationId, "full_sync")
+                .then(async (syncRes: any) => {
+                    if (!syncRes?.success || Number(syncRes?.syncedCount || 0) <= 0) return;
+                    const refreshed = await fetchMessages(selectedConversationId, { take: THREAD_TARGET_MESSAGE_COUNT });
+                    if (activeIdRef.current !== selectedConversationId) return;
+                    const currentSnapshot = getCachedWorkspaceCoreSnapshot(selectedConversationId) || baseSnapshot;
+                    const refreshedSnapshot: WorkspaceCoreSnapshot = {
+                        ...currentSnapshot,
+                        messages: refreshed,
+                        hydration: createWorkspaceHydrationState({
+                            status: 'full',
+                            messages: refreshed,
+                            initialCount: currentSnapshot.hydration?.initialCount || refreshed.length,
+                            targetCount: THREAD_TARGET_MESSAGE_COUNT,
+                            requestedLimit: currentSnapshot.hydration?.requestedLimit || THREAD_TARGET_MESSAGE_COUNT,
+                        }),
+                    };
+                    cacheWorkspaceCoreSnapshot(selectedConversationId, refreshedSnapshot);
+                    applyWorkspaceCoreSnapshot(selectedConversationId, refreshedSnapshot);
+                    initialWorkspaceLoadedAtRef.current[selectedConversationId] = Date.now();
+                    void markConversationReadInUi(selectedConversationId);
+                })
+                .catch((err) => console.error("[Workspace Background Sync] Error:", err));
+        };
+
         const loadWorkspaceCore = async () => {
+            const threadOpenStartedAtMs = Date.now();
+            const initialMessageLimit = computeInitialMessageLimitFromViewport(estimateThreadViewportHeightPx());
             workspaceCoreInFlightRef.current.add(selectedConversationId);
-            trackClientRequest("workspace_core_load", { conversationId: selectedConversationId });
+            workspaceInitialHydrationInFlightRef.current.add(selectedConversationId);
+            trackClientRequest("workspace_core_load", {
+                conversationId: selectedConversationId,
+                mode: "initial_hydration",
+                messageLimit: initialMessageLimit,
+            });
             try {
                 const workspace = await getConversationWorkspaceCore(selectedConversationId, {
                     includeMessages: true,
-                    includeActivity: true,
-                    messageLimit: 250,
-                    activityLimit: 180,
+                    includeActivity: false,
+                    messageLimit: initialMessageLimit,
+                    activityLimit: WORKSPACE_ACTIVITY_LIMIT,
                 });
 
                 if (cancelled || activeIdRef.current !== selectedConversationId) return;
@@ -1070,49 +1270,194 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     throw new Error(workspace?.error || "Failed to load conversation workspace core");
                 }
 
-                const snapshot: WorkspaceCoreSnapshot = {
+                const initialMessages = Array.isArray(workspace?.messages) ? workspace.messages : [];
+                const cachedMessages = Array.isArray(cachedSnapshot?.messages) ? cachedSnapshot.messages : [];
+                const mergedInitialMessages = (() => {
+                    if (cachedMessages.length === 0) return initialMessages;
+                    const byId = new Map<string, Message>();
+                    for (const message of [...cachedMessages, ...initialMessages]) {
+                        if (!message?.id) continue;
+                        byId.set(message.id, message);
+                    }
+                    const sorted = Array.from(byId.values()).sort((a, b) => {
+                        const aTs = Number(new Date(a.dateAdded).getTime());
+                        const bTs = Number(new Date(b.dateAdded).getTime());
+                        if (aTs !== bTs) return aTs - bTs;
+                        return String(a.id).localeCompare(String(b.id));
+                    });
+                    const preserveCount = Math.min(
+                        THREAD_TARGET_MESSAGE_COUNT,
+                        Math.max(cachedMessages.length, initialMessages.length)
+                    );
+                    return preserveCount > 0 ? sorted.slice(-preserveCount) : sorted;
+                })();
+                const initialHydration = createWorkspaceHydrationState({
+                    status: mergedInitialMessages.length >= THREAD_TARGET_MESSAGE_COUNT ? 'full' : 'partial',
+                    messages: mergedInitialMessages,
+                    initialCount: initialMessages.length,
+                    targetCount: THREAD_TARGET_MESSAGE_COUNT,
+                    requestedLimit: initialMessageLimit,
+                });
+                const initialSnapshot = createWorkspaceCoreSnapshot({
                     conversationHeader: workspace?.conversationHeader || null,
-                    messages: Array.isArray(workspace?.messages) ? workspace.messages : [],
-                    activityTimeline: Array.isArray(workspace?.activityTimeline) ? workspace.activityTimeline : [],
-                    transcriptOnDemandEnabled: !!workspace?.transcriptEligibility?.success && !!workspace?.transcriptEligibility?.enabled,
-                };
+                    messages: mergedInitialMessages,
+                    activityTimeline: cachedSnapshot?.activityTimeline || [],
+                    transcriptEligibility: workspace?.transcriptEligibility,
+                    hydration: initialHydration,
+                });
 
-                cacheWorkspaceCoreSnapshot(selectedConversationId, snapshot);
-                applyWorkspaceCoreSnapshot(selectedConversationId, snapshot);
+                cacheWorkspaceCoreSnapshot(selectedConversationId, initialSnapshot);
+                applyWorkspaceCoreSnapshot(selectedConversationId, initialSnapshot);
                 initialWorkspaceLoadedAtRef.current[selectedConversationId] = Date.now();
+                setLoadingMessages(false);
+
+                const initialOpenMs = Date.now() - threadOpenStartedAtMs;
+                trackClientRequest("thread_open_initial", {
+                    conversationId: selectedConversationId,
+                    thread_open_initial_ms: initialOpenMs,
+                    initial_message_count: initialMessages.length,
+                    rendered_message_count: mergedInitialMessages.length,
+                    requested_initial_limit: initialMessageLimit,
+                });
 
                 void markConversationReadInUi(selectedConversationId);
+                runThreadStaleBackgroundSync(initialSnapshot, !!workspace?.freshness?.threadStale);
 
-                if (featureFlags.workspaceV2 && workspace?.freshness?.threadStale) {
-                    const nowMs = Date.now();
-                    const lastSyncedMs = backgroundSyncByConversationRef.current[selectedConversationId] || 0;
-                    if (nowMs - lastSyncedMs >= 5 * 60 * 1000) {
-                        backgroundSyncByConversationRef.current[selectedConversationId] = nowMs;
-                        void refreshConversationOnDemand(selectedConversationId, "full_sync")
-                            .then(async (syncRes: any) => {
-                                if (!syncRes?.success || Number(syncRes?.syncedCount || 0) <= 0) return;
-                                const refreshed = await fetchMessages(selectedConversationId, { take: 250 });
-                                if (activeIdRef.current !== selectedConversationId) return;
-                                const refreshedSnapshot: WorkspaceCoreSnapshot = {
-                                    conversationHeader: snapshot.conversationHeader,
-                                    messages: refreshed,
-                                    activityTimeline: snapshot.activityTimeline,
-                                    transcriptOnDemandEnabled: snapshot.transcriptOnDemandEnabled,
+                const runDeferredHydration = async () => {
+                    if (cancelled || activeIdRef.current !== selectedConversationId) return;
+
+                    let backfillCount = 0;
+                    const runBackfillHydration = async (): Promise<number> => {
+                        if (workspaceBackfillInFlightRef.current.has(selectedConversationId)) return 0;
+                        workspaceBackfillInFlightRef.current.add(selectedConversationId);
+                        trackClientRequest("workspace_backfill_start", { conversationId: selectedConversationId });
+                        try {
+                            let totalAdded = 0;
+                            let latestSnapshot = getCachedWorkspaceCoreSnapshot(selectedConversationId) || initialSnapshot;
+                            let workingMessages = Array.isArray(latestSnapshot.messages) ? latestSnapshot.messages : [];
+                            let oldestCursor = latestSnapshot.hydration?.oldestCursor || buildMessageCursorFromMessage(workingMessages[0]);
+
+                            while (!cancelled && activeIdRef.current === selectedConversationId && workingMessages.length < THREAD_TARGET_MESSAGE_COUNT && oldestCursor) {
+                                const needed = THREAD_TARGET_MESSAGE_COUNT - workingMessages.length;
+                                const olderMessages = await fetchMessages(selectedConversationId, {
+                                    take: needed,
+                                    beforeCursor: oldestCursor,
+                                });
+                                if (cancelled || activeIdRef.current !== selectedConversationId) break;
+                                if (!Array.isArray(olderMessages) || olderMessages.length === 0) break;
+
+                                const mergedMessages = mergePrependMessagesDedupe(workingMessages, olderMessages);
+                                const addedCount = Math.max(mergedMessages.length - workingMessages.length, 0);
+                                if (addedCount <= 0) break;
+
+                                totalAdded += addedCount;
+                                workingMessages = mergedMessages;
+                                oldestCursor = buildMessageCursorFromMessage(workingMessages[0]) || oldestCursor;
+
+                                const currentSnapshot = getCachedWorkspaceCoreSnapshot(selectedConversationId) || latestSnapshot;
+                                const nextSnapshot: WorkspaceCoreSnapshot = {
+                                    ...currentSnapshot,
+                                    messages: workingMessages,
+                                    hydration: createWorkspaceHydrationState({
+                                        status: workingMessages.length >= THREAD_TARGET_MESSAGE_COUNT ? 'full' : 'partial',
+                                        messages: workingMessages,
+                                        initialCount: currentSnapshot.hydration?.initialCount || initialSnapshot.hydration.initialCount,
+                                        targetCount: THREAD_TARGET_MESSAGE_COUNT,
+                                        requestedLimit: currentSnapshot.hydration?.requestedLimit || initialMessageLimit,
+                                    }),
                                 };
-                                cacheWorkspaceCoreSnapshot(selectedConversationId, refreshedSnapshot);
-                                applyWorkspaceCoreSnapshot(selectedConversationId, refreshedSnapshot);
-                                initialWorkspaceLoadedAtRef.current[selectedConversationId] = Date.now();
-                                void markConversationReadInUi(selectedConversationId);
-                            })
-                            .catch((err) => console.error("[Workspace Background Sync] Error:", err));
-                    }
-                }
+                                latestSnapshot = nextSnapshot;
+                                cacheWorkspaceCoreSnapshot(selectedConversationId, nextSnapshot);
+                                applyWorkspaceCoreSnapshot(selectedConversationId, nextSnapshot);
+
+                                if (olderMessages.length < needed) break;
+                            }
+
+                            if (!cancelled && activeIdRef.current === selectedConversationId) {
+                                const currentSnapshot = getCachedWorkspaceCoreSnapshot(selectedConversationId) || latestSnapshot;
+                                if (currentSnapshot.hydration.status !== 'full') {
+                                    const finalizedSnapshot: WorkspaceCoreSnapshot = {
+                                        ...currentSnapshot,
+                                        hydration: createWorkspaceHydrationState({
+                                            status: 'full',
+                                            messages: currentSnapshot.messages,
+                                            initialCount: currentSnapshot.hydration.initialCount,
+                                            targetCount: THREAD_TARGET_MESSAGE_COUNT,
+                                            requestedLimit: currentSnapshot.hydration.requestedLimit,
+                                        }),
+                                    };
+                                    cacheWorkspaceCoreSnapshot(selectedConversationId, finalizedSnapshot);
+                                    applyWorkspaceCoreSnapshot(selectedConversationId, finalizedSnapshot);
+                                }
+                            }
+
+                            return totalAdded;
+                        } finally {
+                            workspaceBackfillInFlightRef.current.delete(selectedConversationId);
+                        }
+                    };
+
+                    const runDeferredActivityHydration = async () => {
+                        if (workspaceActivityHydrationInFlightRef.current.has(selectedConversationId)) return;
+                        workspaceActivityHydrationInFlightRef.current.add(selectedConversationId);
+                        trackClientRequest("workspace_activity_deferred_load", { conversationId: selectedConversationId });
+                        try {
+                            const activityWorkspace = await getConversationWorkspaceCore(selectedConversationId, {
+                                includeMessages: false,
+                                includeActivity: true,
+                                messageLimit: initialMessageLimit,
+                                activityLimit: WORKSPACE_ACTIVITY_LIMIT,
+                            });
+                            if (cancelled || activeIdRef.current !== selectedConversationId) return;
+                            if (!activityWorkspace?.success) return;
+
+                            const currentSnapshot = getCachedWorkspaceCoreSnapshot(selectedConversationId) || initialSnapshot;
+                            const refreshedSnapshot: WorkspaceCoreSnapshot = {
+                                ...currentSnapshot,
+                                conversationHeader: activityWorkspace?.conversationHeader || currentSnapshot.conversationHeader,
+                                activityTimeline: Array.isArray(activityWorkspace?.activityTimeline)
+                                    ? activityWorkspace.activityTimeline
+                                    : currentSnapshot.activityTimeline,
+                                transcriptOnDemandEnabled: !!activityWorkspace?.transcriptEligibility?.success
+                                    ? !!activityWorkspace?.transcriptEligibility?.enabled
+                                    : currentSnapshot.transcriptOnDemandEnabled,
+                            };
+                            cacheWorkspaceCoreSnapshot(selectedConversationId, refreshedSnapshot);
+                            applyWorkspaceCoreSnapshot(selectedConversationId, refreshedSnapshot);
+                        } catch (err) {
+                            if (!cancelled) {
+                                console.error("Deferred workspace activity load failed:", err);
+                            }
+                        } finally {
+                            workspaceActivityHydrationInFlightRef.current.delete(selectedConversationId);
+                        }
+                    };
+
+                    const [resolvedBackfillCount] = await Promise.all([
+                        runBackfillHydration(),
+                        runDeferredActivityHydration(),
+                    ]);
+                    backfillCount = resolvedBackfillCount;
+
+                    if (cancelled || activeIdRef.current !== selectedConversationId) return;
+                    trackClientRequest("thread_open_full", {
+                        conversationId: selectedConversationId,
+                        thread_open_full_ms: Date.now() - threadOpenStartedAtMs,
+                        initial_message_count: initialMessages.length,
+                        backfill_count: backfillCount,
+                    });
+                };
+
+                scheduleDeferredHydration(() => {
+                    void runDeferredHydration();
+                });
             } catch (err) {
                 if (cancelled) return;
                 console.error("Failed to load conversation workspace core:", err);
                 toast({ title: "Error", description: "Failed to load conversation workspace.", variant: "destructive" });
             } finally {
                 workspaceCoreInFlightRef.current.delete(selectedConversationId);
+                workspaceInitialHydrationInFlightRef.current.delete(selectedConversationId);
                 if (!cancelled) {
                     setLoadingMessages(false);
                 }
@@ -1137,91 +1482,21 @@ export function ConversationInterface({ locationId, initialConversations, initia
             }
         };
 
-        if (featureFlags.workspaceSplit) {
-            void loadWorkspaceCore();
-            void loadWorkspaceSidebar();
-        } else {
-            const loadWorkspace = async () => {
-                trackClientRequest("workspace_combined_load", { conversationId: selectedConversationId });
-                try {
-                    const workspace = await getConversationWorkspace(selectedConversationId, {
-                        includeMessages: true,
-                        includeActivity: true,
-                        includeContactContext: true,
-                        includeTaskSummary: true,
-                        includeViewingSummary: true,
-                        includeAgentSummary: true,
-                        messageLimit: 250,
-                        activityLimit: 180,
-                    });
-                    if (cancelled || activeIdRef.current !== selectedConversationId) return;
-                    if (!workspace?.success) {
-                        throw new Error(workspace?.error || "Failed to load conversation workspace");
-                    }
-
-                    const snapshot: WorkspaceCoreSnapshot = {
-                        conversationHeader: workspace?.conversationHeader || null,
-                        messages: Array.isArray(workspace?.messages) ? workspace.messages : [],
-                        activityTimeline: Array.isArray(workspace?.activityTimeline) ? workspace.activityTimeline : [],
-                        transcriptOnDemandEnabled: !!workspace?.transcriptEligibility?.success && !!workspace?.transcriptEligibility?.enabled,
-                    };
-
-                    cacheWorkspaceCoreSnapshot(selectedConversationId, snapshot);
-                    applyWorkspaceCoreSnapshot(selectedConversationId, snapshot);
-                    initialWorkspaceLoadedAtRef.current[selectedConversationId] = Date.now();
-
-                    setWorkspaceContactContext(workspace?.contactContext || null);
-                    setWorkspaceTaskSummary(workspace?.taskSummary || null);
-                    setWorkspaceViewingSummary(workspace?.viewingSummary || null);
-                    setWorkspaceAgentSummary(workspace?.agentSummary || null);
-
-                    void markConversationReadInUi(selectedConversationId);
-
-                    if (featureFlags.workspaceV2 && workspace?.freshness?.threadStale) {
-                        const nowMs = Date.now();
-                        const lastSyncedMs = backgroundSyncByConversationRef.current[selectedConversationId] || 0;
-                        if (nowMs - lastSyncedMs >= 5 * 60 * 1000) {
-                            backgroundSyncByConversationRef.current[selectedConversationId] = nowMs;
-                            void refreshConversationOnDemand(selectedConversationId, "full_sync")
-                                .then(async (syncRes: any) => {
-                                    if (!syncRes?.success || Number(syncRes?.syncedCount || 0) <= 0) return;
-                                    const refreshed = await fetchMessages(selectedConversationId, { take: 250 });
-                                    if (activeIdRef.current !== selectedConversationId) return;
-                                    const refreshedSnapshot: WorkspaceCoreSnapshot = {
-                                        conversationHeader: snapshot.conversationHeader,
-                                        messages: refreshed,
-                                        activityTimeline: snapshot.activityTimeline,
-                                        transcriptOnDemandEnabled: snapshot.transcriptOnDemandEnabled,
-                                    };
-                                    cacheWorkspaceCoreSnapshot(selectedConversationId, refreshedSnapshot);
-                                    applyWorkspaceCoreSnapshot(selectedConversationId, refreshedSnapshot);
-                                    initialWorkspaceLoadedAtRef.current[selectedConversationId] = Date.now();
-                                    void markConversationReadInUi(selectedConversationId);
-                                })
-                                .catch((err) => console.error("[Workspace Background Sync] Error:", err));
-                        }
-                    }
-                } catch (err) {
-                    if (!cancelled) {
-                        console.error("Failed to load conversation workspace:", err);
-                        toast({ title: "Error", description: "Failed to load conversation workspace.", variant: "destructive" });
-                    }
-                } finally {
-                    if (!cancelled) setLoadingMessages(false);
-                }
-            };
-            void loadWorkspace();
-        }
+        void loadWorkspaceCore();
+        void loadWorkspaceSidebar();
 
         return () => {
             cancelled = true;
+            clearDeferredHydrationTimer();
+            workspaceInitialHydrationInFlightRef.current.delete(selectedConversationId);
+            workspaceBackfillInFlightRef.current.delete(selectedConversationId);
+            workspaceActivityHydrationInFlightRef.current.delete(selectedConversationId);
         };
     }, [
         viewMode,
         activeId,
         markConversationReadInUi,
         featureFlags.workspaceV2,
-        featureFlags.workspaceSplit,
         trackClientRequest,
         getCachedWorkspaceCoreSnapshot,
         applyWorkspaceCoreSnapshot,
@@ -1325,21 +1600,35 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     return;
                 }
 
+                if (isWorkspaceHydrationBusy(selectedConversationId)) {
+                    trackClientRequest("active_delta_poll_skipped_hydration", { conversationId: selectedConversationId });
+                    return;
+                }
+
                 trackClientRequest("active_delta_poll", { conversationId: selectedConversationId, pendingTranscripts });
                 const workspace = await getConversationWorkspaceCore(selectedConversationId, {
                     includeMessages: true,
                     includeActivity: true,
-                    messageLimit: 250,
-                    activityLimit: 180,
+                    messageLimit: THREAD_TARGET_MESSAGE_COUNT,
+                    activityLimit: WORKSPACE_ACTIVITY_LIMIT,
                 });
                 if (cancelled || !workspace?.success || activeIdRef.current !== selectedConversationId) return;
 
-                const snapshot: WorkspaceCoreSnapshot = {
+                const workspaceMessages = Array.isArray(workspace?.messages) ? workspace.messages : [];
+                const snapshot = createWorkspaceCoreSnapshot({
                     conversationHeader: workspace?.conversationHeader || null,
-                    messages: Array.isArray(workspace?.messages) ? workspace.messages : [],
+                    messages: workspaceMessages,
                     activityTimeline: Array.isArray(workspace?.activityTimeline) ? workspace.activityTimeline : [],
-                    transcriptOnDemandEnabled: !!workspace?.transcriptEligibility?.success && !!workspace?.transcriptEligibility?.enabled,
-                };
+                    transcriptEligibility: workspace?.transcriptEligibility,
+                    hydration: createWorkspaceHydrationState({
+                        status: 'full',
+                        messages: workspaceMessages,
+                        messageWindow: workspace?.messageWindow,
+                        initialCount: workspaceMessages.length,
+                        targetCount: THREAD_TARGET_MESSAGE_COUNT,
+                        requestedLimit: THREAD_TARGET_MESSAGE_COUNT,
+                    }),
+                });
                 cacheWorkspaceCoreSnapshot(selectedConversationId, snapshot);
                 applyWorkspaceCoreSnapshot(selectedConversationId, snapshot);
                 initialWorkspaceLoadedAtRef.current[selectedConversationId] = Date.now();
@@ -1372,7 +1661,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 clearInterval(intervalId);
             }
         };
-    }, [viewMode, activeId, isTabVisible, featureFlags.balancedPolling, featureFlags.workspaceV2, featureFlags.realtimeSse, realtimeMode, markConversationReadInUi, trackClientRequest, applyWorkspaceCoreSnapshot, cacheWorkspaceCoreSnapshot]);
+    }, [viewMode, activeId, isTabVisible, featureFlags.balancedPolling, featureFlags.workspaceV2, featureFlags.realtimeSse, realtimeMode, isWorkspaceHydrationBusy, markConversationReadInUi, trackClientRequest, applyWorkspaceCoreSnapshot, cacheWorkspaceCoreSnapshot]);
 
     useEffect(() => {
         if (!featureFlags.realtimeSse) {
@@ -1462,7 +1751,6 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
     useEffect(() => {
         if (viewMode !== 'chats') return;
-        if (!featureFlags.workspaceSplit) return;
 
         const candidateIds = conversations
             .filter((conversation) => conversation.id !== activeId)
@@ -1495,7 +1783,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 (window as any).cancelIdleCallback(idleHandle);
             }
         };
-    }, [viewMode, activeId, conversations, featureFlags.workspaceSplit, prefetchWorkspaceCore]);
+    }, [viewMode, activeId, conversations, prefetchWorkspaceCore]);
 
     // Handle clicking a conversation in the list
     const handleSelect = (id: string) => {
@@ -2323,7 +2611,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             conversations={debouncedSearchQuery.trim() ? searchResults : conversations}
             selectedId={viewMode === 'chats' ? activeId : activeDealId}
             onSelect={handleSelect}
-            onHoverConversation={viewMode === 'chats' && featureFlags.workspaceSplit ? prefetchWorkspaceCore : undefined}
+            onHoverConversation={viewMode === 'chats' ? prefetchWorkspaceCore : undefined}
             hasMore={viewMode === 'chats' ? conversationListHasMore : false}
             isLoadingMore={viewMode === 'chats' ? loadingMoreConversations : false}
             onLoadMore={viewMode === 'chats' ? loadMoreConversations : undefined}

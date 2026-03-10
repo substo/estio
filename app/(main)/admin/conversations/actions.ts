@@ -25,6 +25,7 @@ import { getConversationFeatureFlags } from "@/lib/feature-flags";
 import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-events";
 import { withResilience } from "@/lib/external/resilience";
 import { assembleTimelineEvents } from "@/lib/conversations/timeline-events";
+import { buildMessageCursorFromMessage } from "@/lib/conversations/thread-hydration";
 import {
     buildWhatsAppOutboundUploadKey,
     createWhatsAppMediaReadUrl,
@@ -1487,6 +1488,13 @@ type ConversationWorkspaceCoreMetadata = {
     };
 };
 
+type ConversationWorkspaceMessageWindow = {
+    oldestCursor: string | null;
+    newestCursor: string | null;
+    count: number;
+    requestedLimit: number;
+};
+
 type ConversationWorkspaceOptions = {
     includeMessages?: boolean;
     includeActivity?: boolean;
@@ -1950,6 +1958,24 @@ export async function getConversationWorkspaceCore(
                     })),
             ]);
 
+            const messageWindow: ConversationWorkspaceMessageWindow = {
+                oldestCursor: includeMessages ? (buildMessageCursorFromMessage(messages[0]) || null) : null,
+                newestCursor: includeMessages ? (buildMessageCursorFromMessage(messages[messages.length - 1]) || null) : null,
+                count: includeMessages ? messages.length : 0,
+                requestedLimit: messageLimit,
+            };
+
+            console.log("[perf:conversations.workspace_core_window]", JSON.stringify({
+                traceId,
+                conversationId: trimmedConversationId,
+                includeMessages,
+                includeActivity,
+                messageLimit,
+                activityLimit,
+                message_count: messageWindow.count,
+                activity_count: Array.isArray(activityTimeline) ? activityTimeline.length : 0,
+            }));
+
             return {
                 success: true as const,
                 traceId,
@@ -1958,6 +1984,7 @@ export async function getConversationWorkspaceCore(
                 activityTimeline,
                 transcriptEligibility,
                 freshness: metadata.freshness,
+                messageWindow,
             };
         });
     } catch (error: any) {
@@ -2081,6 +2108,7 @@ export async function getConversationWorkspace(
         agentSummary: includeAgentSummary ? sidebarData?.agentSummary || null : null,
         transcriptEligibility: core.transcriptEligibility,
         freshness: core.freshness,
+        messageWindow: core.messageWindow,
     };
 }
 

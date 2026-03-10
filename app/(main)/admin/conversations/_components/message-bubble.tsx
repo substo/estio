@@ -82,6 +82,7 @@ export interface MessageBubbleProps {
     contactEmail?: string;
     contactName?: string; // Fallback contact name if message.contactName missing
     aiModel?: string | null;
+    enableMountAnimation?: boolean;
     selectionBatch?: SelectionBatchItem[];
     onAddSelectionToBatch?: (item: SelectionBatchInput) => { added: boolean; total: number } | void;
     onRemoveSelectionBatchItem?: (id: string) => void;
@@ -106,6 +107,7 @@ export function MessageBubble({
     contactEmail: _contactEmail,
     contactName,
     aiModel,
+    enableMountAnimation = true,
     selectionBatch,
     onAddSelectionToBatch,
     onRemoveSelectionBatchItem,
@@ -338,7 +340,8 @@ export function MessageBubble({
     return (
         <div
             className={cn(
-                "flex flex-col max-w-[85%] min-w-0 overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300",
+                "flex flex-col max-w-[85%] min-w-0 overflow-hidden",
+                enableMountAnimation && "animate-in fade-in slide-in-from-bottom-2 duration-300",
                 isOutbound ? "ml-auto items-end" : "mr-auto items-start"
             )}
         >
