@@ -53,7 +53,8 @@ interface ChatWindowProps {
     transcriptOnDemandEnabled?: boolean;
     onSync?: () => void;
     onFetchHistory?: () => void;
-    onGenerateDraft?: (instruction?: string, model?: string) => Promise<string | null>;
+    onGenerateDraft?: (instruction?: string, model?: string, replyLanguage?: string | null) => Promise<string | null>;
+    onSetReplyLanguageOverride?: (replyLanguage: string | null) => Promise<{ success: boolean; error?: string; replyLanguageOverride?: string | null }>;
     onAddActivityEntry?: (entryText: string, dateIso: string) => Promise<void>;
 }
 
@@ -131,6 +132,7 @@ export function ChatWindow({
     transcriptOnDemandEnabled,
     onSync,
     onGenerateDraft,
+    onSetReplyLanguageOverride,
     onFetchHistory,
     onAddActivityEntry,
     suggestions = [],
@@ -790,6 +792,7 @@ export function ChatWindow({
                 onSendMessage={onSendMessage}
                 onSendMedia={onSendMedia}
                 onGenerateDraft={onGenerateDraft}
+                onSetReplyLanguageOverride={onSetReplyLanguageOverride}
                 suggestions={suggestions}
                 onModelChange={setSelectedModel}
             />

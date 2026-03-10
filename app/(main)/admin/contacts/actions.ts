@@ -14,6 +14,7 @@ import { runGoogleAutoSyncForContact } from '@/lib/google/automation';
 import { getLocationContext } from '@/lib/auth/location-context';
 import { parseEvolutionMessageContent } from '@/lib/whatsapp/evolution-media';
 import { seedConversationFromContactLeadText } from '@/lib/conversations/bootstrap';
+import { normalizeReplyLanguage } from '@/lib/ai/reply-language-options';
 import {
   normalizeIanaTimeZoneOrThrow,
   parseViewingDateTimeInput,
@@ -73,6 +74,14 @@ function parseArray(input: string | null | undefined): string[] {
     // Fallback: split by comma if JSON parsing fails
     return input.split(',').map(s => s.trim()).filter(s => s.length > 0);
   }
+}
+
+function parsePreferredLanguage(input: string | null | undefined): string | null {
+  const raw = String(input || '').trim();
+  if (!raw || raw.toLowerCase() === 'auto') return null;
+
+  const normalized = normalizeReplyLanguage(raw);
+  return normalized || null;
 }
 
 // --- Helpers & Zod Transforms ---
@@ -187,6 +196,19 @@ const createContactSchema = z.object({
   phone: z.string().optional().transform(normalizePhone),
   locationId: z.string().min(1, 'Location ID is required'),
   message: z.string().optional(),
+  preferredLang: z.string().optional().transform((value, ctx) => {
+    const raw = String(value || '').trim();
+    if (!raw || raw.toLowerCase() === 'auto') return null;
+    const normalized = parsePreferredLanguage(raw);
+    if (!normalized) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Invalid preferred language code',
+      });
+      return z.NEVER;
+    }
+    return normalized;
+  }),
   contactType: z.enum(CONTACT_TYPES).optional().default('Lead'),
 
   // Enhanced Demographics
@@ -263,6 +285,7 @@ export type CreateContactState = {
     lastName?: string | null;
     email?: string | null;
     phone?: string | null;
+    preferredLang?: string | null;
     message?: string | null;
   };
   duplicateContact?: { id: string; name: string | null; email?: string | null; phone?: string | null };
@@ -433,6 +456,10 @@ export async function openOrStartConversationForContact(contactId: string) {
 
 // Prepares the Prisma data object from validated Zod data
 function prepareContactInput(data: ValidatedContactData) {
+  const preferredLang = data.preferredLang === undefined
+    ? undefined
+    : parsePreferredLanguage(data.preferredLang);
+
   return {
     name: data.name,
     firstName: data.firstName,
@@ -440,6 +467,7 @@ function prepareContactInput(data: ValidatedContactData) {
     email: data.email || null,
     phone: data.phone || null,
     message: data.message,
+    preferredLang,
     contactType: data.contactType,
 
     dateOfBirth: data.dateOfBirth,
@@ -607,6 +635,7 @@ export async function createContact(
     email: formData.get('email') || '',
     phone: formData.get('phone') || undefined,
     message: formData.get('message') || undefined,
+    preferredLang: formData.get('preferredLang') || undefined,
     locationId: formData.get('locationId') || undefined,
     contactType: formData.get('contactType') || undefined,
     roleType: formData.get('roleType') || undefined,
@@ -782,6 +811,7 @@ export async function createContact(
         lastName: contact.lastName ?? null,
         email: contact.email,
         phone: contact.phone,
+        preferredLang: contact.preferredLang ?? null,
         message: contact.message || null
       },
     };
@@ -861,6 +891,8 @@ async function updateContactCore(
       }
     }
 
+    let savedContactSummary: CreateContactState["contact"] = undefined;
+
     await db.$transaction(async (tx) => {
       // Fetch current state for diffing
       const currentContact = await tx.contact.findUnique({ where: { id: data.contactId } });
@@ -870,6 +902,16 @@ async function updateContactCore(
         where: { id: data.contactId },
         data: contactInput,
       });
+      savedContactSummary = {
+        id: updatedContact.id,
+        name: updatedContact.name || '',
+        firstName: updatedContact.firstName || null,
+        lastName: updatedContact.lastName || null,
+        email: updatedContact.email || null,
+        phone: updatedContact.phone || null,
+        preferredLang: updatedContact.preferredLang || null,
+        message: updatedContact.message || null,
+      };
       console.log('[updateContact] Contact updated successfully', data.contactId);
 
       // Calculate Changes
@@ -943,7 +985,7 @@ async function updateContactCore(
       preferredUserId: internalUserId
     });
 
-    return { success: true, message: 'Contact updated successfully.' };
+    return { success: true, message: 'Contact updated successfully.', contact: savedContactSummary };
 
   } catch (error: any) {
     if (String(error?.code) === 'P2002') {
@@ -1011,6 +1053,7 @@ export async function updateContact(
     email: formData.get('email') || '',
     phone: formData.get('phone') || undefined,
     message: formData.get('message') || undefined,
+    preferredLang: formData.get('preferredLang') || undefined,
     locationId: formData.get('locationId') || undefined,
     contactType: formData.get('contactType') || undefined,
     roleType: formData.get('roleType') || undefined,

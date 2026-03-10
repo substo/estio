@@ -431,7 +431,13 @@ export function CoordinatorPanel({
                 setDraft(res.draft);
                 setReasoning(res.reasoning);
             } else {
-                const res = await generateAIDraft(conversation.id, conversation.contactId, undefined, undefined, { mode: "chat" });
+                const res = await generateAIDraft(
+                    conversation.id,
+                    conversation.contactId,
+                    undefined,
+                    undefined,
+                    { mode: "chat", replyLanguage: conversation.replyLanguageOverride || null }
+                );
                 setDraft(res.draft);
                 setReasoning(res.reasoning);
             }
@@ -564,6 +570,7 @@ export function CoordinatorPanel({
                     phone: refreshedContact.phone ?? null,
                     firstName: refreshedContact.firstName ?? null,
                     lastName: refreshedContact.lastName ?? null,
+                    preferredLang: refreshedContact.preferredLang ?? null,
                 });
             }
         } catch (error) {

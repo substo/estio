@@ -1,4 +1,5 @@
 type LanguageSource =
+    | "conversation_override"
     | "latest_inbound"
     | "contact_preferred"
     | "thread_default"
@@ -7,6 +8,7 @@ type LanguageSource =
 
 export interface CommunicationLanguageResolution {
     expectedLanguage: string | null;
+    manualOverrideLanguage: string | null;
     latestInboundLanguage: string | null;
     contactPreferredLanguage: string | null;
     threadDefaultLanguage: string | null;
@@ -14,6 +16,7 @@ export interface CommunicationLanguageResolution {
 }
 
 export interface ResolveCommunicationLanguageInput {
+    manualOverrideLanguage?: string | null;
     latestInboundText?: string | null;
     contactPreferredLanguage?: string | null;
     threadText?: string | null;
@@ -123,24 +126,27 @@ export function detectLanguageFromText(text: string | null | undefined): string 
 export function resolveCommunicationLanguage(
     input: ResolveCommunicationLanguageInput
 ): CommunicationLanguageResolution {
+    const manualOverrideLanguage = normalizeLanguageTag(input.manualOverrideLanguage);
     const latestInboundLanguage = detectLanguageFromText(input.latestInboundText);
     const contactPreferredLanguage = normalizeLanguageTag(input.contactPreferredLanguage);
     const threadDefaultLanguage = detectLanguageFromText(input.threadText);
     const fallbackLanguage = normalizeLanguageTag(input.fallbackLanguage);
 
-    if (latestInboundLanguage) {
+    if (manualOverrideLanguage) {
         return {
-            expectedLanguage: latestInboundLanguage,
+            expectedLanguage: manualOverrideLanguage,
+            manualOverrideLanguage,
             latestInboundLanguage,
             contactPreferredLanguage,
             threadDefaultLanguage,
-            source: "latest_inbound",
+            source: "conversation_override",
         };
     }
 
     if (contactPreferredLanguage) {
         return {
             expectedLanguage: contactPreferredLanguage,
+            manualOverrideLanguage,
             latestInboundLanguage,
             contactPreferredLanguage,
             threadDefaultLanguage,
@@ -148,9 +154,21 @@ export function resolveCommunicationLanguage(
         };
     }
 
+    if (latestInboundLanguage) {
+        return {
+            expectedLanguage: latestInboundLanguage,
+            manualOverrideLanguage,
+            latestInboundLanguage,
+            contactPreferredLanguage,
+            threadDefaultLanguage,
+            source: "latest_inbound",
+        };
+    }
+
     if (threadDefaultLanguage) {
         return {
             expectedLanguage: threadDefaultLanguage,
+            manualOverrideLanguage,
             latestInboundLanguage,
             contactPreferredLanguage,
             threadDefaultLanguage,
@@ -161,6 +179,7 @@ export function resolveCommunicationLanguage(
     if (fallbackLanguage) {
         return {
             expectedLanguage: fallbackLanguage,
+            manualOverrideLanguage,
             latestInboundLanguage,
             contactPreferredLanguage,
             threadDefaultLanguage,
@@ -170,6 +189,7 @@ export function resolveCommunicationLanguage(
 
     return {
         expectedLanguage: null,
+        manualOverrideLanguage,
         latestInboundLanguage,
         contactPreferredLanguage,
         threadDefaultLanguage,

@@ -117,6 +117,7 @@ export function EditContactForm({ contact, onSuccess, onDelete, onContactSaved, 
                     phone: mergedData?.phone ?? contact.phone ?? null,
                     firstName: mergedData?.firstName ?? contact.firstName ?? null,
                     lastName: mergedData?.lastName ?? contact.lastName ?? null,
+                    preferredLang: mergedData?.preferredLang ?? contact.preferredLang ?? null,
                 });
                 toast({ title: "Success", description: "Contact updated successfully" });
                 if (onSuccess) onSuccess(); // Refresh data

@@ -19,7 +19,8 @@ interface UnifiedTimelineProps {
     onOpenMissionControl?: () => void;
     onSendMessage?: (text: string, type: 'SMS' | 'Email' | 'WhatsApp') => void | Promise<void>;
     onSendMedia?: (file: File, caption: string) => void | Promise<void>;
-    onGenerateDraft?: (instruction?: string, model?: string) => Promise<string | null>;
+    onGenerateDraft?: (instruction?: string, model?: string, replyLanguage?: string | null) => Promise<string | null>;
+    onSetReplyLanguageOverride?: (replyLanguage: string | null) => Promise<{ success: boolean; error?: string; replyLanguageOverride?: string | null }>;
     suggestions?: string[];
     composerDisabled?: boolean;
     composerDisabledReason?: string;
@@ -35,6 +36,7 @@ export function UnifiedTimeline({
     onSendMessage,
     onSendMedia,
     onGenerateDraft,
+    onSetReplyLanguageOverride,
     suggestions = [],
     composerDisabled = false,
     composerDisabledReason,
@@ -150,6 +152,7 @@ export function UnifiedTimeline({
                 onSendMessage={(text, type) => Promise.resolve(onSendMessage?.(text, type))}
                 onSendMedia={onSendMedia}
                 onGenerateDraft={onGenerateDraft}
+                onSetReplyLanguageOverride={onSetReplyLanguageOverride}
                 suggestions={suggestions}
                 disabled={composerDisabled || !composerConversation}
                 disabledReason={composerDisabledReason}

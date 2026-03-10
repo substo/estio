@@ -43,6 +43,11 @@ import {
     CONTACT_TYPES, CONTACT_TYPE_CONFIG, DEFAULT_CONTACT_TYPE, type ContactType,
     LEAD_GOALS, LEAD_PRIORITIES, LEAD_STAGES, REQUIREMENT_STATUSES, REQUIREMENT_CONDITIONS
 } from './contact-types';
+import {
+    getReplyLanguageLabel,
+    REPLY_LANGUAGE_AUTO_VALUE,
+    REPLY_LANGUAGE_OPTIONS,
+} from '@/lib/ai/reply-language-options';
 
 // Types for contact data (used in edit mode)
 export type ContactData = {
@@ -52,6 +57,7 @@ export type ContactData = {
     lastName?: string | null;
     email: string | null;
     phone: string | null;
+    preferredLang?: string | null;
     locationId: string;
     contactType?: string | null;
     createdAt?: Date | string | null;
@@ -129,6 +135,7 @@ export type ContactIdentityPatch = {
     phone?: string | null;
     firstName?: string | null;
     lastName?: string | null;
+    preferredLang?: string | null;
 };
 
 // Helper to safely display values
@@ -222,6 +229,9 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
     const [contactPatch, setContactPatch] = useState<Partial<ContactData>>({});
     const [formRenderKey, setFormRenderKey] = useState(0);
     const contact = baseContact ? ({ ...baseContact, ...contactPatch } as ContactData) : undefined;
+    const [preferredLangSelection, setPreferredLangSelection] = useState<string>(
+        contact?.preferredLang || REPLY_LANGUAGE_AUTO_VALUE
+    );
     const [syncMeta, setSyncMeta] = useState<{
         googleContactId?: string | null;
         lastGoogleSync?: Date | null;
@@ -246,6 +256,10 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
         setContactPatch({});
         setFormRenderKey(0);
     }, [initialContact?.id]);
+
+    useEffect(() => {
+        setPreferredLangSelection(contact?.preferredLang || REPLY_LANGUAGE_AUTO_VALUE);
+    }, [contact?.id, contact?.preferredLang, formRenderKey]);
 
     const [isEditing, setIsEditing] = useState(initialMode !== 'view');
     const isCreating = initialMode === 'create';
@@ -402,6 +416,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                 setMatchedProperties([]);
                 setSelectedDistricts([]);
                 setSelectedAreas([]);
+                setPreferredLangSelection(REPLY_LANGUAGE_AUTO_VALUE);
                 if (onSuccessRef.current) onSuccessRef.current();
             } else {
                 const savedIdentityPatch: ContactIdentityPatch | null = state.contact?.id ? {
@@ -411,6 +426,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                     phone: state.contact.phone ?? null,
                     firstName: state.contact.firstName ?? null,
                     lastName: state.contact.lastName ?? null,
+                    preferredLang: state.contact.preferredLang ?? null,
                 } : null;
 
                 if (savedIdentityPatch) {
@@ -479,6 +495,10 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
     // leadSources are passed as props
 
     const districts = ["Any District", "Paphos", "Nicosia", "Famagusta", "Limassol", "Larnaca"];
+    const replyLanguageOptions = [
+        { value: REPLY_LANGUAGE_AUTO_VALUE, label: "Auto (detect from conversation)" },
+        ...REPLY_LANGUAGE_OPTIONS,
+    ];
 
     // Count visible tabs including additional tabs
     const visibleTabCount = currentConfig.visibleTabs.length + (additionalTabs ? (additionalTabCount || 1) : 0);
@@ -601,9 +621,26 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                             </RenderField>
                         </div>
 
-                        <div className="grid grid-cols-1 gap-4">
+                        <div className="grid grid-cols-2 gap-4">
                             <RenderField label="Tags" value={contact?.tags?.join(', ')} isEditing={isEditing}>
                                 <Input id="tags" name="tags" placeholder="Tag1, Tag2 (comma separated)" defaultValue={contact?.tags?.join(', ') || ''} />
+                            </RenderField>
+                            <RenderField
+                                label="Preferred Reply Language"
+                                value={contact?.preferredLang
+                                    ? getReplyLanguageLabel(contact?.preferredLang)
+                                    : "Auto (detected from conversation)"}
+                                isEditing={isEditing}
+                            >
+                                <SearchableSelect
+                                    name="preferredLang"
+                                    options={replyLanguageOptions}
+                                    value={preferredLangSelection}
+                                    onChange={(value) => setPreferredLangSelection(value || REPLY_LANGUAGE_AUTO_VALUE)}
+                                    placeholder="Auto (detect from conversation)"
+                                    searchPlaceholder="Search language..."
+                                    emptyMessage="No language found."
+                                />
                             </RenderField>
                         </div>
 

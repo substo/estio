@@ -12,6 +12,7 @@ import { ensureLocalContactSynced } from "@/lib/crm/contact-sync";
 import { ensureConversationHistory, syncMessageFromWebhook } from "@/lib/ghl/sync";
 import { checkGHLSMSStatus } from "@/lib/ghl/sms";
 import { calculateRunCost, calculateRunCostFromUsage } from "@/lib/ai/pricing";
+import { normalizeReplyLanguage } from "@/lib/ai/reply-language-options";
 import { z } from "zod";
 import { getModelForTask } from "@/lib/ai/model-router";
 import { callLLM, callLLMWithMetadata } from "@/lib/ai/llm";
@@ -921,6 +922,8 @@ function mapConversationRowToUi(c: any, location: { ghlLocationId?: string | nul
         contactName: c.contact?.name || "Unknown",
         contactPhone: c.contact?.phone || undefined,
         contactEmail: c.contact?.email || undefined,
+        contactPreferredLanguage: c.contact?.preferredLang || null,
+        replyLanguageOverride: c.replyLanguageOverride || null,
         lastMessageBody: c.lastMessageBody || "",
         lastMessageDate: Math.floor(new Date(c.lastMessageAt).getTime() / 1000),
         unreadCount: c.unreadCount,
@@ -1079,7 +1082,7 @@ async function queryConversationListSnapshot(args: {
         where: paginatedWhere,
         orderBy: [{ lastMessageAt: "desc" }, { id: "desc" }],
         take: args.pageSize + 1,
-        include: { contact: { select: { name: true, email: true, phone: true, ghlContactId: true } } },
+        include: { contact: { select: { name: true, email: true, phone: true, ghlContactId: true, preferredLang: true } } },
     });
 
     const hasMore = fetchedRows.length > args.pageSize;
@@ -1100,7 +1103,7 @@ async function queryConversationListSnapshot(args: {
                 locationId: args.locationId,
                 ghlConversationId: args.selectedConversationId,
             },
-            include: { contact: { select: { name: true, email: true, phone: true, ghlContactId: true } } },
+            include: { contact: { select: { name: true, email: true, phone: true, ghlContactId: true, preferredLang: true } } },
         });
         if (selectedConversation) {
             rows = [selectedConversation, ...rows];
@@ -1575,6 +1578,7 @@ async function queryConversationWorkspaceCoreMetadata(args: {
                     email: true,
                     phone: true,
                     ghlContactId: true,
+                    preferredLang: true,
                 },
             },
         },
@@ -1649,6 +1653,7 @@ async function queryConversationWorkspaceMetadata(args: {
                     email: true,
                     phone: true,
                     ghlContactId: true,
+                    preferredLang: true,
                 },
             },
         },
@@ -2132,7 +2137,7 @@ export async function getConversationListDelta(
                 orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
                 take: limit,
                 include: {
-                    contact: { select: { name: true, email: true, phone: true, ghlContactId: true } },
+                    contact: { select: { name: true, email: true, phone: true, ghlContactId: true, preferredLang: true } },
                 },
             });
 
@@ -5409,6 +5414,7 @@ export async function sendReply(conversationId: string, contactId: string, messa
 type GenerateAIDraftOptions = {
     mode?: "chat" | "deal";
     dealId?: string;
+    replyLanguage?: string | null;
 };
 
 export async function generateAIDraft(
@@ -5474,9 +5480,61 @@ export async function generateAIDraft(
         model: resolvedDraftModel,
         mode: options?.mode || "chat",
         dealId: options?.dealId || undefined,
+        replyLanguageOverride: options?.replyLanguage,
     });
 
     return result;
+}
+
+export async function setConversationReplyLanguageOverride(
+    conversationId: string,
+    replyLanguage: string | null
+) {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const trimmedConversationId = String(conversationId || "").trim();
+
+    if (!trimmedConversationId) {
+        return { success: false as const, error: "Missing conversation ID." };
+    }
+
+    const rawReplyLanguage = String(replyLanguage || "").trim();
+    const normalizedReplyLanguage = normalizeReplyLanguage(rawReplyLanguage);
+    if (rawReplyLanguage && rawReplyLanguage.toLowerCase() !== "auto" && !normalizedReplyLanguage) {
+        return { success: false as const, error: "Invalid language code." };
+    }
+    const conversation = await db.conversation.findFirst({
+        where: {
+            locationId: location.id,
+            OR: [
+                { id: trimmedConversationId },
+                { ghlConversationId: trimmedConversationId },
+            ],
+        },
+        select: { id: true, ghlConversationId: true },
+    });
+
+    if (!conversation) {
+        return { success: false as const, error: "Conversation not found." };
+    }
+
+    await db.conversation.update({
+        where: { id: conversation.id },
+        data: { replyLanguageOverride: normalizedReplyLanguage },
+    });
+
+    invalidateConversationReadCaches(conversation.ghlConversationId);
+    emitConversationRealtimeEvent({
+        locationId: location.id,
+        conversationId: conversation.ghlConversationId,
+        type: "conversation.reply_language_override.updated",
+        payload: { replyLanguageOverride: normalizedReplyLanguage },
+    });
+
+    return {
+        success: true as const,
+        conversationId: conversation.ghlConversationId,
+        replyLanguageOverride: normalizedReplyLanguage,
+    };
 }
 
 export async function orchestrateAction(conversationId: string, contactId: string, dealStage?: string) {
@@ -6856,6 +6914,8 @@ export async function refreshConversation(conversationId: string) {
         contactName: conversation.contact.name || "Unknown",
         contactPhone: conversation.contact.phone || undefined,
         contactEmail: conversation.contact.email || undefined,
+        contactPreferredLanguage: conversation.contact.preferredLang || null,
+        replyLanguageOverride: conversation.replyLanguageOverride || null,
         lastMessageBody: conversation.lastMessageBody || "",
         lastMessageDate: Math.floor(conversation.lastMessageAt.getTime() / 1000),
         unreadCount: conversation.unreadCount,
@@ -10430,7 +10490,7 @@ export async function searchConversations(query: string, options?: { limit?: num
                 id: { in: rankedConversationIds },
             },
             include: {
-                contact: { select: { name: true, email: true, phone: true, ghlContactId: true } },
+                contact: { select: { name: true, email: true, phone: true, ghlContactId: true, preferredLang: true } },
             },
         });
 

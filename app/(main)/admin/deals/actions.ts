@@ -67,6 +67,8 @@ export async function getDealContext(id: string) {
             contactName: c.contact.name || "Unknown",
             contactEmail: c.contact.email || undefined,
             contactPhone: c.contact.phone || undefined,
+            contactPreferredLanguage: c.contact.preferredLang || null,
+            replyLanguageOverride: c.replyLanguageOverride || null,
             contactType: c.contact.contactType,
             status: (c.status as any) || 'open',
             type: c.lastMessageType || 'TYPE_SMS',

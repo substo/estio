@@ -26,6 +26,7 @@ interface CoordinationContext {
     businessName?: string;
     instruction?: string;
     model?: string;
+    replyLanguageOverride?: string | null;
 }
 
 import { calculateRunCost, DEFAULT_MODEL } from "@/lib/ai/pricing";
@@ -385,6 +386,7 @@ export async function generateDraft(context: CoordinationContext) {
         let messages: DraftMessage[] = [];
         let conversationType = 'SMS';
         let foundLocally = false;
+        let localConversationReplyLanguageOverride: string | null = null;
 
         // Step 1: Try Local Lookup (Primary)
         try {
@@ -409,6 +411,7 @@ export async function generateDraft(context: CoordinationContext) {
                     createdAt: parseMessageTimestamp(m.createdAt)
                 }));
                 conversationType = localConversation.lastMessageType || 'SMS';
+                localConversationReplyLanguageOverride = localConversation.replyLanguageOverride || null;
                 foundLocally = true;
             } else {
                 console.log(`[AI Draft] Conversation not found locally (ID: ${context.conversationId}).`);
@@ -547,7 +550,11 @@ export async function generateDraft(context: CoordinationContext) {
             .map(m => (m.body || "").trim())
             .filter(Boolean)
             .join("\n");
+        const manualReplyLanguage = context.replyLanguageOverride === undefined
+            ? localConversationReplyLanguageOverride
+            : context.replyLanguageOverride;
         const languageResolution = resolveCommunicationLanguage({
+            manualOverrideLanguage: manualReplyLanguage,
             latestInboundText: latestInboundMessage,
             contactPreferredLanguage: contact?.preferredLang ?? null,
             threadText,

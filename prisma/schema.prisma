@@ -1006,6 +1006,7 @@ model Conversation {
 
   // Phase 6: Semi-Auto & Event-Driven
   semiAuto         Boolean   @default(false) // AI auto-drafts on incoming events (never auto-sends)
+  replyLanguageOverride String? // Optional per-conversation language override (BCP-47, null = auto)
   contextSummary   String?   @db.Text // Compacted conversation context for long threads
   lastSummarizedAt DateTime? // When context was last compacted
 

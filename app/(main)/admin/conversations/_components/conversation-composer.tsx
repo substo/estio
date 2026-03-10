@@ -1,11 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { Conversation } from "@/lib/ghl/conversations";
 import { GEMINI_FLASH_LATEST_ALIAS, GOOGLE_AI_MODELS } from "@/lib/ai/models";
+import {
+    getReplyLanguageLabel,
+    normalizeReplyLanguage,
+    REPLY_LANGUAGE_AUTO_VALUE,
+    REPLY_LANGUAGE_OPTIONS,
+} from "@/lib/ai/reply-language-options";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Send, Paperclip, Mic, Square, Sparkles } from "lucide-react";
+import { Check, ChevronsUpDown, Loader2, Send, Paperclip, Mic, Square, Sparkles } from "lucide-react";
 import { SuggestionBubbles } from "./suggestion-bubbles";
 import {
     getAiDraftModelPickerStateAction,
@@ -32,7 +40,8 @@ interface ConversationComposerProps {
     conversation: Conversation | null;
     onSendMessage: (text: string, type: ComposerChannel) => void | Promise<void>;
     onSendMedia?: (file: File, caption: string) => void | Promise<void>;
-    onGenerateDraft?: (instruction?: string, model?: string) => Promise<string | null>;
+    onGenerateDraft?: (instruction?: string, model?: string, replyLanguage?: string | null) => Promise<string | null>;
+    onSetReplyLanguageOverride?: (replyLanguage: string | null) => Promise<{ success: boolean; error?: string; replyLanguageOverride?: string | null }>;
     suggestions?: string[];
     disabled?: boolean;
     disabledReason?: string;
@@ -65,6 +74,7 @@ export function ConversationComposer({
     onSendMessage,
     onSendMedia,
     onGenerateDraft,
+    onSetReplyLanguageOverride,
     suggestions = [],
     disabled = false,
     disabledReason,
@@ -78,6 +88,11 @@ export function ConversationComposer({
     const [selectedModel, setSelectedModel] = useState(GEMINI_FLASH_LATEST_ALIAS);
     const [hasUserSelectedModel, setHasUserSelectedModel] = useState(false);
     const [availableModels, setAvailableModels] = useState<any[]>([]);
+    const [selectedReplyLanguage, setSelectedReplyLanguage] = useState<string>(
+        conversation?.replyLanguageOverride || REPLY_LANGUAGE_AUTO_VALUE
+    );
+    const [replyLanguageOpen, setReplyLanguageOpen] = useState(false);
+    const [savingReplyLanguage, setSavingReplyLanguage] = useState(false);
     const [whatsAppEligibility, setWhatsAppEligibility] = useState<WhatsAppEligibilityState>({ status: "checking" });
     const [smsEligibility, setSmsEligibility] = useState<SmsEligibilityState>({ status: "checking" });
     const [isRecording, setIsRecording] = useState(false);
@@ -117,7 +132,12 @@ export function ConversationComposer({
         setSelectedChannel(getInitialChannel(conversation));
         setDraft("");
         setIsRecording(false);
+        setSelectedReplyLanguage(conversation?.replyLanguageOverride || REPLY_LANGUAGE_AUTO_VALUE);
     }, [conversation?.id]);
+
+    useEffect(() => {
+        setSelectedReplyLanguage(conversation?.replyLanguageOverride || REPLY_LANGUAGE_AUTO_VALUE);
+    }, [conversation?.replyLanguageOverride]);
 
     useEffect(() => {
         if (!conversation?.id) {
@@ -387,7 +407,10 @@ export function ConversationComposer({
         try {
             const instruction = instructionOverride || draft.trim();
             const modelOverride = hasUserSelectedModel ? selectedModel : undefined;
-            const text = await onGenerateDraft(instruction, modelOverride);
+            const replyLanguageOverride = selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE
+                ? null
+                : selectedReplyLanguage;
+            const text = await onGenerateDraft(instruction, modelOverride, replyLanguageOverride);
             if (text) {
                 setDraft(text);
             }
@@ -397,6 +420,41 @@ export function ConversationComposer({
             setGeneratingDraft(false);
         }
     };
+
+    const handleReplyLanguageSelect = async (value: string) => {
+        const nextSelection = value || REPLY_LANGUAGE_AUTO_VALUE;
+        setReplyLanguageOpen(false);
+        if (isUnavailable || !conversation || !onSetReplyLanguageOverride || savingReplyLanguage) return;
+
+        const previousSelection = selectedReplyLanguage || REPLY_LANGUAGE_AUTO_VALUE;
+        const normalizedReplyLanguage = normalizeReplyLanguage(nextSelection);
+
+        setSelectedReplyLanguage(nextSelection);
+        setSavingReplyLanguage(true);
+        try {
+            const result = await onSetReplyLanguageOverride(normalizedReplyLanguage);
+            if (!result?.success) {
+                setSelectedReplyLanguage(previousSelection);
+                toast.error(result?.error || "Failed to save reply language.");
+                return;
+            }
+            setSelectedReplyLanguage(result.replyLanguageOverride || REPLY_LANGUAGE_AUTO_VALUE);
+        } catch (error: any) {
+            setSelectedReplyLanguage(previousSelection);
+            toast.error(error?.message || "Failed to save reply language.");
+        } finally {
+            setSavingReplyLanguage(false);
+        }
+    };
+
+    const selectedReplyLanguageLabel = selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE
+        ? "Reply: Auto"
+        : `Reply: ${getReplyLanguageLabel(selectedReplyLanguage) || selectedReplyLanguage}`;
+    const replyLanguageSourceHint = selectedReplyLanguage !== REPLY_LANGUAGE_AUTO_VALUE
+        ? `Source: Conversation override (${getReplyLanguageLabel(selectedReplyLanguage) || selectedReplyLanguage})`
+        : conversation?.contactPreferredLanguage
+            ? `Source: Contact default (${getReplyLanguageLabel(conversation.contactPreferredLanguage) || conversation.contactPreferredLanguage})`
+            : "Source: Auto-detected";
 
     const isWhatsAppDisabled = whatsAppEligibility.status === "ineligible";
     const isSmsDisabled = smsEligibility.status === "ineligible";
@@ -498,6 +556,50 @@ export function ConversationComposer({
                                             ))}
                                         </SelectContent>
                                     </Select>
+                                    <Popover open={replyLanguageOpen} onOpenChange={setReplyLanguageOpen}>
+                                        <PopoverTrigger asChild>
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                className="h-7 w-[118px] sm:w-[144px] justify-between text-[11px] border-0 bg-slate-50 hover:bg-slate-100 px-2"
+                                                disabled={isUnavailable || !onSetReplyLanguageOverride || savingReplyLanguage}
+                                            >
+                                                <span className="truncate">{selectedReplyLanguageLabel}</span>
+                                                {savingReplyLanguage ? (
+                                                    <Loader2 className="ml-1 h-3 w-3 animate-spin shrink-0" />
+                                                ) : (
+                                                    <ChevronsUpDown className="ml-1 h-3 w-3 shrink-0 opacity-60" />
+                                                )}
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-[240px] p-0" align="start">
+                                            <Command>
+                                                <CommandInput placeholder="Search language..." />
+                                                <CommandList>
+                                                    <CommandEmpty>No language found.</CommandEmpty>
+                                                    <CommandGroup>
+                                                        <CommandItem
+                                                            value={`auto ${REPLY_LANGUAGE_AUTO_VALUE}`}
+                                                            onSelect={() => handleReplyLanguageSelect(REPLY_LANGUAGE_AUTO_VALUE)}
+                                                        >
+                                                            <Check className={cn("mr-2 h-3.5 w-3.5", selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE ? "opacity-100" : "opacity-0")} />
+                                                            Auto (detect from conversation)
+                                                        </CommandItem>
+                                                        {REPLY_LANGUAGE_OPTIONS.map((option) => (
+                                                            <CommandItem
+                                                                key={option.value}
+                                                                value={`${option.label} ${option.value}`}
+                                                                onSelect={() => handleReplyLanguageSelect(option.value)}
+                                                            >
+                                                                <Check className={cn("mr-2 h-3.5 w-3.5", selectedReplyLanguage === option.value ? "opacity-100" : "opacity-0")} />
+                                                                {option.label}
+                                                            </CommandItem>
+                                                        ))}
+                                                    </CommandGroup>
+                                                </CommandList>
+                                            </Command>
+                                        </PopoverContent>
+                                    </Popover>
                                     <Button
                                         variant="ghost"
                                         size="sm"
@@ -566,6 +668,11 @@ export function ConversationComposer({
                         </div>
                     </div>
                 </div>
+                {onGenerateDraft && (
+                    <div className="px-1 pt-1 text-[10px] text-slate-500">
+                        {replyLanguageSourceHint}
+                    </div>
+                )}
             </div>
         </div>
     );

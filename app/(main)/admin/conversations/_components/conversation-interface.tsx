@@ -17,6 +17,7 @@ import {
     createWhatsAppMediaUploadUrl,
     sendWhatsAppMediaReply,
     generateAIDraft,
+    setConversationReplyLanguageOverride,
     deleteConversations,
     restoreConversations,
     archiveConversations,
@@ -1802,6 +1803,20 @@ export function ConversationInterface({ locationId, initialConversations, initia
         }
     };
 
+    const applyConversationReplyLanguageOverride = useCallback((conversationId: string, replyLanguageOverride: string | null) => {
+        setConversations((prev) => prev.map((conversationItem) =>
+            conversationItem.id === conversationId
+                ? { ...conversationItem, replyLanguageOverride }
+                : conversationItem
+        ));
+
+        setActiveDealParticipants((prev) => prev.map((conversationItem) =>
+            conversationItem.id === conversationId
+                ? { ...conversationItem, replyLanguageOverride }
+                : conversationItem
+        ));
+    }, []);
+
     const handleConversationContactSaved = useCallback(async (conversationId: string, patch: ContactIdentityPatch) => {
         if (!conversationId || !patch?.id) return;
 
@@ -1816,6 +1831,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 ...(patch.name !== undefined ? { contactName: patch.name || "Unknown" } : {}),
                 ...(patch.email !== undefined ? { contactEmail: patch.email || undefined } : {}),
                 ...(patch.phone !== undefined ? { contactPhone: patch.phone || undefined } : {}),
+                ...(patch.preferredLang !== undefined ? { contactPreferredLanguage: patch.preferredLang || null } : {}),
             };
         }));
 
@@ -1826,6 +1842,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 ...(patch.name !== undefined ? { contactName: patch.name || "Unknown" } : {}),
                 ...(patch.email !== undefined ? { contactEmail: patch.email || undefined } : {}),
                 ...(patch.phone !== undefined ? { contactPhone: patch.phone || undefined } : {}),
+                ...(patch.preferredLang !== undefined ? { contactPreferredLanguage: patch.preferredLang || null } : {}),
             };
         }));
 
@@ -1851,6 +1868,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     ...(patch.name !== undefined ? { contactName: patch.name || "Unknown" } : {}),
                     ...(patch.email !== undefined ? { contactEmail: patch.email || undefined } : {}),
                     ...(patch.phone !== undefined ? { contactPhone: patch.phone || undefined } : {}),
+                    ...(patch.preferredLang !== undefined ? { contactPreferredLanguage: patch.preferredLang || null } : {}),
                 } : conversationItem
             ));
         } catch (error) {
@@ -2280,14 +2298,14 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     }
                 }}
                 suggestions={[...(activeConversation?.suggestedActions || []), ...suggestions]}
-                onGenerateDraft={async (instruction?: string, model?: string) => {
+                onGenerateDraft={async (instruction?: string, model?: string, replyLanguage?: string | null) => {
                     try {
                         const res = await generateAIDraft(
                             activeConversation.id,
                             activeConversation.contactId,
                             instruction,
                             model,
-                            { mode: "chat" }
+                            { mode: "chat", replyLanguage }
                         );
                         if (res.reasoning) {
                             toast({ title: "Draft Generated", description: res.reasoning });
@@ -2297,6 +2315,13 @@ export function ConversationInterface({ locationId, initialConversations, initia
                         toast({ title: "Draft Failed", description: e.message, variant: "destructive" });
                         return null;
                     }
+                }}
+                onSetReplyLanguageOverride={async (replyLanguage: string | null) => {
+                    const result = await setConversationReplyLanguageOverride(activeConversation.id, replyLanguage);
+                    if (result.success) {
+                        applyConversationReplyLanguageOverride(activeConversation.id, result.replyLanguageOverride ?? null);
+                    }
+                    return result;
                 }}
             />
         ) : (
@@ -2314,7 +2339,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 onOpenMissionControl={isMobileViewport ? handleOpenMissionControl : undefined}
                 onSendMessage={(text, type) => handleSendMessage(text, type, selectedDealConversation || undefined)}
                 onSendMedia={(file, caption) => handleSendMedia(file, caption, selectedDealConversation || undefined)}
-                onGenerateDraft={async (instruction?: string, model?: string) => {
+                onGenerateDraft={async (instruction?: string, model?: string, replyLanguage?: string | null) => {
                     if (!selectedDealConversation) return null;
                     try {
                         const res = await generateAIDraft(
@@ -2322,7 +2347,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                             selectedDealConversation.contactId,
                             instruction,
                             model,
-                            { mode: "deal", dealId: activeDealId }
+                            { mode: "deal", dealId: activeDealId, replyLanguage }
                         );
                         if (res.reasoning) {
                             toast({ title: "Draft Generated", description: res.reasoning });
@@ -2332,6 +2357,16 @@ export function ConversationInterface({ locationId, initialConversations, initia
                         toast({ title: "Draft Failed", description: error?.message || "Failed to generate draft", variant: "destructive" });
                         return null;
                     }
+                }}
+                onSetReplyLanguageOverride={async (replyLanguage: string | null) => {
+                    if (!selectedDealConversation) {
+                        return { success: false as const, error: "No conversation selected." };
+                    }
+                    const result = await setConversationReplyLanguageOverride(selectedDealConversation.id, replyLanguage);
+                    if (result.success) {
+                        applyConversationReplyLanguageOverride(selectedDealConversation.id, result.replyLanguageOverride ?? null);
+                    }
+                    return result;
                 }}
                 suggestions={suggestions}
                 composerDisabled={loadingDealContext || !selectedDealConversation}
