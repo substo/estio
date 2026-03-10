@@ -1,5 +1,5 @@
 # AI Communication Policy: Deal-Protective Multilingual Guardrails
-**Last Updated:** 2026-03-06
+**Last Updated:** 2026-03-10
 
 ## Purpose
 This document is the source of truth for outbound AI communication style across drafting, smart suggestions, skill-based agent replies, and critic/reflexion passes.
@@ -14,7 +14,12 @@ The policy is designed for real-estate negotiation contexts where wording must r
 ## Core Contract
 All outbound AI messages must follow this contract:
 
-1. Reply in the contact's language (latest inbound language first, then `Contact.preferredLang`, then thread default).
+1. Reply in the resolved reply language using this precedence:
+   - `Conversation.replyLanguageOverride` when a user explicitly sets a manual reply language for the thread.
+   - `Contact.preferredLang` when no conversation override is set.
+   - latest inbound detected language.
+   - thread-level detected default language.
+   - final fallback language from the shared resolver.
 2. Keep tone neutral, factual, concise, and non-pushy.
 3. Avoid implying final authority unless explicitly confirmed by the appropriate party.
 4. Prefer probability-based language over absolutes ("at this stage", "unlikely to accept below").
@@ -29,8 +34,48 @@ Single source implementation lives in:
 Key capabilities:
 - language normalization/detection,
 - language resolution priority,
+- manual override handling (`manualOverrideLanguage`),
+- normalized BCP-47 storage for manual/default language fields,
+- resolution source tracing (`conversation_override`, `contact_preferred`, `latest_inbound`, `thread_default`, `fallback`),
 - reusable communication contract prompt block,
 - lightweight evidence inference for policy checks.
+
+## Manual Reply Language Controls
+Manual drafting flows now support a dual-layer reply-language model:
+
+- **Conversation override**: `Conversation.replyLanguageOverride`
+  - nullable string
+  - normalized BCP-47 code
+  - `null` means `Auto`
+- **Contact default**: `Contact.preferredLang`
+  - nullable string
+  - normalized BCP-47 code
+  - used only when no conversation override is set
+
+This applies to manual AI draft entry points only:
+- composer AI Draft in chats mode
+- composer AI Draft in deal mode
+- Mission Control quick draft
+- deal timeline draft generation
+
+This does **not** yet apply to background or semi-auto automation flows.
+
+## UI Contract
+The reply-language UX is intentionally split by persistence scope:
+
+- **Conversation composer** is the primary control surface for fast per-thread changes.
+- **Contact settings** is the persistent default for future/manual drafting when no thread override exists.
+
+Composer options:
+- `Auto`
+- curated searchable language list
+
+Composer source hint values:
+- `Conversation override`
+- `Contact default`
+- `Auto-detected`
+
+Selecting `Auto` clears `Conversation.replyLanguageOverride`. Selecting a language persists the override immediately.
 
 ## Enforcement Layer
 Policy enforcement lives in:
@@ -57,6 +102,7 @@ Result model:
 - Orchestrator policy check (`lib/ai/orchestrator.ts`)
 
 ## Notes
-- v1 uses existing fields/context only (no schema changes).
+- Current implementation includes schema-backed manual/default language fields.
 - Scope is AI-generated outbound communication and AI-generated suggestion intents.
 - Manual user-typed messages are not auto-rewritten by this policy.
+- For UI placement and manual draft entry points, see [Conversation Management](./conversation-management.md) and [AI Draft Feature](./ai-draft-feature.md).

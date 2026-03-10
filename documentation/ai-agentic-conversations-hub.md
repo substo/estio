@@ -50,9 +50,11 @@ We chose to build this **internally** rather than relying on GoHighLevel's nativ
 ### Mar 2026 Performance Rollout
 The hub now has a performance-oriented read path for larger inboxes:
 
-*   **Workspace V2**: the selected thread loads through `getConversationWorkspace(...)`, which bundles messages, activity, contact context, task/viewing summaries, agent summary, and transcript eligibility into one server response.
-*   **Delta List Polling**: the left conversation list no longer requires full snapshot refetches on every poll when `workspaceV2` is enabled. It advances from a `deltaCursor` via `getConversationListDelta(...)`.
-*   **Balanced Polling**: background refresh slows down when the balanced flag is enabled and pauses while the tab is hidden or search is active.
+*   **Split Workspace Loading**: the selected thread now uses a split read path on the critical switch path. `getConversationWorkspaceCore(...)` loads header/messages/timeline/freshness first, while `getConversationWorkspaceSidebar(...)` loads contact/task/viewing/agent summaries separately. The legacy `getConversationWorkspace(...)` shape remains as a compatibility wrapper.
+*   **Instant Thread Reopen**: the client keeps an in-memory LRU cache of recent `workspaceCore` snapshots and prefetches likely-next conversations on idle/hover so switching back to a recent thread can paint immediately.
+*   **Realtime + Fallback**: the hub prefers location-scoped SSE updates from `/api/conversations/events`, with automatic fallback to polling if the stream is unavailable or disconnected.
+*   **Delta List Polling**: when polling is active, the left conversation list advances from a `deltaCursor` via `getConversationListDelta(...)` instead of full snapshot refetches.
+*   **Balanced Polling**: background refresh slows down when the balanced flag is enabled, pauses while the tab is hidden or search is active, and no longer duplicates the initial thread load immediately after selection.
 *   **Ranked Search**: search now uses a hybrid full-text + trigram SQL ranking path with a Prisma fallback.
 
 Source of truth for the exact UI/API behavior and feature flags:
@@ -188,7 +190,8 @@ To support direct linking, bookmarking, and browser navigation, the hub now sync
 *   **View Persistence**: The active view (Inbox, Archived, Trash) is persisted via `?view=archived`.
 *   **Deal Mode**: Direct access to deal rooms via `?mode=deals&dealId=DEAL_ID`.
     *   If `?id=` belongs to a participant conversation inside that deal, it is used as the initial reply target in Mission Control and the shared composer.
-*   **Browser History**: Back and Forward buttons correctly navigate through conversation selection history.
+*   **Shallow URL Updates**: when the shallow-url feature flag is enabled, selection changes update `id` / `view` / `mode` / `dealId` with `history.replaceState(...)` instead of forcing App Router navigation churn.
+*   **Browser History**: Back and Forward still restore the conversation/deal selection state through `popstate`, but selection changes do not intentionally create a new history entry per click.
 
 ### Conversation List Pagination (Infinite Scroll)
 The conversation list is now loaded incrementally instead of a single fixed top-50 fetch:
@@ -211,10 +214,12 @@ The conversation list uses a **compact layout** by default, showing only the con
 *   `conversation-preview-card.tsx`: The popover content component.
 *   `conversation-list.tsx`: Wraps each row with `HoverCard` + `HoverCardTrigger` + `HoverCardContent`.
 
-### Live Thread Refresh & Read-State Handling (Feb 2026)
+### Live Thread Refresh & Read-State Handling
 While a thread is open, the UI now keeps the chat in sync without manual refresh:
 
-*   **Selected Thread Change Detection**: When polling detects `lastMessageDate`/`lastMessageBody` changes for the active conversation, the client silently re-fetches `fetchMessages(activeId)`.
+*   **Realtime First**: active list/thread updates now prefer SSE event delivery with idempotent merge and replay support after reconnect.
+*   **Polling Fallback**: if realtime is unavailable, the client falls back to the existing polling path.
+*   **Selected Thread Refresh**: in workspace-v2 mode, the client refreshes `workspaceCore` rather than only raw messages.
 *   **Auto Read Reset**: Opening or live-refreshing an active thread with unread messages triggers `markConversationAsRead(conversationId)` to clear `unreadCount`.
 *   **Auto-scroll to Latest**: `ChatWindow` already auto-scrolls on message updates; with live refresh in place, new inbound messages are immediately shown at the bottom for the active thread.
 

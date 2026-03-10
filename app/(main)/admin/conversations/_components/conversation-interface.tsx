@@ -324,6 +324,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const realtimeEventIdsRef = useRef<Set<string>>(new Set());
     const realtimeEventLastTsByConversationRef = useRef<Record<string, number>>({});
     const realtimeRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const readResetInFlightRef = useRef<Set<string>>(new Set());
 
     // Initialize Active ID from URL
     const initialActiveId = searchParams.get('id') || (initialConversations.length > 0 ? initialConversations[0].id : null);
@@ -913,19 +914,38 @@ export function ConversationInterface({ locationId, initialConversations, initia
         messageSignatureRef.current = getMessageSignature(messages);
     }, [messages, activeId]);
 
-    const markConversationReadInUi = useCallback(async (conversationId: string) => {
+    const markConversationReadInUi = useCallback((conversationId: string) => {
         const currentConversation = conversationsRef.current.find((c) => c.id === conversationId);
-        if (!currentConversation || (currentConversation.unreadCount || 0) <= 0) return;
+        if (!currentConversation) return;
 
-        try {
-            const res = await markConversationAsRead(conversationId);
-            if (!res?.success) return;
+        const currentUnreadCount = Number(currentConversation.unreadCount || 0);
+        if (currentUnreadCount <= 0 && !readResetInFlightRef.current.has(conversationId)) return;
+
+        if (currentUnreadCount > 0) {
             setConversations(prev =>
-                prev.map(c => c.id === conversationId ? { ...c, unreadCount: 0 } : c)
+                prev.map(c =>
+                    c.id === conversationId
+                        ? { ...c, unreadCount: 0 }
+                        : c
+                )
             );
-        } catch (err) {
-            console.error("Failed to mark conversation as read:", err);
         }
+
+        if (readResetInFlightRef.current.has(conversationId)) return;
+        readResetInFlightRef.current.add(conversationId);
+
+        void markConversationAsRead(conversationId)
+            .then((res) => {
+                if (!res?.success) {
+                    console.warn("markConversationAsRead returned unsuccessful response:", res);
+                }
+            })
+            .catch((err) => {
+                console.error("Failed to mark conversation as read:", err);
+            })
+            .finally(() => {
+                readResetInFlightRef.current.delete(conversationId);
+            });
     }, []);
 
     const handleBindClick = (ids: string[]) => {
@@ -1480,6 +1500,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     // Handle clicking a conversation in the list
     const handleSelect = (id: string) => {
         setActiveId(id);
+        markConversationReadInUi(id);
         if (isMobileViewport) {
             setMobilePane('window');
         }

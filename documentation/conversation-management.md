@@ -1,8 +1,8 @@
 # Conversation Management & Deletion Features
-**Last Updated:** 2026-03-09
+**Last Updated:** 2026-03-10
 
 ## Overview
-This document is the source of truth for `/admin/conversations`, including conversation lifecycles, inbox state management, deal-mode reply routing, and the Mar 2026 performance rollout (`workspaceV2`, delta polling, ranked search, and supporting indexes/observability).
+This document is the source of truth for `/admin/conversations`, including conversation lifecycles, inbox state management, deal-mode reply routing, and the Mar 2026 performance rollout (`workspaceV2`, workspace split loading, realtime SSE, ranked search, and supporting indexes/observability).
 
 ## Data Model Changes
 We updated the `Conversation` model in `prisma/schema.prisma` to support these features without losing data:
@@ -13,7 +13,8 @@ model Conversation {
   deletedAt     DateTime?   @db.Timestamptz(6)  // If set, conversation is in Trash
   archivedAt    DateTime?   @db.Timestamptz(6)  // If set, conversation is Archived
   deletedBy     String?     // ID of user who deleted it (audit trail)
-  
+  replyLanguageOverride String? // Optional normalized BCP-47 code, null = Auto
+ 
   @@index([deletedAt])
   @@index([archivedAt])
 }
@@ -51,21 +52,39 @@ The Conversations list (`/admin/conversations`) is now **cursor-paginated** and 
 - **Deep Links**: If a URL-selected conversation (`?id=...`) is outside the current page window, the server injects it into the initial payload so the center/right panels can still render.
 
 ### 1.2 Workspace V2 Snapshot Payload
-When `workspaceV2` is enabled for the current location, the conversations page uses a server-composed snapshot/workspace model instead of separately stitching every panel from multiple client requests.
+When `workspaceV2` is enabled for the current location, the conversations page uses a server-composed workspace model instead of separately stitching every panel from multiple unrelated client requests.
 
 - **Initial List Snapshot**: `fetchConversations(...)` returns the paginated list plus `deltaCursor`.
-- **Thread Workspace**: `getConversationWorkspace(...)` returns:
-  - `conversationHeader`
-  - `messages`
-  - `activityTimeline`
-  - `contactContext`
-  - `taskSummary`
-  - `viewingSummary`
-  - `agentSummary`
-  - `transcriptEligibility`
-  - `freshness`
+- **Compatibility Wrapper**: `getConversationWorkspace(...)` still exists for legacy callers and returns the unified payload shape.
+- **Split Workspace Path**: when `workspaceSplit` is enabled, the UI loads the thread in two parts:
+  - `getConversationWorkspaceCore(...)` returns:
+    - `conversationHeader`
+    - `messages`
+    - `activityTimeline`
+    - `transcriptEligibility`
+    - `freshness`
+  - `getConversationWorkspaceSidebar(...)` returns:
+    - `contactContext`
+    - `taskSummary`
+    - `viewingSummary`
+    - `agentSummary`
 - **Read Path**: Workspace reads are location-scoped and use DB-first read-only auth helpers.
-- **Caching**: When `workspaceV2` is on, list snapshots and workspace metadata use cache wrappers plus explicit invalidation on write paths.
+- **Caching**:
+  - server metadata reads use cache wrappers plus explicit invalidation on write paths
+  - client thread switches keep an in-memory LRU cache of recent `workspaceCore` snapshots so previously opened conversations can render immediately while background revalidation runs
+- **Prefetch**: the client prefetches the top likely-next conversations on idle and on row hover when split loading is enabled
+
+### 1.2.2 Bounded Thread Reads (Mar 2026)
+The rollout removed full-thread over-fetch on the switch-critical path.
+
+- **Messages**:
+  - `fetchMessages(...)` now supports bounded DB reads with `take`, `beforeCursor`, and `includeLegacyEmailMeta`
+  - the default thread-open behavior still preserves the latest approximately 250 visible messages
+  - message pagination reads newest-first at the DB layer, then reverses for UI chronology
+- **Timeline**:
+  - `assembleTimelineEvents(...)` now supports `take` and `beforeCursor`
+  - message/activity/task/viewing sources are each bounded before merge/sort
+  - the final merged event list is sliced to the requested limit rather than building an unbounded timeline first
 
 ### 1.2.1 Shared Timeline Event Pipeline (Mar 2026)
 Timeline rendering and AI draft context now share one normalized assembler service.
@@ -93,12 +112,19 @@ The inbox updates on-page without requiring a manual refresh:
 
 - **Delta Polling**: In workspace v2, the client polls `getConversationListDelta(viewFilter, deltaCursor, activeId)` instead of refetching the whole list.
 - **Legacy Fallback**: If `workspaceV2` is disabled, the client falls back to full-list polling via `fetchConversations(...)`.
+- **Realtime-First Refresh**:
+  - when `realtimeSse` is enabled, the client opens `/api/conversations/events`
+  - SSE is location-scoped, heartbeat-backed, and supports `Last-Event-ID` replay from Redis-backed history
+  - the client dedupes by event id and ignores older out-of-order events per conversation before triggering a delta refresh
+  - if SSE is disconnected for more than 10 seconds, the UI falls back automatically to the existing polling path
+  - on reconnect/open, the client performs one debounced delta resync
 - **Live Reordering**: Incoming rows are merged **incoming-first** so conversations with newer `lastMessageAt` naturally move to the top immediately.
 - **Unread Badges**: Each row displays `Conversation.unreadCount` as a compact badge (`99+` cap).
 - **Read Reset on Open Thread**: Opening a thread (and live-refreshing an already open thread) calls `markConversationAsRead(conversationId)` to reset unread count to `0`.
 - **Active Thread Refresh**:
   - legacy mode refreshes messages when selected-thread metadata changes
-  - workspace v2 refreshes the whole workspace on a slower balanced interval
+  - workspace v2 refreshes `workspaceCore` on a slower balanced interval
+  - the active-thread poller waits through a short grace window after initial selection load so the UI does not double-fetch immediately after a thread switch
   - stale WhatsApp threads can trigger `refreshConversationOnDemand(conversationId, "full_sync")` in the background, throttled per conversation
 - **Thread Scroll Behavior**: When opening a conversation, ChatWindow snaps directly to the latest message on first paint. While viewing a thread, new messages only auto-scroll when the user is already near the bottom; if the user has scrolled up to read history, the current scroll position is preserved.
 - **Visibility/Search Guards**: Background polling pauses when the tab is hidden or when a search query is active.
@@ -111,6 +137,9 @@ Supported flags:
 - `workspaceV2`
 - `balancedPolling`
 - `lazySidebarData`
+- `workspaceSplit`
+- `realtimeSse`
+- `shallowUrlSync`
 
 Supported env values per flag:
 
@@ -173,7 +202,9 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
 | Function | Purpose |
 | :--- | :--- |
 | `fetchConversations(status, selectedConversationId?, options?)` | Fetches a paginated list based on filter (`active`, `archived`, `trash`, `all`) and returns `hasMore` / `nextCursor` for infinite scroll. |
-| `getConversationWorkspace(conversationId, options?)` | Returns the unified thread workspace payload for the center/right panels. |
+| `getConversationWorkspaceCore(conversationId, options?)` | Returns the switch-critical thread payload: header, messages, activity timeline, transcript eligibility, and freshness metadata. |
+| `getConversationWorkspaceSidebar(conversationId)` | Returns the sidebar-only payload: contact context, task summary, viewing summary, and agent summary. |
+| `getConversationWorkspace(conversationId, options?)` | Compatibility wrapper that combines core + sidebar into the legacy unified payload shape. |
 | `getConversationListDelta(status, sinceCursor?, activeConversationId?, options?)` | Returns changed conversation rows since the last `deltaCursor`. |
 | `refreshConversationOnDemand(conversationId, mode)` | Refreshes metadata only or runs a full WhatsApp history sync for stale threads. |
 | `deleteConversations(ids)` | Performs **Soft Delete** (sets `deletedAt`). |
@@ -190,11 +221,18 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
 - **Selection Mode**: Allows bulk actions (Archive, Delete, Restore) with a "Cancel" button aligned next to actions.
 - **Safety**: "Delete Forever" dialog only appears when deleting items from the Trash view.
 - **URL Synchronization**: View state (`active`, `archived`, `trash`) is synced to the URL (`?view=...`), allowing for bookmarking and sharing of specific lists.
+- **Shallow URL Sync**: When `shallowUrlSync` is enabled, the client updates `id` / `view` / `mode` / `dealId` using `history.replaceState(...)` and restores them via `popstate`, avoiding unnecessary App Router churn during thread switches.
 - **Infinite Scroll**: The left list auto-loads more conversations near the bottom using a sentinel + `IntersectionObserver`, with a visible "Load more" fallback.
 - **Deep-Link Stability**: URL-selected conversations are preserved during list refreshes and view changes, preventing the center panel from dropping back to "Select a conversation" when the selected item is older than the first page.
 - **Live Inbox Reordering**: Inbox updates are merged with incoming-first ordering so newly active conversations move to top in real time.
-- **Workspace V2 Panel Loading**: When enabled, the center/right panel is hydrated from a single workspace response instead of multiple unrelated round trips.
-- **Lazy Sidebar Data**: Tasks/viewings/contact context cards can defer secondary work behind the workspace feature flag instead of forcing eager list-time hydration.
+- **Workspace V2 Panel Loading**:
+  - `workspaceSplit=off`: the UI uses the unified `getConversationWorkspace(...)` compatibility response
+  - `workspaceSplit=on`: the UI renders cached `workspaceCore` immediately when available, then revalidates `workspaceCore` and `workspaceSidebar` separately
+- **Lazy Sidebar Data**: Tasks/viewings/contact context cards stay off the switch-critical path in split mode and can be refreshed independently.
+- **Realtime Event Transport**:
+  - SSE endpoint: `/api/conversations/events`
+  - transport uses Redis pub/sub plus a short Redis history buffer for replay after reconnect
+  - write paths publish events for inbound/outbound messages, read resets, archive/delete/restore operations, and activity writes
 - **Timeline Parity**: The activity timeline and AI Draft prompt now use the same normalized event feed, so notes, viewing events, and task state entries are aligned between what the agent sees and what AI reads.
 - **Unread Badges**: List rows show unread counts from `Conversation.unreadCount`.
 - **Auto Read Reset**: Selecting a conversation marks it read and clears the badge.
@@ -223,6 +261,13 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
 - **Shared Composer Source of Truth**: Both chats mode and deal mode now render the same reusable composer component (`conversation-composer.tsx`). Composer behavior changes should be implemented once and will apply to `ChatWindow` and `UnifiedTimeline`.
 - **Channel Guards**: The shared composer channel picker disables ineligible channels with a reason tooltip. SMS is blocked when phone is invalid/masked or GHL SMS is not configured; WhatsApp is blocked when eligibility checks fail.
 - **AI Draft Model Picker**: The shared composer loads its model list via `getAiDraftModelPickerStateAction()` and keeps AI Draft plus selection workflows aligned on the same chosen model.
+- **Reply Language Picker (Mar 10, 2026)**:
+  - The shared composer now includes a `Reply language` control beside the channel/model controls.
+  - Options are `Auto` plus a curated searchable language list.
+  - Choosing `Auto` clears `Conversation.replyLanguageOverride`.
+  - Choosing a language persists `Conversation.replyLanguageOverride` immediately through a secured server action and refreshes thread caches.
+  - The composer shows the active source hint as `Conversation override`, `Contact default`, or `Auto-detected`.
+  - Deal mode and chats mode use the same control and payload contract.
 - **WhatsApp Media Composer**: In any WhatsApp-eligible reply context, the shared composer supports media upload (`image/*`, `audio/*`, and various document types like PDF/CSV) and in-app voice-note recording (`MediaRecorder`). Media is sent through the private R2 -> Evolution `sendMedia` flow and rendered inline (image preview, audio player, or document download link) from signed attachment URLs.
 - **WhatsApp Media Recovery**: Message bubbles now expose `Re-fetch Media` for WhatsApp media messages/placeholders to recover missing or stale attachment storage. Source-of-truth details: [`whatsapp-integration.md`](whatsapp-integration.md#61-media-re-fetch-recovery-mar-2026).
 - **Source of Truth (Selection Workflow)**: This document is the canonical reference for chat text-selection behavior, batch summarize/custom flow, and CRM-log save semantics.
@@ -240,6 +285,7 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
   - Chat header exposes `Summarize Batch (N)` plus a clear button for quick logging without opening each message.
   - `Summarize` and `Custom` dialogs switch into batch mode when snippets are queued, show a queued-snippets list, and allow per-item remove/clear.
 - **Selection Model Consistency**: `Paste Lead`/`Suggest Viewing`/`Summarize`/`Custom` use the currently selected AI model from the chat toolbar, keeping tone/behavior consistent with AI Draft.
+- **Selection Language Consistency**: AI Draft entry points now carry the currently selected reply-language override through manual generation flows so chat mode and deal mode stay consistent with the visible composer state.
 - **CRM Log Save Format**: Selection-based CRM log entries are saved as `MANUAL_ENTRY` in `ContactHistory` using format `DD.MM.YY FirstName: summary`.
 - **CRM Log Dedupe Guard**: Before writing `MANUAL_ENTRY` for `Summarize` or `Custom`, the system checks the latest 30 manual entries for likely duplicates (exact/contains/high token overlap). Duplicate entries are skipped and the existing entry is returned.
 - **Selection Observability**:
@@ -249,6 +295,8 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
 
 ## Deal Mode Reply Routing
 This document is also the source of truth for reply-target behavior in `/admin/conversations?mode=deals`.
+
+For the reply-language resolution contract itself, see [AI Communication Policy](./ai-communication-policy.md).
 
 ### Participant Hydration
 - Deal mode no longer relies on the paginated left chat list to infer participants.
@@ -338,7 +386,11 @@ Conversation search now prefers a SQL-ranked search path over the older Prisma-o
 ## Observability & Perf Tooling (Mar 2026)
 - `lib/observability/performance.ts` provides `createTraceId()` and `withServerTiming(...)` wrappers for list, workspace, delta, and search actions.
 - Client-side request counters log `[perf:conversations.client_request]` events during list/workspace polling.
-- DB/index verification script: `npm run perf:conversations:db`
+- Perf scripts:
+  - `npm run perf:conversations:db`
+  - `npm run perf:conversations:query-plan`
+  - `npm run perf:conversations:ui-playwright`
+  - `npm run test:conversations:realtime`
 
 ## Related Docs
 - High-level product/AI framing: [ai-agentic-conversations-hub.md](/Users/martingreen/Projects/IDX/documentation/ai-agentic-conversations-hub.md)

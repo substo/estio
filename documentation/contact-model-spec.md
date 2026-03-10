@@ -29,6 +29,7 @@ model Contact {
    state        String?
    postalCode   String?
    country      String?
+   preferredLang String?  // Optional normalized BCP-47 default reply language
  
    // GHL Integration
    ghlContactId        String?  @unique
@@ -149,6 +150,7 @@ model Contact {
 
 ### 1. Identity & GHL Sync
 -   **`ghlContactId`**: The canonical identifier for the person in GoHighLevel. This field is `@unique`, ensuring that we only have one record per GHL Contact.
+-   **`preferredLang`**: Optional default reply language used by manual AI drafting when a conversation-level override is not set.
 -   **Upsert Logic**: When a contact is submitted via the widget:
     -   If a `ghlContactId` is returned from GHL (or already known), the system **updates** the existing `Contact` record.
     -   If no `ghlContactId` exists, a new `Contact` record is created.
@@ -166,6 +168,19 @@ Contacts sync bidirectionally with Google Contacts using a **"last write wins"**
 -   **Visual ID**: The organization field in Google Contacts is populated with a summary (e.g., "Lead Rent DT4012 Paphos €750") for caller ID.
 
 > See [Google Contact Sync](./google-contact-sync.md) for full implementation details, including global import actions and the **Google Sync Manager** for manual conflict resolution.
+
+### 1.2 Preferred Reply Language
+Contacts can now store a persistent preferred reply language for manual AI draft generation.
+
+- **Field**: `preferredLang`
+- **Storage**: normalized BCP-47 language tag (for example `en`, `el`, `fr`)
+- **UI Surface**: `Preferred Reply Language` selector in the Contact edit form, Details tab
+- **Behavior**:
+  - used only when the active conversation has no `replyLanguageOverride`
+  - selecting `Auto` clears the field
+  - invalid non-empty language values are rejected during contact create/update validation
+
+The full reply-language precedence contract is documented in [AI Communication Policy](./ai-communication-policy.md).
 
 ### 2. Comprehensive Lead Tracking
 The model now includes extensive fields locally to track the full lifecycle of a lead without solely relying on external CRM fields:

@@ -6935,23 +6935,28 @@ export async function markConversationAsRead(conversationId: string) {
     }
 
     try {
-        await db.conversation.updateMany({
+        const result = await db.conversation.updateMany({
             where: {
                 ghlConversationId: conversationId,
                 locationId: location.id,
+                unreadCount: { gt: 0 },
             },
             data: {
                 unreadCount: 0,
             }
         });
-        invalidateConversationReadCaches(conversationId);
-        emitConversationRealtimeEvent({
-            locationId: location.id,
-            conversationId,
-            type: "conversation.read_reset",
-            payload: { unreadCount: 0 },
-        });
-        return { success: true };
+
+        if (result.count > 0) {
+            invalidateConversationReadCaches(conversationId);
+            emitConversationRealtimeEvent({
+                locationId: location.id,
+                conversationId,
+                type: "conversation.read_reset",
+                payload: { unreadCount: 0 },
+            });
+        }
+
+        return { success: true, updatedCount: result.count };
     } catch (error: any) {
         console.error("markConversationAsRead error:", error);
         return { success: false, error: error?.message || "Failed to mark conversation as read" };

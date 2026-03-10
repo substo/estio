@@ -8,6 +8,8 @@ As of Feb 2026, draft generation also applies a **name-greeting cadence rule** t
 As of Mar 2026, draft generation also enforces the shared **Deal-Protective Multilingual Communication Policy** for language matching, non-binding precision, and hierarchy-safe wording.  
 Source of truth: [AI Communication Policy](./ai-communication-policy.md).
 
+As of Mar 10, 2026, manual draft generation also supports an explicit **reply language override** at the conversation level plus a persistent contact-level default. The policy and precedence rules remain documented only in [AI Communication Policy](./ai-communication-policy.md).
+
 ## 2. Architecture: Local-First Hybrid
 To ensure resilience, speed, and compatibility with both "Synced" (GHL) and "Shadow" (WhatsApp-only) conversations, we use a **Local-First** architecture.
 
@@ -68,11 +70,19 @@ It is critical to distinguish between **Content** and **Metadata**:
 - A safety post-processor strips a leading name greeting when it violates this rule.
 
 ### Communication Policy (Mar 2026)
-- Drafts must reply in the contact's language (latest inbound -> `Contact.preferredLang` -> thread default).
+- Drafts must use the shared reply-language resolver.
+- Precedence is `Conversation.replyLanguageOverride` -> `Contact.preferredLang` -> latest inbound -> thread default -> fallback.
 - Tone must stay neutral, factual, commercially aware, and non-pushy.
 - Drafts avoid hard authority/finality claims unless confirmed in context.
 - Urgency wording must be evidence-based (for example, confirmed competing offer activity), not pressure language.
 - Guardrail outcomes are attached to draft metadata for review visibility.
+
+### Reply Language Controls (Mar 10, 2026)
+- The shared composer includes a `Reply language` selector next to the channel/model controls.
+- Options are `Auto` plus a curated searchable language list.
+- `Auto` clears the conversation override and falls back to contact default or auto-detection.
+- The active source is shown in the composer as `Conversation override`, `Contact default`, or `Auto-detected`.
+- The same language selection is forwarded through manual draft entry points in chats mode, deal mode, and Mission Control quick draft.
 
 ### Timeline Context Rules (Mar 2026)
 - Suggestion bubbles and explicit `AI Draft` actions both flow through the same draft generator and therefore use the same timeline-parity context rules.
@@ -120,9 +130,10 @@ Users can override the default AI model directly from the Chat Window before gen
 
 ### Workflow
 1.  **Select Model**: Use the dropdown next to the "AI Draft" button (defaults to a server-resolved Flash model: configured `googleAiModel` if set, otherwise `gemini-flash-latest` alias with pinned fallback).
-2.  **Generate**: Click "AI Draft" or a suggestion bubble.
-3.  **Backend**: The selected model ID is passed to `generateAIDraft` -> `generateDraft`.
-4.  **Cost Tracking**: `AgentExecution` records the specific model used for accurate cost calculation.
+2.  **Select Reply Language (Optional)**: Use the `Reply language` selector to keep the thread on `Auto` or force a specific language for this conversation.
+3.  **Generate**: Click "AI Draft" or a suggestion bubble.
+4.  **Backend**: The selected model ID and optional `replyLanguage` are passed to `generateAIDraft` -> `generateDraft`.
+5.  **Cost Tracking**: `AgentExecution` records the specific model used for accurate cost calculation.
 
 ### Model Reuse in Selection Actions (New)
 The same active model selection is also reused by message text-selection actions in the Chat Window:
