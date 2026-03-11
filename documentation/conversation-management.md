@@ -1,8 +1,11 @@
 # Conversation Management & Deletion Features
-**Last Updated:** 2026-03-10
+**Last Updated:** 2026-03-11
 
 ## Overview
 This document is the source of truth for `/admin/conversations`, including conversation lifecycles, inbox state management, deal-mode reply routing, and the Mar 2026 performance rollout (`workspaceV2`, workspace split loading, realtime SSE, ranked search, and supporting indexes/observability).
+
+For the full performance architecture/history thread, implementation status matrix, and enterprise roadmap, see:
+- `documentation/conversations-speed-architecture-and-roadmap.md`
 
 ## Data Model Changes
 We updated the `Conversation` model in `prisma/schema.prisma` to support these features without losing data:

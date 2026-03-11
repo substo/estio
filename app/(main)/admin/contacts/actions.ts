@@ -1702,6 +1702,30 @@ function toViewingDateTimeErrorMessage(error: unknown): string {
   return error.message || 'Failed to parse viewing datetime.';
 }
 
+async function syncContactInspectedPropertiesFromViewings(
+  prismaClient: any,
+  contactId: string
+): Promise<string[]> {
+  const viewingRows = await prismaClient.viewing.findMany({
+    where: { contactId },
+    orderBy: [{ date: 'desc' }, { updatedAt: 'desc' }, { id: 'desc' }],
+    select: { propertyId: true }
+  });
+
+  const dedupedPropertyIds: string[] = Array.from(new Set<string>(
+    viewingRows
+      .map((row: any) => String(row?.propertyId || '').trim())
+      .filter(Boolean)
+  ));
+
+  await prismaClient.contact.update({
+    where: { id: contactId },
+    data: { propertiesInspected: dedupedPropertyIds }
+  });
+
+  return dedupedPropertyIds;
+}
+
 import { createAppointment } from '@/lib/ghl/calendars';
 import {
   enqueueViewingSyncJobs,
@@ -1849,8 +1873,11 @@ export async function createViewing(
       notes: data.notes,
     });
 
+    await syncContactInspectedPropertiesFromViewings(db, data.contactId);
+
     revalidatePath(`/admin/properties/${data.propertyId}`);
     revalidatePath(`/admin/properties/${data.propertyId}`);
+    revalidatePath('/admin/contacts');
 
     // Trigger Google Sync for Visual ID Update (only if current user has Google connected)
     const currentUserForSync = await db.user.findUnique({
@@ -2045,8 +2072,11 @@ export async function updateViewing(
       //   const { syncContactToGoogle } = await import('@/lib/google/people');
       //   syncContactToGoogle(currentUserForSync.id, contactId).catch(e => console.error(e));
       // }
+
+      await syncContactInspectedPropertiesFromViewings(db, contactId);
     }
 
+    revalidatePath('/admin/contacts');
     return { success: true, message: 'Viewing updated successfully.' };
   } catch (e: any) {
     console.error(e);
@@ -2059,6 +2089,14 @@ export async function deleteViewing(viewingId: string) {
   if (!userId) return { success: false, message: 'Unauthorized' };
 
   try {
+    const existingViewing = await db.viewing.findUnique({
+      where: { id: viewingId },
+      select: { contactId: true, propertyId: true }
+    });
+    if (!existingViewing) {
+      return { success: false, message: 'Viewing not found.' };
+    }
+
     // Create the delete outbox jobs first
     await enqueueViewingSyncJobs({
       viewingId,
@@ -2066,6 +2104,9 @@ export async function deleteViewing(viewingId: string) {
     });
 
     await db.viewing.delete({ where: { id: viewingId } });
+    await syncContactInspectedPropertiesFromViewings(db, existingViewing.contactId);
+    revalidatePath(`/admin/properties/${existingViewing.propertyId}`);
+    revalidatePath('/admin/contacts');
     return { success: true, message: 'Viewing deleted.' };
   } catch (e) {
     return { success: false, message: 'Failed to delete viewing.' };

@@ -1513,6 +1513,130 @@ const MAX_WORKSPACE_ACTIVITY_LIMIT = 400;
 const DEFAULT_LIST_DELTA_LIMIT = 150;
 const MAX_LIST_DELTA_LIMIT = 400;
 
+function normalizeContactContextRole(value: unknown): string {
+    return String(value || "").trim().toLowerCase();
+}
+
+function getContactContextInclude() {
+    return {
+        propertyRoles: {
+            include: {
+                property: {
+                    select: {
+                        id: true,
+                        title: true,
+                        reference: true,
+                        price: true,
+                    },
+                },
+            },
+        },
+        companyRoles: {
+            include: {
+                company: {
+                    select: {
+                        id: true,
+                        name: true,
+                        type: true,
+                    },
+                },
+            },
+        },
+        viewings: {
+            take: 5,
+            orderBy: { date: "desc" as const },
+            include: {
+                property: {
+                    select: {
+                        id: true,
+                        title: true,
+                        reference: true,
+                    },
+                },
+            },
+        },
+    };
+}
+
+async function enrichContactContextContact(contact: any, locationId: string) {
+    if (!contact) return null;
+
+    const interestedPropertyIds: string[] = Array.from(new Set<string>(
+        (Array.isArray(contact.propertiesInterested) ? contact.propertiesInterested : [])
+            .map((id: any) => String(id || "").trim())
+            .filter(Boolean)
+    ));
+
+    const [interestedPropertiesRaw, inspectedViewingRows] = await Promise.all([
+        interestedPropertyIds.length > 0
+            ? db.property.findMany({
+                where: {
+                    id: { in: interestedPropertyIds },
+                    locationId,
+                },
+                select: {
+                    id: true,
+                    title: true,
+                    reference: true,
+                    price: true,
+                },
+            })
+            : Promise.resolve([]),
+        db.viewing.findMany({
+            where: { contactId: contact.id },
+            orderBy: [{ date: "desc" }, { updatedAt: "desc" }, { id: "desc" }],
+            select: {
+                propertyId: true,
+                date: true,
+                property: {
+                    select: {
+                        id: true,
+                        title: true,
+                        reference: true,
+                        price: true,
+                    },
+                },
+            },
+        }),
+    ]);
+
+    const interestedPropertyMap = new Map(
+        interestedPropertiesRaw.map((property: any) => [property.id, property])
+    );
+    const interestedProperties = interestedPropertyIds
+        .map((propertyId) => interestedPropertyMap.get(propertyId))
+        .filter(Boolean);
+
+    const inspectedByPropertyId = new Map<string, any>();
+    for (const viewing of inspectedViewingRows) {
+        const propertyId = String(viewing?.propertyId || "");
+        if (!propertyId || inspectedByPropertyId.has(propertyId) || !viewing?.property) continue;
+        inspectedByPropertyId.set(propertyId, {
+            ...viewing.property,
+            lastViewedAt: viewing.date ? new Date(viewing.date).toISOString() : null,
+        });
+    }
+
+    const propertyRoles = (Array.isArray(contact.propertyRoles) ? contact.propertyRoles : []).map((role: any) => ({
+        ...role,
+        normalizedRole: normalizeContactContextRole(role?.role),
+    }));
+    const companyRoles = (Array.isArray(contact.companyRoles) ? contact.companyRoles : []).map((role: any) => ({
+        ...role,
+        normalizedRole: normalizeContactContextRole(role?.role),
+    }));
+
+    return {
+        ...contact,
+        propertyRoles,
+        companyRoles,
+        interestedProperties,
+        inspectedProperties: Array.from(inspectedByPropertyId.values()),
+        normalizedContactType: String(contact.contactType || "").trim().toLowerCase(),
+        // TODO(whatsapp-groups): add relatedWhatsAppGroups once contact<->group relation support is implemented.
+    };
+}
+
 async function getConversationContactContextSnapshot(locationId: string, contactId: string) {
     const [contact, leadSources] = await Promise.all([
         db.contact.findFirst({
@@ -1520,27 +1644,7 @@ async function getConversationContactContextSnapshot(locationId: string, contact
                 id: contactId,
                 locationId,
             },
-            include: {
-                propertyRoles: {
-                    include: {
-                        property: {
-                            select: {
-                                id: true,
-                                title: true,
-                                reference: true,
-                                price: true,
-                            },
-                        },
-                    },
-                },
-                viewings: {
-                    take: 5,
-                    orderBy: { date: "desc" },
-                    include: {
-                        property: { select: { title: true } },
-                    },
-                },
-            },
+            include: getContactContextInclude(),
         }),
         db.leadSource.findMany({
             where: { locationId, isActive: true },
@@ -1549,8 +1653,10 @@ async function getConversationContactContextSnapshot(locationId: string, contact
         }),
     ]);
 
+    const hydratedContact = await enrichContactContextContact(contact, locationId);
+
     return {
-        contact,
+        contact: hydratedContact,
         leadSources: leadSources.map((source) => source.name),
     };
 }
@@ -5762,27 +5868,7 @@ export async function getContactContext(contactId: string, options?: { refreshEx
             ],
             locationId: location.id
         },
-        include: {
-            propertyRoles: {
-                include: {
-                    property: {
-                        select: {
-                            id: true,
-                            title: true,
-                            reference: true,
-                            price: true
-                        }
-                    }
-                }
-            },
-            viewings: {
-                take: 5,
-                orderBy: { date: 'desc' },
-                include: {
-                    property: { select: { title: true } }
-                }
-            }
-        }
+        include: getContactContextInclude()
     });
 
     // Optional external refresh when explicitly requested.
@@ -5802,27 +5888,7 @@ export async function getContactContext(contactId: string, options?: { refreshEx
                 // Re-fetch with full includes
                 contact = await db.contact.findUnique({
                     where: { id: synced.id },
-                    include: {
-                        propertyRoles: {
-                            include: {
-                                property: {
-                                    select: {
-                                        id: true,
-                                        title: true,
-                                        reference: true,
-                                        price: true
-                                    }
-                                }
-                            }
-                        },
-                        viewings: {
-                            take: 5,
-                            orderBy: { date: 'desc' },
-                            include: {
-                                property: { select: { title: true } }
-                            }
-                        }
-                    }
+                    include: getContactContextInclude()
                 });
             }
         } catch (e) {
@@ -5838,8 +5904,10 @@ export async function getContactContext(contactId: string, options?: { refreshEx
     });
 
 
+    const hydratedContact = await enrichContactContextContact(contact, location.id);
+
     return {
-        contact,
+        contact: hydratedContact,
         leadSources: leadSources.map((s: any) => s.name)
     };
 }
@@ -10686,6 +10754,7 @@ const SelectionViewingSuggestionSchema = z.object({
     propertyId: z.string().optional().nullable().describe("Resolved property ID for exact reference/slug matches. Null if no deterministic match."),
     date: z.string().optional().nullable().describe("The date of the viewing, in ISO 8601 format (YYYY-MM-DD). If no clear date is mentioned, leave null."),
     time: z.string().optional().nullable().describe("The time of the viewing, in HH:mm format (24-hour). If no clear time is mentioned, leave null."),
+    duration: z.coerce.number().int().min(15).max(480).multipleOf(15).optional().nullable().describe("Duration in minutes. Use 30 if not explicitly stated."),
     notes: z.string().optional().nullable().describe("Any additional notes or context about the viewing, such as the person attending or specific requirements."),
     duration: z.coerce.number().int().min(15).max(480).multipleOf(15).optional().nullable().describe("Viewing duration in minutes using 15-minute increments. Default to 30 when not specified."),
 });
@@ -10925,6 +10994,7 @@ ${trimmedText}
                     propertyId: propertyMatch.propertyId,
                     date: date || null,
                     time: time || null,
+                    duration: rawSuggestion.duration || 30,
                     notes: rawSuggestion.notes || null,
                     duration: normalizeViewingDurationMinutes(rawSuggestion.duration),
                 },
@@ -11012,6 +11082,7 @@ const ApplySelectionViewingSuggestionSchema = z.object({
     scheduledAtIso: z.string().optional().nullable(),
     scheduledLocal: z.string().optional().nullable(),
     scheduledTimeZone: z.string().optional().nullable(),
+    duration: z.coerce.number().int().min(15).max(480).multipleOf(15).optional().nullable(),
     notes: z.string().optional().nullable(),
     duration: z.coerce.number().int().min(15).max(480).multipleOf(15).default(30),
 });
@@ -11104,6 +11175,7 @@ export async function applySuggestedViewingsFromSelection(
 
             // Backward-compatible fallback field consumed by hardened parser as a secondary source.
             formData.append('date', scheduledAtIso || derivedLocal || new Date().toISOString());
+            formData.append('duration', String(suggestion.duration || 30));
             formData.append('notes', suggestion.notes || '');
             formData.append('duration', String(normalizeViewingDurationMinutes(suggestion.duration)));
 
