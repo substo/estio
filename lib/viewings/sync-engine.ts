@@ -175,7 +175,7 @@ function toProviderViewingPayload(viewing: SyncViewingRecord) {
         title: (viewing as any).title || null,
         description: (viewing as any).description || null,
         location: (viewing as any).location || null,
-        duration: (viewing as any).duration || 60,
+        duration: (viewing as any).duration || 30,
     };
 }
 

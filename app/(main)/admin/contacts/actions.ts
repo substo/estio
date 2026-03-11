@@ -1605,7 +1605,7 @@ const viewingSchema = z.object({
   title: z.string().optional(),
   description: z.string().optional(),
   location: z.string().optional(),
-  duration: z.coerce.number().int().min(5).max(480).default(60),
+  duration: z.coerce.number().int().min(15).max(480).multipleOf(15).default(30),
 });
 
 type ResolvedViewingAgentTimeZone =
@@ -1725,7 +1725,7 @@ export async function createViewing(
     title: formData.get('title') || undefined,
     description: formData.get('description') || undefined,
     location: formData.get('location') || undefined,
-    duration: formData.get('duration') || 60,
+    duration: formData.get('duration') || 30,
   });
 
   if (!validatedFields.success) {
@@ -1892,7 +1892,7 @@ export async function updateViewing(
     title: formData.get('title') || undefined,
     description: formData.get('description') || undefined,
     location: formData.get('location') || undefined,
-    duration: formData.get('duration') || 60,
+    duration: formData.get('duration') || 30,
   });
 
   if (!validatedFields.success || !viewingId) {

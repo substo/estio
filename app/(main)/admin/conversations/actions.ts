@@ -10687,6 +10687,7 @@ const SelectionViewingSuggestionSchema = z.object({
     date: z.string().optional().nullable().describe("The date of the viewing, in ISO 8601 format (YYYY-MM-DD). If no clear date is mentioned, leave null."),
     time: z.string().optional().nullable().describe("The time of the viewing, in HH:mm format (24-hour). If no clear time is mentioned, leave null."),
     notes: z.string().optional().nullable().describe("Any additional notes or context about the viewing, such as the person attending or specific requirements."),
+    duration: z.coerce.number().int().min(15).max(480).multipleOf(15).optional().nullable().describe("Viewing duration in minutes using 15-minute increments. Default to 30 when not specified."),
 });
 
 const SelectionViewingSuggestionEnvelopeSchema = z.object({
@@ -10694,6 +10695,18 @@ const SelectionViewingSuggestionEnvelopeSchema = z.object({
 });
 
 export type SelectionViewingSuggestion = z.infer<typeof SelectionViewingSuggestionSchema>;
+
+const VIEWING_DURATION_DEFAULT = 30;
+const VIEWING_DURATION_STEP = 15;
+const VIEWING_DURATION_MIN = 15;
+const VIEWING_DURATION_MAX = 480;
+
+function normalizeViewingDurationMinutes(value: unknown): number {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return VIEWING_DURATION_DEFAULT;
+    const snapped = Math.round(parsed / VIEWING_DURATION_STEP) * VIEWING_DURATION_STEP;
+    return Math.min(VIEWING_DURATION_MAX, Math.max(VIEWING_DURATION_MIN, snapped));
+}
 
 export async function suggestViewingsFromSelection(
     conversationId: string,
@@ -10798,7 +10811,8 @@ You must return a valid JSON object matching this schema:
       "propertyId": "string or null",
       "date": "YYYY-MM-DD or null",
       "time": "HH:mm or null",
-      "notes": "string or null"
+      "notes": "string or null",
+      "duration": "number or null"
     }
   ]
 }`;
@@ -10912,6 +10926,7 @@ ${trimmedText}
                     date: date || null,
                     time: time || null,
                     notes: rawSuggestion.notes || null,
+                    duration: normalizeViewingDurationMinutes(rawSuggestion.duration),
                 },
                 dateResolutionSource,
                 propertyResolutionSource: propertyMatch.source,
@@ -10921,7 +10936,6 @@ ${trimmedText}
         const dateResolutionSources = resolvedSuggestions.map((item) => item.dateResolutionSource);
         const propertyResolutionSources = resolvedSuggestions.map((item) => item.propertyResolutionSource);
         const normalizedSuggestions = resolvedSuggestions.map((item) => item.suggestion);
-
         await persistSelectionAiExecution({
             conversationInternalId: conversation.id,
             taskTitle: "Suggest Viewings from Selection",
@@ -10999,6 +11013,7 @@ const ApplySelectionViewingSuggestionSchema = z.object({
     scheduledLocal: z.string().optional().nullable(),
     scheduledTimeZone: z.string().optional().nullable(),
     notes: z.string().optional().nullable(),
+    duration: z.coerce.number().int().min(15).max(480).multipleOf(15).default(30),
 });
 
 const ApplySelectionViewingSuggestionBatchSchema = z.array(ApplySelectionViewingSuggestionSchema).min(1).max(MAX_TASK_SUGGESTIONS);
@@ -11090,6 +11105,7 @@ export async function applySuggestedViewingsFromSelection(
             // Backward-compatible fallback field consumed by hardened parser as a secondary source.
             formData.append('date', scheduledAtIso || derivedLocal || new Date().toISOString());
             formData.append('notes', suggestion.notes || '');
+            formData.append('duration', String(normalizeViewingDurationMinutes(suggestion.duration)));
 
             const result = await createViewing(null, formData);
 

@@ -761,7 +761,7 @@ model Viewing {
   title       String?   // e.g. "Viewing: 3BR Villa in Limassol"
   description String?   @db.Text  // Detailed agenda / notes for the event
   location    String?   // Address or meetup location for the viewing
-  duration    Int       @default(60) // Duration in minutes (default 1 hour)
+  duration    Int       @default(30) // Duration in minutes (default 30 minutes)
 
   ghlAppointmentId String? @unique
   status           String  @default("scheduled") // proposed, lead_confirmed, confirmed, reminded, completed, cancelled, rescheduled, scheduled, no_show

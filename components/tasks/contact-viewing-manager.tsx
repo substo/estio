@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { format } from 'date-fns';
-import { Loader2, Plus, Trash2, CheckCircle2, Clock3, AlertCircle, Ban, Pencil } from 'lucide-react';
+import { Loader2, Plus, Trash2, CheckCircle2, Clock3, AlertCircle, Ban, Pencil, Minus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -47,6 +47,10 @@ import {
 
 // Reuse the badge logic from Tasks, adapting it for viewings
 const VIEWING_SYNC_MAX_ATTEMPTS = 6;
+const VIEWING_DURATION_DEFAULT = 30;
+const VIEWING_DURATION_STEP = 15;
+const VIEWING_DURATION_MIN = 15;
+const VIEWING_DURATION_MAX = 480;
 
 type SyncRecord = { provider: string; status?: string | null; lastSyncedAt?: string | Date | null; lastError?: string | null };
 type OutboxJob = { provider: string; status?: string | null; operation?: string | null; attemptCount?: number | null; scheduledAt?: string | Date | null; lastError?: string | null; createdAt?: string | Date | null };
@@ -63,6 +67,21 @@ function formatDueLabel(input?: Date | string | null) {
     const date = new Date(input);
     if (Number.isNaN(date.getTime())) return null;
     return format(date, 'PPp');
+}
+
+function normalizeViewingDuration(value: unknown): number {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return VIEWING_DURATION_DEFAULT;
+    const snapped = Math.round(parsed / VIEWING_DURATION_STEP) * VIEWING_DURATION_STEP;
+    return Math.min(VIEWING_DURATION_MAX, Math.max(VIEWING_DURATION_MIN, snapped));
+}
+
+function formatViewingDuration(value: number): string {
+    const hours = Math.floor(value / 60);
+    const minutes = value % 60;
+    if (hours === 0) return `${minutes} min`;
+    if (minutes === 0) return `${hours}h`;
+    return `${hours}h ${minutes}m`;
 }
 
 function getProviderSyncTone(status: ProviderSyncStatus) {
@@ -221,7 +240,7 @@ export function ContactViewingManager({
     const [viewingTitle, setViewingTitle] = useState('');
     const [viewingDescription, setViewingDescription] = useState('');
     const [viewingLocation, setViewingLocation] = useState('');
-    const [viewingDuration, setViewingDuration] = useState('30');
+    const [viewingDuration, setViewingDuration] = useState<number>(VIEWING_DURATION_DEFAULT);
     const [editingViewingId, setEditingViewingId] = useState<string | null>(null);
 
     // Deletion Modal
@@ -316,7 +335,7 @@ export function ContactViewingManager({
         formData.append('title', viewingTitle);
         formData.append('description', viewingDescription);
         formData.append('location', viewingLocation);
-        formData.append('duration', viewingDuration);
+        formData.append('duration', String(viewingDuration));
 
         try {
             let result;
@@ -363,7 +382,7 @@ export function ContactViewingManager({
         setViewingTitle(viewing.title || '');
         setViewingDescription(viewing.description || viewing.notes || '');
         setViewingLocation(viewing.location || '');
-        setViewingDuration(String(viewing.duration || 30));
+        setViewingDuration(normalizeViewingDuration(viewing.duration));
         setModalOpen(true);
     };
 
@@ -394,7 +413,7 @@ export function ContactViewingManager({
         setViewingTitle('');
         setViewingDescription('');
         setViewingLocation('');
-        setViewingDuration('30');
+        setViewingDuration(VIEWING_DURATION_DEFAULT);
         setEditingViewingId(null);
 
         // Apply smart defaults for New Viewings
@@ -574,18 +593,32 @@ export function ContactViewingManager({
                             </div>
                             <div className="space-y-2">
                                 <Label>Duration</Label>
-                                <Select value={viewingDuration} onValueChange={setViewingDuration}>
-                                    <SelectTrigger><SelectValue placeholder="Duration" /></SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="15">15 minutes</SelectItem>
-                                        <SelectItem value="30">30 minutes</SelectItem>
-                                        <SelectItem value="45">45 minutes</SelectItem>
-                                        <SelectItem value="60">1 hour</SelectItem>
-                                        <SelectItem value="90">1.5 hours</SelectItem>
-                                        <SelectItem value="120">2 hours</SelectItem>
-                                        <SelectItem value="180">3 hours</SelectItem>
-                                    </SelectContent>
-                                </Select>
+                                <div className="flex items-center gap-2">
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="icon"
+                                        className="h-9 w-9"
+                                        onClick={() => setViewingDuration((prev) => Math.max(VIEWING_DURATION_MIN, prev - VIEWING_DURATION_STEP))}
+                                        disabled={viewingDuration <= VIEWING_DURATION_MIN}
+                                    >
+                                        <Minus className="h-4 w-4" />
+                                    </Button>
+                                    <div className="flex h-9 min-w-[120px] items-center justify-center rounded-md border bg-background px-3 text-sm font-medium">
+                                        {formatViewingDuration(viewingDuration)}
+                                    </div>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="icon"
+                                        className="h-9 w-9"
+                                        onClick={() => setViewingDuration((prev) => Math.min(VIEWING_DURATION_MAX, prev + VIEWING_DURATION_STEP))}
+                                        disabled={viewingDuration >= VIEWING_DURATION_MAX}
+                                    >
+                                        <Plus className="h-4 w-4" />
+                                    </Button>
+                                </div>
+                                <p className="text-[11px] text-muted-foreground">Adjust by {VIEWING_DURATION_STEP}-minute increments.</p>
                             </div>
                         </div>
 

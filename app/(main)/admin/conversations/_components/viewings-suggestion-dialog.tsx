@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Home, ListTodo } from "lucide-react";
+import { Loader2, Home, ListTodo, Minus, Plus } from "lucide-react";
 import { SearchableSelect } from "@/app/(main)/admin/contacts/_components/searchable-select";
 import {
     suggestViewingsFromSelection,
@@ -28,7 +28,28 @@ type SuggestedViewingState = SelectionViewingSuggestion & {
     selected: boolean;
     propertyId?: string | null;
     userId?: string;
+    duration: number;
 };
+
+const VIEWING_DURATION_DEFAULT = 30;
+const VIEWING_DURATION_STEP = 15;
+const VIEWING_DURATION_MIN = 15;
+const VIEWING_DURATION_MAX = 480;
+
+function normalizeViewingDuration(value: unknown): number {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return VIEWING_DURATION_DEFAULT;
+    const snapped = Math.round(parsed / VIEWING_DURATION_STEP) * VIEWING_DURATION_STEP;
+    return Math.min(VIEWING_DURATION_MAX, Math.max(VIEWING_DURATION_MIN, snapped));
+}
+
+function formatViewingDuration(value: number): string {
+    const hours = Math.floor(value / 60);
+    const minutes = value % 60;
+    if (hours === 0) return `${minutes} min`;
+    if (minutes === 0) return `${hours}h`;
+    return `${hours}h ${minutes}m`;
+}
 
 function formatViewingSyncWarning(warning: ApplySuggestedViewingWarning): string {
     const missingGoogleCalendar = warning.skippedProviders.some(({ provider, reason }) => (
@@ -79,6 +100,7 @@ export function ViewingsSuggestionDialog({ open, onOpenChange, selectionText, co
                 if (result.contactId) setResolvedContactId(result.contactId);
                 setSuggestions(result.suggestions.map((s, idx) => ({
                     ...s,
+                    duration: normalizeViewingDuration(s.duration),
                     id: `suggestion-${idx}-${Date.now()}`,
                     selected: true,
                 })));
@@ -157,6 +179,7 @@ export function ViewingsSuggestionDialog({ open, onOpenChange, selectionText, co
                     scheduledLocal,
                     scheduledTimeZone,
                     notes: s.notes || null,
+                    duration: normalizeViewingDuration(s.duration),
                 };
             });
 
@@ -286,6 +309,35 @@ export function ViewingsSuggestionDialog({ open, onOpenChange, selectionText, co
                                                 value={suggestion.time || ""}
                                                 onChange={(e) => handlePatchSuggestion(suggestion.id, { time: e.target.value })}
                                             />
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-1">
+                                        <label className="text-[11px] font-medium text-slate-600">Duration</label>
+                                        <div className="flex items-center gap-2">
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="icon"
+                                                className="h-8 w-8"
+                                                onClick={() => handlePatchSuggestion(suggestion.id, { duration: Math.max(VIEWING_DURATION_MIN, suggestion.duration - VIEWING_DURATION_STEP) })}
+                                                disabled={suggestion.duration <= VIEWING_DURATION_MIN}
+                                            >
+                                                <Minus className="h-3.5 w-3.5" />
+                                            </Button>
+                                            <div className="flex h-8 min-w-[90px] items-center justify-center rounded-md border bg-slate-50 px-2 text-xs font-medium text-slate-700">
+                                                {formatViewingDuration(suggestion.duration)}
+                                            </div>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="icon"
+                                                className="h-8 w-8"
+                                                onClick={() => handlePatchSuggestion(suggestion.id, { duration: Math.min(VIEWING_DURATION_MAX, suggestion.duration + VIEWING_DURATION_STEP) })}
+                                                disabled={suggestion.duration >= VIEWING_DURATION_MAX}
+                                            >
+                                                <Plus className="h-3.5 w-3.5" />
+                                            </Button>
                                         </div>
                                     </div>
 

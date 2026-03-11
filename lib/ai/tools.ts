@@ -942,17 +942,21 @@ export async function createViewing(
             }
         }
 
+        const viewingStartAt = parsedSchedule.utcDate;
+        const durationMinutes = 30;
+
         const viewing = await db.viewing.create({
             data: {
                 contactId: contact.id,
                 propertyId,
                 userId,
-                date: parsedSchedule.utcDate,
+                date: viewingStartAt,
                 scheduledTimeZone: parsedSchedule.scheduledTimeZone,
                 scheduledLocal: parsedSchedule.scheduledLocal,
-                endAt: new Date(parsedSchedule.utcDate.getTime() + 60 * 60 * 1000),
                 notes: `${notes} (Scheduled by AI)`,
                 ghlAppointmentId,
+                duration: durationMinutes,
+                endAt: new Date(viewingStartAt.getTime() + durationMinutes * 60 * 1000),
                 status: "scheduled"
             }
         });

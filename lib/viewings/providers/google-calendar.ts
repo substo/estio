@@ -91,9 +91,9 @@ function toGoogleEventBody(viewing: HubViewingForGoogle): calendar_v3.Schema$Eve
     // Use description if provided, otherwise fall back to notes
     const eventDescription = viewing.description || viewing.notes || undefined;
 
-    // Calculate end time from duration (default 60 minutes)
+    // Calculate end time from duration (default 30 minutes)
     const startTime = new Date(viewing.date);
-    const durationMinutes = viewing.duration || 60;
+    const durationMinutes = viewing.duration || 30;
     const endTime = new Date(startTime.getTime() + durationMinutes * 60 * 1000);
 
     return {
