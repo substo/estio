@@ -29,7 +29,6 @@ interface CoordinatorPanelProps {
     dealContacts?: DealContactOption[];
     selectedDealConversationId?: string | null;
     onSelectDealConversation?: (conversationId: string) => void;
-    activityLog?: any[];
     initialContactContext?: any;
     initialTaskSummary?: any;
     initialViewingSummary?: any;
@@ -130,107 +129,6 @@ function getBriefRequirementItems(contact: any): Array<{ label: string; value: s
     return items;
 }
 
-function ActivityLogPanel({ entries }: { entries: any[] }) {
-    const [expanded, setExpanded] = useState(false);
-
-    if (entries.length === 0) return null;
-
-    const recentEntries = expanded ? entries : entries.slice(-5);
-    const hasMore = entries.length > 5;
-
-    function formatAction(action: string): string {
-        switch (action) {
-            case 'MANUAL_ENTRY': return 'Note';
-            case 'CREATED': return 'Created';
-            case 'UPDATED': return 'Updated';
-            case 'VIEWING_ADDED': return 'Viewing';
-            case 'VIEWING_UPDATED': return 'Viewing Updated';
-            case 'VIEWING_SCHEDULED': return 'Viewing Scheduled';
-            case 'VIEWING_COMPLETED': return 'Viewing Completed';
-            case 'VIEWING_CANCELLED': return 'Viewing Cancelled';
-            case 'TASK_OPEN': return 'Task Open';
-            case 'TASK_DONE': return 'Task Done';
-            case 'MERGED_FROM': return 'Merged';
-            case 'CREATED_FROM_GOOGLE': return 'Google Import';
-            default: return action;
-        }
-    }
-
-    function getActionColor(action: string): string {
-        switch (action) {
-            case 'MANUAL_ENTRY': return 'bg-blue-100 text-blue-700';
-            case 'CREATED': return 'bg-emerald-100 text-emerald-700';
-            case 'UPDATED': return 'bg-amber-100 text-amber-700';
-            case 'VIEWING_ADDED':
-            case 'VIEWING_UPDATED': return 'bg-purple-100 text-purple-700';
-            case 'VIEWING_SCHEDULED': return 'bg-purple-100 text-purple-700';
-            case 'VIEWING_COMPLETED': return 'bg-emerald-100 text-emerald-700';
-            case 'VIEWING_CANCELLED': return 'bg-rose-100 text-rose-700';
-            case 'TASK_OPEN': return 'bg-amber-100 text-amber-700';
-            case 'TASK_DONE': return 'bg-emerald-100 text-emerald-700';
-            case 'MERGED_FROM': return 'bg-slate-100 text-slate-700';
-            default: return 'bg-gray-100 text-gray-700';
-        }
-    }
-
-    return (
-        <Card className="shadow-none border-border/50">
-            <CardContent className="p-3">
-                <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
-                        <History className="h-3.5 w-3.5" />
-                        Activity Log
-                        <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-1">{entries.length}</Badge>
-                    </div>
-                    {hasMore && (
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-5 text-[10px] px-1.5 text-slate-500"
-                            onClick={() => setExpanded(!expanded)}
-                        >
-                            {expanded ? 'Show Less' : `View All (${entries.length})`}
-                        </Button>
-                    )}
-                </div>
-                <div className="space-y-1.5 max-h-60 overflow-y-auto">
-                    {recentEntries.map((entry: any) => {
-                        const userName = entry.user?.name || entry.user?.email || 'System';
-                        const dateStr = new Date(entry.createdAt).toLocaleString('en-GB', {
-                            day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
-                        });
-
-                        // Extract note text for MANUAL_ENTRY
-                        let noteText = '';
-                        if (entry.action === 'MANUAL_ENTRY' && entry.changes) {
-                            const changes = typeof entry.changes === 'string' ? JSON.parse(entry.changes) : entry.changes;
-                            if (Array.isArray(changes)) {
-                                noteText = changes.find((c: any) => c.field === 'entry')?.new || '';
-                            } else if (changes.entry) {
-                                noteText = typeof changes.entry === 'string' ? changes.entry : (changes.entry?.new || '');
-                            }
-                        }
-
-                        return (
-                            <div key={entry.id} className="flex items-start gap-2 text-[11px] py-1 border-b border-slate-100 last:border-0">
-                                <Badge className={cn("text-[9px] h-4 px-1 shrink-0 font-medium", getActionColor(entry.action))}>
-                                    {formatAction(entry.action)}
-                                </Badge>
-                                <div className="flex-1 min-w-0">
-                                    {noteText && (
-                                        <p className="text-slate-700 line-clamp-2 leading-relaxed">{noteText}</p>
-                                    )}
-                                    <p className="text-slate-400 text-[10px]">{userName} · {dateStr}</p>
-                                </div>
-                            </div>
-                        );
-                    })}
-                </div>
-            </CardContent>
-        </Card>
-    );
-}
-
 export function CoordinatorPanel({
     locationId,
     conversation,
@@ -238,7 +136,6 @@ export function CoordinatorPanel({
     dealContacts,
     selectedDealConversationId,
     onSelectDealConversation,
-    activityLog,
     initialContactContext,
     initialTaskSummary,
     initialViewingSummary,
@@ -1036,10 +933,6 @@ export function CoordinatorPanel({
                     </Card>
                 </div>
             )}
-
-            <div className={cn(lazySidebarDataEnabled && sidebarTab !== 'overview' ? 'hidden' : 'block')}>
-                <ActivityLogPanel entries={Array.isArray(activityLog) ? activityLog : []} />
-            </div>
 
             <div className={cn("flex-1 min-h-0 flex flex-col space-y-3", lazySidebarDataEnabled && sidebarTab !== 'overview' ? 'hidden' : '')}>
                 {/* PLANNER SECTION */}

@@ -2836,7 +2836,6 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 locationId={locationId}
                 conversation={activeConversation}
                 selectedConversations={isSelectionMode ? selectedConversations : undefined}
-                activityLog={activityLog}
                 initialContactContext={workspaceContactContext}
                 initialTaskSummary={workspaceTaskSummary}
                 initialViewingSummary={workspaceViewingSummary}
@@ -2855,7 +2854,6 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 locationId={locationId}
                 conversation={selectedDealConversation}
                 selectedConversations={activeDealParticipants}
-                activityLog={activityLog}
                 initialContactContext={workspaceContactContext}
                 initialTaskSummary={workspaceTaskSummary}
                 initialViewingSummary={workspaceViewingSummary}
