@@ -6803,7 +6803,12 @@ export async function getAggregateAIUsage() {
 
         // Aggregate from AgentExecution + MessageTranscript + MessageTranscriptExtraction
         const [
-            todayUsage, monthUsage, allTimeUsage, topConversations,
+            todayUsage,
+            monthUsage,
+            allTimeExecutionUsage,
+            allTimeUsage,
+            topConversations,
+            topConversationUsageByExecution,
             txTodayT, txMonthT, txAllTimeT,
             txTodayE, txMonthE, txAllTimeE,
         ] = await Promise.all([
@@ -6819,6 +6824,12 @@ export async function getAggregateAIUsage() {
                 where: {
                     conversation: { locationId: location.id },
                     createdAt: { gte: startOfMonth }
+                },
+                _sum: { totalTokens: true, cost: true }
+            }),
+            db.agentExecution.aggregate({
+                where: {
+                    conversation: { locationId: location.id },
                 },
                 _sum: { totalTokens: true, cost: true }
             }),
@@ -6839,6 +6850,18 @@ export async function getAggregateAIUsage() {
                     lastMessageAt: true,
                     contact: { select: { name: true, email: true } }
                 }
+            }),
+            db.agentExecution.groupBy({
+                by: ["conversationId"],
+                where: {
+                    conversation: { locationId: location.id },
+                },
+                _sum: { totalTokens: true, cost: true },
+                orderBy: [
+                    { _sum: { cost: "desc" } },
+                    { _sum: { totalTokens: "desc" } },
+                ],
+                take: 10,
             }),
 
             // --- Transcript usage (MessageTranscript) ---
@@ -6871,8 +6894,95 @@ export async function getAggregateAIUsage() {
             }),
         ]);
 
+        const normalizedTopConversations = topConversationUsageByExecution.length > 0
+            ? (() => {
+                const usageByConversationId = new Map(
+                    topConversationUsageByExecution.map((row) => [
+                        row.conversationId,
+                        {
+                            totalTokens: Number(row._sum.totalTokens || 0),
+                            totalCost: Number(row._sum.cost || 0),
+                        },
+                    ])
+                );
+                return usageByConversationId;
+            })()
+            : null;
+
+        let topConversationRows: Array<{
+            id: string;
+            conversationId: string;
+            contactName: string;
+            contactEmail: string | null;
+            totalTokens: number;
+            totalCost: number;
+            lastMessageAt: string;
+        }> = [];
+
+        if (normalizedTopConversations && normalizedTopConversations.size > 0) {
+            const conversationIds = Array.from(normalizedTopConversations.keys());
+            const conversationRecords = await db.conversation.findMany({
+                where: {
+                    id: { in: conversationIds },
+                    locationId: location.id,
+                },
+                select: {
+                    id: true,
+                    ghlConversationId: true,
+                    lastMessageAt: true,
+                    contact: {
+                        select: {
+                            name: true,
+                            email: true,
+                        },
+                    },
+                },
+            });
+
+            const byConversationId = new Map(
+                conversationRecords.map((record) => [record.id, record])
+            );
+
+            topConversationRows = conversationIds
+                .map((conversationId) => {
+                    const record = byConversationId.get(conversationId);
+                    const usage = normalizedTopConversations.get(conversationId);
+                    if (!record || !usage) return null;
+                    return {
+                        id: record.id,
+                        conversationId: record.ghlConversationId,
+                        contactName: record.contact?.name || "Unknown",
+                        contactEmail: record.contact?.email || null,
+                        totalTokens: usage.totalTokens,
+                        totalCost: usage.totalCost,
+                        lastMessageAt: record.lastMessageAt.toISOString(),
+                    };
+                })
+                .filter((row): row is {
+                    id: string;
+                    conversationId: string;
+                    contactName: string;
+                    contactEmail: string | null;
+                    totalTokens: number;
+                    totalCost: number;
+                    lastMessageAt: string;
+                } => !!row);
+        }
+
+        if (topConversationRows.length === 0) {
+            topConversationRows = topConversations.map((conversation) => ({
+                id: conversation.id,
+                conversationId: conversation.ghlConversationId,
+                contactName: conversation.contact?.name || "Unknown",
+                contactEmail: conversation.contact?.email || null,
+                totalTokens: Number(conversation.totalTokens || 0),
+                totalCost: Number(conversation.totalCost || 0),
+                lastMessageAt: conversation.lastMessageAt.toISOString(),
+            }));
+        }
+
         // Per-conversation transcript cost for top conversations
-        const topConvIds = topConversations.map(c => c.id);
+        const topConvIds = topConversationRows.map((conversation) => conversation.id);
         let convTranscriptMap: Record<string, { tokens: number; cost: number }> = {};
         if (topConvIds.length > 0) {
             const convTxRows = await db.messageTranscript.groupBy({
@@ -6901,6 +7011,15 @@ export async function getAggregateAIUsage() {
             }
         }
 
+        const allTimeTokens = Math.max(
+            Number(allTimeExecutionUsage._sum.totalTokens || 0),
+            Number(allTimeUsage._sum.totalTokens || 0)
+        );
+        const allTimeCost = Math.max(
+            Number(allTimeExecutionUsage._sum.cost || 0),
+            Number(allTimeUsage._sum.totalCost || 0)
+        );
+
         return {
             today: {
                 totalTokens: todayUsage._sum.totalTokens || 0,
@@ -6911,8 +7030,8 @@ export async function getAggregateAIUsage() {
                 totalCost: monthUsage._sum.cost || 0
             },
             allTime: {
-                totalTokens: allTimeUsage._sum.totalTokens || 0,
-                totalCost: allTimeUsage._sum.totalCost || 0,
+                totalTokens: allTimeTokens,
+                totalCost: allTimeCost,
                 conversationCount: allTimeUsage._count.id || 0
             },
             transcription: {
@@ -6930,16 +7049,16 @@ export async function getAggregateAIUsage() {
                     transcriptCount: txAllTimeT._count?.id || 0,
                 },
             },
-            topConversations: topConversations.map(c => ({
-                id: c.id,
-                conversationId: c.ghlConversationId,
-                contactName: c.contact?.name || 'Unknown',
-                contactEmail: c.contact?.email,
-                totalTokens: c.totalTokens,
-                totalCost: c.totalCost,
-                transcriptTokens: convTranscriptMap[c.id]?.tokens || 0,
-                transcriptCost: convTranscriptMap[c.id]?.cost || 0,
-                lastMessageAt: c.lastMessageAt.toISOString()
+            topConversations: topConversationRows.map((conversation) => ({
+                id: conversation.id,
+                conversationId: conversation.conversationId,
+                contactName: conversation.contactName,
+                contactEmail: conversation.contactEmail,
+                totalTokens: conversation.totalTokens,
+                totalCost: conversation.totalCost,
+                transcriptTokens: convTranscriptMap[conversation.id]?.tokens || 0,
+                transcriptCost: convTranscriptMap[conversation.id]?.cost || 0,
+                lastMessageAt: conversation.lastMessageAt,
             }))
         };
     } catch (e) {
