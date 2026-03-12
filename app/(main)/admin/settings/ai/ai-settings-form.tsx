@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Sparkles, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { AutomationHubSettings } from "./automation-hub-settings";
 
 const initialState = {
     message: "",
@@ -30,11 +31,20 @@ export function AiSettingsForm({
     locationId,
     settingsVersion,
     hasGoogleAiApiKey,
+    automationSummary,
 }: {
     initialData: any,
     locationId: string,
     settingsVersion: number,
-    hasGoogleAiApiKey: boolean
+    hasGoogleAiApiKey: boolean,
+    automationSummary?: {
+        totalSchedules: number;
+        enabledSchedules: number;
+        nextRunAt: string | null;
+        pendingJobs: number;
+        deadJobs: number;
+        pendingSuggestions: number;
+    } | null,
 }) {
     const [state, action] = useActionState(updateAiSettings, initialState);
 
@@ -313,6 +323,14 @@ export function AiSettingsForm({
                         </div>
                     </div>
                 </div>
+
+                <Separator />
+
+                <AutomationHubSettings
+                    locationId={locationId}
+                    initialConfig={initialData?.automationConfig}
+                    summary={automationSummary || null}
+                />
 
                 <Separator />
 

@@ -5,6 +5,8 @@ import { auth } from "@clerk/nextjs/server";
 import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
 import { revalidatePath } from "next/cache";
 import { GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
+import { runAiAutomationCron } from "@/lib/ai/automation/hub";
+import { updateAiAutomationConfig } from "@/app/(main)/admin/conversations/actions";
 import { settingsService } from "@/lib/settings/service";
 import {
     SETTINGS_DOMAINS,
@@ -22,6 +24,14 @@ interface AiSettingsState {
         _form?: string[];
     };
 }
+
+type RunAiAutomationNowResult = {
+    success: boolean;
+    error?: string;
+    stats?: Awaited<ReturnType<typeof runAiAutomationCron>>;
+};
+
+type UpdateAiAutomationConfigResult = Awaited<ReturnType<typeof updateAiAutomationConfig>>;
 
 function normalizeTranscriptionModel(value: unknown): string {
     const normalized = String(value || "").trim();
@@ -193,4 +203,38 @@ export async function updateAiSettings(
         }
         return { message: "Database error occurred." };
     }
+}
+
+export async function runAiAutomationNowAction(
+    locationId: string,
+    options?: { plannerOnly?: boolean; batchSize?: number }
+): Promise<RunAiAutomationNowResult> {
+    const { userId } = await auth();
+    if (!userId) return { success: false, error: "Unauthorized" };
+
+    const targetLocationId = String(locationId || "").trim();
+    if (!targetLocationId) return { success: false, error: "Missing location ID." };
+
+    const isAdmin = await verifyUserIsLocationAdmin(userId, targetLocationId);
+    if (!isAdmin) return { success: false, error: "Unauthorized: Admin access is required." };
+
+    try {
+        const stats = await runAiAutomationCron({
+            plannerOnly: !!options?.plannerOnly,
+            batchSize: Math.max(1, Math.min(200, Number(options?.batchSize || 60))),
+        });
+
+        revalidatePath("/admin/settings/ai");
+        return { success: true, stats };
+    } catch (error: any) {
+        console.error("[runAiAutomationNowAction] Error:", error);
+        return { success: false, error: error?.message || "Failed to run automation cron." };
+    }
+}
+
+export async function updateAiAutomationConfigFromSettingsAction(
+    locationId: string,
+    config: unknown
+): Promise<UpdateAiAutomationConfigResult> {
+    return updateAiAutomationConfig(locationId, config);
 }

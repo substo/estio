@@ -63,6 +63,17 @@
   - `Accept + Send` -> server-permissioned immediate send.
 - Same behavior in chat mode and deal timeline mode.
 
+## Admin Controls
+- Surface: `/admin/settings/ai` -> `Automation Hub` section.
+- Editable controls:
+  - enable/disable automation hub
+  - `maxFollowUps`, `followUpCadence`, `researchDepth`, `styleProfile`
+  - enabled built-in templates
+  - quiet hours and daily caps
+  - optional per-template prompt/style/research/follow-up overrides
+- Admin utility action:
+  - `Run Automation Now` executes one planner+worker cycle for immediate verification.
+
 ## Reliability and Security Standards
 - Idempotency key per due candidate + slot to prevent duplicate job/suggestion creation.
 - Atomic claim pattern for worker locks (`pending` -> `processing` with lock fields).

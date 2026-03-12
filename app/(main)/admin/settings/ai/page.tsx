@@ -23,7 +23,7 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
         return <div>No location context found.</div>;
     }
 
-    const [siteConfig, aiDoc, hasGoogleAiApiKey] = await Promise.all([
+    const [siteConfig, aiDoc, hasGoogleAiApiKey, automationSummary] = await Promise.all([
         db.siteConfig.findUnique({
             where: { locationId },
         }),
@@ -38,6 +38,72 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
             domain: SETTINGS_DOMAINS.LOCATION_AI,
             secretKey: SETTINGS_SECRET_KEYS.GOOGLE_AI_API_KEY,
         }).catch(() => false),
+        (async () => {
+            try {
+                const [
+                    totalSchedules,
+                    enabledSchedules,
+                    nextSchedule,
+                    pendingJobs,
+                    deadJobs,
+                    pendingSuggestions,
+                ] = await Promise.all([
+                    db.aiAutomationSchedule.count({
+                        where: { locationId },
+                    }),
+                    db.aiAutomationSchedule.count({
+                        where: { locationId, enabled: true },
+                    }),
+                    db.aiAutomationSchedule.findFirst({
+                        where: {
+                            locationId,
+                            enabled: true,
+                            nextRunAt: { not: null },
+                        },
+                        orderBy: { nextRunAt: "asc" },
+                        select: { nextRunAt: true },
+                    }),
+                    db.aiAutomationJob.count({
+                        where: {
+                            locationId,
+                            status: "pending",
+                        },
+                    }),
+                    db.aiAutomationJob.count({
+                        where: {
+                            locationId,
+                            status: "dead",
+                        },
+                    }),
+                    db.aiSuggestedResponse.count({
+                        where: {
+                            locationId,
+                            status: "pending",
+                            source: { startsWith: "automation:" },
+                        },
+                    }),
+                ]);
+
+                return {
+                    totalSchedules,
+                    enabledSchedules,
+                    nextRunAt: nextSchedule?.nextRunAt ? nextSchedule.nextRunAt.toISOString() : null,
+                    pendingJobs,
+                    deadJobs,
+                    pendingSuggestions,
+                };
+            } catch (error) {
+                console.warn("[AiSettingsPage] Failed to load automation summary:", error);
+                return {
+                    totalSchedules: 0,
+                    enabledSchedules: 0,
+                    nextRunAt: null,
+                    pendingJobs: 0,
+                    deadJobs: 0,
+                    pendingSuggestions: 0,
+                };
+            }
+        })(),
     ]);
 
     const initialData = isSettingsReadFromNewEnabled() && aiDoc
@@ -73,6 +139,7 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
                     locationId={locationId}
                     settingsVersion={settingsVersion}
                     hasGoogleAiApiKey={hasGoogleAiApiKey || Boolean(siteConfig?.googleAiApiKey)}
+                    automationSummary={automationSummary}
                 />
             </div>
         </div>

@@ -15,6 +15,8 @@ Migrate from scattered AI draft/orchestration flows to a centralized automation 
 - Configure `CRON_SECRET`.
 - Schedule internal cron calls to:
   - `GET /api/cron/ai-automations`
+- Production helper script:
+  - `scripts/cron-ai-automations.sh` (registered by `scripts/install-cron.sh` every 10 minutes)
 - Optional compatibility path exists but is deprecated:
   - `/api/cron/scheduled-tasks`
 
