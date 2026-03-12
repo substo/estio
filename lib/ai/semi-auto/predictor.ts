@@ -1,5 +1,7 @@
 import db from "@/lib/db";
 import { orchestrate } from "../orchestrator";
+import { Prisma } from "@prisma/client";
+import crypto from "crypto";
 
 /**
  * Semi-Auto Predictor
@@ -30,6 +32,20 @@ interface PredictionResult {
  * Checks rate limits, builds context, calls orchestrator, stores draft.
  */
 export async function predictAndDraft(input: PredictionInput): Promise<PredictionResult | null> {
+    const conversationRecord = await db.conversation.findUnique({
+        where: { id: input.conversationId },
+        select: {
+            id: true,
+            locationId: true,
+            contactId: true,
+        },
+    });
+
+    if (!conversationRecord?.id) {
+        console.warn(`[Predictor] Conversation not found: ${input.conversationId}`);
+        return null;
+    }
+
     // ── Rate Limit Check ──
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
@@ -127,6 +143,37 @@ export async function predictAndDraft(input: PredictionInput): Promise<Predictio
                 status: "draft",
             },
         });
+
+        const idempotencyKey = crypto
+            .createHash("sha256")
+            .update(`${conversationRecord.id}|${input.triggerSource}|${result.traceId}|${result.intent}`)
+            .digest("hex");
+
+        try {
+            await db.aiSuggestedResponse.create({
+                data: {
+                    locationId: conversationRecord.locationId,
+                    conversationId: conversationRecord.id,
+                    contactId: conversationRecord.contactId || input.contactId,
+                    body: result.draftReply,
+                    source: `semi_auto:${input.triggerSource}`,
+                    status: "pending",
+                    traceId: result.traceId,
+                    idempotencyKey,
+                    metadata: {
+                        intent: result.intent,
+                        skillUsed: result.skillUsed,
+                        reasoning: result.reasoning,
+                        triggerSource: input.triggerSource,
+                        humanApprovalRequired: true,
+                    } as any,
+                },
+            });
+        } catch (error: any) {
+            if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") {
+                throw error;
+            }
+        }
     }
 
     // ── Update Suggested Actions ──

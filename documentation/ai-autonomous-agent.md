@@ -1,5 +1,10 @@
 # AI Autonomous Agent - Technical Documentation
 
+> Historical/Reference: This document describes the prior Mission Control draft-oriented architecture.
+> Current canonical automation scheduling and queue architecture:
+> - `documentation/ai-automation-hub-v1.md`
+> - `documentation/ai-automation-hub-migration-guide.md`
+
 ## Overview
 
 The Estio AI system has evolved from a simple "Draft Generator" to a full **Autonomous Agent** capable of reasoning, planning, and executing actions in the CRM. Inspired by state-of-the-art agentic systems (Manus, etc.), it uses a structured "Plan -> Act -> Verify" methodology.

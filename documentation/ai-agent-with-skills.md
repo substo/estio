@@ -1,6 +1,11 @@
 
 # Technical Reference: Implementing Progressive Disclosure Agent Skills
 
+> Historical/Reference: Skill architecture notes retained for background.
+> Consolidated enterprise automation runtime reference:
+> - `documentation/ai-automation-hub-v1.md`
+> - `documentation/ai-automation-hub-migration-guide.md`
+
 **Date:** October 26, 2023
 **Topic:** Agentic Architecture / Context Management
 **Repository:** [custom-agent-with-skills](https://github.com/coleam00/custom-agent-with-skills)

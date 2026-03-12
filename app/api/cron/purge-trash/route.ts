@@ -1,46 +1,52 @@
 import { NextRequest, NextResponse } from 'next/server';
 import db from '@/lib/db';
+import { CronGuard } from '@/lib/cron/guard';
+import { verifyCronAuthorization } from '@/lib/cron/auth';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * Auto-purge expired conversations from trash
- * 
- * This cron job permanently deletes conversations that have been in the trash
- * for more than 30 days. Run daily via Vercel Cron or external scheduler.
- * 
- * Endpoint: GET /api/cron/purge-trash
- * Schedule: Daily at 2:00 AM UTC (0 2 * * *)
+ * Auto-purge expired conversations from trash.
  */
+
+const guard = new CronGuard('purge-trash');
+
 export async function GET(request: NextRequest) {
-    // Optional: Verify cron secret for security
-    const authHeader = request.headers.get('authorization');
-    if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+  const auth = verifyCronAuthorization(request);
+  if (!auth.ok) return auth.response;
 
-    try {
-        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const resources = await guard.checkResources(300, 6.0);
+  if (!resources.ok) {
+    return NextResponse.json({ skipped: true, reason: resources.reason });
+  }
 
-        const result = await db.conversation.deleteMany({
-            where: {
-                deletedAt: { lt: thirtyDaysAgo }
-            }
-        });
+  if (!(await guard.acquire())) {
+    return NextResponse.json({ skipped: true, reason: 'locked' });
+  }
 
-        console.log(`[Cron: purge-trash] Permanently deleted ${result.count} expired conversations.`);
+  try {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-        return NextResponse.json({
-            success: true,
-            purged: result.count,
-            message: `Permanently deleted ${result.count} conversations older than 30 days in trash.`
-        });
+    const result = await db.conversation.deleteMany({
+      where: {
+        deletedAt: { lt: thirtyDaysAgo },
+      },
+    });
 
-    } catch (error: any) {
-        console.error('[Cron: purge-trash] Error:', error);
-        return NextResponse.json({
-            success: false,
-            error: error.message
-        }, { status: 500 });
-    }
+    return NextResponse.json({
+      success: true,
+      purged: result.count,
+      message: `Permanently deleted ${result.count} conversations older than 30 days in trash.`,
+    });
+  } catch (error: any) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: error?.message || 'Purge trash failed',
+      },
+      { status: 500 }
+    );
+  } finally {
+    await guard.release();
+  }
 }

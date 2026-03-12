@@ -70,6 +70,14 @@ export async function updateAiSettings(
             where: { clerkId: userId },
             select: { id: true },
         });
+        const existingAiDoc = await settingsService.getDocument<any>({
+            scopeType: "LOCATION",
+            scopeId: locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_AI,
+        });
+        const existingPayload = (existingAiDoc?.payload && typeof existingAiDoc.payload === "object")
+            ? existingAiDoc.payload
+            : {};
         const expectedVersionRaw = (formData.get("settingsVersion") as string | null)?.trim();
         const expectedVersionCandidate = expectedVersionRaw ? Number(expectedVersionRaw) : null;
         const expectedVersion = Number.isFinite(expectedVersionCandidate) ? expectedVersionCandidate : null;
@@ -79,6 +87,7 @@ export async function updateAiSettings(
         const transcriptRetentionDays = normalizeTranscriptRetentionDays(formData.get("whatsappTranscriptRetentionDays"));
         const transcriptVisibility = normalizeTranscriptVisibility(formData.get("whatsappTranscriptVisibility"));
         const payload = {
+            ...existingPayload,
             googleAiModel: formData.get("googleAiModel") as string || GEMINI_FLASH_LATEST_ALIAS,
             googleAiModelExtraction: formData.get("googleAiModelExtraction") as string || GEMINI_FLASH_LATEST_ALIAS,
             googleAiModelDesign: formData.get("googleAiModelDesign") as string || GEMINI_FLASH_LATEST_ALIAS,
@@ -93,6 +102,7 @@ export async function updateAiSettings(
                 icebreakerPrompt: formData.get("icebreakerPrompt") as string,
                 qualifierPrompt: formData.get("qualifierPrompt") as string,
             },
+            automationConfig: (existingPayload as any)?.automationConfig,
         };
 
         const savedDoc = await settingsService.upsertDocument({
@@ -163,11 +173,13 @@ export async function updateAiSettings(
         }
 
         if (isSettingsDualWriteLegacyEnabled() && isSettingsParityCheckEnabled()) {
+            const legacyComparablePayload: Record<string, unknown> = { ...payload };
+            delete legacyComparablePayload.automationConfig;
             await settingsService.checkDocumentParity({
                 scopeType: "LOCATION",
                 scopeId: locationId,
                 domain: SETTINGS_DOMAINS.LOCATION_AI,
-                legacyPayload: payload,
+                legacyPayload: legacyComparablePayload,
                 actorUserId: localUser?.id,
             });
         }

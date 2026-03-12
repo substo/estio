@@ -1,42 +1,56 @@
-
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import db from "@/lib/db";
 import { FeedService } from "@/lib/feed/feed-service";
+import { CronGuard } from "@/lib/cron/guard";
+import { verifyCronAuthorization } from "@/lib/cron/auth";
 
-export const dynamic = 'force-dynamic'; // No caching
-export const maxDuration = 300; // 5 minutes timeout
+export const dynamic = 'force-dynamic';
+export const maxDuration = 300;
 
-export async function GET(req: Request) {
-    try {
-        const { searchParams } = new URL(req.url);
-        const companyId = searchParams.get('companyId');
+const guard = new CronGuard('sync-feeds');
 
-        // 1. Find all active feeds, optionally filtered by company
-        const where: any = { isActive: true };
-        if (companyId) {
-            where.companyId = companyId;
-        }
+export async function GET(req: NextRequest) {
+  const auth = verifyCronAuthorization(req);
+  if (!auth.ok) return auth.response;
 
-        const feeds = await db.propertyFeed.findMany({
-            where
-        });
+  const resources = await guard.checkResources(350, 6.0);
+  if (!resources.ok) {
+    return NextResponse.json({ skipped: true, reason: resources.reason });
+  }
 
-        const results = [];
+  if (!(await guard.acquire())) {
+    return NextResponse.json({ skipped: true, reason: 'locked' });
+  }
 
-        // 2. Sync loop
-        for (const feed of feeds) {
-            try {
-                const result = await FeedService.syncFeed(feed.id);
-                results.push({ feedId: feed.id, status: 'success', ...result });
-            } catch (error: any) {
-                console.error(`Error syncing feed ${feed.id}:`, error);
-                results.push({ feedId: feed.id, status: 'error', error: error.message });
-            }
-        }
+  try {
+    const companyId = req.nextUrl.searchParams.get('companyId');
 
-        return NextResponse.json({ success: true, results });
-
-    } catch (error: any) {
-        return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    const where: any = { isActive: true };
+    if (companyId) {
+      where.companyId = companyId;
     }
+
+    const feeds = await db.propertyFeed.findMany({ where });
+
+    const results = [];
+
+    for (const feed of feeds) {
+      try {
+        const result = await FeedService.syncFeed(feed.id);
+        results.push({ feedId: feed.id, status: 'success', ...result });
+      } catch (error: any) {
+        results.push({
+          feedId: feed.id,
+          status: 'error',
+          error: error?.message || 'Feed sync failed',
+        });
+      }
+    }
+
+    return NextResponse.json({ success: true, results });
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error?.message || 'Feed sync failed' }, { status: 500 });
+  } finally {
+    await guard.release();
+  }
 }

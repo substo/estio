@@ -17,6 +17,7 @@ import { z } from "zod";
 import { getModelForTask } from "@/lib/ai/model-router";
 import { callLLM, callLLMWithMetadata } from "@/lib/ai/llm";
 import { auth } from "@clerk/nextjs/server";
+import { Prisma } from "@prisma/client";
 import { revalidatePath, revalidateTag, unstable_cache } from "next/cache";
 import { runGoogleAutoSyncForContact } from "@/lib/google/automation";
 import { createContactTask } from "@/app/(main)/admin/tasks/actions";
@@ -26,6 +27,12 @@ import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-ev
 import { withResilience } from "@/lib/external/resilience";
 import { assembleTimelineEvents } from "@/lib/conversations/timeline-events";
 import { buildMessageCursorFromMessage } from "@/lib/conversations/thread-hydration";
+import { settingsService } from "@/lib/settings/service";
+import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
+import {
+    AiAutomationConfigSchema,
+    cadenceToDays,
+} from "@/lib/ai/automation/config";
 import {
     buildWhatsAppOutboundUploadKey,
     createWhatsAppMediaReadUrl,
@@ -10754,9 +10761,8 @@ const SelectionViewingSuggestionSchema = z.object({
     propertyId: z.string().optional().nullable().describe("Resolved property ID for exact reference/slug matches. Null if no deterministic match."),
     date: z.string().optional().nullable().describe("The date of the viewing, in ISO 8601 format (YYYY-MM-DD). If no clear date is mentioned, leave null."),
     time: z.string().optional().nullable().describe("The time of the viewing, in HH:mm format (24-hour). If no clear time is mentioned, leave null."),
-    duration: z.coerce.number().int().min(15).max(480).multipleOf(15).optional().nullable().describe("Duration in minutes. Use 30 if not explicitly stated."),
-    notes: z.string().optional().nullable().describe("Any additional notes or context about the viewing, such as the person attending or specific requirements."),
     duration: z.coerce.number().int().min(15).max(480).multipleOf(15).optional().nullable().describe("Viewing duration in minutes using 15-minute increments. Default to 30 when not specified."),
+    notes: z.string().optional().nullable().describe("Any additional notes or context about the viewing, such as the person attending or specific requirements."),
 });
 
 const SelectionViewingSuggestionEnvelopeSchema = z.object({
@@ -10994,9 +11000,8 @@ ${trimmedText}
                     propertyId: propertyMatch.propertyId,
                     date: date || null,
                     time: time || null,
-                    duration: rawSuggestion.duration || 30,
-                    notes: rawSuggestion.notes || null,
                     duration: normalizeViewingDurationMinutes(rawSuggestion.duration),
+                    notes: rawSuggestion.notes || null,
                 },
                 dateResolutionSource,
                 propertyResolutionSource: propertyMatch.source,
@@ -11082,9 +11087,8 @@ const ApplySelectionViewingSuggestionSchema = z.object({
     scheduledAtIso: z.string().optional().nullable(),
     scheduledLocal: z.string().optional().nullable(),
     scheduledTimeZone: z.string().optional().nullable(),
-    duration: z.coerce.number().int().min(15).max(480).multipleOf(15).optional().nullable(),
-    notes: z.string().optional().nullable(),
     duration: z.coerce.number().int().min(15).max(480).multipleOf(15).default(30),
+    notes: z.string().optional().nullable(),
 });
 
 const ApplySelectionViewingSuggestionBatchSchema = z.array(ApplySelectionViewingSuggestionSchema).min(1).max(MAX_TASK_SUGGESTIONS);
@@ -11628,4 +11632,402 @@ export async function addConversationActivityEntry(conversationId: string, entry
     });
 
     return { success: true };
+}
+
+type ListSuggestedResponsesInput = {
+    conversationId?: string | null;
+    dealId?: string | null;
+    status?: "pending" | "accepted" | "rejected" | "sent" | "expired" | "all";
+    limit?: number;
+};
+
+function getComposerChannelFromMessageType(lastMessageType?: string | null): 'SMS' | 'Email' | 'WhatsApp' {
+    const normalized = String(lastMessageType || "").toUpperCase();
+    if (normalized.includes("EMAIL")) return "Email";
+    if (normalized.includes("WHATSAPP")) return "WhatsApp";
+    return "SMS";
+}
+
+export async function listSuggestedResponses(input: ListSuggestedResponsesInput) {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+
+    const requestedConversationId = String(input?.conversationId || "").trim();
+    const requestedDealId = String(input?.dealId || "").trim();
+    const status = input?.status || "pending";
+    const limit = Math.max(1, Math.min(100, Number(input?.limit || 30)));
+
+    let scopedConversationInternalId: string | null = null;
+    if (requestedConversationId) {
+        const conversation = await db.conversation.findFirst({
+            where: {
+                locationId: location.id,
+                OR: [
+                    { id: requestedConversationId },
+                    { ghlConversationId: requestedConversationId },
+                ],
+            },
+            select: { id: true },
+        });
+        if (!conversation) return [];
+        scopedConversationInternalId = conversation.id;
+    }
+
+    let dealConversationInternalIds: string[] = [];
+    if (requestedDealId) {
+        const deal = await db.dealContext.findFirst({
+            where: {
+                id: requestedDealId,
+                locationId: location.id,
+            },
+            select: {
+                id: true,
+                conversationIds: true,
+            },
+        });
+
+        if (!deal) return [];
+
+        const dealConversations = await db.conversation.findMany({
+            where: {
+                locationId: location.id,
+                ghlConversationId: { in: deal.conversationIds || [] },
+            },
+            select: { id: true },
+        });
+        dealConversationInternalIds = dealConversations.map((item) => item.id);
+    }
+
+    const filterBlocks: Prisma.AiSuggestedResponseWhereInput[] = [];
+    if (scopedConversationInternalId) {
+        filterBlocks.push({ conversationId: scopedConversationInternalId });
+    }
+    if (requestedDealId) {
+        filterBlocks.push({ dealId: requestedDealId });
+        if (dealConversationInternalIds.length > 0) {
+            filterBlocks.push({ conversationId: { in: dealConversationInternalIds } });
+        }
+    }
+
+    if (filterBlocks.length === 0) {
+        return [];
+    }
+
+    const rows = await db.aiSuggestedResponse.findMany({
+        where: {
+            locationId: location.id,
+            ...(status === "all" ? {} : { status }),
+            OR: filterBlocks,
+        },
+        include: {
+            conversation: {
+                select: {
+                    id: true,
+                    ghlConversationId: true,
+                    lastMessageType: true,
+                },
+            },
+            contact: {
+                select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                    phone: true,
+                },
+            },
+        },
+        orderBy: { createdAt: "desc" },
+        take: limit,
+    });
+
+    return rows.map((row) => ({
+        id: row.id,
+        body: row.body,
+        source: row.source,
+        status: row.status,
+        createdAt: row.createdAt.toISOString(),
+        updatedAt: row.updatedAt.toISOString(),
+        conversationId: row.conversation?.ghlConversationId || row.conversation?.id || null,
+        contactId: row.contactId || row.contact?.id || null,
+        contactName: row.contact?.name || null,
+        contactEmail: row.contact?.email || null,
+        contactPhone: row.contact?.phone || null,
+        dealId: row.dealId || null,
+        traceId: row.traceId || null,
+        metadata: row.metadata || null,
+    }));
+}
+
+export async function acceptSuggestedResponse(
+    id: string,
+    options?: { mode?: "insertOnly" | "sendNow" }
+) {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const actor = await resolveLocationActorContext(location.id);
+    if (!actor.hasAccess) {
+        return { success: false as const, error: "Unauthorized" };
+    }
+
+    const mode = options?.mode === "sendNow" ? "sendNow" : "insertOnly";
+    const trimmedId = String(id || "").trim();
+    if (!trimmedId) {
+        return { success: false as const, error: "Missing suggested response ID." };
+    }
+
+    const suggestion = await db.aiSuggestedResponse.findFirst({
+        where: {
+            id: trimmedId,
+            locationId: location.id,
+        },
+        include: {
+            conversation: {
+                select: {
+                    id: true,
+                    ghlConversationId: true,
+                    contactId: true,
+                    lastMessageType: true,
+                },
+            },
+        },
+    });
+
+    if (!suggestion) {
+        return { success: false as const, error: "Suggested response not found." };
+    }
+
+    if (suggestion.status === "rejected" || suggestion.status === "expired") {
+        return { success: false as const, error: `Cannot accept a ${suggestion.status} suggestion.` };
+    }
+
+    const acceptedAt = new Date();
+    if (mode === "insertOnly" && suggestion.status !== "accepted" && suggestion.status !== "sent") {
+        await db.aiSuggestedResponse.update({
+            where: { id: suggestion.id },
+            data: {
+                status: "accepted",
+                acceptedAt,
+                acceptedByUserId: actor.userId || null,
+            },
+        });
+    }
+
+    if (mode === "sendNow") {
+        if (!suggestion.conversation?.ghlConversationId) {
+            return { success: false as const, error: "Suggestion is not linked to an active conversation." };
+        }
+
+        const sendType = getComposerChannelFromMessageType(suggestion.conversation.lastMessageType);
+        const targetContactId = suggestion.contactId || suggestion.conversation.contactId;
+        const sendResult = await sendReply(
+            suggestion.conversation.ghlConversationId,
+            targetContactId,
+            suggestion.body,
+            sendType
+        );
+
+        if (!sendResult?.success) {
+            return {
+                success: false as const,
+                error: String((sendResult as any)?.error || "Failed to send accepted suggestion."),
+            };
+        }
+
+        await db.aiSuggestedResponse.update({
+            where: { id: suggestion.id },
+            data: {
+                status: "sent",
+                sentAt: new Date(),
+                acceptedAt: suggestion.acceptedAt || acceptedAt,
+                acceptedByUserId: suggestion.acceptedByUserId || actor.userId || null,
+            },
+        });
+    }
+
+    if (suggestion.conversation?.ghlConversationId) {
+        invalidateConversationReadCaches(suggestion.conversation.ghlConversationId);
+        emitConversationRealtimeEvent({
+            locationId: location.id,
+            conversationId: suggestion.conversation.ghlConversationId,
+            type: "suggested_response.accepted",
+            payload: { id: suggestion.id, mode },
+        });
+    }
+
+    return {
+        success: true as const,
+        mode,
+        body: suggestion.body,
+        id: suggestion.id,
+        status: mode === "sendNow" ? "sent" : "accepted",
+    };
+}
+
+export async function rejectSuggestedResponse(id: string, reason?: string | null) {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const actor = await resolveLocationActorContext(location.id);
+    if (!actor.hasAccess) {
+        return { success: false as const, error: "Unauthorized" };
+    }
+
+    const trimmedId = String(id || "").trim();
+    if (!trimmedId) {
+        return { success: false as const, error: "Missing suggested response ID." };
+    }
+
+    const suggestion = await db.aiSuggestedResponse.findFirst({
+        where: {
+            id: trimmedId,
+            locationId: location.id,
+        },
+        include: {
+            conversation: {
+                select: {
+                    ghlConversationId: true,
+                },
+            },
+        },
+    });
+
+    if (!suggestion) {
+        return { success: false as const, error: "Suggested response not found." };
+    }
+
+    const normalizedReason = String(reason || "").trim().slice(0, 500) || "Not a fit";
+
+    await db.aiSuggestedResponse.update({
+        where: { id: suggestion.id },
+        data: {
+            status: "rejected",
+            rejectedAt: new Date(),
+            rejectedByUserId: actor.userId || null,
+            rejectedReason: normalizedReason,
+        },
+    });
+
+    if (suggestion.conversation?.ghlConversationId) {
+        invalidateConversationReadCaches(suggestion.conversation.ghlConversationId);
+        emitConversationRealtimeEvent({
+            locationId: location.id,
+            conversationId: suggestion.conversation.ghlConversationId,
+            type: "suggested_response.rejected",
+            payload: { id: suggestion.id },
+        });
+    }
+
+    return { success: true as const, id: suggestion.id };
+}
+
+export async function updateAiAutomationConfig(locationId: string, config: unknown) {
+    const targetLocationId = String(locationId || "").trim();
+    if (!targetLocationId) {
+        return { success: false as const, error: "Missing location ID." };
+    }
+
+    const actor = await resolveLocationActorContext(targetLocationId);
+    if (!actor.hasAccess || !actor.isAdmin) {
+        return { success: false as const, error: "Unauthorized: admin access is required." };
+    }
+
+    const parsed = AiAutomationConfigSchema.safeParse(config ?? {});
+    if (!parsed.success) {
+        return {
+            success: false as const,
+            error: parsed.error.issues[0]?.message || "Invalid automation configuration.",
+            issues: parsed.error.issues.map((issue) => ({
+                path: issue.path.join("."),
+                message: issue.message,
+            })),
+        };
+    }
+
+    const existingDoc = await settingsService.getDocument<any>({
+        scopeType: "LOCATION",
+        scopeId: targetLocationId,
+        domain: SETTINGS_DOMAINS.LOCATION_AI,
+    });
+    const existingPayload = (existingDoc?.payload && typeof existingDoc.payload === "object")
+        ? existingDoc.payload
+        : {};
+
+    const mergedPayload = {
+        ...existingPayload,
+        automationConfig: parsed.data,
+    };
+
+    const savedDoc = await settingsService.upsertDocument({
+        scopeType: "LOCATION",
+        scopeId: targetLocationId,
+        domain: SETTINGS_DOMAINS.LOCATION_AI,
+        payload: mergedPayload,
+        actorUserId: actor.userId || undefined,
+    });
+
+    const location = await db.location.findUnique({
+        where: { id: targetLocationId },
+        select: { id: true, timeZone: true },
+    });
+    if (!location) {
+        return { success: false as const, error: "Location not found." };
+    }
+
+    if (!parsed.data.enabled) {
+        await db.aiAutomationSchedule.updateMany({
+            where: { locationId: targetLocationId },
+            data: { enabled: false },
+        });
+    } else {
+        const cadenceMinutesBase = cadenceToDays(parsed.data.followUpCadence) * 24 * 60;
+        const now = new Date();
+
+        for (const templateKey of parsed.data.enabledTemplates) {
+            const cadenceMinutes = templateKey === "listing_alert"
+                ? 60
+                : cadenceMinutesBase;
+
+            await db.aiAutomationSchedule.upsert({
+                where: {
+                    locationId_triggerType_templateKey: {
+                        locationId: targetLocationId,
+                        triggerType: templateKey,
+                        templateKey,
+                    },
+                },
+                create: {
+                    locationId: targetLocationId,
+                    name: `Automation: ${templateKey}`,
+                    enabled: true,
+                    cadenceMinutes,
+                    triggerType: templateKey,
+                    templateKey,
+                    timezone: location.timeZone || "UTC",
+                    quietHours: parsed.data.quietHours as any,
+                    policy: {},
+                    nextRunAt: now,
+                },
+                update: {
+                    enabled: true,
+                    cadenceMinutes,
+                    timezone: location.timeZone || "UTC",
+                    quietHours: parsed.data.quietHours as any,
+                },
+            });
+        }
+
+        await db.aiAutomationSchedule.updateMany({
+            where: {
+                locationId: targetLocationId,
+                templateKey: { notIn: parsed.data.enabledTemplates },
+            },
+            data: {
+                enabled: false,
+            },
+        });
+    }
+
+    revalidatePath("/admin/settings/ai");
+
+    return {
+        success: true as const,
+        version: savedDoc.version,
+        config: parsed.data,
+    };
 }

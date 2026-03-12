@@ -40,6 +40,9 @@ model Location {
   conversations                 Conversation[]
   contactTasks                  ContactTask[]
   contactTaskOutboxJobs         ContactTaskOutbox[]
+  aiAutomationSchedules         AiAutomationSchedule[]
+  aiAutomationJobs              AiAutomationJob[]
+  aiSuggestedResponses          AiSuggestedResponse[]
   legacyCrmLeadEmailProcessings LegacyCrmLeadEmailProcessing[]
 
   // WhatsApp Integration (Native)
@@ -168,6 +171,8 @@ model User {
   createdContactTasks  ContactTask[]    @relation("ContactTaskCreatedByUser")
   updatedContactTasks  ContactTask[]    @relation("ContactTaskUpdatedByUser")
   settingsAuditLogs    SettingsAuditLog[] @relation("SettingsAuditActor")
+  acceptedAiSuggestedResponses AiSuggestedResponse[] @relation("AiSuggestedResponseAcceptedBy")
+  rejectedAiSuggestedResponses AiSuggestedResponse[] @relation("AiSuggestedResponseRejectedBy")
 
   // Google Contact Sync Credentials
   googleAccessToken             String?         @db.Text
@@ -485,6 +490,8 @@ model Contact {
 
   insights Insight[]
   tasks    ContactTask[]
+  aiAutomationJobs    AiAutomationJob[]
+  aiSuggestedResponses AiSuggestedResponse[]
 
   @@unique([locationId, email])
   @@unique([locationId, phone])
@@ -1018,6 +1025,8 @@ model Conversation {
   participants ConversationParticipant[]
   insights     Insight[]
   contactTasks ContactTask[]
+  aiAutomationJobs AiAutomationJob[]
+  aiSuggestedResponses AiSuggestedResponse[]
 
   @@unique([locationId, contactId])
   @@index([locationId])
@@ -1186,6 +1195,109 @@ model AgentExecution {
   @@index([conversationId])
   @@index([createdAt])
   @@index([traceId])
+}
+
+model AiAutomationSchedule {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId String
+  name       String   @default("AI Automation")
+  enabled    Boolean  @default(true)
+  cadenceMinutes Int  @default(30)
+  triggerType String
+  templateKey String
+  timezone    String  @default("UTC")
+  quietHours  Json?
+  policy      Json?
+  nextRunAt   DateTime?
+  lastPlannedAt DateTime?
+  lastRunAt   DateTime?
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  jobs     AiAutomationJob[]
+
+  @@index([locationId, enabled])
+  @@index([enabled, nextRunAt])
+  @@index([locationId, triggerType, templateKey])
+  @@unique([locationId, triggerType, templateKey])
+}
+
+model AiAutomationJob {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId String
+  scheduleId String?
+  conversationId String?
+  contactId String?
+  dealId String?
+  templateKey String
+  triggerType String
+  payload Json?
+  status String @default("pending") // pending | processing | completed | dead
+  scheduledAt DateTime @default(now())
+  processedAt DateTime?
+  attemptCount Int @default(0)
+  maxAttempts Int @default(6)
+  lockedAt DateTime?
+  lockedBy String?
+  lastError String? @db.Text
+  idempotencyKey String @unique
+  sourceKey String?
+  traceId String?
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  schedule AiAutomationSchedule? @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  contact Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  suggestedResponses AiSuggestedResponse[]
+
+  @@index([status, scheduledAt])
+  @@index([locationId, status, scheduledAt])
+  @@index([scheduleId, status, scheduledAt])
+  @@index([conversationId, status, scheduledAt])
+  @@index([contactId, status, scheduledAt])
+}
+
+model AiSuggestedResponse {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId String
+  conversationId String?
+  contactId String?
+  dealId String?
+  jobId String?
+  body String @db.Text
+  source String
+  status String @default("pending") // pending | accepted | rejected | sent | expired
+  metadata Json?
+  traceId String?
+  idempotencyKey String @unique
+
+  acceptedAt DateTime?
+  rejectedAt DateTime?
+  sentAt DateTime?
+  expiresAt DateTime?
+  rejectedReason String?
+  acceptedByUserId String?
+  rejectedByUserId String?
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  contact Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  job AiAutomationJob? @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  acceptedByUser User? @relation("AiSuggestedResponseAcceptedBy", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
+  rejectedByUser User? @relation("AiSuggestedResponseRejectedBy", fields: [rejectedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([locationId, status, createdAt(sort: Desc)])
+  @@index([conversationId, status, createdAt(sort: Desc)])
+  @@index([dealId, status, createdAt(sort: Desc)])
+  @@index([contactId, status, createdAt(sort: Desc)])
 }
 
 model Message {

@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ActivityLogEntry } from "./activity-log-entry";
+import { SuggestedResponseQueue, type SuggestedResponseQueueItem } from "./suggested-response-queue";
 
 export interface ActivityLogItem {
     id: string;
@@ -61,6 +62,11 @@ interface ChatWindowProps {
     ) => Promise<string | null>;
     onSetReplyLanguageOverride?: (replyLanguage: string | null) => Promise<{ success: boolean; error?: string; replyLanguageOverride?: string | null }>;
     onAddActivityEntry?: (entryText: string, dateIso: string) => Promise<void>;
+    suggestedResponseQueue?: SuggestedResponseQueueItem[];
+    suggestedResponseQueueLoading?: boolean;
+    onAcceptSuggestedResponse?: (id: string, mode: "insertOnly" | "sendNow") => Promise<void>;
+    onRejectSuggestedResponse?: (id: string, reason?: string | null) => Promise<void>;
+    composerInsertSeed?: { key: string; body: string } | null;
 }
 
 /**
@@ -141,6 +147,11 @@ export function ChatWindow({
     onSetReplyLanguageOverride,
     onFetchHistory,
     onAddActivityEntry,
+    suggestedResponseQueue = [],
+    suggestedResponseQueueLoading = false,
+    onAcceptSuggestedResponse,
+    onRejectSuggestedResponse,
+    composerInsertSeed,
     suggestions = [],
 }: ChatWindowProps & { suggestions?: string[] }) {
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -894,6 +905,20 @@ export function ChatWindow({
                 </div>
             </div>
 
+            <SuggestedResponseQueue
+                items={suggestedResponseQueue}
+                loading={suggestedResponseQueueLoading}
+                onAccept={async (id, mode) => {
+                    if (!onAcceptSuggestedResponse) return;
+                    await onAcceptSuggestedResponse(id, mode);
+                }}
+                onReject={async (id, reason) => {
+                    if (!onRejectSuggestedResponse) return;
+                    await onRejectSuggestedResponse(id, reason);
+                }}
+                allowSendNow={true}
+            />
+
             <ConversationComposer
                 conversation={conversation}
                 onSendMessage={onSendMessage}
@@ -902,6 +927,7 @@ export function ChatWindow({
                 onSetReplyLanguageOverride={onSetReplyLanguageOverride}
                 suggestions={suggestions}
                 onModelChange={setSelectedModel}
+                insertDraftSeed={composerInsertSeed}
             />
         </div>
     );

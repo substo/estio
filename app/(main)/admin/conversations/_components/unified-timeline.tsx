@@ -10,6 +10,7 @@ import { MessageSquare, Sparkles, ArrowLeft, ListTodo } from "lucide-react";
 import { Button } from '@/components/ui/button';
 import { ConversationComposer } from './conversation-composer';
 import { ActivityLogEntry } from "./activity-log-entry";
+import { SuggestedResponseQueue, type SuggestedResponseQueueItem } from "./suggested-response-queue";
 
 interface UnifiedTimelineProps {
     dealId: string;
@@ -30,6 +31,11 @@ interface UnifiedTimelineProps {
     composerDisabled?: boolean;
     composerDisabledReason?: string;
     replyingToLabel?: string;
+    suggestedResponseQueue?: SuggestedResponseQueueItem[];
+    suggestedResponseQueueLoading?: boolean;
+    onAcceptSuggestedResponse?: (id: string, mode: "insertOnly" | "sendNow") => Promise<void>;
+    onRejectSuggestedResponse?: (id: string, reason?: string | null) => Promise<void>;
+    composerInsertSeed?: { key: string; body: string } | null;
 }
 
 export function UnifiedTimeline({
@@ -46,6 +52,11 @@ export function UnifiedTimeline({
     composerDisabled = false,
     composerDisabledReason,
     replyingToLabel,
+    suggestedResponseQueue = [],
+    suggestedResponseQueueLoading = false,
+    onAcceptSuggestedResponse,
+    onRejectSuggestedResponse,
+    composerInsertSeed,
 }: UnifiedTimelineProps) {
     const [timelineMessages, setTimelineMessages] = useState<any[]>([]);
     const [loadingTimeline, setLoadingTimeline] = useState(true);
@@ -152,6 +163,20 @@ export function UnifiedTimeline({
                 )}
             </div>
 
+            <SuggestedResponseQueue
+                items={suggestedResponseQueue}
+                loading={suggestedResponseQueueLoading}
+                onAccept={async (id, mode) => {
+                    if (!onAcceptSuggestedResponse) return;
+                    await onAcceptSuggestedResponse(id, mode);
+                }}
+                onReject={async (id, reason) => {
+                    if (!onRejectSuggestedResponse) return;
+                    await onRejectSuggestedResponse(id, reason);
+                }}
+                allowSendNow={true}
+            />
+
             <ConversationComposer
                 conversation={composerConversation}
                 onSendMessage={(text, type) => Promise.resolve(onSendMessage?.(text, type))}
@@ -163,6 +188,7 @@ export function UnifiedTimeline({
                 disabledReason={composerDisabledReason}
                 replyingToLabel={replyingToLabel}
                 onModelChange={setSelectedModel}
+                insertDraftSeed={composerInsertSeed}
             />
         </div>
     );

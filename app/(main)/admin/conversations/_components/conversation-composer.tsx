@@ -52,6 +52,7 @@ interface ConversationComposerProps {
     disabledReason?: string;
     replyingToLabel?: string;
     onModelChange?: (model: string) => void;
+    insertDraftSeed?: { key: string; body: string } | null;
 }
 
 function getInitialChannel(conversation: Conversation | null): ComposerChannel {
@@ -85,6 +86,7 @@ export function ConversationComposer({
     disabledReason,
     replyingToLabel,
     onModelChange,
+    insertDraftSeed,
 }: ConversationComposerProps) {
     const [draft, setDraft] = useState("");
     const [sending, setSending] = useState(false);
@@ -139,6 +141,12 @@ export function ConversationComposer({
         setIsRecording(false);
         setSelectedReplyLanguage(conversation?.replyLanguageOverride || REPLY_LANGUAGE_AUTO_VALUE);
     }, [conversation?.id]);
+
+    useEffect(() => {
+        if (!insertDraftSeed?.key) return;
+        const nextBody = String(insertDraftSeed.body || "");
+        setDraft(nextBody);
+    }, [insertDraftSeed?.key, insertDraftSeed?.body]);
 
     useEffect(() => {
         setSelectedReplyLanguage(conversation?.replyLanguageOverride || REPLY_LANGUAGE_AUTO_VALUE);

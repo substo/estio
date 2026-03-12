@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { SETTINGS_DOMAINS, type SettingsDomain } from "./constants";
+import { AiAutomationConfigSchema } from "@/lib/ai/automation/config";
 
 const nullableTrimmedString = z.string().trim().nullish().transform((v) => v ?? null);
 const hexColor = z.string().regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, "Expected hex color");
@@ -72,6 +73,7 @@ const aiSchema = z.object({
         icebreakerPrompt: nullableTrimmedString,
         qualifierPrompt: nullableTrimmedString,
     }).passthrough(),
+    automationConfig: AiAutomationConfigSchema.default({}),
     whatsappTranscriptOnDemandEnabled: z.boolean().default(false),
     whatsappTranscriptRetentionDays: z.union([z.literal(30), z.literal(90), z.literal(365)]),
     whatsappTranscriptVisibility: z.union([z.literal("team"), z.literal("admin_only")]).default("team"),

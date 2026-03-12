@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { CronGuard } from '@/lib/cron/guard';
+import { verifyCronAuthorization } from '@/lib/cron/auth';
 import { processTaskSyncOutboxBatch } from '@/lib/tasks/sync-engine';
 import { processViewingSyncOutboxBatch } from '@/lib/viewings/sync-engine';
 
@@ -9,12 +10,8 @@ export const maxDuration = 120;
 const guard = new CronGuard('task-sync');
 
 export async function GET(request: NextRequest) {
-  const authHeader = request.headers.get('authorization');
-  const cronSecret = process.env.CRON_SECRET;
-
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const auth = verifyCronAuthorization(request);
+  if (!auth.ok) return auth.response;
 
   const resources = await guard.checkResources(400, 5.0);
   if (!resources.ok) {

@@ -3,15 +3,10 @@ import { CronGuard } from "@/lib/cron/guard";
 import { verifyCronAuthorization } from "@/lib/cron/auth";
 import { runAiAutomationCron } from "@/lib/ai/automation/hub";
 
-/**
- * Deprecated compatibility endpoint.
- *
- * All AI automation scheduling now runs through /api/cron/ai-automations.
- */
 export const dynamic = "force-dynamic";
 export const maxDuration = 180;
 
-const guard = new CronGuard("scheduled-tasks");
+const guard = new CronGuard("ai-automations");
 
 export async function GET(request: NextRequest) {
   const auth = verifyCronAuthorization(request);
@@ -19,24 +14,24 @@ export async function GET(request: NextRequest) {
 
   const resources = await guard.checkResources(400, 5.0);
   if (!resources.ok) {
-    return NextResponse.json({ skipped: true, reason: resources.reason, deprecated: true });
+    return NextResponse.json({ skipped: true, reason: resources.reason });
   }
 
   if (!(await guard.acquire())) {
-    return NextResponse.json({ skipped: true, reason: "locked", deprecated: true });
+    return NextResponse.json({ skipped: true, reason: "locked" });
   }
 
   try {
     const startedAt = Date.now();
+    const plannerOnly = request.nextUrl.searchParams.get("mode") === "plan";
     const stats = await runAiAutomationCron({
-      plannerOnly: false,
+      plannerOnly,
       batchSize: Number(request.nextUrl.searchParams.get("batch") || 60),
     });
 
     return NextResponse.json({
       success: true,
-      deprecated: true,
-      replacement: "/api/cron/ai-automations",
+      plannerOnly,
       durationMs: Date.now() - startedAt,
       ...stats,
     });
@@ -44,8 +39,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        deprecated: true,
-        error: error?.message || "Scheduled tasks cron failed",
+        error: error?.message || "AI automation cron failed",
       },
       { status: 500 }
     );

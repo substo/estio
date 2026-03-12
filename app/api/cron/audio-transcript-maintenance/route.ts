@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CronGuard } from "@/lib/cron/guard";
+import { verifyCronAuthorization } from "@/lib/cron/auth";
 import { runAudioTranscriptMaintenanceJob } from "@/lib/ai/audio/transcript-maintenance";
 
 export const dynamic = "force-dynamic";
@@ -8,12 +9,8 @@ export const maxDuration = 180;
 const guard = new CronGuard("audio-transcript-maintenance");
 
 export async function GET(request: NextRequest) {
-    const authHeader = request.headers.get("authorization");
-    const cronSecret = process.env.CRON_SECRET;
-
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const auth = verifyCronAuthorization(request);
+    if (!auth.ok) return auth.response;
 
     const resources = await guard.checkResources(400, 5.0);
     if (!resources.ok) {

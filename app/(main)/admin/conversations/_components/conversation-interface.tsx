@@ -33,6 +33,9 @@ import {
     searchConversations,
     fetchConversationActivityLog,
     addConversationActivityEntry,
+    listSuggestedResponses,
+    acceptSuggestedResponse,
+    rejectSuggestedResponse,
 } from '../actions';
 import { toast } from '@/components/ui/use-toast';
 import { getDealContexts, createPersistentDeal, getDealContext } from '../../deals/actions';
@@ -57,6 +60,7 @@ import { WhatsAppImportModal } from './whatsapp-import-modal';
 import { CreateDealDialog } from './create-deal-dialog';
 import { SyncAllChatsDialog } from './sync-all-chats-dialog';
 import { NewConversationDialog } from './new-conversation-dialog';
+import type { SuggestedResponseQueueItem } from './suggested-response-queue';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -2514,11 +2518,110 @@ export function ConversationInterface({ locationId, initialConversations, initia
     };
 
     const [suggestions, setSuggestions] = useState<string[]>([]);
+    const [suggestedResponseQueue, setSuggestedResponseQueue] = useState<SuggestedResponseQueueItem[]>([]);
+    const [loadingSuggestedResponseQueue, setLoadingSuggestedResponseQueue] = useState(false);
+    const [composerInsertSeed, setComposerInsertSeed] = useState<{ key: string; body: string } | null>(null);
+    const suggestedResponseQueueRequestIdRef = useRef(0);
 
     // Reset suggestions when active conversation changes
     useEffect(() => {
         setSuggestions([]);
     }, [activeId]);
+
+    useEffect(() => {
+        setComposerInsertSeed(null);
+    }, [viewMode, activeId, activeDealId]);
+
+    const refreshSuggestedResponseQueue = useCallback(async () => {
+        const conversationScopeId = viewMode === 'chats' ? String(activeId || "").trim() : "";
+        const dealScopeId = viewMode === 'deals' ? String(activeDealId || "").trim() : "";
+
+        if (!conversationScopeId && !dealScopeId) {
+            setSuggestedResponseQueue([]);
+            setLoadingSuggestedResponseQueue(false);
+            return;
+        }
+
+        const requestId = suggestedResponseQueueRequestIdRef.current + 1;
+        suggestedResponseQueueRequestIdRef.current = requestId;
+        setLoadingSuggestedResponseQueue(true);
+
+        try {
+            const rows = await listSuggestedResponses({
+                conversationId: conversationScopeId || undefined,
+                dealId: dealScopeId || undefined,
+                status: "pending",
+                limit: 40,
+            });
+            if (suggestedResponseQueueRequestIdRef.current !== requestId) return;
+            setSuggestedResponseQueue(Array.isArray(rows) ? (rows as SuggestedResponseQueueItem[]) : []);
+        } catch (error: any) {
+            if (suggestedResponseQueueRequestIdRef.current !== requestId) return;
+            console.error("Failed to load suggested responses:", error);
+            toast({
+                title: "Queue Error",
+                description: error?.message || "Failed to load suggested responses.",
+                variant: "destructive",
+            });
+            setSuggestedResponseQueue([]);
+        } finally {
+            if (suggestedResponseQueueRequestIdRef.current === requestId) {
+                setLoadingSuggestedResponseQueue(false);
+            }
+        }
+    }, [viewMode, activeId, activeDealId]);
+
+    useEffect(() => {
+        void refreshSuggestedResponseQueue();
+    }, [refreshSuggestedResponseQueue]);
+
+    const handleAcceptSuggestedResponse = useCallback(async (
+        suggestedResponseId: string,
+        mode: "insertOnly" | "sendNow"
+    ) => {
+        const result = await acceptSuggestedResponse(suggestedResponseId, { mode });
+        if (!result?.success) {
+            toast({
+                title: "Action Failed",
+                description: String(result?.error || "Could not accept suggested response."),
+                variant: "destructive",
+            });
+            return;
+        }
+
+        if (mode === "insertOnly") {
+            setComposerInsertSeed({
+                key: `${result.id}:${Date.now()}`,
+                body: String(result.body || ""),
+            });
+            toast({
+                title: "Added to Composer",
+                description: "Suggested response inserted for review.",
+            });
+        } else {
+            toast({
+                title: "Message Sent",
+                description: "Suggested response was accepted and sent.",
+            });
+        }
+
+        await refreshSuggestedResponseQueue();
+    }, [refreshSuggestedResponseQueue]);
+
+    const handleRejectSuggestedResponse = useCallback(async (suggestedResponseId: string, reason?: string | null) => {
+        const result = await rejectSuggestedResponse(suggestedResponseId, reason);
+        if (!result?.success) {
+            toast({
+                title: "Action Failed",
+                description: String(result?.error || "Could not reject suggested response."),
+                variant: "destructive",
+            });
+            return;
+        }
+
+        toast({ title: "Suggestion Rejected" });
+        await refreshSuggestedResponseQueue();
+    }, [refreshSuggestedResponseQueue]);
 
     const streamDraftViaApi = useCallback(async (args: {
         conversationId: string;
@@ -2693,6 +2796,11 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     }
                 }}
                 suggestions={[...(activeConversation?.suggestedActions || []), ...suggestions]}
+                suggestedResponseQueue={suggestedResponseQueue}
+                suggestedResponseQueueLoading={loadingSuggestedResponseQueue}
+                onAcceptSuggestedResponse={handleAcceptSuggestedResponse}
+                onRejectSuggestedResponse={handleRejectSuggestedResponse}
+                composerInsertSeed={composerInsertSeed}
                 onGenerateDraft={async (
                     instruction?: string,
                     model?: string,
@@ -2815,6 +2923,11 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     return result;
                 }}
                 suggestions={suggestions}
+                suggestedResponseQueue={suggestedResponseQueue}
+                suggestedResponseQueueLoading={loadingSuggestedResponseQueue}
+                onAcceptSuggestedResponse={handleAcceptSuggestedResponse}
+                onRejectSuggestedResponse={handleRejectSuggestedResponse}
+                composerInsertSeed={composerInsertSeed}
                 composerDisabled={loadingDealContext || !selectedDealConversation}
                 composerDisabledReason={
                     loadingDealContext

@@ -1,5 +1,10 @@
 # AI Draft & "Sketch-to-Draft" Feature
 
+> Historical/Reference: This document contains legacy draft-generation details.
+> For enterprise scheduling and unified suggested-response queue behavior, use:
+> - `documentation/ai-automation-hub-v1.md`
+> - `documentation/ai-automation-hub-migration-guide.md`
+
 ## 1. Overview
 The AI Draft feature allows agents to quickly generate professional replies directly within the Chat Window. It supports a **"Sketch-to-Draft"** workflow where users type a rough instruction (e.g., *"say thanks and ask about budget"*) and the AI expands it into a polite, context-aware message.
 

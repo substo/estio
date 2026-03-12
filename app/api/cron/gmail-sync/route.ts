@@ -3,6 +3,7 @@ import db from '@/lib/db';
 import { syncRecentMessages, watchGmail } from '@/lib/google/gmail-sync';
 import { syncContactsFromGoogle } from '@/lib/google/people';
 import { CronGuard } from '@/lib/cron/guard';
+import { verifyCronAuthorization } from '@/lib/cron/auth';
 
 /**
  * Gmail Sync Cron Job
@@ -25,14 +26,8 @@ export const maxDuration = 300; // 5 minutes max (Vercel Pro limit)
 const guard = new CronGuard('gmail-sync');
 
 export async function GET(request: NextRequest) {
-    // Security check
-    const authHeader = request.headers.get('authorization');
-    const cronSecret = process.env.CRON_SECRET;
-
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-        console.warn('[Cron Gmail] Unauthorized request');
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const auth = verifyCronAuthorization(request);
+    if (!auth.ok) return auth.response;
 
     console.log('[Cron Gmail] Starting scheduled sync job...');
 

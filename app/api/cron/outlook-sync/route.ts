@@ -3,6 +3,7 @@ import db from '@/lib/db';
 import { syncEmailsFromOWA } from '@/lib/microsoft/owa-email-sync';
 import { syncContactsFromOutlook } from '@/lib/microsoft/contact-sync';
 import { CronGuard } from '@/lib/cron/guard';
+import { verifyCronAuthorization } from '@/lib/cron/auth';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300; // Allow 5 minutes for cron job
@@ -10,11 +11,8 @@ export const maxDuration = 300; // Allow 5 minutes for cron job
 const guard = new CronGuard('outlook-sync');
 
 export async function GET(req: NextRequest) {
-    // 1. Security Check
-    const authHeader = req.headers.get('authorization');
-    if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-        return new NextResponse('Unauthorized', { status: 401 });
-    }
+    const auth = verifyCronAuthorization(req);
+    if (!auth.ok) return auth.response;
 
     console.log('[OutlookCron] Starting scheduled sync & maintenance');
 
