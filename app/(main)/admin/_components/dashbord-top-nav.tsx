@@ -1,6 +1,7 @@
 "use client"
 
 import ModeToggle from '@/components/mode-toggle'
+import { AdminNotificationBell } from '@/components/notifications/admin-notification-bell'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
@@ -116,6 +117,7 @@ export default function DashboardTopNav({ children }: { children: ReactNode }) {
           </SheetContent>
         </Sheet>
         <div className="flex justify-center items-center gap-2 ml-auto">
+          <AdminNotificationBell />
           <AICostBadge />
           {config?.auth?.enabled && <UserProfile />}
           <ModeToggle />

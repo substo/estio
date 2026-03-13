@@ -44,6 +44,8 @@ interface ConversationListProps {
     onArchive?: (ids: string[]) => void;
     onNewConversationClick?: () => void;
     onSyncAllClick?: () => void;
+    selectedTaskId?: string | null;
+    onSelectTask?: (taskId: string | null, conversationId?: string | null) => void;
     searchQuery?: string;
     onSearchChange?: (q: string) => void;
     isSearching?: boolean;
@@ -98,6 +100,8 @@ export function ConversationList({
     onArchive,
     onNewConversationClick,
     onSyncAllClick,
+    selectedTaskId = null,
+    onSelectTask,
     searchQuery = "",
     onSearchChange,
     isSearching = false,
@@ -511,6 +515,8 @@ export function ConversationList({
                 <GlobalTaskList
                     selectedConversationId={selectedId}
                     onSelectConversation={onSelect}
+                    selectedTaskId={selectedTaskId}
+                    onSelectTask={onSelectTask}
                 />
             </div>
         );

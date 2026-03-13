@@ -57,6 +57,16 @@ export default async function SettingsPage() {
           </Link>
         </div>
 
+        <div className="p-4 border rounded-lg bg-card text-card-foreground shadow-sm">
+          <h2 className="text-lg font-semibold mb-2">Notifications</h2>
+          <p className="text-sm text-muted-foreground mb-4">
+            Manage your task reminder timing, quiet hours, and browser push devices.
+          </p>
+          <Link href="/admin/settings/notifications">
+            <Button variant="outline">Manage Notifications</Button>
+          </Link>
+        </div>
+
         {/* Integrations Card */}
         <div className="p-4 border rounded-lg bg-card text-card-foreground shadow-sm">
           <h2 className="text-lg font-semibold mb-2">Integrations</h2>

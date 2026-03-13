@@ -38,8 +38,9 @@ SQL rollout helper: `prisma/sql/conversations-performance-indexes.sql`
 ## Feature Logic
 
 ### 1. View Filters
-The Conversation List (`/admin/conversations`) now supports three distinct views:
+The Conversation List (`/admin/conversations`) now supports four distinct views:
 - **Inbox** (`active`): Shows conversations where `deletedAt` is NULL and `archivedAt` is NULL.
+- **Tasks** (`tasks`): Replaces the left conversation list with the global task list and supports task-selection deep links.
 - **Archived** (`archived`): Shows conversations where `archivedAt` is SET and `deletedAt` is NULL.
 - **Trash** (`trash`): Shows conversations where `deletedAt` is SET (regardless of archive status).
 
@@ -220,11 +221,15 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
 | `getWhatsAppChannelEligibility(conversationId)` | Returns WhatsApp send eligibility based on contact phone validity + Evolution checks. |
 
 ## UI Implementation
-- **View Filters**: `ConversationList` header uses icon buttons (Inbox, Archive, Trash) with a hoverable dropdown for quick switching.
+- **View Filters**: `ConversationList` header uses icon buttons/dropdown states for Inbox, Tasks, Archive, and Trash with quick switching from the same control surface.
 - **Selection Mode**: Allows bulk actions (Archive, Delete, Restore) with a "Cancel" button aligned next to actions.
 - **Safety**: "Delete Forever" dialog only appears when deleting items from the Trash view.
-- **URL Synchronization**: View state (`active`, `archived`, `trash`) is synced to the URL (`?view=...`), allowing for bookmarking and sharing of specific lists.
-- **Shallow URL Sync**: When `shallowUrlSync` is enabled, the client updates `id` / `view` / `mode` / `dealId` using `history.replaceState(...)` and restores them via `popstate`, avoiding unnecessary App Router churn during thread switches.
+- **URL Synchronization**: View state (`active`, `tasks`, `archived`, `trash`) is synced to the URL (`?view=...`), allowing for bookmarking and sharing of specific lists.
+- **Shallow URL Sync**: When `shallowUrlSync` is enabled, the client updates `id` / `task` / `view` / `mode` / `dealId` using `history.replaceState(...)` and restores them via `popstate`, avoiding unnecessary App Router churn during thread switches.
+- **Task Workspace Deep Links**:
+  - `?view=tasks&task=<taskId>` highlights the task row and opens the shared task detail dialog
+  - `?view=tasks&task=<taskId>&id=<ghlConversationId>` also hydrates the related conversation in the background workspace
+  - full reminder and notification behavior is documented in [task-deadline-reminders.md](/Users/martingreen/Projects/IDX/documentation/task-deadline-reminders.md)
 - **Infinite Scroll**: The left list auto-loads more conversations near the bottom using a sentinel + `IntersectionObserver`, with a visible "Load more" fallback.
 - **Deep-Link Stability**: URL-selected conversations are preserved during list refreshes and view changes, preventing the center panel from dropping back to "Select a conversation" when the selected item is older than the first page.
 - **Live Inbox Reordering**: Inbox updates are merged with incoming-first ordering so newly active conversations move to top in real time.

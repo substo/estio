@@ -9415,6 +9415,10 @@ export async function applySuggestedTasksFromSelection(
 
     try {
         const location = await getAuthenticatedLocation();
+        const actor = await resolveLocationActorContext(location.id);
+        if (!actor.hasAccess) {
+            return { success: false as const, error: "Unauthorized" };
+        }
         const conversation = await resolveConversationForCrmLog(location.id, sanitizedConversationId);
         if (!conversation) {
             return { success: false as const, error: "Conversation not found" };
@@ -9446,6 +9450,7 @@ export async function applySuggestedTasksFromSelection(
                 description: suggestion.description || undefined,
                 dueAt: suggestion.dueAt || undefined,
                 priority: suggestion.priority,
+                assignedUserId: actor.userId || undefined,
                 source: "ai_selection",
             });
 

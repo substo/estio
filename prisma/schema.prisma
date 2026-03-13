@@ -47,6 +47,8 @@ model Location {
   aiRuntimeJobs                 AiRuntimeJob[]
   aiSuggestedResponses          AiSuggestedResponse[]
   legacyCrmLeadEmailProcessings LegacyCrmLeadEmailProcessing[]
+  userNotifications             UserNotification[]
+  taskReminderJobs              TaskReminderJob[]
 
   // WhatsApp Integration (Native)
   whatsappBusinessAccountId String?
@@ -173,6 +175,10 @@ model User {
   assignedContactTasks ContactTask[]    @relation("ContactTaskAssignedUser")
   createdContactTasks  ContactTask[]    @relation("ContactTaskCreatedByUser")
   updatedContactTasks  ContactTask[]    @relation("ContactTaskUpdatedByUser")
+  webPushSubscriptions WebPushSubscription[]
+  userNotifications    UserNotification[]
+  taskReminderJobs     TaskReminderJob[]
+  taskReminderPreference UserTaskReminderPreference?
   settingsAuditLogs    SettingsAuditLog[] @relation("SettingsAuditActor")
   acceptedAiSuggestedResponses AiSuggestedResponse[] @relation("AiSuggestedResponseAcceptedBy")
   rejectedAiSuggestedResponses AiSuggestedResponse[] @relation("AiSuggestedResponseRejectedBy")
@@ -493,6 +499,7 @@ model Contact {
 
   insights Insight[]
   tasks    ContactTask[]
+  userNotifications UserNotification[]
   aiAutomationJobs    AiAutomationJob[]
   aiDecisions         AiDecision[]
   aiSuggestedResponses AiSuggestedResponse[]
@@ -1030,6 +1037,7 @@ model Conversation {
   participants ConversationParticipant[]
   insights     Insight[]
   contactTasks ContactTask[]
+  userNotifications UserNotification[]
   aiAutomationJobs AiAutomationJob[]
   aiDecisions      AiDecision[]
   aiSuggestedResponses AiSuggestedResponse[]
@@ -1062,6 +1070,8 @@ model ContactTask {
   completedAt    DateTime?
   assignedUserId String?
   source         String    @default("manual") // manual, ai_selection, automation
+  reminderMode   String    @default("default") // default, custom, off
+  reminderOffsets Json? // array of offset minutes when reminderMode=custom
 
   createdByUserId String?
   updatedByUserId String?
@@ -1078,6 +1088,8 @@ model ContactTask {
 
   syncRecords ContactTaskSync[]
   outboxJobs  ContactTaskOutbox[]
+  reminderJobs TaskReminderJob[]
+  notifications UserNotification[]
 
   @@index([locationId, contactId, status, dueAt])
   @@index([conversationId, status, dueAt])
@@ -1138,6 +1150,92 @@ model ContactTaskOutbox {
   @@index([provider, status, scheduledAt])
   @@index([locationId, status, scheduledAt])
   @@index([taskId, status, scheduledAt])
+}
+
+model TaskReminderJob {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  taskId      String
+  userId      String
+  locationId  String
+  slotKey     String
+  offsetMinutes Int
+  scheduledFor DateTime
+
+  status       String    @default("pending") // pending, processing, completed, failed, dead, canceled
+  lockedAt     DateTime?
+  lockedBy     String?
+  processedAt  DateTime?
+  attemptCount Int       @default(0)
+  lastAttemptAt DateTime?
+  lastError    String?   @db.Text
+
+  idempotencyKey String @unique
+
+  task         ContactTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location     Location    @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  notification UserNotification? @relation("TaskReminderNotification")
+
+  @@index([status, scheduledFor])
+  @@index([taskId, status, scheduledFor])
+  @@index([userId, status, scheduledFor])
+  @@index([locationId, status, scheduledFor])
+}
+
+model UserNotification {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId         String
+  locationId     String?
+  type           String // task_deadline
+  title          String
+  body           String?  @db.Text
+  deepLinkUrl    String?
+  taskId         String?
+  contactId      String?
+  conversationId String?
+  taskReminderJobId String? @unique
+  payload        Json?
+  readAt         DateTime?
+  clickedAt      DateTime?
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location        Location?        @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  task            ContactTask?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  contact         Contact?         @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  conversation    Conversation?    @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  taskReminderJob TaskReminderJob? @relation("TaskReminderNotification", fields: [taskReminderJobId], references: [id], onDelete: SetNull)
+  deliveries      UserNotificationDelivery[]
+
+  @@index([userId, readAt, createdAt])
+  @@index([taskId])
+  @@index([contactId])
+  @@index([conversationId])
+}
+
+model UserNotificationDelivery {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  notificationId String
+  channel        String // in_app, web_push
+  status         String @default("pending") // pending, delivered, failed, disabled
+  attemptCount   Int    @default(0)
+  lastAttemptAt  DateTime?
+  deliveredAt    DateTime?
+  lastError      String? @db.Text
+  metadata       Json?
+
+  notification UserNotification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, channel])
+  @@index([channel, status, lastAttemptAt])
 }
 
 model ConversationParticipant {
@@ -1502,6 +1600,49 @@ model OutlookSyncState {
   deltaLinkContacts String? @db.Text
 
   lastSyncedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model WebPushSubscription {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId    String
+  endpoint  String   @unique
+  p256dh    String   @db.Text
+  auth      String   @db.Text
+  status    String   @default("active") // active, inactive
+  deviceLabel String?
+  userAgent String?  @db.Text
+  browser   String?
+  platform  String?
+  expiration DateTime?
+  lastUsedAt DateTime?
+  lastSuccessAt DateTime?
+  lastFailureAt DateTime?
+  failureCount Int   @default(0)
+  metadata   Json?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+}
+
+model UserTaskReminderPreference {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId             String  @unique
+  enabled            Boolean @default(true)
+  inAppEnabled       Boolean @default(true)
+  webPushEnabled     Boolean @default(true)
+  defaultOffsets     Json?
+  quietHoursEnabled  Boolean @default(true)
+  quietHoursStartHour Int    @default(21)
+  quietHoursEndHour   Int    @default(8)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

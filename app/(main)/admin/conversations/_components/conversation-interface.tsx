@@ -529,8 +529,10 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
     // Initialize Active ID from URL
     const initialActiveId = searchParams.get('id') || (initialConversations.length > 0 ? initialConversations[0].id : null);
+    const initialTaskId = searchParams.get('task');
     const [activeId, setActiveId] = useState<string | null>(initialActiveId);
     const activeIdRef = useRef<string | null>(initialActiveId);
+    const [selectedTaskId, setSelectedTaskId] = useState<string | null>(initialTaskId);
 
     // View Mode State (inbox, archived, trash)
     const [viewFilter, setViewFilter] = useState<'active' | 'archived' | 'trash' | 'tasks'>(normalizedViewFilter);
@@ -635,10 +637,12 @@ export function ConversationInterface({ locationId, initialConversations, initia
                         : rawView
                     : 'active';
             const nextId = params.get('id');
+            const nextTaskId = params.get('task');
             const nextMode = (params.get('mode') as 'chats' | 'deals') || 'chats';
             const nextDealId = params.get('dealId');
 
             setUrlConversationId(nextId);
+            setSelectedTaskId(nextTaskId);
             setViewMode(nextMode);
             setActiveDealId(nextDealId);
             setViewFilter(
@@ -699,10 +703,17 @@ export function ConversationInterface({ locationId, initialConversations, initia
         const view = viewFilter === 'active' ? null : viewFilter;
         updateUrl({
             view,
-            id: activeId
+            id: activeId,
+            task: viewFilter === 'tasks' ? selectedTaskId : null,
         });
         setUrlConversationId(activeId);
-    }, [viewFilter, activeId, updateUrl]);
+    }, [viewFilter, activeId, selectedTaskId, updateUrl]);
+
+    useEffect(() => {
+        if (viewFilter === 'tasks') return;
+        if (!selectedTaskId) return;
+        setSelectedTaskId(null);
+    }, [viewFilter, selectedTaskId]);
 
     useEffect(() => {
         activeIdRef.current = activeId;
@@ -1705,7 +1716,8 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const selectedConversations = conversations.filter(c => selectedIds.has(c.id));
     const selectedDealConversation = activeDealParticipants.find((conversation) => conversation.id === activeId) || null;
     const activeDealListEntry = deals.find((deal) => deal?.id === activeDealId) || null;
-    const activeDealTitle = String(activeDealListEntry?.title || "Deal").trim() || "Deal";
+    const activeDealSnapshot = activeDealId ? getCachedDealWorkspaceCoreSnapshot(activeDealId) : null;
+    const activeDealTitle = String(activeDealListEntry?.title || activeDealSnapshot?.title || "Deal").trim() || "Deal";
     const activeDealEnrichmentStatus = String(
         activeDealMetadata?.enrichment?.status
         || activeDealListEntry?.metadata?.enrichment?.status
@@ -2531,11 +2543,22 @@ export function ConversationInterface({ locationId, initialConversations, initia
     // Handle clicking a conversation in the list
     const handleSelect = (id: string) => {
         setActiveId(id);
+        setSelectedTaskId(null);
         markConversationReadInUi(id);
         if (isMobileViewport) {
             setMobilePane('window');
         }
     };
+
+    const handleSelectTask = useCallback((taskId: string | null, conversationId?: string | null) => {
+        if (conversationId) {
+            setActiveId(conversationId);
+        }
+        setSelectedTaskId(taskId);
+        if (isMobileViewport && taskId) {
+            setMobilePane('window');
+        }
+    }, [isMobileViewport]);
 
     const handleSelectDeal = (id: string) => {
         setActiveDealId(id);
@@ -3562,6 +3585,8 @@ export function ConversationInterface({ locationId, initialConversations, initia
             selectedIds={selectedIds}
             onToggleSelect={handleToggleSelect}
             onDelete={handleDelete}
+            selectedTaskId={selectedTaskId}
+            onSelectTask={handleSelectTask}
             onSelectAll={(select) => {
                 if (select) {
                     setSelectedIds(new Set(conversations.map(c => c.id)));
@@ -3699,6 +3724,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         activeDealId ? (
             <UnifiedTimeline
                 dealId={activeDealId}
+                title={activeDealTitle}
                 timelineEvents={dealTimelineEvents}
                 loading={loadingDealContext}
                 hydrationStatus={dealTimelineHydrationStatus}

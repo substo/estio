@@ -1,23 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { format } from 'date-fns';
-import { Loader2, Plus, Trash2, Circle, CheckCircle2, Clock3, AlertCircle, Ban } from 'lucide-react';
+import { Loader2, Plus, Trash2, Circle, CheckCircle2, Clock3, AlertCircle, Ban, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { TaskEditorDialog } from '@/components/tasks/task-editor-dialog';
 import { cn } from '@/lib/utils';
 import {
-  createContactTask,
   deleteContactTask,
   listContactTasks,
   setContactTaskCompletion,
@@ -84,12 +74,6 @@ function formatDueLabel(input?: Date | string | null) {
   const date = new Date(input);
   if (Number.isNaN(date.getTime())) return null;
   return format(date, 'PPp');
-}
-
-function getCurrentDateTimeLocalValue() {
-  const now = new Date();
-  const offset = now.getTimezoneOffset() * 60000;
-  return new Date(now.getTime() - offset).toISOString().slice(0, 16);
 }
 
 function getPriorityTone(priority: string) {
@@ -296,14 +280,6 @@ function clampCount(value: number) {
   return Math.max(0, value);
 }
 
-function incrementOpenTaskCounts(prev: TaskCounts): TaskCounts {
-  return {
-    all: prev.all + 1,
-    open: prev.open + 1,
-    completed: prev.completed,
-  };
-}
-
 function decrementTaskCounts(prev: TaskCounts, task: any): TaskCounts {
   const completed = isCompletedTask(task);
   return {
@@ -341,11 +317,8 @@ export function ContactTaskManager({
   const [filter, setFilter] = useState<TaskFilter>('open');
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [titleInput, setTitleInput] = useState('');
-  const [descriptionInput, setDescriptionInput] = useState('');
-  const [dueAtInput, setDueAtInput] = useState('');
-  const [addTaskModalOpen, setAddTaskModalOpen] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorTask, setEditorTask] = useState<any | null>(null);
   const [busyTaskIds, setBusyTaskIds] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const loadRequestIdRef = useRef(0);
@@ -414,84 +387,17 @@ export function ContactTaskManager({
     return () => window.removeEventListener('estio-tasks-mutated', handleMutated);
   }, [loadTasks]);
 
-  const canSubmit = useMemo(() => titleInput.trim().length > 0 && !submitting, [titleInput, submitting]);
-
   const openAddTaskModal = useCallback(() => {
     setError(null);
-    setDueAtInput(getCurrentDateTimeLocalValue());
-    setAddTaskModalOpen(true);
+    setEditorTask(null);
+    setEditorOpen(true);
   }, []);
 
-  const handleCreateTask = async () => {
-    const trimmedTitle = titleInput.trim();
-    if (!trimmedTitle) return;
-
-    const previousTasks = tasks;
-    const previousCounts = counts;
-    const optimisticId = `optimistic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const optimisticTask = normalizeTask({
-      id: optimisticId,
-      title: trimmedTitle,
-      description: descriptionInput.trim() || null,
-      dueAt: dueAtInput || null,
-      priority: 'medium',
-      status: 'open',
-      completedAt: null,
-      syncRecords: [],
-      outboxJobs: [],
-      _optimistic: true,
-    });
-
-    if (filter !== 'completed') {
-      setTasks((prev) => [optimisticTask, ...prev]);
-    }
-    setCounts((prev) => incrementOpenTaskCounts(prev));
-
-    setSubmitting(true);
-    setError(null);
-
-    try {
-      const res = await createContactTask({
-        contactId,
-        conversationId: conversationId || undefined,
-        title: trimmedTitle,
-        description: descriptionInput.trim() || undefined,
-        dueAt: dueAtInput || undefined,
-        priority: 'medium',
-        source: 'manual',
-      });
-
-      if (!res?.success) {
-        setTasks(previousTasks);
-        setCounts(previousCounts);
-        setError(res?.error || 'Failed to create task');
-        return;
-      }
-
-      const createdTask = normalizeTask(res.task);
-
-      setTasks((prev) => {
-        if (filter === 'completed') return prev;
-        if (prev.some((task) => task.id === optimisticId)) {
-          return prev.map((task) => (task.id === optimisticId ? createdTask : task));
-        }
-        if (prev.some((task) => task.id === createdTask.id)) return prev;
-        return [createdTask, ...prev];
-      });
-
-      setTitleInput('');
-      setDescriptionInput('');
-      setDueAtInput('');
-      setAddTaskModalOpen(false);
-      void loadTasks({ silent: true });
-    } catch (e: any) {
-      setTasks(previousTasks);
-      setCounts(previousCounts);
-      setError(e?.message || 'Failed to create task');
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  const handleEditorSaved = useCallback(() => {
+    setEditorOpen(false);
+    setEditorTask(null);
+    void loadTasks({ silent: true });
+  }, [loadTasks]);
 
   const handleToggleComplete = async (taskId: string, completed: boolean) => {
     const previousTasks = tasks;
@@ -636,66 +542,20 @@ export function ContactTaskManager({
         </div>
       </div>
 
-      <Dialog
-        open={addTaskModalOpen}
+      <TaskEditorDialog
+        open={editorOpen}
         onOpenChange={(open) => {
-          setAddTaskModalOpen(open);
-          if (!open && !submitting) {
-            setTitleInput('');
-            setDescriptionInput('');
-            setDueAtInput('');
+          setEditorOpen(open);
+          if (!open) {
+            setEditorTask(null);
           }
         }}
-      >
-        <DialogContent className="sm:max-w-[560px]">
-          <DialogHeader>
-            <DialogTitle>Add Task</DialogTitle>
-            <DialogDescription>Create a new task for this contact.</DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-3">
-            <Input
-              value={titleInput}
-              onChange={(event) => setTitleInput(event.target.value)}
-              placeholder="Add task title"
-              className="h-9 text-sm"
-              autoFocus
-            />
-            <Textarea
-              value={descriptionInput}
-              onChange={(event) => setDescriptionInput(event.target.value)}
-              placeholder="Optional description"
-              className="min-h-[96px] text-sm"
-            />
-            <Input
-              type="datetime-local"
-              step={300}
-              value={dueAtInput}
-              onChange={(event) => setDueAtInput(event.target.value)}
-              className="h-9 text-xs"
-            />
-          </div>
-
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => setAddTaskModalOpen(false)}
-              disabled={submitting}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              onClick={handleCreateTask}
-              disabled={!canSubmit}
-            >
-              {submitting ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Plus className="mr-1 h-3.5 w-3.5" />}
-              Add task
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        mode={editorTask ? 'edit' : 'create'}
+        contactId={contactId}
+        conversationId={conversationId}
+        task={editorTask}
+        onSaved={handleEditorSaved}
+      />
 
       {error && <div className="text-xs text-red-600">{error}</div>}
 
@@ -734,16 +594,31 @@ export function ContactTaskManager({
                     </span>
                   </button>
 
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 text-muted-foreground hover:text-destructive"
-                    onClick={() => handleDelete(task.id)}
-                    disabled={isBusy}
-                  >
-                    {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 text-muted-foreground"
+                      onClick={() => {
+                        setEditorTask(task);
+                        setEditorOpen(true);
+                      }}
+                      disabled={isBusy}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                      onClick={() => handleDelete(task.id)}
+                      disabled={isBusy}
+                    >
+                      {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                    </Button>
+                  </div>
                 </div>
 
                 {task.description && (
@@ -759,6 +634,22 @@ export function ContactTaskManager({
                     <Badge variant="outline" className="text-[10px] h-5 bg-blue-50 text-blue-700 border-blue-200">
                       <Clock3 className="h-3 w-3 mr-1" />
                       {dueLabel}
+                    </Badge>
+                  )}
+
+                  {task.assignedUser?.name || task.assignedUser?.email ? (
+                    <Badge variant="outline" className="text-[10px] h-5 bg-violet-50 text-violet-700 border-violet-200">
+                      {task.assignedUser?.name || task.assignedUser?.email}
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-[10px] h-5 bg-zinc-50 text-zinc-700 border-zinc-200">
+                      No reminders until assigned
+                    </Badge>
+                  )}
+
+                  {!dueLabel && String(task.reminderMode || 'default') !== 'off' && (
+                    <Badge variant="outline" className="text-[10px] h-5 bg-zinc-50 text-zinc-700 border-zinc-200">
+                      Set due date to schedule reminders
                     </Badge>
                   )}
 

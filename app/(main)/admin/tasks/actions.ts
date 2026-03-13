@@ -1,13 +1,18 @@
 'use server';
 
+import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import db from '@/lib/db';
 import { auth } from '@clerk/nextjs/server';
 import { getLocationContext } from '@/lib/auth/location-context';
 import { verifyUserHasAccessToLocation } from '@/lib/auth/permissions';
+import { normalizeReminderOffsets } from '@/lib/tasks/reminder-config';
+import { rebuildTaskReminderJobs } from '@/lib/tasks/reminders';
 import { enqueueTaskSyncJobs } from '@/lib/tasks/sync-engine';
 
 const statusFilterSchema = z.enum(['open', 'completed', 'all']).default('all');
+const reminderModeSchema = z.enum(['default', 'custom', 'off']).default('default');
+const reminderOffsetsSchema = z.array(z.number().int().min(0).max(7 * 24 * 60)).max(10).optional();
 
 const createTaskSchema = z.object({
   contactId: z.string().optional(),
@@ -17,6 +22,8 @@ const createTaskSchema = z.object({
   dueAt: z.string().optional(),
   priority: z.enum(['low', 'medium', 'high']).default('medium'),
   assignedUserId: z.string().optional(),
+  reminderMode: reminderModeSchema,
+  reminderOffsets: reminderOffsetsSchema,
   source: z.enum(['manual', 'ai_selection', 'automation']).default('manual'),
 }).refine((value) => Boolean(value.contactId || value.conversationId), {
   message: 'contactId or conversationId is required',
@@ -29,7 +36,16 @@ const updateTaskSchema = z.object({
   dueAt: z.string().optional().nullable(),
   priority: z.enum(['low', 'medium', 'high']).optional(),
   assignedUserId: z.string().optional().nullable(),
+  reminderMode: reminderModeSchema.optional(),
+  reminderOffsets: reminderOffsetsSchema.nullable().optional(),
 });
+
+async function getCurrentUserRecord(clerkUserId: string) {
+  return db.user.findUnique({
+    where: { clerkId: clerkUserId },
+    select: { id: true, timeZone: true },
+  });
+}
 
 async function getAuthContext() {
   const { userId: clerkUserId } = await auth();
@@ -41,16 +57,14 @@ async function getAuthContext() {
   const hasAccess = await verifyUserHasAccessToLocation(clerkUserId, location.id);
   if (!hasAccess) throw new Error('Unauthorized');
 
-  const user = await db.user.findUnique({
-    where: { clerkId: clerkUserId },
-    select: { id: true },
-  });
+  const user = await getCurrentUserRecord(clerkUserId);
 
   if (!user?.id) throw new Error('User not found');
 
   return {
     location,
     userId: user.id,
+    currentUserTimeZone: user.timeZone || location.timeZone || 'UTC',
   };
 }
 
@@ -289,6 +303,168 @@ export async function listLocationTasks(statusFilter?: 'open' | 'completed' | 'a
   };
 }
 
+export async function listTaskAssignableUsers() {
+  const { location, userId, currentUserTimeZone } = await getAuthContext();
+
+  const users = await db.user.findMany({
+    where: {
+      locations: {
+        some: { id: location.id },
+      },
+    },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      timeZone: true,
+    },
+    orderBy: [
+      { name: 'asc' },
+      { email: 'asc' },
+    ],
+  });
+
+  return {
+    success: true as const,
+    currentUserId: userId,
+    currentUserTimeZone,
+    users: users.map((candidate) => ({
+      ...candidate,
+      effectiveTimeZone: candidate.timeZone || location.timeZone || 'UTC',
+    })),
+  };
+}
+
+export async function getTaskDetail(taskId: string) {
+  const { location } = await getAuthContext();
+  const id = String(taskId || '').trim();
+  if (!id) {
+    return { success: false as const, error: 'Task ID is required' };
+  }
+
+  const task = await db.contactTask.findFirst({
+    where: {
+      id,
+      locationId: location.id,
+      deletedAt: null,
+    },
+    include: {
+      contact: {
+        select: {
+          id: true,
+          name: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+          phone: true,
+        },
+      },
+      conversation: {
+        select: {
+          id: true,
+          ghlConversationId: true,
+        },
+      },
+      assignedUser: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          timeZone: true,
+          taskReminderPreference: true,
+        },
+      },
+      createdByUser: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+        },
+      },
+      updatedByUser: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+        },
+      },
+      syncRecords: {
+        select: {
+          provider: true,
+          status: true,
+          lastSyncedAt: true,
+          lastError: true,
+          attemptCount: true,
+        },
+      },
+      outboxJobs: {
+        where: {
+          status: {
+            in: ['pending', 'processing', 'failed', 'dead'],
+          },
+        },
+        orderBy: [
+          { status: 'asc' },
+          { scheduledAt: 'asc' },
+          { createdAt: 'desc' },
+        ],
+        select: {
+          provider: true,
+          status: true,
+          operation: true,
+          attemptCount: true,
+          scheduledAt: true,
+          lastError: true,
+          createdAt: true,
+        },
+      },
+      reminderJobs: {
+        orderBy: [
+          { scheduledFor: 'asc' },
+          { createdAt: 'asc' },
+        ],
+        take: 12,
+        include: {
+          notification: {
+            include: {
+              deliveries: {
+                select: {
+                  channel: true,
+                  status: true,
+                  deliveredAt: true,
+                  lastAttemptAt: true,
+                  lastError: true,
+                },
+              },
+            },
+          },
+        },
+      },
+      notifications: {
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+        include: {
+          deliveries: {
+            select: {
+              channel: true,
+              status: true,
+              deliveredAt: true,
+              lastAttemptAt: true,
+              lastError: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!task) {
+    return { success: false as const, error: 'Task not found' };
+  }
+
+  return { success: true as const, task };
+}
+
 export async function createContactTask(input: z.input<typeof createTaskSchema>) {
   const { location, userId } = await getAuthContext();
   const parsed = createTaskSchema.parse(input);
@@ -326,7 +502,10 @@ export async function createContactTask(input: z.input<typeof createTaskSchema>)
     assignedUserId = assignee?.id || null;
   }
 
-  const dueAt = parseDueAt(parsed.dueAt || null) || new Date();
+  const dueAt = parseDueAt(parsed.dueAt || null);
+  const reminderOffsets = parsed.reminderMode === 'custom'
+    ? normalizeReminderOffsets(parsed.reminderOffsets)
+    : Prisma.JsonNull;
 
   const task = await db.contactTask.create({
     data: {
@@ -339,6 +518,8 @@ export async function createContactTask(input: z.input<typeof createTaskSchema>)
       priority: parsed.priority,
       source: parsed.source,
       assignedUserId,
+      reminderMode: parsed.reminderMode,
+      reminderOffsets,
       createdByUserId: userId,
       updatedByUserId: userId,
     },
@@ -351,11 +532,13 @@ export async function createContactTask(input: z.input<typeof createTaskSchema>)
     taskId: task.id,
     operation: 'create',
   });
+  const reminders = await rebuildTaskReminderJobs(task.id);
 
   return {
     success: true,
     task,
     queue,
+    reminders,
   };
 }
 
@@ -398,6 +581,11 @@ export async function updateContactTask(input: z.input<typeof updateTaskSchema>)
   const dueAt = parsed.dueAt === undefined
     ? undefined
     : parseDueAt(parsed.dueAt);
+  const reminderOffsets = parsed.reminderMode === undefined
+    ? undefined
+    : parsed.reminderMode === 'custom'
+      ? normalizeReminderOffsets(parsed.reminderOffsets)
+      : Prisma.JsonNull;
 
   const task = await db.contactTask.update({
     where: { id: existing.id },
@@ -407,6 +595,8 @@ export async function updateContactTask(input: z.input<typeof updateTaskSchema>)
       ...(parsed.priority !== undefined ? { priority: parsed.priority } : {}),
       ...(dueAt !== undefined ? { dueAt } : {}),
       ...(assignedUserId !== undefined ? { assignedUserId } : {}),
+      ...(parsed.reminderMode !== undefined ? { reminderMode: parsed.reminderMode } : {}),
+      ...(reminderOffsets !== undefined ? { reminderOffsets } : {}),
       updatedByUserId: userId,
       syncVersion: { increment: 1 },
     },
@@ -419,11 +609,13 @@ export async function updateContactTask(input: z.input<typeof updateTaskSchema>)
     taskId: task.id,
     operation: 'update',
   });
+  const reminders = await rebuildTaskReminderJobs(task.id);
 
   return {
     success: true,
     task,
     queue,
+    reminders,
   };
 }
 
@@ -460,11 +652,13 @@ export async function setContactTaskCompletion(taskId: string, completed: boolea
     taskId: task.id,
     operation: completed ? 'complete' : 'uncomplete',
   });
+  const reminders = await rebuildTaskReminderJobs(task.id);
 
   return {
     success: true,
     task,
     queue,
+    reminders,
   };
 }
 
@@ -498,10 +692,12 @@ export async function deleteContactTask(taskId: string) {
     taskId: task.id,
     operation: 'delete',
   });
+  const reminders = await rebuildTaskReminderJobs(task.id);
 
   return {
     success: true,
     task,
     queue,
+    reminders,
   };
 }

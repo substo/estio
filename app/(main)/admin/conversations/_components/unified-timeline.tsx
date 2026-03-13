@@ -14,6 +14,7 @@ import { SuggestedResponseQueue, type SuggestedResponseQueueItem } from "./sugge
 
 interface UnifiedTimelineProps {
     dealId: string;
+    title?: string;
     timelineEvents: any[];
     loading: boolean;
     hydrationStatus?: 'partial' | 'full';
@@ -43,6 +44,7 @@ interface UnifiedTimelineProps {
 
 export function UnifiedTimeline({
     dealId,
+    title,
     timelineEvents,
     loading,
     hydrationStatus = 'full',
@@ -229,7 +231,7 @@ export function UnifiedTimeline({
                         </Button>
                     )}
                     <MessageSquare className="w-4 h-4 shrink-0" />
-                    <span className="font-semibold text-sm truncate">Unified Timeline</span>
+                    <span className="font-semibold text-sm truncate">{String(title || "Deal").trim() || "Deal"}</span>
                 </div>
                 <div className="flex items-center gap-2">
                     <div className="text-xs text-muted-foreground hidden sm:block">

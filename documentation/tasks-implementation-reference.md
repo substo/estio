@@ -1,44 +1,50 @@
 # Tasks Implementation Reference
+**Last Updated:** 2026-03-13
 
 ## Purpose
 This document is the current implementation reference for contact tasks in Estio. It covers:
 
-- Core task schema and relationships
-- Local task lifecycle (create/update/complete/delete)
-- Sync-out architecture to GoHighLevel and Google Tasks
-- Task UI surfaces in Mission Control and Contact modal
-- AI task suggestion generate/apply flow and telemetry
-- Main files to touch for future changes
+- local-first task storage and lifecycle
+- provider sync-out to GoHighLevel and Google Tasks
+- assignment, reminder, and notification entry points
+- task UI surfaces across Contacts and Mission Control
+- AI task suggestion generate/apply flow
 
-This reflects the codebase state at commit `fd0cee5` (March 1, 2026).
+> [!NOTE]
+> The dedicated source of truth for the reminder subsystem is [task-deadline-reminders.md](/Users/martingreen/Projects/IDX/documentation/task-deadline-reminders.md). This document keeps only the task-domain context needed to understand where reminders fit.
 
 ## Scope Summary
 
-- Tasks are stored locally first (`ContactTask`).
-- Every mutation enqueues provider sync jobs (outbox pattern).
-- Sync-out currently targets:
-  - GoHighLevel contact tasks
-  - Google Tasks (per-user selected task list)
+- `ContactTask` remains the local source of truth.
+- Every task mutation still enqueues provider sync jobs through the outbox pattern.
+- Task reminders are now also local-first:
+  - reminder jobs are generated from the local task record
+  - delivery fan-out is handled from the local database only
+  - GHL and Google remain sync targets, not reminder schedulers
 - Tasks are visible in:
+  - Contact modal
   - Mission Control coordinator panel
-  - Contact modal (`Tasks` tab)
-  - Message selection toolbar (AI suggestions + apply)
-- Suggestion funnel telemetry is stored and visualized.
+  - Mission Control global tasks workspace (`/admin/conversations?view=tasks`)
+  - message selection toolbar (manual quick-create + AI suggestions)
+- In-app reminder notifications are surfaced from the admin top-nav bell.
 
 ## High-Level Architecture
 
 ```mermaid
 flowchart LR
-  A["UI (Contact Modal / Mission Control / Selection Toolbar)"] --> B["Server Actions (tasks/actions.ts + conversations/actions.ts)"]
+  A["Task UI (Contact / Mission Control / Selection Toolbar)"] --> B["Server Actions<br/>tasks/actions.ts + conversations/actions.ts"]
   B --> C["ContactTask (local DB)"]
-  B --> D["ContactTaskOutbox jobs"]
-  D --> E["Cron: /api/cron/task-sync"]
-  E --> F["Sync Engine (lib/tasks/sync-engine.ts)"]
-  F --> G["GHL Provider API"]
-  F --> H["Google Tasks API"]
-  F --> I["ContactTaskSync status records"]
-  B --> J["Telemetry: AgentExecution + AgentEvent"]
-  J --> K["Funnel Metrics UI"]
+  B --> D["ContactTaskOutbox"]
+  B --> E["TaskReminderJob"]
+  D --> F["/api/cron/task-sync"]
+  F --> G["lib/tasks/sync-engine.ts"]
+  G --> H["GHL Provider"]
+  G --> I["Google Tasks Provider"]
+  E --> J["/api/cron/task-reminders"]
+  J --> K["lib/tasks/reminders.ts"]
+  K --> L["UserNotification + Delivery Log"]
+  K --> M["Redis-backed notification SSE"]
+  K --> N["Web Push"]
 ```
 
 ## Data Model
@@ -47,160 +53,130 @@ Primary schema lives in [`prisma/schema.prisma`](/Users/martingreen/Projects/IDX
 
 ### `ContactTask`
 
-- Local source of truth for tasks
+- Local source of truth for tasks.
 - Key fields:
   - `locationId`, `contactId`, optional `conversationId`
-  - `title`, `description`, `status`, `priority`, `dueAt`, `completedAt`
+  - `title`, `description`, `status`, `priority`, nullable `dueAt`, `completedAt`
   - `source` (`manual`, `ai_selection`, `automation`)
-  - `assignedUserId`, audit user ids, `deletedAt`
-  - `syncVersion` (used in outbox idempotency/supersede logic)
+  - `assignedUserId`
+  - `reminderMode` (`default`, `custom`, `off`)
+  - `reminderOffsets` (JSON array of minute offsets when `reminderMode = "custom"`)
+  - audit user ids, `deletedAt`, `syncVersion`
 - Soft delete behavior:
-  - Delete sets `deletedAt` and `status = "canceled"`
+  - delete sets `deletedAt` and `status = "canceled"`
 
 ### `ContactTaskSync`
 
-- Provider sync state per task/provider/account
+- Provider sync state per task/provider/account.
 - Unique key:
   - `(taskId, provider, providerAccountId)`
 - Tracks:
-  - `providerTaskId`, `providerContainerId`
-  - `status` (`pending`, `synced`, `error`, `disabled`)
-  - attempts, last error, last sync metadata
+  - remote ids/container ids
+  - sync status (`pending`, `synced`, `error`, `disabled`)
+  - attempts, errors, timestamps
 
 ### `ContactTaskOutbox`
 
-- Durable queue for sync operations
+- Durable queue for provider sync operations.
 - Stores:
   - `provider` (`ghl`, `google`)
   - `operation` (`create`, `update`, `complete`, `uncomplete`, `delete`)
-  - retry/lock scheduling state
-  - unique `idempotencyKey` (`taskId:provider:operation:v{syncVersion}`)
+  - retry and lock state
+  - idempotency key `taskId:provider:operation:v{syncVersion}`
 
-### Related `User` fields for Google Tasks
+### Reminder / notification models
 
-- `googleTasklistId`
-- `googleTasklistTitle`
-- plus OAuth tokens used by Google provider
+- `TaskReminderJob`
+- `UserNotification`
+- `UserNotificationDelivery`
+- `WebPushSubscription`
+- `UserTaskReminderPreference`
 
-### Telemetry tables used by task suggestions
+Full schema and lifecycle details for these models live in [task-deadline-reminders.md](/Users/martingreen/Projects/IDX/documentation/task-deadline-reminders.md).
 
-- `AgentExecution` for model execution traces (prompt/usage/latency/cost)
-- `AgentEvent` for funnel events and metrics aggregation
-
-## Server Actions: Local Task Lifecycle
+## Server Actions
 
 Primary file: [`app/(main)/admin/tasks/actions.ts`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/tasks/actions.ts)
 
 ### Auth and scope
 
-- Uses Clerk auth + location context + membership verification
-- All operations are location-scoped
-- Contact can be resolved by local id or `ghlContactId`
-- Conversation can be resolved by local id or `ghlConversationId`
+- Uses Clerk auth + location context + membership verification.
+- All operations are location-scoped.
+- Contacts can be resolved by local id or `ghlContactId`.
+- Conversations can be resolved by local id or `ghlConversationId`.
 
 ### Available actions
 
 - `listContactTasks(contactId, statusFilter)`
-  - Filters open/completed/all
-  - Returns counts and includes sync/outbox status for badges
+  - returns per-contact task list, counts, sync badges, and assignment/reminder metadata used by Contact and Mission Control panels
+- `listLocationTasks(statusFilter)`
+  - powers the global Mission Control tasks list
+- `listTaskAssignableUsers()`
+  - returns location members plus the current user id/timezone for assignment UI defaults
+- `getTaskDetail(taskId)`
+  - returns full task context for the shared detail dialog, including reminder jobs, notification deliveries, provider sync state, contact, and conversation metadata
 - `createContactTask(input)`
-  - Requires `contactId` or `conversationId`
-  - Defaults `dueAt` to the task creation timestamp when input is missing/invalid
-  - Creates local task, then enqueues sync jobs
+  - requires `contactId` or `conversationId`
+  - keeps `dueAt` nullable when no due date is provided
+  - persists `assignedUserId`, `reminderMode`, and optional `reminderOffsets`
+  - creates the local task, enqueues sync jobs, then rebuilds reminder jobs
 - `updateContactTask(input)`
-  - Updates editable fields, increments `syncVersion`, enqueues `update`
+  - updates editable fields, increments `syncVersion`, enqueues provider sync, then rebuilds reminder jobs
 - `setContactTaskCompletion(taskId, completed)`
-  - Sets status/completedAt, increments `syncVersion`, enqueues `complete` or `uncomplete`
+  - sets status/completed state, increments `syncVersion`, enqueues `complete` or `uncomplete`, then rebuilds reminder jobs
 - `deleteContactTask(taskId)`
-  - Soft deletes (`deletedAt`), sets `canceled`, increments `syncVersion`, enqueues `delete`
+  - soft deletes, marks `canceled`, increments `syncVersion`, enqueues `delete`, then rebuilds reminder jobs
 
-## Sync Engine and Outbox Processing
+## Provider Sync-Out
 
 Primary file: [`lib/tasks/sync-engine.ts`](/Users/martingreen/Projects/IDX/lib/tasks/sync-engine.ts)
+
+### Important reminder-related rule
+
+- Provider payloads may still synthesize a fallback due date when a remote API requires one.
+- That fallback is transport-only.
+- The local `ContactTask.dueAt` remains nullable and is the only field used for reminder eligibility/scheduling.
 
 ### Provider availability
 
 - GHL enabled when location has `ghlAccessToken` and `ghlLocationId`
-- Google enabled when selected sync user has Google credentials
+- Google enabled when the selected sync user has Google credentials
 - Google sync user selection order:
-  - `assignedUser` -> `createdByUser` -> `updatedByUser`
+  - `assignedUser`
+  - `createdByUser`
+  - `updatedByUser`
 
-### Queueing
+### Queueing and worker behavior
 
 - `enqueueTaskSyncJobs({ taskId, operation, providers?, scheduledAt? })`
-- Generates idempotency key with current `syncVersion`
-- Duplicate key collisions are treated as intentional idempotency
-- Keeps `ContactTaskSync` in `pending` while queued/requeued
+- idempotency key includes `syncVersion`
+- stale jobs are superseded when their version is older than the task’s current `syncVersion`
+- retry/backoff/dead-letter behavior is unchanged from the original outbox design
 
-### Worker execution
+## Reminder Integration
 
-- `processTaskSyncOutboxBatch({ batchSize, workerId })`
-- Recovers stale processing locks older than 5 minutes
-- Claims pending/failed due jobs via atomic `updateMany` status transition
-- Calls `processSingleOutboxJob(...)`
+Reminder scheduling and delivery are implemented in [`lib/tasks/reminders.ts`](/Users/martingreen/Projects/IDX/lib/tasks/reminders.ts).
 
-### Retry and dead-letter behavior
+### Core rules
 
-- Max attempts: `6`
-- Backoff: exponential with jitter (up to 30 minutes)
-- Retryable:
-  - network/unknown errors
-  - HTTP `408`, `409`, `425`, `429`, `5xx`
-- Non-retryable:
-  - GHL `400`, `401`, `403`, `404`, `422`
-  - general `4xx` (except retryable list above)
-- Terminal outcomes:
-  - `completed` on success
-  - `failed` when retrying
-  - `dead` when non-retryable or max attempts reached
+- reminders are for the assigned user only
+- a task only becomes reminder-eligible when all of the following are true:
+  - `status = "open"`
+  - `deletedAt IS NULL`
+  - `assignedUserId` is present
+  - `dueAt` is present
+  - `reminderMode != "off"`
+  - the assigned user’s reminder preferences are enabled
+- every task mutation rebuilds its reminder jobs
+- reminder job idempotency also includes task `syncVersion`
 
-### Supersede logic
+### Cron
 
-- Outbox key includes `v{syncVersion}`
-- If a job’s version is older than current task `syncVersion`, it is marked completed as superseded and skipped
+- `/api/cron/task-reminders`
+- guarded by `CronGuard`
+- processes all due `TaskReminderJob` rows
 
-## Provider Implementations
-
-### GoHighLevel provider
-
-File: [`lib/tasks/providers/ghl.ts`](/Users/martingreen/Projects/IDX/lib/tasks/providers/ghl.ts)
-
-- Create: `POST /contacts/{ghlContactId}/tasks`
-- Update: `PUT /contacts/{ghlContactId}/tasks/{providerTaskId}`
-- Complete toggle:
-  - Preferred endpoint: `PUT .../completed`
-  - Fallback: `PUT .../tasks/{id}` with `completed`
-- Delete: `DELETE /contacts/{ghlContactId}/tasks/{providerTaskId}`
-- Notable behavior:
-  - If task contact is not linked yet, sync engine calls `ensureRemoteContact(...)`
-  - For GHL payload, `dueDate` is always provided (defaults to now if missing)
-
-### Google Tasks provider
-
-File: [`lib/tasks/providers/google.ts`](/Users/martingreen/Projects/IDX/lib/tasks/providers/google.ts)
-
-- Uses Google Tasks API via `googleapis`
-- Supports listing tasklists for settings UI
-- Default list id: `@default`
-- Operations:
-  - Create: `tasks.insert`
-  - Update: `tasks.update`
-  - Complete toggle: `tasks.patch`
-  - Delete: `tasks.delete`
-- Stores and reuses `providerContainerId` (tasklist id) so existing remote tasks remain on their original list
-
-## Scheduled Execution
-
-Cron endpoint: [`app/api/cron/task-sync/route.ts`](/Users/martingreen/Projects/IDX/app/api/cron/task-sync/route.ts)
-
-- `GET /api/cron/task-sync`
-- Optional bearer secret check via `CRON_SECRET`
-- Uses `CronGuard` lock/resource checks to avoid overlap and high-load runs
-- Processes batch with `processTaskSyncOutboxBatch({ batchSize: 25 })`
-- Also processes viewing outbox jobs with `processViewingSyncOutboxBatch({ batchSize: 25 })`
-
-> [!NOTE]
-> Viewing updates can trigger this cron endpoint immediately via an authenticated server-side request, so viewing sync does not always wait for the next scheduler tick. Full details live in [viewing-creation-architecture.md](/Users/martingreen/Projects/IDX/documentation/viewing-creation-architecture.md).
+For the full reminder architecture, delivery flow, feature flags, env vars, and deep-link behavior, see [task-deadline-reminders.md](/Users/martingreen/Projects/IDX/documentation/task-deadline-reminders.md).
 
 ## UI Surfaces
 
@@ -208,39 +184,97 @@ Cron endpoint: [`app/api/cron/task-sync/route.ts`](/Users/martingreen/Projects/I
 
 File: [`app/(main)/admin/contacts/_components/edit-contact-dialog.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/contacts/_components/edit-contact-dialog.tsx)
 
-- `Tasks` tab renders `ContactTaskManager` for the contact
+- `Tasks` tab renders `ContactTaskManager`
 
-### Mission Control side panel tasks
+### Mission Control coordinator panel
 
 File: [`app/(main)/admin/conversations/_components/coordinator-panel.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/conversations/_components/coordinator-panel.tsx)
 
-- Renders `ContactTaskManager` in coordinator panel for current conversation contact
+- Renders `ContactTaskManager` for the selected conversation contact
 
-### Shared task manager component
+### Shared task editor dialog
 
-File: [`components/tasks/contact-task-manager.tsx`](/Users/martingreen/Projects/IDX/components/tasks/contact-task-manager.tsx)
+File: [`components/tasks/task-editor-dialog.tsx`](/Users/martingreen/Projects/IDX/components/tasks/task-editor-dialog.tsx)
 
-- Supports compact mode and title customization
-- Features:
-  - optimistic create/complete/delete
-  - filters: open/done/all with counts
-  - add-task modal with title/description/due datetime
-  - provider sync badges (GHL/Google)
-  - retry/dead/processing/pending/synced UI states
+- used by both contact-level and Mission Control task surfaces
+- supports:
+  - assignment to any location member
+  - nullable due date
+  - reminder mode (`default`, `custom`, `off`)
+  - custom reminder offsets
+- create mode prefills the assignee to the current user
+- reminders only schedule when a due date and assignee are both saved
 
-### Message selection task actions (AI + manual)
+### Shared task detail dialog
 
-File: [`app/(main)/admin/conversations/_components/message-selection-actions.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/conversations/_components/message-selection-actions.tsx)
+File: [`components/tasks/task-detail-dialog.tsx`](/Users/martingreen/Projects/IDX/components/tasks/task-detail-dialog.tsx)
 
-- Selection toolbar actions include:
-  - `Task` (single manual task from selection)
-  - `Suggest` (AI-generated task suggestions)
-- Suggest flow:
-  - generate suggestions
-  - edit title/notes/priority/due
-  - select subset
-  - apply selected tasks to contact
-- Supports batch context from multiple selected snippets
+- shown from the Mission Control tasks workspace
+- includes:
+  - task metadata
+  - assignment
+  - reminder schedule and delivery state
+  - provider sync status
+  - contact and conversation shortcuts
+  - quick actions for edit/complete/delete
+
+### Mission Control global tasks workspace
+
+Files:
+
+- [`app/(main)/admin/conversations/_components/global-task-list.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/conversations/_components/global-task-list.tsx)
+- [`app/(main)/admin/conversations/_components/conversation-interface.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/conversations/_components/conversation-interface.tsx)
+
+- Mission Control now supports a dedicated tasks view in the left pane
+- URL-driven selection is supported with:
+  - `view=tasks`
+  - `task=<taskId>`
+  - optional `id=<ghlConversationId>`
+- selecting a task highlights the row and opens `TaskDetailDialog`
+
+### Admin notification bell
+
+Files:
+
+- [`components/notifications/admin-notification-bell.tsx`](/Users/martingreen/Projects/IDX/components/notifications/admin-notification-bell.tsx)
+- [`app/(main)/admin/_components/dashbord-top-nav.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/_components/dashbord-top-nav.tsx)
+
+- shows unread deadline reminders
+- allows mark-read actions
+- keeps only quick actions for the current browser push subscription
+- links to the dedicated user settings page at `/admin/settings/notifications`
+
+### User notification settings
+
+Files:
+
+- [`app/(main)/admin/settings/notifications/page.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/settings/notifications/page.tsx)
+- [`components/notifications/notification-settings-page.tsx`](/Users/martingreen/Projects/IDX/components/notifications/notification-settings-page.tsx)
+
+- this is the source of truth for user-level reminder settings
+- reuses the existing notification actions, subscription APIs, and reminder preference models
+- full reminder UX and delivery behavior is documented in [task-deadline-reminders.md](/Users/martingreen/Projects/IDX/documentation/task-deadline-reminders.md)
+
+## Message Selection Task Actions (AI + manual)
+
+Files:
+
+- [`app/(main)/admin/conversations/_components/message-selection-actions.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/conversations/_components/message-selection-actions.tsx)
+- [`app/(main)/admin/conversations/actions.ts`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/conversations/actions.ts)
+
+### Manual quick-create from selection
+
+- pre-fills title/notes from the selected text
+- pre-assigns the task to the current user
+- does **not** auto-fill a due date
+- explicitly tells the user reminders will start only after a due date is added later
+
+### AI suggestions
+
+- still generate/edit/apply multiple candidate tasks
+- selected suggestions are created through `createContactTask(...)`
+- applied suggestions now default assignment to the acting user
+- suggestion edit rows no longer default `dueAt` to “now”
 
 ## AI Task Suggestions and Telemetry
 
@@ -249,111 +283,68 @@ Primary file: [`app/(main)/admin/conversations/actions.ts`](/Users/martingreen/P
 ### Generation
 
 - `suggestTasksFromSelection(conversationId, selectedText, modelOverride?)`
-- Uses LLM in JSON mode
-- Enforces schema and normalization:
-  - max 6 suggestions
-  - normalized priority/dueAt/confidence
-  - title de-duplication
+- uses the LLM in JSON mode
+- normalizes priority, due date, and confidence
+- deduplicates titles and caps output size
 
 ### Apply
 
 - `applySuggestedTasksFromSelection(conversationId, suggestions[])`
-- Server-side validation + normalization
-- Creates tasks by calling `createContactTask(...)` internally
-- Returns created/failed counts and details
+- creates tasks by calling `createContactTask(...)`
+- emits task suggestion funnel telemetry
 
-### Execution telemetry
+### Telemetry event families
 
-- Generation traces persisted in `AgentExecution` via `persistSelectionAiExecution(...)`
-- Includes prompt, normalized output, token usage, latency, estimated cost
+- `task_suggestion.generate.requested`
+- `task_suggestion.generate.succeeded`
+- `task_suggestion.generate.failed`
+- `task_suggestion.apply.requested`
+- `task_suggestion.apply.completed`
+- `task_suggestion.apply.failed`
 
-### Funnel telemetry
+## Google Task List Settings
 
-- Persisted in `AgentEvent`:
-  - `task_suggestion.generate.requested`
-  - `task_suggestion.generate.succeeded`
-  - `task_suggestion.generate.failed`
-  - `task_suggestion.apply.requested`
-  - `task_suggestion.apply.completed`
-  - `task_suggestion.apply.failed`
-- Aggregation API:
-  - `getTaskSuggestionFunnelMetrics(...)`
-  - supports `location` or `conversation` scope and window days
+File: [`app/(main)/admin/settings/integrations/google/tasklist-settings.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/settings/integrations/google/tasklist-settings.tsx)
 
-### Metrics UI
+- loads available Google tasklists for the connected user
+- saves preferred tasklist id/title to the local user record
+- new Google sync-outs use the selected list
+- existing already-synced tasks remain on their recorded provider container
 
-File: [`app/(main)/admin/conversations/_components/task-suggestion-funnel-metrics.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/conversations/_components/task-suggestion-funnel-metrics.tsx)
+## Main Files to Touch
 
-- Embedded in Suggest dialog
-- Shows:
-  - request/success/apply/task-created totals
-  - conversion rates and averages
-  - daily trend
-  - top failures
+### Schema
 
-## Google Tasks List Settings (Per User)
+- [`prisma/schema.prisma`](/Users/martingreen/Projects/IDX/prisma/schema.prisma)
 
-Settings page files:
+### Core task domain logic
 
-- [`app/(main)/admin/settings/integrations/google/page.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/settings/integrations/google/page.tsx)
-- [`app/(main)/admin/settings/integrations/google/tasklist-settings.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/settings/integrations/google/tasklist-settings.tsx)
-- [`app/(main)/admin/settings/integrations/google/actions.ts`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/settings/integrations/google/actions.ts)
+- [`app/(main)/admin/tasks/actions.ts`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/tasks/actions.ts)
+- [`lib/tasks/sync-engine.ts`](/Users/martingreen/Projects/IDX/lib/tasks/sync-engine.ts)
+- [`lib/tasks/providers/ghl.ts`](/Users/martingreen/Projects/IDX/lib/tasks/providers/ghl.ts)
+- [`lib/tasks/providers/google.ts`](/Users/martingreen/Projects/IDX/lib/tasks/providers/google.ts)
 
-Behavior:
+### Reminder subsystem
 
-- Loads available Google tasklists for connected user
-- Saves preferred tasklist id/title to user record
-- New Google task sync-outs use selected list
-- Existing already-synced tasks remain on their recorded provider container
+- [`lib/tasks/reminders.ts`](/Users/martingreen/Projects/IDX/lib/tasks/reminders.ts)
+- [`lib/tasks/reminder-config.ts`](/Users/martingreen/Projects/IDX/lib/tasks/reminder-config.ts)
+- [`lib/tasks/reminder-links.ts`](/Users/martingreen/Projects/IDX/lib/tasks/reminder-links.ts)
+- [`app/api/cron/task-reminders/route.ts`](/Users/martingreen/Projects/IDX/app/api/cron/task-reminders/route.ts)
+- [`app/api/notifications/events/route.ts`](/Users/martingreen/Projects/IDX/app/api/notifications/events/route.ts)
+- [`app/api/notifications/subscriptions/route.ts`](/Users/martingreen/Projects/IDX/app/api/notifications/subscriptions/route.ts)
 
-## File Map
+### UI
 
-Core schema and types:
+- [`components/tasks/contact-task-manager.tsx`](/Users/martingreen/Projects/IDX/components/tasks/contact-task-manager.tsx)
+- [`components/tasks/task-editor-dialog.tsx`](/Users/martingreen/Projects/IDX/components/tasks/task-editor-dialog.tsx)
+- [`components/tasks/task-detail-dialog.tsx`](/Users/martingreen/Projects/IDX/components/tasks/task-detail-dialog.tsx)
+- [`app/(main)/admin/conversations/_components/global-task-list.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/conversations/_components/global-task-list.tsx)
+- [`components/notifications/admin-notification-bell.tsx`](/Users/martingreen/Projects/IDX/components/notifications/admin-notification-bell.tsx)
 
-- [`prisma/schema.prisma`](/Users/martingreen/Projects/IDX/prisma/schema.prisma): Task models, user tasklist fields, telemetry model
-- [`lib/tasks/types.ts`](/Users/martingreen/Projects/IDX/lib/tasks/types.ts): provider/operation/status type constants
+## Current Limitations
 
-Core task domain logic:
-
-- [`app/(main)/admin/tasks/actions.ts`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/tasks/actions.ts): task CRUD server actions
-- [`lib/tasks/sync-engine.ts`](/Users/martingreen/Projects/IDX/lib/tasks/sync-engine.ts): outbox queue + retry + provider dispatch
-- [`lib/tasks/providers/ghl.ts`](/Users/martingreen/Projects/IDX/lib/tasks/providers/ghl.ts): GHL API adapter
-- [`lib/tasks/providers/google.ts`](/Users/martingreen/Projects/IDX/lib/tasks/providers/google.ts): Google Tasks API adapter
-
-Scheduling and operational endpoint:
-
-- [`app/api/cron/task-sync/route.ts`](/Users/martingreen/Projects/IDX/app/api/cron/task-sync/route.ts): outbox worker trigger endpoint
-
-UI:
-
-- [`components/tasks/contact-task-manager.tsx`](/Users/martingreen/Projects/IDX/components/tasks/contact-task-manager.tsx): reusable task UI + sync badges
-- [`app/(main)/admin/conversations/_components/coordinator-panel.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/conversations/_components/coordinator-panel.tsx): Mission Control tasks block
-- [`app/(main)/admin/contacts/_components/edit-contact-dialog.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/contacts/_components/edit-contact-dialog.tsx): Contact modal tasks tab
-- [`app/(main)/admin/conversations/_components/message-selection-actions.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/conversations/_components/message-selection-actions.tsx): suggest/apply UI from conversation selection
-- [`app/(main)/admin/conversations/_components/task-suggestion-funnel-metrics.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/conversations/_components/task-suggestion-funnel-metrics.tsx): funnel analytics card
-
-Suggestion + telemetry backend:
-
-- [`app/(main)/admin/conversations/actions.ts`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/conversations/actions.ts): suggestion generation, apply action, funnel metrics query
-
-Google tasklist settings:
-
-- [`app/(main)/admin/settings/integrations/google/page.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/settings/integrations/google/page.tsx)
-- [`app/(main)/admin/settings/integrations/google/tasklist-settings.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/settings/integrations/google/tasklist-settings.tsx)
-- [`app/(main)/admin/settings/integrations/google/actions.ts`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/settings/integrations/google/actions.ts)
-
-## Current Constraints and Notes
-
-- This is sync-out only. Inbound task sync from GHL/Google to local tasks is not implemented.
-- `providerAccountId` is currently hardcoded to `"default"` in sync records.
-- Suggestion metrics use `AgentEvent.processedAt` event time, not wall-clock UI time.
-- `getTaskSuggestionFunnelMetrics(...)` is location-scoped and uses existing conversation resolution rules.
-- Deletion is soft-delete locally plus remote delete sync attempt.
-
-## Recommended Future Extension Points
-
-- Add inbound reconciliation workers for provider-originated task changes.
-- Support per-provider account ids beyond `"default"` for multi-account workflows.
-- Add manual retry action in UI for `dead` jobs (server action for targeted requeue).
-- Add assignment UI in task manager (`assignedUserId` exists in schema/actions).
-- Add stronger provider capability detection and richer error categorization.
+- Sync is still outbound only. Inbound reconciliation from GHL/Google into local tasks is not implemented.
+- Reminder channels in this implementation are limited to:
+  - in-app inbox/realtime
+  - browser web push
+- Browser push requires VAPID keys, a supported browser, and an explicit user opt-in from the bell/settings UI.

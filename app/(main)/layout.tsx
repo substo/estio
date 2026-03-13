@@ -3,6 +3,7 @@ import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/sonner"
 import AuthWrapper from '@/components/wrapper/auth-wrapper'
 import { LiveDeployGuard } from "@/components/deploy/live-deploy-guard"
+import { NotificationServiceWorker } from "@/components/notifications/notification-service-worker"
 import { GeistSans } from 'geist/font/sans'
 import type { Metadata } from 'next'
 import '@/app/globals.css'
@@ -13,6 +14,7 @@ console.log('[MainLayout] Rendering');
 
 export const metadata: Metadata = {
   metadataBase: new URL(APP_URL),
+  manifest: "/manifest.webmanifest",
   title: {
     default: 'Estio',
     template: `%s | Estio`
@@ -44,6 +46,7 @@ export default async function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        <meta name="theme-color" content="#2563eb" />
         <link
           rel="preload"
           href="https://utfs.io/f/31dba2ff-6c3b-4927-99cd-b928eaa54d5f-5w20ij.png"
@@ -65,6 +68,7 @@ export default async function RootLayout({
               disableTransitionOnChange
             >
               <LiveDeployGuard initialBuildId={initialBuildId} />
+              <NotificationServiceWorker />
               {children}
               <Toaster />
             </ThemeProvider>

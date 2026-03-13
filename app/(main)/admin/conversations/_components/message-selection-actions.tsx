@@ -39,7 +39,7 @@ import {
     suggestViewingsFromSelection,
 } from "@/app/(main)/admin/conversations/actions";
 import { openOrStartConversationForContact, searchContactsAction } from "@/app/(main)/admin/contacts/actions";
-import { createContactTask } from "@/app/(main)/admin/tasks/actions";
+import { createContactTask, listTaskAssignableUsers } from "@/app/(main)/admin/tasks/actions";
 import { cn } from "@/lib/utils";
 import { TaskSuggestionFunnelMetrics } from "./task-suggestion-funnel-metrics";
 import { ViewingsSuggestionDialog } from "./viewings-suggestion-dialog";
@@ -159,12 +159,6 @@ function toDateTimeLocalValue(value?: string | null) {
     return new Date(date.getTime() - offset).toISOString().slice(0, 16);
 }
 
-function getCurrentDateTimeLocalValue() {
-    const now = new Date();
-    const offset = now.getTimezoneOffset() * 60000;
-    return new Date(now.getTime() - offset).toISOString().slice(0, 16);
-}
-
 export function MessageSelectionActions({
     selection,
     onClearSelection,
@@ -199,6 +193,8 @@ export function MessageSelectionActions({
     const [taskTitle, setTaskTitle] = useState("");
     const [taskDescription, setTaskDescription] = useState("");
     const [isCreatingTask, setIsCreatingTask] = useState(false);
+    const [currentTaskUserId, setCurrentTaskUserId] = useState<string | null>(null);
+    const [currentTaskUserLabel, setCurrentTaskUserLabel] = useState<string>("You");
 
     const [suggestTasksOpen, setSuggestTasksOpen] = useState(false);
     const [suggestSelectionText, setSuggestSelectionText] = useState("");
@@ -226,6 +222,33 @@ export function MessageSelectionActions({
     const selectedSuggestionCount = taskSuggestions.filter((item) => item.selected).length;
 
     const selectionVisible = !!selection && !pasteLeadOpen && !findContactOpen && !createTaskOpen && !suggestTasksOpen && !summarizeOpen && !customOpen;
+
+    useEffect(() => {
+        let cancelled = false;
+
+        listTaskAssignableUsers()
+            .then((result) => {
+                if (cancelled || !result?.success) return;
+                const userId = String(result.currentUserId || "").trim() || null;
+                const currentUser = Array.isArray(result.users)
+                    ? result.users.find((candidate) => candidate.id === userId)
+                    : null;
+
+                setCurrentTaskUserId(userId);
+                setCurrentTaskUserLabel(
+                    String(currentUser?.name || currentUser?.email || "You")
+                );
+            })
+            .catch((error) => {
+                if (!cancelled) {
+                    console.warn("[SelectionActions] Failed to resolve current task assignee:", error);
+                }
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     useEffect(() => {
         if (!selectionVisible) return;
@@ -431,6 +454,7 @@ export function MessageSelectionActions({
                 conversationId,
                 title: taskTitle.trim(),
                 description: taskDescription.trim() || undefined,
+                assignedUserId: currentTaskUserId || undefined,
                 priority: "medium",
                 source: "ai_selection",
             });
@@ -483,7 +507,7 @@ export function MessageSelectionActions({
                 description: suggestion.description || "",
                 priority: suggestion.priority || "medium",
                 dueAt: suggestion.dueAt || null,
-                dueAtInput: toDateTimeLocalValue(suggestion.dueAt) || getCurrentDateTimeLocalValue(),
+                dueAtInput: toDateTimeLocalValue(suggestion.dueAt) || "",
                 confidence: typeof suggestion.confidence === "number" ? suggestion.confidence : 0.5,
                 reason: suggestion.reason || null,
             }));
@@ -1111,6 +1135,10 @@ export function MessageSelectionActions({
                             {taskDescription ? getSelectionPreview(taskDescription) : "Selection captured"}
                         </div>
 
+                        <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+                            <span className="font-medium">Assignee:</span> {currentTaskUserLabel}. This quick-create flow saves the task without a due date, so reminders start only after a due date is added later.
+                        </div>
+
                         <div className="space-y-2">
                             <label className="text-xs font-medium text-slate-700">Task title</label>
                             <Input
@@ -1174,6 +1202,10 @@ export function MessageSelectionActions({
                             {hasBatchSelections
                                 ? `${selectionBatch.length} snippets queued across messages`
                                 : (suggestSelectionText ? getSelectionPreview(suggestSelectionText) : "Selection captured")}
+                        </div>
+
+                        <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+                            <span className="font-medium">Assignee:</span> {currentTaskUserLabel}. Add a due date on any suggestion that should generate reminders.
                         </div>
 
                         {hasBatchSelections ? (
@@ -1317,6 +1349,7 @@ export function MessageSelectionActions({
                                                     step={300}
                                                     value={suggestion.dueAtInput || ""}
                                                     onChange={(event) => handlePatchSuggestion(suggestion.id, { dueAtInput: event.target.value })}
+                                                    placeholder="Optional"
                                                 />
                                             </div>
                                         </div>
