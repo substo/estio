@@ -38,7 +38,13 @@ import {
     rejectSuggestedResponse,
 } from '../actions';
 import { toast } from '@/components/ui/use-toast';
-import { getDealContexts, createPersistentDeal, getDealContext } from '../../deals/actions';
+import {
+    createPersistentDeal,
+    fetchDealTimeline,
+    getDealContexts,
+    getDealWorkspaceCore,
+    getDealWorkspaceSidebar,
+} from '../../deals/actions';
 import { shouldApplyRealtimeEnvelope } from '@/lib/conversations/realtime-merge';
 import {
     getWorkspaceCoreCacheEntry,
@@ -51,6 +57,7 @@ import {
     computeInitialMessageLimitFromViewport,
     mergePrependMessagesDedupe,
 } from '@/lib/conversations/thread-hydration';
+import { buildTimelineCursorFromEvent } from '@/lib/conversations/timeline-events';
 import { UnifiedTimeline } from './unified-timeline';
 import { ConversationList } from './conversation-list';
 import { ChatWindow } from './chat-window';
@@ -223,11 +230,37 @@ type WorkspaceCoreSnapshot = {
     hydration: WorkspaceHydrationState;
 };
 
+type DealWorkspaceHydrationState = {
+    status: WorkspaceHydrationStatus;
+    oldestCursor: string | null;
+    newestCursor: string | null;
+    initialCount: number;
+    targetCount: number;
+    requestedLimit: number;
+};
+
+type DealWorkspaceCoreSnapshot = {
+    dealId: string;
+    title: string;
+    stage: string;
+    metadata: any;
+    participants: Conversation[];
+    timelineEvents: any[];
+    hydration: DealWorkspaceHydrationState;
+};
+
 const WORKSPACE_CACHE_LIMIT = 30;
 const WORKSPACE_ACTIVITY_LIMIT = 180;
 const ACTIVE_POLL_GRACE_MS = 2500;
 
 type WorkspaceMessageWindowLike = {
+    oldestCursor?: string | null;
+    newestCursor?: string | null;
+    count?: number;
+    requestedLimit?: number;
+} | null | undefined;
+
+type DealTimelineWindowLike = {
     oldestCursor?: string | null;
     newestCursor?: string | null;
     count?: number;
@@ -285,6 +318,80 @@ function createWorkspaceCoreSnapshot(args: {
             : (!!args.transcriptEligibility?.success && !!args.transcriptEligibility?.enabled),
         hydration: args.hydration,
     };
+}
+
+function createDealWorkspaceHydrationState(args: {
+    status?: WorkspaceHydrationStatus;
+    timelineEvents: any[];
+    timelineWindow?: DealTimelineWindowLike;
+    initialCount?: number;
+    targetCount?: number;
+    requestedLimit?: number;
+}): DealWorkspaceHydrationState {
+    const timelineEvents = Array.isArray(args.timelineEvents) ? args.timelineEvents : [];
+    const timelineWindow = args.timelineWindow;
+    const derivedInitialCount = Number(args.initialCount);
+    const derivedTargetCount = Number(args.targetCount);
+    const derivedRequestedLimit = Number(args.requestedLimit);
+    const resolvedCount = Number(timelineWindow?.count);
+    const resolvedRequestedLimit = Number(timelineWindow?.requestedLimit);
+
+    return {
+        status: args.status || 'full',
+        oldestCursor: timelineWindow?.oldestCursor || buildTimelineCursorFromEvent(timelineEvents[0]) || null,
+        newestCursor: timelineWindow?.newestCursor || buildTimelineCursorFromEvent(timelineEvents[timelineEvents.length - 1]) || null,
+        initialCount: Number.isFinite(derivedInitialCount)
+            ? Math.max(0, Math.floor(derivedInitialCount))
+            : (Number.isFinite(resolvedCount) ? Math.max(0, Math.floor(resolvedCount)) : timelineEvents.length),
+        targetCount: Number.isFinite(derivedTargetCount)
+            ? Math.max(1, Math.floor(derivedTargetCount))
+            : THREAD_TARGET_MESSAGE_COUNT,
+        requestedLimit: Number.isFinite(derivedRequestedLimit)
+            ? Math.max(1, Math.floor(derivedRequestedLimit))
+            : (Number.isFinite(resolvedRequestedLimit)
+                ? Math.max(1, Math.floor(resolvedRequestedLimit))
+                : Math.max(timelineEvents.length || 0, THREAD_INITIAL_FALLBACK_MESSAGES)),
+    };
+}
+
+function createDealWorkspaceCoreSnapshot(args: {
+    dealId: string;
+    title?: string | null;
+    stage?: string | null;
+    metadata?: any;
+    participants?: Conversation[];
+    timelineEvents?: any[];
+    hydration: DealWorkspaceHydrationState;
+}): DealWorkspaceCoreSnapshot {
+    return {
+        dealId: args.dealId,
+        title: String(args.title || "Untitled Deal"),
+        stage: String(args.stage || "ACTIVE"),
+        metadata: args.metadata || null,
+        participants: Array.isArray(args.participants) ? args.participants : [],
+        timelineEvents: Array.isArray(args.timelineEvents) ? args.timelineEvents : [],
+        hydration: args.hydration,
+    };
+}
+
+function mergePrependTimelineEventsDedupe(existing: any[], older: any[]): any[] {
+    if (!Array.isArray(existing) || existing.length === 0) {
+        return Array.isArray(older) ? [...older] : [];
+    }
+    if (!Array.isArray(older) || older.length === 0) {
+        return [...existing];
+    }
+
+    const seen = new Set(existing.map((event) => String(event?.id || "")));
+    const prepend: any[] = [];
+    for (const event of older) {
+        const eventId = String(event?.id || "");
+        if (!eventId || seen.has(eventId)) continue;
+        seen.add(eventId);
+        prepend.push(event);
+    }
+
+    return prepend.length > 0 ? [...prepend, ...existing] : [...existing];
 }
 
 function estimateThreadViewportHeightPx(): number | null {
@@ -441,7 +548,16 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const [activeDealParticipants, setActiveDealParticipants] = useState<Conversation[]>([]);
     const [dealContacts, setDealContacts] = useState<DealContactOption[]>([]);
     const [loadingDealContext, setLoadingDealContext] = useState(false);
-    const [dealTimelineRefreshToken, setDealTimelineRefreshToken] = useState(0);
+    const [dealTimelineEvents, setDealTimelineEvents] = useState<any[]>([]);
+    const [activeDealMetadata, setActiveDealMetadata] = useState<any>(null);
+    const [dealTimelineHydrationStatus, setDealTimelineHydrationStatus] = useState<WorkspaceHydrationStatus>('full');
+    const [dealTimelineInitialPainted, setDealTimelineInitialPainted] = useState(false);
+    const dealWorkspaceCoreCacheRef = useRef<Map<string, DealWorkspaceCoreSnapshot>>(new Map());
+    const dealWorkspaceCoreInFlightRef = useRef<Set<string>>(new Set());
+    const dealWorkspaceInitialHydrationInFlightRef = useRef<Set<string>>(new Set());
+    const dealWorkspaceBackfillInFlightRef = useRef<Set<string>>(new Set());
+    const dealWorkspaceSidebarInFlightRef = useRef<Set<string>>(new Set());
+    const activeDealIdRef = useRef<string | null>(null);
 
     useEffect(() => {
         setConversations(initialConversations);
@@ -492,6 +608,10 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const [urlConversationId, setUrlConversationId] = useState<string | null>(initialUrlConversationId);
     const [activeDealId, setActiveDealId] = useState<string | null>(initialDealId);
     const [transcriptOnDemandEnabled, setTranscriptOnDemandEnabled] = useState(false);
+
+    useEffect(() => {
+        activeDealIdRef.current = activeDealId;
+    }, [activeDealId]);
 
     useEffect(() => {
         setRealtimeMode(featureFlags.realtimeSse ? 'connecting' : 'disabled');
@@ -664,6 +784,67 @@ export function ConversationInterface({ locationId, initialConversations, initia
         }
     }, []);
 
+    const isDealWorkspaceHydrationBusy = useCallback((dealId?: string | null) => {
+        const key = String(dealId || "");
+        if (!key) return false;
+        return (
+            dealWorkspaceInitialHydrationInFlightRef.current.has(key)
+            || dealWorkspaceBackfillInFlightRef.current.has(key)
+        );
+    }, []);
+
+    const cacheDealWorkspaceCoreSnapshot = useCallback((dealId: string, snapshot: DealWorkspaceCoreSnapshot) => {
+        setWorkspaceCoreCacheEntry(
+            dealWorkspaceCoreCacheRef.current,
+            dealId,
+            snapshot,
+            WORKSPACE_CACHE_LIMIT
+        );
+    }, []);
+
+    const getCachedDealWorkspaceCoreSnapshot = useCallback((dealId: string): DealWorkspaceCoreSnapshot | null => {
+        return getWorkspaceCoreCacheEntry(dealWorkspaceCoreCacheRef.current, dealId);
+    }, []);
+
+    const applyDealParticipants = useCallback((participants: Conversation[], preferredConversationId?: string | null) => {
+        const normalizedParticipants = Array.isArray(participants) ? participants.filter((conversation) => !!conversation?.id) : [];
+        const contacts = buildDealContactOptions(normalizedParticipants);
+        const availableIds = new Set(normalizedParticipants.map((conversation) => conversation.id));
+
+        setActiveDealParticipants(normalizedParticipants);
+        setDealContacts(contacts);
+        setActiveId((prev) => {
+            const preferredId = String(preferredConversationId || "").trim();
+            if (preferredId && availableIds.has(preferredId)) {
+                return preferredId;
+            }
+            if (urlConversationId && availableIds.has(urlConversationId)) {
+                return urlConversationId;
+            }
+            if (prev && availableIds.has(prev)) {
+                return prev;
+            }
+            return contacts[0]?.conversationId || normalizedParticipants[0]?.id || null;
+        });
+    }, [urlConversationId]);
+
+    const applyDealWorkspaceCoreSnapshot = useCallback((dealId: string, snapshot: DealWorkspaceCoreSnapshot, preferredConversationId?: string | null) => {
+        applyDealParticipants(snapshot.participants, preferredConversationId);
+        setDealTimelineEvents(Array.isArray(snapshot.timelineEvents) ? snapshot.timelineEvents : []);
+        setActiveDealMetadata(snapshot.metadata || null);
+        setDealTimelineHydrationStatus(snapshot.hydration?.status || 'full');
+        setDeals((prev) => prev.map((deal) => (
+            deal.id === dealId
+                ? {
+                    ...deal,
+                    title: snapshot.title || deal.title,
+                    stage: snapshot.stage || deal.stage,
+                    metadata: snapshot.metadata ?? deal.metadata,
+                }
+                : deal
+        )));
+    }, [applyDealParticipants]);
+
     const prefetchWorkspaceCore = useCallback(async (conversationId: string) => {
         if (!conversationId) return;
         if (workspaceCoreCacheRef.current.has(conversationId)) return;
@@ -704,6 +885,43 @@ export function ConversationInterface({ locationId, initialConversations, initia
         }
     }, [cacheWorkspaceCoreSnapshot, trackClientRequest]);
 
+    const prefetchDealWorkspaceCore = useCallback(async (dealId: string) => {
+        if (!dealId) return;
+        if (dealWorkspaceCoreCacheRef.current.has(dealId)) return;
+        if (dealWorkspaceCoreInFlightRef.current.has(dealId)) return;
+
+        dealWorkspaceCoreInFlightRef.current.add(dealId);
+        try {
+            trackClientRequest("deal_workspace_core_prefetch", { dealId });
+            const prefetchedLimit = computeInitialMessageLimitFromViewport(estimateThreadViewportHeightPx());
+            const workspace = await getDealWorkspaceCore(dealId, { take: prefetchedLimit });
+            if (!workspace?.success) return;
+
+            const timelineEvents = Array.isArray(workspace.timelineEvents) ? workspace.timelineEvents : [];
+            const hydration = createDealWorkspaceHydrationState({
+                status: timelineEvents.length >= THREAD_TARGET_MESSAGE_COUNT ? 'full' : 'partial',
+                timelineEvents,
+                timelineWindow: workspace.timelineWindow,
+                initialCount: timelineEvents.length,
+                targetCount: THREAD_TARGET_MESSAGE_COUNT,
+                requestedLimit: prefetchedLimit,
+            });
+            cacheDealWorkspaceCoreSnapshot(dealId, createDealWorkspaceCoreSnapshot({
+                dealId,
+                title: workspace.deal?.title,
+                stage: workspace.deal?.stage,
+                metadata: workspace.deal?.metadata,
+                participants: Array.isArray(workspace.participants) ? workspace.participants : [],
+                timelineEvents,
+                hydration,
+            }));
+        } catch (error) {
+            console.error("Deal workspace prefetch failed:", error);
+        } finally {
+            dealWorkspaceCoreInFlightRef.current.delete(dealId);
+        }
+    }, [cacheDealWorkspaceCoreSnapshot, trackClientRequest]);
+
     useEffect(() => {
         const onVisibility = () => setIsTabVisible(typeof document === 'undefined' ? true : !document.hidden);
         onVisibility();
@@ -725,80 +943,435 @@ export function ConversationInterface({ locationId, initialConversations, initia
         if (viewMode === 'deals' && deals.length === 0) {
             getDealContexts().then(setDeals).catch(console.error);
         }
-    }, [viewMode]);
+    }, [deals.length, viewMode]);
+
+    const loadDealWorkspaceSidebar = useCallback(async (
+        dealId: string,
+        options?: { reason?: string }
+    ) => {
+        const normalizedDealId = String(dealId || "").trim();
+        if (!normalizedDealId) return null;
+        if (dealWorkspaceSidebarInFlightRef.current.has(normalizedDealId)) return null;
+
+        dealWorkspaceSidebarInFlightRef.current.add(normalizedDealId);
+        trackClientRequest("deal_workspace_sidebar_load", {
+            dealId: normalizedDealId,
+            reason: options?.reason || "deferred",
+        });
+
+        try {
+            const sidebar = await getDealWorkspaceSidebar(normalizedDealId);
+            if (!sidebar?.success) return sidebar;
+            if (activeDealIdRef.current !== normalizedDealId) return sidebar;
+
+            if (Array.isArray(sidebar.participants) && sidebar.participants.length > 0) {
+                applyDealParticipants(sidebar.participants, activeIdRef.current);
+            }
+            setActiveDealMetadata(sidebar.metadata ?? sidebar.deal?.metadata ?? null);
+            setDeals((prev) => prev.map((deal) => (
+                deal.id === normalizedDealId
+                    ? {
+                        ...deal,
+                        title: sidebar.deal?.title || deal.title,
+                        stage: sidebar.deal?.stage || deal.stage,
+                        propertyIds: Array.isArray(sidebar.deal?.propertyIds) ? sidebar.deal.propertyIds : deal.propertyIds,
+                        metadata: sidebar.metadata ?? deal.metadata,
+                    }
+                    : deal
+            )));
+            return sidebar;
+        } catch (error) {
+            console.error("Failed to load deal workspace sidebar:", error);
+            return null;
+        } finally {
+            dealWorkspaceSidebarInFlightRef.current.delete(normalizedDealId);
+        }
+    }, [applyDealParticipants, trackClientRequest]);
+
+    const refreshActiveDealWorkspace = useCallback(async (
+        dealId: string,
+        options?: {
+            reason?: string;
+            take?: number;
+            refreshSidebar?: boolean;
+        }
+    ) => {
+        const normalizedDealId = String(dealId || "").trim();
+        if (!normalizedDealId) return null;
+
+        const requestedTake = Number(options?.take);
+        const take = Number.isFinite(requestedTake) && requestedTake > 0
+            ? Math.min(Math.max(Math.floor(requestedTake), 1), THREAD_TARGET_MESSAGE_COUNT)
+            : THREAD_TARGET_MESSAGE_COUNT;
+
+        trackClientRequest("deal_workspace_refresh", {
+            dealId: normalizedDealId,
+            reason: options?.reason || "manual",
+            take,
+        });
+
+        try {
+            const workspace = await getDealWorkspaceCore(normalizedDealId, { take });
+            if (!workspace?.success) return workspace;
+            if (activeDealIdRef.current !== normalizedDealId) return workspace;
+
+            const timelineEvents = Array.isArray(workspace.timelineEvents) ? workspace.timelineEvents : [];
+            const snapshot = createDealWorkspaceCoreSnapshot({
+                dealId: normalizedDealId,
+                title: workspace.deal?.title,
+                stage: workspace.deal?.stage,
+                metadata: workspace.deal?.metadata,
+                participants: Array.isArray(workspace.participants) ? workspace.participants : [],
+                timelineEvents,
+                hydration: createDealWorkspaceHydrationState({
+                    status: 'full',
+                    timelineEvents,
+                    timelineWindow: workspace.timelineWindow,
+                    initialCount: timelineEvents.length,
+                    targetCount: THREAD_TARGET_MESSAGE_COUNT,
+                    requestedLimit: take,
+                }),
+            });
+            cacheDealWorkspaceCoreSnapshot(normalizedDealId, snapshot);
+            applyDealWorkspaceCoreSnapshot(normalizedDealId, snapshot, activeIdRef.current);
+
+            if (options?.refreshSidebar) {
+                void loadDealWorkspaceSidebar(normalizedDealId, { reason: options.reason || "refresh" });
+            }
+
+            return workspace;
+        } catch (error) {
+            console.error("Failed to refresh deal workspace:", error);
+            return null;
+        }
+    }, [
+        applyDealWorkspaceCoreSnapshot,
+        cacheDealWorkspaceCoreSnapshot,
+        loadDealWorkspaceSidebar,
+        trackClientRequest,
+    ]);
 
     useEffect(() => {
         if (viewMode !== 'deals' || !activeDealId) {
             setActiveDealParticipants([]);
             setDealContacts([]);
+            setDealTimelineEvents([]);
+            setActiveDealMetadata(null);
+            setDealTimelineHydrationStatus('full');
+            setDealTimelineInitialPainted(false);
             setLoadingDealContext(false);
             return;
         }
 
         let cancelled = false;
-        setLoadingDealContext(true);
+        let deferredHydrationTimeout: ReturnType<typeof setTimeout> | null = null;
+        let deferredHydrationIdleHandle: number | null = null;
+        const selectedDealId = activeDealId;
+        const preferredConversationId = activeIdRef.current;
 
-        getDealContext(activeDealId)
-            .then((context: any) => {
-                if (cancelled) return;
+        const clearDeferredHydrationTimer = () => {
+            if (deferredHydrationTimeout) {
+                clearTimeout(deferredHydrationTimeout);
+                deferredHydrationTimeout = null;
+            }
+            if (deferredHydrationIdleHandle !== null && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+                (window as any).cancelIdleCallback(deferredHydrationIdleHandle);
+                deferredHydrationIdleHandle = null;
+            }
+        };
 
-                const rawConversations = Array.isArray(context?.conversations) ? context.conversations : [];
-                const normalizedConversations: Conversation[] = rawConversations
-                    .map((item: any) => {
-                        const parsedDate = Number.isFinite(Number(item?.lastMessageDate))
-                            ? Number(item.lastMessageDate)
-                            : Math.floor(new Date(item?.lastMessageAt || item?.updatedAt || 0).getTime() / 1000);
+        const scheduleDeferredHydration = (task: () => void) => {
+            clearDeferredHydrationTimer();
+            if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+                deferredHydrationIdleHandle = (window as any).requestIdleCallback(() => {
+                    deferredHydrationIdleHandle = null;
+                    task();
+                }, { timeout: 1200 });
+                return;
+            }
+            deferredHydrationTimeout = setTimeout(() => {
+                deferredHydrationTimeout = null;
+                task();
+            }, 300);
+        };
 
-                        return {
-                            id: String(item?.id || ""),
-                            contactId: String(item?.contactId || ""),
-                            contactName: item?.contactName || "Unknown Contact",
-                            contactPhone: item?.contactPhone || undefined,
-                            contactEmail: item?.contactEmail || undefined,
-                            lastMessageBody: item?.lastMessageBody || "",
-                            lastMessageDate: Number.isFinite(parsedDate) ? parsedDate : 0,
-                            unreadCount: Number(item?.unreadCount || 0),
-                            status: (item?.status || 'open') as any,
-                            type: item?.type || item?.lastMessageType || 'TYPE_SMS',
-                            lastMessageType: item?.lastMessageType || undefined,
-                            locationId: item?.locationId || "",
-                            suggestedActions: Array.isArray(item?.suggestedActions) ? item.suggestedActions : [],
-                        } satisfies Conversation;
-                    })
-                    .filter((conversation: Conversation): conversation is Conversation => !!conversation.id);
+        const cachedSnapshot = getCachedDealWorkspaceCoreSnapshot(selectedDealId);
+        setDealTimelineInitialPainted(false);
+        if (cachedSnapshot) {
+            applyDealWorkspaceCoreSnapshot(selectedDealId, cachedSnapshot, preferredConversationId);
+            const shouldKeepLoading = (
+                cachedSnapshot.hydration?.status !== 'full'
+                && (cachedSnapshot.timelineEvents?.length || 0) === 0
+                && Number(cachedSnapshot.hydration?.initialCount || 0) === 0
+            );
+            setLoadingDealContext(shouldKeepLoading);
+        } else {
+            setActiveDealParticipants([]);
+            setDealContacts([]);
+            setDealTimelineEvents([]);
+            setActiveDealMetadata(null);
+            setDealTimelineHydrationStatus('full');
+            setLoadingDealContext(true);
+        }
 
-                const contacts = buildDealContactOptions(normalizedConversations);
-                const availableIds = new Set(normalizedConversations.map((conversation) => conversation.id));
+        const loadDealWorkspaceCore = async () => {
+            const dealOpenStartedAtMs = Date.now();
+            const initialTimelineLimit = computeInitialMessageLimitFromViewport(estimateThreadViewportHeightPx());
+            dealWorkspaceCoreInFlightRef.current.add(selectedDealId);
+            dealWorkspaceInitialHydrationInFlightRef.current.add(selectedDealId);
+            trackClientRequest("deal_workspace_core_load", {
+                dealId: selectedDealId,
+                mode: "initial_hydration",
+                take: initialTimelineLimit,
+            });
 
-                setActiveDealParticipants(normalizedConversations);
-                setDealContacts(contacts);
-                setActiveId((prev) => {
-                    if (urlConversationId && availableIds.has(urlConversationId)) {
-                        return urlConversationId;
+            try {
+                const workspace = await getDealWorkspaceCore(selectedDealId, { take: initialTimelineLimit });
+                if (cancelled || activeDealIdRef.current !== selectedDealId) return;
+                if (!workspace?.success) {
+                    throw new Error(workspace?.error || "Failed to load deal workspace core");
+                }
+
+                const initialTimelineEvents = Array.isArray(workspace.timelineEvents) ? workspace.timelineEvents : [];
+                const cachedTimelineEvents = Array.isArray(cachedSnapshot?.timelineEvents) ? cachedSnapshot.timelineEvents : [];
+                const mergedInitialTimelineEvents = (() => {
+                    if (cachedTimelineEvents.length === 0) return initialTimelineEvents;
+                    const byId = new Map<string, any>();
+                    for (const event of [...cachedTimelineEvents, ...initialTimelineEvents]) {
+                        const eventId = String(event?.id || "");
+                        if (!eventId) continue;
+                        byId.set(eventId, event);
                     }
-                    if (prev && availableIds.has(prev)) {
-                        return prev;
-                    }
-                    return contacts[0]?.conversationId || normalizedConversations[0]?.id || null;
+                    const sorted = Array.from(byId.values()).sort((a, b) => {
+                        const aTs = Number(new Date(a?.createdAt || 0).getTime());
+                        const bTs = Number(new Date(b?.createdAt || 0).getTime());
+                        if (aTs !== bTs) return aTs - bTs;
+                        return String(a?.id || "").localeCompare(String(b?.id || ""));
+                    });
+                    const preserveCount = Math.min(
+                        THREAD_TARGET_MESSAGE_COUNT,
+                        Math.max(cachedTimelineEvents.length, initialTimelineEvents.length)
+                    );
+                    return preserveCount > 0 ? sorted.slice(-preserveCount) : sorted;
+                })();
+
+                const initialSnapshot = createDealWorkspaceCoreSnapshot({
+                    dealId: selectedDealId,
+                    title: workspace.deal?.title,
+                    stage: workspace.deal?.stage,
+                    metadata: workspace.deal?.metadata,
+                    participants: Array.isArray(workspace.participants) ? workspace.participants : [],
+                    timelineEvents: mergedInitialTimelineEvents,
+                    hydration: createDealWorkspaceHydrationState({
+                        status: mergedInitialTimelineEvents.length >= THREAD_TARGET_MESSAGE_COUNT ? 'full' : 'partial',
+                        timelineEvents: mergedInitialTimelineEvents,
+                        timelineWindow: workspace.timelineWindow,
+                        initialCount: initialTimelineEvents.length,
+                        targetCount: THREAD_TARGET_MESSAGE_COUNT,
+                        requestedLimit: initialTimelineLimit,
+                    }),
                 });
-                setDealTimelineRefreshToken((previous) => previous + 1);
-            })
-            .catch((error) => {
+
+                cacheDealWorkspaceCoreSnapshot(selectedDealId, initialSnapshot);
+                applyDealWorkspaceCoreSnapshot(selectedDealId, initialSnapshot, preferredConversationId);
+                setLoadingDealContext(false);
+
+                trackClientRequest("deal_open_initial", {
+                    dealId: selectedDealId,
+                    deal_open_initial_ms: Date.now() - dealOpenStartedAtMs,
+                    initial_event_count: initialTimelineEvents.length,
+                    rendered_event_count: mergedInitialTimelineEvents.length,
+                    requested_initial_limit: initialTimelineLimit,
+                });
+
+                const runDeferredHydration = async () => {
+                    if (cancelled || activeDealIdRef.current !== selectedDealId) return;
+                    if (dealWorkspaceBackfillInFlightRef.current.has(selectedDealId)) return;
+
+                    dealWorkspaceBackfillInFlightRef.current.add(selectedDealId);
+                    trackClientRequest("deal_workspace_backfill_start", { dealId: selectedDealId });
+                    try {
+                        let totalAdded = 0;
+                        let latestSnapshot = getCachedDealWorkspaceCoreSnapshot(selectedDealId) || initialSnapshot;
+                        let workingEvents = Array.isArray(latestSnapshot.timelineEvents) ? latestSnapshot.timelineEvents : [];
+                        let oldestCursor = latestSnapshot.hydration?.oldestCursor || buildTimelineCursorFromEvent(workingEvents[0]);
+
+                        while (!cancelled && activeDealIdRef.current === selectedDealId && workingEvents.length < THREAD_TARGET_MESSAGE_COUNT && oldestCursor) {
+                            const needed = THREAD_TARGET_MESSAGE_COUNT - workingEvents.length;
+                            const olderTimeline = await fetchDealTimeline(selectedDealId, {
+                                take: needed,
+                                beforeCursor: oldestCursor,
+                            });
+                            if (cancelled || activeDealIdRef.current !== selectedDealId) break;
+
+                            const olderEvents = Array.isArray(olderTimeline?.events) ? olderTimeline.events : [];
+                            if (olderEvents.length === 0) break;
+
+                            const mergedEvents = mergePrependTimelineEventsDedupe(workingEvents, olderEvents);
+                            const addedCount = Math.max(mergedEvents.length - workingEvents.length, 0);
+                            if (addedCount <= 0) break;
+
+                            totalAdded += addedCount;
+                            workingEvents = mergedEvents;
+                            oldestCursor = buildTimelineCursorFromEvent(workingEvents[0]) || oldestCursor;
+
+                            const currentSnapshot = getCachedDealWorkspaceCoreSnapshot(selectedDealId) || latestSnapshot;
+                            const nextSnapshot = createDealWorkspaceCoreSnapshot({
+                                dealId: selectedDealId,
+                                title: currentSnapshot.title,
+                                stage: currentSnapshot.stage,
+                                metadata: currentSnapshot.metadata,
+                                participants: currentSnapshot.participants,
+                                timelineEvents: workingEvents,
+                                hydration: createDealWorkspaceHydrationState({
+                                    status: workingEvents.length >= THREAD_TARGET_MESSAGE_COUNT ? 'full' : 'partial',
+                                    timelineEvents: workingEvents,
+                                    initialCount: currentSnapshot.hydration?.initialCount || initialSnapshot.hydration.initialCount,
+                                    targetCount: THREAD_TARGET_MESSAGE_COUNT,
+                                    requestedLimit: currentSnapshot.hydration?.requestedLimit || initialTimelineLimit,
+                                }),
+                            });
+                            latestSnapshot = nextSnapshot;
+                            cacheDealWorkspaceCoreSnapshot(selectedDealId, nextSnapshot);
+                            applyDealWorkspaceCoreSnapshot(selectedDealId, nextSnapshot, preferredConversationId);
+
+                            if (olderEvents.length < needed) break;
+                        }
+
+                        if (!cancelled && activeDealIdRef.current === selectedDealId) {
+                            const currentSnapshot = getCachedDealWorkspaceCoreSnapshot(selectedDealId) || latestSnapshot;
+                            if (currentSnapshot.hydration.status !== 'full') {
+                                const finalizedSnapshot = createDealWorkspaceCoreSnapshot({
+                                    dealId: selectedDealId,
+                                    title: currentSnapshot.title,
+                                    stage: currentSnapshot.stage,
+                                    metadata: currentSnapshot.metadata,
+                                    participants: currentSnapshot.participants,
+                                    timelineEvents: currentSnapshot.timelineEvents,
+                                    hydration: createDealWorkspaceHydrationState({
+                                        status: 'full',
+                                        timelineEvents: currentSnapshot.timelineEvents,
+                                        initialCount: currentSnapshot.hydration.initialCount,
+                                        targetCount: THREAD_TARGET_MESSAGE_COUNT,
+                                        requestedLimit: currentSnapshot.hydration.requestedLimit,
+                                    }),
+                                });
+                                cacheDealWorkspaceCoreSnapshot(selectedDealId, finalizedSnapshot);
+                                applyDealWorkspaceCoreSnapshot(selectedDealId, finalizedSnapshot, preferredConversationId);
+                            }
+                        }
+
+                        if (!cancelled && activeDealIdRef.current === selectedDealId) {
+                            trackClientRequest("deal_open_full", {
+                                dealId: selectedDealId,
+                                deal_open_full_ms: Date.now() - dealOpenStartedAtMs,
+                                initial_event_count: initialTimelineEvents.length,
+                                backfill_count: totalAdded,
+                            });
+                        }
+                    } catch (error) {
+                        if (!cancelled) {
+                            console.error("Deferred deal backfill failed:", error);
+                        }
+                    } finally {
+                        dealWorkspaceBackfillInFlightRef.current.delete(selectedDealId);
+                    }
+                };
+
+                scheduleDeferredHydration(() => {
+                    void runDeferredHydration();
+                });
+            } catch (error) {
                 if (cancelled) return;
-                console.error("Failed to fetch active deal context:", error);
-                setActiveDealParticipants([]);
-                setDealContacts([]);
-            })
-            .finally(() => {
+                console.error("Failed to load deal workspace core:", error);
+                toast({ title: "Error", description: "Failed to load deal timeline.", variant: "destructive" });
+            } finally {
+                dealWorkspaceCoreInFlightRef.current.delete(selectedDealId);
+                dealWorkspaceInitialHydrationInFlightRef.current.delete(selectedDealId);
                 if (!cancelled) {
                     setLoadingDealContext(false);
                 }
-            });
+            }
+        };
+
+        void loadDealWorkspaceCore();
+
+        const dealInitialHydrationInFlight = dealWorkspaceInitialHydrationInFlightRef.current;
+        const dealBackfillInFlight = dealWorkspaceBackfillInFlightRef.current;
 
         return () => {
             cancelled = true;
+            clearDeferredHydrationTimer();
+            dealInitialHydrationInFlight.delete(selectedDealId);
+            dealBackfillInFlight.delete(selectedDealId);
         };
-    }, [viewMode, activeDealId, urlConversationId]);
+    }, [
+        activeDealId,
+        applyDealWorkspaceCoreSnapshot,
+        cacheDealWorkspaceCoreSnapshot,
+        getCachedDealWorkspaceCoreSnapshot,
+        isDealWorkspaceHydrationBusy,
+        trackClientRequest,
+        viewMode,
+    ]);
+
+    useEffect(() => {
+        if (viewMode !== 'deals' || !activeDealId || !dealTimelineInitialPainted) return;
+
+        let cancelled = false;
+        let idleHandle: number | null = null;
+        let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+
+        const runSidebarLoad = async () => {
+            const sidebar = await loadDealWorkspaceSidebar(activeDealId, { reason: "after_initial_paint" });
+            if (cancelled) return;
+
+            const enrichmentStatus = String((sidebar as any)?.metadata?.enrichment?.status || "").trim().toLowerCase();
+            const shouldPollPendingEnrichment = (
+                (realtimeMode === 'disabled' || realtimeMode === 'fallback')
+                && (enrichmentStatus === 'pending' || enrichmentStatus === 'processing')
+            );
+
+            if (!shouldPollPendingEnrichment) return;
+
+            const intervalId = setInterval(() => {
+                if (cancelled) return;
+                void loadDealWorkspaceSidebar(activeDealId, { reason: "pending_enrichment_poll" });
+            }, 5000);
+
+            return () => clearInterval(intervalId);
+        };
+
+        let cleanupInterval: (() => void) | null = null;
+        const scheduleSidebarLoad = () => {
+            void runSidebarLoad().then((cleanup) => {
+                cleanupInterval = cleanup || null;
+            });
+        };
+
+        if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+            idleHandle = (window as any).requestIdleCallback(scheduleSidebarLoad, { timeout: 1200 });
+        } else {
+            timeoutHandle = setTimeout(scheduleSidebarLoad, 250);
+        }
+
+        return () => {
+            cancelled = true;
+            if (timeoutHandle) clearTimeout(timeoutHandle);
+            if (idleHandle !== null && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+                (window as any).cancelIdleCallback(idleHandle);
+            }
+            cleanupInterval?.();
+        };
+    }, [activeDealId, dealTimelineInitialPainted, loadDealWorkspaceSidebar, realtimeMode, viewMode]);
+
+    useEffect(() => {
+        if (viewMode !== 'deals') return;
+        setWorkspaceContactContext(null);
+        setWorkspaceTaskSummary(null);
+        setWorkspaceViewingSummary(null);
+        setWorkspaceAgentSummary(null);
+    }, [activeDealId, viewMode]);
 
     // Multi-selection (what shows in the Context Builder)
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -1087,17 +1660,39 @@ export function ConversationInterface({ locationId, initialConversations, initia
         setCreatingDeal(true);
         try {
             const ids = Array.from(selectedIds);
+            const selectedConversationsForDeal = conversationsRef.current.filter((conversation) => ids.includes(conversation.id));
             const newDeal = await createPersistentDeal(title, ids);
+
+            cacheDealWorkspaceCoreSnapshot(newDeal.id, createDealWorkspaceCoreSnapshot({
+                dealId: newDeal.id,
+                title: newDeal.title,
+                stage: newDeal.stage,
+                metadata: newDeal.metadata,
+                participants: selectedConversationsForDeal,
+                timelineEvents: [],
+                hydration: createDealWorkspaceHydrationState({
+                    status: 'partial',
+                    timelineEvents: [],
+                    initialCount: 0,
+                    targetCount: THREAD_TARGET_MESSAGE_COUNT,
+                    requestedLimit: THREAD_INITIAL_FALLBACK_MESSAGES,
+                }),
+            }));
+
+            setDeals((prev) => [
+                newDeal,
+                ...prev.filter((deal) => deal.id !== newDeal.id),
+            ]);
+            setActiveId(ids[0] || null);
+            setViewMode('deals');
+            setActiveDealId(newDeal.id);
+
             toast({ title: "Deal Created", description: `Created "${newDeal.title}" with ${ids.length} conversations.` });
 
             // Clear selection and mode
             setSelectedIds(new Set());
             setIsSelectionMode(false);
             setCreateDealOpen(false);
-
-            // Optional: Switch to Deals view?
-            // setViewMode('deals');
-            // setActiveDealId(newDeal.id);
         } catch (e: any) {
             toast({ title: "Error", description: e.message || "Failed to create deal", variant: "destructive" });
         } finally {
@@ -1109,6 +1704,14 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const activeConversation = conversations.find(c => c.id === activeId);
     const selectedConversations = conversations.filter(c => selectedIds.has(c.id));
     const selectedDealConversation = activeDealParticipants.find((conversation) => conversation.id === activeId) || null;
+    const activeDealListEntry = deals.find((deal) => deal?.id === activeDealId) || null;
+    const activeDealTitle = String(activeDealListEntry?.title || "Deal").trim() || "Deal";
+    const activeDealEnrichmentStatus = String(
+        activeDealMetadata?.enrichment?.status
+        || activeDealListEntry?.metadata?.enrichment?.status
+        || ""
+    ).trim().toLowerCase();
+    const dealMissionConversation = dealTimelineInitialPainted ? selectedDealConversation : null;
 
     // Fetch Messages when active selection changes
     useEffect(() => {
@@ -1489,12 +2092,16 @@ export function ConversationInterface({ locationId, initialConversations, initia
         void loadWorkspaceCore();
         void loadWorkspaceSidebar();
 
+        const workspaceInitialHydrationInFlight = workspaceInitialHydrationInFlightRef.current;
+        const workspaceBackfillInFlight = workspaceBackfillInFlightRef.current;
+        const workspaceActivityHydrationInFlight = workspaceActivityHydrationInFlightRef.current;
+
         return () => {
             cancelled = true;
             clearDeferredHydrationTimer();
-            workspaceInitialHydrationInFlightRef.current.delete(selectedConversationId);
-            workspaceBackfillInFlightRef.current.delete(selectedConversationId);
-            workspaceActivityHydrationInFlightRef.current.delete(selectedConversationId);
+            workspaceInitialHydrationInFlight.delete(selectedConversationId);
+            workspaceBackfillInFlight.delete(selectedConversationId);
+            workspaceActivityHydrationInFlight.delete(selectedConversationId);
         };
     }, [
         viewMode,
@@ -1668,12 +2275,72 @@ export function ConversationInterface({ locationId, initialConversations, initia
     }, [viewMode, activeId, isTabVisible, featureFlags.balancedPolling, featureFlags.workspaceV2, featureFlags.realtimeSse, realtimeMode, isWorkspaceHydrationBusy, markConversationReadInUi, trackClientRequest, applyWorkspaceCoreSnapshot, cacheWorkspaceCoreSnapshot]);
 
     useEffect(() => {
+        if (viewMode !== 'deals' || !activeDealId) return;
+        if (!isTabVisible) return;
+        if (featureFlags.realtimeSse && realtimeMode !== 'fallback') return;
+
+        let cancelled = false;
+        const intervalMs = featureFlags.balancedPolling ? 20_000 : 5_000;
+
+        const runActiveDealDelta = async () => {
+            const selectedDealId = activeDealIdRef.current;
+            if (!selectedDealId) return;
+
+            try {
+                if (isDealWorkspaceHydrationBusy(selectedDealId)) {
+                    trackClientRequest("deal_active_poll_skipped_hydration", { dealId: selectedDealId });
+                    return;
+                }
+
+                await refreshActiveDealWorkspace(selectedDealId, {
+                    reason: "poll",
+                    refreshSidebar: true,
+                });
+            } catch (error) {
+                if (!cancelled) {
+                    console.error("Active deal delta sync failed:", error);
+                }
+            }
+        };
+
+        let intervalId: ReturnType<typeof setInterval> | null = null;
+        const startTimer = setTimeout(() => {
+            if (cancelled) return;
+            void runActiveDealDelta();
+            intervalId = setInterval(runActiveDealDelta, intervalMs);
+        }, ACTIVE_POLL_GRACE_MS);
+
+        return () => {
+            cancelled = true;
+            clearTimeout(startTimer);
+            if (intervalId) clearInterval(intervalId);
+        };
+    }, [
+        activeDealId,
+        featureFlags.balancedPolling,
+        featureFlags.realtimeSse,
+        isDealWorkspaceHydrationBusy,
+        isTabVisible,
+        realtimeMode,
+        refreshActiveDealWorkspace,
+        trackClientRequest,
+        viewMode,
+    ]);
+
+    useEffect(() => {
         if (!featureFlags.realtimeSse) {
             setRealtimeMode('disabled');
             return;
         }
 
-        if (viewMode !== 'chats' || viewFilter === 'tasks' || !isTabVisible || debouncedSearchQuery.trim()) {
+        const shouldDisableRealtime = (
+            !isTabVisible
+            || (viewMode === 'chats' && debouncedSearchQuery.trim().length > 0)
+            || (viewMode === 'chats' && viewFilter === 'tasks')
+            || (viewMode !== 'chats' && viewMode !== 'deals')
+        );
+
+        if (shouldDisableRealtime) {
             setRealtimeMode('fallback');
             return;
         }
@@ -1701,6 +2368,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             try {
                 const event = JSON.parse(rawData || "{}");
                 const conversationId = event?.conversationId ? String(event.conversationId) : null;
+                const eventType = String(event?.type || "");
                 const shouldApply = shouldApplyRealtimeEnvelope(
                     {
                         seenEventIds: realtimeEventIdsRef.current,
@@ -1715,6 +2383,21 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 );
                 if (!shouldApply) return;
 
+                if (viewMode === 'deals') {
+                    const payloadDealId = String(event?.payload?.dealId || "").trim();
+                    if (eventType === "deal.update" && payloadDealId && payloadDealId === activeDealIdRef.current) {
+                        if (isDealWorkspaceHydrationBusy(payloadDealId)) {
+                            trackClientRequest("deal_realtime_refresh_skipped_hydration", { dealId: payloadDealId });
+                            return;
+                        }
+                        void refreshActiveDealWorkspace(payloadDealId, {
+                            reason: "realtime",
+                            refreshSidebar: true,
+                        });
+                    }
+                    return;
+                }
+
                 runRealtimeRefresh(conversationId);
             } catch (error) {
                 console.error("Failed to parse realtime conversation event:", error);
@@ -1727,6 +2410,15 @@ export function ConversationInterface({ locationId, initialConversations, initia
             if (closed) return;
             clearFallbackTimer();
             setRealtimeMode('connected');
+            if (viewMode === 'deals') {
+                if (activeDealIdRef.current && !isDealWorkspaceHydrationBusy(activeDealIdRef.current)) {
+                    void refreshActiveDealWorkspace(activeDealIdRef.current, {
+                        reason: "reconnect",
+                        refreshSidebar: true,
+                    });
+                }
+                return;
+            }
             runRealtimeRefresh(activeIdRef.current);
         };
         eventSource.addEventListener('conversation', (evt) => {
@@ -1751,7 +2443,18 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 eventSource = null;
             }
         };
-    }, [featureFlags.realtimeSse, viewMode, viewFilter, isTabVisible, debouncedSearchQuery, runRealtimeRefresh]);
+    }, [
+        activeDealId,
+        debouncedSearchQuery,
+        featureFlags.realtimeSse,
+        isDealWorkspaceHydrationBusy,
+        isTabVisible,
+        refreshActiveDealWorkspace,
+        runRealtimeRefresh,
+        trackClientRequest,
+        viewFilter,
+        viewMode,
+    ]);
 
     useEffect(() => {
         if (viewMode !== 'chats') return;
@@ -1788,6 +2491,42 @@ export function ConversationInterface({ locationId, initialConversations, initia
             }
         };
     }, [viewMode, activeId, conversations, prefetchWorkspaceCore]);
+
+    useEffect(() => {
+        if (viewMode !== 'deals') return;
+
+        const candidateIds = deals
+            .filter((deal) => deal?.id && deal.id !== activeDealId)
+            .slice(0, 3)
+            .map((deal) => deal.id);
+
+        if (candidateIds.length === 0) return;
+
+        let cancelled = false;
+        let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+        let idleHandle: number | null = null;
+
+        const runPrefetch = () => {
+            if (cancelled) return;
+            for (const dealId of candidateIds) {
+                void prefetchDealWorkspaceCore(dealId);
+            }
+        };
+
+        if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+            idleHandle = (window as any).requestIdleCallback(runPrefetch, { timeout: 1200 });
+        } else {
+            timeoutHandle = setTimeout(runPrefetch, 350);
+        }
+
+        return () => {
+            cancelled = true;
+            if (timeoutHandle) clearTimeout(timeoutHandle);
+            if (idleHandle !== null && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+                (window as any).cancelIdleCallback(idleHandle);
+            }
+        };
+    }, [activeDealId, deals, prefetchDealWorkspaceCore, viewMode]);
 
     // Handle clicking a conversation in the list
     const handleSelect = (id: string) => {
@@ -2106,11 +2845,14 @@ export function ConversationInterface({ locationId, initialConversations, initia
             return;
         }
 
-        if (viewMode === 'deals') {
-            setDealTimelineRefreshToken((previous) => previous + 1);
+        if (viewMode === 'deals' && activeDealIdRef.current) {
+            void refreshActiveDealWorkspace(activeDealIdRef.current, {
+                reason: "send_message",
+                refreshSidebar: false,
+            });
         }
 
-        if (activeIdRef.current === conversationTarget.id) {
+        if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
             const newMsgs = await fetchMessages(conversationTarget.id);
             setMessages(newMsgs);
         }
@@ -2316,10 +3058,13 @@ export function ConversationInterface({ locationId, initialConversations, initia
             );
 
             if (sendRes.success) {
-                if (viewMode === 'deals') {
-                    setDealTimelineRefreshToken((previous) => previous + 1);
+                if (viewMode === 'deals' && activeDealIdRef.current) {
+                    void refreshActiveDealWorkspace(activeDealIdRef.current, {
+                        reason: "send_media",
+                        refreshSidebar: false,
+                    });
                 }
-                if (activeIdRef.current === conversationTarget.id) {
+                if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
                     const newMsgs = await fetchMessages(conversationTarget.id);
                     setMessages(newMsgs);
                 }
@@ -2615,6 +3360,13 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const refreshSuggestedResponseQueue = useCallback(async () => {
         const conversationScopeId = viewMode === 'chats' ? String(activeId || "").trim() : "";
         const dealScopeId = viewMode === 'deals' ? String(activeDealId || "").trim() : "";
+        const shouldDelayDealQueue = viewMode === 'deals' && !dealTimelineInitialPainted;
+
+        if (shouldDelayDealQueue) {
+            setSuggestedResponseQueue([]);
+            setLoadingSuggestedResponseQueue(false);
+            return;
+        }
 
         if (!conversationScopeId && !dealScopeId) {
             setSuggestedResponseQueue([]);
@@ -2649,7 +3401,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 setLoadingSuggestedResponseQueue(false);
             }
         }
-    }, [viewMode, activeId, activeDealId]);
+    }, [viewMode, activeId, activeDealId, dealTimelineInitialPainted]);
 
     useEffect(() => {
         void refreshSuggestedResponseQueue();
@@ -2825,6 +3577,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             onViewFilterChange={setViewFilter}
             deals={deals}
             onSelectDeal={handleSelectDeal}
+            onHoverDeal={viewMode === 'deals' ? prefetchDealWorkspaceCore : undefined}
             onImportClick={() => setImportModalOpen(true)}
             onBind={handleBindClick}
             onArchive={viewFilter === 'active' ? handleArchive : undefined}
@@ -2946,10 +3699,17 @@ export function ConversationInterface({ locationId, initialConversations, initia
         activeDealId ? (
             <UnifiedTimeline
                 dealId={activeDealId}
-                refreshToken={dealTimelineRefreshToken}
+                timelineEvents={dealTimelineEvents}
+                loading={loadingDealContext}
+                hydrationStatus={dealTimelineHydrationStatus}
                 composerConversation={selectedDealConversation}
                 onBack={isMobileViewport ? handleBackToList : undefined}
                 onOpenMissionControl={isMobileViewport ? handleOpenMissionControl : undefined}
+                onInitialPaintReady={() => {
+                    if (activeDealIdRef.current === activeDealId) {
+                        setDealTimelineInitialPainted(true);
+                    }
+                }}
                 onSendMessage={(text, type) => handleSendMessage(text, type, selectedDealConversation || undefined)}
                 onSendMedia={(file, caption) => handleSendMedia(file, caption, selectedDealConversation || undefined)}
                 onGenerateDraft={async (
@@ -3016,7 +3776,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 composerDisabled={loadingDealContext || !selectedDealConversation}
                 composerDisabledReason={
                     loadingDealContext
-                        ? "Loading deal participants..."
+                        ? "Loading recent deal timeline..."
                         : "Select a contact in Mission Control to reply."
                 }
                 replyingToLabel={selectedDealConversation?.contactName || undefined}
@@ -3047,28 +3807,36 @@ export function ConversationInterface({ locationId, initialConversations, initia
             />
         ) : <div className="h-full bg-slate-50" />
     ) : (
-        selectedDealConversation ? (
+        dealMissionConversation ? (
             <CoordinatorPanel
                 locationId={locationId}
-                conversation={selectedDealConversation}
+                conversation={dealMissionConversation}
                 selectedConversations={activeDealParticipants}
+                existingDealContextId={activeDealId}
+                existingDealTitle={activeDealTitle}
                 initialContactContext={workspaceContactContext}
                 initialTaskSummary={workspaceTaskSummary}
                 initialViewingSummary={workspaceViewingSummary}
                 initialAgentSummary={workspaceAgentSummary}
                 lazySidebarDataEnabled={featureFlags.lazySidebarData}
                 onBackToConversation={isMobileViewport ? handleBackToConversation : undefined}
-                onDraftApproved={(text) => handleSendMessage(text, getMessageType(selectedDealConversation), selectedDealConversation)}
+                onDraftApproved={(text) => handleSendMessage(text, getMessageType(dealMissionConversation), dealMissionConversation)}
                 onDeselect={() => undefined} // No deselect in deal mode
                 onSuggestionsGenerated={handleMissionSuggestionsGenerated}
-                onContactSaved={(patch) => handleConversationContactSaved(selectedDealConversation.id, patch)}
+                onContactSaved={(patch) => handleConversationContactSaved(dealMissionConversation.id, patch)}
                 dealContacts={dealContacts}
-                selectedDealConversationId={selectedDealConversation.id}
+                selectedDealConversationId={dealMissionConversation.id}
                 onSelectDealConversation={(conversationId) => setActiveId(conversationId)}
             />
         ) : (
             <div className="h-full bg-slate-50 p-4 text-center text-gray-400 text-xs flex flex-col items-center justify-center">
-                {loadingDealContext ? 'Loading deal context...' : 'Select a deal contact to view context.'}
+                {loadingDealContext
+                    ? 'Loading deal context...'
+                    : !dealTimelineInitialPainted
+                        ? 'Preparing timeline...'
+                        : (activeDealEnrichmentStatus === 'pending' || activeDealEnrichmentStatus === 'processing')
+                            ? 'Finalizing deal enrichment...'
+                            : 'Select a deal contact to view context.'}
             </div>
         )
     );

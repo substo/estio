@@ -2,15 +2,102 @@
 
 import db from "@/lib/db";
 import { getLocationContext } from "@/lib/auth/location-context";
-import { refreshGhlAccessToken } from "@/lib/location";
-import { ensureLocalContactSynced } from "@/lib/crm/contact-sync";
-import { getConversation } from "@/lib/ghl/conversations";
-import { assembleTimelineEvents } from "@/lib/conversations/timeline-events";
+import type { Conversation } from "@/lib/ghl/conversations";
+import {
+    assembleTimelineEvents,
+    buildTimelineCursorFromEvent,
+} from "@/lib/conversations/timeline-events";
+import { mergeDealEnrichmentMetadata } from "@/lib/deals/enrichment";
+import {
+    enqueueDealEnrichment,
+    initDealEnrichmentWorker,
+} from "@/lib/queue/deal-enrichment";
+import { DealAgent } from "@/lib/ai/agent";
+
+type DealTimelineWindow = {
+    oldestCursor: string | null;
+    newestCursor: string | null;
+    count: number;
+    requestedLimit: number;
+};
 
 async function getAuthenticatedLocation() {
     const location = await getLocationContext();
     if (!location?.ghlAccessToken) throw new Error("Unauthorized or GHL not connected");
     return location;
+}
+
+function mapDealConversationRowToUi(row: any, ghlLocationId: string | null): Conversation {
+    const lastMessageAtMs = Number(new Date(row.lastMessageAt || 0).getTime());
+    return {
+        id: row.ghlConversationId,
+        contactId: row.contact?.ghlContactId || row.contactId,
+        contactName: row.contact?.name || "Unknown Contact",
+        contactEmail: row.contact?.email || undefined,
+        contactPhone: row.contact?.phone || undefined,
+        contactPreferredLanguage: row.contact?.preferredLang || null,
+        replyLanguageOverride: row.replyLanguageOverride || null,
+        status: (row.status as any) || "open",
+        type: row.lastMessageType || "TYPE_SMS",
+        lastMessageType: row.lastMessageType || undefined,
+        lastMessageBody: row.lastMessageBody || "",
+        lastMessageDate: Number.isFinite(lastMessageAtMs) ? Math.floor(lastMessageAtMs / 1000) : 0,
+        unreadCount: Number(row.unreadCount || 0),
+        locationId: ghlLocationId || "",
+        suggestedActions: [],
+    };
+}
+
+async function queryDealParticipants(dealId: string, locationId: string, ghlLocationId: string | null) {
+    const deal = await db.dealContext.findFirst({
+        where: { id: dealId, locationId },
+        select: {
+            id: true,
+            title: true,
+            stage: true,
+            lastActivityAt: true,
+            metadata: true,
+            propertyIds: true,
+            conversationIds: true,
+        },
+    });
+
+    if (!deal) return null;
+
+    const conversations = await db.conversation.findMany({
+        where: {
+            ghlConversationId: { in: deal.conversationIds },
+            locationId,
+        },
+        include: {
+            contact: {
+                select: {
+                    ghlContactId: true,
+                    name: true,
+                    email: true,
+                    phone: true,
+                    preferredLang: true,
+                    contactType: true,
+                },
+            },
+        },
+        orderBy: [{ lastMessageAt: "desc" }, { id: "desc" }],
+    });
+
+    return {
+        deal,
+        participants: conversations.map((conversation) => mapDealConversationRowToUi(conversation, ghlLocationId)),
+    };
+}
+
+function buildDealTimelineWindow(events: any[], requestedLimit: number): DealTimelineWindow {
+    const normalizedEvents = Array.isArray(events) ? events : [];
+    return {
+        oldestCursor: buildTimelineCursorFromEvent(normalizedEvents[0]) || null,
+        newestCursor: buildTimelineCursorFromEvent(normalizedEvents[normalizedEvents.length - 1]) || null,
+        count: normalizedEvents.length,
+        requestedLimit: Math.max(1, Math.floor(Number(requestedLimit) || normalizedEvents.length || 1)),
+    };
 }
 
 export async function getDealContexts() {
@@ -31,54 +118,18 @@ export async function getDealContexts() {
 
 export async function getDealContext(id: string) {
     const location = await getAuthenticatedLocation();
+    const [core, sidebar] = await Promise.all([
+        getDealWorkspaceCore(id, { take: 1 }),
+        getDealWorkspaceSidebar(id),
+    ]);
 
-    const deal = await db.dealContext.findUnique({
-        where: { id, locationId: location.id }
-    });
-
-    if (!deal) return null;
-
-    // Hydrate Participants (Conversations + Contacts)
-    // We assume conversationIds are GHL Conversation IDs based on current usage
-    const conversations = await db.conversation.findMany({
-        where: {
-            ghlConversationId: { in: deal.conversationIds },
-            locationId: location.id
-        },
-        include: {
-            contact: {
-                include: {
-                    viewings: true
-                }
-            }
-        }
-    });
-
-    // Hydrate Properties
-    const properties = await db.property.findMany({
-        where: { id: { in: deal.propertyIds } }
-    });
+    if (!core?.success || !sidebar?.success) return null;
 
     return {
-        ...deal,
-        conversations: conversations.map(c => ({
-            id: c.ghlConversationId,
-            contactId: c.contact.ghlContactId || c.contactId,
-            contactName: c.contact.name || "Unknown",
-            contactEmail: c.contact.email || undefined,
-            contactPhone: c.contact.phone || undefined,
-            contactPreferredLanguage: c.contact.preferredLang || null,
-            replyLanguageOverride: c.replyLanguageOverride || null,
-            contactType: c.contact.contactType,
-            status: (c.status as any) || 'open',
-            type: c.lastMessageType || 'TYPE_SMS',
-            lastMessageType: c.lastMessageType || undefined,
-            lastMessageBody: c.lastMessageBody || "",
-            lastMessageDate: Math.floor(new Date(c.lastMessageAt).getTime() / 1000),
-            unreadCount: c.unreadCount,
-            locationId: location.ghlLocationId || "",
-        })),
-        properties
+        ...sidebar.deal,
+        conversations: core.participants,
+        properties: sidebar.properties,
+        metadata: sidebar.metadata,
     };
 }
 
@@ -105,83 +156,145 @@ export async function findExistingDeal(conversationIds: string[]) {
 
 export async function createPersistentDeal(title: string, conversationIds: string[]) {
     const location = await getAuthenticatedLocation();
-    const accessToken = location.ghlAccessToken!;
+    const normalizedTitle = String(title || "").trim() || "Untitled Deal";
+    const normalizedConversationIds = Array.from(new Set(
+        (Array.isArray(conversationIds) ? conversationIds : [])
+            .map((conversationId) => String(conversationId || "").trim())
+            .filter(Boolean)
+    ));
 
-    // Auto-detect properties from the contacts involved
-    let propertyIds: string[] = [];
-    try {
-        // [JIT Sync] Ensure contacts are synced locally
-        const conversations = await Promise.all(
-            conversationIds.map(id => getConversation(accessToken, id))
-        );
-
-        const ghlContactIds = conversations
-            .map(c => c.conversation?.contactId)
-            .filter(Boolean) as string[];
-
-        // Run Sync in Parallel
-        await Promise.all(
-            ghlContactIds.map(cid => ensureLocalContactSynced(cid, location.id, accessToken))
-        );
-
-        // Find local Contacts and their Property Roles to find shared properties
-        if (ghlContactIds.length > 0) {
-            const contacts = await db.contact.findMany({
-                where: {
-                    ghlContactId: { in: ghlContactIds },
-                    locationId: location.id
-                },
-                include: {
-                    propertyRoles: { select: { propertyId: true } },
-                    viewings: { select: { propertyId: true } },
-                    // Also check plain lists?
-                }
-            });
-
-            // Extract unique Property IDs from roles and viewings
-            const allPropIds = contacts.flatMap(c => [
-                ...c.propertyRoles.map(r => r.propertyId),
-                ...c.viewings.map(v => v.propertyId)
-            ]);
-            propertyIds = Array.from(new Set(allPropIds));
-        }
-    } catch (e) {
-        console.warn("Failed to auto-detect properties for Deal Context", e);
+    if (normalizedConversationIds.length === 0) {
+        throw new Error("Select at least one conversation.");
     }
 
-    // Create the DB record
+    const queuedAt = new Date().toISOString();
     const dealContext = await db.dealContext.create({
         data: {
-            title,
+            title: normalizedTitle,
             locationId: location.id,
-            conversationIds,
-            propertyIds,
+            conversationIds: normalizedConversationIds,
+            propertyIds: [],
             stage: 'ACTIVE',
-            lastActivityAt: new Date()
-        }
+            lastActivityAt: new Date(),
+            metadata: mergeDealEnrichmentMetadata(null, {
+                status: "pending",
+                queuedAt,
+            }),
+        },
     });
 
+    void initDealEnrichmentWorker().catch((error) => {
+        console.warn("[Deal Enrichment] Worker init failed, continuing with enqueue fallback:", error);
+    });
+
+    const enqueueResult = await enqueueDealEnrichment({
+        dealId: dealContext.id,
+        allowInlineFallback: true,
+    });
+
+    if (enqueueResult.mode === "queue-unavailable") {
+        await db.dealContext.update({
+            where: { id: dealContext.id },
+            data: {
+                metadata: mergeDealEnrichmentMetadata(dealContext.metadata, {
+                    status: "failed",
+                    failedAt: new Date().toISOString(),
+                    error: enqueueResult.error || "Queue unavailable for deal enrichment.",
+                }),
+            },
+        });
+    }
+
     return dealContext;
+}
+
+export async function getDealWorkspaceCore(
+    dealId: string,
+    options?: {
+        take?: number | null;
+        beforeCursor?: string | null;
+    }
+) {
+    const location = await getAuthenticatedLocation();
+    const normalizedDealId = String(dealId || "").trim();
+    const requestedTake = Number(options?.take);
+    const take = Number.isFinite(requestedTake) && requestedTake > 0
+        ? Math.min(Math.max(Math.floor(requestedTake), 1), 500)
+        : 40;
+
+    const resolved = await queryDealParticipants(normalizedDealId, location.id, location.ghlLocationId || null);
+    if (!resolved) {
+        return {
+            success: false as const,
+            error: "Deal not found.",
+        };
+    }
+
+    const timeline = await assembleTimelineEvents({
+        mode: "deal",
+        locationId: location.id,
+        dealId: normalizedDealId,
+        includeMessages: true,
+        includeActivities: true,
+        take,
+        beforeCursor: options?.beforeCursor || null,
+    });
+
+    return {
+        success: true as const,
+        deal: resolved.deal,
+        participants: resolved.participants,
+        timelineEvents: timeline.events,
+        timelineWindow: buildDealTimelineWindow(timeline.events, take),
+    };
+}
+
+export async function getDealWorkspaceSidebar(dealId: string) {
+    const location = await getAuthenticatedLocation();
+    const normalizedDealId = String(dealId || "").trim();
+
+    const resolved = await queryDealParticipants(normalizedDealId, location.id, location.ghlLocationId || null);
+    if (!resolved) {
+        return {
+            success: false as const,
+            error: "Deal not found.",
+        };
+    }
+
+    const properties = await db.property.findMany({
+        where: {
+            id: { in: resolved.deal.propertyIds },
+        },
+    });
+
+    return {
+        success: true as const,
+        deal: resolved.deal,
+        participants: resolved.participants,
+        properties,
+        metadata: resolved.deal.metadata,
+    };
 }
 
 export async function updateDealStatus(dealId: string, status: string) {
     const location = await getAuthenticatedLocation();
 
-    await db.dealContext.update({
+    const result = await db.dealContext.updateMany({
         where: { id: dealId, locationId: location.id },
         data: { stage: status }
     });
+    if (result.count === 0) {
+        throw new Error("Deal not found");
+    }
 
     return { success: true };
 }
-
-import { DealAgent } from "@/lib/ai/agent";
 
 export async function runDealAgentAction(dealId: string, message: string, history: any[]) {
     const location = await getAuthenticatedLocation();
 
     // Check access
-    const deal = await db.dealContext.findUnique({
+    const deal = await db.dealContext.findFirst({
         where: { id: dealId, locationId: location.id }
     });
     if (!deal) throw new Error("Deal not found");
@@ -210,7 +323,7 @@ export async function runDealAgentAction(dealId: string, message: string, histor
 export async function removeConversationFromDeal(dealId: string, conversationId: string) {
     const location = await getAuthenticatedLocation();
 
-    const deal = await db.dealContext.findUnique({
+    const deal = await db.dealContext.findFirst({
         where: { id: dealId, locationId: location.id },
         select: { conversationIds: true }
     });
@@ -228,15 +341,31 @@ export async function removeConversationFromDeal(dealId: string, conversationId:
 }
 
 
-export async function fetchDealTimeline(dealId: string) {
+export async function fetchDealTimeline(
+    dealId: string,
+    options?: {
+        take?: number | null;
+        beforeCursor?: string | null;
+    }
+) {
     const location = await getAuthenticatedLocation();
+    const requestedTake = Number(options?.take);
+    const take = Number.isFinite(requestedTake) && requestedTake > 0
+        ? Math.min(Math.max(Math.floor(requestedTake), 1), 500)
+        : 40;
+
     const timeline = await assembleTimelineEvents({
         mode: "deal",
         locationId: location.id,
         dealId,
         includeMessages: true,
         includeActivities: true,
+        take,
+        beforeCursor: options?.beforeCursor || null,
     });
 
-    return timeline.events;
+    return {
+        events: timeline.events,
+        timelineWindow: buildDealTimelineWindow(timeline.events, take),
+    };
 }

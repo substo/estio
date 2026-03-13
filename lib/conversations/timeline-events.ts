@@ -1,4 +1,5 @@
 import db from "@/lib/db";
+import { buildTimelineCursorFromEvent } from "./timeline-cursor";
 
 type TimelineMode = "chat" | "deal";
 
@@ -117,6 +118,7 @@ type TimelineCursor = {
     createdAtMs: number;
     id: string;
 };
+export { buildTimelineCursorFromEvent };
 
 function decodeTimelineCursor(cursor?: string | null): TimelineCursor | null {
     const value = String(cursor || "").trim();

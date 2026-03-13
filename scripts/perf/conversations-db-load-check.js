@@ -146,6 +146,18 @@ async function main() {
       throw new Error(`No conversation found for location ${location.id}.`);
     }
 
+    const activeDeal = await db.dealContext.findFirst({
+      where: {
+        locationId: location.id,
+        stage: { not: "CLOSED" },
+      },
+      orderBy: [{ lastActivityAt: "desc" }, { id: "desc" }],
+      select: {
+        id: true,
+        conversationIds: true,
+      },
+    });
+
     const listQuery = async () => {
       await db.conversation.findMany({
         where: {
@@ -215,6 +227,52 @@ async function main() {
       ]);
     };
 
+    const dealWorkspaceCoreQuery = activeDeal
+      ? async () => {
+          const conversations = await db.conversation.findMany({
+            where: {
+              locationId: location.id,
+              ghlConversationId: { in: activeDeal.conversationIds },
+            },
+            select: {
+              id: true,
+              contactId: true,
+            },
+          });
+
+          if (conversations.length === 0) return;
+
+          const conversationIds = conversations.map((conversation) => conversation.id);
+          const contactIds = Array.from(new Set(conversations.map((conversation) => conversation.contactId)));
+
+          await Promise.all([
+            db.message.findMany({
+              where: { conversationId: { in: conversationIds } },
+              orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+              take: messageTake,
+            }),
+            db.contactHistory.findMany({
+              where: { contactId: { in: contactIds } },
+              orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+              take: activityTake,
+            }),
+            db.contactTask.findMany({
+              where: {
+                contactId: { in: contactIds },
+                deletedAt: null,
+              },
+              orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+              take: activityTake,
+            }),
+            db.viewing.findMany({
+              where: { contactId: { in: contactIds } },
+              orderBy: [{ date: "desc" }, { id: "desc" }],
+              take: activityTake,
+            }),
+          ]);
+        }
+      : null;
+
     const now = Date.now();
     const deltaCutoff = new Date(now - 3 * 60 * 1000);
     const deltaQuery = async () => {
@@ -242,22 +300,30 @@ async function main() {
     await runBatched(10, Math.min(concurrency, 4), listQuery);
     await runBatched(10, Math.min(concurrency, 4), workspaceCoreQuery);
     await runBatched(10, Math.min(concurrency, 4), deltaQuery);
+    if (dealWorkspaceCoreQuery) {
+      await runBatched(10, Math.min(concurrency, 4), dealWorkspaceCoreQuery);
+    }
 
-    const [listSamples, workspaceCoreSamples, deltaSamples] = await Promise.all([
+    const [listSamples, workspaceCoreSamples, deltaSamples, dealWorkspaceCoreSamples] = await Promise.all([
       runBatched(iterations, concurrency, listQuery),
       runBatched(iterations, concurrency, workspaceCoreQuery),
       runBatched(iterations, concurrency, deltaQuery),
+      dealWorkspaceCoreQuery
+        ? runBatched(iterations, concurrency, dealWorkspaceCoreQuery)
+        : Promise.resolve([]),
     ]);
 
     const listStats = summarize(listSamples);
     const workspaceCoreStats = summarize(workspaceCoreSamples);
     const deltaStats = summarize(deltaSamples);
+    const dealWorkspaceCoreStats = summarize(dealWorkspaceCoreSamples);
 
     const output = {
       context: {
         locationId: location.id,
         locationName: location.name || null,
         conversationId: activeConversation.ghlConversationId,
+        dealId: activeDeal?.id || null,
         iterations,
         concurrency,
         listTake,
@@ -267,16 +333,19 @@ async function main() {
       results: {
         listRefresh: listStats,
         conversationSwitchWorkspaceCore: workspaceCoreStats,
+        dealSwitchWorkspaceCore: dealWorkspaceCoreStats,
         listDelta: deltaStats,
       },
       targets: {
         listRefreshP95LtMs: 700,
         conversationSwitchWorkspaceCoreP95LtMs: 700,
+        dealSwitchWorkspaceCoreP95LtMs: 700,
         listDeltaP95LtMs: 500,
       },
       passFail: {
         listRefresh: listStats.p95Ms < 700,
         conversationSwitchWorkspaceCore: workspaceCoreStats.p95Ms < 700,
+        dealSwitchWorkspaceCore: dealWorkspaceCoreQuery ? dealWorkspaceCoreStats.p95Ms < 700 : true,
         listDelta: deltaStats.p95Ms < 500,
       },
     };

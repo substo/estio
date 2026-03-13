@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Conversation } from "@/lib/ghl/conversations";
 import { generateAIDraft, generateMultiContextDraftAction, getContactContext, generatePlanAction, executeNextTaskAction, getAgentPlan, getAgentExecutions, getTraceTreeAction, getContactInsightsAction, orchestrateAction, getConversationTranscriptUsage } from "../actions";
 import { createPersistentDeal, findExistingDeal, removeConversationFromDeal } from "../../deals/actions";
@@ -26,6 +26,8 @@ interface CoordinatorPanelProps {
     locationId: string;
     conversation: Conversation;
     selectedConversations?: Conversation[]; // New Prop for Context Mode
+    existingDealContextId?: string | null;
+    existingDealTitle?: string | null;
     dealContacts?: DealContactOption[];
     selectedDealConversationId?: string | null;
     onSelectDealConversation?: (conversationId: string) => void;
@@ -133,6 +135,8 @@ export function CoordinatorPanel({
     locationId,
     conversation,
     selectedConversations,
+    existingDealContextId = null,
+    existingDealTitle = null,
     dealContacts,
     selectedDealConversationId,
     onSelectDealConversation,
@@ -166,6 +170,7 @@ export function CoordinatorPanel({
     const [executionHistory, setExecutionHistory] = useState<any[]>([]);
     const [loadingHistory, setLoadingHistory] = useState(false);
     const [loadingTraceDetails, setLoadingTraceDetails] = useState(false);
+    const rawTraceRef = useRef<any>(null);
 
     // Context Builder State
     const [dealTitle, setDealTitle] = useState("");
@@ -218,6 +223,10 @@ export function CoordinatorPanel({
         setContactContext(initialContactContext || null);
     }, [initialContactContext, conversation.id]);
 
+    useEffect(() => {
+        rawTraceRef.current = rawTrace;
+    }, [rawTrace]);
+
     const isContextMode = selectedConversations && selectedConversations.length > 0;
     const traceToolCalls = Array.isArray(rawTrace?.toolCalls) ? rawTrace.toolCalls : [];
     const leadParserToolCall = traceToolCalls.find((c: any) => c?.tool === "gemini.generateContent") || null;
@@ -264,22 +273,7 @@ export function CoordinatorPanel({
         }
     }, [conversation.id]);
 
-    // Fetch History when Modal Opens
-    useEffect(() => {
-        if (traceModalOpen && conversation.id) {
-            setLoadingHistory(true);
-            getAgentExecutions(conversation.id).then(history => {
-                setExecutionHistory(history);
-                // If there's no selected trace but we have history, select the latest
-                if (!rawTrace && history.length > 0) {
-                    handleSelectTrace(history[0]);
-                }
-                setLoadingHistory(false);
-            });
-        }
-    }, [traceModalOpen, conversation.id]);
-
-    const handleSelectTrace = async (trace: any) => {
+    const handleSelectTrace = useCallback(async (trace: any) => {
         setRawTrace(trace);
         setTraceTree(null);
         setInsights([]);
@@ -302,10 +296,31 @@ export function CoordinatorPanel({
         } finally {
             setLoadingTraceDetails(false);
         }
-    };
+    }, [conversation.contactId]);
+
+    // Fetch History when Modal Opens
+    useEffect(() => {
+        if (traceModalOpen && conversation.id) {
+            setLoadingHistory(true);
+            getAgentExecutions(conversation.id).then(history => {
+                setExecutionHistory(history);
+                // If there's no selected trace but we have history, select the latest
+                if (!rawTraceRef.current && history.length > 0) {
+                    void handleSelectTrace(history[0]);
+                }
+                setLoadingHistory(false);
+            });
+        }
+    }, [traceModalOpen, conversation.id, handleSelectTrace]);
 
     // Auto-detect existing deal on selection change
     useEffect(() => {
+        if (existingDealContextId) {
+            setDealContextId(existingDealContextId);
+            setDealTitle(String(existingDealTitle || "").trim());
+            return;
+        }
+
         if (!selectedConversations || selectedConversations.length === 0) {
             setDealContextId(null);
             setDealTitle("");
@@ -322,7 +337,7 @@ export function CoordinatorPanel({
                 setDealTitle("");
             }
         });
-    }, [selectedConversations]);
+    }, [existingDealContextId, existingDealTitle, selectedConversations]);
 
     // Fetch Context on Load or Conversation Change
     useEffect(() => {

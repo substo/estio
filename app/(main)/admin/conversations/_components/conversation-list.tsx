@@ -38,6 +38,7 @@ interface ConversationListProps {
     onViewFilterChange?: (filter: 'active' | 'archived' | 'trash' | 'tasks') => void;
     deals?: any[];
     onSelectDeal?: (id: string) => void;
+    onHoverDeal?: (id: string) => void;
     onImportClick?: () => void;
     onBind?: (ids: string[]) => void;
     onArchive?: (ids: string[]) => void;
@@ -91,6 +92,7 @@ export function ConversationList({
     onViewFilterChange,
     deals,
     onSelectDeal,
+    onHoverDeal,
     onImportClick,
     onBind,
     onArchive,
@@ -178,6 +180,7 @@ export function ConversationList({
                                                     variant="ghost"
                                                     size="icon"
                                                     className="h-8 w-8 text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50"
+                                                    data-bind-deal-action="true"
                                                     onClick={() => onBind(selectedIdsList)}
                                                 >
                                                     <Layers className="w-4 h-4" />
@@ -386,6 +389,7 @@ export function ConversationList({
                                                         variant="ghost"
                                                         size="icon"
                                                         className="h-7 w-7"
+                                                        data-selection-mode-toggle="true"
                                                         onClick={() => onToggleSelectionMode(true)}
                                                     >
                                                         <Layers className="w-3.5 h-3.5" />
@@ -425,6 +429,7 @@ export function ConversationList({
                                             variant="ghost"
                                             size="icon"
                                             className="h-7 w-7"
+                                            data-selection-mode-toggle="true"
                                             onClick={() => onToggleSelectionMode(true)}
                                         >
                                             <CheckSquare className="w-3.5 h-3.5" />
@@ -455,12 +460,14 @@ export function ConversationList({
                     {deals.map(d => (
                         <div
                             key={d.id}
+                            data-deal-id={d.id}
                             className={cn(
                                 "border-b transition-colors p-2 cursor-pointer hover:bg-slate-50",
                                 "bg-slate-50", // Placeholder for logic
                                 selectedId === d.id ? "bg-indigo-50 border-l-4 border-l-indigo-500" : "border-l-4 border-l-transparent"
                             )}
                             onClick={() => onSelectDeal?.(d.id)}
+                            onMouseEnter={() => onHoverDeal?.(d.id)}
                         >
                             <div className="flex justify-between items-start">
                                 <h4 className="font-semibold text-sm truncate text-indigo-900">{d.title}</h4>

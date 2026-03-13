@@ -49,6 +49,7 @@ export function CreateDealDialog({ open, onOpenChange, onConfirm, loading }: Cre
                             </Label>
                             <Input
                                 id="title"
+                                data-create-deal-title="true"
                                 value={title}
                                 onChange={(e) => setTitle(e.target.value)}
                                 className="col-span-3"
@@ -61,7 +62,7 @@ export function CreateDealDialog({ open, onOpenChange, onConfirm, loading }: Cre
                         <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>
                             Cancel
                         </Button>
-                        <Button type="submit" disabled={!title.trim() || loading}>
+                        <Button type="submit" data-create-deal-submit="true" disabled={!title.trim() || loading}>
                             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Create Deal
                         </Button>
