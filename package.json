@@ -15,7 +15,7 @@
         "perf:conversations:query-plan": "node scripts/perf/conversations-query-plan-check.js",
         "perf:conversations:ui-playwright": "node scripts/perf/conversations-ui-benchmark-playwright.js",
         "test:conversations:realtime": "node --test lib/conversations/realtime-merge.test.mjs lib/conversations/workspace-core-cache.test.mjs lib/conversations/thread-hydration.test.mjs lib/conversations/timeline-events.test.mjs lib/deals/enrichment.test.mjs lib/realtime/conversation-events.test.mjs",
-        "test:tasks:reminders": "node --test lib/tasks/reminder-config.test.mjs lib/tasks/reminder-links.test.mjs"
+        "test:tasks:reminders": "node --test lib/tasks/reminder-config.test.mjs lib/tasks/reminder-links.test.mjs lib/tasks/datetime-local.test.mjs"
     },
     "dependencies": {
         "@aws-sdk/client-s3": "^3.995.0",

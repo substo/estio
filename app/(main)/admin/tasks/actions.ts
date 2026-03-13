@@ -6,9 +6,11 @@ import db from '@/lib/db';
 import { auth } from '@clerk/nextjs/server';
 import { getLocationContext } from '@/lib/auth/location-context';
 import { verifyUserHasAccessToLocation } from '@/lib/auth/permissions';
+import { isLocalDateTimeWithoutZone } from '@/lib/tasks/datetime-local';
 import { normalizeReminderOffsets } from '@/lib/tasks/reminder-config';
 import { rebuildTaskReminderJobs } from '@/lib/tasks/reminders';
 import { enqueueTaskSyncJobs } from '@/lib/tasks/sync-engine';
+import { parseViewingDateTimeInput } from '@/lib/viewings/datetime';
 
 const statusFilterSchema = z.enum(['open', 'completed', 'all']).default('all');
 const reminderModeSchema = z.enum(['default', 'custom', 'off']).default('default');
@@ -92,8 +94,18 @@ async function resolveConversationId(locationId: string, conversationId?: string
   return conversation?.id || null;
 }
 
-function parseDueAt(input?: string | null): Date | null {
+function parseDueAt(input?: string | null, timeZone?: string | null): Date | null {
   if (!input) return null;
+  if (timeZone && isLocalDateTimeWithoutZone(input)) {
+    try {
+      return parseViewingDateTimeInput({
+        scheduledAtIso: input,
+        scheduledTimeZone: timeZone,
+      }).utcDate;
+    } catch {
+      return null;
+    }
+  }
   const parsed = new Date(input);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed;
@@ -466,7 +478,7 @@ export async function getTaskDetail(taskId: string) {
 }
 
 export async function createContactTask(input: z.input<typeof createTaskSchema>) {
-  const { location, userId } = await getAuthContext();
+  const { location, userId, currentUserTimeZone } = await getAuthContext();
   const parsed = createTaskSchema.parse(input);
 
   const conversationId = await resolveConversationId(location.id, parsed.conversationId || null);
@@ -502,7 +514,7 @@ export async function createContactTask(input: z.input<typeof createTaskSchema>)
     assignedUserId = assignee?.id || null;
   }
 
-  const dueAt = parseDueAt(parsed.dueAt || null);
+  const dueAt = parseDueAt(parsed.dueAt || null, currentUserTimeZone);
   const reminderOffsets = parsed.reminderMode === 'custom'
     ? normalizeReminderOffsets(parsed.reminderOffsets)
     : Prisma.JsonNull;
@@ -543,7 +555,7 @@ export async function createContactTask(input: z.input<typeof createTaskSchema>)
 }
 
 export async function updateContactTask(input: z.input<typeof updateTaskSchema>) {
-  const { location, userId } = await getAuthContext();
+  const { location, userId, currentUserTimeZone } = await getAuthContext();
   const parsed = updateTaskSchema.parse(input);
 
   const existing = await db.contactTask.findFirst({
@@ -580,7 +592,7 @@ export async function updateContactTask(input: z.input<typeof updateTaskSchema>)
 
   const dueAt = parsed.dueAt === undefined
     ? undefined
-    : parseDueAt(parsed.dueAt);
+    : parseDueAt(parsed.dueAt, currentUserTimeZone);
   const reminderOffsets = parsed.reminderMode === undefined
     ? undefined
     : parsed.reminderMode === 'custom'

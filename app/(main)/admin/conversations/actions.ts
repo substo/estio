@@ -21,6 +21,7 @@ import { Prisma } from "@prisma/client";
 import { revalidatePath, revalidateTag, unstable_cache } from "next/cache";
 import { runGoogleAutoSyncForContact } from "@/lib/google/automation";
 import { createContactTask } from "@/app/(main)/admin/tasks/actions";
+import { isLocalDateTimeWithoutZone } from "@/lib/tasks/datetime-local";
 import { createTraceId, withServerTiming } from "@/lib/observability/performance";
 import { getConversationFeatureFlags } from "@/lib/feature-flags";
 import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-events";
@@ -175,6 +176,7 @@ function normalizeSuggestionPriority(value: unknown): z.infer<typeof TaskSuggest
 function normalizeSuggestionDueAt(value: unknown): string | null {
     const raw = String(value || "").trim();
     if (!raw) return null;
+    if (isLocalDateTimeWithoutZone(raw)) return raw;
     const parsed = new Date(raw);
     if (Number.isNaN(parsed.getTime())) return null;
     return parsed.toISOString();

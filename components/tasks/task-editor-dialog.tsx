@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Loader2, Plus, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { createContactTask, listTaskAssignableUsers, updateContactTask } from '@/app/(main)/admin/tasks/actions';
+import { convertDateTimeLocalToIso, formatDateTimeLocalValue } from '@/lib/tasks/datetime-local';
 import { AVAILABLE_TASK_REMINDER_OFFSETS_MINUTES, DEFAULT_TASK_REMINDER_OFFSETS_MINUTES, normalizeReminderOffsets, reminderOffsetLabel } from '@/lib/tasks/reminder-config';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -38,14 +39,6 @@ type TaskEditorDialogProps = {
   task?: any | null;
   onSaved?: (task: any) => void;
 };
-
-function toDateTimeLocalValue(input?: Date | string | null) {
-  if (!input) return '';
-  const date = new Date(input);
-  if (Number.isNaN(date.getTime())) return '';
-  const pad = (value: number) => String(value).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
 
 function parseTaskReminderMode(task: any): ReminderMode {
   const value = String(task?.reminderMode || 'default').toLowerCase();
@@ -109,7 +102,7 @@ export function TaskEditorDialog({
     if (mode === 'edit' && task) {
       setTitle(String(task.title || ''));
       setDescription(String(task.description || ''));
-      setDueAt(toDateTimeLocalValue(task.dueAt));
+      setDueAt(formatDateTimeLocalValue(task.dueAt));
       setPriority((task.priority || 'medium') as TaskPriority);
       setAssignedUserId(task.assignedUserId || 'unassigned');
       setReminderMode(parseTaskReminderMode(task));
@@ -147,12 +140,13 @@ export function TaskEditorDialog({
       : undefined;
 
     try {
+      const normalizedDueAt = convertDateTimeLocalToIso(dueAt);
       const result = mode === 'edit' && task?.id
         ? await updateContactTask({
             taskId: task.id,
             title: title.trim(),
             description: description.trim() || undefined,
-            dueAt: dueAt || null,
+            dueAt: normalizedDueAt,
             priority,
             assignedUserId: assignedUserId === 'unassigned' ? null : assignedUserId,
             reminderMode,
@@ -163,7 +157,7 @@ export function TaskEditorDialog({
             conversationId: conversationId || undefined,
             title: title.trim(),
             description: description.trim() || undefined,
-            dueAt: dueAt || undefined,
+            dueAt: normalizedDueAt || undefined,
             priority,
             assignedUserId: assignedUserId === 'unassigned' ? undefined : assignedUserId,
             reminderMode,

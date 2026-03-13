@@ -40,6 +40,7 @@ import {
 } from "@/app/(main)/admin/conversations/actions";
 import { openOrStartConversationForContact, searchContactsAction } from "@/app/(main)/admin/contacts/actions";
 import { createContactTask, listTaskAssignableUsers } from "@/app/(main)/admin/tasks/actions";
+import { convertDateTimeLocalToIso, formatDateTimeLocalValue } from "@/lib/tasks/datetime-local";
 import { cn } from "@/lib/utils";
 import { TaskSuggestionFunnelMetrics } from "./task-suggestion-funnel-metrics";
 import { ViewingsSuggestionDialog } from "./viewings-suggestion-dialog";
@@ -149,14 +150,6 @@ function buildBatchContextText(items: SelectionBatchItem[]) {
     return items
         .map((item, index) => `Snippet ${index + 1}:\n${item.text}`)
         .join("\n\n");
-}
-
-function toDateTimeLocalValue(value?: string | null) {
-    if (!value) return "";
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return "";
-    const offset = date.getTimezoneOffset() * 60000;
-    return new Date(date.getTime() - offset).toISOString().slice(0, 16);
 }
 
 export function MessageSelectionActions({
@@ -507,7 +500,7 @@ export function MessageSelectionActions({
                 description: suggestion.description || "",
                 priority: suggestion.priority || "medium",
                 dueAt: suggestion.dueAt || null,
-                dueAtInput: toDateTimeLocalValue(suggestion.dueAt) || "",
+                dueAtInput: formatDateTimeLocalValue(suggestion.dueAt) || "",
                 confidence: typeof suggestion.confidence === "number" ? suggestion.confidence : 0.5,
                 reason: suggestion.reason || null,
             }));
@@ -557,7 +550,7 @@ export function MessageSelectionActions({
                 selected.map((suggestion) => ({
                     title: suggestion.title.trim(),
                     description: suggestion.description?.trim() || undefined,
-                    dueAt: suggestion.dueAtInput || undefined,
+                    dueAt: convertDateTimeLocalToIso(suggestion.dueAtInput) || undefined,
                     priority: suggestion.priority,
                     confidence: suggestion.confidence,
                     reason: suggestion.reason || undefined,
