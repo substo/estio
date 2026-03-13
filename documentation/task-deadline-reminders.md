@@ -229,6 +229,9 @@ Route: [`app/api/cron/task-reminders/route.ts`](/Users/martingreen/Projects/IDX/
 - overlap/load protection: `CronGuard("task-reminders")`
 - feature flag: `TASK_REMINDERS_CRON_ENABLED`
 - worker entrypoint: `processTaskReminderBatch({ batchSize: 50 })`
+- production scheduler requirement: a system cron must call the route every minute
+- canonical server script: [`scripts/cron-task-reminders.sh`](/Users/martingreen/Projects/IDX/scripts/cron-task-reminders.sh)
+- install helper: [`scripts/install-cron.sh`](/Users/martingreen/Projects/IDX/scripts/install-cron.sh)
 
 ### Retry rules
 
