@@ -34,6 +34,7 @@ interface ChatWindowProps {
     messages: Message[];
     activityLog?: ActivityLogItem[];
     loading: boolean;
+    onInitialPaintReady?: () => void;
     onBack?: () => void;
     onOpenMissionControl?: () => void;
     onSendMessage: (text: string, type: 'SMS' | 'Email' | 'WhatsApp') => void | Promise<void>;
@@ -132,6 +133,7 @@ export function ChatWindow({
     messages,
     activityLog = [],
     loading,
+    onInitialPaintReady,
     onBack,
     onOpenMissionControl,
     onSendMessage,
@@ -179,6 +181,7 @@ export function ChatWindow({
     const previousTailMessageIdRef = useRef<string | null>(null);
     const hasInitializedKnownMessagesRef = useRef(false);
     const [isTimelineReady, setIsTimelineReady] = useState(false);
+    const hasReportedInitialPaintRef = useRef(false);
     const canUseTranscriptOnDemand = transcriptOnDemandEnabled !== false;
     const [addNoteOpen, setAddNoteOpen] = useState(false);
     const [addNoteText, setAddNoteText] = useState("");
@@ -243,6 +246,7 @@ export function ChatWindow({
         knownMessageIdsRef.current = new Set();
         previousTailMessageIdRef.current = null;
         hasInitializedKnownMessagesRef.current = false;
+        hasReportedInitialPaintRef.current = false;
         setIsTimelineReady(false);
     }, [conversation.id]);
 
@@ -335,14 +339,22 @@ export function ChatWindow({
                 snapToBottom();
             }
             setIsTimelineReady(true);
+            if (!hasReportedInitialPaintRef.current) {
+                hasReportedInitialPaintRef.current = true;
+                onInitialPaintReady?.();
+            }
         });
-    }, [conversation.id, loading, timelineItems.length, snapToBottom]);
+    }, [conversation.id, loading, onInitialPaintReady, timelineItems.length, snapToBottom]);
 
     useEffect(() => {
         if (!loading && timelineItems.length === 0) {
             setIsTimelineReady(true);
+            if (!hasReportedInitialPaintRef.current) {
+                hasReportedInitialPaintRef.current = true;
+                onInitialPaintReady?.();
+            }
         }
-    }, [loading, timelineItems.length]);
+    }, [loading, onInitialPaintReady, timelineItems.length]);
 
     // Keep snapped to latest when new items arrive while user is still near bottom.
     useLayoutEffect(() => {
@@ -529,7 +541,11 @@ export function ChatWindow({
     );
 
     return (
-        <div data-chat-active-conversation-id={conversation.id} className="h-full flex flex-col bg-white min-w-0 overflow-hidden">
+        <div
+            data-chat-active-conversation-id={conversation.id}
+            data-chat-initial-paint-ready={isTimelineReady ? "true" : "false"}
+            className="h-full flex flex-col bg-white min-w-0 overflow-hidden"
+        >
             {/* Header */}
             <div className="h-16 border-b flex items-center px-3 sm:px-6 shrink-0 justify-between bg-white z-10 shadow-sm gap-2">
                 <div className="flex items-center gap-2 min-w-0 flex-1">

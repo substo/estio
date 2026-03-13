@@ -214,6 +214,7 @@ async function main() {
       rowSelector: '[data-conversation-id="__ID__"]',
       activeSelector: "[data-chat-active-conversation-id]",
       activeAttribute: "data-chat-active-conversation-id",
+      readyAttribute: "data-chat-initial-paint-ready",
     });
 
     await clickTab(page, "Deals");

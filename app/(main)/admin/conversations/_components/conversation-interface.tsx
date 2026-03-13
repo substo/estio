@@ -497,6 +497,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const [messages, setMessages] = useState<Message[]>([]);
     const messagesRef = useRef<Message[]>([]);
     const [loadingMessages, setLoadingMessages] = useState(false);
+    const [chatTimelineInitialPainted, setChatTimelineInitialPainted] = useState(false);
     const messageSignatureRef = useRef<string>('0');
     const [activityLog, setActivityLog] = useState<any[]>([]);
     const [conversationListHasMore, setConversationListHasMore] = useState<boolean>(!!initialConversationListPageInfo?.hasMore);
@@ -3370,6 +3371,8 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const [loadingSuggestedResponseQueue, setLoadingSuggestedResponseQueue] = useState(false);
     const [composerInsertSeed, setComposerInsertSeed] = useState<{ key: string; body: string } | null>(null);
     const suggestedResponseQueueRequestIdRef = useRef(0);
+    const suggestedResponseQueueIdleHandleRef = useRef<number | null>(null);
+    const suggestedResponseQueueTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Reset suggestions when active conversation changes
     useEffect(() => {
@@ -3377,21 +3380,41 @@ export function ConversationInterface({ locationId, initialConversations, initia
     }, [activeId]);
 
     useEffect(() => {
+        setChatTimelineInitialPainted(false);
+    }, [viewMode, activeId]);
+
+    useEffect(() => {
         setComposerInsertSeed(null);
     }, [viewMode, activeId, activeDealId]);
 
-    const refreshSuggestedResponseQueue = useCallback(async () => {
-        const conversationScopeId = viewMode === 'chats' ? String(activeId || "").trim() : "";
-        const dealScopeId = viewMode === 'deals' ? String(activeDealId || "").trim() : "";
-        const shouldDelayDealQueue = viewMode === 'deals' && !dealTimelineInitialPainted;
+    const suggestedResponseQueueConversationId = viewMode === 'chats' ? String(activeId || "").trim() : "";
+    const suggestedResponseQueueDealId = viewMode === 'deals' ? String(activeDealId || "").trim() : "";
+    const suggestedResponseQueueScopeKey = suggestedResponseQueueConversationId
+        ? `chat:${suggestedResponseQueueConversationId}`
+        : suggestedResponseQueueDealId
+            ? `deal:${suggestedResponseQueueDealId}`
+            : "";
+    const suggestedResponseQueueReady = viewMode === 'chats'
+        ? (!!suggestedResponseQueueConversationId && chatTimelineInitialPainted)
+        : (!!suggestedResponseQueueDealId && dealTimelineInitialPainted);
 
-        if (shouldDelayDealQueue) {
-            setSuggestedResponseQueue([]);
-            setLoadingSuggestedResponseQueue(false);
-            return;
+    const clearSuggestedResponseQueueAutoLoad = useCallback(() => {
+        if (
+            suggestedResponseQueueIdleHandleRef.current !== null
+            && typeof window !== 'undefined'
+            && 'cancelIdleCallback' in window
+        ) {
+            (window as any).cancelIdleCallback(suggestedResponseQueueIdleHandleRef.current);
+            suggestedResponseQueueIdleHandleRef.current = null;
         }
+        if (suggestedResponseQueueTimeoutRef.current) {
+            clearTimeout(suggestedResponseQueueTimeoutRef.current);
+            suggestedResponseQueueTimeoutRef.current = null;
+        }
+    }, []);
 
-        if (!conversationScopeId && !dealScopeId) {
+    const refreshSuggestedResponseQueue = useCallback(async (options?: { trigger?: string }) => {
+        if (!suggestedResponseQueueConversationId && !suggestedResponseQueueDealId) {
             setSuggestedResponseQueue([]);
             setLoadingSuggestedResponseQueue(false);
             return;
@@ -3399,12 +3422,16 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
         const requestId = suggestedResponseQueueRequestIdRef.current + 1;
         suggestedResponseQueueRequestIdRef.current = requestId;
+        trackClientRequest("suggested_response_queue_load", {
+            scopeKey: suggestedResponseQueueScopeKey,
+            trigger: options?.trigger || "manual",
+        });
         setLoadingSuggestedResponseQueue(true);
 
         try {
             const rows = await listSuggestedResponses({
-                conversationId: conversationScopeId || undefined,
-                dealId: dealScopeId || undefined,
+                conversationId: suggestedResponseQueueConversationId || undefined,
+                dealId: suggestedResponseQueueDealId || undefined,
                 status: "pending",
                 limit: 40,
             });
@@ -3424,15 +3451,54 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 setLoadingSuggestedResponseQueue(false);
             }
         }
-    }, [viewMode, activeId, activeDealId, dealTimelineInitialPainted]);
+    }, [
+        suggestedResponseQueueConversationId,
+        suggestedResponseQueueDealId,
+        suggestedResponseQueueScopeKey,
+        trackClientRequest,
+    ]);
 
     useEffect(() => {
-        void refreshSuggestedResponseQueue();
-    }, [refreshSuggestedResponseQueue]);
+        clearSuggestedResponseQueueAutoLoad();
+        suggestedResponseQueueRequestIdRef.current += 1;
+        setSuggestedResponseQueue([]);
+        setLoadingSuggestedResponseQueue(false);
+    }, [clearSuggestedResponseQueueAutoLoad, suggestedResponseQueueScopeKey]);
+
+    useEffect(() => {
+        if (!suggestedResponseQueueScopeKey || !suggestedResponseQueueReady) return;
+
+        clearSuggestedResponseQueueAutoLoad();
+
+        const runAutoLoad = () => {
+            suggestedResponseQueueIdleHandleRef.current = null;
+            suggestedResponseQueueTimeoutRef.current = null;
+            void refreshSuggestedResponseQueue({ trigger: "auto" });
+        };
+
+        if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+            suggestedResponseQueueIdleHandleRef.current = (window as any).requestIdleCallback(runAutoLoad, { timeout: 1200 });
+        } else {
+            suggestedResponseQueueTimeoutRef.current = setTimeout(runAutoLoad, 250);
+        }
+
+        return clearSuggestedResponseQueueAutoLoad;
+    }, [
+        clearSuggestedResponseQueueAutoLoad,
+        refreshSuggestedResponseQueue,
+        suggestedResponseQueueReady,
+        suggestedResponseQueueScopeKey,
+    ]);
+
+    useEffect(() => {
+        return () => {
+            clearSuggestedResponseQueueAutoLoad();
+        };
+    }, [clearSuggestedResponseQueueAutoLoad]);
 
     const handleMissionSuggestionsGenerated = useCallback((nextSuggestions: string[]) => {
         setSuggestions(Array.isArray(nextSuggestions) ? nextSuggestions : []);
-        void refreshSuggestedResponseQueue();
+        void refreshSuggestedResponseQueue({ trigger: "mission" });
     }, [refreshSuggestedResponseQueue]);
 
     const handleAcceptSuggestedResponse = useCallback(async (
@@ -3465,7 +3531,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             });
         }
 
-        await refreshSuggestedResponseQueue();
+        await refreshSuggestedResponseQueue({ trigger: "accept" });
     }, [refreshSuggestedResponseQueue]);
 
     const handleRejectSuggestedResponse = useCallback(async (suggestedResponseId: string, reason?: string | null) => {
@@ -3480,7 +3546,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         }
 
         toast({ title: "Suggestion Rejected" });
-        await refreshSuggestedResponseQueue();
+        await refreshSuggestedResponseQueue({ trigger: "reject" });
     }, [refreshSuggestedResponseQueue]);
 
     const streamDraftViaApi = useCallback(async (args: {
@@ -3713,6 +3779,11 @@ export function ConversationInterface({ locationId, initialConversations, initia
                         applyConversationReplyLanguageOverride(activeConversation.id, result.replyLanguageOverride ?? null);
                     }
                     return result;
+                }}
+                onInitialPaintReady={() => {
+                    if (activeIdRef.current === activeConversation.id) {
+                        setChatTimelineInitialPainted(true);
+                    }
                 }}
             />
         ) : (
