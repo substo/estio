@@ -2,6 +2,7 @@ import db from '@/lib/db';
 import { Prisma } from '@prisma/client';
 import { auth } from '@clerk/nextjs/server';
 import { getRuntimeNotificationFeatureFlags } from '@/lib/notifications/runtime-config';
+import { isTaskDeadlineNotificationStale } from '@/lib/notifications/task-deadline-state';
 import { DEFAULT_TASK_REMINDER_OFFSETS_MINUTES, normalizeReminderOffsets } from '@/lib/tasks/reminder-config';
 import { rebuildTaskReminderJobsForAssignee } from '@/lib/tasks/reminders';
 
@@ -34,6 +35,56 @@ export async function getCurrentDbUserIdOrThrow() {
   return user.id;
 }
 
+async function pruneStaleTaskDeadlineNotificationsForUser(userId: string) {
+  const notifications = await db.userNotification.findMany({
+    where: {
+      userId,
+      type: 'task_deadline',
+    },
+    select: {
+      id: true,
+      userId: true,
+      type: true,
+      payload: true,
+      task: {
+        select: {
+          deletedAt: true,
+          status: true,
+          dueAt: true,
+          assignedUserId: true,
+          syncVersion: true,
+          reminderMode: true,
+        },
+      },
+      taskReminderJob: {
+        select: {
+          idempotencyKey: true,
+          status: true,
+        },
+      },
+    },
+  });
+
+  const staleIds = notifications
+    .filter((notification) => isTaskDeadlineNotificationStale(notification))
+    .map((notification) => notification.id);
+
+  if (staleIds.length === 0) {
+    return 0;
+  }
+
+  await db.userNotification.deleteMany({
+    where: {
+      userId,
+      id: {
+        in: staleIds,
+      },
+    },
+  });
+
+  return staleIds.length;
+}
+
 export async function getCurrentUserNotificationSnapshot(options?: {
   limit?: number;
   unreadOnly?: boolean;
@@ -42,6 +93,8 @@ export async function getCurrentUserNotificationSnapshot(options?: {
   const flags = getRuntimeNotificationFeatureFlags();
   const take = Math.min(Math.max(Number(options?.limit || 20), 1), 100);
   const unreadOnly = !!options?.unreadOnly;
+
+  await pruneStaleTaskDeadlineNotificationsForUser(dbUserId);
 
   const [unreadCount, notifications] = await Promise.all([
     db.userNotification.count({

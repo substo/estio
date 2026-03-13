@@ -251,6 +251,7 @@ Behavior:
 - in-app delivery writes a `UserNotificationDelivery` row with channel `in_app`
 - if realtime notifications are enabled, a Redis-backed SSE event is also published
 - the admin bell subscribes to `/api/notifications/events` and refreshes its inbox snapshot
+- task-deadline notifications are pruned when the related task is deleted, completed, unassigned, rescheduled onto a newer sync version, or otherwise becomes ineligible
 
 ### Browser web push
 

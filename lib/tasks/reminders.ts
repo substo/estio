@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import db from '@/lib/db';
 import { isWithinQuietHours } from '@/lib/ai/automation/config';
 import { getNotificationFeatureFlags } from '@/lib/notifications/feature-flags';
+import { parseTaskReminderSyncVersion } from '@/lib/notifications/task-deadline-state';
 import { sendWebPushNotification, isWebPushConfigured } from '@/lib/notifications/push';
 import { publishNotificationRealtimeEvent } from '@/lib/realtime/notification-events';
 import {
@@ -143,15 +144,8 @@ function computeBackoffMs(attemptCount: number) {
   return Math.round(seconds * 1000 * jitter);
 }
 
-function parseReminderSyncVersion(idempotencyKey: string) {
-  const match = String(idempotencyKey || '').match(/:v(\d+)$/);
-  if (!match?.[1]) return null;
-  const version = Number(match[1]);
-  return Number.isFinite(version) ? version : null;
-}
-
 function isSupersededReminderJob(idempotencyKey: string, taskSyncVersion: number) {
-  const version = parseReminderSyncVersion(idempotencyKey);
+  const version = parseTaskReminderSyncVersion(idempotencyKey);
   if (!version) return false;
   return version < taskSyncVersion;
 }
@@ -361,6 +355,44 @@ async function ensureTaskReminderNotification(job: ReminderJobRecord) {
     },
     include: {
       deliveries: true,
+    },
+  });
+}
+
+async function clearStaleTaskDeadlineNotifications(taskId: string, activeIdempotencyKeys: string[]) {
+  const trimmedTaskId = String(taskId || '').trim();
+  if (!trimmedTaskId) return;
+
+  if (activeIdempotencyKeys.length === 0) {
+    await db.userNotification.deleteMany({
+      where: {
+        taskId: trimmedTaskId,
+        type: 'task_deadline',
+      },
+    });
+    return;
+  }
+
+  await db.userNotification.deleteMany({
+    where: {
+      taskId: trimmedTaskId,
+      type: 'task_deadline',
+      OR: [
+        {
+          taskReminderJob: {
+            is: null,
+          },
+        },
+        {
+          taskReminderJob: {
+            is: {
+              idempotencyKey: {
+                notIn: activeIdempotencyKeys,
+              },
+            },
+          },
+        },
+      ],
     },
   });
 }
@@ -763,6 +795,7 @@ export async function rebuildTaskReminderJobs(taskId: string) {
   }) as ReminderTaskRecord | null;
 
   if (!task) {
+    await clearStaleTaskDeadlineNotifications(taskId, []);
     return { success: false as const, count: 0, reason: 'task_not_found' };
   }
 
@@ -793,6 +826,7 @@ export async function rebuildTaskReminderJobs(taskId: string) {
   });
 
   const rows = buildReminderJobRows(task);
+  await clearStaleTaskDeadlineNotifications(task.id, rows.map((row) => row.idempotencyKey));
   return {
     success: true as const,
     count: rows.length,
