@@ -160,9 +160,14 @@ function toConversationContextSummary(args: {
 async function collectPostViewingCandidates(args: {
   locationId: string;
   now: Date;
+  schedulePolicy: Prisma.JsonValue | null | undefined;
   dealMap: Map<string, string>;
 }): Promise<CandidateJobInput[]> {
-  const cutoff = new Date(args.now.getTime() - 2 * 60 * 60 * 1000);
+  const minHoursSinceViewing = Math.max(
+    1,
+    Math.min(168, toPositiveInt(getSchedulePolicyValue(args.schedulePolicy, "minHoursSinceViewing"), 2))
+  );
+  const cutoff = new Date(args.now.getTime() - minHoursSinceViewing * 60 * 60 * 1000);
 
   const rows = await db.viewing.findMany({
     where: {
@@ -198,8 +203,8 @@ async function collectPostViewingCandidates(args: {
     if (!conversation?.id || !conversation.ghlConversationId) continue;
 
     const hoursAgo = row.scheduledAt
-      ? Math.max(2, Math.round((args.now.getTime() - row.scheduledAt.getTime()) / (60 * 60 * 1000)))
-      : 2;
+      ? Math.max(minHoursSinceViewing, Math.round((args.now.getTime() - row.scheduledAt.getTime()) / (60 * 60 * 1000)))
+      : minHoursSinceViewing;
 
     candidates.push({
       conversationId: conversation.id,
@@ -509,6 +514,7 @@ async function collectCandidatesForTemplate(args: {
       return collectPostViewingCandidates({
         locationId: args.locationId,
         now: args.now,
+        schedulePolicy: args.schedulePolicy,
         dealMap: args.dealMap,
       });
 
@@ -628,6 +634,10 @@ async function ensureDefaultSchedules(now: Date): Promise<void> {
         ? 60
         : cadenceToDays(config.followUpCadence) * 24 * 60;
 
+      const schedulePolicy = (config.schedulePolicies?.[templateKey] && typeof config.schedulePolicies[templateKey] === "object")
+        ? config.schedulePolicies[templateKey] as Prisma.JsonValue
+        : ({} as Prisma.JsonValue);
+
       try {
         await db.aiAutomationSchedule.create({
           data: {
@@ -639,7 +649,7 @@ async function ensureDefaultSchedules(now: Date): Promise<void> {
             templateKey,
             timezone: location.timeZone || "UTC",
             quietHours: config.quietHours as any,
-            policy: {},
+            policy: schedulePolicy as any,
             nextRunAt: now,
           },
         });
@@ -1023,6 +1033,19 @@ async function processClaimedJob(job: Awaited<ReturnType<typeof claimNextPending
       conversationHistory,
       dealStage: null as any,
     });
+
+    if (orchestration.traceId) {
+      await db.agentExecution.updateMany({
+        where: {
+          traceId: orchestration.traceId,
+          spanId: orchestration.traceId,
+        },
+        data: {
+          taskTitle: `automation:${templateKey}`,
+          intent: templateKey,
+        },
+      }).catch(() => undefined);
+    }
 
     const draftBody = String(orchestration.draftReply || "").trim();
     if (!draftBody) {

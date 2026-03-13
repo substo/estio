@@ -50,6 +50,31 @@ type AutomationSummary = {
     pendingJobs: number;
     deadJobs: number;
     pendingSuggestions: number;
+    schedules?: Array<{
+        id: string;
+        triggerType: string;
+        templateKey: string;
+        enabled: boolean;
+        cadenceMinutes: number;
+        timezone: string;
+        nextRunAt: string | null;
+        lastPlannedAt: string | null;
+        lastRunAt: string | null;
+        updatedAt: string;
+        policy: any;
+    }>;
+    recentJobs?: Array<{
+        id: string;
+        templateKey: string;
+        status: string;
+        attemptCount: number;
+        maxAttempts: number;
+        scheduledAt: string;
+        processedAt: string | null;
+        traceId: string | null;
+        lastError: string | null;
+        createdAt: string;
+    }>;
 };
 
 interface AutomationHubSettingsProps {
@@ -75,6 +100,20 @@ function formatDateLabel(value: string | null | undefined): string {
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return "Not scheduled yet";
     return d.toLocaleString();
+}
+
+function parseIdListInput(value: string): string[] {
+    return Array.from(new Set(
+        String(value || "")
+            .split(/[\n,]/g)
+            .map((item) => item.trim())
+            .filter(Boolean)
+    ));
+}
+
+function formatIdList(value: unknown): string {
+    if (!Array.isArray(value)) return "";
+    return value.map((item) => String(item || "").trim()).filter(Boolean).join("\n");
 }
 
 function hasOverrideValues(override: any): boolean {
@@ -149,6 +188,39 @@ export function AutomationHubSettings({ locationId, initialConfig, summary }: Au
         });
     };
 
+    const updateSchedulePolicy = (
+        templateKey: AutomationTemplateKey,
+        patch: Record<string, unknown>
+    ) => {
+        setConfig((prev) => {
+            const current = { ...(prev.schedulePolicies?.[templateKey] || {}) } as Record<string, unknown>;
+            const merged: Record<string, unknown> = { ...current, ...patch };
+
+            for (const [key, value] of Object.entries(merged)) {
+                if (value === undefined || value === null || value === "") {
+                    delete merged[key];
+                    continue;
+                }
+                if (Array.isArray(value) && value.length === 0) {
+                    delete merged[key];
+                    continue;
+                }
+            }
+
+            const schedulePolicies = { ...(prev.schedulePolicies || {}) } as Record<string, any>;
+            if (Object.keys(merged).length > 0) {
+                schedulePolicies[templateKey] = merged;
+            } else {
+                delete schedulePolicies[templateKey];
+            }
+
+            return {
+                ...prev,
+                schedulePolicies: schedulePolicies as any,
+            };
+        });
+    };
+
     const saveAutomationConfig = async () => {
         setSaving(true);
         try {
@@ -218,6 +290,84 @@ export function AutomationHubSettings({ locationId, initialConfig, summary }: Au
                     <p className="text-sm font-semibold text-slate-900">
                         {(summary?.pendingSuggestions ?? 0)} / {(summary?.pendingJobs ?? 0)} / {(summary?.deadJobs ?? 0)}
                     </p>
+                </div>
+            </div>
+
+            <div className="space-y-3 rounded-lg border p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                        <p className="text-sm font-medium text-slate-900">Central Scheduler and Worker</p>
+                        <p className="text-[11px] text-muted-foreground">Cron endpoint: <code>/api/cron/ai-automations</code></p>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                        Installed via <code>scripts/install-cron.sh</code> (10-minute cadence by default).
+                    </p>
+                </div>
+
+                <div className="space-y-1">
+                    <p className="text-xs font-medium text-slate-700">Schedule Runtime</p>
+                    {summary?.schedules && summary.schedules.length > 0 ? (
+                        <div className="max-h-56 overflow-auto rounded border">
+                            <table className="min-w-full text-xs">
+                                <thead className="bg-slate-50 text-slate-600">
+                                    <tr>
+                                        <th className="px-2 py-1 text-left font-medium">Template</th>
+                                        <th className="px-2 py-1 text-left font-medium">Cadence</th>
+                                        <th className="px-2 py-1 text-left font-medium">Timezone</th>
+                                        <th className="px-2 py-1 text-left font-medium">Next Run</th>
+                                        <th className="px-2 py-1 text-left font-medium">Last Run</th>
+                                        <th className="px-2 py-1 text-left font-medium">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {summary.schedules.map((row) => (
+                                        <tr key={row.id} className="border-t">
+                                            <td className="px-2 py-1">{TEMPLATE_LABELS[(row.templateKey as AutomationTemplateKey)] || row.templateKey}</td>
+                                            <td className="px-2 py-1">{row.cadenceMinutes}m</td>
+                                            <td className="px-2 py-1">{row.timezone || "UTC"}</td>
+                                            <td className="px-2 py-1">{formatDateLabel(row.nextRunAt)}</td>
+                                            <td className="px-2 py-1">{formatDateLabel(row.lastRunAt)}</td>
+                                            <td className="px-2 py-1">{row.enabled ? "enabled" : "disabled"}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        <p className="text-[11px] text-muted-foreground">No schedule rows yet. Save settings to materialize schedule records.</p>
+                    )}
+                </div>
+
+                <div className="space-y-1">
+                    <p className="text-xs font-medium text-slate-700">Recent Worker Jobs</p>
+                    {summary?.recentJobs && summary.recentJobs.length > 0 ? (
+                        <div className="max-h-56 overflow-auto rounded border">
+                            <table className="min-w-full text-xs">
+                                <thead className="bg-slate-50 text-slate-600">
+                                    <tr>
+                                        <th className="px-2 py-1 text-left font-medium">Created</th>
+                                        <th className="px-2 py-1 text-left font-medium">Template</th>
+                                        <th className="px-2 py-1 text-left font-medium">Status</th>
+                                        <th className="px-2 py-1 text-left font-medium">Attempts</th>
+                                        <th className="px-2 py-1 text-left font-medium">Trace</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {summary.recentJobs.map((row) => (
+                                        <tr key={row.id} className="border-t">
+                                            <td className="px-2 py-1">{formatDateLabel(row.createdAt)}</td>
+                                            <td className="px-2 py-1">{TEMPLATE_LABELS[(row.templateKey as AutomationTemplateKey)] || row.templateKey}</td>
+                                            <td className="px-2 py-1">{row.status}</td>
+                                            <td className="px-2 py-1">{row.attemptCount}/{row.maxAttempts}</td>
+                                            <td className="px-2 py-1 font-mono">{row.traceId ? `${row.traceId.slice(0, 8)}...` : "-"}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        <p className="text-[11px] text-muted-foreground">No worker jobs yet.</p>
+                    )}
                 </div>
             </div>
 
@@ -408,6 +558,7 @@ export function AutomationHubSettings({ locationId, initialConfig, summary }: Au
                     <div className="space-y-3">
                         {BUILTIN_AUTOMATION_TEMPLATES.map((templateKey) => {
                             const override = config.templateOverrides?.[templateKey] || {};
+                            const policy = config.schedulePolicies?.[templateKey] || {};
                             const checked = enabledTemplateSet.has(templateKey);
 
                             return (
@@ -486,6 +637,124 @@ export function AutomationHubSettings({ locationId, initialConfig, summary }: Au
                                                         ))}
                                                     </select>
                                                 </div>
+                                            </div>
+
+                                            <div className="space-y-2 rounded-md border bg-slate-50 p-2.5">
+                                                <Label className="text-[11px] font-medium text-slate-700">Scheduler policy</Label>
+
+                                                {templateKey === "post_viewing_follow_up" && (
+                                                    <div className="grid gap-1.5 md:max-w-xs">
+                                                        <Label className="text-[11px] text-muted-foreground">Min hours after viewing</Label>
+                                                        <Input
+                                                            type="number"
+                                                            min={1}
+                                                            max={168}
+                                                            value={Number((policy as any).minHoursSinceViewing ?? 2)}
+                                                            onChange={(event) => updateSchedulePolicy(templateKey, {
+                                                                minHoursSinceViewing: toBoundedInt(event.target.value, 1, 168, Number((policy as any).minHoursSinceViewing ?? 2)),
+                                                            })}
+                                                        />
+                                                    </div>
+                                                )}
+
+                                                {templateKey === "inactive_lead_reengagement" && (
+                                                    <div className="grid gap-2 md:grid-cols-2">
+                                                        <div className="grid gap-1">
+                                                            <Label className="text-[11px] text-muted-foreground">Inactive days threshold</Label>
+                                                            <Input
+                                                                type="number"
+                                                                min={1}
+                                                                max={180}
+                                                                value={Number((policy as any).inactivityDays ?? 7)}
+                                                                onChange={(event) => updateSchedulePolicy(templateKey, {
+                                                                    inactivityDays: toBoundedInt(event.target.value, 1, 180, Number((policy as any).inactivityDays ?? 7)),
+                                                                })}
+                                                            />
+                                                        </div>
+                                                        <div className="grid gap-1">
+                                                            <Label className="text-[11px] text-muted-foreground">Minimum lead score</Label>
+                                                            <Input
+                                                                type="number"
+                                                                min={0}
+                                                                max={100}
+                                                                value={Number((policy as any).minLeadScore ?? 30)}
+                                                                onChange={(event) => updateSchedulePolicy(templateKey, {
+                                                                    minLeadScore: toBoundedInt(event.target.value, 0, 100, Number((policy as any).minLeadScore ?? 30)),
+                                                                })}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {templateKey === "re_engagement" && (
+                                                    <div className="grid gap-1.5 md:max-w-xs">
+                                                        <Label className="text-[11px] text-muted-foreground">Inactive days threshold</Label>
+                                                        <Input
+                                                            type="number"
+                                                            min={1}
+                                                            max={180}
+                                                            value={Number((policy as any).inactivityDays ?? 10)}
+                                                            onChange={(event) => updateSchedulePolicy(templateKey, {
+                                                                inactivityDays: toBoundedInt(event.target.value, 1, 180, Number((policy as any).inactivityDays ?? 10)),
+                                                            })}
+                                                        />
+                                                    </div>
+                                                )}
+
+                                                {templateKey === "listing_alert" && (
+                                                    <div className="grid gap-1.5 md:max-w-xs">
+                                                        <Label className="text-[11px] text-muted-foreground">Listing lookback hours</Label>
+                                                        <Input
+                                                            type="number"
+                                                            min={1}
+                                                            max={168}
+                                                            value={Number((policy as any).listingLookbackHours ?? 1)}
+                                                            onChange={(event) => updateSchedulePolicy(templateKey, {
+                                                                listingLookbackHours: toBoundedInt(event.target.value, 1, 168, Number((policy as any).listingLookbackHours ?? 1)),
+                                                            })}
+                                                        />
+                                                    </div>
+                                                )}
+
+                                                {templateKey === "custom_follow_up" && (
+                                                    <div className="grid gap-2">
+                                                        <div className="grid gap-1">
+                                                            <Label className="text-[11px] text-muted-foreground">Campaign context</Label>
+                                                            <textarea
+                                                                className="flex min-h-[64px] w-full rounded-md border border-input bg-background px-3 py-2 text-xs"
+                                                                placeholder="Describe the custom follow-up goal/context..."
+                                                                value={String((policy as any).customContext || "")}
+                                                                onChange={(event) => updateSchedulePolicy(templateKey, {
+                                                                    customContext: event.target.value.trim(),
+                                                                })}
+                                                            />
+                                                        </div>
+                                                        <div className="grid gap-1 md:grid-cols-2">
+                                                            <div className="grid gap-1">
+                                                                <Label className="text-[11px] text-muted-foreground">Target conversation IDs (optional)</Label>
+                                                                <textarea
+                                                                    className="flex min-h-[72px] w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono"
+                                                                    placeholder="One per line or comma-separated"
+                                                                    value={formatIdList((policy as any).targetConversationIds)}
+                                                                    onChange={(event) => updateSchedulePolicy(templateKey, {
+                                                                        targetConversationIds: parseIdListInput(event.target.value),
+                                                                    })}
+                                                                />
+                                                            </div>
+                                                            <div className="grid gap-1">
+                                                                <Label className="text-[11px] text-muted-foreground">Target contact IDs (optional)</Label>
+                                                                <textarea
+                                                                    className="flex min-h-[72px] w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono"
+                                                                    placeholder="One per line or comma-separated"
+                                                                    value={formatIdList((policy as any).targetContactIds)}
+                                                                    onChange={(event) => updateSchedulePolicy(templateKey, {
+                                                                        targetContactIds: parseIdListInput(event.target.value),
+                                                                    })}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     )}

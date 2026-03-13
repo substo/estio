@@ -1,9 +1,15 @@
 ---
+id: lead_qualification
 name: lead_qualification
 description: >
   Builds comprehensive buyer profiles through strategic questioning.
   Triggers when intent is GENERAL_QUESTION, PROPERTY_QUESTION, or
   when the contact's qualification stage is "unqualified" or "basic".
+risk: medium
+channels:
+  - whatsapp
+  - sms
+  - email
 tools:
   - update_requirements
   - store_insight
@@ -11,6 +17,22 @@ tools:
   - update_lead_score
   - search_properties
   - log_activity
+requiredTools:
+  - store_insight
+  - log_activity
+inputsSchema:
+  requires:
+    - conversationId
+    - contactId
+    - latestMessage
+outputsSchema:
+  final_response: string
+  tool_calls: array
+policyHints:
+  objective:
+    - nurture
+    - revive
+  defaultAggressiveness: balanced
 ---
 
 # Qualifying Leads

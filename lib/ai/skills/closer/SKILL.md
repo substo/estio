@@ -1,12 +1,34 @@
 ---
+id: closer
 name: closer
 description: Use this skill when the user asks for a contract, legal advice, closing details, or signature procedures.
+risk: high
+channels:
+  - email
+  - whatsapp
+  - sms
 tools:
   - generate_contract
   - send_for_signature
   - check_signature_status
   - log_activity
   - store_insight
+requiredTools:
+  - generate_contract
+  - send_for_signature
+  - check_signature_status
+inputsSchema:
+  requires:
+    - conversationId
+    - contactId
+    - legalContext
+outputsSchema:
+  final_response: string
+  tool_calls: array
+policyHints:
+  objective:
+    - deal_progress
+  defaultAggressiveness: conservative
 ---
 
 # Skill: Closer

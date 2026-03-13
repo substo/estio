@@ -19,6 +19,9 @@ interface OrchestratorInput {
     message: string;
     conversationHistory: string;
     dealStage?: string;
+    forcedSkill?: string | null;
+    forcedIntent?: string | null;
+    runtimeSource?: string | null;
 }
 
 export interface OrchestratorResult {
@@ -89,11 +92,14 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
     });
     const communicationEvidence = inferCommunicationEvidenceFromText(`${input.conversationHistory}\n${input.message}`);
 
-    console.log(`[ORCHESTRATOR] Classification: intent=${classification.intent}, skill=${classification.suggestedSkill}, risk=${classification.risk}`);
+    const resolvedIntent = input.forcedIntent || classification.intent;
+    const resolvedSkill = input.forcedSkill || classification.suggestedSkill;
 
-    if (classification.suggestedSkill) {
-        const skillSpan = await startSpan(trace, `Execute Skill: ${classification.suggestedSkill}`, "tool");
-        const skill = SkillLoader.loadSkill(classification.suggestedSkill);
+    console.log(`[ORCHESTRATOR] Classification: intent=${classification.intent}, skill=${classification.suggestedSkill}, risk=${classification.risk}, resolvedIntent=${resolvedIntent}, resolvedSkill=${resolvedSkill}`);
+
+    if (resolvedSkill) {
+        const skillSpan = await startSpan(trace, `Execute Skill: ${resolvedSkill}`, "tool");
+        const skill = SkillLoader.loadSkill(resolvedSkill);
         console.log(`[ORCHESTRATOR] Skill loaded: ${skill ? skill.name : 'NULL - SKILL NOT FOUND'}`);
         if (skill) console.log(`[ORCHESTRATOR] Skill tools: ${skill.tools?.join(', ') || 'none'}`);
 
@@ -133,7 +139,7 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
             skillResult = await executeSkill(skill, {
                 ...input,
                 locationId: contactData?.locationId,
-                intent: classification.intent,
+                intent: resolvedIntent,
                 sentiment,
                 memories,
                 apiKey: contactData?.location?.siteConfig?.googleAiApiKey ?? undefined,
@@ -176,7 +182,7 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
     const policySpan = await startSpan(trace, "Policy Check", "planning");
     const draftLanguage = detectLanguageFromText(skillResult?.draftReply ?? null);
     const policyResult = await validateAction({
-        intent: classification.intent,
+        intent: resolvedIntent,
         risk: classification.risk,
         actions: skillResult?.toolCalls ?? [],
         draftReply: skillResult?.draftReply ?? null,
@@ -200,7 +206,7 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
         skillResult.draftReply = await reflectOnDraft(
             skillResult.draftReply,
             input.conversationHistory,
-            classification.intent,
+            resolvedIntent,
             {
                 expectedLanguage: languageResolution.expectedLanguage,
                 latestInboundMessage: latestInboundText,
@@ -249,9 +255,9 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
 
     return {
         traceId: trace.traceId,
-        intent: classification.intent,
+        intent: resolvedIntent,
         sentiment,
-        skillUsed: classification.suggestedSkill,
+        skillUsed: resolvedSkill,
         actions: skillResult?.toolCalls ?? [],
         draftReply: skillResult?.draftReply ?? null,
         requiresHumanApproval: shouldRequireHumanApproval(classification.risk, policyResult),

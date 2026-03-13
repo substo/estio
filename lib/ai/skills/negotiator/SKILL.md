@@ -1,6 +1,12 @@
 ---
+id: negotiator
 name: negotiator
 description: Use this skill when the user wants to negotiate price, make an offer, counter-offer, or discuss financial terms.
+risk: high
+channels:
+  - whatsapp
+  - sms
+  - email
 tools:
   - create_offer
   - get_offer_history
@@ -8,6 +14,21 @@ tools:
   - price_comparison
   - log_activity
   - store_insight
+requiredTools:
+  - get_offer_history
+  - price_comparison
+inputsSchema:
+  requires:
+    - conversationId
+    - contactId
+    - offerContext
+outputsSchema:
+  final_response: string
+  tool_calls: array
+policyHints:
+  objective:
+    - deal_progress
+  defaultAggressiveness: conservative
 ---
 
 # Skill: Negotiator

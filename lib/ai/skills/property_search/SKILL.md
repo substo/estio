@@ -1,9 +1,15 @@
 ---
+id: property_search
 name: searching-properties
 description: >
   Searches for properties using hybrid (structured + semantic) matching.
   Triggers when intent is PROPERTY_QUESTION, REQUEST_INFO, or when
   the buyer profile indicates readiness for property recommendations.
+risk: medium
+channels:
+  - whatsapp
+  - sms
+  - email
 tools:
   - search_properties
   - resolve_viewing_property_context
@@ -11,6 +17,21 @@ tools:
   - recommend_similar
   - store_insight
   - draft_reply
+requiredTools:
+  - search_properties
+inputsSchema:
+  requires:
+    - conversationId
+    - contactId
+    - requirementContext
+outputsSchema:
+  final_response: string
+  tool_calls: array
+policyHints:
+  objective:
+    - listing_alert
+    - nurture
+  defaultAggressiveness: balanced
 ---
 
 # Searching & Recommending Properties

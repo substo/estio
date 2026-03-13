@@ -35,6 +35,11 @@ const dailyCapsSchema = z
   })
   .passthrough();
 
+const targetIdsSchema = z
+  .array(z.string().trim().min(1).max(120))
+  .max(200)
+  .transform((items) => Array.from(new Set(items)));
+
 function isUnsafePrompt(value: string): boolean {
   const text = String(value || "").trim();
   if (!text) return false;
@@ -62,6 +67,45 @@ const templateOverrideSchema = z
   })
   .passthrough();
 
+const schedulePoliciesSchema = z
+  .object({
+    post_viewing_follow_up: z
+      .object({
+        minHoursSinceViewing: z.number().int().min(1).max(168).optional(),
+      })
+      .passthrough()
+      .optional(),
+    inactive_lead_reengagement: z
+      .object({
+        inactivityDays: z.number().int().min(1).max(180).optional(),
+        minLeadScore: z.number().min(0).max(100).optional(),
+      })
+      .passthrough()
+      .optional(),
+    re_engagement: z
+      .object({
+        inactivityDays: z.number().int().min(1).max(180).optional(),
+      })
+      .passthrough()
+      .optional(),
+    listing_alert: z
+      .object({
+        listingLookbackHours: z.number().int().min(1).max(168).optional(),
+      })
+      .passthrough()
+      .optional(),
+    custom_follow_up: z
+      .object({
+        customContext: z.string().trim().max(1000).optional(),
+        targetConversationIds: targetIdsSchema.optional(),
+        targetContactIds: targetIdsSchema.optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough()
+  .default({});
+
 export const AiAutomationConfigSchema = z
   .object({
     version: z.literal(1).default(1),
@@ -78,6 +122,7 @@ export const AiAutomationConfigSchema = z
     quietHours: quietHoursSchema.default({}),
     dailyCaps: dailyCapsSchema.default({}),
     templateOverrides: z.record(AutomationTemplateKeySchema, templateOverrideSchema).default({}),
+    schedulePolicies: schedulePoliciesSchema,
   })
   .passthrough();
 

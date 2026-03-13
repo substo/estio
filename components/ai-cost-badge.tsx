@@ -39,6 +39,17 @@ interface AIUsage {
         thisMonth: TimePeriodUsage;
         allTime: TimePeriodUsage & { transcriptCount: number };
     };
+    sourceBreakdown?: {
+        manual: TimePeriodUsage;
+        semi_auto: TimePeriodUsage;
+        automation: TimePeriodUsage;
+    };
+    skillBreakdown?: Array<{
+        source: "manual" | "semi_auto" | "automation";
+        skillId: string;
+        totalTokens: number;
+        totalCost: number;
+    }>;
     topConversations: ConversationUsage[];
 }
 
@@ -100,6 +111,13 @@ export function AICostBadge() {
             allTime: { totalTokens: 0, totalCost: 0, transcriptCount: 0 },
         },
         topConversations: []
+        ,
+        sourceBreakdown: {
+            manual: { totalTokens: 0, totalCost: 0 },
+            semi_auto: { totalTokens: 0, totalCost: 0 },
+            automation: { totalTokens: 0, totalCost: 0 },
+        },
+        skillBreakdown: [],
     };
 
 
@@ -258,6 +276,52 @@ export function AICostBadge() {
                             </div>
                         )}
 
+                        {/* Source / Skill Breakdown */}
+                        {(displayUsage.sourceBreakdown || (displayUsage.skillBreakdown && displayUsage.skillBreakdown.length > 0)) && (
+                            <div className="border-t pt-4 space-y-3">
+                                <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Runtime Source Breakdown</h4>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+                                    <div className="rounded border p-2 bg-slate-50">
+                                        <p className="font-medium text-slate-700">Manual</p>
+                                        <p className="font-mono">{formatCost(displayUsage.sourceBreakdown?.manual?.totalCost || 0)} · {formatTokens(displayUsage.sourceBreakdown?.manual?.totalTokens || 0)} tokens</p>
+                                    </div>
+                                    <div className="rounded border p-2 bg-slate-50">
+                                        <p className="font-medium text-slate-700">Semi Auto</p>
+                                        <p className="font-mono">{formatCost(displayUsage.sourceBreakdown?.semi_auto?.totalCost || 0)} · {formatTokens(displayUsage.sourceBreakdown?.semi_auto?.totalTokens || 0)} tokens</p>
+                                    </div>
+                                    <div className="rounded border p-2 bg-slate-50">
+                                        <p className="font-medium text-slate-700">Automation</p>
+                                        <p className="font-mono">{formatCost(displayUsage.sourceBreakdown?.automation?.totalCost || 0)} · {formatTokens(displayUsage.sourceBreakdown?.automation?.totalTokens || 0)} tokens</p>
+                                    </div>
+                                </div>
+
+                                {Array.isArray(displayUsage.skillBreakdown) && displayUsage.skillBreakdown.length > 0 && (
+                                    <div className="max-h-44 overflow-auto rounded border">
+                                        <table className="min-w-full text-xs">
+                                            <thead className="bg-slate-50 text-slate-600">
+                                                <tr>
+                                                    <th className="px-2 py-1 text-left font-medium">Source</th>
+                                                    <th className="px-2 py-1 text-left font-medium">Skill</th>
+                                                    <th className="px-2 py-1 text-left font-medium">Cost</th>
+                                                    <th className="px-2 py-1 text-left font-medium">Tokens</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {displayUsage.skillBreakdown.map((row) => (
+                                                    <tr key={`${row.source}:${row.skillId}`} className="border-t">
+                                                        <td className="px-2 py-1">{row.source}</td>
+                                                        <td className="px-2 py-1">{row.skillId}</td>
+                                                        <td className="px-2 py-1 font-mono">{formatCost(row.totalCost || 0)}</td>
+                                                        <td className="px-2 py-1 font-mono">{formatTokens(row.totalTokens || 0)}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
                         {/* Empty State */}
                         {displayUsage.topConversations.length === 0 && (
                             <div className="text-center py-8 text-gray-500 dark:text-gray-400">
@@ -272,4 +336,3 @@ export function AICostBadge() {
         </>
     );
 }
-

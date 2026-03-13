@@ -2575,6 +2575,11 @@ export function ConversationInterface({ locationId, initialConversations, initia
         void refreshSuggestedResponseQueue();
     }, [refreshSuggestedResponseQueue]);
 
+    const handleMissionSuggestionsGenerated = useCallback((nextSuggestions: string[]) => {
+        setSuggestions(Array.isArray(nextSuggestions) ? nextSuggestions : []);
+        void refreshSuggestedResponseQueue();
+    }, [refreshSuggestedResponseQueue]);
+
     const handleAcceptSuggestedResponse = useCallback(async (
         suggestedResponseId: string,
         mode: "insertOnly" | "sendNow"
@@ -2957,7 +2962,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 onBackToConversation={isMobileViewport ? handleBackToConversation : undefined}
                 onDraftApproved={(text) => handleSendMessage(text, getMessageType(activeConversation))}
                 onDeselect={(id) => handleToggleSelect(id, false)}
-                onSuggestionsGenerated={setSuggestions}
+                onSuggestionsGenerated={handleMissionSuggestionsGenerated}
                 onContactSaved={(patch) => handleConversationContactSaved(activeConversation.id, patch)}
             />
         ) : <div className="h-full bg-slate-50" />
@@ -2975,7 +2980,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 onBackToConversation={isMobileViewport ? handleBackToConversation : undefined}
                 onDraftApproved={(text) => handleSendMessage(text, getMessageType(selectedDealConversation), selectedDealConversation)}
                 onDeselect={() => undefined} // No deselect in deal mode
-                onSuggestionsGenerated={setSuggestions}
+                onSuggestionsGenerated={handleMissionSuggestionsGenerated}
                 onContactSaved={(patch) => handleConversationContactSaved(selectedDealConversation.id, patch)}
                 dealContacts={dealContacts}
                 selectedDealConversationId={selectedDealConversation.id}

@@ -42,6 +42,9 @@ model Location {
   contactTaskOutboxJobs         ContactTaskOutbox[]
   aiAutomationSchedules         AiAutomationSchedule[]
   aiAutomationJobs              AiAutomationJob[]
+  aiSkillPolicies               AiSkillPolicy[]
+  aiDecisions                   AiDecision[]
+  aiRuntimeJobs                 AiRuntimeJob[]
   aiSuggestedResponses          AiSuggestedResponse[]
   legacyCrmLeadEmailProcessings LegacyCrmLeadEmailProcessing[]
 
@@ -491,6 +494,7 @@ model Contact {
   insights Insight[]
   tasks    ContactTask[]
   aiAutomationJobs    AiAutomationJob[]
+  aiDecisions         AiDecision[]
   aiSuggestedResponses AiSuggestedResponse[]
 
   @@unique([locationId, email])
@@ -944,6 +948,7 @@ model DealContext {
   documents        DealDocument[]
 
   location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  aiDecisions AiDecision[]
 
   @@index([locationId])
   @@index([lastActivityAt])
@@ -1026,6 +1031,7 @@ model Conversation {
   insights     Insight[]
   contactTasks ContactTask[]
   aiAutomationJobs AiAutomationJob[]
+  aiDecisions      AiDecision[]
   aiSuggestedResponses AiSuggestedResponse[]
 
   @@unique([locationId, contactId])
@@ -1197,6 +1203,104 @@ model AgentExecution {
   @@index([traceId])
 }
 
+model AiSkillPolicy {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId String
+  skillId    String
+  enabled    Boolean @default(true)
+  objective  String  @default("nurture")
+
+  channelPolicy   Json?
+  contactSegments Json?
+  decisionPolicy  Json?
+  compliancePolicy Json?
+  stylePolicy     Json?
+  researchPolicy  Json?
+  humanApprovalRequired Boolean @default(true)
+  version Int @default(1)
+  metadata Json?
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  decisions AiDecision[]
+
+  @@unique([locationId, skillId])
+  @@index([locationId, enabled])
+  @@index([locationId, objective, enabled])
+}
+
+model AiDecision {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId String
+  policyId String?
+  conversationId String?
+  contactId String?
+  dealId String?
+
+  source String @default("automation") // automation | semi_auto | manual | mission
+  dueAt DateTime @default(now())
+  dueKey String?
+  status String @default("planned") // planned | held | queued | running | completed | failed | skipped | dead
+  holdReason String?
+  rejectedReason String?
+
+  selectedSkillId String?
+  selectedObjective String?
+  selectedScore Float?
+  scoreBreakdown Json?
+  evaluatedSkills Json?
+  decisionContext Json?
+  traceId String?
+  policyVersion Int?
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  policy AiSkillPolicy? @relation(fields: [policyId], references: [id], onDelete: SetNull)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  contact Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  deal DealContext? @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  runtimeJobs AiRuntimeJob[]
+  suggestedResponses AiSuggestedResponse[]
+
+  @@unique([locationId, dueKey])
+  @@index([locationId, status, dueAt])
+  @@index([policyId, status, dueAt])
+  @@index([conversationId, status, dueAt])
+  @@index([contactId, status, dueAt])
+  @@index([dealId, status, dueAt])
+}
+
+model AiRuntimeJob {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId String
+  decisionId String
+  status String @default("pending") // pending | processing | completed | dead | canceled
+  scheduledAt DateTime @default(now())
+  processedAt DateTime?
+  attemptCount Int @default(0)
+  maxAttempts Int @default(6)
+  lockedAt DateTime?
+  lockedBy String?
+  lastError String? @db.Text
+  idempotencyKey String @unique
+  traceId String?
+  payload Json?
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  decision AiDecision @relation(fields: [decisionId], references: [id], onDelete: Cascade)
+
+  @@index([status, scheduledAt])
+  @@index([locationId, status, scheduledAt])
+  @@index([decisionId, status])
+}
+
 model AiAutomationSchedule {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -1272,6 +1376,7 @@ model AiSuggestedResponse {
   contactId String?
   dealId String?
   jobId String?
+  decisionId String?
   body String @db.Text
   source String
   status String @default("pending") // pending | accepted | rejected | sent | expired
@@ -1291,6 +1396,7 @@ model AiSuggestedResponse {
   conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
   contact Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
   job AiAutomationJob? @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  decision AiDecision? @relation(fields: [decisionId], references: [id], onDelete: SetNull)
   acceptedByUser User? @relation("AiSuggestedResponseAcceptedBy", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
   rejectedByUser User? @relation("AiSuggestedResponseRejectedBy", fields: [rejectedByUserId], references: [id], onDelete: SetNull)
 
@@ -1298,6 +1404,7 @@ model AiSuggestedResponse {
   @@index([conversationId, status, createdAt(sort: Desc)])
   @@index([dealId, status, createdAt(sort: Desc)])
   @@index([contactId, status, createdAt(sort: Desc)])
+  @@index([decisionId, status, createdAt(sort: Desc)])
 }
 
 model Message {

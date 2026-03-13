@@ -34,6 +34,14 @@ import {
     cadenceToDays,
 } from "@/lib/ai/automation/config";
 import {
+    AiSkillPolicySchema,
+} from "@/lib/ai/runtime/config";
+import {
+    runAiRuntimeCron,
+    runAiSkillDecision,
+    simulateSkillDecision as simulateSkillDecisionRuntime,
+} from "@/lib/ai/runtime/engine";
+import {
     buildWhatsAppOutboundUploadKey,
     createWhatsAppMediaReadUrl,
     createWhatsAppMediaUploadUrl as createWhatsAppMediaUploadSignedUrl,
@@ -5604,6 +5612,48 @@ export async function generateAIDraft(
         }
     }
 
+    const conversationRecord = await db.conversation.findFirst({
+        where: {
+            locationId: location.id,
+            OR: [{ id: conversationId }, { ghlConversationId: conversationId }],
+        },
+        select: {
+            id: true,
+            contactId: true,
+        },
+    });
+    const contactRecord = await db.contact.findFirst({
+        where: {
+            locationId: location.id,
+            OR: [{ id: contactId }, { ghlContactId: contactId }],
+        },
+        select: { id: true },
+    });
+
+    if (conversationRecord?.id && contactRecord?.id) {
+        const runtimeResult = await runAiSkillDecision({
+            locationId: location.id,
+            conversationId: conversationRecord.id,
+            contactId: contactRecord.id,
+            source: "manual",
+            contextSummary: [
+                `Mode: ${options?.mode || "chat"}`,
+                options?.dealId ? `Deal: ${options.dealId}` : null,
+            ].filter(Boolean).join("\n"),
+            extraInstruction: instruction || "Draft the best next response based on current conversation context.",
+            executeImmediately: true,
+        });
+
+        if (runtimeResult.success && runtimeResult.draftBody) {
+            return {
+                draft: runtimeResult.draftBody,
+                reasoning: `Generated via unified skill runtime (${runtimeResult.selectedSkillId || "skill"}).`,
+                requiresHumanApproval: true,
+                traceId: runtimeResult.traceId || null,
+            };
+        }
+    }
+
     // Use internal location.id (for SiteConfig lookup), not ghlLocationId (external GHL ID)
     const result = await generateDraft({
         conversationId,
@@ -5674,115 +5724,158 @@ export async function setConversationReplyLanguageOverride(
 }
 
 export async function orchestrateAction(conversationId: string, contactId: string, dealStage?: string) {
-    const location = await getAuthenticatedLocation();
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const requestedConversationId = String(conversationId || "").trim();
+
+    if (!requestedConversationId) {
+        throw new Error("Conversation ID is required.");
+    }
 
     // Resolve real conversation DB ID (AgentExecution FK requires Conversation.id, not ghlConversationId)
     const conversation = await db.conversation.findFirst({
         where: {
-            ghlConversationId: conversationId,
-            locationId: location.id
+            locationId: location.id,
+            OR: [
+                { id: requestedConversationId },
+                { ghlConversationId: requestedConversationId },
+            ],
         },
         select: {
             id: true,
             contactId: true,
+            ghlConversationId: true,
             lastMessageType: true,
             createdAt: true,
             contact: {
                 select: {
                     id: true,
                     message: true,
-                    name: true
-                }
-            }
-        }
+                    name: true,
+                },
+            },
+        },
     });
 
     if (!conversation) {
-        throw new Error(`Conversation not found for ghlConversationId: ${conversationId}`);
+        throw new Error(`Conversation not found for ID: ${requestedConversationId}`);
     }
 
     // Canonicalize contact ID to local DB Contact.id.
-    // UI sometimes passes GHL contact IDs; tools and tracing require local IDs.
     let resolvedContactId = conversation.contactId;
-    if (contactId && contactId !== conversation.contactId) {
+    const requestedContactId = String(contactId || "").trim();
+    if (requestedContactId && requestedContactId !== conversation.contactId) {
         const mapped = await db.contact.findFirst({
             where: {
                 locationId: location.id,
-                OR: [{ id: contactId }, { ghlContactId: contactId }]
+                OR: [{ id: requestedContactId }, { ghlContactId: requestedContactId }],
             },
-            select: { id: true }
+            select: { id: true },
         });
         if (mapped?.id) resolvedContactId = mapped.id;
     }
 
-    // Heal empty shell conversations created from Contacts by seeding the lead inquiry text
-    // when the Contact record already contains a captured message.
+    // Heal empty shell conversations created from Contacts by seeding the lead inquiry text.
     const seedResult = await seedConversationFromContactLeadText({
         conversationId: conversation.id,
         contact: conversation.contact,
         messageType: conversation.lastMessageType || "TYPE_SMS",
         messageDate: conversation.createdAt,
-        source: "contact_bootstrap"
+        source: "contact_bootstrap",
     });
     if (seedResult.seeded) {
-        console.log(`[ORCHESTRATE_ACTION] Seeded conversation ${conversationId} from contact.message before orchestration`);
+        console.log(`[ORCHESTRATE_ACTION] Seeded conversation ${requestedConversationId} from contact.message before runtime decision.`);
     }
 
-    // Fetch conversation history (ignore system notes; AI orchestration should operate on real dialog turns)
     const messages = await db.message.findMany({
         where: {
             conversationId: conversation.id,
-            direction: { in: ['inbound', 'outbound'] }
+            direction: { in: ["inbound", "outbound"] },
         },
-        orderBy: { createdAt: 'asc' },
-        take: 20
+        orderBy: { createdAt: "asc" },
+        take: 40,
     });
 
-    let messageForOrchestration: string;
-    let historyForOrchestration: string;
+    let latestMessage = "";
+    let historyForOrchestration = "";
     let bootstrapMode: "none" | "empty_thread" = "none";
 
     if (messages.length === 0) {
-        // Last-resort fallback: allow Smart Agent to draft the *first* outreach on a brand-new thread.
-        // The classifier will typically route this to lead qualification (or UNKNOWN -> lead qualification).
         bootstrapMode = "empty_thread";
-        messageForOrchestration = "I am interested in a property and would like more information. This is our first contact.";
-        historyForOrchestration = "";
-        console.warn(`[ORCHESTRATE_ACTION] No dialog messages for ${conversationId}; using empty-thread bootstrap prompt.`);
+        latestMessage = "I am interested in a property and would like more information. This is our first contact.";
     } else {
         const lastMessage = messages[messages.length - 1];
-        messageForOrchestration = (lastMessage.body || "").trim();
-        if (!messageForOrchestration) {
-            messageForOrchestration = `[${lastMessage.direction} ${lastMessage.type || "message"} with no text body]`;
+        latestMessage = (lastMessage.body || "").trim();
+        if (!latestMessage) {
+            latestMessage = `[${lastMessage.direction} ${lastMessage.type || "message"} with no text body]`;
         }
         historyForOrchestration = messages
-            .map((m) => {
-                const speaker = m.direction === 'inbound' ? 'User' : 'Agent';
-                const body = (m.body || "").trim() || `[${m.type || "message"} with no text body]`;
+            .map((message) => {
+                const speaker = message.direction === "inbound" ? "User" : "Agent";
+                const body = (message.body || "").trim() || `[${message.type || "message"} with no text body]`;
                 return `${speaker}: ${body}`;
             })
             .join("\n");
     }
 
-    // Dynamic import to avoid build-time circular deps if any (though standard import is likely fine)
-    const { orchestrate } = await import("@/lib/ai/orchestrator");
+    const contextSummary = [
+        "Mission action: orchestrate",
+        dealStage ? `Deal stage: ${dealStage}` : null,
+        bootstrapMode !== "none" ? `Bootstrap mode: ${bootstrapMode}` : null,
+        `Latest message: ${latestMessage}`,
+    ]
+        .filter(Boolean)
+        .join("\n");
 
-    const result = await orchestrate({
-        conversationId: conversation.id, // Use real DB ID, not ghlConversationId
+    const runtimeResult = await runAiSkillDecision({
+        locationId: location.id,
+        conversationId: conversation.id,
         contactId: resolvedContactId,
-        message: messageForOrchestration,
-        conversationHistory: historyForOrchestration,
-        dealStage
+        source: "mission",
+        contextSummary,
+        extraInstruction: historyForOrchestration
+            ? `Use the full mission conversation history below when deciding the best next step.\n\n${historyForOrchestration}`
+            : "Generate the first mission-safe outreach for this conversation context.",
+        executeImmediately: true,
     });
 
-    if (bootstrapMode !== "none") {
-        return {
-            ...result,
-            bootstrapMode
-        };
+    const holdReason = runtimeResult.holdReason || null;
+    const suggestionQueued = Boolean(runtimeResult.draftBody);
+    const success = Boolean(runtimeResult.success);
+
+    let reasoning = "";
+    if (!success) {
+        reasoning = runtimeResult.error || "Mission runtime decision failed.";
+    } else if (holdReason) {
+        reasoning = `Decision held by policy: ${holdReason}.`;
+    } else if (suggestionQueued) {
+        reasoning = `Queued suggested response via skill "${runtimeResult.selectedSkillId || "unknown"}".`;
+    } else {
+        reasoning = "Decision executed without draft output.";
     }
 
-    return result;
+    return {
+        success,
+        traceId: runtimeResult.traceId || null,
+        intent: runtimeResult.objective || "mission",
+        sentiment: null,
+        skillUsed: runtimeResult.selectedSkillId || null,
+        actions: [] as any[],
+        draftReply: null,
+        requiresHumanApproval: true,
+        reasoning,
+        policyResult: {
+            approved: success && !holdReason,
+            reviewRequired: true,
+            reason: holdReason ? `Held: ${holdReason}` : reasoning,
+        },
+        decisionId: runtimeResult.decisionId || null,
+        selectedSkillId: runtimeResult.selectedSkillId || null,
+        objective: runtimeResult.objective || null,
+        score: typeof runtimeResult.score === "number" ? runtimeResult.score : null,
+        holdReason,
+        suggestionQueued,
+        bootstrapMode,
+    };
 }
 
 export async function createDealContext(title: string, conversationIds: string[]) {
@@ -6511,147 +6604,181 @@ export async function generatePlanAction(conversationId: string, contactId: stri
 }
 
 export async function executeNextTaskAction(conversationId: string, contactId: string) {
-    const location = await getAuthenticatedLocation();
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const requestedConversationId = String(conversationId || "").trim();
+    if (!requestedConversationId) {
+        return { success: false, error: "Missing conversation ID." };
+    }
 
-    // 1. Fetch Plan
     const conversation = await db.conversation.findFirst({
-        where: { ghlConversationId: conversationId, locationId: location.id },
-        include: { messages: { orderBy: { createdAt: 'asc' }, take: 30 } }
+        where: {
+            locationId: location.id,
+            OR: [
+                { id: requestedConversationId },
+                { ghlConversationId: requestedConversationId },
+            ],
+        },
+        include: { messages: { orderBy: { createdAt: "asc" }, take: 40 } },
     });
 
-    if (!conversation || !(conversation as any).agentPlan) return { success: false, error: "No plan found" };
+    if (!conversation || !(conversation as any).agentPlan) {
+        return { success: false, error: "No plan found" };
+    }
 
     const plan = (conversation as any).agentPlan as any[];
-    const nextTask = plan.find(t => t.status === 'pending');
-
+    const nextTask = plan.find((task) => task.status === "pending");
     if (!nextTask) return { success: false, message: "All tasks completed!" };
 
-    // 2. Mark In-Progress
-    nextTask.status = 'in-progress';
+    // Mark in-progress before runtime execution.
+    nextTask.status = "in-progress";
     await db.conversation.update({
         where: { id: conversation.id },
-        data: { agentPlan: plan } as any
+        data: { agentPlan: plan } as any,
     });
 
-    const historyText = conversation.messages.map((m: any) =>
-        `${m.direction === 'outbound' ? 'Agent' : 'Lead'}: ${m.body}`
-    ).join("\n");
+    const mappedContact = await db.contact.findFirst({
+        where: {
+            locationId: location.id,
+            OR: [{ id: contactId }, { ghlContactId: contactId }],
+        },
+        select: { id: true },
+    });
+    const resolvedContactId = mappedContact?.id || conversation.contactId;
+    if (!resolvedContactId) {
+        nextTask.status = "failed";
+        nextTask.result = "Missing contact context.";
+        await db.conversation.update({
+            where: { id: conversation.id },
+            data: { agentPlan: plan } as any,
+        });
+        return { success: false, error: "Missing contact context." };
+    }
 
-    // 3. Execute
+    const historyText = conversation.messages
+        .map((message: any) => `${message.direction === "outbound" ? "Agent" : "Lead"}: ${message.body}`)
+        .join("\n");
+
     try {
-        const { executeAgentTask } = await import('@/lib/ai/agent');
-        const result = await executeAgentTask(contactId, location.id, historyText, nextTask, plan);
+        const runtimeResult = await runAiSkillDecision({
+            locationId: location.id,
+            conversationId: conversation.id,
+            contactId: resolvedContactId,
+            source: "mission",
+            contextSummary: [
+                "Mission action: execute_next_task",
+                `Task: ${String(nextTask.title || nextTask.id || "Untitled task")}`,
+            ].join("\n"),
+            extraInstruction: [
+                `Execute this mission task: ${String(nextTask.title || nextTask.id || "Untitled task")}`,
+                historyText ? `Conversation history:\n${historyText}` : null,
+            ]
+                .filter(Boolean)
+                .join("\n\n"),
+            executeImmediately: true,
+        });
 
-        if (result.success) {
-            // 4. Update Task Status
-            if (result.taskCompleted) {
-                nextTask.status = 'done';
-                nextTask.result = result.taskResult || "Completed";
-            } else {
-                nextTask.status = 'pending';
-                nextTask.result = "Partial: " + result.taskResult;
-            }
-
-            const runCost = calculateRunCost(
-                result.usage?.model || 'default',
-                result.usage?.promptTokenCount || 0,
-                result.usage?.candidatesTokenCount || 0
-            );
-
-            let updatedConversation = await db.conversation.update({
+        if (!runtimeResult.success) {
+            nextTask.status = "failed";
+            nextTask.result = runtimeResult.error || "Runtime execution failed.";
+            await db.conversation.update({
                 where: { id: conversation.id },
-                data: {
-                    agentPlan: plan,
-                    promptTokens: { increment: result.usage?.promptTokenCount || 0 },
-                    completionTokens: { increment: result.usage?.candidatesTokenCount || 0 },
-                    totalTokens: { increment: result.usage?.totalTokenCount || 0 },
-                    totalCost: { increment: runCost }
-                } as any
+                data: { agentPlan: plan } as any,
+            });
+            return { success: false, error: nextTask.result };
+        }
+
+        if (runtimeResult.holdReason) {
+            nextTask.status = "pending";
+            nextTask.result = `Held by policy: ${runtimeResult.holdReason}`;
+        } else {
+            nextTask.status = "done";
+            nextTask.result = runtimeResult.draftBody
+                ? `Queued suggested response via ${runtimeResult.selectedSkillId || "skill"}.`
+                : `Decision executed via ${runtimeResult.selectedSkillId || "skill"}.`;
+        }
+
+        let updatedConversation = await db.conversation.update({
+            where: { id: conversation.id },
+            data: { agentPlan: plan } as any,
+        });
+
+        let usage: {
+            promptTokenCount?: number;
+            candidatesTokenCount?: number;
+            totalTokenCount?: number;
+            model?: string | null;
+            cost?: number;
+        } | null = null;
+
+        if (runtimeResult.traceId) {
+            const rootExecution = await db.agentExecution.findFirst({
+                where: {
+                    conversationId: conversation.id,
+                    traceId: runtimeResult.traceId,
+                    parentSpanId: null,
+                },
+                select: {
+                    promptTokens: true,
+                    completionTokens: true,
+                    totalTokens: true,
+                    model: true,
+                    cost: true,
+                },
             });
 
-            // Self-healing: If totals were 0 (pre-tracking) but we have history, recalculate everything
-            if (conversation.totalTokens === 0) {
-                const allExecs = await db.agentExecution.findMany({
-                    where: { conversationId: conversation.id }
-                });
+            const promptTokens = Number(rootExecution?.promptTokens || 0);
+            const completionTokens = Number(rootExecution?.completionTokens || 0);
+            const totalTokens = Number(rootExecution?.totalTokens || 0);
+            const cost = Number(rootExecution?.cost || 0);
 
-                const totalPrompt = allExecs.reduce((acc, e) => acc + (e.promptTokens || 0), 0) + (result.usage?.promptTokenCount || 0);
-                const totalCompletion = allExecs.reduce((acc, e) => acc + (e.completionTokens || 0), 0) + (result.usage?.candidatesTokenCount || 0);
-                const totalToks = totalPrompt + totalCompletion;
+            usage = {
+                promptTokenCount: promptTokens,
+                candidatesTokenCount: completionTokens,
+                totalTokenCount: totalTokens,
+                model: rootExecution?.model || null,
+                cost,
+            };
 
-                // Recalculate cost (approximate for old runs if model not saved, assume default/current)
-                // For new run we have exact cost. For old runs, we might not have cost saved.
-                // But we can try to estimate if we had model, or just leave it as is.
-                // Actually, let's just sum up tokens properly.
-
-                // If we want to backfill cost for old runs:
-                let historicalCost = 0;
-                for (const ex of allExecs) {
-                    // If cost already saved, use it. Else calculate.
-                    if (ex.cost) {
-                        historicalCost += ex.cost;
-                    } else if (ex.promptTokens || ex.completionTokens) {
-                        historicalCost += calculateRunCost(ex.model || 'default', ex.promptTokens || 0, ex.completionTokens || 0);
-                    }
-                }
-                historicalCost += runCost; // Add current run
-
+            if (promptTokens > 0 || completionTokens > 0 || totalTokens > 0 || cost > 0) {
                 updatedConversation = await db.conversation.update({
                     where: { id: conversation.id },
                     data: {
-                        promptTokens: totalPrompt,
-                        completionTokens: totalCompletion,
-                        totalTokens: totalToks,
-                        totalCost: historicalCost
-                    }
+                        promptTokens: { increment: promptTokens },
+                        completionTokens: { increment: completionTokens },
+                        totalTokens: { increment: totalTokens },
+                        totalCost: { increment: cost },
+                    } as any,
                 });
             }
-
-            // Save execution to history
-            await db.agentExecution.create({
-                data: {
-                    conversationId: conversation.id,
-                    taskId: nextTask.id,
-                    taskTitle: nextTask.title,
-                    taskStatus: nextTask.status,
-                    thoughtSummary: result.thoughtSummary,
-                    thoughtSteps: result.thoughtSteps,
-                    toolCalls: result.actions,
-                    draftReply: result.draft,
-                    promptTokens: result.usage?.promptTokenCount,
-                    completionTokens: result.usage?.candidatesTokenCount,
-                    totalTokens: result.usage?.totalTokenCount,
-                    model: result.usage?.model,
-                    cost: runCost
-                }
-            });
-
-            return {
-                success: true,
-                task: nextTask,
-                draft: result.draft,
-                thoughtSummary: result.thoughtSummary,
-                thoughtSteps: result.thoughtSteps,
-                actions: result.actions,
-                usage: result.usage,
-                conversationUsage: {
-                    promptTokens: updatedConversation.promptTokens,
-                    completionTokens: updatedConversation.completionTokens,
-                    totalTokens: updatedConversation.totalTokens,
-                    totalCost: updatedConversation.totalCost
-                }
-            };
-        } else {
-            nextTask.status = 'failed';
-            await db.conversation.update({
-                where: { id: conversation.id },
-                data: { agentPlan: plan } as any
-            });
-            return { success: false, error: result.message };
         }
 
-    } catch (e: any) {
-        return { success: false, error: e.message };
+        return {
+            success: true,
+            task: nextTask,
+            draft: null,
+            thoughtSummary: nextTask.result || "Mission task executed.",
+            thoughtSteps: [],
+            actions: [],
+            usage,
+            traceId: runtimeResult.traceId || null,
+            suggestionQueued: Boolean(runtimeResult.draftBody),
+            selectedSkillId: runtimeResult.selectedSkillId || null,
+            holdReason: runtimeResult.holdReason || null,
+            conversationUsage: {
+                promptTokens: Number(updatedConversation.promptTokens || 0),
+                completionTokens: Number(updatedConversation.completionTokens || 0),
+                totalTokens: Number(updatedConversation.totalTokens || 0),
+                totalCost: Number(updatedConversation.totalCost || 0),
+            },
+        };
+    } catch (error: any) {
+        nextTask.status = "failed";
+        nextTask.result = error?.message || "Mission task execution failed.";
+        await db.conversation.update({
+            where: { id: conversation.id },
+            data: { agentPlan: plan } as any,
+        });
+        return { success: false, error: nextTask.result };
     }
 }
 
@@ -6782,11 +6909,27 @@ export async function getAggregateAIUsage() {
         today: { totalTokens: 0, totalCost: 0 },
         thisMonth: { totalTokens: 0, totalCost: 0 },
         allTime: { totalTokens: 0, totalCost: 0, conversationCount: 0 },
+        automation: {
+            today: { totalTokens: 0, totalCost: 0 },
+            thisMonth: { totalTokens: 0, totalCost: 0 },
+            allTime: { totalTokens: 0, totalCost: 0 },
+        },
         transcription: {
             today: { totalTokens: 0, totalCost: 0 },
             thisMonth: { totalTokens: 0, totalCost: 0 },
             allTime: { totalTokens: 0, totalCost: 0, transcriptCount: 0 },
         },
+        sourceBreakdown: {
+            manual: { totalTokens: 0, totalCost: 0 },
+            semi_auto: { totalTokens: 0, totalCost: 0 },
+            automation: { totalTokens: 0, totalCost: 0 },
+        },
+        skillBreakdown: [] as Array<{
+            source: "manual" | "semi_auto" | "automation";
+            skillId: string;
+            totalTokens: number;
+            totalCost: number;
+        }>,
         topConversations: [] as any[]
     };
 
@@ -6806,9 +6949,13 @@ export async function getAggregateAIUsage() {
             todayUsage,
             monthUsage,
             allTimeExecutionUsage,
+            automationTodayUsage,
+            automationMonthUsage,
+            automationAllTimeUsage,
             allTimeUsage,
             topConversations,
             topConversationUsageByExecution,
+            sourceAndSkillUsageRows,
             txTodayT, txMonthT, txAllTimeT,
             txTodayE, txMonthE, txAllTimeE,
         ] = await Promise.all([
@@ -6832,6 +6979,29 @@ export async function getAggregateAIUsage() {
                     conversation: { locationId: location.id },
                 },
                 _sum: { totalTokens: true, cost: true }
+            }),
+            db.agentExecution.aggregate({
+                where: {
+                    conversation: { locationId: location.id },
+                    taskTitle: { startsWith: "automation:" },
+                    createdAt: { gte: startOfToday },
+                },
+                _sum: { totalTokens: true, cost: true },
+            }),
+            db.agentExecution.aggregate({
+                where: {
+                    conversation: { locationId: location.id },
+                    taskTitle: { startsWith: "automation:" },
+                    createdAt: { gte: startOfMonth },
+                },
+                _sum: { totalTokens: true, cost: true },
+            }),
+            db.agentExecution.aggregate({
+                where: {
+                    conversation: { locationId: location.id },
+                    taskTitle: { startsWith: "automation:" },
+                },
+                _sum: { totalTokens: true, cost: true },
             }),
             db.conversation.aggregate({
                 where: { locationId: location.id },
@@ -6862,6 +7032,13 @@ export async function getAggregateAIUsage() {
                     { _sum: { totalTokens: "desc" } },
                 ],
                 take: 10,
+            }),
+            db.agentExecution.groupBy({
+                by: ["taskTitle"],
+                where: {
+                    conversation: { locationId: location.id },
+                },
+                _sum: { totalTokens: true, cost: true },
             }),
 
             // --- Transcript usage (MessageTranscript) ---
@@ -7020,6 +7197,54 @@ export async function getAggregateAIUsage() {
             Number(allTimeUsage._sum.totalCost || 0)
         );
 
+        const sourceBreakdown = {
+            manual: { totalTokens: 0, totalCost: 0 },
+            semi_auto: { totalTokens: 0, totalCost: 0 },
+            automation: { totalTokens: 0, totalCost: 0 },
+        };
+        const skillBreakdownMap = new Map<string, {
+            source: "manual" | "semi_auto" | "automation";
+            skillId: string;
+            totalTokens: number;
+            totalCost: number;
+        }>();
+
+        for (const row of sourceAndSkillUsageRows) {
+            const taskTitle = String(row.taskTitle || "").trim().toLowerCase();
+            const tokens = Number(row._sum.totalTokens || 0);
+            const cost = Number(row._sum.cost || 0);
+
+            let source: "manual" | "semi_auto" | "automation" = "manual";
+            if (taskTitle.startsWith("automation:")) source = "automation";
+            else if (taskTitle.startsWith("semi_auto:")) source = "semi_auto";
+            else if (taskTitle.startsWith("manual:")) source = "manual";
+            else if (taskTitle.startsWith("mission:")) source = "manual";
+
+            sourceBreakdown[source].totalTokens += tokens;
+            sourceBreakdown[source].totalCost += cost;
+
+            const skillMatch = taskTitle.match(/^(automation|semi_auto|manual|mission):skill:([a-z0-9_-]+)/i);
+            if (!skillMatch) continue;
+
+            const rawSkillSource = String(skillMatch[1] || "").toLowerCase();
+            const skillSource = (rawSkillSource === "mission" ? "manual" : rawSkillSource) as "manual" | "semi_auto" | "automation";
+            const skillId = String(skillMatch[2] || "").trim() || "unknown";
+            const key = `${skillSource}:${skillId}`;
+            const existing = skillBreakdownMap.get(key) || {
+                source: skillSource,
+                skillId,
+                totalTokens: 0,
+                totalCost: 0,
+            };
+            existing.totalTokens += tokens;
+            existing.totalCost += cost;
+            skillBreakdownMap.set(key, existing);
+        }
+
+        const skillBreakdown = Array.from(skillBreakdownMap.values())
+            .sort((a, b) => b.totalCost - a.totalCost || b.totalTokens - a.totalTokens)
+            .slice(0, 20);
+
         return {
             today: {
                 totalTokens: todayUsage._sum.totalTokens || 0,
@@ -7033,6 +7258,20 @@ export async function getAggregateAIUsage() {
                 totalTokens: allTimeTokens,
                 totalCost: allTimeCost,
                 conversationCount: allTimeUsage._count.id || 0
+            },
+            automation: {
+                today: {
+                    totalTokens: automationTodayUsage._sum.totalTokens || 0,
+                    totalCost: automationTodayUsage._sum.cost || 0,
+                },
+                thisMonth: {
+                    totalTokens: automationMonthUsage._sum.totalTokens || 0,
+                    totalCost: automationMonthUsage._sum.cost || 0,
+                },
+                allTime: {
+                    totalTokens: automationAllTimeUsage._sum.totalTokens || 0,
+                    totalCost: automationAllTimeUsage._sum.cost || 0,
+                },
             },
             transcription: {
                 today: {
@@ -7049,6 +7288,8 @@ export async function getAggregateAIUsage() {
                     transcriptCount: txAllTimeT._count?.id || 0,
                 },
             },
+            sourceBreakdown,
+            skillBreakdown,
             topConversations: topConversationRows.map((conversation) => ({
                 id: conversation.id,
                 conversationId: conversation.conversationId,
@@ -11853,6 +12094,17 @@ export async function listSuggestedResponses(input: ListSuggestedResponsesInput)
                     phone: true,
                 },
             },
+            decision: {
+                select: {
+                    id: true,
+                    selectedSkillId: true,
+                    selectedObjective: true,
+                    selectedScore: true,
+                    holdReason: true,
+                    scoreBreakdown: true,
+                    source: true,
+                },
+            },
         },
         orderBy: { createdAt: "desc" },
         take: limit,
@@ -11872,13 +12124,27 @@ export async function listSuggestedResponses(input: ListSuggestedResponsesInput)
         contactPhone: row.contact?.phone || null,
         dealId: row.dealId || null,
         traceId: row.traceId || null,
+        decisionId: row.decisionId || row.decision?.id || null,
         metadata: row.metadata || null,
+        decision: row.decision ? {
+            id: row.decision.id,
+            selectedSkillId: row.decision.selectedSkillId || null,
+            selectedObjective: row.decision.selectedObjective || null,
+            selectedScore: row.decision.selectedScore || null,
+            holdReason: row.decision.holdReason || null,
+            source: row.decision.source || null,
+            scoreBreakdown: row.decision.scoreBreakdown || null,
+        } : null,
     }));
 }
 
 export async function acceptSuggestedResponse(
     id: string,
-    options?: { mode?: "insertOnly" | "sendNow" }
+    options?: {
+        mode?: "insertOnly" | "sendNow";
+        insertOnly?: boolean;
+        sendNow?: boolean;
+    }
 ) {
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const actor = await resolveLocationActorContext(location.id);
@@ -11886,7 +12152,9 @@ export async function acceptSuggestedResponse(
         return { success: false as const, error: "Unauthorized" };
     }
 
-    const mode = options?.mode === "sendNow" ? "sendNow" : "insertOnly";
+    const mode = (options?.mode === "sendNow" || options?.sendNow === true)
+        ? "sendNow"
+        : "insertOnly";
     const trimmedId = String(id || "").trim();
     if (!trimmedId) {
         return { success: false as const, error: "Missing suggested response ID." };
@@ -12101,6 +12369,9 @@ export async function updateAiAutomationConfig(locationId: string, config: unkno
             const cadenceMinutes = templateKey === "listing_alert"
                 ? 60
                 : cadenceMinutesBase;
+            const schedulePolicy = (parsed.data.schedulePolicies?.[templateKey] && typeof parsed.data.schedulePolicies[templateKey] === "object")
+                ? parsed.data.schedulePolicies[templateKey]
+                : {};
 
             await db.aiAutomationSchedule.upsert({
                 where: {
@@ -12119,7 +12390,7 @@ export async function updateAiAutomationConfig(locationId: string, config: unkno
                     templateKey,
                     timezone: location.timeZone || "UTC",
                     quietHours: parsed.data.quietHours as any,
-                    policy: {},
+                    policy: schedulePolicy as any,
                     nextRunAt: now,
                 },
                 update: {
@@ -12127,6 +12398,7 @@ export async function updateAiAutomationConfig(locationId: string, config: unkno
                     cadenceMinutes,
                     timezone: location.timeZone || "UTC",
                     quietHours: parsed.data.quietHours as any,
+                    policy: schedulePolicy as any,
                 },
             });
         }
@@ -12149,4 +12421,486 @@ export async function updateAiAutomationConfig(locationId: string, config: unkno
         version: savedDoc.version,
         config: parsed.data,
     };
+}
+
+type ListAiDecisionsInput = {
+    locationId?: string | null;
+    status?: string | null;
+    skillId?: string | null;
+    since?: string | null;
+    limit?: number;
+    conversationId?: string | null;
+    dealId?: string | null;
+    contactId?: string | null;
+};
+
+type ListAiRuntimeJobsInput = {
+    locationId?: string | null;
+    status?: string | null;
+    since?: string | null;
+    limit?: number;
+};
+
+export async function listSkillPolicies(locationId?: string | null) {
+    const fallbackLocation = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const targetLocationId = String(locationId || fallbackLocation.id || "").trim();
+    if (!targetLocationId) return [];
+
+    const actor = await resolveLocationActorContext(targetLocationId);
+    if (!actor.hasAccess) return [];
+
+    const rows = await db.aiSkillPolicy.findMany({
+        where: { locationId: targetLocationId },
+        orderBy: [{ enabled: "desc" }, { objective: "asc" }, { skillId: "asc" }],
+    });
+
+    return rows.map((row) => {
+        const parsed = AiSkillPolicySchema.safeParse({
+            locationId: row.locationId,
+            skillId: row.skillId,
+            enabled: row.enabled,
+            objective: row.objective,
+            channelPolicy: row.channelPolicy || {},
+            contactSegments: row.contactSegments || {},
+            decisionPolicy: row.decisionPolicy || {},
+            compliancePolicy: row.compliancePolicy || {},
+            stylePolicy: row.stylePolicy || {},
+            researchPolicy: row.researchPolicy || {},
+            humanApprovalRequired: row.humanApprovalRequired,
+            version: row.version,
+            metadata: row.metadata || {},
+        });
+
+        return {
+            id: row.id,
+            createdAt: row.createdAt.toISOString(),
+            updatedAt: row.updatedAt.toISOString(),
+            ...(parsed.success ? parsed.data : {
+                locationId: row.locationId,
+                skillId: row.skillId,
+                enabled: row.enabled,
+                objective: row.objective,
+                channelPolicy: row.channelPolicy || {},
+                contactSegments: row.contactSegments || {},
+                decisionPolicy: row.decisionPolicy || {},
+                compliancePolicy: row.compliancePolicy || {},
+                stylePolicy: row.stylePolicy || {},
+                researchPolicy: row.researchPolicy || {},
+                humanApprovalRequired: row.humanApprovalRequired,
+                version: row.version,
+                metadata: row.metadata || {},
+            }),
+        };
+    });
+}
+
+export async function upsertSkillPolicy(locationId: string, skillId: string, policy: unknown) {
+    const targetLocationId = String(locationId || "").trim();
+    const targetSkillId = String(skillId || "").trim();
+    if (!targetLocationId || !targetSkillId) {
+        return { success: false as const, error: "Missing locationId or skillId." };
+    }
+
+    const actor = await resolveLocationActorContext(targetLocationId);
+    if (!actor.hasAccess || !actor.isAdmin) {
+        return { success: false as const, error: "Unauthorized: admin access required." };
+    }
+
+    const parsed = AiSkillPolicySchema.safeParse({
+        ...(policy && typeof policy === "object" ? policy as Record<string, unknown> : {}),
+        locationId: targetLocationId,
+        skillId: targetSkillId,
+    });
+
+    if (!parsed.success) {
+        return {
+            success: false as const,
+            error: parsed.error.issues[0]?.message || "Invalid skill policy payload.",
+            issues: parsed.error.issues.map((issue) => ({
+                path: issue.path.join("."),
+                message: issue.message,
+            })),
+        };
+    }
+
+    const saved = await db.aiSkillPolicy.upsert({
+        where: {
+            locationId_skillId: {
+                locationId: targetLocationId,
+                skillId: targetSkillId,
+            },
+        },
+        create: {
+            locationId: targetLocationId,
+            skillId: targetSkillId,
+            enabled: parsed.data.enabled,
+            objective: parsed.data.objective,
+            channelPolicy: parsed.data.channelPolicy as any,
+            contactSegments: parsed.data.contactSegments as any,
+            decisionPolicy: parsed.data.decisionPolicy as any,
+            compliancePolicy: parsed.data.compliancePolicy as any,
+            stylePolicy: parsed.data.stylePolicy as any,
+            researchPolicy: parsed.data.researchPolicy as any,
+            humanApprovalRequired: parsed.data.humanApprovalRequired,
+            version: parsed.data.version,
+            metadata: (parsed.data.metadata || {}) as any,
+        },
+        update: {
+            enabled: parsed.data.enabled,
+            objective: parsed.data.objective,
+            channelPolicy: parsed.data.channelPolicy as any,
+            contactSegments: parsed.data.contactSegments as any,
+            decisionPolicy: parsed.data.decisionPolicy as any,
+            compliancePolicy: parsed.data.compliancePolicy as any,
+            stylePolicy: parsed.data.stylePolicy as any,
+            researchPolicy: parsed.data.researchPolicy as any,
+            humanApprovalRequired: parsed.data.humanApprovalRequired,
+            version: { increment: 1 },
+            metadata: (parsed.data.metadata || {}) as any,
+        },
+    });
+
+    revalidatePath("/admin/settings/ai");
+
+    return {
+        success: true as const,
+        id: saved.id,
+        skillId: saved.skillId,
+        version: saved.version,
+    };
+}
+
+export async function listAiDecisions(input?: ListAiDecisionsInput) {
+    const fallbackLocation = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const targetLocationId = String(input?.locationId || fallbackLocation.id || "").trim();
+    if (!targetLocationId) return [];
+    const actor = await resolveLocationActorContext(targetLocationId);
+    if (!actor.hasAccess) return [];
+
+    const limit = Math.max(1, Math.min(200, Number(input?.limit || 60)));
+    const status = String(input?.status || "").trim() || null;
+    const skillId = String(input?.skillId || "").trim() || null;
+    const sinceRaw = String(input?.since || "").trim();
+    const sinceDate = sinceRaw ? new Date(sinceRaw) : null;
+
+    const conversationIdRaw = String(input?.conversationId || "").trim();
+    let conversationId: string | null = null;
+    if (conversationIdRaw) {
+        const conversation = await db.conversation.findFirst({
+            where: {
+                locationId: targetLocationId,
+                OR: [{ id: conversationIdRaw }, { ghlConversationId: conversationIdRaw }],
+            },
+            select: { id: true },
+        });
+        conversationId = conversation?.id || null;
+        if (!conversationId) return [];
+    }
+
+    const contactIdRaw = String(input?.contactId || "").trim();
+    let contactId: string | null = null;
+    if (contactIdRaw) {
+        const contact = await db.contact.findFirst({
+            where: {
+                locationId: targetLocationId,
+                OR: [{ id: contactIdRaw }, { ghlContactId: contactIdRaw }],
+            },
+            select: { id: true },
+        });
+        contactId = contact?.id || null;
+        if (!contactId) return [];
+    }
+
+    const dealId = String(input?.dealId || "").trim() || null;
+    if (dealId) {
+        const deal = await db.dealContext.findFirst({
+            where: { id: dealId, locationId: targetLocationId },
+            select: { id: true },
+        });
+        if (!deal) return [];
+    }
+
+    const rows = await db.aiDecision.findMany({
+        where: {
+            locationId: targetLocationId,
+            ...(status ? { status } : {}),
+            ...(skillId ? { selectedSkillId: skillId } : {}),
+            ...(sinceDate && Number.isFinite(sinceDate.getTime()) ? { createdAt: { gte: sinceDate } } : {}),
+            ...(conversationId ? { conversationId } : {}),
+            ...(contactId ? { contactId } : {}),
+            ...(dealId ? { dealId } : {}),
+        },
+        include: {
+            policy: {
+                select: {
+                    id: true,
+                    skillId: true,
+                    objective: true,
+                    enabled: true,
+                    version: true,
+                },
+            },
+            conversation: {
+                select: {
+                    id: true,
+                    ghlConversationId: true,
+                },
+            },
+            contact: {
+                select: {
+                    id: true,
+                    name: true,
+                },
+            },
+            runtimeJobs: {
+                orderBy: { createdAt: "desc" },
+                take: 3,
+                select: {
+                    id: true,
+                    status: true,
+                    attemptCount: true,
+                    maxAttempts: true,
+                    scheduledAt: true,
+                    processedAt: true,
+                    traceId: true,
+                    lastError: true,
+                },
+            },
+            suggestedResponses: {
+                orderBy: { createdAt: "desc" },
+                take: 2,
+                select: {
+                    id: true,
+                    status: true,
+                    body: true,
+                    traceId: true,
+                    createdAt: true,
+                },
+            },
+        },
+        orderBy: { createdAt: "desc" },
+        take: limit,
+    });
+
+    return rows.map((row) => ({
+        id: row.id,
+        locationId: row.locationId,
+        policyId: row.policyId,
+        selectedSkillId: row.selectedSkillId,
+        selectedObjective: row.selectedObjective,
+        selectedScore: row.selectedScore,
+        status: row.status,
+        source: row.source,
+        dueAt: row.dueAt?.toISOString() || null,
+        holdReason: row.holdReason || null,
+        rejectedReason: row.rejectedReason || null,
+        scoreBreakdown: row.scoreBreakdown || null,
+        decisionContext: row.decisionContext || null,
+        traceId: row.traceId || null,
+        policyVersion: row.policyVersion || null,
+        createdAt: row.createdAt.toISOString(),
+        updatedAt: row.updatedAt.toISOString(),
+        conversationId: row.conversation?.ghlConversationId || row.conversation?.id || row.conversationId || null,
+        contactId: row.contact?.id || row.contactId || null,
+        contactName: row.contact?.name || null,
+        dealId: row.dealId || null,
+        policy: row.policy ? {
+            id: row.policy.id,
+            skillId: row.policy.skillId,
+            objective: row.policy.objective,
+            enabled: row.policy.enabled,
+            version: row.policy.version,
+        } : null,
+        runtimeJobs: row.runtimeJobs.map((job) => ({
+            id: job.id,
+            status: job.status,
+            attemptCount: job.attemptCount,
+            maxAttempts: job.maxAttempts,
+            scheduledAt: job.scheduledAt.toISOString(),
+            processedAt: job.processedAt ? job.processedAt.toISOString() : null,
+            traceId: job.traceId || null,
+            lastError: job.lastError || null,
+        })),
+        suggestedResponses: row.suggestedResponses.map((suggestion) => ({
+            id: suggestion.id,
+            status: suggestion.status,
+            body: suggestion.body,
+            traceId: suggestion.traceId || null,
+            createdAt: suggestion.createdAt.toISOString(),
+        })),
+    }));
+}
+
+export async function listAiRuntimeJobs(input?: ListAiRuntimeJobsInput) {
+    const fallbackLocation = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const targetLocationId = String(input?.locationId || fallbackLocation.id || "").trim();
+    if (!targetLocationId) return [];
+
+    const actor = await resolveLocationActorContext(targetLocationId);
+    if (!actor.hasAccess) return [];
+
+    const limit = Math.max(1, Math.min(200, Number(input?.limit || 60)));
+    const status = String(input?.status || "").trim() || null;
+    const sinceRaw = String(input?.since || "").trim();
+    const sinceDate = sinceRaw ? new Date(sinceRaw) : null;
+
+    const rows = await db.aiRuntimeJob.findMany({
+        where: {
+            locationId: targetLocationId,
+            ...(status ? { status } : {}),
+            ...(sinceDate && Number.isFinite(sinceDate.getTime()) ? { createdAt: { gte: sinceDate } } : {}),
+        },
+        include: {
+            decision: {
+                select: {
+                    id: true,
+                    selectedSkillId: true,
+                    selectedObjective: true,
+                    selectedScore: true,
+                    holdReason: true,
+                    source: true,
+                    traceId: true,
+                },
+            },
+        },
+        orderBy: [{ scheduledAt: "asc" }, { createdAt: "desc" }],
+        take: limit,
+    });
+
+    return rows.map((row) => ({
+        id: row.id,
+        locationId: row.locationId,
+        decisionId: row.decisionId,
+        status: row.status,
+        attemptCount: row.attemptCount,
+        maxAttempts: row.maxAttempts,
+        scheduledAt: row.scheduledAt.toISOString(),
+        processedAt: row.processedAt ? row.processedAt.toISOString() : null,
+        lockedAt: row.lockedAt ? row.lockedAt.toISOString() : null,
+        lockedBy: row.lockedBy || null,
+        lastError: row.lastError || null,
+        traceId: row.traceId || null,
+        createdAt: row.createdAt.toISOString(),
+        updatedAt: row.updatedAt.toISOString(),
+        decision: row.decision
+            ? {
+                id: row.decision.id,
+                selectedSkillId: row.decision.selectedSkillId || null,
+                selectedObjective: row.decision.selectedObjective || null,
+                selectedScore: row.decision.selectedScore ?? null,
+                holdReason: row.decision.holdReason || null,
+                source: row.decision.source || null,
+                traceId: row.decision.traceId || null,
+            }
+            : null,
+    }));
+}
+
+export async function simulateSkillDecision(input: {
+    locationId?: string | null;
+    conversationId?: string | null;
+    dealId?: string | null;
+    contactId?: string | null;
+}) {
+    const fallbackLocation = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const targetLocationId = String(input?.locationId || fallbackLocation.id || "").trim();
+    if (!targetLocationId) {
+        return { success: false as const, error: "Missing location ID." };
+    }
+
+    const actor = await resolveLocationActorContext(targetLocationId);
+    if (!actor.hasAccess) {
+        return { success: false as const, error: "Unauthorized." };
+    }
+
+    let resolvedConversationId = String(input?.conversationId || "").trim() || null;
+    const resolvedDealId = String(input?.dealId || "").trim() || null;
+    const resolvedContactId = String(input?.contactId || "").trim() || null;
+
+    if (!resolvedConversationId && resolvedDealId) {
+        const deal = await db.dealContext.findFirst({
+            where: { id: resolvedDealId, locationId: targetLocationId },
+            select: { conversationIds: true },
+        });
+        if (deal?.conversationIds?.length) {
+            const conversation = await db.conversation.findFirst({
+                where: {
+                    locationId: targetLocationId,
+                    ghlConversationId: { in: deal.conversationIds },
+                },
+                select: { id: true },
+                orderBy: { lastMessageAt: "desc" },
+            });
+            if (conversation?.id) {
+                resolvedConversationId = conversation.id;
+            }
+        }
+    }
+
+    const simulation = await simulateSkillDecisionRuntime({
+        locationId: targetLocationId,
+        conversationId: resolvedConversationId,
+        contactId: resolvedContactId,
+        dealId: resolvedDealId,
+    });
+
+    return simulation;
+}
+
+export async function runAiRuntimeNow(locationId: string, options?: { plannerOnly?: boolean; batchSize?: number; source?: "automation" | "semi_auto" | "manual" | "mission" }) {
+    const targetLocationId = String(locationId || "").trim();
+    if (!targetLocationId) {
+        return { success: false as const, error: "Missing location ID." };
+    }
+
+    const actor = await resolveLocationActorContext(targetLocationId);
+    if (!actor.hasAccess || !actor.isAdmin) {
+        return { success: false as const, error: "Unauthorized: admin access required." };
+    }
+
+    try {
+        const stats = await runAiRuntimeCron({
+            locationId: targetLocationId,
+            plannerOnly: !!options?.plannerOnly,
+            batchSize: Math.max(1, Math.min(300, Number(options?.batchSize || 80))),
+            source: options?.source || "automation",
+        });
+
+        revalidatePath("/admin/settings/ai");
+        return { success: true as const, stats };
+    } catch (error: any) {
+        return { success: false as const, error: error?.message || "Failed to run AI runtime." };
+    }
+}
+
+export async function runAiSkillDecisionNow(input: {
+    locationId: string;
+    conversationId: string;
+    contactId: string;
+    dealId?: string | null;
+    source?: "automation" | "semi_auto" | "manual" | "mission";
+    objectiveHint?: "nurture" | "book_viewing" | "revive" | "listing_alert" | "deal_progress";
+    forceSkillId?: string;
+    contextSummary?: string;
+    extraInstruction?: string;
+    executeImmediately?: boolean;
+}) {
+    const targetLocationId = String(input.locationId || "").trim();
+    const actor = await resolveLocationActorContext(targetLocationId);
+    if (!actor.hasAccess) {
+        return { success: false as const, error: "Unauthorized." };
+    }
+
+    return runAiSkillDecision({
+        locationId: targetLocationId,
+        conversationId: String(input.conversationId || "").trim(),
+        contactId: String(input.contactId || "").trim(),
+        dealId: input.dealId || null,
+        source: input.source || "manual",
+        objectiveHint: input.objectiveHint,
+        forceSkillId: input.forceSkillId,
+        contextSummary: input.contextSummary,
+        extraInstruction: input.extraInstruction,
+        executeImmediately: input.executeImmediately ?? true,
+    });
 }

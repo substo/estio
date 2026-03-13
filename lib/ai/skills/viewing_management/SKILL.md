@@ -1,10 +1,16 @@
 ---
+id: viewing_management
 name: coordinating-viewings
 description: >
   Manages multi-party scheduling for property viewings.
   Checks calendar availability, proposes time slots, confirms with owners,
   sends invitations, reminders, and post-viewing follow-ups.
   Triggers on SCHEDULE_VIEWING or AVAILABILITY_QUESTION intents.
+risk: medium
+channels:
+  - whatsapp
+  - sms
+  - email
 tools:
   - resolve_viewing_property_context
   - check_availability
@@ -16,6 +22,22 @@ tools:
   - search_properties
   - log_activity
   - store_insight
+requiredTools:
+  - resolve_viewing_property_context
+  - check_availability
+inputsSchema:
+  requires:
+    - conversationId
+    - contactId
+    - schedulingContext
+outputsSchema:
+  final_response: string
+  tool_calls: array
+policyHints:
+  objective:
+    - book_viewing
+    - deal_progress
+  defaultAggressiveness: balanced
 ---
 
 # Skill: Coordinating Viewings

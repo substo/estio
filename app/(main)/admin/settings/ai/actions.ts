@@ -5,8 +5,15 @@ import { auth } from "@clerk/nextjs/server";
 import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
 import { revalidatePath } from "next/cache";
 import { GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
-import { runAiAutomationCron } from "@/lib/ai/automation/hub";
-import { updateAiAutomationConfig } from "@/app/(main)/admin/conversations/actions";
+import {
+    listAiDecisions,
+    listAiRuntimeJobs,
+    listSkillPolicies,
+    runAiRuntimeNow,
+    simulateSkillDecision,
+    updateAiAutomationConfig,
+    upsertSkillPolicy,
+} from "@/app/(main)/admin/conversations/actions";
 import { settingsService } from "@/lib/settings/service";
 import {
     SETTINGS_DOMAINS,
@@ -28,7 +35,7 @@ interface AiSettingsState {
 type RunAiAutomationNowResult = {
     success: boolean;
     error?: string;
-    stats?: Awaited<ReturnType<typeof runAiAutomationCron>>;
+    stats?: any;
 };
 
 type UpdateAiAutomationConfigResult = Awaited<ReturnType<typeof updateAiAutomationConfig>>;
@@ -219,17 +226,28 @@ export async function runAiAutomationNowAction(
     if (!isAdmin) return { success: false, error: "Unauthorized: Admin access is required." };
 
     try {
-        const stats = await runAiAutomationCron({
+        const runtime = await runAiRuntimeNow(targetLocationId, {
             plannerOnly: !!options?.plannerOnly,
-            batchSize: Math.max(1, Math.min(200, Number(options?.batchSize || 60))),
+            batchSize: Math.max(1, Math.min(300, Number(options?.batchSize || 80))),
+            source: "automation",
         });
+        if (!runtime.success) {
+            return { success: false, error: runtime.error || "Failed to run AI runtime cron." };
+        }
 
         revalidatePath("/admin/settings/ai");
-        return { success: true, stats };
+        return { success: true, stats: runtime.stats };
     } catch (error: any) {
-        console.error("[runAiAutomationNowAction] Error:", error);
-        return { success: false, error: error?.message || "Failed to run automation cron." };
+        console.error("[runAiRuntimeNowAction] Error:", error);
+        return { success: false, error: error?.message || "Failed to run runtime cron." };
     }
+}
+
+export async function runAiRuntimeNowAction(
+    locationId: string,
+    options?: { plannerOnly?: boolean; batchSize?: number }
+): Promise<RunAiAutomationNowResult> {
+    return runAiAutomationNowAction(locationId, options);
 }
 
 export async function updateAiAutomationConfigFromSettingsAction(
@@ -237,4 +255,76 @@ export async function updateAiAutomationConfigFromSettingsAction(
     config: unknown
 ): Promise<UpdateAiAutomationConfigResult> {
     return updateAiAutomationConfig(locationId, config);
+}
+
+export async function listSkillPoliciesFromSettingsAction(locationId: string) {
+    const { userId } = await auth();
+    if (!userId) return [];
+    const targetLocationId = String(locationId || "").trim();
+    if (!targetLocationId) return [];
+    const isAdmin = await verifyUserIsLocationAdmin(userId, targetLocationId);
+    if (!isAdmin) return [];
+    return listSkillPolicies(targetLocationId);
+}
+
+export async function upsertSkillPolicyFromSettingsAction(locationId: string, skillId: string, policy: unknown) {
+    const { userId } = await auth();
+    if (!userId) return { success: false as const, error: "Unauthorized" };
+    const targetLocationId = String(locationId || "").trim();
+    if (!targetLocationId) return { success: false as const, error: "Missing location ID." };
+    const isAdmin = await verifyUserIsLocationAdmin(userId, targetLocationId);
+    if (!isAdmin) return { success: false as const, error: "Unauthorized: Admin access is required." };
+    return upsertSkillPolicy(targetLocationId, skillId, policy);
+}
+
+export async function listAiRuntimeDecisionsFromSettingsAction(locationId: string, input?: {
+    status?: string | null;
+    skillId?: string | null;
+    since?: string | null;
+    limit?: number;
+}) {
+    const { userId } = await auth();
+    if (!userId) return [];
+    const targetLocationId = String(locationId || "").trim();
+    if (!targetLocationId) return [];
+    const isAdmin = await verifyUserIsLocationAdmin(userId, targetLocationId);
+    if (!isAdmin) return [];
+    return listAiDecisions({
+        ...input,
+        locationId: targetLocationId,
+        limit: Math.max(1, Math.min(120, Number(input?.limit || 40))),
+    });
+}
+
+export async function listAiRuntimeJobsFromSettingsAction(locationId: string, input?: {
+    status?: string | null;
+    since?: string | null;
+    limit?: number;
+}) {
+    const { userId } = await auth();
+    if (!userId) return [];
+    const targetLocationId = String(locationId || "").trim();
+    if (!targetLocationId) return [];
+    const isAdmin = await verifyUserIsLocationAdmin(userId, targetLocationId);
+    if (!isAdmin) return [];
+    return listAiRuntimeJobs({
+        ...input,
+        locationId: targetLocationId,
+        limit: Math.max(1, Math.min(120, Number(input?.limit || 40))),
+    });
+}
+
+export async function simulateSkillDecisionFromSettingsAction(input: {
+    locationId: string;
+    conversationId?: string | null;
+    dealId?: string | null;
+    contactId?: string | null;
+}) {
+    const { userId } = await auth();
+    if (!userId) return { success: false as const, error: "Unauthorized" };
+    const targetLocationId = String(input.locationId || "").trim();
+    if (!targetLocationId) return { success: false as const, error: "Missing location ID." };
+    const isAdmin = await verifyUserIsLocationAdmin(userId, targetLocationId);
+    if (!isAdmin) return { success: false as const, error: "Unauthorized: Admin access is required." };
+    return simulateSkillDecision(input);
 }

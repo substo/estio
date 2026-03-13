@@ -1,14 +1,36 @@
 ---
+id: objection_handler
 name: objection_handler
 description: >
   Retrieves contextually relevant rebuttals from the Sales Playbook
   when a lead expresses objections about price, location, timing,
   or trust. Always empathizes first, then reframes value.
+risk: high
+channels:
+  - whatsapp
+  - sms
+  - email
 tools:
   - retrieve_rebuttal
   - store_insight
   - update_lead_score
   - draft_reply
+requiredTools:
+  - retrieve_rebuttal
+  - store_insight
+inputsSchema:
+  requires:
+    - conversationId
+    - contactId
+    - objectionContext
+outputsSchema:
+  final_response: string
+  tool_calls: array
+policyHints:
+  objective:
+    - nurture
+    - deal_progress
+  defaultAggressiveness: balanced
 ---
 
 # Handling Objections

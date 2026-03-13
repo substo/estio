@@ -8,6 +8,7 @@ import {
     SETTINGS_SECRET_KEYS,
     isSettingsReadFromNewEnabled,
 } from "@/lib/settings/constants";
+import { ensureDefaultSkillPolicies } from "@/lib/ai/runtime/engine";
 
 export default async function AiSettingsPage(props: { searchParams: Promise<{ locationId?: string }> }) {
     const searchParams = await props.searchParams;
@@ -23,7 +24,7 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
         return <div>No location context found.</div>;
     }
 
-    const [siteConfig, aiDoc, hasGoogleAiApiKey, automationSummary] = await Promise.all([
+    const [siteConfig, aiDoc, hasGoogleAiApiKey, runtimeSummary] = await Promise.all([
         db.siteConfig.findUnique({
             where: { locationId },
         }),
@@ -40,36 +41,39 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
         }).catch(() => false),
         (async () => {
             try {
+                await ensureDefaultSkillPolicies(locationId);
                 const [
-                    totalSchedules,
-                    enabledSchedules,
-                    nextSchedule,
-                    pendingJobs,
-                    deadJobs,
+                    totalPolicies,
+                    enabledPolicies,
+                    nextJob,
+                    pendingRuntimeJobs,
+                    deadRuntimeJobs,
                     pendingSuggestions,
+                    policies,
+                    recentDecisions,
+                    recentRuntimeJobs,
                 ] = await Promise.all([
-                    db.aiAutomationSchedule.count({
+                    db.aiSkillPolicy.count({
                         where: { locationId },
                     }),
-                    db.aiAutomationSchedule.count({
+                    db.aiSkillPolicy.count({
                         where: { locationId, enabled: true },
                     }),
-                    db.aiAutomationSchedule.findFirst({
+                    db.aiRuntimeJob.findFirst({
                         where: {
                             locationId,
-                            enabled: true,
-                            nextRunAt: { not: null },
+                            status: "pending",
                         },
-                        orderBy: { nextRunAt: "asc" },
-                        select: { nextRunAt: true },
+                        orderBy: { scheduledAt: "asc" },
+                        select: { scheduledAt: true },
                     }),
-                    db.aiAutomationJob.count({
+                    db.aiRuntimeJob.count({
                         where: {
                             locationId,
                             status: "pending",
                         },
                     }),
-                    db.aiAutomationJob.count({
+                    db.aiRuntimeJob.count({
                         where: {
                             locationId,
                             status: "dead",
@@ -79,28 +83,120 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
                         where: {
                             locationId,
                             status: "pending",
-                            source: { startsWith: "automation:" },
+                            source: { contains: "skill:" },
                         },
+                    }),
+                    db.aiSkillPolicy.findMany({
+                        where: { locationId },
+                        orderBy: [{ enabled: "desc" }, { objective: "asc" }, { skillId: "asc" }],
+                        select: {
+                            id: true,
+                            skillId: true,
+                            objective: true,
+                            enabled: true,
+                            version: true,
+                            decisionPolicy: true,
+                            channelPolicy: true,
+                            compliancePolicy: true,
+                            updatedAt: true,
+                        },
+                        take: 80,
+                    }),
+                    db.aiDecision.findMany({
+                        where: { locationId },
+                        orderBy: { createdAt: "desc" },
+                        select: {
+                            id: true,
+                            selectedSkillId: true,
+                            selectedObjective: true,
+                            selectedScore: true,
+                            status: true,
+                            source: true,
+                            holdReason: true,
+                            traceId: true,
+                            createdAt: true,
+                        },
+                        take: 40,
+                    }),
+                    db.aiRuntimeJob.findMany({
+                        where: { locationId },
+                        orderBy: { createdAt: "desc" },
+                        select: {
+                            id: true,
+                            status: true,
+                            attemptCount: true,
+                            maxAttempts: true,
+                            scheduledAt: true,
+                            processedAt: true,
+                            traceId: true,
+                            lastError: true,
+                            decision: {
+                                select: {
+                                    selectedSkillId: true,
+                                    selectedObjective: true,
+                                },
+                            },
+                            createdAt: true,
+                        },
+                        take: 30,
                     }),
                 ]);
 
                 return {
-                    totalSchedules,
-                    enabledSchedules,
-                    nextRunAt: nextSchedule?.nextRunAt ? nextSchedule.nextRunAt.toISOString() : null,
-                    pendingJobs,
-                    deadJobs,
+                    totalPolicies,
+                    enabledPolicies,
+                    nextRunAt: nextJob?.scheduledAt ? nextJob.scheduledAt.toISOString() : null,
+                    pendingJobs: pendingRuntimeJobs,
+                    deadJobs: deadRuntimeJobs,
                     pendingSuggestions,
+                    policies: policies.map((item) => ({
+                        id: item.id,
+                        skillId: item.skillId,
+                        objective: item.objective,
+                        enabled: item.enabled,
+                        version: item.version,
+                        decisionPolicy: item.decisionPolicy || {},
+                        channelPolicy: item.channelPolicy || {},
+                        compliancePolicy: item.compliancePolicy || {},
+                        updatedAt: item.updatedAt.toISOString(),
+                    })),
+                    recentDecisions: recentDecisions.map((item) => ({
+                        id: item.id,
+                        selectedSkillId: item.selectedSkillId || null,
+                        selectedObjective: item.selectedObjective || null,
+                        selectedScore: item.selectedScore || null,
+                        status: item.status,
+                        source: item.source,
+                        holdReason: item.holdReason || null,
+                        traceId: item.traceId || null,
+                        createdAt: item.createdAt.toISOString(),
+                    })),
+                    recentJobs: recentRuntimeJobs.map((item) => ({
+                        id: item.id,
+                        selectedSkillId: item.decision?.selectedSkillId || null,
+                        selectedObjective: item.decision?.selectedObjective || null,
+                        status: item.status,
+                        attemptCount: item.attemptCount,
+                        maxAttempts: item.maxAttempts,
+                        scheduledAt: item.scheduledAt.toISOString(),
+                        processedAt: item.processedAt ? item.processedAt.toISOString() : null,
+                        traceId: item.traceId || null,
+                        lastError: item.lastError || null,
+                        createdAt: item.createdAt.toISOString(),
+                    })),
                 };
             } catch (error) {
                 console.warn("[AiSettingsPage] Failed to load automation summary:", error);
                 return {
-                    totalSchedules: 0,
-                    enabledSchedules: 0,
+                    totalPolicies: 0,
+                    enabledPolicies: 0,
                     nextRunAt: null,
                     pendingJobs: 0,
                     deadJobs: 0,
                     pendingSuggestions: 0,
+                    policies: [],
+                    recentDecisions: [],
+                    recentJobs: [],
                 };
             }
         })(),
@@ -139,7 +235,7 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
                     locationId={locationId}
                     settingsVersion={settingsVersion}
                     hasGoogleAiApiKey={hasGoogleAiApiKey || Boolean(siteConfig?.googleAiApiKey)}
-                    automationSummary={automationSummary}
+                    runtimeSummary={runtimeSummary}
                 />
             </div>
         </div>

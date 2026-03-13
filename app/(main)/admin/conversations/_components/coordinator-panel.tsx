@@ -142,12 +142,11 @@ export function CoordinatorPanel({
     initialAgentSummary,
     lazySidebarDataEnabled = true,
     onBackToConversation,
-    onDraftApproved,
+    onDraftApproved: _onDraftApproved,
     onDeselect,
     onSuggestionsGenerated,
     onContactSaved
 }: CoordinatorPanelProps) {
-    const [draft, setDraft] = useState("");
     const [reasoning, setReasoning] = useState("");
     const [generating, setGenerating] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -246,16 +245,11 @@ export function CoordinatorPanel({
                 }
             });
 
-            // Also check for recent Agent Execution drafts (e.g. from "Paste Lead" redirection)
+            // Pull latest execution summary to hydrate Mission Control context.
             getAgentExecutions(conversation.id).then(history => {
                 if (history && history.length > 0) {
                     const latest = history[0];
-                    // Check if recent (< 15 mins) and has draft
-                    const isRecent = new Date().getTime() - new Date(latest.createdAt).getTime() < 15 * 60 * 1000;
-                    if (isRecent && latest.taskStatus === 'success' && latest.draftReply) {
-                        setDraft(latest.draftReply);
-                        if (latest.thoughtSummary) setReasoning(latest.thoughtSummary);
-                    }
+                    if (latest?.thoughtSummary) setReasoning(latest.thoughtSummary);
                 }
             });
         }
@@ -353,11 +347,11 @@ export function CoordinatorPanel({
             const res = await orchestrateAction(conversation.id, conversation.contactId);
             setOrchestrationResult(res);
 
-            if (res.draftReply) {
-                setDraft(res.draftReply);
-            }
             if (res.reasoning) {
                 setReasoning(res.reasoning);
+            }
+            if ((res as any)?.suggestionQueued) {
+                onSuggestionsGenerated?.([]);
             }
 
             // Auto-refresh trace history
@@ -389,8 +383,8 @@ export function CoordinatorPanel({
                     contextId = newContext.id;
                 }
                 const res = await generateMultiContextDraftAction(contextId!, 'LEAD');
-                setDraft(res.draft);
                 setReasoning(res.reasoning);
+                onSuggestionsGenerated?.([]);
             } else {
                 const res = await generateAIDraft(
                     conversation.id,
@@ -399,8 +393,8 @@ export function CoordinatorPanel({
                     undefined,
                     { mode: "chat", replyLanguage: conversation.replyLanguageOverride || null }
                 );
-                setDraft(res.draft);
-                setReasoning(res.reasoning);
+                setReasoning(res.reasoning || "Suggested response queued for review.");
+                onSuggestionsGenerated?.([]);
             }
         } catch (e: any) {
             setError("Failed to generate draft. " + e.message);
@@ -441,10 +435,12 @@ export function CoordinatorPanel({
                 if (taskIndex >= 0) updatedPlan[taskIndex] = res.task;
                 setPlan(updatedPlan);
 
-                setDraft(res.draft || "");
                 setReasoning(res.thoughtSummary || "Task executed.");
                 setThoughtSteps(res.thoughtSteps || []);
                 setAgentActions(res.actions || []);
+                if ((res as any)?.suggestionQueued) {
+                    onSuggestionsGenerated?.([]);
+                }
 
                 // Update usage stats if returned
                 if (res.conversationUsage) {
@@ -477,13 +473,6 @@ export function CoordinatorPanel({
             setExecuting(false);
         }
     }
-
-    const handleApprove = () => {
-        if (!draft) return;
-        onDraftApproved(draft);
-        setDraft(""); // Clear after sending
-        setReasoning("");
-    };
 
     const handleRemoveParticipant = async (conversationId: string) => {
         if (dealContextId) {
@@ -1002,7 +991,7 @@ export function CoordinatorPanel({
                             size="sm"
                             className="w-full text-xs text-muted-foreground h-7"
                         >
-                            Or just generate a quick reply draft...
+                            Or queue a quick suggested response...
                         </Button>
                     </div>
                 ) : (
@@ -1415,42 +1404,6 @@ export function CoordinatorPanel({
                     </DialogContent>
                 </Dialog>
 
-                {draft && (
-                    <div className="animate-in fade-in slide-in-from-bottom-2 pt-2">
-                        <div className="rounded-xl border bg-card shadow-sm overflow-hidden ring-offset-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 transition-all">
-                            <Textarea
-                                value={draft}
-                                onChange={(e) => setDraft(e.target.value)}
-                                placeholder="Review and edit the AI draft..."
-                                className="min-h-[100px] border-0 focus-visible:ring-0 resize-none text-sm p-3 block w-full bg-transparent placeholder:text-muted-foreground/50"
-                            />
-                            {/* Inline Toolbar */}
-                            <div className="flex items-center justify-between px-2 pb-2 pt-0">
-                                <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/70 pl-1">
-                                    <span className="flex items-center gap-1"><Sparkles className="w-3 h-3 text-purple-500" /> AI Draft</span>
-                                </div>
-                                <div className="flex gap-2">
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => setDraft("")}
-                                        className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                                    >
-                                        Discard
-                                    </Button>
-                                    <Button
-                                        onClick={handleApprove}
-                                        size="sm"
-                                        className="h-7 text-xs px-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-none"
-                                    >
-                                        <Check className="mr-1.5 h-3.5 w-3.5" />
-                                        Approve
-                                    </Button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                )}
             </div>
         </div >
     );

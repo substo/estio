@@ -5,16 +5,27 @@ import { z } from "zod";
 
 // Helper to define what a Skill looks like in the registry (lightweight)
 export interface SkillRegistryEntry {
+    id?: string;
     name: string;
     description: string;
+    risk?: "low" | "medium" | "high";
+    channels?: string[];
+    requiredTools?: string[];
 }
 
 // Helper to define loaded skill (heavyweight)
 export interface LoadedSkill {
+    id?: string;
     name: string;
     description: string;
     instructions: string;
     tools?: string[];
+    risk?: "low" | "medium" | "high";
+    channels?: string[];
+    requiredTools?: string[];
+    inputsSchema?: Record<string, any>;
+    outputsSchema?: Record<string, any>;
+    policyHints?: Record<string, any>;
 }
 
 const SKILLS_DIR = path.join(process.cwd(), 'lib/ai/skills');
@@ -41,11 +52,19 @@ export class SkillLoader {
                 try {
                     const fileContent = fs.readFileSync(skillPath, 'utf-8');
                     const { data } = matter(fileContent);
+                    const toolList = Array.isArray(data.tools) ? data.tools.map((item: any) => String(item || "").trim()).filter(Boolean) : [];
+                    const requiredTools = Array.isArray(data.requiredTools) ? data.requiredTools.map((item: any) => String(item || "").trim()).filter(Boolean) : [];
 
                     if (data.name && data.description) {
                         registry.push({
+                            id: String(data.id || dir),
                             name: data.name,
-                            description: data.description
+                            description: data.description,
+                            risk: (["low", "medium", "high"].includes(String(data.risk || "").toLowerCase())
+                                ? String(data.risk).toLowerCase()
+                                : "medium") as "low" | "medium" | "high",
+                            channels: Array.isArray(data.channels) ? data.channels.map((item: any) => String(item || "").trim()).filter(Boolean) : undefined,
+                            requiredTools: requiredTools.length ? requiredTools : toolList,
                         });
                     }
                 } catch (e) {
@@ -73,12 +92,32 @@ export class SkillLoader {
         try {
             const fileContent = fs.readFileSync(skillPath, 'utf-8');
             const { data, content } = matter(fileContent);
+            const tools = Array.isArray(data.tools) ? data.tools.map((item: any) => String(item || "").trim()).filter(Boolean) : [];
+            const requiredTools = Array.isArray(data.requiredTools)
+                ? data.requiredTools.map((item: any) => String(item || "").trim()).filter(Boolean)
+                : [];
+            const mergedRequiredTools = Array.from(new Set([...(requiredTools || []), ...(tools || [])]));
 
             return {
+                id: String(data.id || safeName),
                 name: data.name,
                 description: data.description,
                 instructions: content,
-                tools: data.tools ?? [] // Load allowed tools list
+                tools,
+                risk: (["low", "medium", "high"].includes(String(data.risk || "").toLowerCase())
+                    ? String(data.risk).toLowerCase()
+                    : "medium") as "low" | "medium" | "high",
+                channels: Array.isArray(data.channels) ? data.channels.map((item: any) => String(item || "").trim()).filter(Boolean) : [],
+                requiredTools: mergedRequiredTools,
+                inputsSchema: (data.inputsSchema && typeof data.inputsSchema === "object" && !Array.isArray(data.inputsSchema))
+                    ? data.inputsSchema
+                    : {},
+                outputsSchema: (data.outputsSchema && typeof data.outputsSchema === "object" && !Array.isArray(data.outputsSchema))
+                    ? data.outputsSchema
+                    : {},
+                policyHints: (data.policyHints && typeof data.policyHints === "object" && !Array.isArray(data.policyHints))
+                    ? data.policyHints
+                    : {},
             };
         } catch (e) {
             console.error(`Failed to load skill body for ${skillName}`, e);
@@ -655,7 +694,10 @@ export async function executeSkill(
     // 1. Filter Tools
     // Only expose tools that are explicitly listed in the skill's frontmatter
     // If no tools listed, expose none (or default set? For Phase 1 we'll be strict)
-    const allowedToolNames = skill.tools || [];
+    const allowedToolNames = Array.from(new Set([
+        ...(skill.tools || []),
+        ...(skill.requiredTools || []),
+    ]));
     const allowedTools = toolRegistry.filter(t => allowedToolNames.includes(t.name));
 
     const toolDefinitions = allowedTools.map(t => ({

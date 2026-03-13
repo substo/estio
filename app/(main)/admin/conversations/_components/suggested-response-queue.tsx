@@ -20,6 +20,15 @@ export type SuggestedResponseQueueItem = {
     contactPhone: string | null;
     dealId: string | null;
     traceId: string | null;
+    decisionId?: string | null;
+    decision?: {
+        id: string;
+        selectedSkillId: string | null;
+        selectedObjective: string | null;
+        selectedScore: number | null;
+        holdReason?: string | null;
+        source?: string | null;
+    } | null;
     metadata: any;
 };
 
@@ -44,6 +53,16 @@ function formatSourceLabel(source: string): string {
     if (normalized.startsWith("semi_auto:")) {
         const key = normalized.slice("semi_auto:".length).replace(/_/g, " ");
         return `Semi Auto · ${key}`;
+    }
+
+    if (normalized.startsWith("manual:")) {
+        const key = normalized.slice("manual:".length).replace(/_/g, " ");
+        return `Manual · ${key}`;
+    }
+
+    if (normalized.startsWith("mission:")) {
+        const key = normalized.slice("mission:".length).replace(/_/g, " ");
+        return `Mission · ${key}`;
     }
 
     return normalized.replace(/_/g, " ");
@@ -104,6 +123,24 @@ export function SuggestedResponseQueue({
                         <div className="flex items-center justify-between gap-2">
                             <div className="text-[10px] text-slate-500 truncate">{formatSourceLabel(item.source)}</div>
                             <div className="text-[10px] text-slate-400 shrink-0">{formatCreatedLabel(item.createdAt)}</div>
+                        </div>
+                        <div className="text-[10px] text-slate-500 flex flex-wrap gap-2">
+                            {(item.decision?.selectedSkillId || item.metadata?.skillId) && (
+                                <span>Skill: {item.decision?.selectedSkillId || item.metadata?.skillId}</span>
+                            )}
+                            {(item.decision?.selectedObjective || item.metadata?.objective) && (
+                                <span>Objective: {item.decision?.selectedObjective || item.metadata?.objective}</span>
+                            )}
+                            {(item.decision?.selectedScore != null || item.metadata?.scoreBreakdown) && (
+                                <span>
+                                    Score: {item.decision?.selectedScore != null
+                                        ? Number(item.decision?.selectedScore).toFixed(2)
+                                        : "-"}
+                                </span>
+                            )}
+                            {item.traceId && (
+                                <span className="font-mono">Trace: {item.traceId.slice(0, 10)}...</span>
+                            )}
                         </div>
                         <p className="text-xs text-slate-800 whitespace-pre-wrap break-words">{item.body}</p>
                         <div className="flex items-center justify-end gap-1.5">

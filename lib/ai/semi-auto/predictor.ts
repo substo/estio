@@ -1,7 +1,5 @@
 import db from "@/lib/db";
-import { orchestrate } from "../orchestrator";
-import { Prisma } from "@prisma/client";
-import crypto from "crypto";
+import { runAiSkillDecision } from "../runtime/engine";
 
 /**
  * Semi-Auto Predictor
@@ -81,99 +79,74 @@ export async function predictAndDraft(input: PredictionInput): Promise<Predictio
         }
     }
 
-    // ── Build Context ──
-    const recentMessages = await db.message.findMany({
-        where: { conversationId: input.conversationId },
-        orderBy: { createdAt: "desc" },
-        take: 30,
-        select: { direction: true, body: true, createdAt: true },
-    });
+    const objectiveHint = input.triggerMessage.startsWith("NEW_LISTING_ALERT:")
+        ? "listing_alert"
+        : input.triggerMessage === "FOLLOW_UP_TRIGGER"
+            ? "revive"
+            : undefined;
 
-    const conversationHistory = recentMessages
-        .reverse()
-        .map((m) => `[${m.direction}] ${m.body ?? ""}`)
-        .join("\n");
-
-    // ── Orchestrate ──
-    const result = await orchestrate({
+    const runtime = await runAiSkillDecision({
+        locationId: conversationRecord.locationId,
         conversationId: input.conversationId,
         contactId: input.contactId,
-        message: input.triggerMessage,
-        conversationHistory,
+        source: "semi_auto",
+        objectiveHint,
+        contextSummary: [
+            `Trigger source: ${input.triggerSource}`,
+            `Trigger message: ${input.triggerMessage || "(empty)"}`,
+        ].join("\n"),
+        extraInstruction: "Keep this as a concise suggested response for human approval.",
+        executeImmediately: true,
     });
+
+    if (!runtime.success) {
+        return null;
+    }
+
+    const decision = runtime.decisionId
+        ? await db.aiDecision.findUnique({
+            where: { id: runtime.decisionId },
+            select: {
+                selectedObjective: true,
+                selectedSkillId: true,
+                traceId: true,
+                selectedScore: true,
+                suggestedResponses: {
+                    orderBy: { createdAt: "desc" },
+                    take: 1,
+                    select: {
+                        body: true,
+                    },
+                },
+            },
+        })
+        : null;
+
+    const draftReply = runtime.draftBody || decision?.suggestedResponses?.[0]?.body || null;
+    const selectedSkill = runtime.selectedSkillId || decision?.selectedSkillId || null;
+    const selectedObjective = decision?.selectedObjective || objectiveHint || "nurture";
 
     // ── Build Suggested Actions ──
     const suggestedActions: string[] = [];
 
-    if (result.draftReply) {
+    if (draftReply) {
         suggestedActions.push("review_draft_reply");
     }
 
     // Add intent-specific suggestions
-    switch (result.intent) {
-        case "SCHEDULE_VIEWING":
+    switch (selectedObjective) {
+        case "book_viewing":
             suggestedActions.push("propose_viewing_slots");
             break;
-        case "PRICE_NEGOTIATION":
-        case "OFFER":
-        case "COUNTER_OFFER":
+        case "deal_progress":
             suggestedActions.push("review_offer_strategy");
             break;
-        case "PROPERTY_SEARCH":
+        case "listing_alert":
             suggestedActions.push("review_search_results");
             break;
-        case "CONTRACT_REQUEST":
-            suggestedActions.push("review_contract_draft");
-            break;
-        case "FOLLOW_UP":
+        case "revive":
             suggestedActions.push("review_follow_up_draft");
             break;
-    }
-
-    // ── Store Draft (NEVER send) ──
-    if (result.draftReply) {
-        await db.agentExecution.create({
-            data: {
-                conversationId: input.conversationId,
-                traceId: result.traceId,
-                intent: result.intent,
-                skillName: result.skillUsed,
-                draftReply: result.draftReply,
-                thoughtSummary: result.reasoning,
-                status: "draft",
-            },
-        });
-
-        const idempotencyKey = crypto
-            .createHash("sha256")
-            .update(`${conversationRecord.id}|${input.triggerSource}|${result.traceId}|${result.intent}`)
-            .digest("hex");
-
-        try {
-            await db.aiSuggestedResponse.create({
-                data: {
-                    locationId: conversationRecord.locationId,
-                    conversationId: conversationRecord.id,
-                    contactId: conversationRecord.contactId || input.contactId,
-                    body: result.draftReply,
-                    source: `semi_auto:${input.triggerSource}`,
-                    status: "pending",
-                    traceId: result.traceId,
-                    idempotencyKey,
-                    metadata: {
-                        intent: result.intent,
-                        skillUsed: result.skillUsed,
-                        reasoning: result.reasoning,
-                        triggerSource: input.triggerSource,
-                        humanApprovalRequired: true,
-                    } as any,
-                },
-            });
-        } catch (error: any) {
-            if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") {
-                throw error;
-            }
-        }
     }
 
     // ── Update Suggested Actions ──
@@ -185,11 +158,11 @@ export async function predictAndDraft(input: PredictionInput): Promise<Predictio
     }
 
     return {
-        traceId: result.traceId,
-        draftReply: result.draftReply,
+        traceId: runtime.traceId || decision?.traceId || "",
+        draftReply,
         suggestedActions,
-        intent: result.intent,
-        skillUsed: result.skillUsed,
-        reasoning: result.reasoning,
+        intent: String(selectedObjective || "UNKNOWN").toUpperCase(),
+        skillUsed: selectedSkill,
+        reasoning: `Decision score ${Number(runtime.score ?? decision?.selectedScore ?? 0).toFixed(2)} via runtime policy`,
     };
 }

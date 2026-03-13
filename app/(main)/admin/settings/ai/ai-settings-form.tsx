@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Sparkles, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { AutomationHubSettings } from "./automation-hub-settings";
+import { SkillRuntimeSettings } from "./skill-runtime-settings";
 
 const initialState = {
     message: "",
@@ -31,19 +31,54 @@ export function AiSettingsForm({
     locationId,
     settingsVersion,
     hasGoogleAiApiKey,
-    automationSummary,
+    runtimeSummary,
 }: {
     initialData: any,
     locationId: string,
     settingsVersion: number,
     hasGoogleAiApiKey: boolean,
-    automationSummary?: {
-        totalSchedules: number;
-        enabledSchedules: number;
+    runtimeSummary?: {
+        totalPolicies: number;
+        enabledPolicies: number;
         nextRunAt: string | null;
         pendingJobs: number;
         deadJobs: number;
         pendingSuggestions: number;
+        policies: Array<{
+            id: string;
+            skillId: string;
+            objective: string;
+            enabled: boolean;
+            version: number;
+            decisionPolicy: any;
+            channelPolicy: any;
+            compliancePolicy: any;
+            updatedAt: string;
+        }>;
+        recentDecisions: Array<{
+            id: string;
+            selectedSkillId: string | null;
+            selectedObjective: string | null;
+            selectedScore: number | null;
+            status: string;
+            source: string;
+            holdReason: string | null;
+            traceId: string | null;
+            createdAt: string;
+        }>;
+        recentJobs: Array<{
+            id: string;
+            selectedSkillId: string | null;
+            selectedObjective: string | null;
+            status: string;
+            attemptCount: number;
+            maxAttempts: number;
+            scheduledAt: string;
+            processedAt: string | null;
+            traceId: string | null;
+            lastError: string | null;
+            createdAt: string;
+        }>;
     } | null,
 }) {
     const [state, action] = useActionState(updateAiSettings, initialState);
@@ -326,10 +361,9 @@ export function AiSettingsForm({
 
                 <Separator />
 
-                <AutomationHubSettings
+                <SkillRuntimeSettings
                     locationId={locationId}
-                    initialConfig={initialData?.automationConfig}
-                    summary={automationSummary || null}
+                    summary={runtimeSummary || null}
                 />
 
                 <Separator />

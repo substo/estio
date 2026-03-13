@@ -1,55 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
-import { CronGuard } from "@/lib/cron/guard";
-import { verifyCronAuthorization } from "@/lib/cron/auth";
-import { runAiAutomationCron } from "@/lib/ai/automation/hub";
 
 /**
  * Deprecated compatibility endpoint.
  *
- * All AI automation scheduling now runs through /api/cron/ai-automations.
+ * All AI runtime scheduling now runs through /api/cron/ai-runtime.
  */
 export const dynamic = "force-dynamic";
 export const maxDuration = 180;
 
-const guard = new CronGuard("scheduled-tasks");
-
 export async function GET(request: NextRequest) {
-  const auth = verifyCronAuthorization(request);
-  if (!auth.ok) return auth.response;
-
-  const resources = await guard.checkResources(400, 5.0);
-  if (!resources.ok) {
-    return NextResponse.json({ skipped: true, reason: resources.reason, deprecated: true });
-  }
-
-  if (!(await guard.acquire())) {
-    return NextResponse.json({ skipped: true, reason: "locked", deprecated: true });
-  }
-
-  try {
-    const startedAt = Date.now();
-    const stats = await runAiAutomationCron({
-      plannerOnly: false,
-      batchSize: Number(request.nextUrl.searchParams.get("batch") || 60),
-    });
-
-    return NextResponse.json({
-      success: true,
+  const source = String(request.nextUrl.searchParams.get("source") || "automation");
+  return NextResponse.json(
+    {
+      success: false,
       deprecated: true,
-      replacement: "/api/cron/ai-automations",
-      durationMs: Date.now() - startedAt,
-      ...stats,
-    });
-  } catch (error: any) {
-    return NextResponse.json(
-      {
-        success: false,
-        deprecated: true,
-        error: error?.message || "Scheduled tasks cron failed",
-      },
-      { status: 500 }
-    );
-  } finally {
-    await guard.release();
-  }
+      code: "CRON_ENDPOINT_DEPRECATED",
+      error: "Deprecated endpoint. Use /api/cron/ai-runtime.",
+      replacement: `/api/cron/ai-runtime?source=${encodeURIComponent(source)}`,
+    },
+    { status: 410 }
+  );
 }
