@@ -266,8 +266,8 @@ Files:
 
 - pre-fills title/notes from the selected text
 - pre-assigns the task to the current user
-- does **not** auto-fill a due date
-- explicitly tells the user reminders will start only after a due date is added later
+- lets the operator optionally set a due date at creation time
+- if the due date is left blank, reminders still start only after a due date is added later
 
 ### AI suggestions
 

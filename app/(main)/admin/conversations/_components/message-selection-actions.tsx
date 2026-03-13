@@ -185,6 +185,7 @@ export function MessageSelectionActions({
     const [createTaskOpen, setCreateTaskOpen] = useState(false);
     const [taskTitle, setTaskTitle] = useState("");
     const [taskDescription, setTaskDescription] = useState("");
+    const [taskDueAtInput, setTaskDueAtInput] = useState("");
     const [isCreatingTask, setIsCreatingTask] = useState(false);
     const [currentTaskUserId, setCurrentTaskUserId] = useState<string | null>(null);
     const [currentTaskUserLabel, setCurrentTaskUserLabel] = useState<string>("You");
@@ -324,6 +325,7 @@ export function MessageSelectionActions({
 
         setTaskTitle(suggestTaskTitleFromSelection(text));
         setTaskDescription(text);
+        setTaskDueAtInput("");
         setCreateTaskOpen(true);
         onClearSelection();
     };
@@ -447,6 +449,7 @@ export function MessageSelectionActions({
                 conversationId,
                 title: taskTitle.trim(),
                 description: taskDescription.trim() || undefined,
+                dueAt: convertDateTimeLocalToIso(taskDueAtInput) || undefined,
                 assignedUserId: currentTaskUserId || undefined,
                 priority: "medium",
                 source: "ai_selection",
@@ -457,7 +460,11 @@ export function MessageSelectionActions({
                 return;
             }
 
-            toast.success("Task created");
+            toast.success(
+                taskDueAtInput
+                    ? "Task created"
+                    : "Task created. Add a due date later to start reminders."
+            );
             window.dispatchEvent(new Event('estio-tasks-mutated'));
             setCreateTaskOpen(false);
         } catch (error: any) {
@@ -1108,6 +1115,7 @@ export function MessageSelectionActions({
                     setCreateTaskOpen(open);
                     if (!open) {
                         setIsCreatingTask(false);
+                        setTaskDueAtInput("");
                     }
                 }}
             >
@@ -1129,7 +1137,7 @@ export function MessageSelectionActions({
                         </div>
 
                         <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
-                            <span className="font-medium">Assignee:</span> {currentTaskUserLabel}. This quick-create flow saves the task without a due date, so reminders start only after a due date is added later.
+                            <span className="font-medium">Assignee:</span> {currentTaskUserLabel}. Add a due date now if this task should generate reminders; otherwise you can leave it blank and add one later.
                         </div>
 
                         <div className="space-y-2">
@@ -1148,6 +1156,18 @@ export function MessageSelectionActions({
                                 onChange={(event) => setTaskDescription(event.target.value)}
                                 className="min-h-[120px]"
                             />
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-xs font-medium text-slate-700">Due date &amp; time (optional)</label>
+                            <Input
+                                type="datetime-local"
+                                value={taskDueAtInput}
+                                onChange={(event) => setTaskDueAtInput(event.target.value)}
+                            />
+                            <p className="text-[11px] text-slate-500">
+                                Task reminders appear only after a due date exists and a reminder time is reached.
+                            </p>
                         </div>
 
                         <DialogFooter>

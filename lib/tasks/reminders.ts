@@ -1,7 +1,6 @@
 import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
 import db from '@/lib/db';
-import { isWithinQuietHours } from '@/lib/ai/automation/config';
 import { getNotificationFeatureFlags } from '@/lib/notifications/feature-flags';
 import { parseTaskReminderSyncVersion } from '@/lib/notifications/task-deadline-state';
 import { sendWebPushNotification, isWebPushConfigured } from '@/lib/notifications/push';
@@ -11,6 +10,7 @@ import {
   normalizeReminderOffsets,
   reminderOffsetLabel,
 } from '@/lib/tasks/reminder-config';
+import { buildReminderScheduleSlots, getEffectiveReminderLeadMinutes } from '@/lib/tasks/reminder-schedule';
 import { buildTaskReminderDeepLink } from '@/lib/tasks/reminder-links';
 
 const MAX_REMINDER_ATTEMPTS = 6;
@@ -154,28 +154,6 @@ function getReminderTimezone(task: Pick<ReminderTaskRecord, 'location' | 'assign
   return String(task.assignedUser?.timeZone || task.location?.timeZone || 'UTC');
 }
 
-function deferReminderFromQuietHours(date: Date, timezone: string, quietHours?: {
-  enabled?: boolean | null;
-  startHour?: number | null;
-  endHour?: number | null;
-} | null) {
-  if (!quietHours?.enabled) return date;
-
-  let candidate = new Date(date);
-  for (let i = 0; i < 24 * 60 + 5; i += 1) {
-    if (!isWithinQuietHours(candidate, timezone, {
-      enabled: !!quietHours.enabled,
-      startHour: Number(quietHours.startHour ?? 21),
-      endHour: Number(quietHours.endHour ?? 8),
-    })) {
-      return candidate;
-    }
-    candidate = new Date(candidate.getTime() + 60_000);
-  }
-
-  return candidate;
-}
-
 function getTaskReminderEligibility(task: ReminderTaskRecord | ReminderJobRecord['task'] | null): ReminderEligibilityResult {
   if (!task) return { eligible: false, reason: 'missing_task' };
   if (task.deletedAt) return { eligible: false, reason: 'deleted' };
@@ -213,23 +191,27 @@ function buildReminderJobRows(task: ReminderTaskRecord) {
   const timeZone = getReminderTimezone(task);
   const preference = task.assignedUser.taskReminderPreference;
   const offsets = getReminderOffsetsForTask(task);
-
-  return offsets.map((offsetMinutes) => {
-    const baseScheduledFor = new Date(task.dueAt!.getTime() - offsetMinutes * 60_000);
-    const scheduledFor = deferReminderFromQuietHours(baseScheduledFor, timeZone, {
+  const schedule = buildReminderScheduleSlots({
+    dueAt: task.dueAt,
+    offsets,
+    timeZone,
+    quietHours: {
       enabled: preference?.quietHoursEnabled ?? true,
       startHour: preference?.quietHoursStartHour ?? 21,
       endHour: preference?.quietHoursEndHour ?? 8,
-    });
-    const slotKey = `offset_${offsetMinutes}`;
+    },
+  });
+
+  return schedule.map((slot) => {
+    const slotKey = `offset_${slot.offsetMinutes}`;
 
     return {
       taskId: task.id,
       userId: task.assignedUser!.id,
       locationId: task.locationId,
       slotKey,
-      offsetMinutes,
-      scheduledFor,
+      offsetMinutes: slot.offsetMinutes,
+      scheduledFor: slot.scheduledFor,
       status: 'pending',
       idempotencyKey: `${task.id}:${task.assignedUser!.id}:${slotKey}:v${task.syncVersion}`,
     } satisfies Prisma.TaskReminderJobCreateManyInput;
@@ -259,7 +241,8 @@ function buildReminderNotificationContent(job: ReminderJobRecord) {
     title = new Date() >= dueAt ? `Task overdue: ${job.task.title}` : `Task due now: ${job.task.title}`;
   }
 
-  const body = `${contactName} • ${reminderOffsetLabel(job.offsetMinutes)} • Due ${dueLabel}`;
+  const effectiveOffsetMinutes = getEffectiveReminderLeadMinutes(dueAt, job.scheduledFor);
+  const body = `${contactName} • ${reminderOffsetLabel(effectiveOffsetMinutes)} • Due ${dueLabel}`;
 
   return {
     title,

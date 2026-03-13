@@ -209,7 +209,10 @@ Primary file: [`lib/tasks/reminders.ts`](/Users/martingreen/Projects/IDX/lib/tas
   - assignee timezone
   - location timezone
   - `UTC`
-- if a reminder lands inside quiet hours, it is deferred minute-by-minute until the next allowed minute
+- pre-due reminders that land inside quiet hours are deferred minute-by-minute until the next allowed minute
+- `At due time` reminders stay anchored to the actual due timestamp, even during quiet hours
+- if a deferred pre-due reminder would land at or after the due time, it is dropped instead of becoming a late duplicate
+- if multiple pre-due offsets collapse onto the same post-quiet-hours minute, only the closest surviving offset is kept
 
 ### Supersede and cancel behavior
 
@@ -419,7 +422,7 @@ Files:
 Rules:
 
 - quick-create from selected text pre-assigns to the current user
-- quick-create does not auto-fill a due date
+- quick-create lets the operator set an optional due date immediately, but does not auto-fill one from the selection
 - AI-suggested tasks are also assigned to the acting user when applied
 - suggestion rows keep due dates optional, so reminders are not accidentally created from “due now” defaults
 
