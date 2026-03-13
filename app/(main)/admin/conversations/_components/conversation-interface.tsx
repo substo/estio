@@ -2131,59 +2131,139 @@ export function ConversationInterface({ locationId, initialConversations, initia
     }, []);
 
     const handleConversationContactSaved = useCallback(async (conversationId: string, patch: ContactIdentityPatch) => {
-        if (!conversationId || !patch?.id) return;
+        const normalizedConversationId = String(conversationId || "").trim();
+        const patchedContactId = String(patch?.id || "").trim();
+        if (!normalizedConversationId || !patchedContactId) return;
 
-        const sequence = (contactSaveRefreshSeqRef.current[conversationId] || 0) + 1;
-        contactSaveRefreshSeqRef.current[conversationId] = sequence;
+        const normalizedName = patch.name === undefined
+            ? undefined
+            : (String(patch.name || "").trim() || "Unknown Contact");
+        const normalizedEmail = patch.email === undefined
+            ? undefined
+            : (String(patch.email || "").trim() || undefined);
+        const normalizedPhone = patch.phone === undefined
+            ? undefined
+            : (String(patch.phone || "").trim() || undefined);
+        const normalizedPreferredLang = patch.preferredLang === undefined
+            ? undefined
+            : (String(patch.preferredLang || "").trim() || null);
 
-        setConversations((prev) => prev.map((conversationItem) => {
-            if (conversationItem.id !== conversationId) return conversationItem;
+        const applyConversationIdentityPatch = (conversationItem: Conversation): Conversation => {
+            if (
+                conversationItem.id !== normalizedConversationId
+                && String(conversationItem.contactId || "") !== patchedContactId
+            ) {
+                return conversationItem;
+            }
 
             return {
                 ...conversationItem,
-                ...(patch.name !== undefined ? { contactName: patch.name || "Unknown" } : {}),
-                ...(patch.email !== undefined ? { contactEmail: patch.email || undefined } : {}),
-                ...(patch.phone !== undefined ? { contactPhone: patch.phone || undefined } : {}),
-                ...(patch.preferredLang !== undefined ? { contactPreferredLanguage: patch.preferredLang || null } : {}),
+                ...(normalizedName !== undefined ? { contactName: normalizedName } : {}),
+                ...(normalizedEmail !== undefined ? { contactEmail: normalizedEmail } : {}),
+                ...(normalizedPhone !== undefined ? { contactPhone: normalizedPhone } : {}),
+                ...(normalizedPreferredLang !== undefined ? { contactPreferredLanguage: normalizedPreferredLang } : {}),
             };
-        }));
+        };
 
-        setActiveDealParticipants((prev) => prev.map((conversationItem) => {
-            if (conversationItem.id !== conversationId) return conversationItem;
-            return {
-                ...conversationItem,
-                ...(patch.name !== undefined ? { contactName: patch.name || "Unknown" } : {}),
-                ...(patch.email !== undefined ? { contactEmail: patch.email || undefined } : {}),
-                ...(patch.phone !== undefined ? { contactPhone: patch.phone || undefined } : {}),
-                ...(patch.preferredLang !== undefined ? { contactPreferredLanguage: patch.preferredLang || null } : {}),
-            };
-        }));
+        const applyDealContactIdentityPatch = (contact: DealContactOption): DealContactOption => {
+            if (
+                contact.conversationId !== normalizedConversationId
+                && String(contact.contactId || "") !== patchedContactId
+            ) {
+                return contact;
+            }
 
-        setDealContacts((prev) => prev.map((contact) => {
-            if (contact.conversationId !== conversationId) return contact;
             return {
                 ...contact,
-                ...(patch.name !== undefined ? { contactName: patch.name || "Unknown" } : {}),
-                ...(patch.email !== undefined ? { contactEmail: patch.email || undefined } : {}),
-                ...(patch.phone !== undefined ? { contactPhone: patch.phone || undefined } : {}),
+                ...(normalizedName !== undefined ? { contactName: normalizedName } : {}),
+                ...(normalizedEmail !== undefined ? { contactEmail: normalizedEmail } : {}),
+                ...(normalizedPhone !== undefined ? { contactPhone: normalizedPhone } : {}),
             };
-        }));
+        };
+
+        const sequence = (contactSaveRefreshSeqRef.current[normalizedConversationId] || 0) + 1;
+        contactSaveRefreshSeqRef.current[normalizedConversationId] = sequence;
+
+        setConversations((prev) => prev.map(applyConversationIdentityPatch));
+        setSearchResults((prev) => prev.map(applyConversationIdentityPatch));
+        setActiveDealParticipants((prev) => prev.map(applyConversationIdentityPatch));
+        setDealContacts((prev) => prev.map(applyDealContactIdentityPatch));
+        setWorkspaceContactContext((prev: any) => {
+            if (!prev?.contact || String(prev.contact.id || "") !== patchedContactId) return prev;
+            return {
+                ...prev,
+                contact: {
+                    ...prev.contact,
+                    ...(normalizedName !== undefined ? { name: normalizedName } : {}),
+                    ...(normalizedEmail !== undefined ? { email: normalizedEmail || null } : {}),
+                    ...(normalizedPhone !== undefined ? { phone: normalizedPhone || null } : {}),
+                    ...(normalizedPreferredLang !== undefined ? { preferredLang: normalizedPreferredLang } : {}),
+                },
+            };
+        });
 
         try {
-            const fresh = await refreshConversation(conversationId);
+            const fresh = await refreshConversation(normalizedConversationId);
             if (!fresh) return;
-            if (contactSaveRefreshSeqRef.current[conversationId] !== sequence) return;
+            if (contactSaveRefreshSeqRef.current[normalizedConversationId] !== sequence) return;
 
-            setConversations((prev) => prev.map((conversationItem) =>
-                conversationItem.id === conversationId ? {
+            const applyRefreshedConversation = (conversationItem: Conversation): Conversation => {
+                if (
+                    conversationItem.id !== normalizedConversationId
+                    && String(conversationItem.contactId || "") !== patchedContactId
+                ) {
+                    return conversationItem;
+                }
+
+                return {
                     ...conversationItem,
                     ...fresh,
-                    ...(patch.name !== undefined ? { contactName: patch.name || "Unknown" } : {}),
-                    ...(patch.email !== undefined ? { contactEmail: patch.email || undefined } : {}),
-                    ...(patch.phone !== undefined ? { contactPhone: patch.phone || undefined } : {}),
-                    ...(patch.preferredLang !== undefined ? { contactPreferredLanguage: patch.preferredLang || null } : {}),
-                } : conversationItem
-            ));
+                    ...(normalizedName !== undefined ? { contactName: normalizedName } : {}),
+                    ...(normalizedEmail !== undefined ? { contactEmail: normalizedEmail } : {}),
+                    ...(normalizedPhone !== undefined ? { contactPhone: normalizedPhone } : {}),
+                    ...(normalizedPreferredLang !== undefined ? { contactPreferredLanguage: normalizedPreferredLang } : {}),
+                };
+            };
+
+            setConversations((prev) => prev.map(applyRefreshedConversation));
+            setSearchResults((prev) => prev.map(applyRefreshedConversation));
+            setActiveDealParticipants((prev) => prev.map(applyRefreshedConversation));
+            setDealContacts((prev) => prev.map((contact) => {
+                if (
+                    contact.conversationId !== normalizedConversationId
+                    && String(contact.contactId || "") !== patchedContactId
+                ) {
+                    return contact;
+                }
+
+                return {
+                    ...contact,
+                    ...(fresh.contactName !== undefined ? { contactName: fresh.contactName || "Unknown Contact" } : {}),
+                    ...(fresh.contactEmail !== undefined ? { contactEmail: fresh.contactEmail || undefined } : {}),
+                    ...(fresh.contactPhone !== undefined ? { contactPhone: fresh.contactPhone || undefined } : {}),
+                    ...(normalizedName !== undefined ? { contactName: normalizedName } : {}),
+                    ...(normalizedEmail !== undefined ? { contactEmail: normalizedEmail } : {}),
+                    ...(normalizedPhone !== undefined ? { contactPhone: normalizedPhone } : {}),
+                };
+            }));
+
+            setWorkspaceContactContext((prev: any) => {
+                if (!prev?.contact || String(prev.contact.id || "") !== patchedContactId) return prev;
+                return {
+                    ...prev,
+                    contact: {
+                        ...prev.contact,
+                        ...(fresh.contactName !== undefined ? { name: fresh.contactName || null } : {}),
+                        ...(fresh.contactEmail !== undefined ? { email: fresh.contactEmail || null } : {}),
+                        ...(fresh.contactPhone !== undefined ? { phone: fresh.contactPhone || null } : {}),
+                        ...(fresh.contactPreferredLanguage !== undefined ? { preferredLang: fresh.contactPreferredLanguage } : {}),
+                        ...(normalizedName !== undefined ? { name: normalizedName } : {}),
+                        ...(normalizedEmail !== undefined ? { email: normalizedEmail || null } : {}),
+                        ...(normalizedPhone !== undefined ? { phone: normalizedPhone || null } : {}),
+                        ...(normalizedPreferredLang !== undefined ? { preferredLang: normalizedPreferredLang } : {}),
+                    },
+                };
+            });
         } catch (error) {
             console.error("Failed to refresh conversation after contact save:", error);
         }

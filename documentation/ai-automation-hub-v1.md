@@ -1,8 +1,9 @@
 # Unified AI Automation Hub (Enterprise V1)
 
 > Historical/Reference: This document describes the template-based automation hub.
-> Current canonical architecture is the skill runtime rewrite:
-> - `documentation/ai-skills-runtime-rewrite-handoff.md`
+> Current canonical architecture is the implemented skill runtime:
+> - `documentation/ai-skills-runtime-implementation.md`
+> - `documentation/ai-skills-runtime-rewrite-handoff.md` (historical planning context)
 
 ## Status
 - Legacy V1 implementation remains in codebase for migration compatibility.

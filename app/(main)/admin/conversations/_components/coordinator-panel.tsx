@@ -659,6 +659,7 @@ export function CoordinatorPanel({
                                     contact={contactContext.contact}
                                     leadSources={contactContext.leadSources || []}
                                     onContactSaved={handleContactSaved}
+                                    skipRouterRefresh
                                 />
                             )}
                         </div>
@@ -673,6 +674,7 @@ export function CoordinatorPanel({
                                             leadSources={contactContext.leadSources || []}
                                             trigger={<span>{contactContext.contact.name || "Unnamed Contact"}</span>}
                                             onContactSaved={handleContactSaved}
+                                            skipRouterRefresh
                                         />
                                     </div>
                                     <div className="text-muted-foreground text-[11px] flex flex-col gap-0.5">

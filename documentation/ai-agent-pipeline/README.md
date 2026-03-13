@@ -2,8 +2,8 @@
 
 > Historical/Reference: This document describes legacy and exploratory architecture across multiple AI flows.
 > Source of truth for scheduling + follow-up drafting is now:
-> - `documentation/ai-automation-hub-v1.md`
-> - `documentation/ai-automation-hub-migration-guide.md`
+> - `documentation/ai-skills-runtime-implementation.md`
+> - `documentation/ai-skills-runtime-rewrite-handoff.md` (historical planning context)
 
 > **Last Updated**: February 14, 2026 — SOTA alignment verified against Anthropic Claude Skills, OpenClaw, Tool Search Tool, Programmatic Tool Calling, and MCP Apps.
 

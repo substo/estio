@@ -2,7 +2,8 @@
 
 > Historical/Reference: This migration guide applies to the old template-based automation hub.
 > Current canonical migration target:
-> - `documentation/ai-skills-runtime-rewrite-handoff.md`
+> - `documentation/ai-skills-runtime-implementation.md`
+> - `documentation/ai-skills-runtime-rewrite-handoff.md` (historical planning context)
 
 ## Current Migration Direction
 - Move from template schedule/job pipeline to unified skill runtime.

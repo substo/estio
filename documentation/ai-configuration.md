@@ -1,8 +1,11 @@
 # AI Configuration & Integration
 
-**Last Updated:** 2026-03-07
+**Last Updated:** 2026-03-13
 
 Estio uses Google Gemini models across conversation drafting, selection actions, content generation, and import flows. This document reflects the current model-resolution logic used in production.
+
+For canonical AI automation runtime architecture (policies, decisions, jobs, suggested response queue), use:
+- `documentation/ai-skills-runtime-implementation.md`
 
 ## AI Settings Page
 
@@ -16,6 +19,17 @@ The settings page now writes through `SettingsService`:
 
 For storage architecture, migration flags, and encryption/key rotation procedures, see [site-settings-platform.md](/Users/martingreen/Projects/IDX/documentation/site-settings-platform.md).
 
+### Skill Runtime Hub (Admin)
+
+The AI settings page includes a **Skill Runtime Hub** section that manages:
+- per-skill `AiSkillPolicy` configuration,
+- runtime simulation (`simulateSkillDecision`),
+- runtime execution trigger (`runAiRuntimeNow`),
+- runtime health summaries (policies, pending/dead jobs, pending suggestions).
+
+UI source:
+- `app/(main)/admin/settings/ai/skill-runtime-settings.tsx`
+
 ## Core Fields in `location.ai`
 
 - `googleAiApiKey` (stored as encrypted secret in `settings_secrets`)
@@ -24,6 +38,7 @@ For storage architecture, migration flags, and encryption/key rotation procedure
 - `googleAiModelDesign` (stage 2 design)
 - `brandVoice`
 - `outreachConfig` (`enabled`, `visionIdPrompt`, `icebreakerPrompt`, `qualifierPrompt`)
+- `automationConfig` (legacy compatibility payload; not the primary runtime control plane)
 
 ## Model Catalog Source
 

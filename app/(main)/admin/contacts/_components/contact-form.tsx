@@ -2,7 +2,7 @@
 
 
 import { useRouter } from 'next/navigation';
-import { useState, useEffect, useActionState, useTransition, useRef } from 'react';
+import { useState, useEffect, useActionState, useTransition, useRef, useCallback } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { X, Pencil } from 'lucide-react';
@@ -189,6 +189,7 @@ interface ContactFormProps {
     isOutlookConnected?: boolean;
     initialData?: Partial<ContactData>;
     onContactSaved?: (patch: ContactIdentityPatch) => void;
+    skipRouterRefresh?: boolean;
 }
 
 function SubmitButton({ isEditing, isCreating, toggler }: { isEditing: boolean, isCreating: boolean, toggler: (e: React.MouseEvent) => void }) {
@@ -219,7 +220,7 @@ function formatDate(date: Date | string | null | undefined) {
     }
 }
 
-export function ContactForm({ initialMode = 'create', contact: initialContact, locationId, onSuccess, additionalTabs, additionalTabContent, editActionsMenuItems, additionalTabCount = 0, leadSources = [], isOutlookConnected = false, initialData, onContactSaved }: ContactFormProps) {
+export function ContactForm({ initialMode = 'create', contact: initialContact, locationId, onSuccess, additionalTabs, additionalTabContent, editActionsMenuItems, additionalTabCount = 0, leadSources = [], isOutlookConnected = false, initialData, onContactSaved, skipRouterRefresh = false }: ContactFormProps) {
     // For initialization, merge passed contact with initialData (prefill)
     const baseContact = { ...initialData, ...initialContact } as ContactData | undefined;
 
@@ -282,6 +283,10 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
     const onSuccessRef = useRef(onSuccess);
     const onContactSavedRef = useRef(onContactSaved);
     const lastHandledStateRef = useRef<typeof state | null>(null);
+    const refreshRoute = useCallback(() => {
+        if (skipRouterRefresh) return;
+        router.refresh();
+    }, [router, skipRouterRefresh]);
 
     useEffect(() => {
         onSuccessRef.current = onSuccess;
@@ -389,7 +394,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                     title: 'Success',
                     description: result.message,
                 });
-                router.refresh(); // Refresh data without closing dialog (unlike onSubmit)
+                refreshRoute(); // Refresh data without closing dialog (unlike onSubmit)
             } else {
                 toast({
                     title: 'Error',
@@ -437,7 +442,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
 
                 // If editing, just toggle back to view mode + refresh
                 setIsEditing(false);
-                router.refresh();
+                refreshRoute();
                 if (onSuccessRef.current) onSuccessRef.current();
             }
 
@@ -453,7 +458,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                 variant: 'destructive',
             });
         }
-    }, [state, toast, isCreating, router]);
+    }, [state, toast, isCreating, refreshRoute]);
 
     // Auto-Heal Broken Links (Client Side to prevent render loops)
     const [hasAttemptedHeal, setHasAttemptedHeal] = useState(false);
@@ -466,10 +471,10 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
             setHasAttemptedHeal(true); // Prevent infinite loops
 
             verifyAndHealContact(contact.id, contact.error).then(() => {
-                router.refresh(); // Refresh to clear error if fixed
+                refreshRoute(); // Refresh to clear error if fixed
             });
         }
-    }, [contact, hasAttemptedHeal, router]);
+    }, [contact, hasAttemptedHeal, refreshRoute]);
 
     // Fetch data when form is rendered
     const hasPropertiesTab = currentConfig.visibleTabs.includes('properties');

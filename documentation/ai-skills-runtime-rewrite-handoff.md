@@ -1,5 +1,9 @@
 # AI Skills Runtime Rewrite Handoff (Full Rewrite, Global Compliance, Human Approval)
 
+> Historical/Reference: This document is the implementation handoff plan.
+> Implemented-state canonical doc:
+> - `documentation/ai-skills-runtime-implementation.md`
+
 ## Summary
 - Replace rigid template-based automation with one unified skill runtime across manual draft, semi-auto, mission orchestration, and cron follow-ups.
 - Keep human approval only; all generated text goes to `AiSuggestedResponse`.

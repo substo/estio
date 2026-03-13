@@ -2,8 +2,8 @@
 
 > Historical/Reference: This document describes the prior Mission Control draft-oriented architecture.
 > Current canonical automation scheduling and queue architecture:
-> - `documentation/ai-automation-hub-v1.md`
-> - `documentation/ai-automation-hub-migration-guide.md`
+> - `documentation/ai-skills-runtime-implementation.md`
+> - `documentation/ai-skills-runtime-rewrite-handoff.md` (historical planning context)
 
 ## Overview
 
