@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getNotificationFeatureFlags } from '@/lib/notifications/feature-flags';
-import { getWebPushPublicKey } from '@/lib/notifications/push';
+import {
+  getRuntimeNotificationFeatureFlags,
+  getRuntimeWebPushPublicKey,
+} from '@/lib/notifications/runtime-config';
 import {
   deactivateWebPushSubscriptionForUser,
   getCurrentDbUserIdOrThrow,
@@ -27,13 +29,13 @@ function trim(value: unknown) {
 
 export async function GET() {
   try {
-    const featureFlags = getNotificationFeatureFlags();
+    const featureFlags = getRuntimeNotificationFeatureFlags();
     const subscriptions = await listCurrentUserWebPushSubscriptions();
 
     return NextResponse.json({
       success: true,
       featureFlags,
-      publicKey: getWebPushPublicKey(),
+      publicKey: getRuntimeWebPushPublicKey(),
       subscriptions,
     });
   } catch (error: any) {

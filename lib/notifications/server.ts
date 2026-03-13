@@ -1,7 +1,7 @@
 import db from '@/lib/db';
 import { Prisma } from '@prisma/client';
 import { auth } from '@clerk/nextjs/server';
-import { getNotificationFeatureFlags } from '@/lib/notifications/feature-flags';
+import { getRuntimeNotificationFeatureFlags } from '@/lib/notifications/runtime-config';
 import { DEFAULT_TASK_REMINDER_OFFSETS_MINUTES, normalizeReminderOffsets } from '@/lib/tasks/reminder-config';
 import { rebuildTaskReminderJobsForAssignee } from '@/lib/tasks/reminders';
 
@@ -39,7 +39,7 @@ export async function getCurrentUserNotificationSnapshot(options?: {
   unreadOnly?: boolean;
 }) {
   const dbUserId = await getCurrentDbUserIdOrThrow();
-  const flags = getNotificationFeatureFlags();
+  const flags = getRuntimeNotificationFeatureFlags();
   const take = Math.min(Math.max(Number(options?.limit || 20), 1), 100);
   const unreadOnly = !!options?.unreadOnly;
 
@@ -143,7 +143,7 @@ export async function markAllUserNotificationsRead() {
 
 export async function getCurrentUserTaskReminderPreference() {
   const dbUserId = await getCurrentDbUserIdOrThrow();
-  const flags = getNotificationFeatureFlags();
+  const flags = getRuntimeNotificationFeatureFlags();
 
   const preference = await db.userTaskReminderPreference.upsert({
     where: { userId: dbUserId },

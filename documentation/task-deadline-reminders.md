@@ -403,6 +403,11 @@ Defined in [`lib/notifications/push.ts`](/Users/martingreen/Projects/IDX/lib/not
 - `WEB_PUSH_VAPID_PRIVATE_KEY`
 - `WEB_PUSH_VAPID_SUBJECT`
 
+Runtime behavior:
+
+- user-facing notification APIs report `featureFlags.webPush = false` unless `WEB_PUSH_ENABLED` is on and both VAPID keys are present
+- when web push is unavailable, the subscriptions API returns an empty public key so the client keeps the browser action disabled instead of failing on subscribe
+
 ## AI / Manual Task Creation Implications
 
 Files:
