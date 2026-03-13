@@ -61,7 +61,10 @@ Core rules:
 - Use context facts exactly; do not invent property status, pricing, or commitments.
 - If availability is uncertain, state uncertainty and ask for confirmation.
 - If a requested property is unavailable, acknowledge this clearly and propose a practical next step.
+- Default to a minimum-sufficient response: include only what is needed to answer the latest message correctly.
 - Keep outputs concise while preserving clarity.
+- Do not add backup scenarios, persuasive framing, or goodwill filler unless explicitly requested.
+- If a user instruction already reads like a send-ready message, preserve its structure and only refine clarity.
 - Avoid manipulative urgency and hard-finality claims unless explicitly supported by context evidence.
 - Never include automatic signature blocks unless explicitly asked.
 - Preserve channel-appropriate style (chat vs email) as instructed in runtime context.`;
@@ -835,12 +838,12 @@ export async function generateDraft(context: CoordinationContext) {
 
         Task:
         Draft a suggested reply for the Agent to send back to the Contact via ${channelName}.
-        Analyze the conversation to understand the intent (booking a viewing, asking price, etc.).
-        Use the Contact's Requirements and Property Activity to personalize the response.
-        If they are asking about a property they've already seen or been emailed, acknowledge that context.
-        If the contact is asking about a property, answer directly when the status/details are present in the context.
+        Prioritize the immediate reply need from the latest inbound message.
+        Use Contact Requirements, Property Activity, and timeline details only when needed for factual correctness or disambiguation.
+        If they are asking about a property, answer directly when status/details are present in context.
         If the property is unavailable, explain briefly and offer help finding alternatives.
-        ${isEmail ? 'Include a subject line suggestion only if a new topic is started and it reads naturally.' : 'Keep it concise (typically 2-5 short lines), but do not force an overly short reply if clarity requires more.'}
+        Avoid adding extra strategy, fallback scenarios, or motivational filler unless explicitly requested.
+        ${isEmail ? 'Include a subject line suggestion only if a new topic is started and it reads naturally.' : 'Keep it naturally concise and direct; add detail only when required for understanding or a next action.'}
         
         Output Format:
         Just the draft message text the agent should send next.
@@ -849,7 +852,7 @@ export async function generateDraft(context: CoordinationContext) {
         // Add specific user instruction if provided.
         let finalPrompt = fullPrompt;
         if (normalizedInstruction) {
-            finalPrompt += `\n\nSPECIFIC USER INSTRUCTION:\nThe user provided: "${normalizedInstruction}"\n\nYour draft MUST:\n1. Follow this instruction precisely.\n2. Expand it into a polished channel-appropriate message.\n3. Do not repeat the instruction; write the actual message the agent should send.`;
+            finalPrompt += `\n\nSPECIFIC USER INSTRUCTION:\nThe user provided: "${normalizedInstruction}"\n\nYour draft MUST:\n1. Follow this instruction precisely.\n2. Treat this instruction as the primary scope for what to include.\n3. Produce a send-ready channel-appropriate message using only the wording needed.\n4. If the instruction is already close to send-ready, keep its structure and only refine clarity/grammar.\n5. Do not add new scenarios, commitments, pressure, or side notes unless explicitly requested.\n6. Do not repeat the instruction; write the actual message the agent should send.`;
         }
 
         telemetry.prompt.chars = finalPrompt.length;
