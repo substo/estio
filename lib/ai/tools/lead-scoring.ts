@@ -23,6 +23,17 @@ export async function updateLeadScore(
         },
     });
 
+    await db.contactHistory.create({
+        data: {
+            contactId,
+            action: 'SCORE_UPDATED',
+            changes: JSON.stringify([
+                { field: 'leadScore', old: previousScore, new: score },
+                { field: 'reason', old: null, new: reason },
+            ]),
+        },
+    });
+
     // Log the scoring event
     await storeInsight({
         contactId,

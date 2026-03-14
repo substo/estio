@@ -935,7 +935,16 @@ async function updateContactCore(
       if (changes.length > 0) {
         // Resolve IDs to human readable values (Properties, Users)
         await enrichChangesWithReadableValues(changes);
-        await logContactHistory(tx, data.contactId, internalUserId, 'UPDATED', changes);
+
+        const stageChangeIndex = changes.findIndex(c => c.field === 'leadStage');
+        if (stageChangeIndex !== -1) {
+          const stageChange = changes.splice(stageChangeIndex, 1)[0];
+          await logContactHistory(tx, data.contactId, internalUserId, 'STAGE_CHANGED', [stageChange]);
+        }
+
+        if (changes.length > 0) {
+          await logContactHistory(tx, data.contactId, internalUserId, 'UPDATED', changes);
+        }
       }
 
       await handleContactRoles(tx, data.contactId, data);
@@ -2676,4 +2685,34 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
     console.error("Merge error:", error);
     return { success: false, message: error.message };
   }
+}
+
+export async function updateContactStage(contactId: string, newStage: string) {
+  const { userId } = await auth();
+  if (!userId) return { success: false, error: 'Unauthorized' };
+
+  const dbUser = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } });
+  const contact = await db.contact.findUnique({
+    where: { id: contactId },
+    select: { leadStage: true, locationId: true }
+  });
+
+  if (!contact) return { success: false, error: 'Contact not found' };
+
+  const hasAccess = await verifyUserHasAccessToLocation(userId, contact.locationId);
+  if (!hasAccess) return { success: false, error: 'Unauthorized' };
+
+  await db.$transaction(async (tx) => {
+    await tx.contact.update({
+      where: { id: contactId },
+      data: { leadStage: newStage },
+    });
+
+    await logContactHistory(tx, contactId, dbUser?.id || null, 'STAGE_CHANGED', [
+      { field: 'leadStage', old: contact.leadStage, new: newStage }
+    ]);
+  });
+
+  revalidatePath('/admin/contacts');
+  return { success: true };
 }

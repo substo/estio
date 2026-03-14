@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useTransition, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Search, X, ChevronDown, RotateCcw, Filter } from 'lucide-react';
+import { Search, X, ChevronDown, RotateCcw, Filter, List, Kanban } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -46,6 +46,8 @@ const SORT_OPTIONS = [
     { value: 'updated_asc', label: 'Update: Oldest' },
     { value: 'created_desc', label: 'Created: Newest' },
     { value: 'created_asc', label: 'Created: Oldest' },
+    { value: 'score_desc', label: 'Score: Highest' },
+    { value: 'score_asc', label: 'Score: Lowest' },
 ] as const;
 
 const DATE_PRESETS = [
@@ -67,9 +69,10 @@ const DISTRICTS = [
 interface ContactFiltersProps {
     leadSources?: string[];
     agents?: { id: string; name: string | null; email: string }[];
+    view?: string;
 }
 
-export function ContactFilters({ leadSources = [], agents = [] }: ContactFiltersProps) {
+export function ContactFilters({ leadSources = [], agents = [], view = 'table' }: ContactFiltersProps) {
     const router = useRouter();
     const searchParams = useSearchParams();
     const [isPending, startTransition] = useTransition();

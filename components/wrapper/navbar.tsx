@@ -25,6 +25,11 @@ const components: { title: string; href: string; description: string }[] = [
         description: "Sync contacts with GoHighLevel and track property interests.",
     },
     {
+        title: "Lead Inbox",
+        href: "/admin/leads/inbox",
+        description: "Review and triage discovered prospects before CRM entry.",
+    },
+    {
         title: "Site Settings",
         href: "/admin/site-settings",
         description: "Customize your public-facing website with your own branding.",

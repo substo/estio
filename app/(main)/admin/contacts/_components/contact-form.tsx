@@ -43,6 +43,7 @@ import {
     CONTACT_TYPES, CONTACT_TYPE_CONFIG, DEFAULT_CONTACT_TYPE, type ContactType,
     LEAD_GOALS, LEAD_PRIORITIES, LEAD_STAGES, REQUIREMENT_STATUSES, REQUIREMENT_CONDITIONS
 } from './contact-types';
+import { LeadScoreBadge } from './lead-score-badge';
 import {
     getReplyLanguageLabel,
     REPLY_LANGUAGE_AUTO_VALUE,
@@ -91,6 +92,8 @@ export type ContactData = {
     leadPriority?: string;
     leadStage?: string;
     leadSource?: string | null;
+    leadScore?: number | null;
+    qualificationStage?: string | null;
     leadNextAction?: string | null;
     leadFollowUpDate?: Date | null;
     leadAssignedToAgent?: string | null;
@@ -674,6 +677,15 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                         {/* Lead Fields (conditional) */}
                         {currentConfig.showLeadFields && (
                             <div className="grid grid-cols-2 gap-4">
+                                <RenderField label="AI Score" value={contact?.leadScore !== undefined && contact?.leadScore !== null ? <div className="flex items-center gap-2"><LeadScoreBadge score={contact.leadScore} />{contact.qualificationStage && <span className="text-xs uppercase text-muted-foreground">{contact.qualificationStage.replace('_', ' ')}</span>}</div> : null} isEditing={isEditing}>
+                                    <div className="flex items-center h-10 px-3 py-2 border rounded-md bg-muted/30 gap-2">
+                                        <LeadScoreBadge score={contact?.leadScore || 0} />
+                                        <span className="text-xs text-muted-foreground font-medium uppercase">
+                                            {contact?.qualificationStage ? contact.qualificationStage.replace('_', ' ') : 'NOT SCORED'}
+                                        </span>
+                                    </div>
+                                    <input type="hidden" name="leadScore" value={contact?.leadScore || 0} />
+                                </RenderField>
                                 <RenderField label="Goal" value={contact?.leadGoal} isEditing={isEditing}>
                                     <Select name="leadGoal" defaultValue={contact?.leadGoal || undefined}>
                                         <SelectTrigger>

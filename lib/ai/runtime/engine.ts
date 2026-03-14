@@ -315,7 +315,7 @@ async function collectNurtureOrReviveCandidates(args: {
       contact: {
         leadScore: { gte: minLeadScore },
         ...(includeTags.length ? { tags: { hasSome: includeTags } } : {}),
-        ...(excludeTags.length ? { tags: { hasNone: excludeTags } } : {}),
+        ...(excludeTags.length ? { NOT: { tags: { hasSome: excludeTags } } } : {}),
       },
     },
     select: {
@@ -724,7 +724,7 @@ async function evaluateDecisionCandidate(args: {
     holdReason = "consent_revoked_or_opted_out";
   } else if (quietHoursBlock) {
     holdReason = "quiet_hours_block";
-  } else if (score < args.policy.decisionPolicy.minScoreThreshold) {
+  } else if (score < (args.policy.decisionPolicy.minScoreThreshold || 0)) {
     holdReason = "score_below_threshold";
   }
 
@@ -739,9 +739,9 @@ async function evaluateDecisionCandidate(args: {
       channelHealth,
       recentOutcomeDelta,
       objectiveSignal,
-      quietHoursBlock,
-      threshold: args.policy.decisionPolicy.minScoreThreshold,
-      aggressiveness: args.policy.decisionPolicy.aggressiveness,
+      quietHoursBlock: quietHoursBlock || false,
+      threshold: args.policy.decisionPolicy.minScoreThreshold || 0,
+      aggressiveness: args.policy.decisionPolicy.aggressiveness || "balanced",
       channel,
       timezone,
     },
@@ -845,7 +845,7 @@ export async function planDecisions(args?: {
           contactId: candidate.contactId,
           dealId: candidate.dealId,
           now,
-          cooldownHours: policy.decisionPolicy.baseCooldownHours,
+          cooldownHours: policy.decisionPolicy.baseCooldownHours || 24,
         });
 
         const dayKey = getTimeZoneDayKey(now, timezone);

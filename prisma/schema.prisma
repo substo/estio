@@ -41,6 +41,7 @@ model Location {
   contactTasks                  ContactTask[]
   contactTaskOutboxJobs         ContactTaskOutbox[]
   aiAutomationSchedules         AiAutomationSchedule[]
+  prospectLeads                 ProspectLead[]
   aiAutomationJobs              AiAutomationJob[]
   aiSkillPolicies               AiSkillPolicy[]
   aiDecisions                   AiDecision[]
@@ -755,6 +756,51 @@ model Project {
 
   location   Location   @relation(fields: [locationId], references: [id])
   properties Property[]
+}
+
+model ProspectLead {
+  id         String   @id @default(cuid())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  locationId String
+
+  // Identity
+  name       String?
+  firstName  String?
+  lastName   String?
+  email      String?
+  phone      String?
+  message    String?  @db.Text
+
+  // Source Attribution
+  source          String   // bazaraki_scrape, facebook, instagram, manual, referral
+  sourceUrl       String?  @db.Text
+  sourceListingId String?
+  sourceMetadata  Json?
+
+  // AI Scoring
+  aiScore          Float?   @default(0)
+  aiScoreBreakdown Json?
+
+  // Deduplication
+  matchedContactId String?
+  matchConfidence  Float?
+  dedupStatus      String   @default("pending") // pending, unique, duplicate, merged
+
+  // Pipeline
+  status     String   @default("new") // new, reviewing, accepted, rejected, archived
+  reviewedAt DateTime?
+  reviewedBy String?
+
+  // Result
+  createdContactId String?
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@index([locationId, status, createdAt(sort: Desc)])
+  @@index([locationId, source, status])
+  @@index([email])
+  @@index([phone])
 }
 
 model Viewing {

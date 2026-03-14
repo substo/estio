@@ -1,5 +1,5 @@
 import type { WebPushSubscription } from '@prisma/client';
-import { getNotificationFeatureFlags } from './feature-flags.ts';
+import { getNotificationFeatureFlags } from './feature-flags';
 
 type WebPushPayload = {
   title: string;

@@ -11,6 +11,7 @@ import { CalendarIcon, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { addContactHistoryEntry } from '../actions';
 import { toast } from 'sonner';
+import { LeadScoreBadge } from './lead-score-badge';
 
 type Change = {
     field: string;
@@ -209,6 +210,30 @@ export function HistoryTab({ history, loading, contact }: HistoryTabProps) {
                                                                     {!['property', 'date', 'notes'].includes(change.field) && formatChangeValue(change.new)}
                                                                 </div>
                                                             )
+                                                            : item.action === 'STAGE_CHANGED'
+                                                                ? (
+                                                                    <div className="flex items-center gap-2">
+                                                                        <Badge variant="outline">{change.old || 'None'}</Badge>
+                                                                        <span>→</span>
+                                                                        <Badge variant="default">{change.new}</Badge>
+                                                                    </div>
+                                                                )
+                                                            : item.action === 'SCORE_UPDATED'
+                                                                ? (
+                                                                    <div className="flex items-center gap-2">
+                                                                        {change.field === 'leadScore' ? (
+                                                                            <>
+                                                                                <LeadScoreBadge score={change.old || 0} />
+                                                                                <span>→</span>
+                                                                                <LeadScoreBadge score={change.new || 0} />
+                                                                            </>
+                                                                        ) : change.field === 'reason' ? (
+                                                                            <span className="text-xs italic text-muted-foreground">{change.new}</span>
+                                                                        ) : (
+                                                                            <>{formatChangeValue(change.old)} <span className="text-muted-foreground mx-1">to</span> {formatChangeValue(change.new)}</>
+                                                                        )}
+                                                                    </div>
+                                                                )
                                                             : item.action === 'MANUAL_ENTRY'
                                                                 ? (
                                                                     <div className="flex flex-col gap-1 w-full pl-2">

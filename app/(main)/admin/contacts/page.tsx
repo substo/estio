@@ -9,6 +9,7 @@ import { AddContactDialog } from "./_components/add-contact-dialog";
 import { ContactRow } from "./_components/contact-row";
 import { ContactFilters } from "./_components/contact-filters";
 import { GoogleContactImportDialogTrigger } from "./_components/google-contact-import-dialog-trigger";
+import { PipelineBoard } from "./_components/pipeline-board";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 
@@ -18,6 +19,7 @@ import { getLocationContext } from "@/lib/auth/location-context";
 interface ContactSearchParams {
     locationId?: string;
     q?: string;
+    view?: string;
     category?: string;
     type?: string;
     priority?: string;
@@ -202,6 +204,7 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
     // --- Parse Search Params ---
     const {
         q = '',
+        view = 'table',
         category = 'real_estate',
         type = '',
         priority = '',
@@ -322,6 +325,12 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
         },
     });
 
+    const stageCounts = view === 'pipeline' ? await db.contact.groupBy({
+        by: ['leadStage'],
+        where,
+        _count: true,
+    }) : null;
+
     const leadSources = await db.leadSource.findMany({
         where: { locationId, isActive: true },
         select: { name: true },
@@ -354,10 +363,19 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
                 </div>
             </div>
 
-            <ContactFilters leadSources={leadSourceNames} agents={agents} />
+            <ContactFilters leadSources={leadSourceNames} agents={agents} view={view} />
 
-            <div className="border rounded-lg overflow-hidden">
-                <table className="w-full text-sm text-left">
+            {view === 'pipeline' ? (
+                <PipelineBoard 
+                    contacts={contacts}
+                    stageCounts={stageCounts}
+                    leadSources={leadSourceNames}
+                    isGoogleConnected={isGoogleConnected}
+                    isGhlConnected={!!location.ghlAccessToken}
+                />
+            ) : (
+                <div className="border rounded-lg overflow-hidden">
+                    <table className="w-full text-sm text-left">
                     <thead className="bg-gray-100 dark:bg-gray-800">
                         <tr>
                             <th className="p-4">Date</th>
@@ -393,6 +411,7 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
                     </tbody>
                 </table>
             </div>
+            )}
         </div>
     );
 }

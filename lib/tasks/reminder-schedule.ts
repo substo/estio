@@ -1,5 +1,5 @@
-import { isWithinQuietHours } from '../ai/automation/config.ts';
-import { normalizeReminderOffsets } from './reminder-config.ts';
+import { isWithinQuietHours } from '../ai/automation/config';
+import { normalizeReminderOffsets } from './reminder-config';
 
 export type ReminderQuietHoursWindow = {
   enabled?: boolean | null;

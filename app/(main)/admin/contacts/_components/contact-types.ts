@@ -34,6 +34,21 @@ export const LEAD_STAGES = [
     'Unassigned', 'New', 'Contacted', 'Viewing', 'Negotiation', 'Closed', 'Lost'
 ] as const;
 
+export const LEAD_SOURCE_CATEGORIES = {
+    website_inquiry: { label: 'Website Inquiry', icon: '🌐', color: 'bg-blue-100 text-blue-800 border-blue-200' },
+    bazaraki_scrape: { label: 'Bazaraki', icon: '🔵', color: 'bg-cyan-100 text-cyan-800 border-cyan-200' },
+    facebook: { label: 'Facebook', icon: '🟣', color: 'bg-indigo-100 text-indigo-800 border-indigo-200' },
+    instagram: { label: 'Instagram', icon: '📸', color: 'bg-pink-100 text-pink-800 border-pink-200' },
+    linkedin: { label: 'LinkedIn', icon: '🔗', color: 'bg-blue-100 text-blue-800 border-blue-200' },
+    google_ads: { label: 'Google Ads', icon: '📊', color: 'bg-green-100 text-green-800 border-green-200' },
+    referral: { label: 'Referral', icon: '🤝', color: 'bg-amber-100 text-amber-800 border-amber-200' },
+    cold_outreach: { label: 'Cold Outreach', icon: '📞', color: 'bg-gray-100 text-gray-800 border-gray-200' },
+    property_portal: { label: 'Property Portal', icon: '🏠', color: 'bg-teal-100 text-teal-800 border-teal-200' },
+    xml_feed: { label: 'XML Feed', icon: '📡', color: 'bg-indigo-100 text-indigo-800 border-indigo-200' },
+    walk_in: { label: 'Walk-in', icon: '🚶', color: 'bg-orange-100 text-orange-800 border-orange-200' },
+    manual: { label: 'Manual Entry', icon: '✏️', color: 'bg-slate-100 text-slate-800 border-slate-200' },
+} as const;
+
 export const LEAD_SOURCES = [
     'None',
     'Website Inquiry',

@@ -11,6 +11,8 @@ import { GoogleSyncManager } from "./google-sync-manager";
 import { EditContactDialog } from "./edit-contact-dialog";
 import { ContactData } from "./contact-form";
 import { openOrStartConversationForContact } from "../actions";
+import { LeadSourceBadge } from "./lead-source-badge";
+import { LeadScoreBadge } from "./lead-score-badge";
 
 interface ContactRowProps {
     contact: ContactData & {
@@ -103,7 +105,14 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
             <tr onClick={handleRowClick} className="border-t hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer transition-colors">
 
 
-                <td className="p-4">{format(new Date(contact.createdAt), "dd/MM/yyyy")}</td>
+                <td className="p-4">
+                <div className="flex flex-col gap-1">
+                    <span>{format(new Date(contact.createdAt), "dd/MM/yyyy")}</span>
+                    {contact.leadSource && (
+                        <LeadSourceBadge source={contact.leadSource} />
+                    )}
+                </div>
+            </td>
                 <td className="p-4 font-medium">{contact.name || "Unknown"}</td>
                 <td className="p-4">
                     <div className="flex flex-col">
@@ -132,9 +141,14 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
                     </div>
                 </td>
                 <td className="p-4">
-                    <span className={`font-bold ${contact.heatScore > 50 ? 'text-red-600' : contact.heatScore > 20 ? 'text-orange-500' : 'text-gray-500'}`}>
-                        {contact.heatScore}
-                    </span>
+                    <div className="flex flex-col items-center gap-0.5 w-[fit-content]">
+                        <LeadScoreBadge score={contact.leadScore ?? 0} />
+                        {contact.qualificationStage && (
+                        <span className="text-[10px] text-muted-foreground uppercase">
+                            {contact.qualificationStage.replace('_', ' ')}
+                        </span>
+                        )}
+                    </div>
                 </td>
                 <td className="p-4">
                     <div className="flex items-center gap-2">

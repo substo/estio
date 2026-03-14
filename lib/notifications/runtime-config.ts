@@ -1,5 +1,5 @@
-import { getNotificationFeatureFlags, type NotificationFeatureFlags } from "./feature-flags.ts";
-import { getWebPushPublicKey, isWebPushConfigured } from "./push.ts";
+import { getNotificationFeatureFlags, type NotificationFeatureFlags } from "./feature-flags";
+import { getWebPushPublicKey, isWebPushConfigured } from "./push";
 
 export function getRuntimeNotificationFeatureFlags(): NotificationFeatureFlags {
   const featureFlags = getNotificationFeatureFlags();
