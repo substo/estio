@@ -9,7 +9,7 @@ import { UserProfile } from '@/components/user-profile'
 import { AICostBadge } from '@/components/ai-cost-badge'
 import config from '@/config'
 import { HamburgerMenuIcon } from '@radix-ui/react-icons'
-import { Home, Settings, List, FileText, MessageSquare, Building, LayoutTemplate } from 'lucide-react'
+import { Home, Settings, List, FileText, MessageSquare, Building, LayoutTemplate, Layers } from 'lucide-react'
 import Link from 'next/link'
 import { ReactNode } from 'react'
 import { APP_NAME } from "@/components/app-logo"
@@ -61,6 +61,14 @@ export default function DashboardTopNav({ children }: { children: ReactNode }) {
                   <Button variant="outline" className="w-full">
                     <FileText className="mr-2 h-4 w-4" />
                     Contacts
+                  </Button>
+                </Link>
+              </SheetClose>
+              <SheetClose asChild>
+                <Link href="/admin/leads/inbox">
+                  <Button variant="outline" className="w-full">
+                    <Layers className="mr-2 h-4 w-4" />
+                    Lead Inbox
                   </Button>
                 </Link>
               </SheetClose>

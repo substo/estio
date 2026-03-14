@@ -46,6 +46,12 @@ export default function DashboardSideBar({ logoUrl, lightUrl }: { logoUrl?: stri
       activePath: (pathname: string) => pathname.includes(`/admin/contacts`)
     },
     {
+      href: `/admin/leads/inbox`,
+      label: "Lead Inbox",
+      icon: <Layers className="h-3 w-3" />,
+      activePath: (pathname: string) => pathname.includes(`/admin/leads/inbox`)
+    },
+    {
       href: `/admin/companies`,
       label: "Companies",
       icon: <Building className="h-3 w-3" />,
