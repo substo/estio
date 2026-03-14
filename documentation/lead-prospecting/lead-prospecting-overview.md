@@ -67,17 +67,17 @@ Build the CRM surfaces to properly display, manage, qualify, and triage leads.
 
 ---
 
-### Phase 2 — Strategic Scraping Infrastructure
+### Phase 2 — Strategic Scraping Infrastructure ✅ *Completed*
 
-Build the tooling to discover property owners and interested parties from external listing sites.
+Build the tooling to discover property owners and interested parties from external listing sites. We implemented a robust Playwright + BullMQ architecture for reliable queue processing.
 
-| Feature | Priority | Spec |
+| Feature | Status | Spec |
 |---|---|---|
-| Scraping Target Configuration UI | 🔴 Critical | [Phase 2 Spec](./phase-2-strategic-scraping.md#21-scraping-target-configuration) |
-| Listing Scraper Service | 🔴 Critical | [Phase 2 Spec](./phase-2-strategic-scraping.md#22-listing-scraper-service) |
-| Bazaraki Integration | 🟡 High | [Phase 2 Spec](./phase-2-strategic-scraping.md#23-bazaraki-integration) |
-| Social Media Listeners | 🟢 Medium | [Phase 2 Spec](./phase-2-strategic-scraping.md#24-social-media-listeners) |
-| Global Portal Connectors | 🟢 Medium | [Phase 2 Spec](./phase-2-strategic-scraping.md#25-global-portal-connectors) |
+| Scraping Target Configuration UI | ✅ Implemented | [Phase 2 Spec](./phase-2-strategic-scraping.md#21-scraping-target-configuration) |
+| Listing Scraper Service (Playwright) | ✅ Implemented | [Phase 2 Spec](./phase-2-strategic-scraping.md#22-listing-scraper-service) |
+| Bazaraki Integration | ✅ Implemented | [Phase 2 Spec](./phase-2-strategic-scraping.md#23-bazaraki-integration) |
+| Generic AI Extraction Fallback | ✅ Implemented | [Phase 2 Spec](./phase-2-strategic-scraping.md#22-listing-scraper-service) |
+| BullMQ Queue Infrastructure | ✅ Implemented | [Phase 2 Spec](./phase-2-strategic-scraping.md#26-queue-infrastructure) |
 
 **Spec**: [phase-2-strategic-scraping.md](./phase-2-strategic-scraping.md)
 

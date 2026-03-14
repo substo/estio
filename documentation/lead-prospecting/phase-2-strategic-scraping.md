@@ -1,6 +1,6 @@
 §# Phase 2 — Strategic Scraping Infrastructure
 **Last Updated:** 2026-03-14
-**Status:** Planned (after Phase 1)
+**Status:** Completed
 
 ## Overview
 
@@ -53,6 +53,10 @@ model ScrapingTarget {
   selectors         Json?    // CSS selector mapping
   aiInstructions    String?  // AI extraction prompt
   targetType        String   @default("listings") // listings, social_posts, profiles
+  targetUrls        String[] // Support exact path overrides for scraping loops
+  fieldMappings     Json?    // Dynamic output mapping for AI/CSS values
+  authUsername      String?  // Platform login
+  authPassword      String?  // Encrypted platform login
 
   // Sync state
   lastSyncAt        DateTime?
@@ -94,21 +98,29 @@ model ScrapingRun {
 
 ### Architecture
 
+The scraping architecture decouples cron triggering from actual browser execution using BullMQ, ensuring isolated, retriable background processing that respects Target domain rate limits.
+
 ```
 ┌────────────────────────────────────────────────────┐
-│            Cron: /api/cron/scrape-listings          │
-│            (runs per target schedule)               │
+│            Cron: /api/cron/scrape-listings         │
+│            (Enqueues eligible targets)             │
 ├────────────────────────────────────────────────────┤
-│                                                    │
-│  ┌──────────────┐    ┌─────────────────────┐      │
-│  │ ScrapingTarget│───▶│  ListingScraperService│     │
-│  │ (config)     │    │                     │      │
-│  └──────────────┘    │  1. Fetch pages     │      │
-│                      │  2. Extract listings │      │
-│                      │  3. AI enrichment   │      │
-│                      │  4. Dedup check     │      │
-│                      │  5. Create prospects │      │
-│                      └─────────┬───────────┘      │
+│                           |                        │
+│                           ▼                        │
+│                   ┌───────────────┐                │
+│                   │  BullMQ Queue │                │
+│                   │(scrapingQueue)│                │
+│                   └───────┬───────┘                │
+│                           │                        │
+│  ┌──────────────┐    ┌────▼────────────────┐       │
+│  │ ScrapingTarget│───▶│ ListingScraperService│      │
+│  │ (config)     │    │   (Worker context)  │       │
+│  └──────────────┘    │  1. PageFetcher     │       │
+│                      │  2. Domain Extractor│       │
+│                      │  3. AI enrichment   │       │
+│                      │  4. Dedup check     │       │
+│                      │  5. Gen ProspectLead│       │
+│                      └─────────┬───────────┘       │
 │                                │                   │
 │                    ┌───────────▼──────────┐        │
 │                    │   ProspectLead       │        │
@@ -152,8 +164,8 @@ interface ListingScraper {
 | **Browser Rendering** (Playwright) | JS-rendered SPAs, anti-bot sites | `playwright.chromium.launch()` |
 | **API Direct** | Sites with known APIs | Direct HTTP client calls |
 
-> [!TIP]
-> **Default recommendation**: Use Playwright in headless mode as the primary driver. It handles all three cases (static, JS-rendered, API interception). The existing `crm-puller.ts` already uses Puppeteer — consider migrating to Playwright for consistency and better API.
+> [!NOTE]
+> **Implementation Decision**: The stack uses `Playwright` encapsulated in `lib/scraping/page-fetcher.ts` as the primary driver instead of Puppeteer or raw fetch. This allows trivial bypassing of standard anti-bot protections and handles JS-heavy sites natively.
 
 ### AI Extraction Pipeline
 
@@ -291,7 +303,18 @@ Each portal connector follows the same `ScrapingTarget` + `ListingScraperService
 
 ---
 
-## Cron Integration
+## 2.6 Queue Infrastructure (BullMQ)
+
+Scraping is an inherently long-running task that is prone to network timeouts and anti-bot bans. Running it synchronously in a Next.js API route is an anti-pattern.
+
+`lib/queue/scraping-queue.ts` implements a dedicated BullMQ queue specifically for scraping isolated targets.
+- **Worker Concurrency**: 1 (Processes one target at a time to prevent server IP bans)
+- **Rate Limit**: 1 job per 5 seconds globally.
+- **Retries**: Configured to 1 attempt initially to prevent spamming failing target sites automatically.
+
+---
+
+## 2.7 Cron Integration
 
 New cron endpoint at `app/api/cron/scrape-listings/route.ts`:
 
@@ -304,10 +327,8 @@ GET /api/cron/scrape-listings
 
 Flow:
   1. Fetch active ScrapingTargets where nextRunDue <= now()
-  2. For each target, call ListingScraperService.scrapeTarget()
-  3. Create ScrapingRun audit records
-  4. Update target.lastSyncAt and stats
-  5. Return summary JSON
+  2. For each target, push job params onto BullMQ `scrapingQueue`
+  3. Return summary JSON of enqueued jobs immediately.
 ```
 
 ---
