@@ -28,6 +28,7 @@ When a user clicks generic draft:
     *   **Deal mode** uses a deal-aware merged timeline across all participant conversations linked to the active deal.
 5.  **Included Timeline Entities**:
     *   messages / emails
+    *   voice messages (with audio transcription text when available; tagged as `VOICE_MESSAGE` in prompt context; shows `[voice message – transcript unavailable]` when transcript is pending or failed)
     *   manual notes and other relevant contact-history activity entries
     *   canonical viewing events
     *   task state events

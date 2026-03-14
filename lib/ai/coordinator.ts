@@ -299,9 +299,17 @@ function formatTimelineEventForPrompt(event: TimelineEvent): string {
         const directionLabel = event.message.direction === "outbound"
             ? `Agent -> ${event.contactName || "Contact"}`
             : `${event.contactName || "Contact"} -> Agent`;
-        const channel = String(event.message.type || "MESSAGE");
-        const body = truncateText(event.message.body || "[no text body]", TIMELINE_LINE_MAX_CHARS);
-        return `[${event.createdAt}] MESSAGE ${channel} ${directionLabel}: ${body}`;
+        const isAudio = !!event.message.isAudio;
+        const channel = isAudio ? "VOICE_MESSAGE" : String(event.message.type || "MESSAGE");
+        let body: string;
+        if (isAudio) {
+            body = event.message.transcriptText
+                ? truncateText(event.message.transcriptText, TIMELINE_LINE_MAX_CHARS)
+                : "[voice message – transcript unavailable]";
+        } else {
+            body = truncateText(event.message.body || "[no text body]", TIMELINE_LINE_MAX_CHARS);
+        }
+        return `[${event.createdAt}] ${channel} ${directionLabel}: ${body}`;
     }
 
     const contactLabel = event.contactName ? ` (${event.contactName})` : "";

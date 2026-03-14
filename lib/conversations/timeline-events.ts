@@ -41,6 +41,8 @@ type TimelineMessagePayload = {
     ghlMessageId?: string | null;
     senderName: string;
     senderEmail?: string | null;
+    transcriptText?: string | null;
+    isAudio?: boolean;
 };
 
 export type TimelineMessageEvent = {
@@ -314,6 +316,11 @@ export async function assembleTimelineEvents(options: AssembleTimelineOptions): 
                             },
                         },
                     },
+                    transcripts: {
+                        select: { text: true, status: true },
+                        take: 1,
+                        orderBy: { completedAt: "desc" },
+                    },
                 },
             })
             : Promise.resolve([] as any[]),
@@ -387,6 +394,10 @@ export async function assembleTimelineEvents(options: AssembleTimelineOptions): 
         const contactEmail = contact?.email || null;
         const senderName = direction === "outbound" ? "You" : (contactName || "Contact");
 
+        const transcript = message.transcripts?.[0] || null;
+        const isAudio = !!transcript;
+        const transcriptText = transcript?.status === "completed" ? (transcript.text || null) : null;
+
         return {
             kind: "message",
             id: `message:${message.id}`,
@@ -412,6 +423,8 @@ export async function assembleTimelineEvents(options: AssembleTimelineOptions): 
                 source: message.source || null,
                 senderName,
                 senderEmail: direction === "outbound" ? null : contactEmail,
+                transcriptText,
+                isAudio,
             },
         };
     });
