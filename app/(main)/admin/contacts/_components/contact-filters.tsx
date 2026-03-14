@@ -201,6 +201,28 @@ export function ContactFilters({ leadSources = [], agents = [], view = 'table' }
                     )}
                 </div>
 
+                {/* View Toggle (List / Pipeline) */}
+                <div className="flex rounded-md shadow-sm">
+                    <Button
+                        variant={view === 'table' ? 'default' : 'outline'}
+                        size="sm"
+                        className="h-9 rounded-r-none px-3 gap-1.5"
+                        onClick={() => updateParams({ view: null })}
+                    >
+                        <List className="h-4 w-4" />
+                        <span className="hidden sm:inline text-xs">List</span>
+                    </Button>
+                    <Button
+                        variant={view === 'pipeline' ? 'default' : 'outline'}
+                        size="sm"
+                        className="h-9 rounded-l-none border-l-0 px-3 gap-1.5"
+                        onClick={() => updateParams({ view: 'pipeline' })}
+                    >
+                        <Kanban className="h-4 w-4" />
+                        <span className="hidden sm:inline text-xs">Pipeline</span>
+                    </Button>
+                </div>
+
                 {/* Category Select (View Mode) */}
                 {/* Replaces the toggle switch with a dropdown for better density and "All" option */}
                 <Select
