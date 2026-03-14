@@ -50,6 +50,7 @@ model Location {
   legacyCrmLeadEmailProcessings LegacyCrmLeadEmailProcessing[]
   userNotifications             UserNotification[]
   taskReminderJobs              TaskReminderJob[]
+  scrapingTargets               ScrapingTarget[]
 
   // WhatsApp Integration (Native)
   whatsappBusinessAccountId String?
@@ -1837,4 +1838,67 @@ model AgentEvent {
 
   @@index([type, processedAt])
   @@map("agent_events")
+}
+
+
+// ==========================================
+// Phase 2: Strategic Scraping Infrastructure
+// ==========================================
+
+model ScrapingTarget {
+  id         String   @id @default(cuid())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  locationId String
+
+  name              String
+  domain            String
+  baseUrl           String
+  enabled           Boolean  @default(true)
+  scrapeFrequency   String   @default("daily") // hourly, every_6h, daily, weekly
+  maxPagesPerRun    Int      @default(10)
+  extractionMode    String   @default("hybrid") // css_selectors, ai_extraction, hybrid
+  selectors         Json?    // CSS selector mapping
+  aiInstructions    String?  @db.Text // AI extraction prompt
+  targetType        String   @default("listings") // listings, social_posts, profiles
+
+  // Dynamic Mapping & Multiple URLs
+  targetUrls        String[] @default([]) // Array of specific URLs to scrape (e.g. /real-estate-for-sale/)
+  fieldMappings     Json?    // Flexible JSON for mapping fields dynamically per platform
+
+  // Authentication Details (Encrypted/Secure)
+  authUsername      String?
+  authPassword      String?  @db.Text
+
+  // Sync state
+  lastSyncAt        DateTime?
+  lastSyncStatus    String?
+  lastSyncError     String?  @db.Text
+  lastSyncStats     Json?    // { discovered: 15, new: 8, duplicates: 7, errors: 0 }
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  runs     ScrapingRun[]
+
+  @@index([locationId, enabled])
+  @@index([domain])
+}
+
+model ScrapingRun {
+  id         String   @id @default(cuid())
+  createdAt  DateTime @default(now())
+  targetId   String
+
+  status          String    @default("running") // running, completed, partial, failed
+  pagesScraped    Int       @default(0)
+  listingsFound   Int       @default(0)
+  leadsCreated    Int       @default(0)
+  duplicatesFound Int       @default(0)
+  errors          Int       @default(0)
+  completedAt     DateTime?
+  errorLog        String?   @db.Text
+  metadata        Json?
+
+  target ScrapingTarget @relation(fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@index([targetId, createdAt(sort: Desc)])
 }
