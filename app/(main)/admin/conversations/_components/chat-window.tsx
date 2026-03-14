@@ -68,6 +68,7 @@ interface ChatWindowProps {
     onAcceptSuggestedResponse?: (id: string, mode: "insertOnly" | "sendNow") => Promise<void>;
     onRejectSuggestedResponse?: (id: string, reason?: string | null) => Promise<void>;
     composerInsertSeed?: { key: string; body: string } | null;
+    onResendMessage?: (messageId: string) => void | Promise<void>;
 }
 
 /**
@@ -155,6 +156,7 @@ export function ChatWindow({
     onRejectSuggestedResponse,
     composerInsertSeed,
     suggestions = [],
+    onResendMessage,
 }: ChatWindowProps & { suggestions?: string[] }) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const timelineContentRef = useRef<HTMLDivElement>(null);
@@ -914,6 +916,7 @@ export function ChatWindow({
                                     onRemoveSelectionBatchItem={handleRemoveSelectionBatchItem}
                                     onClearSelectionBatch={handleClearSelectionBatch}
                                     enableMountAnimation={enableMountAnimation}
+                                    onResendMessage={onResendMessage}
                                 />
                             </div>
                         );

@@ -2863,22 +2863,69 @@ export function ConversationInterface({ locationId, initialConversations, initia
         const conversationTarget = targetConversation || activeConversation;
         if (!conversationTarget) return;
 
-        const res = await sendReply(conversationTarget.id, conversationTarget.contactId, text, type);
-        if (!res.success) {
-            alert('Failed to send message: ' + JSON.stringify(res.error));
-            return;
-        }
-
-        if (viewMode === 'deals' && activeDealIdRef.current) {
-            void refreshActiveDealWorkspace(activeDealIdRef.current, {
-                reason: "send_message",
-                refreshSidebar: false,
-            });
-        }
+        // Optimistic UI update
+        const optimisticMessageId = `opt-${Date.now()}`;
+        const optimisticMessage: any = {
+            id: optimisticMessageId,
+            conversationId: conversationTarget.id,
+            contactId: conversationTarget.contactId,
+            body: text,
+            type,
+            direction: 'outbound',
+            status: 'sending',
+            dateAdded: new Date().toISOString(),
+            createdAt: new Date(),
+            updatedAt: new Date(),
+        };
 
         if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
-            const newMsgs = await fetchMessages(conversationTarget.id);
-            setMessages(newMsgs);
+            setMessages((prev) => [...prev, optimisticMessage]);
+        }
+
+        try {
+            const res = await sendReply(conversationTarget.id, conversationTarget.contactId, text, type);
+            if (!res.success) {
+                if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
+                    setMessages((prev) =>
+                        prev.map((m) =>
+                            m.id === optimisticMessageId ? { ...m, status: 'failed' } : m
+                        )
+                    );
+                }
+                toast({
+                    title: 'Failed to send message',
+                    description: typeof res.error === 'string' ? res.error : 'Unknown error occurred',
+                    variant: 'destructive',
+                });
+                return;
+            }
+
+            if (viewMode === 'deals' && activeDealIdRef.current) {
+                void refreshActiveDealWorkspace(activeDealIdRef.current, {
+                    reason: "send_message",
+                    refreshSidebar: false,
+                });
+            }
+
+            if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
+                // If the action returned the real message, we could swap it. 
+                // For now, refetch to be safe and get the DB-assigned ID.
+                const newMsgs = await fetchMessages(conversationTarget.id);
+                setMessages(newMsgs);
+            }
+        } catch (e: any) {
+            if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
+                setMessages((prev) =>
+                    prev.map((m) =>
+                        m.id === optimisticMessageId ? { ...m, status: 'failed' } : m
+                    )
+                );
+            }
+            toast({
+                title: 'Failed to send message',
+                description: e?.message || 'Unknown error occurred',
+                variant: 'destructive',
+            });
         }
     };
 
@@ -3043,6 +3090,34 @@ export function ConversationInterface({ locationId, initialConversations, initia
         const conversationTarget = targetConversation || activeConversation;
         if (!conversationTarget) return;
 
+        // Optimistic UI update for media
+        const optimisticMessageId = `opt-media-${Date.now()}`;
+        const objectUrl = URL.createObjectURL(file);
+        const optimisticMessage: any = {
+            id: optimisticMessageId,
+            conversationId: conversationTarget.id,
+            contactId: conversationTarget.contactId,
+            body: caption,
+            type: 'WhatsApp',
+            direction: 'outbound',
+            status: 'sending',
+            dateAdded: new Date().toISOString(),
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            attachments: [
+                {
+                    id: `opt-att-${Date.now()}`,
+                    url: objectUrl,
+                    fileName: file.name,
+                    mimeType: file.type || 'application/octet-stream',
+                }
+            ]
+        };
+
+        if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
+            setMessages((prev) => [...prev, optimisticMessage]);
+        }
+
         try {
             const prep = await createWhatsAppMediaUploadUrl(conversationTarget.id, conversationTarget.contactId, {
                 fileName: file.name,
@@ -3051,12 +3126,35 @@ export function ConversationInterface({ locationId, initialConversations, initia
             });
 
             if (!prep.success) {
-                alert('Failed to prepare media upload: ' + JSON.stringify(prep.error));
+                if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
+                    setMessages((prev) =>
+                        prev.map((m) =>
+                            m.id === optimisticMessageId ? { ...m, status: 'failed' } : m
+                        )
+                    );
+                }
+                toast({
+                    title: 'Failed to prepare media upload',
+                    description: typeof prep.error === 'string' ? prep.error : 'Unknown error',
+                    variant: 'destructive',
+                });
                 return;
             }
 
             if (!prep.uploadUrl || !prep.upload) {
-                throw new Error("Upload preparation response missing upload URL or upload reference.");
+                if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
+                    setMessages((prev) =>
+                        prev.map((m) =>
+                            m.id === optimisticMessageId ? { ...m, status: 'failed' } : m
+                        )
+                    );
+                }
+                toast({
+                    title: 'Missing upload details',
+                    description: "Upload preparation response missing upload URL or upload reference.",
+                    variant: 'destructive',
+                });
+                return;
             }
 
             const uploadUrl = prep.uploadUrl;
@@ -3071,7 +3169,19 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
             if (!uploadRes.ok) {
                 const errText = await uploadRes.text().catch(() => '');
-                throw new Error(`R2 upload failed (${uploadRes.status}) ${errText}`);
+                if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
+                    setMessages((prev) =>
+                        prev.map((m) =>
+                            m.id === optimisticMessageId ? { ...m, status: 'failed' } : m
+                        )
+                    );
+                }
+                toast({
+                    title: `R2 upload failed (${uploadRes.status})`,
+                    description: errText,
+                    variant: 'destructive',
+                });
+                return;
             }
 
             const sendRes = await sendWhatsAppMediaReply(
@@ -3093,10 +3203,94 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     setMessages(newMsgs);
                 }
             } else {
-                alert('Failed to send media: ' + JSON.stringify(sendRes.error));
+                if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
+                    setMessages((prev) =>
+                        prev.map((m) =>
+                            m.id === optimisticMessageId ? { ...m, status: 'failed' } : m
+                        )
+                    );
+                }
+                toast({
+                    title: 'Failed to send media',
+                    description: typeof sendRes.error === 'string' ? sendRes.error : 'Unknown error',
+                    variant: 'destructive',
+                });
             }
         } catch (e: any) {
-            alert('Failed to send media: ' + (e?.message || 'Unknown error'));
+            if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
+                setMessages((prev) =>
+                    prev.map((m) =>
+                        m.id === optimisticMessageId ? { ...m, status: 'failed' } : m
+                    )
+                );
+            }
+            toast({
+                title: 'Failed to send media',
+                description: e?.message || 'Unknown error',
+                variant: 'destructive',
+            });
+        }
+    };
+
+    const handleResendMessage = async (messageId: string) => {
+        const conversationTarget = activeConversation;
+        if (!conversationTarget) return;
+
+        const msgs = viewMode === 'chats' ? messages : dealTimelineEvents.filter(e => e.kind === 'message').map(e => e.message as any);
+        const originalMsg = msgs.find(m => m.id === messageId);
+        
+        if (!originalMsg) {
+            toast({ title: "Cannot resend", description: "Message not found in timeline", variant: "destructive" });
+            return;
+        }
+
+        if (originalMsg.status !== 'failed') return;
+
+        // Transition back to sending optimism
+        if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
+            setMessages((prev) => prev.map((m) => m.id === messageId ? { ...m, status: 'sending' } : m));
+        }
+
+        try {
+            const hasAttachments = originalMsg.attachments && originalMsg.attachments.length > 0;
+            const res = hasAttachments 
+              // Basic retry for text for now, media retry requires original file which we don't store on client.
+              // We'll fallback to alerting for media if we can't reconstruct.
+              ? { success: false, error: "Retrying media messages is not supported without re-uploading the file" }
+              : await sendReply(conversationTarget.id, conversationTarget.contactId, originalMsg.body, originalMsg.type as 'SMS'|'Email'|'WhatsApp');
+
+            if (!res.success) {
+                if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
+                    setMessages((prev) => prev.map((m) => m.id === messageId ? { ...m, status: 'failed' } : m));
+                }
+                toast({
+                    title: 'Failed to resend message',
+                    description: typeof res.error === 'string' ? res.error : 'Unknown error',
+                    variant: 'destructive',
+                });
+                return;
+            }
+
+            if (viewMode === 'deals' && activeDealIdRef.current) {
+                void refreshActiveDealWorkspace(activeDealIdRef.current, {
+                    reason: "resend_message",
+                    refreshSidebar: false,
+                });
+            }
+
+            if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
+                const newMsgs = await fetchMessages(conversationTarget.id);
+                setMessages(newMsgs);
+            }
+        } catch (e: any) {
+            if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
+                setMessages((prev) => prev.map((m) => m.id === messageId ? { ...m, status: 'failed' } : m));
+            }
+            toast({
+                title: 'Failed to resend message',
+                description: e?.message || 'Unknown error',
+                variant: 'destructive',
+            });
         }
     };
 
@@ -3689,6 +3883,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 onBack={isMobileViewport ? handleBackToList : undefined}
                 onOpenMissionControl={isMobileViewport ? handleOpenMissionControl : undefined}
                 onSendMessage={handleSendMessage}
+                onResendMessage={handleResendMessage}
                 onSendMedia={handleSendMedia}
                 onRefetchMedia={handleRefetchMedia}
                 onRequestTranscript={handleRequestTranscript}
@@ -3808,6 +4003,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     }
                 }}
                 onSendMessage={(text, type) => handleSendMessage(text, type, selectedDealConversation || undefined)}
+                onResendMessage={handleResendMessage}
                 onSendMedia={(file, caption) => handleSendMedia(file, caption, selectedDealConversation || undefined)}
                 onGenerateDraft={async (
                     instruction?: string,

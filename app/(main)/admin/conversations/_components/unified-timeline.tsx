@@ -40,6 +40,7 @@ interface UnifiedTimelineProps {
     onAcceptSuggestedResponse?: (id: string, mode: "insertOnly" | "sendNow") => Promise<void>;
     onRejectSuggestedResponse?: (id: string, reason?: string | null) => Promise<void>;
     composerInsertSeed?: { key: string; body: string } | null;
+    onResendMessage?: (messageId: string) => void | Promise<void>;
 }
 
 export function UnifiedTimeline({
@@ -65,6 +66,7 @@ export function UnifiedTimeline({
     onAcceptSuggestedResponse,
     onRejectSuggestedResponse,
     composerInsertSeed,
+    onResendMessage,
 }: UnifiedTimelineProps) {
     const [selectedModel, setSelectedModel] = useState(GEMINI_FLASH_LATEST_ALIAS);
     const [isTimelineReady, setIsTimelineReady] = useState(false);
@@ -292,6 +294,7 @@ export function UnifiedTimeline({
                                     contactName={message?.senderName || message?.contactName}
                                     contactEmail={message?.senderEmail || message?.contactEmail}
                                     aiModel={selectedModel}
+                                    onResendMessage={onResendMessage}
                                 />
                             );
                         })}

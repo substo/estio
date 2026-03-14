@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { Mail, Smartphone, Paperclip, ExternalLink, ChevronDown, ChevronUp, ArrowRight, Download, Maximize2, RefreshCw } from "lucide-react";
+import { Mail, Smartphone, Paperclip, ExternalLink, ChevronDown, ChevronUp, ArrowRight, Download, Maximize2, RefreshCw, Clock, Check, CheckCheck, AlertTriangle } from "lucide-react";
 import { format } from "date-fns";
 import { EmailFrame, type EmailFrameSelection } from "./email-frame";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -54,6 +54,7 @@ export interface MessageBubbleProps {
         body: string;
         type: string;
         direction: 'inbound' | 'outbound';
+        status?: string;
         dateAdded: string | Date; // Accept both for compatibility
         subject?: string;
         attachments?: MessageAttachment[];
@@ -99,6 +100,7 @@ export interface MessageBubbleProps {
         options?: { force?: boolean }
     ) => void | Promise<void>;
     onRetryTranscript?: (messageId: string, attachmentId: string) => void | Promise<void>;
+    onResendMessage?: (messageId: string) => void | Promise<void>;
 }
 
 export function MessageBubble({
@@ -116,6 +118,7 @@ export function MessageBubble({
     onRequestTranscript,
     onExtractViewingNotes,
     onRetryTranscript,
+    onResendMessage,
 }: MessageBubbleProps) {
     const isOutbound = message.direction === 'outbound';
     const isEmail = (message.type || '').toUpperCase().includes('EMAIL');
@@ -797,13 +800,51 @@ export function MessageBubble({
                 )}
             </div>
 
-            {/* Timestamp */}
-            <span className="text-[10px] text-gray-400 mt-1 px-1 flex gap-1 items-center select-none">
-                {isEmail && <Mail className="h-3 w-3" />}
-                {isSMS && <Smartphone className="h-3 w-3" />}
-                {(message.contactName || contactName) && !isOutbound ? "Contact • " : "You • "}
-                {format(new Date(message.dateAdded), 'PP p')}
-            </span>
+            {/* Timestamp & Status */}
+            <div className="flex items-center gap-1 mt-1 px-1 justify-between select-none min-w-0">
+                <span className="text-[10px] text-gray-400 flex gap-1 items-center flex-1 min-w-0 truncate">
+                    {isEmail && <Mail className="h-3 w-3 shrink-0" />}
+                    {isSMS && <Smartphone className="h-3 w-3 shrink-0" />}
+                    <span className="truncate">
+                        {(message.contactName || contactName) && !isOutbound ? "Contact • " : "You • "}
+                        {format(new Date(message.dateAdded), 'PP p')}
+                    </span>
+                </span>
+                
+                {isOutbound && (isSMS || isWhatsApp) && (
+                    <span className="flex items-center gap-1 shrink-0 ml-2">
+                        {message.status === 'sending' && (
+                            <Clock className="h-3 w-3 text-gray-400" aria-label="Sending" />
+                        )}
+                        {message.status === 'sent' && (
+                            <Check className="h-3 w-3 text-gray-400" aria-label="Sent" />
+                        )}
+                        {(message.status === 'delivered' || message.status === 'read' || message.status === 'played') && (
+                            <CheckCheck className={cn("h-3 w-3", message.status === 'read' || message.status === 'played' ? "text-blue-500" : "text-gray-400")} aria-label={message.status === 'read' ? 'Read' : 'Delivered'} />
+                        )}
+                        {message.status === 'failed' && (
+                            <div className="flex items-center gap-1">
+                                <span className="flex items-center gap-1 text-red-500 bg-red-50 px-1.5 py-0.5 rounded text-[10px] border border-red-100 font-medium">
+                                    <AlertTriangle className="h-3 w-3" />
+                                    Failed
+                                </span>
+                                {onResendMessage && (
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            onResendMessage(message.id);
+                                        }}
+                                        className="text-[10px] text-blue-600 hover:text-blue-800 hover:underline px-1 py-0.5 rounded transition-colors"
+                                    >
+                                        Resend
+                                    </button>
+                                )}
+                            </div>
+                        )}
+                    </span>
+                )}
+            </div>
 
             <MessageSelectionActions
                 selection={selectionTarget}

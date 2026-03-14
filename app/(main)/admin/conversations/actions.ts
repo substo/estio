@@ -5006,22 +5006,6 @@ export async function sendWhatsAppMediaReply(
         }
 
         const { evolutionClient } = await import("@/lib/evolution/client");
-        const instanceState = await withResilience({
-            breakerKey: `evolution:send_media_status:${location.evolutionInstanceId}`,
-            timeoutMs: 8_000,
-            timeoutMessage: "Timed out checking WhatsApp connection status.",
-            retry: { attempts: 2, baseDelayMs: 250, maxDelayMs: 1500 },
-            task: async () => evolutionClient.fetchInstance(location.evolutionInstanceId!),
-        });
-        const instanceData = Array.isArray(instanceState) ? instanceState[0] : instanceState;
-        const connStatus = instanceData?.instance?.connectionStatus || instanceData?.connectionStatus || instanceData?.status;
-
-        if (connStatus !== 'open') {
-            return {
-                success: false,
-                error: `WhatsApp is disconnected (Status: ${connStatus || 'unknown'}). Please reconnect in Settings → WhatsApp.`
-            };
-        }
 
         const signedMediaUrl = await createWhatsAppMediaReadUrl({
             key: objectKey,
@@ -5262,44 +5246,8 @@ export async function sendReply(conversationId: string, contactId: string, messa
                     };
                 }
 
-                const eligibility = await checkWhatsAppPhoneEligibility(
-                    { evolutionInstanceId: location.evolutionInstanceId },
-                    contact.phone,
-                    {
-                        contactName: contact.name,
-                        contactType: contact.contactType,
-                    }
-                );
-
-                if (eligibility.status === 'ineligible') {
-                    return {
-                        success: false,
-                        error: eligibility.reason || "This contact's phone number is not registered on WhatsApp."
-                    };
-                }
-
                 try {
                     const { evolutionClient } = await import("@/lib/evolution/client");
-
-                    // Verify connection is actually alive (DB status can be stale)
-                    const instanceState = await withResilience({
-                        breakerKey: `evolution:send_message_status:${location.evolutionInstanceId}`,
-                        timeoutMs: 8_000,
-                        timeoutMessage: "Timed out checking WhatsApp connection status.",
-                        retry: { attempts: 2, baseDelayMs: 250, maxDelayMs: 1500 },
-                        task: async () => evolutionClient.fetchInstance(location.evolutionInstanceId!),
-                    });
-                    // Handle different response structures (array or object)
-                    const instanceData = Array.isArray(instanceState) ? instanceState[0] : instanceState;
-                    const connStatus = instanceData?.instance?.connectionStatus || instanceData?.connectionStatus || instanceData?.status;
-
-                    if (connStatus !== 'open') {
-                        console.warn(`[sendReply] Aborting send: WhatsApp instance ${location.evolutionInstanceId} is not connected (Status: ${connStatus})`);
-                        return {
-                            success: false,
-                            error: `WhatsApp is disconnected (Status: ${connStatus || 'unknown'}). Please reconnect in Settings → WhatsApp.`
-                        };
-                    }
 
                     console.log('[sendReply] Calling Evolution API sendMessage:', {
                         instanceId: location.evolutionInstanceId,
