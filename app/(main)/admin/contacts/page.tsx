@@ -139,6 +139,10 @@ function getSortOrder(sort: string): { [key: string]: 'asc' | 'desc' } {
             return { updatedAt: 'asc' };
         case 'created_asc':
             return { createdAt: 'asc' };
+        case 'score_desc':
+            return { leadScore: 'desc' };
+        case 'score_asc':
+            return { leadScore: 'asc' };
         case 'created_desc':
         default:
             return { createdAt: 'desc' };

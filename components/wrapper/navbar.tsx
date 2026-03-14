@@ -89,6 +89,21 @@ export default function NavBar({ logoUrl, lightUrl }: NavBarProps) {
                                     </Button>
                                 </Link>
                             </DialogClose>
+                            <DialogClose asChild>
+                                <Link href="/admin/contacts">
+                                    <Button variant="outline" className="w-full">Contact CRM</Button>
+                                </Link>
+                            </DialogClose>
+                            <DialogClose asChild>
+                                <Link href="/admin/leads/inbox">
+                                    <Button variant="outline" className="w-full">Lead Inbox</Button>
+                                </Link>
+                            </DialogClose>
+                            <DialogClose asChild>
+                                <Link href="/admin/properties">
+                                    <Button variant="outline" className="w-full">Properties</Button>
+                                </Link>
+                            </DialogClose>
                         </div>
                     </SheetContent>
                 </Dialog>
