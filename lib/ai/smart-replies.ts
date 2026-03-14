@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
+import { assembleTimelineEvents, formatTimelineEventForPrompt } from "@/lib/conversations/timeline-events";
 import { DEFAULT_MODEL } from "@/lib/ai/pricing";
 import {
     buildDealProtectiveCommunicationContract,
@@ -14,7 +15,6 @@ export async function generateSmartReplies(conversationId: string) {
         const conversation = await db.conversation.findUnique({
             where: { id: conversationId },
             include: {
-                messages: { orderBy: { createdAt: 'desc' }, take: 15 },
                 location: { include: { siteConfig: true } },
                 contact: { select: { preferredLang: true } }
             }
@@ -45,17 +45,24 @@ export async function generateSmartReplies(conversationId: string) {
         const model = genAI.getGenerativeModel({ model: modelName });
 
         // 3. Prepare Context
-        const reversedMessages = [...conversation.messages].reverse();
-        let conversationText = "";
-        const latestInboundText = [...reversedMessages]
-            .reverse()
-            .find((m) => m.direction === "inbound" && (m.body || "").trim().length > 0)?.body || "";
-        reversedMessages.forEach(m => {
-            const sender = m.direction === 'outbound' ? 'Agent' : 'Contact';
-            // Only include text messages for now
-            if (!m.body) return;
-            conversationText += `${sender}: ${m.body}\n`;
+        const timelineResult = await assembleTimelineEvents({
+            mode: "chat",
+            locationId: conversation.locationId,
+            conversationId: conversation.id,
+            includeMessages: true,
+            includeActivities: true,
+            take: 36, // same window as AI Draft Compaction
         });
+        
+        const recentEvents = timelineResult.events;
+        const conversationText = recentEvents.map((e) => formatTimelineEventForPrompt(e, 220)).join("\n");
+        
+        // Find latest inbound text for language detection
+        const latestInboundText = [...recentEvents]
+            .reverse() // from newest to oldest since events are sorted ascending by assembleTimelineEvents
+            .find((e): e is import("@/lib/conversations/timeline-events").TimelineMessageEvent => e.kind === "message" && e.message.direction === "inbound" && (e.message.body || "").trim().length > 0)
+            ?.message?.body || "";
+            
         const languageResolution = resolveCommunicationLanguage({
             latestInboundText,
             contactPreferredLanguage: conversation.contact?.preferredLang ?? null,

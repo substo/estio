@@ -165,7 +165,7 @@ The system automatically analyzes inbound WhatsApp messages to suggest 3 quick "
 ### Workflow
 1.  **Inbound Message**: Contact sends a message.
 2.  **Background Analysis**: `lib/whatsapp/sync.ts` triggers `generateSmartReplies` (fire-and-forget).
-3.  **AI Generation**: Gemini reads the last 15 messages and generates 3 short intents (JSON).
+3.  **AI Generation**: Gemini reads the recent conversation timeline (same normalized timeline as manual drafts, approx ~36 events) and generates 3 short intents (JSON).
 4.  **Storage**: Suggestions are stored in `Conversation.suggestedActions`.
 5.  **UI Update**: When the agent views the conversation, the bubbles appear.
 6.  **Action**: Clicking a bubble uses the intent text as the **Instruction** for the same `generateAIDraft` pipeline used by the main draft button.

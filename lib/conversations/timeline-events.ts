@@ -70,6 +70,125 @@ export type TimelineActivityEvent = {
 
 export type TimelineEvent = TimelineMessageEvent | TimelineActivityEvent;
 
+export type TimelineBucket = "messages" | "notes" | "viewings" | "tasks";
+
+export type TimelineBucketCounts = {
+    messages: number;
+    notes: number;
+    viewings: number;
+    tasks: number;
+};
+
+export function emptyTimelineBucketCounts(): TimelineBucketCounts {
+    return { messages: 0, notes: 0, viewings: 0, tasks: 0 };
+}
+
+export function getTimelineBucket(event: TimelineEvent): TimelineBucket {
+    if (event.kind === "message") return "messages";
+    const action = String(event.action || "").toUpperCase();
+    if (action.startsWith("TASK_")) return "tasks";
+    if (action.startsWith("VIEWING_")) return "viewings";
+    return "notes";
+}
+
+function normalizeSpace(value: string): string {
+    return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function truncateText(value: string, maxChars: number): string {
+    const normalized = normalizeSpace(value);
+    if (normalized.length <= maxChars) return normalized;
+    return `${normalized.slice(0, Math.max(0, maxChars - 3))}...`;
+}
+
+function parseMaybeJson(value: unknown): any {
+    if (!value) return null;
+    if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        try {
+            return JSON.parse(trimmed);
+        } catch {
+            return value;
+        }
+    }
+    return value;
+}
+
+export function extractChangeField(changes: unknown, field: string): string | null {
+    const parsed = parseMaybeJson(changes);
+    if (!parsed) return null;
+
+    if (Array.isArray(parsed)) {
+        const match = parsed.find((item: any) => String(item?.field || "") === field);
+        if (!match) return null;
+        const raw = match?.new ?? match?.value ?? null;
+        return raw == null ? null : String(raw);
+    }
+
+    if (typeof parsed === "object") {
+        const raw = (parsed as any)[field];
+        if (raw == null) return null;
+        if (typeof raw === "object" && "new" in raw) {
+            const next = (raw as any).new;
+            return next == null ? null : String(next);
+        }
+        return String(raw);
+    }
+
+    return null;
+}
+
+export function summarizeActivityForPrompt(event: Extract<TimelineEvent, { kind: "activity" }>, maxChars: number = 220): string {
+    const action = String(event.action || "").toUpperCase();
+    const fallback = truncateText(JSON.stringify(event.changes || {}), maxChars);
+
+    if (action === "MANUAL_ENTRY") {
+        const entry = extractChangeField(event.changes, "entry");
+        return entry ? truncateText(entry, maxChars) : fallback;
+    }
+
+    if (action === "TASK_OPEN" || action === "TASK_DONE") {
+        const title = extractChangeField(event.changes, "title") || "Task";
+        const dueAt = extractChangeField(event.changes, "dueAt");
+        const dueLabel = dueAt ? ` (due ${dueAt})` : "";
+        return `${title}${dueLabel}`;
+    }
+
+    if (action.startsWith("VIEWING_")) {
+        const property = extractChangeField(event.changes, "property") || "Property";
+        const date = extractChangeField(event.changes, "date");
+        const status = extractChangeField(event.changes, "status");
+        const bits = [property, date ? `at ${date}` : "", status ? `[${status}]` : ""].filter(Boolean);
+        return bits.join(" ");
+    }
+
+    return fallback;
+}
+
+export function formatTimelineEventForPrompt(event: TimelineEvent, maxChars: number = 220): string {
+    if (event.kind === "message") {
+        const directionLabel = event.message.direction === "outbound"
+            ? `Agent -> ${event.contactName || "Contact"}`
+            : `${event.contactName || "Contact"} -> Agent`;
+        const isAudio = !!event.message.isAudio;
+        const channel = isAudio ? "VOICE_MESSAGE" : String(event.message.type || "MESSAGE");
+        let body: string;
+        if (isAudio) {
+            body = event.message.transcriptText
+                ? truncateText(event.message.transcriptText, maxChars)
+                : "[voice message – transcript unavailable]";
+        } else {
+            body = truncateText(event.message.body || "[no text body]", maxChars);
+        }
+        return `[${event.createdAt}] ${channel} ${directionLabel}: ${body}`;
+    }
+
+    const contactLabel = event.contactName ? ` (${event.contactName})` : "";
+    const detail = summarizeActivityForPrompt(event, maxChars);
+    return `[${event.createdAt}] ACTIVITY${contactLabel} ${event.action}: ${detail}`;
+}
+
 type ResolvedConversation = {
     id: string;
     ghlConversationId: string;
