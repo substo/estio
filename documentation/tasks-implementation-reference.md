@@ -241,8 +241,9 @@ Files:
 
 - shows unread deadline reminders
 - allows mark-read actions
-- keeps only quick actions for the current browser push subscription
-- links to the dedicated user settings page at `/admin/settings/notifications`
+- keeps the popover focused on the reminder inbox
+- exposes a compact header link to `/admin/settings/notifications`
+- leaves browser push management and delivery preferences to `/admin/settings/notifications`
 
 ### User notification settings
 

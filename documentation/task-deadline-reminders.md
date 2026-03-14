@@ -292,11 +292,11 @@ Capabilities:
 - unread badge
 - recent reminder list
 - mark-one / mark-all-as-read
-- browser push enable/disable for the current device
-- link to the dedicated notification settings page
+- compact header link to the notification settings page
+- focused reminder inbox surface only
 
 > [!NOTE]
-> The bell is intentionally a quick-action surface. Persistent user-level settings now live under `/admin/settings/notifications`.
+> The bell is intentionally lightweight. Persistent user-level settings live under `/admin/settings/notifications`.
 
 ### User notification settings page
 
@@ -386,7 +386,7 @@ File: [`public/sw.js`](/Users/martingreen/Projects/IDX/public/sw.js)
 
 - clicking a bell item marks the `UserNotification` as read/clicked
 - the client navigates to the same deep link used in browser push
-- clicking "Manage settings" in the bell routes to `/admin/settings/notifications`
+- notification preferences are managed from `/admin/settings/notifications`, linked from the bell header
 
 ## Feature Flags and Environment Variables
 

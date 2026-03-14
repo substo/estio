@@ -19,12 +19,9 @@ import {
   markAllNotificationsReadAction,
   markNotificationReadAction,
 } from "@/app/(main)/admin/notifications/actions";
-import { NotificationCurrentBrowserCard } from "@/components/notifications/notification-current-browser-card";
-import { useNotificationPreferences } from "@/components/notifications/use-notification-preferences";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 
 type NotificationItem = any;
@@ -56,7 +53,6 @@ export function AdminNotificationBell() {
   } | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const lastToastNotificationIdRef = useRef<string | null>(null);
-  const notificationPreferences = useNotificationPreferences();
 
   const refreshSnapshot = useCallback(async (showSpinner = false) => {
     if (showSpinner) setLoading(true);
@@ -157,12 +153,11 @@ export function AdminNotificationBell() {
   useEffect(() => {
     if (!open) return;
     void refreshSnapshot(false);
-    void notificationPreferences.refreshSettings(false);
-  }, [notificationPreferences.refreshSettings, open, refreshSnapshot]);
+  }, [open, refreshSnapshot]);
 
   const unreadCount = snapshot?.unreadCount || 0;
   const notificationCountLabel = unreadCount > 99 ? "99+" : String(unreadCount);
-  const reminderUiEnabled = (snapshot?.featureFlags?.reminderUi ?? notificationPreferences.featureFlags.reminderUi) !== false;
+  const reminderUiEnabled = snapshot?.featureFlags?.reminderUi !== false;
 
   if (!reminderUiEnabled) {
     return null;
@@ -190,54 +185,31 @@ export function AdminNotificationBell() {
               {unreadCount > 0 ? `${unreadCount} unread reminder${unreadCount === 1 ? "" : "s"}` : "No unread reminders"}
             </div>
           </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-8 px-2 text-xs"
-            onClick={() => {
-              void markAllNotificationsReadAction().then(() => refreshSnapshot(false));
-            }}
-            disabled={unreadCount === 0}
-          >
-            <Check className="mr-1.5 h-3.5 w-3.5" />
-            Mark all read
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" asChild>
+              <Link href="/admin/settings/notifications" onClick={() => setOpen(false)}>
+                <Settings2 className="mr-1.5 h-3.5 w-3.5" />
+                Manage settings
+              </Link>
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-xs"
+              onClick={() => {
+                void markAllNotificationsReadAction().then(() => refreshSnapshot(false));
+              }}
+              disabled={unreadCount === 0}
+            >
+              <Check className="mr-1.5 h-3.5 w-3.5" />
+              Mark all read
+            </Button>
+          </div>
         </div>
 
         <div className="max-h-[420px] overflow-y-auto p-4">
-          <div className="space-y-4">
-            <section className="space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-sm font-medium">Quick actions</div>
-                <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" asChild>
-                  <Link href="/admin/settings/notifications" onClick={() => setOpen(false)}>
-                    <Settings2 className="mr-1.5 h-3.5 w-3.5" />
-                    Manage settings
-                  </Link>
-                </Button>
-              </div>
-
-              <NotificationCurrentBrowserCard
-                compact
-                featureFlags={notificationPreferences.featureFlags}
-                browserSupported={notificationPreferences.browserSupported}
-                pushPermission={notificationPreferences.pushPermission}
-                pushEnabledForCurrentBrowser={notificationPreferences.pushEnabledForCurrentBrowser}
-                activePushDeviceCount={notificationPreferences.activePushDeviceCount}
-                currentBrowserSubscription={notificationPreferences.currentBrowserSubscription}
-                managingBrowserPush={notificationPreferences.managingBrowserPush}
-                onEnable={notificationPreferences.enableCurrentBrowserPush}
-                onDisable={notificationPreferences.disableCurrentBrowserPush}
-              />
-
-              <p className="text-[11px] text-muted-foreground">
-                Update quiet hours, default reminder timing, and delivery preferences from notification settings.
-              </p>
-            </section>
-
-            <Separator />
-
+          <div>
             <section className="space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <div className="text-sm font-medium">Recent reminders</div>
