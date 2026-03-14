@@ -52,10 +52,10 @@ It is critical to distinguish between **Content** and **Metadata**:
 
 | Data Type | Storage Table | Purpose | Visible in Chat? |
 | :--- | :--- | :--- | :--- |
-| **Draft Content** | `AgentExecution` | Audit, Cost Tracking, Debugging | **NO** |
+| **Draft Content (Manual & Smart Reply)** | `AgentExecution` | Audit, Cost Tracking, Debugging | **NO** |
 | **Sent Message** | `Message` | Legal Record, Conversation History | **YES** |
 
-**Key Takeaway**: Generated drafts are **never** saved to the `Message` table. They do not pollute the conversation history. They are only logged as `AgentExecution` records to track token usage and AI costs.
+**Key Takeaway**: Generated drafts and smart reply bubbles are **never** saved to the `Message` table. They do not pollute the conversation history. They are only logged as `AgentExecution` records to track token usage and AI costs.
 
 ## 4. Usage Guide
 
@@ -167,9 +167,10 @@ The system automatically analyzes inbound WhatsApp messages to suggest 3 quick "
 2.  **Background Analysis**: `lib/whatsapp/sync.ts` triggers `generateSmartReplies` (fire-and-forget).
 3.  **AI Generation**: Gemini reads the recent conversation timeline (same normalized timeline as manual drafts, approx ~36 events) and generates 3 short intents (JSON).
 4.  **Storage**: Suggestions are stored in `Conversation.suggestedActions`.
-5.  **UI Update**: When the agent views the conversation, the bubbles appear.
-6.  **Action**: Clicking a bubble uses the intent text as the **Instruction** for the same `generateAIDraft` pipeline used by the main draft button.
-7.  **Context Parity**: Bubble-triggered drafts therefore receive the same normalized timeline context as manual draft generation, including notes, viewing events, and task state events when present in the active chat/deal scope.
+5.  **Cost Tracking**: `usageMetadata` is extracted from the Gemini response to calculate the exact cost using `lib/ai/pricing`. A lightweight `AgentExecution` record is created (taskId: `smart-reply-gen`), and the running totals (`promptTokens`, `completionTokens`, `totalTokens`, `totalCost`) are incremented on the parent `Conversation` record for the Location AI Usage Dashboard.
+6.  **UI Update**: When the agent views the conversation, the bubbles appear.
+7.  **Action**: Clicking a bubble uses the intent text as the **Instruction** for the same `generateAIDraft` pipeline used by the main draft button.
+8.  **Context Parity**: Bubble-triggered drafts therefore receive the same normalized timeline context as manual draft generation, including notes, viewing events, and task state events when present in the active chat/deal scope.
 
 ### Example
 -   **User**: "Is the 2-bed in Paphos still available?"
