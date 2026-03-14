@@ -1,7 +1,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
 import { assembleTimelineEvents, formatTimelineEventForPrompt } from "@/lib/conversations/timeline-events";
-import { DEFAULT_MODEL } from "@/lib/ai/pricing";
+import { DEFAULT_MODEL, calculateRunCost } from "@/lib/ai/pricing";
 import {
     buildDealProtectiveCommunicationContract,
     resolveCommunicationLanguage
@@ -119,10 +119,54 @@ export async function generateSmartReplies(conversationId: string) {
 
         console.log(`[Smart Reply] Generated suggestions:`, suggestions);
 
+        const usage = response.usageMetadata;
+        
+        let promptTokens = 0;
+        let completionTokens = 0;
+        let totalTokens = 0;
+        
+        if (usage) {
+            promptTokens = usage.promptTokenCount || 0;
+            completionTokens = usage.candidatesTokenCount || 0;
+            totalTokens = usage.totalTokenCount || (promptTokens + completionTokens);
+        } else {
+            // fallback estimate
+            promptTokens = Math.ceil(prompt.length / 4);
+            completionTokens = Math.ceil(text.length / 4);
+            totalTokens = promptTokens + completionTokens;
+        }
+        
+        const cost = calculateRunCost(modelName, promptTokens, completionTokens);
+
         // 6. Save to DB
         await db.conversation.update({
             where: { id: conversationId },
-            data: { suggestedActions: suggestions }
+            data: { 
+                suggestedActions: suggestions,
+                promptTokens: { increment: promptTokens },
+                completionTokens: { increment: completionTokens },
+                totalTokens: { increment: totalTokens },
+                totalCost: { increment: cost }
+            }
+        });
+
+        // 7. Log Execution
+        await db.agentExecution.create({
+            data: {
+                conversationId,
+                taskId: "smart-reply-gen",
+                taskTitle: "Background Smart Replies Generation",
+                taskStatus: "done",
+                thoughtSummary: `Generated ${suggestions.length} suggestions using ${modelName}.`,
+                latencyMs: 0, 
+                status: "done",
+                promptTokens,
+                completionTokens,
+                totalTokens,
+                model: modelName,
+                cost,
+                draftReply: JSON.stringify(suggestions)
+            }
         });
 
     } catch (error) {
