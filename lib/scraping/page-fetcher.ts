@@ -1,4 +1,10 @@
-import { chromium, Browser, Page } from 'playwright';
+import { Browser, Page } from 'playwright';
+import { chromium } from 'playwright-extra';
+// @ts-ignore
+import stealthPlugin from 'puppeteer-extra-plugin-stealth';
+
+// Add the stealth plugin to playwright-extra
+chromium.use(stealthPlugin());
 
 export interface FetchOptions {
   url: string;
@@ -25,7 +31,7 @@ export class PageFetcher {
           '--disable-accelerated-2d-canvas',
           '--disable-gpu',
         ],
-      });
+      }) as unknown as Browser;
     }
 
     if (!this.page) {
