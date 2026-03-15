@@ -77,75 +77,94 @@ export class ListingScraperService {
                 ? task.targetUrls // If absolute paths are provided in targetUrls
                 : []; // We assume targetUrls are always fully qualified URLs now for simplicity since we removed baseUrl from Schema
 
-            for (const url of urlsToScrape) {
-                console.log(`[ListingScraper] Fetching index url: ${url}`);
+            for (const rootUrl of urlsToScrape) {
+                console.log(`[ListingScraper] Fetching tree starting at: ${rootUrl}`);
                 
-                // TODO: Paging logic (using task.maxPagesPerRun loop)
-                // For this V1 implementation, we will just fetch the single provided array URL.
+                let currentUrl: string | undefined = rootUrl;
+                let pageCount = 0;
+                // Avoid infinite loops, limit to some reasonable max depth if target is infinite
+                const MAX_DEPTH = 100;
+                
+                while (currentUrl && interactionsRemaining > 0 && pageCount < MAX_DEPTH) {
+                    pageCount++;
+                    console.log(`[ListingScraper] Fetching page ${pageCount}: ${currentUrl}`);
 
-                const content = await fetcher.fetchContent({
-                    url: url,
-                    username: activeCredential.authUsername || undefined,
-                    password: activeCredential.authPassword || undefined,
-                    sessionState: activeCredential.sessionState ? activeCredential.sessionState : undefined,
-                });
-                
-                pagesScraped++;
-                
-                // 2. Delegate Extraction based on connection platform/mode
-                let rawListings: RawListing[] = [];
-                
-                if (task.connection.platform === 'bazaraki') {
-                    const { extractBazarakiIndex } = await import('./extractors/bazaraki');
-                    // Pass the strategy context and interaction budget
-                    const extractionResult = await extractBazarakiIndex(content, url, fetcher, {
-                        strategy: task.scrapeStrategy as 'shallow_duplication' | 'deep_extraction',
-                        sellerType: task.targetSellerType as 'individual' | 'agency' | 'all',
-                        interactionsAvailable: interactionsRemaining,
-                        delayBaseMs: task.delayBetweenPagesMs,
-                        delayJitterMs: task.delayJitterMs
+                    const content = await fetcher.fetchContent({
+                        url: currentUrl,
+                        username: activeCredential.authUsername || undefined,
+                        password: activeCredential.authPassword || undefined,
+                        sessionState: activeCredential.sessionState ? activeCredential.sessionState : undefined,
                     });
-                    rawListings = extractionResult.listings;
                     
-                    // Deduct budget
-                    if (extractionResult.interactionsUsed > 0) {
-                        interactionsRemaining -= extractionResult.interactionsUsed;
-                        console.log(`[ListingScraper] Used ${extractionResult.interactionsUsed} interactions. Remaining: ${interactionsRemaining}`);
-                    }
-                } else if (task.extractionMode === 'ai_extraction') {
-                    // Fallback to strict AI Generic Extractor
-                    const { extractGenericAI } = await import('./extractors/generic');
-                    rawListings = await extractGenericAI(content, url, task.aiInstructions || '');
-                } else {
-                    console.warn(`[ListingScraper] No extractor configured for platform ${task.connection.platform}`);
-                    continue;
-                }
-
-                listingsFound += rawListings.length;
-
-                // 3. Process each found listing
-                for (const listing of rawListings) {
-                    try {
-                        // Deduplication Check
-                        const isDuplicate = await this.checkDuplicates(listing, task.locationId);
+                    pagesScraped++;
+                    
+                    // 2. Delegate Extraction based on connection platform/mode
+                    let rawListings: RawListing[] = [];
+                    let nextPageUrl: string | undefined = undefined;
+                    
+                    if (task.connection.platform === 'bazaraki') {
+                        const { extractBazarakiIndex } = await import('./extractors/bazaraki');
+                        // Pass the strategy context and interaction budget
+                        const extractionResult = await extractBazarakiIndex(content, currentUrl, fetcher, {
+                            strategy: task.scrapeStrategy as 'shallow_duplication' | 'deep_extraction',
+                            sellerType: task.targetSellerType as 'individual' | 'agency' | 'all',
+                            interactionsAvailable: interactionsRemaining,
+                            delayBaseMs: task.delayBetweenPagesMs,
+                            delayJitterMs: task.delayJitterMs
+                        });
+                        rawListings = extractionResult.listings;
+                        nextPageUrl = extractionResult.nextPageUrl; // Capture pagination link
                         
-                        if (isDuplicate) {
-                            duplicatesFound++;
-                            continue;
+                        // Deduct budget
+                        if (extractionResult.interactionsUsed > 0) {
+                            interactionsRemaining -= extractionResult.interactionsUsed;
+                            console.log(`[ListingScraper] Used ${extractionResult.interactionsUsed} interactions. Remaining: ${interactionsRemaining}`);
                         }
-
-                        // Create ProspectLead in the Lead Inbox
-                        await this.createProspect(listing, task.id, task.locationId);
-                        leadsCreated++;
-
-                    } catch (err: any) {
-                        console.error(`[ListingScraper] Error processing listing ${listing.url}:`, err.message);
-                        errors++;
+                    } else if (task.extractionMode === 'ai_extraction') {
+                        // Fallback to strict AI Generic Extractor
+                        const { extractGenericAI } = await import('./extractors/generic');
+                        rawListings = await extractGenericAI(content, currentUrl, task.aiInstructions || '');
+                        // Generic AI doesn't support structured pagination out-of-the-box yet, break the while loop
+                        nextPageUrl = undefined;
+                    } else {
+                        console.warn(`[ListingScraper] No extractor configured for platform ${task.connection.platform}`);
+                        break;
                     }
+
+                    listingsFound += rawListings.length;
+
+                    // 3. Process each found listing
+                    for (const listing of rawListings) {
+                        try {
+                            // Deduplication Check
+                            const isDuplicate = await this.checkDuplicates(listing, task.locationId);
+                            
+                            if (isDuplicate) {
+                                duplicatesFound++;
+                                continue;
+                            }
+
+                            // Create ProspectLead in the Lead Inbox
+                            await this.createProspect(listing, task.id, task.locationId);
+                            leadsCreated++;
+
+                        } catch (err: any) {
+                            console.error(`[ListingScraper] Error processing listing ${listing.url}:`, err.message);
+                            errors++;
+                        }
+                    }
+                    
+                    if (!nextPageUrl) {
+                        console.log(`[ListingScraper] Reached end of pagination for root URL.`);
+                        break;
+                    }
+
+                    // Rate Limiting between index pages with Jitter
+                    console.log(`[ListingScraper] Pagination sleep before jumping to ${nextPageUrl}`);
+                    await humanDelay(task.delayBetweenPagesMs, task.delayJitterMs);
+                    
+                    currentUrl = nextPageUrl;
                 }
-                
-                // Rate Limiting between index pages with Jitter
-                await humanDelay(task.delayBetweenPagesMs, task.delayJitterMs);
             }
 
             // Update Credential Rotation TS

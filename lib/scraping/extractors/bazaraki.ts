@@ -3,10 +3,11 @@ import { PageFetcher } from '../page-fetcher';
 import * as cheerio from 'cheerio';
 
 const BAZARAKI_SELECTORS = {
-    listingContainer: '.announcement-block',
-    title: '.announcement-block__title a[href]',
-    price: '.announcement-block__price',
-    location: '.announcement-block__city',
+    listingContainer: '.advert',
+    title: '.advert__content-title a[href]',
+    price: '.advert__content-price',
+    location: '.advert__content-place',
+    nextPage: 'a.number-list-next, a.number-list-line',
 };
 
 export interface BazarakiExtractionOptions {
@@ -20,6 +21,7 @@ export interface BazarakiExtractionOptions {
 export interface BazarakiExtractionResult {
     listings: RawListing[];
     interactionsUsed: number;
+    nextPageUrl?: string;
 }
 
 // Random Gaussian-like delay for human emulation
@@ -73,12 +75,23 @@ export async function extractBazarakiIndex(content: string, baseUrl: string, fet
         });
     });
 
+    // Extract next page URL for pagination
+    let nextPageUrl: string | undefined = undefined;
+    const nextEl = $(BAZARAKI_SELECTORS.nextPage).first();
+    const nextHref = nextEl.attr('href');
+    if (nextHref) {
+        nextPageUrl = nextHref.startsWith('http') ? nextHref : `https://www.bazaraki.com${nextHref}`;
+        console.log(`[BazarakiExtractor] Found next page link: ${nextPageUrl}`);
+    } else {
+        console.log(`[BazarakiExtractor] No next page link found.`);
+    }
+
     console.log(`[BazarakiExtractor] Found ${shallowListings.length} shallow listings on index.`);
 
     // If Strategy is Shallow, we are done! Return immediately
     if (opts.strategy === 'shallow_duplication') {
         console.log(`[BazarakiExtractor] Strategy is Shallow. Returning early.`);
-        return { listings: shallowListings, interactionsUsed: 0 };
+        return { listings: shallowListings, interactionsUsed: 0, nextPageUrl };
     }
 
     // 2. Strategy is Deep Extraction
@@ -86,7 +99,7 @@ export async function extractBazarakiIndex(content: string, baseUrl: string, fet
     const deepCandidates = shallowListings.slice(0, Math.min(10, opts.interactionsAvailable));
     if (deepCandidates.length === 0) {
         console.log(`[BazarakiExtractor] No interaction budget available for deep extractions. Returning shallow.`);
-        return { listings: shallowListings, interactionsUsed: 0 };
+        return { listings: shallowListings, interactionsUsed: 0, nextPageUrl };
     }
 
     // Process deep extractions
@@ -159,5 +172,5 @@ export async function extractBazarakiIndex(content: string, baseUrl: string, fet
         }
     }
 
-    return { listings, interactionsUsed };
+    return { listings, interactionsUsed, nextPageUrl };
 }
