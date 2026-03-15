@@ -34,6 +34,20 @@ New settings page at `/admin/settings/prospecting` (or under existing `/admin/se
 | `lastSyncStatus` | String | `success`, `partial`, `error` |
 | `lastSyncError` | String? | Error message from last run |
 
+### Data Model Architecture Split
+
+To better manage scraping complexity, the data model is split into `ScrapingConnection` (platform-level settings) and `ScrapingTask` (specific scraping configurations).
+
+*   **`ScrapingConnection` Model**
+    *   **Purpose:** Houses platform-level authentication and global rate limits to prevent duplicated logins and avoid bans.
+    *   **Fields:** `name`, `platform`, `enabled`, `authUsername`, `authPassword` (encrypted), `sessionState`, `globalRateLimitMs`.
+*   **`ScrapingTask` Model**
+    *   **Purpose:** Stores configuration for specific scheduled actions utilizing a connection.
+    *   **Fields:** `name`, `connectionId`, `enabled`, `scrapeFrequency`, `maxPagesPerRun`, `extractionMode` (`css_selectors`, `ai_extraction`, `hybrid`), `selectors` (JSON), `aiInstructions` (Text), `taskType`, `targetUrls` (String array), `fieldMappings` (JSON).
+*   **`ScrapingRun` Model**
+    *   **Purpose:** Telemetry tracking for monitoring scraping success and errors.
+    *   **Fields:** `taskId`, `status`, `pagesScraped`, `listingsFound`, `leadsCreated`, `duplicatesFound`, `errors`, `errorLog`, `metadata`.
+
 #### Data Model
 
 ```prisma

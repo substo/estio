@@ -9,7 +9,7 @@ const QUEUE_NAME = 'scraping-queue';
 
 // Define the Job Data Interface
 export interface ScrapingJobData {
-    targetId: string;
+    taskId: string;
     locationId: string;
 }
 
@@ -51,38 +51,39 @@ export async function initScrapingWorker() {
     const { Worker } = await import('bullmq');
 
     worker = new Worker<ScrapingJobData>(QUEUE_NAME, async (job: any) => {
-        const { targetId, locationId } = job.data;
-        console.log(`[Queue] Processing Scraping Job for target ${targetId} (Job ${job.id})`);
+        const { taskId, locationId } = job.data;
+        console.log(`[Queue] Processing Scraping Job for task ${taskId} (Job ${job.id})`);
 
         try {
             // Dynamic import to avoid circular dependencies
             const { ListingScraperService } = await import("@/lib/scraping/listing-scraper");
             
-            const target = await db.scrapingTarget.findUnique({
-                where: { id: targetId }
+            const task = await db.scrapingTask.findUnique({
+                where: { id: taskId },
+                include: { connection: true }
             });
 
-            if (!target) {
-                console.warn(`[Queue] ScrapingTarget ${targetId} not found. Skipping.`);
+            if (!task) {
+                console.warn(`[Queue] ScrapingTask ${taskId} not found. Skipping.`);
                 return;
             }
 
-            if (!target.enabled) {
-                console.warn(`[Queue] ScrapingTarget ${targetId} is disabled. Skipping.`);
+            if (!task.enabled || !task.connection.enabled) {
+                console.warn(`[Queue] ScrapingTask ${taskId} or its connection is disabled. Skipping.`);
                 return;
             }
 
             // Orchestrate the scrape
-            const result = await ListingScraperService.scrapeTarget(target);
-            console.log(`[Queue] Successfully completed scraping target ${targetId}. Stats:`, result);
+            const result = await ListingScraperService.scrapeTask(task as any);
+            console.log(`[Queue] Successfully completed scraping task ${taskId}. Stats:`, result);
 
         } catch (error: any) {
-            console.error(`[Queue] Failed to scrape target ${targetId}:`, error.message);
+            console.error(`[Queue] Failed to scrape task ${taskId}:`, error.message);
             
             // Log the error to the database run (handled within the service if possible, or here as fallback)
             await db.scrapingRun.create({
                 data: {
-                    targetId,
+                    taskId,
                     status: 'failed',
                     errorLog: error.message || 'Unknown error',
                     completedAt: new Date()

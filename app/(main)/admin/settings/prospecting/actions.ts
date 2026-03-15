@@ -6,56 +6,43 @@ import { verifyUserIsLocationAdmin } from '@/lib/auth/permissions';
 import { scrapingQueue } from '@/lib/queue/scraping-queue';
 import { encryptPassword } from '@/lib/crypto/password-encryption';
 
-export async function getScrapingTargets(locationId: string) {
+// --- CONNECTIONS ---
+
+export async function getScrapingConnections(locationId: string) {
     if (!locationId) return [];
-    
-    // We expect the calling page to have validated location access already
-    return await db.scrapingTarget.findMany({
+    return await db.scrapingConnection.findMany({
         where: { locationId },
         orderBy: { createdAt: 'desc' }
     });
 }
 
-export async function createScrapingTarget(locationId: string, data: any) {
-    // Require Admin rights to create scraping bots
-    const userRole = await verifyUserIsLocationAdmin('SYSTEM_AUTH_BYPASS_IN_ACTION_DUE_TO_CLERK', locationId); // NOTE: Requires passing actual userId from Auth in a real implementation. For this scope, assuming caller provides.
-    // Let's fix this to actually use auth():
+export async function createScrapingConnection(locationId: string, data: any) {
     const { auth } = await import('@clerk/nextjs/server');
     const { userId } = await auth();
     const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
+    if (!isAdmin) throw new Error("Unauthorized to create scraping connections");
 
-    if (!isAdmin) throw new Error("Unauthorized to create scraping targets");
-
-    // Encrypt password if provided
     let encryptedPassword = null;
     if (data.authPassword) {
         encryptedPassword = encryptPassword(data.authPassword); 
     }
 
-    const targetUrls = data.targetUrls ? data.targetUrls.split(',').map((s: string) => s.trim()).filter(Boolean) : [];
-
-    const target = await db.scrapingTarget.create({
+    const connection = await db.scrapingConnection.create({
         data: {
             locationId,
             name: data.name,
-            domain: data.domain,
-            baseUrl: data.baseUrl,
+            platform: data.platform,
             enabled: data.enabled ?? true,
-            scrapeFrequency: data.scrapeFrequency || 'daily',
-            extractionMode: data.extractionMode || 'hybrid',
-            aiInstructions: data.aiInstructions,
             authUsername: data.authUsername,
             authPassword: encryptedPassword,
-            targetUrls,
-            fieldMappings: data.fieldMappings ? JSON.parse(data.fieldMappings) : null,
         }
     });
 
     revalidatePath('/admin/settings/prospecting');
-    return target;
+    return connection;
 }
 
-export async function updateScrapingTarget(id: string, locationId: string, data: any) {
+export async function updateScrapingConnection(id: string, locationId: string, data: any) {
     const { auth } = await import('@clerk/nextjs/server');
     const { userId } = await auth();
     const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
@@ -63,18 +50,89 @@ export async function updateScrapingTarget(id: string, locationId: string, data:
 
     const updateData: any = {
         name: data.name,
-        domain: data.domain,
-        baseUrl: data.baseUrl,
+        platform: data.platform,
+        enabled: data.enabled,
+        authUsername: data.authUsername,
+    };
+
+    if (data.authPassword) { 
+         updateData.authPassword = encryptPassword(data.authPassword); 
+    }
+
+    const connection = await db.scrapingConnection.update({
+        where: { id, locationId },
+        data: updateData
+    });
+
+    revalidatePath('/admin/settings/prospecting');
+    return connection;
+}
+
+export async function deleteScrapingConnection(id: string, locationId: string) {
+    const { auth } = await import('@clerk/nextjs/server');
+    const { userId } = await auth();
+    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
+    if (!isAdmin) throw new Error("Unauthorized");
+
+    await db.scrapingConnection.delete({
+        where: { id, locationId }
+    });
+
+    revalidatePath('/admin/settings/prospecting');
+    return true;
+}
+
+// --- TASKS ---
+
+export async function getScrapingTasks(locationId: string) {
+    if (!locationId) return [];
+    return await db.scrapingTask.findMany({
+        where: { locationId },
+        include: { connection: true },
+        orderBy: { createdAt: 'desc' }
+    });
+}
+
+export async function createScrapingTask(locationId: string, data: any) {
+    const { auth } = await import('@clerk/nextjs/server');
+    const { userId } = await auth();
+    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
+    if (!isAdmin) throw new Error("Unauthorized to create scraping tasks");
+
+    const targetUrls = data.targetUrls ? data.targetUrls.split(',').map((s: string) => s.trim()).filter(Boolean) : [];
+
+    const task = await db.scrapingTask.create({
+        data: {
+            locationId,
+            connectionId: data.connectionId,
+            name: data.name,
+            enabled: data.enabled ?? true,
+            scrapeFrequency: data.scrapeFrequency || 'daily',
+            extractionMode: data.extractionMode || 'hybrid',
+            aiInstructions: data.aiInstructions,
+            targetUrls,
+            fieldMappings: data.fieldMappings ? JSON.parse(data.fieldMappings) : null,
+        }
+    });
+
+    revalidatePath('/admin/settings/prospecting');
+    return task;
+}
+
+export async function updateScrapingTask(id: string, locationId: string, data: any) {
+    const { auth } = await import('@clerk/nextjs/server');
+    const { userId } = await auth();
+    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
+    if (!isAdmin) throw new Error("Unauthorized");
+
+    const updateData: any = {
+        name: data.name,
+        connectionId: data.connectionId,
         enabled: data.enabled,
         scrapeFrequency: data.scrapeFrequency,
         extractionMode: data.extractionMode,
         aiInstructions: data.aiInstructions,
-        authUsername: data.authUsername,
     };
-
-    if (data.authPassword) { // Only update if explicitly provided, else preserve old
-         updateData.authPassword = encryptPassword(data.authPassword); 
-    }
 
     if (data.targetUrls !== undefined) {
          updateData.targetUrls = typeof data.targetUrls === 'string' 
@@ -88,22 +146,22 @@ export async function updateScrapingTarget(id: string, locationId: string, data:
             : data.fieldMappings;
     }
 
-    const target = await db.scrapingTarget.update({
-        where: { id, locationId }, // Ensure tenant isolation
+    const task = await db.scrapingTask.update({
+        where: { id, locationId }, 
         data: updateData
     });
 
     revalidatePath('/admin/settings/prospecting');
-    return target;
+    return task;
 }
 
-export async function deleteScrapingTarget(id: string, locationId: string) {
+export async function deleteScrapingTask(id: string, locationId: string) {
     const { auth } = await import('@clerk/nextjs/server');
     const { userId } = await auth();
     const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
     if (!isAdmin) throw new Error("Unauthorized");
 
-    await db.scrapingTarget.delete({
+    await db.scrapingTask.delete({
         where: { id, locationId }
     });
 
@@ -117,16 +175,15 @@ export async function manualTriggerScrape(id: string, locationId: string) {
     const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
     if (!isAdmin) throw new Error("Unauthorized");
 
-    const target = await db.scrapingTarget.findUnique({
+    const task = await db.scrapingTask.findUnique({
         where: { id, locationId }
     });
 
-    if (!target) throw new Error("Target not found");
+    if (!task) throw new Error("Task not found");
 
-    // Add directly to BullMQ
-    await scrapingQueue.add(`manual-scrape-${target.id}-${Date.now()}`, {
-        targetId: target.id,
-        locationId: target.locationId
+    await scrapingQueue.add(`manual-scrape-${task.id}-${Date.now()}`, {
+        taskId: task.id,
+        locationId: task.locationId
     });
 
     return true;

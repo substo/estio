@@ -50,7 +50,8 @@ model Location {
   legacyCrmLeadEmailProcessings LegacyCrmLeadEmailProcessing[]
   userNotifications             UserNotification[]
   taskReminderJobs              TaskReminderJob[]
-  scrapingTargets               ScrapingTarget[]
+  scrapingConnections           ScrapingConnection[]
+  scrapingTasks                 ScrapingTask[]
 
   // WhatsApp Integration (Native)
   whatsappBusinessAccountId String?
@@ -1845,30 +1846,52 @@ model AgentEvent {
 // Phase 2: Strategic Scraping Infrastructure
 // ==========================================
 
-model ScrapingTarget {
+model ScrapingConnection {
   id         String   @id @default(cuid())
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   locationId String
 
   name              String
-  domain            String
-  baseUrl           String
+  platform          String   // e.g., "bazaraki", "facebook_marketplace"
+  enabled           Boolean  @default(true)
+  
+  // Authentication Details (Encrypted/Secure)
+  authUsername      String?
+  authPassword      String?  @db.Text
+  
+  // Session State (Cookies/Tokens to avoid re-login)
+  sessionState      Json?    // Storing Playwright context cookies
+  
+  // Rate Limits
+  globalRateLimitMs Int      @default(5000)
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  tasks    ScrapingTask[]
+
+  @@index([locationId, enabled])
+  @@index([platform])
+}
+
+model ScrapingTask {
+  id           String   @id @default(cuid())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  locationId   String
+  connectionId String
+
+  name              String
   enabled           Boolean  @default(true)
   scrapeFrequency   String   @default("daily") // hourly, every_6h, daily, weekly
   maxPagesPerRun    Int      @default(10)
   extractionMode    String   @default("hybrid") // css_selectors, ai_extraction, hybrid
   selectors         Json?    // CSS selector mapping
   aiInstructions    String?  @db.Text // AI extraction prompt
-  targetType        String   @default("listings") // listings, social_posts, profiles
+  taskType          String   @default("listings") // listings, social_posts, profiles
 
-  // Dynamic Mapping & Multiple URLs
+  // Target Execution specifics
   targetUrls        String[] @default([]) // Array of specific URLs to scrape (e.g. /real-estate-for-sale/)
   fieldMappings     Json?    // Flexible JSON for mapping fields dynamically per platform
-
-  // Authentication Details (Encrypted/Secure)
-  authUsername      String?
-  authPassword      String?  @db.Text
 
   // Sync state
   lastSyncAt        DateTime?
@@ -1876,17 +1899,18 @@ model ScrapingTarget {
   lastSyncError     String?  @db.Text
   lastSyncStats     Json?    // { discovered: 15, new: 8, duplicates: 7, errors: 0 }
 
-  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
-  runs     ScrapingRun[]
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  connection ScrapingConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  runs       ScrapingRun[]
 
   @@index([locationId, enabled])
-  @@index([domain])
+  @@index([connectionId])
 }
 
 model ScrapingRun {
   id         String   @id @default(cuid())
   createdAt  DateTime @default(now())
-  targetId   String
+  taskId     String
 
   status          String    @default("running") // running, completed, partial, failed
   pagesScraped    Int       @default(0)
@@ -1898,7 +1922,7 @@ model ScrapingRun {
   errorLog        String?   @db.Text
   metadata        Json?
 
-  target ScrapingTarget @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  task ScrapingTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
-  @@index([targetId, createdAt(sort: Desc)])
+  @@index([taskId, createdAt(sort: Desc)])
 }

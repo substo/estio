@@ -18,40 +18,40 @@ export async function GET(req: Request) {
             }
         }
 
-        // Optional specific target trigger
+        // Optional specific task trigger
         const url = new URL(req.url);
-        const targetId = url.searchParams.get('targetId');
-        
-        // 2. Query targets
+        const taskId = url.searchParams.get('taskId');
+
+        // 2. Query tasks
         const now = new Date();
         let query: any = { enabled: true };
-        
-        if (targetId) {
-            query.id = targetId;
+
+        if (taskId) {
+            query.id = taskId;
         } else {
             // Complex logic: find all where nextRunDue <= now()
             // Prisma doesn't support complex Date math in finds natively well, 
-            // so we pull active, and filter in memory since scraping targets list shouldn't be massive.
+            // so we pull active, and filter in memory since scraping tasks list shouldn't be massive.
         }
 
-        const targets = await db.scrapingTarget.findMany({
+        const tasks = await db.scrapingTask.findMany({
             where: query,
         });
 
         const enqueuedJobs = [];
-        
-        // 3. Filter schedule logistics and enqueue
-        for (const target of targets) {
-            let shouldRun = false;
-            
-            if (targetId) {
-                shouldRun = true; // Manual override
-            } else if (!target.lastSyncAt) {
-                 shouldRun = true; // Never run before
-            } else {
-                const hoursSinceLastRun = (now.getTime() - target.lastSyncAt.getTime()) / (1000 * 60 * 60);
 
-                switch (target.scrapeFrequency) {
+        // 3. Filter schedule logistics and enqueue
+        for (const task of tasks) {
+            let shouldRun = false;
+
+            if (taskId) {
+                shouldRun = true; // Manual override
+            } else if (!task.lastSyncAt) {
+                shouldRun = true; // Never run before
+            } else {
+                const hoursSinceLastRun = (now.getTime() - task.lastSyncAt.getTime()) / (1000 * 60 * 60);
+
+                switch (task.scrapeFrequency) {
                     case 'hourly': shouldRun = hoursSinceLastRun >= 1; break;
                     case 'every_6h': shouldRun = hoursSinceLastRun >= 6; break;
                     case 'daily': shouldRun = hoursSinceLastRun >= 24; break;
@@ -62,17 +62,17 @@ export async function GET(req: Request) {
 
             if (shouldRun) {
                 // Enqueue to BullMQ
-                await scrapingQueue.add(`scrape-${target.id}-${Date.now()}`, {
-                    targetId: target.id,
-                    locationId: target.locationId
+                await scrapingQueue.add(`scrape-${task.id}-${Date.now()}`, {
+                    taskId: task.id,
+                    locationId: task.locationId
                 });
-                enqueuedJobs.push(target.id);
+                enqueuedJobs.push(task.id);
             }
         }
 
         return NextResponse.json({
             status: 'success',
-            reviewedTargets: targets.length,
+            reviewedTasks: tasks.length,
             enqueuedJobs: enqueuedJobs.length,
             jobs: enqueuedJobs,
         });

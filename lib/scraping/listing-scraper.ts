@@ -1,5 +1,5 @@
 import db from '@/lib/db';
-import { ScrapingTarget, ScrapingRun } from '@prisma/client';
+import { ScrapingTask, ScrapingConnection, ScrapingRun } from '@prisma/client';
 import { PageFetcher } from './page-fetcher';
 
 export interface RawListing {
@@ -19,18 +19,20 @@ export interface RawListing {
     rawHtml?: string;
 }
 
+export type ScrapeTaskWithConnection = ScrapingTask & { connection: ScrapingConnection };
+
 export class ListingScraperService {
     
     /**
-     * Main entry point to scrape a specific target configuration
+     * Main entry point to scrape a specific task configuration
      */
-    static async scrapeTarget(target: ScrapingTarget) {
-        console.log(`[ListingScraper] Starting scrape for target: ${target.name} (${target.id})`);
+    static async scrapeTask(task: ScrapeTaskWithConnection) {
+        console.log(`[ListingScraper] Starting scrape for task: ${task.name} (${task.id})`);
         
         // 1. Create a run record
         const run = await db.scrapingRun.create({
             data: {
-                targetId: target.id,
+                taskId: task.id,
                 status: 'running',
             }
         });
@@ -44,36 +46,37 @@ export class ListingScraperService {
 
         try {
             // Which URLs are we scraping?
-            const urlsToScrape = target.targetUrls && target.targetUrls.length > 0 
-                ? target.targetUrls.map(path => `${target.baseUrl}${path}`) 
-                : [target.baseUrl];
+            const urlsToScrape = task.targetUrls && task.targetUrls.length > 0 
+                ? task.targetUrls // If absolute paths are provided in targetUrls
+                : []; // We assume targetUrls are always fully qualified URLs now for simplicity since we removed baseUrl from Schema
 
             for (const url of urlsToScrape) {
                 console.log(`[ListingScraper] Fetching index url: ${url}`);
                 
-                // TODO: Paging logic (using target.maxPagesPerRun loop)
+                // TODO: Paging logic (using task.maxPagesPerRun loop)
                 // For this V1 implementation, we will just fetch the single provided array URL.
 
                 const content = await fetcher.fetchContent({
                     url: url,
-                    username: target.authUsername || undefined,
-                    password: target.authPassword || undefined,
+                    username: task.connection.authUsername || undefined,
+                    password: task.connection.authPassword || undefined,
+                    // FIXME: We will pass connection.sessionState here when PageFetcher supports it in Stage 2
                 });
                 
                 pagesScraped++;
                 
-                // 2. Delegate Extraction based on target configuration domain/mode
+                // 2. Delegate Extraction based on connection platform/mode
                 let rawListings: RawListing[] = [];
                 
-                if (target.domain === 'bazaraki.com') {
+                if (task.connection.platform === 'bazaraki') {
                     const { extractBazarakiIndex } = await import('./extractors/bazaraki');
                     rawListings = await extractBazarakiIndex(content, url, fetcher);
-                } else if (target.extractionMode === 'ai_extraction') {
+                } else if (task.extractionMode === 'ai_extraction') {
                     // Fallback to strict AI Generic Extractor
                     const { extractGenericAI } = await import('./extractors/generic');
-                    rawListings = await extractGenericAI(content, url, target.aiInstructions || '');
+                    rawListings = await extractGenericAI(content, url, task.aiInstructions || '');
                 } else {
-                    console.warn(`[ListingScraper] No extractor configured for domain ${target.domain}`);
+                    console.warn(`[ListingScraper] No extractor configured for platform ${task.connection.platform}`);
                     continue;
                 }
 
@@ -83,7 +86,7 @@ export class ListingScraperService {
                 for (const listing of rawListings) {
                     try {
                         // Deduplication Check
-                        const isDuplicate = await this.checkDuplicates(listing, target.locationId);
+                        const isDuplicate = await this.checkDuplicates(listing, task.locationId);
                         
                         if (isDuplicate) {
                             duplicatesFound++;
@@ -91,7 +94,7 @@ export class ListingScraperService {
                         }
 
                         // Create ProspectLead in the Lead Inbox
-                        await this.createProspect(listing, target.id, target.locationId);
+                        await this.createProspect(listing, task.id, task.locationId);
                         leadsCreated++;
 
                     } catch (err: any) {
@@ -118,9 +121,9 @@ export class ListingScraperService {
                 }
             });
 
-            // Update Target Stats
-            await db.scrapingTarget.update({
-                where: { id: target.id },
+            // Update Task Stats
+            await db.scrapingTask.update({
+                where: { id: task.id },
                 data: {
                     lastSyncAt: new Date(),
                     lastSyncStatus: 'success',
@@ -131,7 +134,7 @@ export class ListingScraperService {
             return { pagesScraped, listingsFound, leadsCreated, duplicatesFound, errors };
 
         } catch (error: any) {
-            console.error(`[ListingScraper] Target ${target.id} failed deeply:`, error);
+            console.error(`[ListingScraper] Task ${task.id} failed deeply:`, error);
             
             await db.scrapingRun.update({
                 where: { id: run.id },
@@ -147,8 +150,8 @@ export class ListingScraperService {
                 }
             });
 
-            await db.scrapingTarget.update({
-                where: { id: target.id },
+            await db.scrapingTask.update({
+                where: { id: task.id },
                 data: {
                     lastSyncAt: new Date(),
                     lastSyncStatus: 'failed',
@@ -205,7 +208,7 @@ export class ListingScraperService {
     /**
      * Maps the extracted Listing into a Phase 1 Lead Inbox (ProspectLead) entity
      */
-    static async createProspect(listing: RawListing, targetId: string, locationId: string) {
+    static async createProspect(listing: RawListing, taskId: string, locationId: string) {
         
         let messageBody = `Listing Title: ${listing.title}\n`;
         messageBody += `Type: ${listing.listingType} / ${listing.propertyType}\n`;

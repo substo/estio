@@ -1,4 +1,4 @@
-import { getScrapingTargets } from './actions';
+import { getScrapingConnections, getScrapingTasks } from './actions';
 import db from '@/lib/db';
 import { auth } from '@clerk/nextjs/server';
 import { Button } from '@/components/ui/button';
@@ -7,7 +7,6 @@ import Link from 'next/link';
 export default async function ProspectingSettingsPage() {
     const { userId } = await auth();
     
-    // Quick location resolution
     const user = await db.user.findUnique({
         where: { clerkId: userId || '' },
         include: { locations: { take: 1 } }
@@ -16,44 +15,93 @@ export default async function ProspectingSettingsPage() {
     const locationId = user?.locations?.[0]?.id;
     if (!locationId) return <div>Unauthorized</div>;
 
-    const targets = await getScrapingTargets(locationId);
+    const [connections, tasks] = await Promise.all([
+        getScrapingConnections(locationId),
+        getScrapingTasks(locationId)
+    ]);
 
     return (
         <div className="p-6">
-            <div className="flex justify-between items-center mb-6">
-                <div>
-                    <h1 className="text-2xl font-bold">Prospecting Targets</h1>
-                    <p className="text-muted-foreground mt-1 text-sm">
-                        Manage external platforms to scrape listings and populate your Lead Inbox.
-                    </p>
-                </div>
-                <Button>Add Target</Button>
+            <div className="mb-6">
+                <h1 className="text-2xl font-bold">Prospecting Infrastructure</h1>
+                <p className="text-muted-foreground mt-1 text-sm">
+                    Manage platform connections and scheduled scraping tasks to populate your Lead Inbox.
+                </p>
             </div>
 
-            <div className="grid gap-4 mt-8">
-                {targets.length === 0 ? (
-                    <div className="text-center p-12 border rounded-lg bg-card text-muted-foreground">
-                        No targets configured yet. Click "Add Target" to begin.
+            {/* Platform Connections Section */}
+            <div className="mt-8 mb-4 flex justify-between items-center border-b pb-2">
+                <h2 className="text-xl font-semibold">1. Platform Connections</h2>
+                <Link href="/admin/settings/prospecting/connections/new">
+                    <Button variant="outline" size="sm">Add Connection</Button>
+                </Link>
+            </div>
+            
+            <div className="grid gap-4 mb-8">
+                {connections.length === 0 ? (
+                    <div className="text-center p-8 border rounded-lg bg-card text-muted-foreground text-sm">
+                        No platform connections configured. Create one to begin scraping.
                     </div>
                 ) : (
-                    targets.map((target: any) => (
-                        <div key={target.id} className="p-4 border rounded-lg bg-card flex justify-between items-center">
+                    connections.map((conn: any) => (
+                        <div key={conn.id} className="p-4 border rounded-lg bg-card flex justify-between items-center">
                             <div>
-                                <h3 className="font-medium text-lg flex items-center gap-2">
-                                    {target.name}
-                                    {!target.enabled && (
+                                <h3 className="font-medium text-base flex items-center gap-2">
+                                    {conn.name}
+                                    {!conn.enabled && (
                                         <span className="text-xs font-normal bg-muted px-2 py-0.5 rounded text-muted-foreground">Disabled</span>
                                     )}
                                 </h3>
                                 <p className="text-sm text-muted-foreground mt-1">
-                                    Domain: {target.domain}
+                                    Platform: {conn.platform.toUpperCase()}
                                 </p>
-                                <div className="text-xs flex gap-4 mt-3 text-muted-foreground">
-                                    <span>Sync: {target.scrapeFrequency}</span>
-                                    <span>Mode: {target.extractionMode}</span>
-                                    {target.lastSyncAt ? (
-                                        <span className={target.lastSyncStatus === 'success' ? 'text-green-600' : 'text-red-600'}>
-                                            Last Sync: {target.lastSyncAt.toLocaleString()} ({target.lastSyncStatus})
+                                <div className="text-xs flex gap-4 mt-2 text-muted-foreground">
+                                    <span>Auth Configured: {conn.authUsername ? 'Yes' : 'No'}</span>
+                                    <span>Session Cached: {conn.sessionState ? 'Yes' : 'No'}</span>
+                                </div>
+                            </div>
+                            <div className="flex gap-2">
+                                <Link href={`/admin/settings/prospecting/connections/${conn.id}`}>
+                                    <Button variant="ghost" size="sm">Edit</Button>
+                                </Link>
+                            </div>
+                        </div>
+                    ))
+                )}
+            </div>
+
+            {/* Scheduled Tasks Section */}
+            <div className="mt-8 mb-4 flex justify-between items-center border-b pb-2">
+                <h2 className="text-xl font-semibold">2. Scheduled Tasks</h2>
+                <Link href="/admin/settings/prospecting/tasks/new">
+                    <Button size="sm">Add Task</Button>
+                </Link>
+            </div>
+
+            <div className="grid gap-4">
+                {tasks.length === 0 ? (
+                    <div className="text-center p-8 border rounded-lg bg-card text-muted-foreground text-sm">
+                        No target tasks scheduled.
+                    </div>
+                ) : (
+                    tasks.map((task: any) => (
+                        <div key={task.id} className="p-4 border rounded-lg bg-card flex justify-between items-center">
+                            <div>
+                                <h3 className="font-medium text-base flex items-center gap-2">
+                                    {task.name}
+                                    {!task.enabled && (
+                                        <span className="text-xs font-normal bg-muted px-2 py-0.5 rounded text-muted-foreground">Disabled</span>
+                                    )}
+                                </h3>
+                                <p className="text-sm text-muted-foreground mt-1">
+                                    Uses Connection: <strong>{task.connection?.name || 'Unknown'}</strong>
+                                </p>
+                                <div className="text-xs flex gap-4 mt-2 text-muted-foreground">
+                                    <span>Sync: {task.scrapeFrequency}</span>
+                                    <span>Mode: {task.extractionMode}</span>
+                                    {task.lastSyncAt ? (
+                                        <span className={task.lastSyncStatus === 'success' ? 'text-green-600' : 'text-red-600'}>
+                                            Last Sync: {task.lastSyncAt.toLocaleString()} ({task.lastSyncStatus})
                                         </span>
                                     ) : (
                                         <span>Never synced</span>
@@ -61,7 +109,9 @@ export default async function ProspectingSettingsPage() {
                                 </div>
                             </div>
                             <div className="flex gap-2">
-                                <Button variant="outline" size="sm">Edit</Button>
+                                <Link href={`/admin/settings/prospecting/tasks/${task.id}`}>
+                                    <Button variant="outline" size="sm">Edit</Button>
+                                </Link>
                             </div>
                         </div>
                     ))
