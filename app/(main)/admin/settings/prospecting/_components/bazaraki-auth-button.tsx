@@ -11,6 +11,8 @@ interface BazarakiAuthButtonProps {
 
 export function BazarakiAuthButton({ credentialId, phone }: BazarakiAuthButtonProps) {
     const [loading, setLoading] = useState(false);
+    const [statusMessage, setStatusMessage] = useState('');
+    const [qrCodeData, setQrCodeData] = useState<string | null>(null);
     const router = useRouter();
 
     const handleAuth = async () => {
@@ -21,40 +23,91 @@ export function BazarakiAuthButton({ credentialId, phone }: BazarakiAuthButtonPr
 
         try {
             setLoading(true);
+            setQrCodeData(null);
+            setStatusMessage('Connecting to server...');
+
             const res = await fetch('/api/admin/bazaraki-auth', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ credentialId, phone }),
             });
 
-            const data = await res.json();
+            if (!res.body) throw new Error('ReadableStream not supported by browser.');
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
             
-            if (data.success) {
-                alert('Successfully authenticated with Bazaraki! Session state saved.');
-                router.refresh();
-            } else {
-                alert(`Failed: ${data.error}. Check server logs for the HTML dump.`);
+            let done = false;
+            while (!done) {
+                const { value, done: readerDone } = await reader.read();
+                done = readerDone;
+                if (value) {
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.replace('data: ', ''));
+                                
+                                if (data.message) setStatusMessage(data.message);
+                                
+                                if (data.status === 'qr_ready' && data.qrCode) {
+                                    setQrCodeData(data.qrCode);
+                                } else if (data.status === 'error') {
+                                    alert(`Failed: ${data.error}`);
+                                    setLoading(false);
+                                } else if (data.status === 'success') {
+                                    alert('Successfully authenticated with Bazaraki! Session state saved.');
+                                    setLoading(false);
+                                    router.refresh();
+                                }
+                            } catch (e) {
+                                console.error('Failed to parse stream chunk', line);
+                            }
+                        }
+                    }
+                }
             }
         } catch (e: any) {
             alert(`Error: ${e.message}`);
-        } finally {
             setLoading(false);
         }
     };
 
     return (
         <div className="mt-4 p-4 border rounded-md bg-muted/30">
-            <h3 className="font-semibold text-sm mb-2">Remote Authentication</h3>
-            <p className="text-xs text-muted-foreground mb-4">
-                Clicking this will spin up a remote browser to attempt a WhatsApp login. You will have up to 2 minutes to tap "Send" on the WhatsApp message on your phone.
-            </p>
-            <Button 
-                onClick={handleAuth} 
-                disabled={loading || !phone}
-                variant="default"
-            >
-                {loading ? 'Waiting for WhatsApp approval (up to 2 mins)...' : 'Authenticate via WhatsApp'}
-            </Button>
+            <h3 className="font-semibold text-sm mb-2">Remote WhatsApp Authentication</h3>
+            
+            {!qrCodeData ? (
+                <>
+                    <p className="text-xs text-muted-foreground mb-4">
+                        Click below to spin up a background headless browser. Bazaraki will generate a QR code that will stream here.
+                    </p>
+                    <Button 
+                        onClick={handleAuth} 
+                        disabled={loading || !phone}
+                        variant="default"
+                    >
+                        {loading ? 'Connecting...' : 'Generate WhatsApp QR Code'}
+                    </Button>
+                </>
+            ) : (
+                <div className="flex flex-col items-center p-4 bg-white border rounded shadow-sm gap-4">
+                    <p className="text-sm font-semibold text-black">Scan the QR Code with your Phone Camera</p>
+                    <img src={qrCodeData} alt="Bazaraki Auth QR Code" className="w-64 h-64 border rounded" />
+                    <p className="text-xs text-gray-600 text-center max-w-sm">
+                        Tap the link that appears on your phone screen, then hit "Send" in WhatsApp. 
+                        Do not close this page. Waiting for approval (up to 90s)...
+                    </p>
+                </div>
+            )}
+            
+            {statusMessage && (
+                <p className="text-xs text-muted-foreground mt-4 italic bg-muted p-2 rounded">
+                    Status: {statusMessage}
+                </p>
+            )}
         </div>
     );
 }
