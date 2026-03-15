@@ -191,3 +191,12 @@ export async function extractBazarakiIndex(content: string, baseUrl: string, fet
 
     return { listings, interactionsUsed, nextPageUrl };
 }
+
+/**
+ * Quick extractor for deep scrape descriptions
+ */
+export function extractBazarakiDescription(html: string): string {
+    const $ = cheerio.load(html);
+    const description = $('.announcement-description').text();
+    return description ? description.trim() : '';
+}

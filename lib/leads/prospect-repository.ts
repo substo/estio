@@ -27,6 +27,9 @@ export interface ProspectInboxRow {
   status: string;
   createdContactId: string | null;
   createdAt: string;
+  isAgency: boolean;
+  scrapedListingsCount: number;
+  scrapedListings: { id: string; url: string; title: string | null; platform: string; price: number | null }[];
 }
 
 export interface ProspectInboxResult {
@@ -67,6 +70,12 @@ export async function listProspectInbox(
       where,
       take: params.limit || 25,
       skip: params.skip || 0,
+      include: {
+        scrapedListings: {
+          select: { id: true, url: true, title: true, platform: true, price: true },
+          take: 5 // Just preview the first 5 in the inbox list
+        }
+      },
       orderBy: [{ aiScore: 'desc' }, { createdAt: 'desc' }],
     }),
     db.prospectLead.count({ where }),
@@ -87,6 +96,9 @@ export async function listProspectInbox(
       status: r.status,
       createdContactId: r.createdContactId,
       createdAt: r.createdAt.toISOString(),
+      isAgency: r.isAgency,
+      scrapedListingsCount: (r as any).scrapedListings?.length || 0,
+      scrapedListings: (r as any).scrapedListings || [],
     })),
     total,
   };

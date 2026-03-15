@@ -9,9 +9,11 @@ const QUEUE_NAME = 'scraping-queue';
 
 // Define the Job Data Interface
 export interface ScrapingJobData {
-    taskId: string;
+    taskId?: string; // Optional for deep scrapes
     locationId: string;
     pageLimit?: number;
+    type?: 'index_scrape' | 'deep_scrape';
+    limit?: number;
 }
 
 // 1. Queue Instance (Producer) - Lazy Loaded via Dynamic Import
@@ -53,11 +55,20 @@ export async function initScrapingWorker() {
     const { Worker } = await import('bullmq');
 
     worker = new Worker<ScrapingJobData>(QUEUE_NAME, async (job: any) => {
-        const { taskId, locationId, pageLimit } = job.data;
-        console.log(`[Scraping] ▶ Processing job ${job.id} — task=${taskId}, pageLimit=${pageLimit ?? 'unlimited'}`);
+        const { taskId, locationId, pageLimit, type, limit } = job.data;
+        console.log(`[Scraping] ▶ Processing job ${job.id} — task=${taskId ?? 'N/A'}, type=${type || 'index_scrape'}`);
 
         try {
-            // Dynamic import to avoid circular dependencies
+            // Check if this is a Deep Scrape job
+            if (type === 'deep_scrape') {
+                const { DeepScraperService } = await import("@/lib/scraping/deep-scraper");
+                const result = await DeepScraperService.processPendingListings(locationId, limit || 20);
+                console.log(`[Scraping] ✅ Deep Scrape completed:`, JSON.stringify(result));
+                return;
+            }
+
+            // Normal Index Scrape Logic
+            if (!taskId) throw new Error("Index scrape requires a taskId");
             const { ListingScraperService } = await import("@/lib/scraping/listing-scraper");
             
             const task = await db.scrapingTask.findUnique({
@@ -88,16 +99,18 @@ export async function initScrapingWorker() {
             console.error(`[Scraping] ❌ Task ${taskId} failed:`, error.message);
             console.error(`[Scraping] Stack:`, error.stack);
             
-            // Log the error to the database run (fallback if not already handled by ListingScraperService)
+            // Log the error to the database run (fallback if not already handled by Service)
             try {
-                await db.scrapingRun.create({
-                    data: {
-                        taskId,
-                        status: 'failed',
-                        errorLog: error.message || 'Unknown error',
-                        completedAt: new Date()
-                    }
-                });
+                if (taskId) {
+                    await db.scrapingRun.create({
+                        data: {
+                            taskId,
+                            status: 'failed',
+                            errorLog: error.message || 'Unknown error',
+                            completedAt: new Date()
+                        }
+                    });
+                }
             } catch (dbErr: any) {
                 console.error(`[Scraping] ❌ Failed to write error to DB:`, dbErr.message);
             }

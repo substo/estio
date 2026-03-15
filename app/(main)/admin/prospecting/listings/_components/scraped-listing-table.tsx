@@ -6,15 +6,15 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { formatDistanceToNow } from 'date-fns';
-import { type ProspectInboxRow } from '@/lib/leads/prospect-repository';
-import { LeadScoreBadge } from '@/app/(main)/admin/contacts/_components/lead-score-badge';
+import { type ScrapedListingRow } from '@/lib/leads/scraped-listing-repository';
 import { LeadSourceBadge } from '@/app/(main)/admin/contacts/_components/lead-source-badge';
-import { acceptProspect, rejectProspect, bulkAccept, bulkReject } from '../actions';
 import { toast } from 'sonner';
-import { Loader2, Check, X, ExternalLink } from 'lucide-react';
+import { Loader2, Check, ExternalLink, X, Building2, UserCheck, PhoneCall } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { acceptScrapedListing, rejectScrapedListing, bulkAcceptListings, bulkRejectListings } from '../actions';
+import Link from 'next/link';
 
-export function ProspectInboxTable({ items, total, locationId }: { items: ProspectInboxRow[], total: number, locationId: string }) {
+export function ScrapedListingTable({ items, total, locationId }: { items: ScrapedListingRow[], total: number, locationId: string }) {
     const router = useRouter();
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [isPending, startTransition] = useTransition();
@@ -36,9 +36,9 @@ export function ProspectInboxTable({ items, total, locationId }: { items: Prospe
 
     const handleAccept = (id: string) => {
         startTransition(async () => {
-            const res = await acceptProspect(id);
+            const res = await acceptScrapedListing(id);
             if (res.success) {
-                toast.success('Prospect accepted and converted to Contact');
+                toast.success('Listing Accepted');
                 setSelectedIds(prev => { const n = new Set(prev); n.delete(id); return n; });
             } else {
                 toast.error(res.message);
@@ -48,9 +48,9 @@ export function ProspectInboxTable({ items, total, locationId }: { items: Prospe
 
     const handleReject = (id: string) => {
         startTransition(async () => {
-            const res = await rejectProspect(id);
+            const res = await rejectScrapedListing(id);
             if (res.success) {
-                toast.success('Prospect rejected');
+                toast.success('Listing rejected');
                 setSelectedIds(prev => { const n = new Set(prev); n.delete(id); return n; });
             } else {
                 toast.error(res.message);
@@ -61,12 +61,12 @@ export function ProspectInboxTable({ items, total, locationId }: { items: Prospe
     const handleBulkAccept = () => {
         if (selectedIds.size === 0) return;
         startTransition(async () => {
-            const res = await bulkAccept(Array.from(selectedIds));
+            const res = await bulkAcceptListings(Array.from(selectedIds));
             if (res.success) {
-                toast.success(`Accepted ${res.count} prospects`);
+                toast.success(`Accepted ${res.count} listings`);
                 setSelectedIds(new Set());
             } else {
-                toast.error((res as any).message || 'Failed to accept prospects');
+                toast.error((res as any).message || 'Failed to accept listings');
             }
         });
     };
@@ -74,12 +74,12 @@ export function ProspectInboxTable({ items, total, locationId }: { items: Prospe
     const handleBulkReject = () => {
         if (selectedIds.size === 0) return;
         startTransition(async () => {
-            const res = await bulkReject(Array.from(selectedIds));
+            const res = await bulkRejectListings(Array.from(selectedIds));
             if (res.success) {
-                toast.success(`Rejected ${res.count} prospects`);
+                toast.success(`Rejected ${res.count} listings`);
                 setSelectedIds(new Set());
             } else {
-                toast.error((res as any).message || 'Failed to reject prospects');
+                toast.error((res as any).message || 'Failed to reject listings');
             }
         });
     };
@@ -88,9 +88,9 @@ export function ProspectInboxTable({ items, total, locationId }: { items: Prospe
         return (
             <div className="flex flex-col items-center justify-center p-12 text-center border rounded-xl bg-card border-dashed">
                 <div className="text-4xl mb-4">Inbox Zero 🎉</div>
-                <h3 className="text-lg font-semibold">No prospects found</h3>
+                <h3 className="text-lg font-semibold">No listings found</h3>
                 <p className="text-muted-foreground mt-2 max-w-sm">
-                    You've triaged all current leads or your filters are too restrictive.
+                    You've triaged all current listings or your filters are too restrictive.
                 </p>
             </div>
         );
@@ -102,10 +102,10 @@ export function ProspectInboxTable({ items, total, locationId }: { items: Prospe
                 <div className="flex items-center gap-4 p-3 bg-muted/40 rounded-lg border">
                     <div className="text-sm font-medium">{selectedIds.size} selected</div>
                     <Button size="sm" variant="default" onClick={handleBulkAccept} disabled={isPending}>
-                        <Check className="h-4 w-4 mr-2" /> Accept All
+                        <Check className="h-4 w-4 mr-2" /> Mark Accepted
                     </Button>
                     <Button size="sm" variant="destructive" onClick={handleBulkReject} disabled={isPending}>
-                        <X className="h-4 w-4 mr-2" /> Reject All
+                        <X className="h-4 w-4 mr-2" /> Mark Rejected
                     </Button>
                 </div>
             )}
@@ -120,17 +120,17 @@ export function ProspectInboxTable({ items, total, locationId }: { items: Prospe
                                     onCheckedChange={toggleAll}
                                 />
                             </TableHead>
-                            <TableHead>Prospect</TableHead>
-                            <TableHead>Contact Info</TableHead>
-                            <TableHead>Source</TableHead>
-                            <TableHead>AI Score</TableHead>
+                            <TableHead>Listing</TableHead>
+                            <TableHead>Location</TableHead>
+                            <TableHead>Price</TableHead>
+                            <TableHead>Poster / Source</TableHead>
                             <TableHead>Status</TableHead>
                             <TableHead className="text-right">Actions</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
                         {items.map((item) => {
-                            const isNew = item.status === 'new' || item.status === 'reviewing';
+                            const isNew = item.status === 'NEW' || item.status === 'REVIEWING' || item.status === 'new';
                             return (
                                 <TableRow key={item.id} className={isPending && selectedIds.has(item.id) ? 'opacity-50' : ''}>
                                     <TableCell className="text-center">
@@ -141,56 +141,67 @@ export function ProspectInboxTable({ items, total, locationId }: { items: Prospe
                                         />
                                     </TableCell>
                                     <TableCell>
-                                        <div className="font-medium">{item.name || 'Unknown Name'}</div>
-                                        <div className="text-xs text-muted-foreground">
-                                            {formatDistanceToNow(new Date(item.createdAt), { addSuffix: true })}
-                                        </div>
-                                    </TableCell>
-                                    <TableCell>
-                                        <div className="text-sm">{item.email || '-'}</div>
-                                        <div className="text-sm text-muted-foreground">{item.phone || '-'}</div>
-                                    </TableCell>
-                                    <TableCell>
-                                        <div className="flex items-center gap-2">
-                                            <LeadSourceBadge source={item.source} />
-                                            {item.sourceUrl && (
-                                                <a href={item.sourceUrl} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-primary">
-                                                    <ExternalLink className="h-4 w-4" />
-                                                </a>
+                                        <div className="flex items-center gap-3">
+                                            {item.images?.[0] ? (
+                                                <img src={item.images[0]} alt="Property" className="w-12 h-12 rounded object-cover" />
+                                            ) : (
+                                                <div className="w-12 h-12 bg-muted rounded flex items-center justify-center text-xs text-muted-foreground">No img</div>
                                             )}
+                                            <div>
+                                                <a href={item.url} target="_blank" rel="noreferrer" className="font-medium hover:underline flex items-center gap-1 line-clamp-1">
+                                                    {item.title || 'Untitled Listing'}
+                                                </a>
+                                                <div className="text-xs text-muted-foreground">
+                                                    {formatDistanceToNow(new Date(item.createdAt), { addSuffix: true })}
+                                                </div>
+                                            </div>
                                         </div>
                                     </TableCell>
                                     <TableCell>
-                                        <LeadScoreBadge score={item.aiScore || 0} />
+                                        <div className="text-sm">{item.locationText || '-'}</div>
+                                    </TableCell>
+                                    <TableCell>
+                                        <div className="font-semibold">{item.price ? `€${item.price.toLocaleString()}` : 'POA'}</div>
+                                        <div className="text-xs text-muted-foreground">{item.propertyType || 'Unknown'}</div>
+                                    </TableCell>
+                                    <TableCell>
+                                        <div className="flex flex-col gap-1 items-start">
+                                            {item.prospectLeadId ? (
+                                                <div className="flex items-center gap-1">
+                                                    {item.prospectAgency ? <Building2 className="w-3 h-3 text-blue-500" /> : <UserCheck className="w-3 h-3 text-green-500" />}
+                                                    <Link href={`/admin/prospecting/people?q=${item.prospectName}`} className="text-sm font-medium hover:underline">
+                                                        {item.prospectName || 'Unknown Prospect'}
+                                                    </Link>
+                                                </div>
+                                            ) : (
+                                                <span className="text-sm text-muted-foreground">Unlinked</span>
+                                            )}
+                                            <Badge variant="outline" className="text-[10px] mt-1">{item.platform}</Badge>
+                                        </div>
                                     </TableCell>
                                     <TableCell>
                                         <Badge variant={
-                                            item.status === 'accepted' ? 'default' :
-                                            item.status === 'rejected' ? 'destructive' :
+                                            item.status === 'ACCEPTED' ? 'default' :
+                                            item.status === 'REJECTED' ? 'destructive' :
                                             'outline'
                                         }>
                                             {item.status.toUpperCase()}
                                         </Badge>
-                                        {item.dedupStatus === 'duplicate' && (
-                                            <Badge variant="secondary" className="ml-2 text-[10px]">DUPLICATE</Badge>
-                                        )}
                                     </TableCell>
                                     <TableCell className="text-right">
                                         {isNew ? (
                                             <div className="flex justify-end gap-2">
-                                                <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => handleAccept(item.id)} disabled={isPending}>
+                                                <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="Accept" onClick={() => handleAccept(item.id)} disabled={isPending}>
                                                     <Check className="h-4 w-4 text-green-600" />
                                                 </Button>
-                                                <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => handleReject(item.id)} disabled={isPending}>
+                                                <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="Reject" onClick={() => handleReject(item.id)} disabled={isPending}>
                                                     <X className="h-4 w-4 text-red-600" />
                                                 </Button>
                                             </div>
                                         ) : (
-                                            item.status === 'accepted' && item.createdContactId ? (
-                                                <Button size="sm" variant="outline" onClick={() => window.open(`/admin/contacts?contactId=${item.createdContactId}`, '_blank')}>
-                                                    View Contact
-                                                </Button>
-                                            ) : null
+                                             <Button size="sm" variant="ghost" className="h-8 w-8 p-0" asChild title="View Market listing">
+                                                 <a href={item.url} target="_blank" rel="noreferrer"><ExternalLink className="h-4 w-4 text-muted-foreground"/></a>
+                                             </Button>
                                         )}
                                     </TableCell>
                                 </TableRow>
@@ -201,7 +212,7 @@ export function ProspectInboxTable({ items, total, locationId }: { items: Prospe
             </div>
             
             <div className="text-sm text-muted-foreground text-center">
-                Showing {items.length} of {total} prospects
+                Showing {items.length} of {total} listings
             </div>
         </div>
     );

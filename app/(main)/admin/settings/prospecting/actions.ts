@@ -261,6 +261,22 @@ export async function manualTriggerScrape(id: string, locationId: string, pageLi
     return true;
 }
 
+export async function manualTriggerDeepScrape(locationId: string, limit?: number) {
+    const { auth } = await import('@clerk/nextjs/server');
+    const { userId } = await auth();
+    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
+    if (!isAdmin) throw new Error("Unauthorized");
+
+    // We can piggy-back on the same BullMQ scraping queue but with a distinct job name format
+    await scrapingQueue.add(`manual-deep-scrape-${locationId}-${Date.now()}`, {
+        type: 'deep_scrape',
+        locationId: locationId,
+        limit: limit || 50
+    });
+
+    return true;
+}
+
 export async function getScrapingRuns(taskId: string, limit = 10) {
     if (!taskId) return [];
     return await db.scrapingRun.findMany({

@@ -596,6 +596,7 @@ async function persistSelectionAiExecution(args: {
     await db.agentExecution.create({
         data: {
             conversationId: args.conversationInternalId,
+            locationId: location.id,
             taskTitle: args.taskTitle,
             taskStatus: "done",
             status: "success",
@@ -6528,6 +6529,7 @@ export async function generatePlanAction(conversationId: string, contactId: stri
             await db.agentExecution.create({
                 data: {
                     conversationId: conversation.id,
+                    locationId: location.id,
                     taskId: 'PLANNING', // Special ID for planning phase
                     taskTitle: "Generate Mission Plan",
                     taskStatus: "done",
@@ -6908,31 +6910,34 @@ export async function getAggregateAIUsage() {
             sourceAndSkillUsageRows,
             txTodayT, txMonthT, txAllTimeT,
             txTodayE, txMonthE, txAllTimeE,
+            scraperTodayUsage,
+            scraperMonthUsage,
+            scraperAllTimeUsage,
         ] = await Promise.all([
-            // --- AI Agent usage ---
+            // --- AI Agent usage (Global by Location) ---
             db.agentExecution.aggregate({
                 where: {
-                    conversation: { locationId: location.id },
+                    locationId: location.id,
                     createdAt: { gte: startOfToday }
                 },
                 _sum: { totalTokens: true, cost: true }
             }),
             db.agentExecution.aggregate({
                 where: {
-                    conversation: { locationId: location.id },
+                    locationId: location.id,
                     createdAt: { gte: startOfMonth }
                 },
                 _sum: { totalTokens: true, cost: true }
             }),
             db.agentExecution.aggregate({
                 where: {
-                    conversation: { locationId: location.id },
+                    locationId: location.id,
                 },
                 _sum: { totalTokens: true, cost: true }
             }),
             db.agentExecution.aggregate({
                 where: {
-                    conversation: { locationId: location.id },
+                    locationId: location.id,
                     taskTitle: { startsWith: "automation:" },
                     createdAt: { gte: startOfToday },
                 },
@@ -6940,7 +6945,7 @@ export async function getAggregateAIUsage() {
             }),
             db.agentExecution.aggregate({
                 where: {
-                    conversation: { locationId: location.id },
+                    locationId: location.id,
                     taskTitle: { startsWith: "automation:" },
                     createdAt: { gte: startOfMonth },
                 },
@@ -6948,7 +6953,7 @@ export async function getAggregateAIUsage() {
             }),
             db.agentExecution.aggregate({
                 where: {
-                    conversation: { locationId: location.id },
+                    locationId: location.id,
                     taskTitle: { startsWith: "automation:" },
                 },
                 _sum: { totalTokens: true, cost: true },
@@ -6974,7 +6979,8 @@ export async function getAggregateAIUsage() {
             db.agentExecution.groupBy({
                 by: ["conversationId"],
                 where: {
-                    conversation: { locationId: location.id },
+                    locationId: location.id,
+                    conversationId: { not: null },
                 },
                 _sum: { totalTokens: true, cost: true },
                 orderBy: [
@@ -6984,9 +6990,9 @@ export async function getAggregateAIUsage() {
                 take: 10,
             }),
             db.agentExecution.groupBy({
-                by: ["taskTitle"],
+                by: ["taskTitle", "sourceType"],
                 where: {
-                    conversation: { locationId: location.id },
+                    locationId: location.id,
                 },
                 _sum: { totalTokens: true, cost: true },
             }),
@@ -7018,6 +7024,31 @@ export async function getAggregateAIUsage() {
             db.messageTranscriptExtraction.aggregate({
                 where: { transcript: locationFilter },
                 _sum: { totalTokens: true, estimatedCostUsd: true }
+            }),
+
+            // --- Explicit Scraper Usage ---
+            db.agentExecution.aggregate({
+                where: {
+                    locationId: location.id,
+                    sourceType: "scraper",
+                    createdAt: { gte: startOfToday },
+                },
+                _sum: { totalTokens: true, cost: true },
+            }),
+            db.agentExecution.aggregate({
+                where: {
+                    locationId: location.id,
+                    sourceType: "scraper",
+                    createdAt: { gte: startOfMonth },
+                },
+                _sum: { totalTokens: true, cost: true },
+            }),
+            db.agentExecution.aggregate({
+                where: {
+                    locationId: location.id,
+                    sourceType: "scraper",
+                },
+                _sum: { totalTokens: true, cost: true },
             }),
         ]);
 
@@ -10218,6 +10249,7 @@ export async function createParsedLead(
                 await db.agentExecution.create({
                     data: {
                         conversationId: conversation.id,
+                        locationId: conversation.locationId,
                         traceId: trace.traceId,
                         spanId: trace.traceId,
                         taskTitle: "Analyze Lead Text",

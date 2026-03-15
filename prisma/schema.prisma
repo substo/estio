@@ -52,6 +52,7 @@ model Location {
   taskReminderJobs              TaskReminderJob[]
   scrapingConnections           ScrapingConnection[]
   scrapingTasks                 ScrapingTask[]
+  agentExecutions               AgentExecution[]
 
   // WhatsApp Integration (Native)
   whatsappBusinessAccountId String?
@@ -775,10 +776,12 @@ model ProspectLead {
   message   String? @db.Text
 
   // Source Attribution
-  source          String // bazaraki_scrape, facebook, instagram, manual, referral
-  sourceUrl       String? @db.Text
-  sourceListingId String?
-  sourceMetadata  Json?
+  source    String // bazaraki_scrape, facebook, instagram, manual, referral
+  sourceUrl String? @db.Text
+
+  // Scraped Platform Listings  (1 Person -> N Properties)
+  isAgency        Boolean          @default(false)
+  scrapedListings ScrapedListing[]
 
   // AI Scoring
   aiScore          Float? @default(0)
@@ -1304,8 +1307,15 @@ model ConversationParticipant {
 // AI Agent Execution History - stores complete trace of each agent action
 
 model AgentExecution {
-  id             String @id @default(cuid())
-  conversationId String
+  id String @id @default(cuid())
+
+  // Ledger Routing
+  locationId String  @default("legacy-migration-id")
+  sourceType String  @default("conversation") // conversation | scraper | image_gen
+  sourceId   String? // Dynamic ID to the polymorphic parent
+
+  // Legacy fallback
+  conversationId String?
 
   // Tracing & Observability
   traceId      String? @default(cuid())
@@ -1342,8 +1352,10 @@ model AgentExecution {
   createdAt DateTime @default(now())
 
   // Relations
-  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  location     Location      @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
 
+  @@index([locationId, sourceType, createdAt])
   @@index([conversationId])
   @@index([createdAt])
   @@index([traceId])
@@ -1951,4 +1963,30 @@ model ScrapingRun {
   task ScrapingTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
   @@index([taskId, createdAt(sort: Desc)])
+}
+
+model ScrapedListing {
+  id         String @id @default(cuid())
+  locationId String
+
+  platform   String // "bazaraki", "facebook"
+  externalId String // Original ID for deduplication
+  url        String
+
+  title        String?
+  price        Int?
+  propertyType String?
+  locationText String?
+  images       String[]
+
+  status String @default("NEW") // NEW, REVIEWING, ACCEPTED, REJECTED
+
+  // Link to the Prospect / Person
+  prospectLeadId String?
+  prospectLead   ProspectLead? @relation(fields: [prospectLeadId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([platform, externalId])
 }

@@ -65,10 +65,18 @@ export default function DashboardTopNav({ children }: { children: ReactNode }) {
                 </Link>
               </SheetClose>
               <SheetClose asChild>
-                <Link href="/admin/leads/inbox">
+                <Link href="/admin/prospecting/people">
                   <Button variant="outline" className="w-full">
                     <Layers className="mr-2 h-4 w-4" />
-                    Leads
+                    Prospects (People)
+                  </Button>
+                </Link>
+              </SheetClose>
+              <SheetClose asChild>
+                <Link href="/admin/prospecting/listings">
+                  <Button variant="outline" className="w-full">
+                    <Home className="mr-2 h-4 w-4" />
+                    Listings Inbox
                   </Button>
                 </Link>
               </SheetClose>

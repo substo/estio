@@ -71,7 +71,7 @@ export async function acceptProspect(id: string) {
             }
         });
 
-        revalidatePath('/admin/leads/inbox');
+        revalidatePath('/admin/prospecting/people');
         revalidatePath('/admin/contacts');
         return { success: true, contactId: contact.id };
     } catch (e: any) {
@@ -98,7 +98,7 @@ export async function rejectProspect(id: string) {
             }
         });
 
-        revalidatePath('/admin/leads/inbox');
+        revalidatePath('/admin/prospecting/people');
         return { success: true };
     } catch (e: any) {
         return { success: false, message: e.message || 'Server error' };
@@ -128,7 +128,7 @@ export async function bulkReject(ids: string[]) {
             }
         });
 
-        revalidatePath('/admin/leads/inbox');
+        revalidatePath('/admin/prospecting/people');
         return { success: true, count: res.count };
     } catch (e: any) {
         return { success: false, message: e.message || 'Server error' };

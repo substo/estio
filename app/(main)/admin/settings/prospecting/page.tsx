@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { RunScraperButton } from './_components/run-scraper-button';
 import { RunHistoryPanel } from './_components/run-history-panel';
+import { RunDeepScraperButton } from './_components/run-deep-scraper-button';
 
 export default async function ProspectingSettingsPage() {
     const { userId } = await auth();
@@ -32,11 +33,16 @@ export default async function ProspectingSettingsPage() {
 
     return (
         <div className="p-6">
-            <div className="mb-6">
-                <h1 className="text-2xl font-bold">Prospecting Infrastructure</h1>
-                <p className="text-muted-foreground mt-1 text-sm">
-                    Manage platform connections and scheduled scraping tasks to populate your Lead Inbox.
-                </p>
+            <div className="mb-6 flex justify-between items-start">
+                <div>
+                    <h1 className="text-2xl font-bold">Prospecting Infrastructure</h1>
+                    <p className="text-muted-foreground mt-1 text-sm">
+                        Manage platform connections and scheduled scraping tasks to populate your Lead Inbox.
+                    </p>
+                </div>
+                <div className="flex gap-2">
+                    <RunDeepScraperButton locationId={locationId} />
+                </div>
             </div>
 
             {/* Platform Connections Section */}

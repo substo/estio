@@ -252,18 +252,16 @@ export class ListingScraperService {
      * Checks if we already have this listing based on URL, or if there's an existing contact with this phone/email.
      */
     static async checkDuplicates(listing: RawListing, locationId: string): Promise<boolean> {
-        // 1. Check existing Prospects for exact URL or Source Listing ID
-        const existingProspect = await db.prospectLead.findFirst({
+        // 1. Check existing ScrapedListings for exact URL or Platform ID
+        const existingListing = await db.scrapedListing.findFirst({
             where: {
                 locationId,
-                OR: [
-                    { sourceUrl: listing.url },
-                    { sourceListingId: listing.externalId }
-                ]
+                platform: 'bazaraki', // TODO: dynamic platform from task config
+                externalId: listing.externalId
             }
         });
 
-        if (existingProspect) return true;
+        if (existingListing) return true;
 
         // 2. Check existing Contacts for Phone / Email cross-pollination
         if (listing.ownerPhone || listing.ownerEmail) {
@@ -290,28 +288,55 @@ export class ListingScraperService {
     }
 
     /**
-     * Maps the extracted Listing into a Phase 1 Lead Inbox (ProspectLead) entity
+     * Maps the extracted Listing into a ScrapedListing and ProspectLead entity
      */
     static async createProspect(listing: RawListing, taskId: string, locationId: string) {
         
-        let messageBody = `Listing Title: ${listing.title}\n`;
-        messageBody += `Type: ${listing.listingType} / ${listing.propertyType}\n`;
-        messageBody += `Location: ${listing.location}\n`;
-        messageBody += `Price: ${listing.price} ${listing.currency}\n\n`;
-        messageBody += `Description:\n${listing.description}`;
+        // 1. Default to false for initial scrape. Deep Scrape will classify this later.
+        let isAgency = false;
 
-        await db.prospectLead.create({
+        // 2. Find or Create ProspectLead based on phone/email
+        let prospectLeadId: string | null = null;
+        
+        if (listing.ownerPhone || listing.ownerEmail) {
+            const orConditions: any[] = [];
+            if (listing.ownerPhone) orConditions.push({ phone: { contains: listing.ownerPhone } });
+            if (listing.ownerEmail) orConditions.push({ email: listing.ownerEmail });
+
+            let existingProspect = await db.prospectLead.findFirst({
+                where: { locationId, OR: orConditions }
+            });
+
+            if (!existingProspect) {
+                existingProspect = await db.prospectLead.create({
+                    data: {
+                        locationId,
+                        source: 'scraper_bot',
+                        name: listing.ownerName,
+                        phone: listing.ownerPhone,
+                        email: listing.ownerEmail,
+                        status: 'new', // Lands in People Inbox
+                        isAgency
+                    }
+                });
+            }
+            prospectLeadId = existingProspect.id;
+        }
+
+        // 3. Create ScrapedListing connected to the Prospect
+        await db.scrapedListing.create({
             data: {
                 locationId,
-                source: 'scraper_bot',
-                sourceUrl: listing.url,
-                sourceListingId: listing.externalId,
-                name: listing.ownerName,
-                phone: listing.ownerPhone,
-                email: listing.ownerEmail,
-                message: messageBody,
-                status: 'new', // Lands in Phase 1 Inbox
-                sourceMetadata: listing as any // Dump raw for context verification
+                platform: 'bazaraki', // TODO: pass platform dynamically
+                externalId: listing.externalId,
+                url: listing.url,
+                title: listing.title,
+                price: listing.price,
+                propertyType: listing.listingType ? `${listing.listingType} - ${listing.propertyType}` : listing.propertyType,
+                locationText: listing.location,
+                images: listing.images || [],
+                status: 'NEW', // Lands in Listings Inbox
+                prospectLeadId
             }
         });
     }
