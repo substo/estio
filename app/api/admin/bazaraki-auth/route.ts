@@ -36,7 +36,12 @@ export async function POST(req: Request) {
             
             let browser;
             try {
-                browser = await chromium.launch({ headless: true });
+                // Use the FULL Chromium binary (not chromium_headless_shell) for proper
+                // AngularJS rendering. The headless shell doesn't execute all JS properly.
+                browser = await chromium.launch({ 
+                    headless: true,
+                    channel: 'chromium',
+                });
                 const context = await browser.newContext({
                     userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 });
