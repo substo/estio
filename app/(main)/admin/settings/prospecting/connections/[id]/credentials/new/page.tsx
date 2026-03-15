@@ -26,7 +26,7 @@ export default async function NewScrapingCredentialPage({ params }: { params: Pr
         <div className="p-6">
             <h1 className="text-2xl font-bold mb-2">Add Credential to {connection.name}</h1>
             <p className="text-muted-foreground text-sm mb-6">This account will be dynamically rotated into the pool for task assignment.</p>
-            <CredentialForm connectionId={connectionId} locationId={locationId} />
+            <CredentialForm connectionId={connectionId} locationId={locationId} platform={connection.platform} />
         </div>
     );
 }

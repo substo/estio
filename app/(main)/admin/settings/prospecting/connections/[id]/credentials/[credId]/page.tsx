@@ -31,7 +31,7 @@ export default async function EditScrapingCredentialPage({ params }: { params: P
     return (
         <div className="p-6">
             <h1 className="text-2xl font-bold mb-6">Edit Credential</h1>
-            <CredentialForm connectionId={connectionId} locationId={locationId} initialData={credential} />
+            <CredentialForm connectionId={connectionId} locationId={locationId} initialData={credential} platform={connection.platform} />
         </div>
     );
 }
