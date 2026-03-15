@@ -88,6 +88,12 @@ export async function extractBazarakiIndex(content: string, baseUrl: string, fet
 
     console.log(`[BazarakiExtractor] Found ${shallowListings.length} shallow listings on index.`);
 
+    if (shallowListings.length === 0) {
+        console.warn(`[BazarakiExtractor] ⚠️ 0 listings found! Debugging HTML output...`);
+        console.warn(`[BazarakiExtractor] Page Title: ${$('title').text()}`);
+        console.warn(`[BazarakiExtractor] HTML Snippet: ${content.substring(0, 1500)}`);
+    }
+
     // If Strategy is Shallow, we are done! Return immediately
     if (opts.strategy === 'shallow_duplication') {
         console.log(`[BazarakiExtractor] Strategy is Shallow. Returning early.`);
