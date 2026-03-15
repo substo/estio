@@ -55,14 +55,15 @@ export async function POST(req: Request) {
                 
                 // consent checkbox
                 const consentSelector = '#confirm';
-                await page.waitForSelector(consentSelector, { timeout: 5000 });
+                // The actual input checkbox is visually hidden by CSS (custom label styling)
+                await page.waitForSelector(consentSelector, { state: 'attached', timeout: 5000 });
                 // Playwright click might be intercepted if it's visually hidden or covered by a label, so force or use evaluate
                 await page.setChecked(consentSelector, true, { force: true });
                 
                 // Whatsapp button
                 const whatsappBtnSelector = 'button.sign-in__button._whatsapp';
                 await page.waitForSelector(whatsappBtnSelector, { timeout: 5000 });
-                await page.click(whatsappBtnSelector);
+                await page.click(whatsappBtnSelector, { force: true });
 
                 sendEvent({ status: 'waiting_qr', message: 'Waiting for Bazaraki to generate QR Code...' });
 
