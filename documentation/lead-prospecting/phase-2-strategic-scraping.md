@@ -326,20 +326,23 @@ Filters can be applied via URL params (district, price range, bedrooms).
 > [!WARNING]
 > Bazaraki may require clicking a "Show phone number" button to reveal the contact. This requires browser automation (Playwright click + wait). Some listings may show phone as image to prevent scraping — AI OCR may be needed as fallback.
 
-### Selector Configuration (Default)
+### Selector Configuration (New DOM via `.advert`)
+
+Recent changes to Bazaraki require using the nested `.advert__content` classes.
 
 ```json
 {
-  "listingContainer": ".announcement-block",
-  "title": ".announcement-block__title a",
-  "price": ".announcement-block__price",
-  "location": ".announcement-block__city",
-  "link": ".announcement-block__title a[href]",
-  "phone": ".js-phone-number",
-  "phoneRevealButton": ".js-show-phone-btn",
-  "nextPage": ".pagination__next"
+  "listingContainer": ".advert",
+  "title": ".advert__content-title a[href]",
+  "price": ".advert__content-price",
+  "location": ".advert__content-place",
+  "nextPage": "a.number-list-next, a.number-list-line"
 }
 ```
+
+### Bazaraki Pagination Control
+
+Because Bazaraki paginates results into indexes, the scraping task will follow the `nextPageUrl` extracted via the `nextPage` selector. The recursive fetch runs inside a `while` loop within `ListingScraperService` until the `TargetUrl` pages are exhausted or the `interactionsRemaining` budget hits 0.
 
 ---
 
