@@ -49,11 +49,18 @@ export async function POST(req: Request) {
                 // to reliably trigger from Playwright. The direct URL works without consent.
                 const encodedPhone = encodeURIComponent(phone);
                 await page.goto(`https://www.bazaraki.com/profile/login/whatsapp/?phone_number=${encodedPhone}`, { 
-                    waitUntil: 'domcontentloaded',
-                    timeout: 15000 
+                    waitUntil: 'networkidle',
+                    timeout: 30000 
                 });
 
-                sendEvent({ status: 'waiting_qr', message: 'On WhatsApp page, looking for QR code...' });
+                // Wait extra time for AngularJS to bootstrap and IPfication to load
+                await page.waitForTimeout(3000);
+                
+                // Log what's on the page for debugging
+                const initialText = await page.evaluate(() => document.body?.innerText?.substring(0, 300) || 'empty');
+                console.log(`[Bazaraki Auth] Page loaded. Body text: ${initialText}`);
+
+                sendEvent({ status: 'waiting_qr', message: 'Page loaded, looking for QR code...' });
 
                 // Look for QR code image - try multiple selectors
                 const qrSelectors = [
@@ -176,9 +183,11 @@ export async function POST(req: Request) {
                         const pages = browser.contexts()[0]?.pages() || [];
                         if (pages.length > 0) {
                             const currentUrl = pages[0].url();
-                            const html = await pages[0].content();
-                            debugInfo = `\nURL: ${currentUrl}\nDOM: ${html.substring(0, 1500)}`;
+                            // Get body innerHTML instead of full page content (which just shows <head>)
+                            const bodyHtml = await pages[0].evaluate(() => document.body?.innerHTML?.substring(0, 2000) || 'empty body');
+                            debugInfo = `\nURL: ${currentUrl}\nBody: ${bodyHtml}`;
                             console.error(`[Bazaraki Auth Error] URL: ${currentUrl}`);
+                            console.error(`[Bazaraki Auth Error] Body:`, bodyHtml.substring(0, 500));
                         }
                     } catch (e) {}
                 }
