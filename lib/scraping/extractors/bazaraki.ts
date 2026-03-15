@@ -4,7 +4,8 @@ import * as cheerio from 'cheerio';
 
 const BAZARAKI_SELECTORS = {
     listingContainer: '.advert',
-    title: '.advert__content-title a[href]',
+    title: '.advert__content-title',
+    listingLink: 'a.swiper-slide[href]',
     price: '.advert__content-price',
     location: '.advert__content-place',
     nextPage: 'a.number-list-next, a.number-list-line',
@@ -35,12 +36,7 @@ const humanDelay = async (baseMs: number, jitterMs: number) => {
  * Parses Bazaraki index pages and optionally drills down into listings based on strategy
  */
 export async function extractBazarakiIndex(content: string, baseUrl: string, fetcher: PageFetcher, options?: BazarakiExtractionOptions): Promise<BazarakiExtractionResult> {
-    console.log(`[BazarakiExtractor] Content received. Length: ${content.length} chars`);
-    console.log(`[BazarakiExtractor] Content starts with: ${content.substring(0, 200)}`);
     const $ = cheerio.load(content);
-    console.log(`[BazarakiExtractor] Cheerio loaded. Title: ${$('title').text()}`);
-    console.log(`[BazarakiExtractor] Cheerio .advert count: ${$(BAZARAKI_SELECTORS.listingContainer).length}`);
-    console.log(`[BazarakiExtractor] Cheerio body children count: ${$('body').children().length}`);
     const listings: RawListing[] = [];
     let interactionsUsed = 0;
     
@@ -55,15 +51,26 @@ export async function extractBazarakiIndex(content: string, baseUrl: string, fet
     // 1. Gather Shallow info from the index page for all methods
     const shallowListings: RawListing[] = [];
     $(BAZARAKI_SELECTORS.listingContainer).each((_, el) => {
-        const titleEl = $(el).find(BAZARAKI_SELECTORS.title);
-        const href = titleEl.attr('href');
+        // Get listing URL from swiper slide link or any <a> with a /adv/ path
+        const linkEl = $(el).find(BAZARAKI_SELECTORS.listingLink).first();
+        let href = linkEl.attr('href');
+        
+        // Fallback: try any <a> whose href contains /adv/
+        if (!href) {
+            $(el).find('a[href]').each((_, a) => {
+                const h = $(a).attr('href');
+                if (h && h.includes('/adv/')) { href = h; return false; }
+            });
+        }
         if (!href) return;
         
         const absoluteUrl = href.startsWith('http') ? href : `https://www.bazaraki.com${href}`;
-        const matchId = absoluteUrl.match(/\/(\d+)\/$/);
+        // Extract numeric ID from URL like /adv/4424521_...
+        const matchId = absoluteUrl.match(/\/adv\/(\d+)/) || absoluteUrl.match(/(\d+)/);
         const externalId = matchId ? matchId[1] : `bz-${Date.now()}`;
         
-        const title = titleEl.text().trim();
+        // Title is plain text inside .advert__content-title (no longer an <a>)
+        const title = $(el).find(BAZARAKI_SELECTORS.title).text().trim();
         const priceText = $(el).find(BAZARAKI_SELECTORS.price).text() || '0';
         const cleanPrice = parseInt(priceText.replace(/\D/g, '') || '0');
         const location = $(el).find(BAZARAKI_SELECTORS.location).text().trim() || 'Cyprus';
@@ -76,7 +83,7 @@ export async function extractBazarakiIndex(content: string, baseUrl: string, fet
             price: cleanPrice,
             currency: 'EUR',
             location,
-            listingType: absoluteUrl.includes('-rent/') ? 'rent' : 'sale'
+            listingType: absoluteUrl.includes('-rent') || absoluteUrl.includes('to-rent') ? 'rent' : 'sale'
         });
     });
 
@@ -94,12 +101,8 @@ export async function extractBazarakiIndex(content: string, baseUrl: string, fet
     console.log(`[BazarakiExtractor] Found ${shallowListings.length} shallow listings on index.`);
 
     if (shallowListings.length === 0) {
-        console.warn(`[BazarakiExtractor] ⚠️ 0 listings found! Debugging HTML output...`);
-        console.warn(`[BazarakiExtractor] Page Title: ${$('title').text()}`);
-        console.warn(`[BazarakiExtractor] Content length: ${content.length}`);
-        console.warn(`[BazarakiExtractor] Has .advert in raw HTML: ${content.includes('class="advert"') || content.includes("class='advert'") || content.includes('class="advert ')}`);
-        console.warn(`[BazarakiExtractor] HTML body tag count: ${(content.match(/<body/g) || []).length}`);
-        console.warn(`[BazarakiExtractor] HTML Snippet (first 2000): ${content.substring(0, 2000)}`);
+        console.warn(`[BazarakiExtractor] ⚠️ 0 listings found! Page title: ${$('title').text()}, Content length: ${content.length}`);
+        console.warn(`[BazarakiExtractor] HTML Snippet: ${content.substring(0, 500)}`);
     }
 
     // If Strategy is Shallow, we are done! Return immediately
