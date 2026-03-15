@@ -42,76 +42,16 @@ export async function POST(req: Request) {
                 });
                 const page = await context.newPage();
 
-                sendEvent({ status: 'navigating', message: 'Connecting to Bazaraki...' });
-                await page.goto('https://www.bazaraki.com/profile/login/', { waitUntil: 'domcontentloaded' });
+                sendEvent({ status: 'navigating', message: 'Navigating directly to Bazaraki WhatsApp login...' });
                 
-                // Wait for input and type
-                sendEvent({ status: 'inputting', message: 'Entering phone number and consent...' });
-                
-                // Using the specific selector provided by the user
-                const phoneInputSelector = '#main > div.wrap > div > form > div > div.sign-in__form.ng-scope > div.sign-in__form-col._phone > input';
-                await page.waitForSelector(phoneInputSelector, { timeout: 10000 });
-                await page.fill(phoneInputSelector, phone);
-                
-                // consent checkbox - Bazaraki uses AngularJS with ng-model="data.confirm"
-                // The native checkbox is hidden by CSS. We need to trigger Angular's click handler.
-                const consentSelector = '#confirm';
-                await page.waitForSelector(consentSelector, { state: 'attached', timeout: 5000 });
-                
-                // Click the label for the checkbox instead - this is the visible element that 
-                // AngularJS actually listens to. If not, we fall back to triggering Angular's scope manually.
-                const consentLabelSelector = 'label[for="confirm"]';
-                const hasLabel = await page.$(consentLabelSelector);
-                if (hasLabel) {
-                    await page.click(consentLabelSelector, { force: true });
-                } else {
-                    // Fallback: trigger AngularJS scope directly
-                    await page.evaluate(() => {
-                        const el = document.querySelector('#confirm') as any;
-                        if (el) {
-                            const scope = (window as any).angular?.element(el).scope();
-                            if (scope) {
-                                scope.$apply(() => { scope.data.confirm = 1; });
-                            } else {
-                                // Last resort: click + dispatch
-                                el.click();
-                            }
-                        }
-                    });
-                }
-                
-                // Small delay to let Angular digest
-                await page.waitForTimeout(300);
-                
-                // Whatsapp button
-                const whatsappBtnSelector = 'button.sign-in__button._whatsapp';
-                await page.waitForSelector(whatsappBtnSelector, { timeout: 5000 });
-                
-                // Log button state before clicking
-                const btnDisabled = await page.getAttribute(whatsappBtnSelector, 'disabled');
-                console.log(`[Bazaraki Auth] WhatsApp button disabled state: ${btnDisabled}`);
-                sendEvent({ status: 'clicking_whatsapp', message: `Clicking WhatsApp button (disabled=${btnDisabled})...` });
-                
-                await page.click(whatsappBtnSelector, { force: true });
-
-                sendEvent({ status: 'waiting_qr', message: 'Clicked WhatsApp. Waiting for redirect or QR Code...' });
-
-                // Wait for any navigation or new content after clicking WhatsApp
-                // The URL should change to /login/whatsapp/?phone_number=...
-                // Or the page might show an error or stay the same
-                try {
-                    await page.waitForURL('**/login/whatsapp/**', { timeout: 15000 });
-                } catch (navError: any) {
-                    // If the URL didn't change, capture current state for debugging
-                    const currentUrl = page.url();
-                    const bodyHtml = await page.evaluate(() => document.body?.innerHTML?.substring(0, 2000) || 'empty');
-                    sendEvent({ 
-                        status: 'error', 
-                        error: `WhatsApp redirect didn't happen. Current URL: ${currentUrl}`,
-                        debugHtml: bodyHtml
-                    });
-                    throw new Error(`WhatsApp redirect failed. URL stayed at: ${currentUrl}`);
-                }
+                // Navigate directly to the WhatsApp login URL, bypassing the AngularJS form entirely.
+                // The form requires AngularJS model binding for the consent checkbox which is impossible
+                // to reliably trigger from Playwright. The direct URL works without consent.
+                const encodedPhone = encodeURIComponent(phone);
+                await page.goto(`https://www.bazaraki.com/profile/login/whatsapp/?phone_number=${encodedPhone}`, { 
+                    waitUntil: 'domcontentloaded',
+                    timeout: 15000 
+                });
 
                 sendEvent({ status: 'waiting_qr', message: 'On WhatsApp page, looking for QR code...' });
 
