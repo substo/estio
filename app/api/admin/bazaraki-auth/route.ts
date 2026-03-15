@@ -98,15 +98,79 @@ export async function POST(req: Request) {
                 sendEvent({ status: 'qr_ready', qrCode: qrCodeSrc, message: 'Please scan the QR code with your phone camera and tap Send in WhatsApp.' });
                 console.log(`[Bazaraki Auth Stream] Emitted QR code. Waiting for user WhatsApp verification...`);
 
-                // Wait for user to verify on their phone.
-                // When verified, Bazaraki usually redirects to /profile/ or /my/ 
-                await page.waitForURL((url) => {
-                    const href = url.href.toLowerCase();
-                    return href.includes('/profile/') && !href.includes('/login/');
-                }, { timeout: 90000 });
+                // Poll for verification completion. Bazaraki may NOT redirect after WhatsApp verification.
+                // It might show a success message on the same page, or set cookies via AJAX.
+                // We check multiple signals every 3 seconds for up to 90 seconds.
+                const startTime = Date.now();
+                const TIMEOUT = 90000;
+                const POLL_INTERVAL = 3000;
+                let verified = false;
+                
+                while (Date.now() - startTime < TIMEOUT) {
+                    await page.waitForTimeout(POLL_INTERVAL);
+                    
+                    // Signal 1: URL changed away from the login page
+                    const currentUrl = page.url();
+                    if (!currentUrl.includes('/login/')) {
+                        console.log(`[Bazaraki Auth Stream] URL changed to: ${currentUrl}`);
+                        sendEvent({ status: 'detected', message: `Login redirect detected: ${currentUrl}` });
+                        verified = true;
+                        break;
+                    }
+                    
+                    // Signal 2: The QR code image disappeared from the page (verification completed)
+                    const qrStillVisible = await page.$('img[src^="data:image"]');
+                    if (!qrStillVisible) {
+                        console.log(`[Bazaraki Auth Stream] QR code disappeared from page`);
+                        sendEvent({ status: 'detected', message: 'QR code disappeared — verification likely complete' });
+                        verified = true;
+                        break;
+                    }
+                    
+                    // Signal 3: Check for cookies that indicate a logged-in session
+                    const cookies = await context.cookies('https://www.bazaraki.com');
+                    const hasSession = cookies.some(c => 
+                        c.name.includes('session') || c.name.includes('token') || c.name.includes('auth') || c.name.includes('user')
+                    );
+                    if (hasSession) {
+                        console.log(`[Bazaraki Auth Stream] Session cookies detected`);
+                        sendEvent({ status: 'detected', message: 'Session cookies detected' });
+                        verified = true;
+                        break;
+                    }
+                    
+                    // Signal 4: Success/completion text appeared on the page
+                    const bodyText = await page.evaluate(() => document.body?.innerText || '');
+                    if (bodyText.includes('go back') || bodyText.includes('successfully') || bodyText.includes('verified')) {
+                        console.log(`[Bazaraki Auth Stream] Success text detected on page`);
+                        sendEvent({ status: 'detected', message: 'Success text detected on page' });
+                        verified = true;
+                        break;
+                    }
+                    
+                    const elapsed = Math.round((Date.now() - startTime) / 1000);
+                    sendEvent({ status: 'waiting', message: `Waiting for WhatsApp verification... (${elapsed}s)` });
+                }
+                
+                if (!verified) {
+                    const bodyHtml = await page.evaluate(() => document.body?.innerHTML?.substring(0, 2000) || 'empty');
+                    sendEvent({ status: 'error', error: 'Timed out waiting for WhatsApp verification', debugHtml: bodyHtml });
+                    throw new Error('Verification timeout');
+                }
 
-                console.log(`[Bazaraki Auth Stream] Successfully navigated to profile page!`);
-                sendEvent({ status: 'saving', message: 'Login detected! Saving session cookies...' });
+                // After detecting verification, navigate to the profile page to ensure
+                // all cookies from the login session are properly set in the browser context.
+                sendEvent({ status: 'saving', message: 'Verification detected! Loading profile to capture full session...' });
+                
+                try {
+                    await page.goto('https://www.bazaraki.com/my/', { waitUntil: 'domcontentloaded', timeout: 15000 });
+                } catch (e) {
+                    // Even if this navigation fails, we still have the cookies from the login
+                    console.log(`[Bazaraki Auth Stream] Profile navigation failed, proceeding with current cookies`);
+                }
+                
+                console.log(`[Bazaraki Auth Stream] Capturing session state...`);
+                sendEvent({ status: 'saving', message: 'Saving session cookies to database...' });
 
                 // Extract session state
                 const sessionState = await context.storageState();
@@ -120,7 +184,7 @@ export async function POST(req: Request) {
                     }
                 });
 
-                sendEvent({ status: 'success', message: 'Successfully authenticated!' });
+                sendEvent({ status: 'success', message: 'Successfully authenticated! Session cookies saved.' });
             } catch (error: any) {
                 console.error(`[Bazaraki Auth Error]`, error);
                 // Stream the error details including DOM state back to the client
