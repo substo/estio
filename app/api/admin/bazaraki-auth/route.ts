@@ -57,8 +57,15 @@ export async function POST(req: Request) {
                 const consentSelector = '#confirm';
                 // The actual input checkbox is visually hidden by CSS (custom label styling)
                 await page.waitForSelector(consentSelector, { state: 'attached', timeout: 5000 });
-                // Playwright click might be intercepted if it's visually hidden or covered by a label, so force or use evaluate
-                await page.setChecked(consentSelector, true, { force: true });
+                // Bypass Playwright's visibility checks entirely by using DOM evaluation
+                await page.evaluate((sel) => {
+                    const el = document.querySelector(sel) as HTMLInputElement;
+                    if (el) {
+                        el.checked = true;
+                        // Dispatch an event just in case angular/react is listening
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                }, consentSelector);
                 
                 // Whatsapp button
                 const whatsappBtnSelector = 'button.sign-in__button._whatsapp';
