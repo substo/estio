@@ -7,7 +7,7 @@ const nextConfig = {
     pagesBufferLength: 5,
   },
   transpilePackages: ['@tiptap/extension-history', '@tiptap/pm'],
-  serverExternalPackages: ['bullmq', 'puppeteer'],
+  serverExternalPackages: ['bullmq', 'puppeteer', 'playwright-extra', 'puppeteer-extra-plugin-stealth'],
 
 
   images: {

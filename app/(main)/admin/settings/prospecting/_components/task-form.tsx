@@ -22,6 +22,11 @@ export function TaskForm({ locationId, connections, initialData = null }: { loca
                 targetUrls: formData.get('targetUrls'),
                 scrapeFrequency: formData.get('scrapeFrequency'),
                 extractionMode: formData.get('extractionMode'),
+                scrapeStrategy: formData.get('scrapeStrategy'),
+                targetSellerType: formData.get('targetSellerType'),
+                delayBetweenPagesMs: formData.get('delayBetweenPagesMs'),
+                delayJitterMs: formData.get('delayJitterMs'),
+                maxInteractionsPerRun: formData.get('maxInteractionsPerRun'),
                 enabled: formData.get('enabled') === 'on',
             };
             
@@ -83,6 +88,40 @@ export function TaskForm({ locationId, connections, initialData = null }: { loca
                         <option value="ai_extraction">AI Extraction</option>
                         <option value="hybrid">Hybrid (CSS + AI Fallback)</option>
                     </select>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                    <label className="text-sm font-medium">Scrape Strategy</label>
+                    <select name="scrapeStrategy" defaultValue={initialData?.scrapeStrategy || 'shallow_duplication'} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                        <option value="shallow_duplication">Shallow Duplication (Safe)</option>
+                        <option value="deep_extraction">Deep Extraction (Heavy Actions)</option>
+                    </select>
+                </div>
+                
+                <div className="grid gap-2">
+                    <label className="text-sm font-medium">Target Seller Type</label>
+                    <select name="targetSellerType" defaultValue={initialData?.targetSellerType || 'individual'} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                        <option value="individual">Individual</option>
+                        <option value="agency">Agency</option>
+                        <option value="all">All</option>
+                    </select>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+                <div className="grid gap-2">
+                    <label className="text-sm font-medium">Base Delay (ms)</label>
+                    <Input name="delayBetweenPagesMs" type="number" defaultValue={initialData?.delayBetweenPagesMs || 3000} placeholder="3000" />
+                </div>
+                <div className="grid gap-2">
+                    <label className="text-sm font-medium">Delay Jitter (ms)</label>
+                    <Input name="delayJitterMs" type="number" defaultValue={initialData?.delayJitterMs || 1500} placeholder="1500" />
+                </div>
+                <div className="grid gap-2">
+                    <label className="text-sm font-medium">Max Deep Actions / Run</label>
+                    <Input name="maxInteractionsPerRun" type="number" defaultValue={initialData?.maxInteractionsPerRun} placeholder="Empty = No Cap" />
                 </div>
             </div>
 

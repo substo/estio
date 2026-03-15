@@ -170,6 +170,11 @@ export async function createScrapingTask(locationId: string, data: any) {
             enabled: data.enabled ?? true,
             scrapeFrequency: data.scrapeFrequency || 'daily',
             extractionMode: data.extractionMode || 'hybrid',
+            scrapeStrategy: data.scrapeStrategy || 'shallow_duplication',
+            targetSellerType: data.targetSellerType || 'individual',
+            delayBetweenPagesMs: parseInt(data.delayBetweenPagesMs) || 3000,
+            delayJitterMs: parseInt(data.delayJitterMs) || 1500,
+            maxInteractionsPerRun: data.maxInteractionsPerRun ? parseInt(data.maxInteractionsPerRun) : null,
             aiInstructions: data.aiInstructions,
             targetUrls,
             fieldMappings: data.fieldMappings ? JSON.parse(data.fieldMappings) : null,
@@ -192,6 +197,11 @@ export async function updateScrapingTask(id: string, locationId: string, data: a
         enabled: data.enabled,
         scrapeFrequency: data.scrapeFrequency,
         extractionMode: data.extractionMode,
+        scrapeStrategy: data.scrapeStrategy,
+        targetSellerType: data.targetSellerType,
+        delayBetweenPagesMs: parseInt(data.delayBetweenPagesMs),
+        delayJitterMs: parseInt(data.delayJitterMs),
+        maxInteractionsPerRun: data.maxInteractionsPerRun ? parseInt(data.maxInteractionsPerRun) : null,
         aiInstructions: data.aiInstructions,
     };
 

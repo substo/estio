@@ -2,6 +2,15 @@ import db from '@/lib/db';
 import { ScrapingTask, ScrapingConnection, ScrapingRun, ScrapingCredential } from '@prisma/client';
 import { PageFetcher } from './page-fetcher';
 
+// Random Gaussian-like delay for human emulation
+const humanDelay = async (baseMs: number, jitterMs: number) => {
+    // Generate an offset between -jitterMs and +jitterMs
+    const offset = Math.floor(Math.random() * (jitterMs * 2 + 1)) - jitterMs;
+    const finalDelay = Math.max(500, baseMs + offset); // never less than 500ms
+    console.log(`[ListingScraper] 😴 Human delay: ${finalDelay}ms`);
+    await new Promise((resolve) => setTimeout(resolve, finalDelay));
+};
+
 export interface RawListing {
     externalId: string;
     title: string;
@@ -56,6 +65,11 @@ export class ListingScraperService {
         let leadsCreated = 0;
         let duplicatesFound = 0;
         let errors = 0;
+        
+        let interactionsRemaining = task.maxInteractionsPerRun ?? Number.MAX_SAFE_INTEGER;
+        // Global safety: Don't exceed connection limit
+        const dailyLimit = task.connection.maxDailyInteractions || 100; 
+        if (interactionsRemaining > dailyLimit) interactionsRemaining = dailyLimit;
 
         try {
             // Which URLs are we scraping?
@@ -83,7 +97,21 @@ export class ListingScraperService {
                 
                 if (task.connection.platform === 'bazaraki') {
                     const { extractBazarakiIndex } = await import('./extractors/bazaraki');
-                    rawListings = await extractBazarakiIndex(content, url, fetcher);
+                    // Pass the strategy context and interaction budget
+                    const extractionResult = await extractBazarakiIndex(content, url, fetcher, {
+                        strategy: task.scrapeStrategy as 'shallow_duplication' | 'deep_extraction',
+                        sellerType: task.targetSellerType as 'individual' | 'agency' | 'all',
+                        interactionsAvailable: interactionsRemaining,
+                        delayBaseMs: task.delayBetweenPagesMs,
+                        delayJitterMs: task.delayJitterMs
+                    });
+                    rawListings = extractionResult.listings;
+                    
+                    // Deduct budget
+                    if (extractionResult.interactionsUsed > 0) {
+                        interactionsRemaining -= extractionResult.interactionsUsed;
+                        console.log(`[ListingScraper] Used ${extractionResult.interactionsUsed} interactions. Remaining: ${interactionsRemaining}`);
+                    }
                 } else if (task.extractionMode === 'ai_extraction') {
                     // Fallback to strict AI Generic Extractor
                     const { extractGenericAI } = await import('./extractors/generic');
@@ -116,8 +144,8 @@ export class ListingScraperService {
                     }
                 }
                 
-                // Rate Limiting between index pages
-                await new Promise(r => setTimeout(r, 2000));
+                // Rate Limiting between index pages with Jitter
+                await humanDelay(task.delayBetweenPagesMs, task.delayJitterMs);
             }
 
             // Update Credential Rotation TS

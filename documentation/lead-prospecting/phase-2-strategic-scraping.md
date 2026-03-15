@@ -25,6 +25,8 @@ New settings page at `/admin/settings/prospecting` (or under existing `/admin/se
 | `platform` | String | Target platform (e.g., "bazaraki") |
 | `enabled` | Boolean | Active/inactive toggle |
 | `globalRateLimitMs` | Int | Cross-credential delay |
+| `maxDailyInteractions`| Int | Hard limit on "heavy" clicks (deep scrapes) per day to prevent bans |
+| `maxConcurrentRequests`| Int | Limit to prevent Playwright parallel floods |
 
 #### Configuration Fields per Task
 
@@ -34,6 +36,11 @@ New settings page at `/admin/settings/prospecting` (or under existing `/admin/se
 | `scrapeFrequency` | Enum | `hourly`, `every_6h`, `daily`, `weekly` |
 | `maxPagesPerRun` | Int | Pagination depth limit (default 10) |
 | `extractionMode` | Enum | `css_selectors`, `ai_extraction`, `hybrid` |
+| `scrapeStrategy` | Enum | Determines interaction depth: `shallow_duplication` or `deep_extraction` |
+| `targetSellerType` | Enum | Target constraint: `individual`, `agency`, `all` |
+| `delayBetweenPagesMs`| Int | Base wait time before navigating/clicking |
+| `delayJitterMs` | Int | Randomized human variance added to delay |
+| `maxInteractionsPerRun`| Int | Job-specific interaction cap |
 | `selectors` | Json | CSS selector mapping for structured extraction |
 | `aiInstructions` | String | System prompt for AI-based extraction |
 | `targetUrls` | String[] | Specific platform paths to query |
@@ -46,13 +53,13 @@ To better manage scraping complexity and avoid IP bans, the data model is split 
 
 *   **`ScrapingConnection` Model**
     *   **Purpose:** Houses platform-level behavior and acts as a pool for credentials.
-    *   **Fields:** `name`, `platform`, `enabled`, `globalRateLimitMs`.
+    *   **Fields:** `name`, `platform`, `enabled`, `globalRateLimitMs`, `maxDailyInteractions`, `maxConcurrentRequests`.
 *   **`ScrapingCredential` Model**
     *   **Purpose:** Specific platform login accounts rotated in a pool.
     *   **Fields:** `authUsername`, `authPassword`, `sessionState` (Playwright cookies), `status` (active/banned/rate_limited), `healthScore`.
 *   **`ScrapingTask` Model**
     *   **Purpose:** Stores configuration for specific scheduled scraping jobs utilizing a Connection Pool.
-    *   **Fields:** `name`, `connectionId`, `enabled`, `scrapeFrequency`, `maxPagesPerRun`, `extractionMode` (`css_selectors`, `ai_extraction`, `hybrid`), `selectors` (JSON), `aiInstructions` (Text), `taskType`, `targetUrls` (String array), `fieldMappings` (JSON).
+    *   **Fields:** `name`, `connectionId`, `enabled`, `scrapeFrequency`, `maxPagesPerRun`, `extractionMode` (`css_selectors`, `ai_extraction`, `hybrid`), `scrapeStrategy`, `targetSellerType`, `delayBetweenPagesMs`, `delayJitterMs`, `maxInteractionsPerRun`,  `selectors` (JSON), `aiInstructions` (Text), `targetUrls` (String array), `fieldMappings` (JSON).
 *   **`ScrapingRun` Model**
     *   **Purpose:** Telemetry tracking for monitoring scraping success and errors.
     *   **Fields:** `taskId`, `status`, `pagesScraped`, `listingsFound`, `leadsCreated`, `duplicatesFound`, `errors`, `errorLog`, `metadata`.
@@ -230,7 +237,8 @@ Structured JSON → RawListing
 
 | Measure | Implementation |
 |---|---|
-| **Request throttling** | Max 1 request per 2 seconds per domain |
+| **Human Emulation Delays** | Tasks apply `delayBetweenPagesMs` plus a randomized `delayJitterMs` to every navigational and interactive click, avoiding exact programmatic signatures. |
+| **Interaction Budgets** | Hard limits (`maxDailyInteractions` / `maxInteractionsPerRun`) are enforced on clicks that unmask valuable data (e.g. phone numbers) to prevent burning credential trust scores. |
 | **robots.txt** | Check and respect before scraping (config override) |
 | **User-Agent** | Realistic browser User-Agent string |
 | **IP rotation** | Future: proxy rotation for high-volume scraping |
@@ -239,10 +247,54 @@ Structured JSON → RawListing
 
 ---
 
+## 2.8 Enterprise Scraping Strategies
+
+To balance lead acquisition rate against platform bans, Tasks should be configured with specific strategies rather than brute-force crawling.
+
+### Shallow Duplication vs. Deep Extraction
+
+The primary bottleneck on classified platforms is **action thresholds** (how many times you can click "Show Phone Number" per hour/day). To preserve this budget:
+
+1.  **Shallow Duplication:**
+    *   The scraper rapidly traverses index pages (Listings List).
+    *   It extracts surface-level data: `listingId`, `title`, `price`, `status`, `sellerType` (if available visually).
+    *   **No Deep Interactions.** The scraper does not open listing detail pages or click reveal buttons.
+    *   This data is used to continuously map the market state quickly.
+2.  **Deep Extraction:**
+    *   Triggered selectively. The task only attempts a Deep Extraction if the listing matches criteria (e.g., `targetSellerType === 'individual'`) and the `listingId` hasn't been scraped within X days.
+    *   The Playwright instance navigates to the listing detail.
+    *   Applies Human Emulation Delays + Jitter.
+    *   Executes the "Show Phone Number" interaction.
+    *   Deducts 1 point from the Connection's `maxDailyInteractions` budget.
+
+By combining an hourly Shallow sweep with filtered Deep Extractions, Estio maintains full market data without triggering aggressive anti-bot captchas.
+
+---
+
 ## 2.3 Bazaraki Integration
 
 ### Why Bazaraki First
 Bazaraki is the dominant classifieds platform in Cyprus, heavily used for property listings. It is the **highest-impact single source** for the Estio user base.
+
+### Bazaraki Authentication (WhatsApp Flow)
+
+Logging into Bazaraki automatically presents several challenges: Cookie consent Modals, QR code generation, and aggressive anti-bot protection. 
+
+To overcome this, we implemented a **Real-Time Streaming QR Code** flow:
+1. **Headless Browser:** The server launches a headless Playwright instance.
+2. **Cookie Consent API:** The script bypasses the CMP UI overlay via native JS (`__cmp('setConsent', ...)`).
+3. **SSE Stream:** The backend extracts the generated WhatsApp QR Code (base64 image) and streams it down to the Admin UI using Server-Sent Events (SSE). The admin scans this code with their real phone to link the session.
+4. **Cloudflare Turnstile Bypass:** 
+   - Bazaraki protects the post-scan redirect with Cloudflare. Normal Playwright/Puppeteer will hit a "Verify you are human" block and fail to capture the `sessionid`.
+   - **Solution:** We process the login using `playwright-extra` and `puppeteer-extra-plugin-stealth`. This completely evades Turnstile, allowing the backend redirect to complete naturally.
+   - **Webpack Build Fix:** Because `puppeteer-extra` utilizes dynamic `require()` statements, Vercel/Next.js will fail to build. You **must** add `playwright-extra` and `puppeteer-extra-plugin-stealth` to `serverExternalPackages` in `next.config.js`.
+5. **Session Capture:** Once navigated away from `/login/`, the `context.storageState()` is extracted and saved directly to the database in `ScrapingCredential`. 
+
+**Required Dependencies:**
+```bash
+npm i playwright-extra puppeteer-extra-plugin-stealth
+npm i -D @types/puppeteer @types/puppeteer-extra-plugin-stealth
+```
 
 ### Target URL Patterns
 

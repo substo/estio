@@ -171,20 +171,20 @@ model User {
   locations     Location[]         @relation("LocationToUser")
   locationRoles UserLocationRole[]
 
-  createdProperties    Property[]       @relation("PropertyCreator")
-  updatedProperties    Property[]       @relation("PropertyUpdater")
-  viewings             Viewing[]
-  contactHistory       ContactHistory[]
-  assignedContactTasks ContactTask[]    @relation("ContactTaskAssignedUser")
-  createdContactTasks  ContactTask[]    @relation("ContactTaskCreatedByUser")
-  updatedContactTasks  ContactTask[]    @relation("ContactTaskUpdatedByUser")
-  webPushSubscriptions WebPushSubscription[]
-  userNotifications    UserNotification[]
-  taskReminderJobs     TaskReminderJob[]
-  taskReminderPreference UserTaskReminderPreference?
-  settingsAuditLogs    SettingsAuditLog[] @relation("SettingsAuditActor")
-  acceptedAiSuggestedResponses AiSuggestedResponse[] @relation("AiSuggestedResponseAcceptedBy")
-  rejectedAiSuggestedResponses AiSuggestedResponse[] @relation("AiSuggestedResponseRejectedBy")
+  createdProperties            Property[]                  @relation("PropertyCreator")
+  updatedProperties            Property[]                  @relation("PropertyUpdater")
+  viewings                     Viewing[]
+  contactHistory               ContactHistory[]
+  assignedContactTasks         ContactTask[]               @relation("ContactTaskAssignedUser")
+  createdContactTasks          ContactTask[]               @relation("ContactTaskCreatedByUser")
+  updatedContactTasks          ContactTask[]               @relation("ContactTaskUpdatedByUser")
+  webPushSubscriptions         WebPushSubscription[]
+  userNotifications            UserNotification[]
+  taskReminderJobs             TaskReminderJob[]
+  taskReminderPreference       UserTaskReminderPreference?
+  settingsAuditLogs            SettingsAuditLog[]          @relation("SettingsAuditActor")
+  acceptedAiSuggestedResponses AiSuggestedResponse[]       @relation("AiSuggestedResponseAcceptedBy")
+  rejectedAiSuggestedResponses AiSuggestedResponse[]       @relation("AiSuggestedResponseRejectedBy")
 
   // Google Contact Sync Credentials
   googleAccessToken             String?         @db.Text
@@ -351,33 +351,33 @@ model SiteConfig {
   locationId String   @unique
 
   // New Fields
-  domain                  String? @unique
-  theme                   Json?
-  navLinks                Json?
-  footerLinks             Json? // Footer Menu (New)
-  socialLinks             Json? // Social Media Links (New)
-  legalLinks              Json? // Legal/Bottom Menu (New)
-  footerDisclaimer        String? // Custom license/disclaimer text (New)
-  footerBio               String? // Custom biography/description text under logo (New)
-  heroContent             Json?
-  contactInfo             Json? // Address, Phone, Email
-  googleAiApiKey          String? // Google Gemini AI API Key
-  googleAiModel           String? @default("gemini-1.5-pro") // Default / Legacy
-  googleAiModelExtraction String? @default("gemini-1.5-flash") // Stage 1: Fast Scraper
-  googleAiModelDesign     String? @default("gemini-1.5-pro") // Stage 2: High-End Designer
+  domain                     String? @unique
+  theme                      Json?
+  navLinks                   Json?
+  footerLinks                Json? // Footer Menu (New)
+  socialLinks                Json? // Social Media Links (New)
+  legalLinks                 Json? // Legal/Bottom Menu (New)
+  footerDisclaimer           String? // Custom license/disclaimer text (New)
+  footerBio                  String? // Custom biography/description text under logo (New)
+  heroContent                Json?
+  contactInfo                Json? // Address, Phone, Email
+  googleAiApiKey             String? // Google Gemini AI API Key
+  googleAiModel              String? @default("gemini-1.5-pro") // Default / Legacy
+  googleAiModelExtraction    String? @default("gemini-1.5-flash") // Stage 1: Fast Scraper
+  googleAiModelDesign        String? @default("gemini-1.5-pro") // Stage 2: High-End Designer
   googleAiModelTranscription String? @default("gemini-2.5-flash") // Phase 1: Audio transcription default
-  brandVoice              String? // Custom instructions for AI Brand Voice
-  homeSections            Json? // Configuration for Home Page Sections (order, visibility)
-  favoritesConfig         Json? // { title, emptyTitle, emptyBody, headerStyle, heroImage }
-  searchConfig            Json? // { metaTitle, metaDescription, emptyTitle, emptyBody }
-  submissionsConfig       Json? // { title, emptyTitle, emptyBody, headerStyle, heroImage }
+  brandVoice                 String? // Custom instructions for AI Brand Voice
+  homeSections               Json? // Configuration for Home Page Sections (order, visibility)
+  favoritesConfig            Json? // { title, emptyTitle, emptyBody, headerStyle, heroImage }
+  searchConfig               Json? // { metaTitle, metaDescription, emptyTitle, emptyBody }
+  submissionsConfig          Json? // { title, emptyTitle, emptyBody, headerStyle, heroImage }
 
   outreachConfig Json? // AI Outreach Assistant Configuration (Prompts, Enabled status)
 
-  publicListingEnabled Boolean @default(true) // Feature Flag for "List Your Property"
+  publicListingEnabled              Boolean @default(true) // Feature Flag for "List Your Property"
   whatsappTranscriptOnDemandEnabled Boolean @default(false) // Phase 2A: Manual transcript/backfill controls
-  whatsappTranscriptRetentionDays Int @default(90) // Phase 2C: retention policy (30/90/365)
-  whatsappTranscriptVisibility String @default("team") // Phase 2C: transcript visibility (team|admin_only)
+  whatsappTranscriptRetentionDays   Int     @default(90) // Phase 2C: retention policy (30/90/365)
+  whatsappTranscriptVisibility      String  @default("team") // Phase 2C: transcript visibility (team|admin_only)
 
   // Existing Fields
   primaryColor   String?
@@ -500,11 +500,11 @@ model Contact {
   qualificationStage String? @default("unqualified")
   buyerProfile       Json?
 
-  insights Insight[]
-  tasks    ContactTask[]
-  userNotifications UserNotification[]
-  aiAutomationJobs    AiAutomationJob[]
-  aiDecisions         AiDecision[]
+  insights             Insight[]
+  tasks                ContactTask[]
+  userNotifications    UserNotification[]
+  aiAutomationJobs     AiAutomationJob[]
+  aiDecisions          AiDecision[]
   aiSuggestedResponses AiSuggestedResponse[]
 
   @@unique([locationId, email])
@@ -681,20 +681,20 @@ model SettingsDocument {
 }
 
 model SettingsSecret {
-  id         String            @id @default(cuid())
-  scopeType  SettingsScopeType @map("scope_type")
-  scopeId    String            @map("scope_id")
-  domain     String
-  secretKey  String            @map("secret_key")
-  ciphertext String            @db.Text
-  iv         String
-  authTag    String            @map("auth_tag")
-  alg        String            @default("AES-256-GCM")
-  keyId      String            @map("key_id")
-  encryptedAt DateTime         @default(now()) @map("encrypted_at")
-  rotatedAt  DateTime?         @map("rotated_at")
-  createdAt  DateTime          @default(now()) @map("created_at")
-  updatedAt  DateTime          @updatedAt @map("updated_at")
+  id          String            @id @default(cuid())
+  scopeType   SettingsScopeType @map("scope_type")
+  scopeId     String            @map("scope_id")
+  domain      String
+  secretKey   String            @map("secret_key")
+  ciphertext  String            @db.Text
+  iv          String
+  authTag     String            @map("auth_tag")
+  alg         String            @default("AES-256-GCM")
+  keyId       String            @map("key_id")
+  encryptedAt DateTime          @default(now()) @map("encrypted_at")
+  rotatedAt   DateTime?         @map("rotated_at")
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
 
   @@unique([scopeType, scopeId, domain, secretKey], map: "settings_secrets_scope_domain_secret_key")
   @@index([scopeType, scopeId], map: "settings_secrets_scope_idx")
@@ -702,17 +702,17 @@ model SettingsSecret {
 }
 
 model SettingsAuditLog {
-  id         String                 @id @default(cuid())
-  actorUserId String?               @map("actor_user_id")
-  actorUser  User?                  @relation("SettingsAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
-  scopeType  SettingsScopeType      @map("scope_type")
-  scopeId    String                 @map("scope_id")
-  domain     String
-  operation  SettingsAuditOperation
-  beforeJson Json?                  @map("before_json")
-  afterJson  Json?                  @map("after_json")
-  requestId  String?                @map("request_id")
-  createdAt  DateTime               @default(now()) @map("created_at")
+  id          String                 @id @default(cuid())
+  actorUserId String?                @map("actor_user_id")
+  actorUser   User?                  @relation("SettingsAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  scopeType   SettingsScopeType      @map("scope_type")
+  scopeId     String                 @map("scope_id")
+  domain      String
+  operation   SettingsAuditOperation
+  beforeJson  Json?                  @map("before_json")
+  afterJson   Json?                  @map("after_json")
+  requestId   String?                @map("request_id")
+  createdAt   DateTime               @default(now()) @map("created_at")
 
   @@index([scopeType, scopeId, domain], map: "settings_audit_scope_domain_idx")
   @@index([createdAt], map: "settings_audit_created_at_idx")
@@ -767,30 +767,30 @@ model ProspectLead {
   locationId String
 
   // Identity
-  name       String?
-  firstName  String?
-  lastName   String?
-  email      String?
-  phone      String?
-  message    String?  @db.Text
+  name      String?
+  firstName String?
+  lastName  String?
+  email     String?
+  phone     String?
+  message   String? @db.Text
 
   // Source Attribution
-  source          String   // bazaraki_scrape, facebook, instagram, manual, referral
-  sourceUrl       String?  @db.Text
+  source          String // bazaraki_scrape, facebook, instagram, manual, referral
+  sourceUrl       String? @db.Text
   sourceListingId String?
   sourceMetadata  Json?
 
   // AI Scoring
-  aiScore          Float?   @default(0)
+  aiScore          Float? @default(0)
   aiScoreBreakdown Json?
 
   // Deduplication
   matchedContactId String?
   matchConfidence  Float?
-  dedupStatus      String   @default("pending") // pending, unique, duplicate, merged
+  dedupStatus      String  @default("pending") // pending, unique, duplicate, merged
 
   // Pipeline
-  status     String   @default("new") // new, reviewing, accepted, rejected, archived
+  status     String    @default("new") // new, reviewing, accepted, rejected, archived
   reviewedAt DateTime?
   reviewedBy String?
 
@@ -819,15 +819,15 @@ model Viewing {
   userId String // Agent who conducted the viewing
   user   User   @relation(fields: [userId], references: [id])
 
-  date  DateTime
-  notes String?
+  date              DateTime
+  notes             String?
   scheduledTimeZone String? // IANA timezone used to interpret local scheduled input
   scheduledLocal    String? // Local datetime snapshot at write time (YYYY-MM-DDTHH:mm[:ss])
 
-  title       String?   // e.g. "Viewing: 3BR Villa in Limassol"
-  description String?   @db.Text  // Detailed agenda / notes for the event
-  location    String?   // Address or meetup location for the viewing
-  duration    Int       @default(30) // Duration in minutes (default 30 minutes)
+  title       String? // e.g. "Viewing: 3BR Villa in Limassol"
+  description String? @db.Text // Detailed agenda / notes for the event
+  location    String? // Address or meetup location for the viewing
+  duration    Int     @default(30) // Duration in minutes (default 30 minutes)
 
   ghlAppointmentId String? @unique
   status           String  @default("scheduled") // proposed, lead_confirmed, confirmed, reminded, completed, cancelled, rescheduled, scheduled, no_show
@@ -841,9 +841,9 @@ model Viewing {
   reminders        Json? // Track sent reminders [{type, sentAt}]
 
   // Sync engine fields
-  syncVersion      Int       @default(1)
-  syncRecords      ViewingSync[]
-  outboxJobs       ViewingOutbox[]
+  syncVersion Int             @default(1)
+  syncRecords ViewingSync[]
+  outboxJobs  ViewingOutbox[]
 
   @@index([contactId])
   @@index([contactId, date(sort: Asc)])
@@ -897,7 +897,7 @@ model ViewingOutbox {
 
   idempotencyKey String @unique
 
-  viewing Viewing  @relation(fields: [viewingId], references: [id], onDelete: Cascade)
+  viewing Viewing @relation(fields: [viewingId], references: [id], onDelete: Cascade)
 
   @@index([provider, status, scheduledAt])
   @@index([viewingId, status, scheduledAt])
@@ -1002,7 +1002,7 @@ model DealContext {
   offers           Offer[]
   documents        DealDocument[]
 
-  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  location    Location     @relation(fields: [locationId], references: [id], onDelete: Cascade)
   aiDecisions AiDecision[]
 
   @@index([locationId])
@@ -1072,22 +1072,22 @@ model Conversation {
   totalCost        Float @default(0)
 
   // Phase 6: Semi-Auto & Event-Driven
-  semiAuto         Boolean   @default(false) // AI auto-drafts on incoming events (never auto-sends)
+  semiAuto              Boolean   @default(false) // AI auto-drafts on incoming events (never auto-sends)
   replyLanguageOverride String? // Optional per-conversation language override (BCP-47, null = auto)
-  contextSummary   String?   @db.Text // Compacted conversation context for long threads
-  lastSummarizedAt DateTime? // When context was last compacted
+  contextSummary        String?   @db.Text // Compacted conversation context for long threads
+  lastSummarizedAt      DateTime? // When context was last compacted
 
   // Relations
-  location     Location                  @relation(fields: [locationId], references: [id], onDelete: Cascade)
-  contact      Contact                   @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  messages     Message[]
-  executions   AgentExecution[]
-  participants ConversationParticipant[]
-  insights     Insight[]
-  contactTasks ContactTask[]
-  userNotifications UserNotification[]
-  aiAutomationJobs AiAutomationJob[]
-  aiDecisions      AiDecision[]
+  location             Location                  @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  contact              Contact                   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  messages             Message[]
+  executions           AgentExecution[]
+  participants         ConversationParticipant[]
+  insights             Insight[]
+  contactTasks         ContactTask[]
+  userNotifications    UserNotification[]
+  aiAutomationJobs     AiAutomationJob[]
+  aiDecisions          AiDecision[]
   aiSuggestedResponses AiSuggestedResponse[]
 
   @@unique([locationId, contactId])
@@ -1110,15 +1110,15 @@ model ContactTask {
   contactId      String
   conversationId String?
 
-  title          String
-  description    String?   @db.Text
-  status         String    @default("open") // open, completed, canceled
-  priority       String    @default("medium") // low, medium, high
-  dueAt          DateTime?
-  completedAt    DateTime?
-  assignedUserId String?
-  source         String    @default("manual") // manual, ai_selection, automation
-  reminderMode   String    @default("default") // default, custom, off
+  title           String
+  description     String?   @db.Text
+  status          String    @default("open") // open, completed, canceled
+  priority        String    @default("medium") // low, medium, high
+  dueAt           DateTime?
+  completedAt     DateTime?
+  assignedUserId  String?
+  source          String    @default("manual") // manual, ai_selection, automation
+  reminderMode    String    @default("default") // default, custom, off
   reminderOffsets Json? // array of offset minutes when reminderMode=custom
 
   createdByUserId String?
@@ -1134,9 +1134,9 @@ model ContactTask {
   createdByUser User?         @relation("ContactTaskCreatedByUser", fields: [createdByUserId], references: [id], onDelete: SetNull)
   updatedByUser User?         @relation("ContactTaskUpdatedByUser", fields: [updatedByUserId], references: [id], onDelete: SetNull)
 
-  syncRecords ContactTaskSync[]
-  outboxJobs  ContactTaskOutbox[]
-  reminderJobs TaskReminderJob[]
+  syncRecords   ContactTaskSync[]
+  outboxJobs    ContactTaskOutbox[]
+  reminderJobs  TaskReminderJob[]
   notifications UserNotification[]
 
   @@index([locationId, contactId, status, dueAt])
@@ -1205,26 +1205,26 @@ model TaskReminderJob {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  taskId      String
-  userId      String
-  locationId  String
-  slotKey     String
+  taskId        String
+  userId        String
+  locationId    String
+  slotKey       String
   offsetMinutes Int
-  scheduledFor DateTime
+  scheduledFor  DateTime
 
-  status       String    @default("pending") // pending, processing, completed, failed, dead, canceled
-  lockedAt     DateTime?
-  lockedBy     String?
-  processedAt  DateTime?
-  attemptCount Int       @default(0)
+  status        String    @default("pending") // pending, processing, completed, failed, dead, canceled
+  lockedAt      DateTime?
+  lockedBy      String?
+  processedAt   DateTime?
+  attemptCount  Int       @default(0)
   lastAttemptAt DateTime?
-  lastError    String?   @db.Text
+  lastError     String?   @db.Text
 
   idempotencyKey String @unique
 
-  task         ContactTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  location     Location    @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  task         ContactTask       @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location     Location          @relation(fields: [locationId], references: [id], onDelete: Cascade)
   notification UserNotification? @relation("TaskReminderNotification")
 
   @@index([status, scheduledFor])
@@ -1238,26 +1238,26 @@ model UserNotification {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  userId         String
-  locationId     String?
-  type           String // task_deadline
-  title          String
-  body           String?  @db.Text
-  deepLinkUrl    String?
-  taskId         String?
-  contactId      String?
-  conversationId String?
-  taskReminderJobId String? @unique
-  payload        Json?
-  readAt         DateTime?
-  clickedAt      DateTime?
+  userId            String
+  locationId        String?
+  type              String // task_deadline
+  title             String
+  body              String?   @db.Text
+  deepLinkUrl       String?
+  taskId            String?
+  contactId         String?
+  conversationId    String?
+  taskReminderJobId String?   @unique
+  payload           Json?
+  readAt            DateTime?
+  clickedAt         DateTime?
 
-  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  location        Location?        @relation(fields: [locationId], references: [id], onDelete: SetNull)
-  task            ContactTask?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
-  contact         Contact?         @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  conversation    Conversation?    @relation(fields: [conversationId], references: [id], onDelete: SetNull)
-  taskReminderJob TaskReminderJob? @relation("TaskReminderNotification", fields: [taskReminderJobId], references: [id], onDelete: SetNull)
+  user            User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location        Location?                  @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  task            ContactTask?               @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  contact         Contact?                   @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  conversation    Conversation?              @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  taskReminderJob TaskReminderJob?           @relation("TaskReminderNotification", fields: [taskReminderJobId], references: [id], onDelete: SetNull)
   deliveries      UserNotificationDelivery[]
 
   @@index([userId, readAt, createdAt])
@@ -1273,11 +1273,11 @@ model UserNotificationDelivery {
 
   notificationId String
   channel        String // in_app, web_push
-  status         String @default("pending") // pending, delivered, failed, disabled
-  attemptCount   Int    @default(0)
+  status         String    @default("pending") // pending, delivered, failed, disabled
+  attemptCount   Int       @default(0)
   lastAttemptAt  DateTime?
   deliveredAt    DateTime?
-  lastError      String? @db.Text
+  lastError      String?   @db.Text
   metadata       Json?
 
   notification UserNotification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
@@ -1359,17 +1359,17 @@ model AiSkillPolicy {
   enabled    Boolean @default(true)
   objective  String  @default("nurture")
 
-  channelPolicy   Json?
-  contactSegments Json?
-  decisionPolicy  Json?
-  compliancePolicy Json?
-  stylePolicy     Json?
-  researchPolicy  Json?
+  channelPolicy         Json?
+  contactSegments       Json?
+  decisionPolicy        Json?
+  compliancePolicy      Json?
+  stylePolicy           Json?
+  researchPolicy        Json?
   humanApprovalRequired Boolean @default(true)
-  version Int @default(1)
-  metadata Json?
+  version               Int     @default(1)
+  metadata              Json?
 
-  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  location  Location     @relation(fields: [locationId], references: [id], onDelete: Cascade)
   decisions AiDecision[]
 
   @@unique([locationId, skillId])
@@ -1382,34 +1382,34 @@ model AiDecision {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  locationId String
-  policyId String?
+  locationId     String
+  policyId       String?
   conversationId String?
-  contactId String?
-  dealId String?
+  contactId      String?
+  dealId         String?
 
-  source String @default("automation") // automation | semi_auto | manual | mission
-  dueAt DateTime @default(now())
-  dueKey String?
-  status String @default("planned") // planned | held | queued | running | completed | failed | skipped | dead
-  holdReason String?
+  source         String   @default("automation") // automation | semi_auto | manual | mission
+  dueAt          DateTime @default(now())
+  dueKey         String?
+  status         String   @default("planned") // planned | held | queued | running | completed | failed | skipped | dead
+  holdReason     String?
   rejectedReason String?
 
-  selectedSkillId String?
+  selectedSkillId   String?
   selectedObjective String?
-  selectedScore Float?
-  scoreBreakdown Json?
-  evaluatedSkills Json?
-  decisionContext Json?
-  traceId String?
-  policyVersion Int?
+  selectedScore     Float?
+  scoreBreakdown    Json?
+  evaluatedSkills   Json?
+  decisionContext   Json?
+  traceId           String?
+  policyVersion     Int?
 
-  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
-  policy AiSkillPolicy? @relation(fields: [policyId], references: [id], onDelete: SetNull)
-  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
-  contact Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  deal DealContext? @relation(fields: [dealId], references: [id], onDelete: SetNull)
-  runtimeJobs AiRuntimeJob[]
+  location           Location              @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  policy             AiSkillPolicy?        @relation(fields: [policyId], references: [id], onDelete: SetNull)
+  conversation       Conversation?         @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  contact            Contact?              @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  deal               DealContext?          @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  runtimeJobs        AiRuntimeJob[]
   suggestedResponses AiSuggestedResponse[]
 
   @@unique([locationId, dueKey])
@@ -1425,21 +1425,21 @@ model AiRuntimeJob {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  locationId String
-  decisionId String
-  status String @default("pending") // pending | processing | completed | dead | canceled
-  scheduledAt DateTime @default(now())
-  processedAt DateTime?
-  attemptCount Int @default(0)
-  maxAttempts Int @default(6)
-  lockedAt DateTime?
-  lockedBy String?
-  lastError String? @db.Text
-  idempotencyKey String @unique
-  traceId String?
-  payload Json?
+  locationId     String
+  decisionId     String
+  status         String    @default("pending") // pending | processing | completed | dead | canceled
+  scheduledAt    DateTime  @default(now())
+  processedAt    DateTime?
+  attemptCount   Int       @default(0)
+  maxAttempts    Int       @default(6)
+  lockedAt       DateTime?
+  lockedBy       String?
+  lastError      String?   @db.Text
+  idempotencyKey String    @unique
+  traceId        String?
+  payload        Json?
 
-  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  location Location   @relation(fields: [locationId], references: [id], onDelete: Cascade)
   decision AiDecision @relation(fields: [decisionId], references: [id], onDelete: Cascade)
 
   @@index([status, scheduledAt])
@@ -1452,26 +1452,26 @@ model AiAutomationSchedule {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  locationId String
-  name       String   @default("AI Automation")
-  enabled    Boolean  @default(true)
-  cadenceMinutes Int  @default(30)
-  triggerType String
-  templateKey String
-  timezone    String  @default("UTC")
-  quietHours  Json?
-  policy      Json?
-  nextRunAt   DateTime?
-  lastPlannedAt DateTime?
-  lastRunAt   DateTime?
+  locationId     String
+  name           String    @default("AI Automation")
+  enabled        Boolean   @default(true)
+  cadenceMinutes Int       @default(30)
+  triggerType    String
+  templateKey    String
+  timezone       String    @default("UTC")
+  quietHours     Json?
+  policy         Json?
+  nextRunAt      DateTime?
+  lastPlannedAt  DateTime?
+  lastRunAt      DateTime?
 
-  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  location Location          @relation(fields: [locationId], references: [id], onDelete: Cascade)
   jobs     AiAutomationJob[]
 
+  @@unique([locationId, triggerType, templateKey])
   @@index([locationId, enabled])
   @@index([enabled, nextRunAt])
   @@index([locationId, triggerType, templateKey])
-  @@unique([locationId, triggerType, templateKey])
 }
 
 model AiAutomationJob {
@@ -1479,30 +1479,30 @@ model AiAutomationJob {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  locationId String
-  scheduleId String?
+  locationId     String
+  scheduleId     String?
   conversationId String?
-  contactId String?
-  dealId String?
-  templateKey String
-  triggerType String
-  payload Json?
-  status String @default("pending") // pending | processing | completed | dead
-  scheduledAt DateTime @default(now())
-  processedAt DateTime?
-  attemptCount Int @default(0)
-  maxAttempts Int @default(6)
-  lockedAt DateTime?
-  lockedBy String?
-  lastError String? @db.Text
-  idempotencyKey String @unique
-  sourceKey String?
-  traceId String?
+  contactId      String?
+  dealId         String?
+  templateKey    String
+  triggerType    String
+  payload        Json?
+  status         String    @default("pending") // pending | processing | completed | dead
+  scheduledAt    DateTime  @default(now())
+  processedAt    DateTime?
+  attemptCount   Int       @default(0)
+  maxAttempts    Int       @default(6)
+  lockedAt       DateTime?
+  lockedBy       String?
+  lastError      String?   @db.Text
+  idempotencyKey String    @unique
+  sourceKey      String?
+  traceId        String?
 
-  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
-  schedule AiAutomationSchedule? @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
-  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
-  contact Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  location           Location              @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  schedule           AiAutomationSchedule? @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  conversation       Conversation?         @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  contact            Contact?              @relation(fields: [contactId], references: [id], onDelete: SetNull)
   suggestedResponses AiSuggestedResponse[]
 
   @@index([status, scheduledAt])
@@ -1517,34 +1517,34 @@ model AiSuggestedResponse {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  locationId String
+  locationId     String
   conversationId String?
-  contactId String?
-  dealId String?
-  jobId String?
-  decisionId String?
-  body String @db.Text
-  source String
-  status String @default("pending") // pending | accepted | rejected | sent | expired
-  metadata Json?
-  traceId String?
-  idempotencyKey String @unique
+  contactId      String?
+  dealId         String?
+  jobId          String?
+  decisionId     String?
+  body           String  @db.Text
+  source         String
+  status         String  @default("pending") // pending | accepted | rejected | sent | expired
+  metadata       Json?
+  traceId        String?
+  idempotencyKey String  @unique
 
-  acceptedAt DateTime?
-  rejectedAt DateTime?
-  sentAt DateTime?
-  expiresAt DateTime?
-  rejectedReason String?
+  acceptedAt       DateTime?
+  rejectedAt       DateTime?
+  sentAt           DateTime?
+  expiresAt        DateTime?
+  rejectedReason   String?
   acceptedByUserId String?
   rejectedByUserId String?
 
-  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
-  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
-  contact Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  job AiAutomationJob? @relation(fields: [jobId], references: [id], onDelete: SetNull)
-  decision AiDecision? @relation(fields: [decisionId], references: [id], onDelete: SetNull)
-  acceptedByUser User? @relation("AiSuggestedResponseAcceptedBy", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
-  rejectedByUser User? @relation("AiSuggestedResponseRejectedBy", fields: [rejectedByUserId], references: [id], onDelete: SetNull)
+  location       Location         @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  conversation   Conversation?    @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  contact        Contact?         @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  job            AiAutomationJob? @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  decision       AiDecision?      @relation(fields: [decisionId], references: [id], onDelete: SetNull)
+  acceptedByUser User?            @relation("AiSuggestedResponseAcceptedBy", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
+  rejectedByUser User?            @relation("AiSuggestedResponseRejectedBy", fields: [rejectedByUserId], references: [id], onDelete: SetNull)
 
   @@index([locationId, status, createdAt(sort: Desc)])
   @@index([conversationId, status, createdAt(sort: Desc)])
@@ -1657,21 +1657,21 @@ model WebPushSubscription {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  userId    String
-  endpoint  String   @unique
-  p256dh    String   @db.Text
-  auth      String   @db.Text
-  status    String   @default("active") // active, inactive
-  deviceLabel String?
-  userAgent String?  @db.Text
-  browser   String?
-  platform  String?
-  expiration DateTime?
-  lastUsedAt DateTime?
+  userId        String
+  endpoint      String    @unique
+  p256dh        String    @db.Text
+  auth          String    @db.Text
+  status        String    @default("active") // active, inactive
+  deviceLabel   String?
+  userAgent     String?   @db.Text
+  browser       String?
+  platform      String?
+  expiration    DateTime?
+  lastUsedAt    DateTime?
   lastSuccessAt DateTime?
   lastFailureAt DateTime?
-  failureCount Int   @default(0)
-  metadata   Json?
+  failureCount  Int       @default(0)
+  metadata      Json?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -1683,14 +1683,14 @@ model UserTaskReminderPreference {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  userId             String  @unique
-  enabled            Boolean @default(true)
-  inAppEnabled       Boolean @default(true)
-  webPushEnabled     Boolean @default(true)
-  defaultOffsets     Json?
-  quietHoursEnabled  Boolean @default(true)
-  quietHoursStartHour Int    @default(21)
-  quietHoursEndHour   Int    @default(8)
+  userId              String  @unique
+  enabled             Boolean @default(true)
+  inAppEnabled        Boolean @default(true)
+  webPushEnabled      Boolean @default(true)
+  defaultOffsets      Json?
+  quietHoursEnabled   Boolean @default(true)
+  quietHoursStartHour Int     @default(21)
+  quietHoursEndHour   Int     @default(8)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
@@ -1710,14 +1710,14 @@ model MessageAttachment {
 }
 
 model MessageTranscript {
-  id               String   @id @default(cuid())
+  id               String    @id @default(cuid())
   messageId        String
-  attachmentId     String   @unique
-  provider         String   @default("google")
+  attachmentId     String    @unique
+  provider         String    @default("google")
   model            String
-  status           String   @default("pending") // pending | processing | completed | failed
+  status           String    @default("pending") // pending | processing | completed | failed
   language         String?
-  text             String?  @db.Text
+  text             String?   @db.Text
   error            String?
   promptTokens     Int?
   completionTokens Int?
@@ -1725,14 +1725,14 @@ model MessageTranscript {
   estimatedCostUsd Float?
   startedAt        DateTime?
   completedAt      DateTime?
-  retryCount       Int      @default(0)
+  retryCount       Int       @default(0)
   lastRetryAt      DateTime?
   deadLetteredAt   DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  message    Message           @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  attachment MessageAttachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+  message     Message                       @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  attachment  MessageAttachment             @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
   extractions MessageTranscriptExtraction[]
 
   @@index([messageId])
@@ -1743,11 +1743,11 @@ model MessageTranscript {
 }
 
 model MessageTranscriptExtraction {
-  id               String   @id @default(cuid())
+  id               String    @id @default(cuid())
   transcriptId     String
-  provider         String   @default("google")
+  provider         String    @default("google")
   model            String
-  status           String   @default("pending") // pending | processing | completed | failed
+  status           String    @default("pending") // pending | processing | completed | failed
   payload          Json?
   error            String?
   promptTokens     Int?
@@ -1756,13 +1756,13 @@ model MessageTranscriptExtraction {
   estimatedCostUsd Float?
   startedAt        DateTime?
   completedAt      DateTime?
-  retryCount       Int      @default(0)
+  retryCount       Int       @default(0)
   lastRetryAt      DateTime?
   deadLetteredAt   DateTime?
   crmLogHistoryId  String?
   crmLoggedAt      DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   transcript MessageTranscript @relation(fields: [transcriptId], references: [id], onDelete: Cascade)
 
@@ -1841,7 +1841,6 @@ model AgentEvent {
   @@map("agent_events")
 }
 
-
 // ==========================================
 // Phase 2: Strategic Scraping Infrastructure
 // ==========================================
@@ -1852,14 +1851,16 @@ model ScrapingConnection {
   updatedAt  DateTime @updatedAt
   locationId String
 
-  name              String
-  platform          String   // e.g., "bazaraki", "facebook_marketplace"
-  enabled           Boolean  @default(true)
-  
-  // Rate Limits
-  globalRateLimitMs Int      @default(5000)
+  name     String
+  platform String // e.g., "bazaraki", "facebook_marketplace"
+  enabled  Boolean @default(true)
 
-  location    Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  // Rate Limits
+  globalRateLimitMs     Int @default(5000)
+  maxDailyInteractions  Int @default(100) // Hard limit on deep interactions per day per connection
+  maxConcurrentRequests Int @default(1) // Control parallel Playwright contexts
+
+  location    Location             @relation(fields: [locationId], references: [id], onDelete: Cascade)
   tasks       ScrapingTask[]
   credentials ScrapingCredential[]
 
@@ -1874,16 +1875,16 @@ model ScrapingCredential {
   connectionId String
 
   // Authentication Details (Encrypted/Secure)
-  authUsername      String?
-  authPassword      String?  @db.Text
-  
+  authUsername String?
+  authPassword String? @db.Text
+
   // Session State (Cookies/Tokens to avoid re-login)
-  sessionState      Json?    // Storing Playwright context cookies
-  
+  sessionState Json? // Storing Playwright context cookies
+
   // Health & Rotation
-  status            String   @default("active") // active, rate_limited, banned, locked
-  healthScore       Int      @default(100)      // 1-100 scale, degrades on 429s/captchas
-  lastUsedAt        DateTime?
+  status      String    @default("active") // active, rate_limited, banned, locked
+  healthScore Int       @default(100) // 1-100 scale, degrades on 429s/captchas
+  lastUsedAt  DateTime?
 
   connection ScrapingConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
@@ -1898,26 +1899,33 @@ model ScrapingTask {
   locationId   String
   connectionId String
 
-  name              String
-  enabled           Boolean  @default(true)
-  scrapeFrequency   String   @default("daily") // hourly, every_6h, daily, weekly
-  maxPagesPerRun    Int      @default(10)
-  extractionMode    String   @default("hybrid") // css_selectors, ai_extraction, hybrid
-  selectors         Json?    // CSS selector mapping
-  aiInstructions    String?  @db.Text // AI extraction prompt
-  taskType          String   @default("listings") // listings, social_posts, profiles
+  name            String
+  enabled         Boolean @default(true)
+  scrapeFrequency String  @default("daily") // hourly, every_6h, daily, weekly
+  maxPagesPerRun  Int     @default(10)
+  extractionMode  String  @default("hybrid") // css_selectors, ai_extraction, hybrid
+  selectors       Json? // CSS selector mapping
+  aiInstructions  String? @db.Text // AI extraction prompt
+  taskType        String  @default("listings") // listings, social_posts, profiles
+
+  // Scrape Strategy
+  scrapeStrategy        String @default("shallow_duplication") // shallow_duplication, deep_extraction
+  targetSellerType      String @default("individual") // individual, agency, all
+  delayBetweenPagesMs   Int    @default(3000) // Base wait between actions
+  delayJitterMs         Int    @default(1500) // Random variance added
+  maxInteractionsPerRun Int? // Optional hard cap on deep actions per run
 
   // Target Execution specifics
-  targetUrls        String[] @default([]) // Array of specific URLs to scrape (e.g. /real-estate-for-sale/)
-  fieldMappings     Json?    // Flexible JSON for mapping fields dynamically per platform
+  targetUrls    String[] @default([]) // Array of specific URLs to scrape (e.g. /real-estate-for-sale/)
+  fieldMappings Json? // Flexible JSON for mapping fields dynamically per platform
 
   // Sync state
-  lastSyncAt        DateTime?
-  lastSyncStatus    String?
-  lastSyncError     String?  @db.Text
-  lastSyncStats     Json?    // { discovered: 15, new: 8, duplicates: 7, errors: 0 }
+  lastSyncAt     DateTime?
+  lastSyncStatus String?
+  lastSyncError  String?   @db.Text
+  lastSyncStats  Json? // { discovered: 15, new: 8, duplicates: 7, errors: 0 }
 
-  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  location   Location           @relation(fields: [locationId], references: [id], onDelete: Cascade)
   connection ScrapingConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
   runs       ScrapingRun[]
 
@@ -1926,9 +1934,9 @@ model ScrapingTask {
 }
 
 model ScrapingRun {
-  id         String   @id @default(cuid())
-  createdAt  DateTime @default(now())
-  taskId     String
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  taskId    String
 
   status          String    @default("running") // running, completed, partial, failed
   pagesScraped    Int       @default(0)
