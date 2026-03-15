@@ -3,6 +3,10 @@ export async function register() {
         try {
             const { initWhatsAppLidResolveWorker } = await import('@/lib/queue/whatsapp-lid-resolve');
             await initWhatsAppLidResolveWorker();
+
+            const { initScrapingWorker } = await import('@/lib/queue/scraping-queue');
+            await initScrapingWorker();
+
             // const { initGhlSyncWorker } = await import('@/lib/queue/ghl-sync');
             // initGhlSyncWorker();
         } catch (err) {

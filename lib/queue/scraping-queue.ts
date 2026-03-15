@@ -37,6 +37,7 @@ async function getQueueInstance() {
 export const scrapingQueue = {
     add: async (name: string, data: ScrapingJobData, opts?: any) => {
         const queue = await getQueueInstance();
+        console.log(`[Scraping] Job queued: ${name} (task=${data.taskId}, pages=${data.pageLimit ?? 'unlimited'})`);
         return queue.add(name, data, opts);
     }
 };
@@ -47,13 +48,13 @@ let worker: any | null = null;
 export async function initScrapingWorker() {
     if (worker) return;
 
-    console.log('[Queue] Initializing Scraping Worker...');
+    console.log('[Scraping] 🚀 Initializing Scraping Worker...');
 
     const { Worker } = await import('bullmq');
 
     worker = new Worker<ScrapingJobData>(QUEUE_NAME, async (job: any) => {
-        const { taskId, locationId } = job.data;
-        console.log(`[Queue] Processing Scraping Job for task ${taskId} (Job ${job.id})`);
+        const { taskId, locationId, pageLimit } = job.data;
+        console.log(`[Scraping] ▶ Processing job ${job.id} — task=${taskId}, pageLimit=${pageLimit ?? 'unlimited'}`);
 
         try {
             // Dynamic import to avoid circular dependencies
@@ -65,33 +66,41 @@ export async function initScrapingWorker() {
             });
 
             if (!task) {
-                console.warn(`[Queue] ScrapingTask ${taskId} not found. Skipping.`);
+                console.warn(`[Scraping] ⚠ Task ${taskId} not found in DB. Skipping.`);
                 return;
             }
 
             if (!task.enabled || !task.connection.enabled) {
-                console.warn(`[Queue] ScrapingTask ${taskId} or its connection is disabled. Skipping.`);
+                console.warn(`[Scraping] ⚠ Task "${task.name}" or its connection is disabled. Skipping.`);
                 return;
             }
+
+            console.log(`[Scraping] 🔧 Running task "${task.name}" on platform=${task.connection.platform}`);
 
             // Orchestrate the scrape
             const result = await ListingScraperService.scrapeTask(task as any, { 
                 pageLimit: job.data.pageLimit 
             });
-            console.log(`[Queue] Successfully completed scraping task ${taskId}. Stats:`, result);
+
+            console.log(`[Scraping] ✅ Task "${task.name}" completed:`, JSON.stringify(result));
 
         } catch (error: any) {
-            console.error(`[Queue] Failed to scrape task ${taskId}:`, error.message);
+            console.error(`[Scraping] ❌ Task ${taskId} failed:`, error.message);
+            console.error(`[Scraping] Stack:`, error.stack);
             
-            // Log the error to the database run (handled within the service if possible, or here as fallback)
-            await db.scrapingRun.create({
-                data: {
-                    taskId,
-                    status: 'failed',
-                    errorLog: error.message || 'Unknown error',
-                    completedAt: new Date()
-                }
-            });
+            // Log the error to the database run (fallback if not already handled by ListingScraperService)
+            try {
+                await db.scrapingRun.create({
+                    data: {
+                        taskId,
+                        status: 'failed',
+                        errorLog: error.message || 'Unknown error',
+                        completedAt: new Date()
+                    }
+                });
+            } catch (dbErr: any) {
+                console.error(`[Scraping] ❌ Failed to write error to DB:`, dbErr.message);
+            }
 
             throw error; // Let BullMQ mark it failed
         }
@@ -106,6 +115,16 @@ export async function initScrapingWorker() {
     });
 
     worker.on('failed', (job: any, err: Error) => {
-        console.error(`[Queue] Job ${job?.id} failed: ${err.message}`);
+        console.error(`[Scraping] ❌ Job ${job?.id} failed permanently: ${err.message}`);
     });
+
+    worker.on('completed', (job: any) => {
+        console.log(`[Scraping] ✅ Job ${job?.id} completed successfully`);
+    });
+
+    worker.on('error', (err: Error) => {
+        console.error(`[Scraping] ❌ Worker connection error:`, err.message);
+    });
+
+    console.log('[Scraping] ✅ Worker initialized and listening for jobs');
 }

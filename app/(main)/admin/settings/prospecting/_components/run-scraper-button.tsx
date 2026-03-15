@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import {
     DropdownMenu,
@@ -14,6 +15,7 @@ import { Play, Loader2 } from 'lucide-react';
 
 export function RunScraperButton({ taskId, locationId }: { taskId: string; locationId: string }) {
     const [isLoading, setIsLoading] = useState(false);
+    const router = useRouter();
 
     const handleRun = async (pageLimit?: number) => {
         setIsLoading(true);
@@ -24,6 +26,8 @@ export function RunScraperButton({ taskId, locationId }: { taskId: string; locat
                 ? `Scraping task queued (${pageLimit} pages). Check back soon.`
                 : 'Full scraping task queued. Check back soon.'
             );
+            // Refresh the page so Run History panel shows the new "running" entry
+            router.refresh();
         } catch (error: any) {
             toast.error(error.message || 'Failed to queue scraping task');
         } finally {

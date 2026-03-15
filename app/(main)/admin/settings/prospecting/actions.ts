@@ -260,3 +260,12 @@ export async function manualTriggerScrape(id: string, locationId: string, pageLi
 
     return true;
 }
+
+export async function getScrapingRuns(taskId: string, limit = 10) {
+    if (!taskId) return [];
+    return await db.scrapingRun.findMany({
+        where: { taskId },
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+    });
+}

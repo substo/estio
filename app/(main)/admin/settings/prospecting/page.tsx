@@ -1,9 +1,10 @@
-import { getScrapingConnections, getScrapingTasks } from './actions';
+import { getScrapingConnections, getScrapingTasks, getScrapingRuns } from './actions';
 import db from '@/lib/db';
 import { auth } from '@clerk/nextjs/server';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { RunScraperButton } from './_components/run-scraper-button';
+import { RunHistoryPanel } from './_components/run-history-panel';
 
 export default async function ProspectingSettingsPage() {
     const { userId } = await auth();
@@ -20,6 +21,14 @@ export default async function ProspectingSettingsPage() {
         getScrapingConnections(locationId),
         getScrapingTasks(locationId)
     ]);
+
+    // Fetch run history for all tasks in parallel
+    const runsByTask: Record<string, any[]> = {};
+    await Promise.all(
+        tasks.map(async (task: any) => {
+            runsByTask[task.id] = await getScrapingRuns(task.id, 5);
+        })
+    );
 
     return (
         <div className="p-6">
@@ -86,35 +95,40 @@ export default async function ProspectingSettingsPage() {
                     </div>
                 ) : (
                     tasks.map((task: any) => (
-                        <div key={task.id} className="p-4 border rounded-lg bg-card flex justify-between items-center">
-                            <div>
-                                <h3 className="font-medium text-base flex items-center gap-2">
-                                    {task.name}
-                                    {!task.enabled && (
-                                        <span className="text-xs font-normal bg-muted px-2 py-0.5 rounded text-muted-foreground">Disabled</span>
-                                    )}
-                                </h3>
-                                <p className="text-sm text-muted-foreground mt-1">
-                                    Uses Connection: <strong>{task.connection?.name || 'Unknown'}</strong>
-                                </p>
-                                <div className="text-xs flex gap-4 mt-2 text-muted-foreground">
-                                    <span>Sync: {task.scrapeFrequency}</span>
-                                    <span>Mode: {task.extractionMode}</span>
-                                    {task.lastSyncAt ? (
-                                        <span className={task.lastSyncStatus === 'success' ? 'text-green-600' : 'text-red-600'}>
-                                            Last Sync: {task.lastSyncAt.toLocaleString()} ({task.lastSyncStatus})
-                                        </span>
-                                    ) : (
-                                        <span>Never synced</span>
-                                    )}
+                        <div key={task.id} className="p-4 border rounded-lg bg-card">
+                            <div className="flex justify-between items-center">
+                                <div>
+                                    <h3 className="font-medium text-base flex items-center gap-2">
+                                        {task.name}
+                                        {!task.enabled && (
+                                            <span className="text-xs font-normal bg-muted px-2 py-0.5 rounded text-muted-foreground">Disabled</span>
+                                        )}
+                                    </h3>
+                                    <p className="text-sm text-muted-foreground mt-1">
+                                        Uses Connection: <strong>{task.connection?.name || 'Unknown'}</strong>
+                                    </p>
+                                    <div className="text-xs flex gap-4 mt-2 text-muted-foreground">
+                                        <span>Sync: {task.scrapeFrequency}</span>
+                                        <span>Mode: {task.extractionMode}</span>
+                                        {task.lastSyncAt ? (
+                                            <span className={task.lastSyncStatus === 'success' ? 'text-green-600' : 'text-red-600'}>
+                                                Last Sync: {task.lastSyncAt.toLocaleString()} ({task.lastSyncStatus})
+                                            </span>
+                                        ) : (
+                                            <span>Never synced</span>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="flex gap-2">
+                                    <RunScraperButton taskId={task.id} locationId={locationId} />
+                                    <Link href={`/admin/settings/prospecting/tasks/${task.id}`}>
+                                        <Button variant="outline" size="sm">Edit</Button>
+                                    </Link>
                                 </div>
                             </div>
-                            <div className="flex gap-2">
-                                <RunScraperButton taskId={task.id} locationId={locationId} />
-                                <Link href={`/admin/settings/prospecting/tasks/${task.id}`}>
-                                    <Button variant="outline" size="sm">Edit</Button>
-                                </Link>
-                            </div>
+
+                            {/* Run History */}
+                            <RunHistoryPanel taskId={task.id} initialRuns={runsByTask[task.id] || []} />
                         </div>
                     ))
                 )}
