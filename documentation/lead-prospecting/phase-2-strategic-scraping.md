@@ -11,38 +11,47 @@ Phase 2 builds the tooling to **discover property owners and interested parties*
 
 ---
 
-## 2.1 Scraping Target Configuration
+## 2.1 Scraping Connection & Task Configuration
 
 ### Admin UI
 
 New settings page at `/admin/settings/prospecting` (or under existing `/admin/settings` navigation):
 
-#### Configuration Fields per Target Site
+#### Configuration Fields per Connection and Credential
 
 | Field | Type | Description |
 |---|---|---|
 | `name` | String | Display name (e.g., "Bazaraki Properties") |
-| `domain` | String | Target domain (e.g., "bazaraki.com") |
-| `baseUrl` | String | Starting search URL with location/category presets |
+| `platform` | String | Target platform (e.g., "bazaraki") |
 | `enabled` | Boolean | Active/inactive toggle |
+| `globalRateLimitMs` | Int | Cross-credential delay |
+
+#### Configuration Fields per Task
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | String | Display name of the specific job |
 | `scrapeFrequency` | Enum | `hourly`, `every_6h`, `daily`, `weekly` |
 | `maxPagesPerRun` | Int | Pagination depth limit (default 10) |
 | `extractionMode` | Enum | `css_selectors`, `ai_extraction`, `hybrid` |
 | `selectors` | Json | CSS selector mapping for structured extraction |
 | `aiInstructions` | String | System prompt for AI-based extraction |
+| `targetUrls` | String[] | Specific platform paths to query |
+| `fieldMappings` | Json | Dynamic format mapping per target |
 | `lastSyncAt` | DateTime | Last successful scrape timestamp |
-| `lastSyncStatus` | String | `success`, `partial`, `error` |
-| `lastSyncError` | String? | Error message from last run |
 
 ### Data Model Architecture Split
 
-To better manage scraping complexity, the data model is split into `ScrapingConnection` (platform-level settings) and `ScrapingTask` (specific scraping configurations).
+To better manage scraping complexity and avoid IP bans, the data model is split to support **Credential Rotation Pools**.
 
 *   **`ScrapingConnection` Model**
-    *   **Purpose:** Houses platform-level authentication and global rate limits to prevent duplicated logins and avoid bans.
-    *   **Fields:** `name`, `platform`, `enabled`, `authUsername`, `authPassword` (encrypted), `sessionState`, `globalRateLimitMs`.
+    *   **Purpose:** Houses platform-level behavior and acts as a pool for credentials.
+    *   **Fields:** `name`, `platform`, `enabled`, `globalRateLimitMs`.
+*   **`ScrapingCredential` Model**
+    *   **Purpose:** Specific platform login accounts rotated in a pool.
+    *   **Fields:** `authUsername`, `authPassword`, `sessionState` (Playwright cookies), `status` (active/banned/rate_limited), `healthScore`.
 *   **`ScrapingTask` Model**
-    *   **Purpose:** Stores configuration for specific scheduled actions utilizing a connection.
+    *   **Purpose:** Stores configuration for specific scheduled scraping jobs utilizing a Connection Pool.
     *   **Fields:** `name`, `connectionId`, `enabled`, `scrapeFrequency`, `maxPagesPerRun`, `extractionMode` (`css_selectors`, `ai_extraction`, `hybrid`), `selectors` (JSON), `aiInstructions` (Text), `taskType`, `targetUrls` (String array), `fieldMappings` (JSON).
 *   **`ScrapingRun` Model**
     *   **Purpose:** Telemetry tracking for monitoring scraping success and errors.
@@ -51,58 +60,71 @@ To better manage scraping complexity, the data model is split into `ScrapingConn
 #### Data Model
 
 ```prisma
-model ScrapingTarget {
+model ScrapingConnection {
   id         String   @id @default(cuid())
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
   locationId String
 
   name              String
-  domain            String
-  baseUrl           String
+  platform          String
   enabled           Boolean  @default(true)
-  scrapeFrequency   String   @default("daily") // hourly, every_6h, daily, weekly
-  maxPagesPerRun    Int      @default(10)
-  extractionMode    String   @default("hybrid") // css_selectors, ai_extraction, hybrid
-  selectors         Json?    // CSS selector mapping
-  aiInstructions    String?  // AI extraction prompt
-  targetType        String   @default("listings") // listings, social_posts, profiles
-  targetUrls        String[] // Support exact path overrides for scraping loops
-  fieldMappings     Json?    // Dynamic output mapping for AI/CSS values
-  authUsername      String?  // Platform login
-  authPassword      String?  // Encrypted platform login
+  globalRateLimitMs Int      @default(5000)
 
-  // Sync state
+  location    Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  tasks       ScrapingTask[]
+  credentials ScrapingCredential[]
+}
+
+model ScrapingCredential {
+  id           String   @id @default(cuid())
+  connectionId String
+
+  authUsername      String?
+  authPassword      String?  @db.Text
+  sessionState      Json?
+  
+  status            String   @default("active")
+  healthScore       Int      @default(100)
+  lastUsedAt        DateTime?
+
+  connection ScrapingConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+}
+
+model ScrapingTask {
+  id           String   @id @default(cuid())
+  locationId   String
+  connectionId String
+
+  name              String
+  enabled           Boolean  @default(true)
+  scrapeFrequency   String   @default("daily")
+  maxPagesPerRun    Int      @default(10)
+  extractionMode    String   @default("hybrid")
+  selectors         Json?
+  aiInstructions    String?  @db.Text
+  taskType          String   @default("listings")
+  targetUrls        String[] @default([])
+  fieldMappings     Json?
+
   lastSyncAt        DateTime?
   lastSyncStatus    String?
   lastSyncError     String?  @db.Text
-  lastSyncStats     Json?    // { discovered: 15, new: 8, duplicates: 7, errors: 0 }
+  lastSyncStats     Json?
 
-  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
-  runs     ScrapingRun[]
-
-  @@index([locationId, enabled])
-  @@index([domain])
+  connection ScrapingConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  runs       ScrapingRun[]
 }
 
 model ScrapingRun {
   id         String   @id @default(cuid())
-  createdAt  DateTime @default(now())
-  targetId   String
+  taskId     String
 
-  status         String    @default("running") // running, completed, partial, failed
-  pagesScraped   Int       @default(0)
-  listingsFound  Int       @default(0)
-  leadsCreated   Int       @default(0)
-  duplicatesFound Int      @default(0)
-  errors         Int       @default(0)
-  completedAt    DateTime?
-  errorLog       String?   @db.Text
-  metadata       Json?
-
-  target ScrapingTarget @relation(fields: [targetId], references: [id], onDelete: Cascade)
-
-  @@index([targetId, createdAt(sort: Desc)])
+  status          String    @default("running")
+  pagesScraped    Int       @default(0)
+  listingsFound   Int       @default(0)
+  leadsCreated    Int       @default(0)
+  duplicatesFound Int       @default(0)
+  errors          Int       @default(0)
+  errorLog        String?   @db.Text
 }
 ```
 
