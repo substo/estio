@@ -74,8 +74,13 @@ export async function POST(req: Request) {
 
                 sendEvent({ status: 'waiting_qr', message: 'Waiting for Bazaraki to generate QR Code...' });
 
-                // Wait for the QR code image to appear
-                const qrImageSelector = 'img[alt="Scan me!"]';
+                // Wait for the URL to change to the whatsapp login page
+                await page.waitForURL('**/login/whatsapp/**', { timeout: 15000 });
+
+                // The QR code might not have the alt="Scan me!" attribute. 
+                // Let's look for any base64 image or a specific class. Usually it's an img with a base64 src inside the main container.
+                // We'll wait for any image that looks like a data URI or resides in the typical QR container.
+                const qrImageSelector = 'img[src^="data:image"]';
                 await page.waitForSelector(qrImageSelector, { timeout: 15000 });
                 
                 // Wait a moment for the base64 src to be fully populated (just in case)
@@ -92,8 +97,11 @@ export async function POST(req: Request) {
 
                 // Wait for user to verify on their phone.
                 // When verified, Bazaraki usually redirects to /profile/ or /my/ 
-                // We wait up to 90 seconds for this navigation
-                await page.waitForURL('**/profile/**', { timeout: 90000 });
+                // We wait up to 90 seconds. To avoid catching the /login/whatsapp/ redirect, we ensure it doesn't match login.
+                await page.waitForURL((url) => {
+                    const href = url.href.toLowerCase();
+                    return href.includes('/profile/') && !href.includes('/login/');
+                }, { timeout: 90000 });
 
                 console.log(`[Bazaraki Auth Stream] Successfully navigated to profile page!`);
                 sendEvent({ status: 'saving', message: 'Login detected! Saving session cookies...' });
@@ -113,6 +121,16 @@ export async function POST(req: Request) {
                 sendEvent({ status: 'success', message: 'Successfully authenticated!' });
             } catch (error: any) {
                 console.error(`[Bazaraki Auth Error]`, error);
+                if (browser) {
+                    try {
+                        // Attempt to grab the HTML payload to see what went wrong
+                        const pages = browser.contexts()[0]?.pages() || [];
+                        if (pages.length > 0) {
+                            const html = await pages[0].content();
+                            console.error(`[Bazaraki Auth Error] DOM Dump:`, html.substring(0, 3000));
+                        }
+                    } catch (e) {}
+                }
                 sendEvent({ status: 'error', error: error.message || 'Unknown automation error' });
             } finally {
                 if (browser) {
