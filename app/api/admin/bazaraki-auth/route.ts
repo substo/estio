@@ -98,23 +98,18 @@ export async function POST(req: Request) {
                 sendEvent({ status: 'qr_ready', qrCode: qrCodeSrc, message: 'Please scan the QR code with your phone camera and tap Send in WhatsApp.' });
                 console.log(`[Bazaraki Auth Stream] Emitted QR code. Waiting for user WhatsApp verification...`);
 
-                // Poll for verification completion. Bazaraki may NOT redirect after WhatsApp verification.
-                // It might show a success message on the same page, or set cookies via AJAX.
-                // We check multiple signals every 3 seconds for up to 90 seconds.
+                // Poll for verification completion. Bazaraki does NOT redirect after WhatsApp verification.
+                // The IPfication provider shows "Please go back to the app/website" text on success.
+                // We ONLY check for reliable signals to avoid false positives.
                 const startTime = Date.now();
-                const TIMEOUT = 90000;
+                const TIMEOUT = 120000; // 2 minutes
                 const POLL_INTERVAL = 3000;
                 let verified = false;
-                
-                // Capture baseline cookies BEFORE polling, so we can detect NEW cookies
-                const baselineCookies = await context.cookies('https://www.bazaraki.com');
-                const baselineCookieNames = new Set(baselineCookies.map(c => c.name));
-                console.log(`[Bazaraki Auth] Baseline cookies: ${[...baselineCookieNames].join(', ')}`);
                 
                 while (Date.now() - startTime < TIMEOUT) {
                     await page.waitForTimeout(POLL_INTERVAL);
                     
-                    // Signal 1: URL changed away from the login page
+                    // Signal 1: URL changed away from the login page (redirect to profile)
                     const currentUrl = page.url();
                     if (!currentUrl.includes('/login/')) {
                         console.log(`[Bazaraki Auth Stream] URL changed to: ${currentUrl}`);
@@ -123,36 +118,19 @@ export async function POST(req: Request) {
                         break;
                     }
                     
-                    // Signal 2: The QR code image disappeared from the page (verification completed)
-                    const qrStillVisible = await page.$('img[src^="data:image"]');
-                    if (!qrStillVisible) {
-                        console.log(`[Bazaraki Auth Stream] QR code disappeared from page`);
-                        sendEvent({ status: 'detected', message: 'QR code disappeared — verification likely complete' });
-                        verified = true;
-                        break;
-                    }
-                    
-                    // Signal 3: Check for NEW cookies that weren't present at baseline
-                    const currentCookies = await context.cookies('https://www.bazaraki.com');
-                    const newCookies = currentCookies.filter(c => !baselineCookieNames.has(c.name));
-                    if (newCookies.length > 0) {
-                        const newNames = newCookies.map(c => c.name).join(', ');
-                        console.log(`[Bazaraki Auth Stream] New cookies detected: ${newNames}`);
-                        sendEvent({ status: 'detected', message: `New session cookies detected: ${newNames}` });
-                        verified = true;
-                        break;
-                    }
-                    
-                    // Signal 4: Success/completion text appeared on the page
-                    const bodyText = await page.evaluate(() => document.body?.innerText?.toLowerCase() || '');
-                    if (bodyText.includes('go back to the app') || bodyText.includes('verification process')) {
-                        console.log(`[Bazaraki Auth Stream] Success text detected on page`);
-                        sendEvent({ status: 'detected', message: 'Verification complete text detected on page' });
+                    // Signal 2: IPfication success text appeared on page
+                    // The user confirmed the exact text: "Please go back to the app/website to complete the verification process"
+                    const bodyText = await page.evaluate(() => document.body?.innerText || '');
+                    const bodyLower = bodyText.toLowerCase();
+                    if (bodyLower.includes('please go back') || bodyLower.includes('complete the verification')) {
+                        console.log(`[Bazaraki Auth Stream] IPfication success text detected`);
+                        sendEvent({ status: 'detected', message: 'WhatsApp verification confirmed!' });
                         verified = true;
                         break;
                     }
                     
                     const elapsed = Math.round((Date.now() - startTime) / 1000);
+                    console.log(`[Bazaraki Auth Poll ${elapsed}s] URL: ${currentUrl} | Text snippet: ${bodyText.substring(0, 200)}`);
                     sendEvent({ status: 'waiting', message: `Waiting for WhatsApp verification... (${elapsed}s)` });
                 }
                 
