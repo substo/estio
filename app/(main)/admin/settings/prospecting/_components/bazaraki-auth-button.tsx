@@ -13,6 +13,7 @@ export function BazarakiAuthButton({ credentialId, phone }: BazarakiAuthButtonPr
     const [loading, setLoading] = useState(false);
     const [statusMessage, setStatusMessage] = useState('');
     const [qrCodeData, setQrCodeData] = useState<string | null>(null);
+    const [errorDetails, setErrorDetails] = useState<string | null>(null);
     const router = useRouter();
 
     const handleAuth = async () => {
@@ -24,6 +25,7 @@ export function BazarakiAuthButton({ credentialId, phone }: BazarakiAuthButtonPr
         try {
             setLoading(true);
             setQrCodeData(null);
+            setErrorDetails(null);
             setStatusMessage('Connecting to server...');
 
             const res = await fetch('/api/admin/bazaraki-auth', {
@@ -55,7 +57,9 @@ export function BazarakiAuthButton({ credentialId, phone }: BazarakiAuthButtonPr
                                 if (data.status === 'qr_ready' && data.qrCode) {
                                     setQrCodeData(data.qrCode);
                                 } else if (data.status === 'error') {
-                                    alert(`Failed: ${data.error}`);
+                                    const errMsg = data.error || 'Unknown error';
+                                    const debugHtml = data.debugHtml || '';
+                                    setErrorDetails(`${errMsg}\n\n--- Debug HTML ---\n${debugHtml}`);
                                     setLoading(false);
                                 } else if (data.status === 'success') {
                                     alert('Successfully authenticated with Bazaraki! Session state saved.');
@@ -70,7 +74,7 @@ export function BazarakiAuthButton({ credentialId, phone }: BazarakiAuthButtonPr
                 }
             }
         } catch (e: any) {
-            alert(`Error: ${e.message}`);
+            setErrorDetails(`Client error: ${e.message}`);
             setLoading(false);
         }
     };
@@ -97,7 +101,7 @@ export function BazarakiAuthButton({ credentialId, phone }: BazarakiAuthButtonPr
                     <p className="text-sm font-semibold text-black">Scan the QR Code with your Phone Camera</p>
                     <img src={qrCodeData} alt="Bazaraki Auth QR Code" className="w-64 h-64 border rounded" />
                     <p className="text-xs text-gray-600 text-center max-w-sm">
-                        Tap the link that appears on your phone screen, then hit "Send" in WhatsApp. 
+                        Tap the link that appears on your phone screen, then hit &quot;Send&quot; in WhatsApp. 
                         Do not close this page. Waiting for approval (up to 90s)...
                     </p>
                 </div>
@@ -107,6 +111,15 @@ export function BazarakiAuthButton({ credentialId, phone }: BazarakiAuthButtonPr
                 <p className="text-xs text-muted-foreground mt-4 italic bg-muted p-2 rounded">
                     Status: {statusMessage}
                 </p>
+            )}
+
+            {errorDetails && (
+                <div className="mt-4 p-3 border border-red-300 bg-red-50 rounded text-xs">
+                    <p className="font-semibold text-red-700 mb-2">Error Details (for debugging):</p>
+                    <pre className="whitespace-pre-wrap break-all max-h-64 overflow-y-auto text-red-800 bg-red-100 p-2 rounded">
+                        {errorDetails}
+                    </pre>
+                </div>
             )}
         </div>
     );

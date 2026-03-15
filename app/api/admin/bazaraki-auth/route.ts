@@ -53,43 +53,106 @@ export async function POST(req: Request) {
                 await page.waitForSelector(phoneInputSelector, { timeout: 10000 });
                 await page.fill(phoneInputSelector, phone);
                 
-                // consent checkbox
+                // consent checkbox - Bazaraki uses AngularJS with ng-model="data.confirm"
+                // The native checkbox is hidden by CSS. We need to trigger Angular's click handler.
                 const consentSelector = '#confirm';
-                // The actual input checkbox is visually hidden by CSS (custom label styling)
                 await page.waitForSelector(consentSelector, { state: 'attached', timeout: 5000 });
-                // Bypass Playwright's visibility checks entirely by using DOM evaluation
-                await page.evaluate((sel) => {
-                    const el = document.querySelector(sel) as HTMLInputElement;
-                    if (el) {
-                        el.checked = true;
-                        // Dispatch an event just in case angular/react is listening
-                        el.dispatchEvent(new Event('change', { bubbles: true }));
-                    }
-                }, consentSelector);
+                
+                // Click the label for the checkbox instead - this is the visible element that 
+                // AngularJS actually listens to. If not, we fall back to triggering Angular's scope manually.
+                const consentLabelSelector = 'label[for="confirm"]';
+                const hasLabel = await page.$(consentLabelSelector);
+                if (hasLabel) {
+                    await page.click(consentLabelSelector, { force: true });
+                } else {
+                    // Fallback: trigger AngularJS scope directly
+                    await page.evaluate(() => {
+                        const el = document.querySelector('#confirm') as any;
+                        if (el) {
+                            const scope = (window as any).angular?.element(el).scope();
+                            if (scope) {
+                                scope.$apply(() => { scope.data.confirm = 1; });
+                            } else {
+                                // Last resort: click + dispatch
+                                el.click();
+                            }
+                        }
+                    });
+                }
+                
+                // Small delay to let Angular digest
+                await page.waitForTimeout(300);
                 
                 // Whatsapp button
                 const whatsappBtnSelector = 'button.sign-in__button._whatsapp';
                 await page.waitForSelector(whatsappBtnSelector, { timeout: 5000 });
+                
+                // Log button state before clicking
+                const btnDisabled = await page.getAttribute(whatsappBtnSelector, 'disabled');
+                console.log(`[Bazaraki Auth] WhatsApp button disabled state: ${btnDisabled}`);
+                sendEvent({ status: 'clicking_whatsapp', message: `Clicking WhatsApp button (disabled=${btnDisabled})...` });
+                
                 await page.click(whatsappBtnSelector, { force: true });
 
-                sendEvent({ status: 'waiting_qr', message: 'Waiting for Bazaraki to generate QR Code...' });
+                sendEvent({ status: 'waiting_qr', message: 'Clicked WhatsApp. Waiting for redirect or QR Code...' });
 
-                // Wait for the URL to change to the whatsapp login page
-                await page.waitForURL('**/login/whatsapp/**', { timeout: 15000 });
+                // Wait for any navigation or new content after clicking WhatsApp
+                // The URL should change to /login/whatsapp/?phone_number=...
+                // Or the page might show an error or stay the same
+                try {
+                    await page.waitForURL('**/login/whatsapp/**', { timeout: 15000 });
+                } catch (navError: any) {
+                    // If the URL didn't change, capture current state for debugging
+                    const currentUrl = page.url();
+                    const bodyHtml = await page.evaluate(() => document.body?.innerHTML?.substring(0, 2000) || 'empty');
+                    sendEvent({ 
+                        status: 'error', 
+                        error: `WhatsApp redirect didn't happen. Current URL: ${currentUrl}`,
+                        debugHtml: bodyHtml
+                    });
+                    throw new Error(`WhatsApp redirect failed. URL stayed at: ${currentUrl}`);
+                }
 
-                // The QR code might not have the alt="Scan me!" attribute. 
-                // Let's look for any base64 image or a specific class. Usually it's an img with a base64 src inside the main container.
-                // We'll wait for any image that looks like a data URI or resides in the typical QR container.
-                const qrImageSelector = 'img[src^="data:image"]';
-                await page.waitForSelector(qrImageSelector, { timeout: 15000 });
+                sendEvent({ status: 'waiting_qr', message: 'On WhatsApp page, looking for QR code...' });
+
+                // Look for QR code image - try multiple selectors
+                const qrSelectors = [
+                    'img[src^="data:image"]',
+                    'img[alt="Scan me!"]', 
+                    '.qr-code img',
+                    'canvas',
+                ];
                 
-                // Wait a moment for the base64 src to be fully populated (just in case)
-                await page.waitForTimeout(500); 
+                let qrCodeSrc: string | null = null;
                 
-                const qrCodeSrc = await page.getAttribute(qrImageSelector, 'src');
-                
+                for (const sel of qrSelectors) {
+                    try {
+                        await page.waitForSelector(sel, { timeout: 10000 });
+                        if (sel === 'canvas') {
+                            // Extract canvas as data URL
+                            qrCodeSrc = await page.evaluate((s) => {
+                                const canvas = document.querySelector(s) as HTMLCanvasElement;
+                                return canvas?.toDataURL('image/png') || null;
+                            }, sel);
+                        } else {
+                            qrCodeSrc = await page.getAttribute(sel, 'src');
+                        }
+                        if (qrCodeSrc) break;
+                    } catch (e) {
+                        continue;
+                    }
+                }
+
                 if (!qrCodeSrc) {
-                    throw new Error('QR Code image found but src attribute was missing.');
+                    // No QR code found - stream the page HTML for debugging
+                    const currentUrl = page.url();
+                    const bodyHtml = await page.evaluate(() => document.body?.innerHTML?.substring(0, 2000) || 'empty');
+                    sendEvent({ 
+                        status: 'error', 
+                        error: `QR code not found on page ${currentUrl}`,
+                        debugHtml: bodyHtml
+                    });
+                    throw new Error(`QR code not found. URL: ${currentUrl}`);
                 }
 
                 sendEvent({ status: 'qr_ready', qrCode: qrCodeSrc, message: 'Please scan the QR code with your phone camera and tap Send in WhatsApp.' });
@@ -97,7 +160,6 @@ export async function POST(req: Request) {
 
                 // Wait for user to verify on their phone.
                 // When verified, Bazaraki usually redirects to /profile/ or /my/ 
-                // We wait up to 90 seconds. To avoid catching the /login/whatsapp/ redirect, we ensure it doesn't match login.
                 await page.waitForURL((url) => {
                     const href = url.href.toLowerCase();
                     return href.includes('/profile/') && !href.includes('/login/');
@@ -121,17 +183,20 @@ export async function POST(req: Request) {
                 sendEvent({ status: 'success', message: 'Successfully authenticated!' });
             } catch (error: any) {
                 console.error(`[Bazaraki Auth Error]`, error);
+                // Stream the error details including DOM state back to the client
+                let debugInfo = '';
                 if (browser) {
                     try {
-                        // Attempt to grab the HTML payload to see what went wrong
                         const pages = browser.contexts()[0]?.pages() || [];
                         if (pages.length > 0) {
+                            const currentUrl = pages[0].url();
                             const html = await pages[0].content();
-                            console.error(`[Bazaraki Auth Error] DOM Dump:`, html.substring(0, 3000));
+                            debugInfo = `\nURL: ${currentUrl}\nDOM: ${html.substring(0, 1500)}`;
+                            console.error(`[Bazaraki Auth Error] URL: ${currentUrl}`);
                         }
                     } catch (e) {}
                 }
-                sendEvent({ status: 'error', error: error.message || 'Unknown automation error' });
+                sendEvent({ status: 'error', error: (error.message || 'Unknown automation error') + debugInfo });
             } finally {
                 if (browser) {
                     await browser.close();
