@@ -1,5 +1,5 @@
 §# Phase 2 — Strategic Scraping Infrastructure
-**Last Updated:** 2026-03-14
+**Last Updated:** 2026-03-15
 **Status:** Completed
 
 ## Overview
@@ -403,6 +403,18 @@ Scraping is an inherently long-running task that is prone to network timeouts an
 - **Rate Limit**: 1 job per 5 seconds globally.
 - **Retries**: Configured to 1 attempt initially to prevent spamming failing target sites automatically.
 
+### Manual Scrape Trigger ("Run Now")
+
+In addition to scheduled cron runs, tasks can be triggered manually from the Admin UI.
+
+- **`ScrapingJobData`** now accepts an optional `pageLimit?: number` field.
+- **`ListingScraperService.scrapeTask()`** accepts `options?: { pageLimit?: number }` — this caps `MAX_DEPTH` for the pagination loop, overriding the task's `maxPagesPerRun` default.
+- **`manualTriggerScrape(taskId, locationId, pageLimit?)`** server action enqueues the task into BullMQ with the selected page limit.
+- **`RunScraperButton`** — a client component rendered on each task card in the Admin UI, providing a dropdown with:
+  - **Scrape 1 Page (Test Run)** — ideal for verifying selectors work.
+  - **Scrape 5 Pages** — quick validation with broader data.
+  - **Run Full Configured Scrape** — uses task's `maxPagesPerRun` setting.
+
 ---
 
 ## 2.7 Cron Integration
@@ -435,6 +447,7 @@ Flow:
 | `app/api/cron/scrape-listings/route.ts` | **[NEW]** Cron endpoint |
 | `app/(main)/admin/settings/prospecting/page.tsx` | **[NEW]** Scraping target admin UI |
 | `app/(main)/admin/settings/prospecting/actions.ts` | **[NEW]** CRUD for ScrapingTarget |
+| `app/(main)/admin/settings/prospecting/_components/run-scraper-button.tsx` | **[NEW]** Manual trigger dropdown button |
 
 ---
 

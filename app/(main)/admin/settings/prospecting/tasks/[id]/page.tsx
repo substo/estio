@@ -23,10 +23,13 @@ export default async function EditScrapingTaskPage({ params }: { params: Promise
 
     if (!task) return notFound();
 
+    // Serialize to plain JSON to avoid React Server Component Date serialization errors
+    const serializedTask = JSON.parse(JSON.stringify(task));
+
     return (
         <div className="p-6">
             <h1 className="text-2xl font-bold mb-6">Edit Scheduled Task</h1>
-            <TaskForm locationId={locationId} connections={connections} initialData={task} />
+            <TaskForm locationId={locationId} connections={connections} initialData={serializedTask} />
         </div>
     );
 }

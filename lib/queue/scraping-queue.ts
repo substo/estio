@@ -11,6 +11,7 @@ const QUEUE_NAME = 'scraping-queue';
 export interface ScrapingJobData {
     taskId: string;
     locationId: string;
+    pageLimit?: number;
 }
 
 // 1. Queue Instance (Producer) - Lazy Loaded via Dynamic Import
@@ -74,7 +75,9 @@ export async function initScrapingWorker() {
             }
 
             // Orchestrate the scrape
-            const result = await ListingScraperService.scrapeTask(task as any);
+            const result = await ListingScraperService.scrapeTask(task as any, { 
+                pageLimit: job.data.pageLimit 
+            });
             console.log(`[Queue] Successfully completed scraping task ${taskId}. Stats:`, result);
 
         } catch (error: any) {

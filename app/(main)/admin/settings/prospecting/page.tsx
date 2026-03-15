@@ -3,6 +3,7 @@ import db from '@/lib/db';
 import { auth } from '@clerk/nextjs/server';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
+import { RunScraperButton } from './_components/run-scraper-button';
 
 export default async function ProspectingSettingsPage() {
     const { userId } = await auth();
@@ -109,6 +110,7 @@ export default async function ProspectingSettingsPage() {
                                 </div>
                             </div>
                             <div className="flex gap-2">
+                                <RunScraperButton taskId={task.id} locationId={locationId} />
                                 <Link href={`/admin/settings/prospecting/tasks/${task.id}`}>
                                     <Button variant="outline" size="sm">Edit</Button>
                                 </Link>

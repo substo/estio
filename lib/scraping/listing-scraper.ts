@@ -35,8 +35,8 @@ export class ListingScraperService {
     /**
      * Main entry point to scrape a specific task configuration
      */
-    static async scrapeTask(task: ScrapeTaskWithConnection) {
-        console.log(`[ListingScraper] Starting scrape for task: ${task.name} (${task.id})`);
+    static async scrapeTask(task: ScrapeTaskWithConnection, options?: { pageLimit?: number }) {
+        console.log(`[ListingScraper] Starting scrape for task: ${task.name} (${task.id}) with options:`, options);
         
         // 1. Create a run record
         const run = await db.scrapingRun.create({
@@ -83,7 +83,7 @@ export class ListingScraperService {
                 let currentUrl: string | undefined = rootUrl;
                 let pageCount = 0;
                 // Avoid infinite loops, limit to some reasonable max depth if target is infinite
-                const MAX_DEPTH = 100;
+                const MAX_DEPTH = options?.pageLimit ?? task.maxPagesPerRun ?? 100;
                 
                 while (currentUrl && interactionsRemaining > 0 && pageCount < MAX_DEPTH) {
                     pageCount++;

@@ -240,7 +240,7 @@ export async function deleteScrapingTask(id: string, locationId: string) {
     return true;
 }
 
-export async function manualTriggerScrape(id: string, locationId: string) {
+export async function manualTriggerScrape(id: string, locationId: string, pageLimit?: number) {
     const { auth } = await import('@clerk/nextjs/server');
     const { userId } = await auth();
     const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
@@ -254,7 +254,8 @@ export async function manualTriggerScrape(id: string, locationId: string) {
 
     await scrapingQueue.add(`manual-scrape-${task.id}-${Date.now()}`, {
         taskId: task.id,
-        locationId: task.locationId
+        locationId: task.locationId,
+        pageLimit
     });
 
     return true;
