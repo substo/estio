@@ -42,25 +42,16 @@ export async function POST(req: Request) {
                 });
                 const page = await context.newPage();
 
-                sendEvent({ status: 'navigating', message: 'Navigating directly to Bazaraki WhatsApp login...' });
+                sendEvent({ status: 'navigating', message: 'Navigating to Bazaraki WhatsApp login...' });
                 
-                // Navigate directly to the WhatsApp login URL, bypassing the AngularJS form entirely.
-                // The form requires AngularJS model binding for the consent checkbox which is impossible
-                // to reliably trigger from Playwright. The direct URL works without consent.
+                // Navigate directly to the WhatsApp login URL, bypassing the AngularJS form.
                 const encodedPhone = encodeURIComponent(phone);
                 await page.goto(`https://www.bazaraki.com/profile/login/whatsapp/?phone_number=${encodedPhone}`, { 
-                    waitUntil: 'networkidle',
-                    timeout: 30000 
+                    waitUntil: 'domcontentloaded',
+                    timeout: 15000 
                 });
 
-                // Wait extra time for AngularJS to bootstrap and IPfication to load
-                await page.waitForTimeout(3000);
-                
-                // Log what's on the page for debugging
-                const initialText = await page.evaluate(() => document.body?.innerText?.substring(0, 300) || 'empty');
-                console.log(`[Bazaraki Auth] Page loaded. Body text: ${initialText}`);
-
-                sendEvent({ status: 'waiting_qr', message: 'Page loaded, looking for QR code...' });
+                sendEvent({ status: 'waiting_qr', message: 'Looking for QR code...' });
 
                 // Look for QR code image - try multiple selectors
                 const qrSelectors = [
@@ -76,7 +67,6 @@ export async function POST(req: Request) {
                     try {
                         await page.waitForSelector(sel, { timeout: 10000 });
                         if (sel === 'canvas') {
-                            // Extract canvas as data URL
                             qrCodeSrc = await page.evaluate((s) => {
                                 const canvas = document.querySelector(s) as HTMLCanvasElement;
                                 return canvas?.toDataURL('image/png') || null;
@@ -84,114 +74,104 @@ export async function POST(req: Request) {
                         } else {
                             qrCodeSrc = await page.getAttribute(sel, 'src');
                         }
-                        if (qrCodeSrc) break;
+                        if (qrCodeSrc) {
+                            console.log(`[Bazaraki Auth] QR found via selector: ${sel}`);
+                            break;
+                        }
                     } catch (e) {
                         continue;
                     }
                 }
 
                 if (!qrCodeSrc) {
-                    // No QR code found - stream the page HTML for debugging
-                    const currentUrl = page.url();
                     const bodyHtml = await page.evaluate(() => document.body?.innerHTML?.substring(0, 2000) || 'empty');
-                    sendEvent({ 
-                        status: 'error', 
-                        error: `QR code not found on page ${currentUrl}`,
-                        debugHtml: bodyHtml
-                    });
-                    throw new Error(`QR code not found. URL: ${currentUrl}`);
+                    sendEvent({ status: 'error', error: `QR code not found`, debugHtml: bodyHtml });
+                    throw new Error(`QR code not found`);
                 }
 
-                sendEvent({ status: 'qr_ready', qrCode: qrCodeSrc, message: 'Please scan the QR code with your phone camera and tap Send in WhatsApp.' });
-                console.log(`[Bazaraki Auth Stream] Emitted QR code. Waiting for user WhatsApp verification...`);
+                sendEvent({ status: 'qr_ready', qrCode: qrCodeSrc, message: 'Scan the QR code, then tap Send in WhatsApp. Keep this page open.' });
+                console.log(`[Bazaraki Auth Stream] QR code emitted. Waiting for verification...`);
 
-                // Poll for verification completion. Bazaraki does NOT redirect after WhatsApp verification.
-                // The IPfication provider shows "Please go back to the app/website" text on success.
-                // We ONLY check for reliable signals to avoid false positives.
+                // === VERIFICATION DETECTION ===
+                // After the user scans the QR and taps Send in WhatsApp, we need to detect
+                // that verification completed. We poll every 3s for up to 2 minutes.
+                // Only 2 reliable signals (no cookies/QR checks - those cause false positives):
+                //   1. URL changed away from /login/ (redirect to profile)
+                //   2. IPfication success text ("Please go back to the app/website")
                 const startTime = Date.now();
-                const TIMEOUT = 120000; // 2 minutes
+                const TIMEOUT = 120000;
                 const POLL_INTERVAL = 3000;
                 let verified = false;
                 
                 while (Date.now() - startTime < TIMEOUT) {
                     await page.waitForTimeout(POLL_INTERVAL);
                     
-                    // Signal 1: URL changed away from the login page (redirect to profile)
                     const currentUrl = page.url();
+                    
+                    // Signal 1: URL changed away from login
                     if (!currentUrl.includes('/login/')) {
-                        console.log(`[Bazaraki Auth Stream] URL changed to: ${currentUrl}`);
-                        sendEvent({ status: 'detected', message: `Login redirect detected: ${currentUrl}` });
+                        console.log(`[Bazaraki Auth] URL changed to: ${currentUrl}`);
+                        sendEvent({ status: 'detected', message: `Redirect detected: ${currentUrl}` });
                         verified = true;
                         break;
                     }
                     
-                    // Signal 2: IPfication success text appeared on page
-                    // The user confirmed the exact text: "Please go back to the app/website to complete the verification process"
+                    // Signal 2: IPfication success text
                     const bodyText = await page.evaluate(() => document.body?.innerText || '');
                     const bodyLower = bodyText.toLowerCase();
                     if (bodyLower.includes('please go back') || bodyLower.includes('complete the verification')) {
-                        console.log(`[Bazaraki Auth Stream] IPfication success text detected`);
+                        console.log(`[Bazaraki Auth] IPfication success text detected`);
                         sendEvent({ status: 'detected', message: 'WhatsApp verification confirmed!' });
                         verified = true;
                         break;
                     }
                     
                     const elapsed = Math.round((Date.now() - startTime) / 1000);
-                    console.log(`[Bazaraki Auth Poll ${elapsed}s] URL: ${currentUrl} | Text snippet: ${bodyText.substring(0, 200)}`);
+                    console.log(`[Bazaraki Auth Poll ${elapsed}s] Text: ${bodyText.substring(0, 150)}`);
                     sendEvent({ status: 'waiting', message: `Waiting for WhatsApp verification... (${elapsed}s)` });
                 }
                 
                 if (!verified) {
                     const bodyHtml = await page.evaluate(() => document.body?.innerHTML?.substring(0, 2000) || 'empty');
-                    sendEvent({ status: 'error', error: 'Timed out waiting for WhatsApp verification', debugHtml: bodyHtml });
+                    sendEvent({ status: 'error', error: 'Timed out waiting for verification (2 min)', debugHtml: bodyHtml });
                     throw new Error('Verification timeout');
                 }
 
-                // After detecting verification, navigate to the profile page to ensure
-                // all cookies from the login session are properly set in the browser context.
-                sendEvent({ status: 'saving', message: 'Verification detected! Loading profile to capture full session...' });
+                // Navigate to profile page to ensure cookies are fully loaded
+                sendEvent({ status: 'saving', message: 'Verification detected! Capturing session...' });
                 
                 try {
                     await page.goto('https://www.bazaraki.com/my/', { waitUntil: 'domcontentloaded', timeout: 15000 });
                 } catch (e) {
-                    // Even if this navigation fails, we still have the cookies from the login
-                    console.log(`[Bazaraki Auth Stream] Profile navigation failed, proceeding with current cookies`);
+                    console.log(`[Bazaraki Auth] Profile nav failed, proceeding with current cookies`);
                 }
                 
-                console.log(`[Bazaraki Auth Stream] Capturing session state...`);
-                sendEvent({ status: 'saving', message: 'Saving session cookies to database...' });
-
-                // Extract session state
                 const sessionState = await context.storageState();
+                console.log(`[Bazaraki Auth] Session captured. Cookies: ${sessionState.cookies.map(c => c.name).join(', ')}`);
 
-                // Save to DB
                 await db.scrapingCredential.update({
                     where: { id: credentialId },
                     data: {
-                        sessionState: sessionState as any, // Prisma Json compatibility
+                        sessionState: sessionState as any,
                         status: 'active',
                     }
                 });
 
-                sendEvent({ status: 'success', message: 'Successfully authenticated! Session cookies saved.' });
+                sendEvent({ status: 'success', message: 'Successfully authenticated! Session saved.' });
             } catch (error: any) {
                 console.error(`[Bazaraki Auth Error]`, error);
-                // Stream the error details including DOM state back to the client
                 let debugInfo = '';
                 if (browser) {
                     try {
                         const pages = browser.contexts()[0]?.pages() || [];
                         if (pages.length > 0) {
-                            const currentUrl = pages[0].url();
-                            // Get body innerHTML instead of full page content (which just shows <head>)
-                            const bodyHtml = await pages[0].evaluate(() => document.body?.innerHTML?.substring(0, 2000) || 'empty body');
-                            debugInfo = `\nURL: ${currentUrl}\nBody: ${bodyHtml}`;
-                            console.error(`[Bazaraki Auth Error] URL: ${currentUrl}`);
-                            console.error(`[Bazaraki Auth Error] Body:`, bodyHtml.substring(0, 500));
+                            const url = pages[0].url();
+                            const body = await pages[0].evaluate(() => document.body?.innerHTML?.substring(0, 2000) || 'empty');
+                            debugInfo = `\nURL: ${url}\nBody: ${body}`;
                         }
                     } catch (e) {}
                 }
-                sendEvent({ status: 'error', error: (error.message || 'Unknown automation error') + debugInfo });
+                sendEvent({ status: 'error', error: (error.message || 'Unknown error') + debugInfo });
             } finally {
                 if (browser) {
                     await browser.close();
