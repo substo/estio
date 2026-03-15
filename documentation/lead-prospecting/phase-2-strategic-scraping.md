@@ -63,6 +63,10 @@ To better manage scraping complexity and avoid IP bans, the data model is split 
     *   **Purpose:** Telemetry tracking for monitoring scraping success and errors.
     *   **Fields:** `taskId`, `status`, `pagesScraped`, `listingsFound`, `leadsCreated`, `duplicatesFound`, `errors`, `errorLog`, `metadata`.
 
+### Run History UI
+
+Each scheduled or manually triggered run emits a `ScrapingRun` record. The Admin UI features an expandable **Run History Panel** for each task card that displays these records in real-time. This provides immediate observability into pages scraped, listings found, and surfaces any error stack traces without needing to check server logs.
+
 #### Data Model
 
 ```prisma
@@ -327,12 +331,13 @@ Filters can be applied via URL params (district, price range, bedrooms).
 
 ### Selector Configuration (New DOM via `.advert`)
 
-Recent changes to Bazaraki require using the nested `.advert__content` classes.
+Recent changes to Bazaraki require using the nested `.advert__content` classes and extracting the URL from the Swiper slider, as the title itself is now plain text.
 
 ```json
 {
   "listingContainer": ".advert",
-  "title": ".advert__content-title a[href]",
+  "title": ".advert__content-title",
+  "listingLink": "a.swiper-slide[href]",
   "price": ".advert__content-price",
   "location": ".advert__content-place",
   "nextPage": "a.number-list-next, a.number-list-line"
@@ -397,7 +402,7 @@ Each portal connector follows the same `ScrapingTarget` + `ListingScraperService
 
 Scraping is an inherently long-running task that is prone to network timeouts and anti-bot bans. Running it synchronously in a Next.js API route is an anti-pattern.
 
-`lib/queue/scraping-queue.ts` implements a dedicated BullMQ queue specifically for scraping isolated targets.
+`lib/queue/scraping-queue.ts` implements a dedicated BullMQ queue specifically for scraping isolated targets. The `initScrapingWorker()` function is called globally during server boot inside `instrumentation.ts` to ensure background jobs are always processed.
 - **Worker Concurrency**: 1 (Processes one target at a time to prevent server IP bans)
 - **Rate Limit**: 1 job per 5 seconds globally.
 - **Retries**: Configured to 1 attempt initially to prevent spamming failing target sites automatically.
