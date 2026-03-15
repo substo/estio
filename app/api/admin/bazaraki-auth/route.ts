@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
-import { chromium, type BrowserContext } from 'playwright';
+import { chromium } from 'playwright-extra';
+import stealth from 'puppeteer-extra-plugin-stealth';
 import db from '@/lib/db';
 
 export const maxDuration = 120; // Allow Vercel to run up to 2 mins for WhatsApp approval
@@ -36,14 +37,20 @@ export async function POST(req: Request) {
             
             let browser;
             try {
-                // Use the FULL Chromium binary (not chromium_headless_shell) for proper
-                // AngularJS rendering. The headless shell doesn't execute all JS properly.
+                // Use playwright-extra with stealth plugin to bypass Cloudflare Turnstile bot detection
+                chromium.use(stealth());
+                
+                // Use the FULL Chromium binary for proper AngularJS rendering.
                 browser = await chromium.launch({ 
                     headless: true,
                     channel: 'chromium',
                 });
+                
+                // Additional stealth settings for context
                 const context = await browser.newContext({
                     userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    viewport: { width: 1280, height: 800 },
+                    locale: 'en-US',
                 });
                 const page = await context.newPage();
 
@@ -115,7 +122,7 @@ export async function POST(req: Request) {
                     try {
                         await page.waitForSelector(sel, { timeout: 10000 });
                         if (sel === 'canvas') {
-                            qrCodeSrc = await page.evaluate((s) => {
+                            qrCodeSrc = await page.evaluate((s: string) => {
                                 const canvas = document.querySelector(s) as HTMLCanvasElement;
                                 return canvas?.toDataURL('image/png') || null;
                             }, sel);
@@ -141,47 +148,24 @@ export async function POST(req: Request) {
                 console.log(`[Bazaraki Auth Stream] QR code emitted. Waiting for verification...`);
 
                 // === VERIFICATION DETECTION ===
-                // The WhatsApp login page does NOT update after verification.
-                // No URL change, no text change, nothing visible. Bazaraki's backend
-                // sets the session cookies, but the page stays exactly the same.
-                // Navigating to /my/ triggers Cloudflare bot protection.
-                //
-                // Strategy: We monitor the `sessionid` cookie value and any new cookies. 
-                // Before login, it's an anonymous session. After successful WhatsApp
-                // verification, Bazaraki's backend updates the `sessionid` and adds auth cookies.
+                // Now that we are using the stealth plugin, Cloudflare will not block the
+                // redirect. After the user scans the QR and taps Send in WhatsApp, Bazaraki's
+                // backend will successfully redirect the browser to the homepage/profile.
                 const startTime = Date.now();
                 const TIMEOUT = 120000; // 2 minutes total
-                const INITIAL_WAIT = 15000; // 15s before first check (user needs time to scan)
-                const POLL_INTERVAL = 5000; // check every 5s after that
+                const POLL_INTERVAL = 3000;
                 let verified = false;
-                
-                const getCookies = async () => await context.cookies('https://www.bazaraki.com');
-                const baselineCookies = await getCookies();
-                const baselineSessionId = baselineCookies.find(c => c.name === 'sessionid')?.value || null;
-                const baselineCookieNames = new Set(baselineCookies.map(c => c.name));
-                
-                console.log(`[Bazaraki Auth] Baseline sessionid: ${baselineSessionId}`);
-                
-                // Wait for user to scan QR and send WhatsApp message
-                sendEvent({ status: 'waiting', message: 'Waiting for you to scan the QR code and send the WhatsApp message...' });
-                await page.waitForTimeout(INITIAL_WAIT);
                 
                 while (Date.now() - startTime < TIMEOUT) {
                     const elapsed = Math.round((Date.now() - startTime) / 1000);
-                    sendEvent({ status: 'checking', message: `Checking if login succeeded... (${elapsed}s)` });
+                    sendEvent({ status: 'checking', message: `Waiting for WhatsApp verification... (${elapsed}s)` });
                     
-                    const currentCookies = await getCookies();
-                    const currentSessionId = currentCookies.find(c => c.name === 'sessionid')?.value || null;
+                    const currentUrl = page.url();
                     
-                    // Filter out known tracker cookies that might appear mid-session randomly
-                    const newCookies = currentCookies.filter(c => !baselineCookieNames.has(c.name));
-                    const hasSignificantNewCookie = newCookies.some(c => 
-                        !['_cfuvid', '_ga', '_ym_', '__cmp'].some(prefix => c.name.startsWith(prefix))
-                    );
-                    
-                    if ((currentSessionId && currentSessionId !== baselineSessionId) || hasSignificantNewCookie) {
-                        console.log(`[Bazaraki Auth] Login detected! sessionid changed to: ${currentSessionId}, or new cookies found`);
-                        sendEvent({ status: 'detected', message: 'Login successful! Capturing session...' });
+                    // If the URL changed away from the login page, the redirect succeeded!
+                    if (!currentUrl.includes('/login/')) {
+                        console.log(`[Bazaraki Auth] Redirect detected! URL: ${currentUrl}`);
+                        sendEvent({ status: 'detected', message: 'WhatsApp verification confirmed! Capturing session...' });
                         verified = true;
                         break;
                     }
@@ -194,11 +178,17 @@ export async function POST(req: Request) {
                     throw new Error('Verification timeout');
                 }
 
-                // We are authenticated. No need to navigate anywhere and risk Cloudflare.
-                sendEvent({ status: 'saving', message: 'Session captured. Saving to database...' });
+                // Navigate to the profile page explicitly to ensure all cookies are fully loaded
+                // just in case it initially redirected to the bare homepage.
+                sendEvent({ status: 'saving', message: 'Session authenticated. Finalizing profile...' });
+                try {
+                    await page.goto('https://www.bazaraki.com/my/', { waitUntil: 'domcontentloaded', timeout: 15000 });
+                } catch (e) {
+                    console.log(`[Bazaraki Auth] Profile nav failed, proceeding with current cookies`);
+                }
                 
                 const sessionState = await context.storageState();
-                console.log(`[Bazaraki Auth] Session captured. Cookies: ${sessionState.cookies.map(c => c.name).join(', ')}`);
+                console.log(`[Bazaraki Auth] Session captured. Cookies: ${sessionState.cookies.map((c: any) => c.name).join(', ')}`);
 
                 await db.scrapingCredential.update({
                     where: { id: credentialId },
