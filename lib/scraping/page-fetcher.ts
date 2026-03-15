@@ -100,6 +100,7 @@ export class PageFetcher {
     await this.page.waitForTimeout(1000 + Math.random() * 2000);
 
     const content = await this.page.content();
+    console.log(`[PageFetcher] Content retrieved. Length: ${content.length}, Title match: ${content.match(/<title[^>]*>(.*?)<\/title>/)?.[1] || 'N/A'}`);
     return content;
   }
   

@@ -35,7 +35,12 @@ const humanDelay = async (baseMs: number, jitterMs: number) => {
  * Parses Bazaraki index pages and optionally drills down into listings based on strategy
  */
 export async function extractBazarakiIndex(content: string, baseUrl: string, fetcher: PageFetcher, options?: BazarakiExtractionOptions): Promise<BazarakiExtractionResult> {
+    console.log(`[BazarakiExtractor] Content received. Length: ${content.length} chars`);
+    console.log(`[BazarakiExtractor] Content starts with: ${content.substring(0, 200)}`);
     const $ = cheerio.load(content);
+    console.log(`[BazarakiExtractor] Cheerio loaded. Title: ${$('title').text()}`);
+    console.log(`[BazarakiExtractor] Cheerio .advert count: ${$(BAZARAKI_SELECTORS.listingContainer).length}`);
+    console.log(`[BazarakiExtractor] Cheerio body children count: ${$('body').children().length}`);
     const listings: RawListing[] = [];
     let interactionsUsed = 0;
     
@@ -91,7 +96,10 @@ export async function extractBazarakiIndex(content: string, baseUrl: string, fet
     if (shallowListings.length === 0) {
         console.warn(`[BazarakiExtractor] ⚠️ 0 listings found! Debugging HTML output...`);
         console.warn(`[BazarakiExtractor] Page Title: ${$('title').text()}`);
-        console.warn(`[BazarakiExtractor] HTML Snippet: ${content.substring(0, 1500)}`);
+        console.warn(`[BazarakiExtractor] Content length: ${content.length}`);
+        console.warn(`[BazarakiExtractor] Has .advert in raw HTML: ${content.includes('class="advert"') || content.includes("class='advert'") || content.includes('class="advert ')}`);
+        console.warn(`[BazarakiExtractor] HTML body tag count: ${(content.match(/<body/g) || []).length}`);
+        console.warn(`[BazarakiExtractor] HTML Snippet (first 2000): ${content.substring(0, 2000)}`);
     }
 
     // If Strategy is Shallow, we are done! Return immediately
