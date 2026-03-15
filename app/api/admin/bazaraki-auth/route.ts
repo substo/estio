@@ -51,6 +51,49 @@ export async function POST(req: Request) {
                     timeout: 15000 
                 });
 
+                // Dismiss cookie consent popup (ConsentManager / cmpwrapper)
+                // This blocks AngularJS scripts from running, preventing QR code render.
+                sendEvent({ status: 'consent', message: 'Accepting cookie consent...' });
+                try {
+                    // Method 1: Try ConsentManager JS API
+                    await page.evaluate(() => {
+                        // consentmanager.net API
+                        if (typeof (window as any).__cmp === 'function') {
+                            (window as any).__cmp('setConsent', 1);
+                        }
+                        // Alternative CMP APIs
+                        if (typeof (window as any).cmpApi === 'object') {
+                            (window as any).cmpApi.acceptAllConsent?.();
+                        }
+                    });
+                    
+                    // Method 2: Try clicking common accept buttons
+                    const consentSelectors = [
+                        '.cmpboxbtn.cmpboxbtnyes',           // ConsentManager yes button
+                        '#cmpbntyestxt',                      // ConsentManager yes text button
+                        'a.cmpboxbtnyes',                     // ConsentManager link button
+                        'button:has-text("Accept")',          // Generic accept
+                        'button:has-text("Accept all")',      // Generic accept all
+                        '.cmpwrapper button',                 // Any button in cmpwrapper
+                    ];
+                    
+                    for (const sel of consentSelectors) {
+                        try {
+                            const btn = await page.$(sel);
+                            if (btn) {
+                                await btn.click();
+                                console.log(`[Bazaraki Auth] Clicked consent button: ${sel}`);
+                                break;
+                            }
+                        } catch (e) { continue; }
+                    }
+                } catch (e) {
+                    console.log(`[Bazaraki Auth] Cookie consent handling skipped`);
+                }
+                
+                // Wait for AngularJS to bootstrap after consent is accepted
+                await page.waitForTimeout(3000);
+
                 sendEvent({ status: 'waiting_qr', message: 'Looking for QR code...' });
 
                 // Look for QR code image - try multiple selectors
