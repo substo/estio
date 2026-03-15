@@ -106,6 +106,11 @@ export async function POST(req: Request) {
                 const POLL_INTERVAL = 3000;
                 let verified = false;
                 
+                // Capture baseline cookies BEFORE polling, so we can detect NEW cookies
+                const baselineCookies = await context.cookies('https://www.bazaraki.com');
+                const baselineCookieNames = new Set(baselineCookies.map(c => c.name));
+                console.log(`[Bazaraki Auth] Baseline cookies: ${[...baselineCookieNames].join(', ')}`);
+                
                 while (Date.now() - startTime < TIMEOUT) {
                     await page.waitForTimeout(POLL_INTERVAL);
                     
@@ -127,23 +132,22 @@ export async function POST(req: Request) {
                         break;
                     }
                     
-                    // Signal 3: Check for cookies that indicate a logged-in session
-                    const cookies = await context.cookies('https://www.bazaraki.com');
-                    const hasSession = cookies.some(c => 
-                        c.name.includes('session') || c.name.includes('token') || c.name.includes('auth') || c.name.includes('user')
-                    );
-                    if (hasSession) {
-                        console.log(`[Bazaraki Auth Stream] Session cookies detected`);
-                        sendEvent({ status: 'detected', message: 'Session cookies detected' });
+                    // Signal 3: Check for NEW cookies that weren't present at baseline
+                    const currentCookies = await context.cookies('https://www.bazaraki.com');
+                    const newCookies = currentCookies.filter(c => !baselineCookieNames.has(c.name));
+                    if (newCookies.length > 0) {
+                        const newNames = newCookies.map(c => c.name).join(', ');
+                        console.log(`[Bazaraki Auth Stream] New cookies detected: ${newNames}`);
+                        sendEvent({ status: 'detected', message: `New session cookies detected: ${newNames}` });
                         verified = true;
                         break;
                     }
                     
                     // Signal 4: Success/completion text appeared on the page
-                    const bodyText = await page.evaluate(() => document.body?.innerText || '');
-                    if (bodyText.includes('go back') || bodyText.includes('successfully') || bodyText.includes('verified')) {
+                    const bodyText = await page.evaluate(() => document.body?.innerText?.toLowerCase() || '');
+                    if (bodyText.includes('go back to the app') || bodyText.includes('verification process')) {
                         console.log(`[Bazaraki Auth Stream] Success text detected on page`);
-                        sendEvent({ status: 'detected', message: 'Success text detected on page' });
+                        sendEvent({ status: 'detected', message: 'Verification complete text detected on page' });
                         verified = true;
                         break;
                     }
