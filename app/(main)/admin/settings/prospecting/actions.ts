@@ -22,19 +22,13 @@ export async function createScrapingConnection(locationId: string, data: any) {
     const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
     if (!isAdmin) throw new Error("Unauthorized to create scraping connections");
 
-    let encryptedPassword = null;
-    if (data.authPassword) {
-        encryptedPassword = encryptPassword(data.authPassword); 
-    }
-
     const connection = await db.scrapingConnection.create({
         data: {
             locationId,
             name: data.name,
             platform: data.platform,
             enabled: data.enabled ?? true,
-            authUsername: data.authUsername,
-            authPassword: encryptedPassword,
+            // Rate limit explicitly if needed in future, currently defaults to 5000
         }
     });
 
@@ -52,12 +46,7 @@ export async function updateScrapingConnection(id: string, locationId: string, d
         name: data.name,
         platform: data.platform,
         enabled: data.enabled,
-        authUsername: data.authUsername,
     };
-
-    if (data.authPassword) { 
-         updateData.authPassword = encryptPassword(data.authPassword); 
-    }
 
     const connection = await db.scrapingConnection.update({
         where: { id, locationId },
@@ -76,6 +65,78 @@ export async function deleteScrapingConnection(id: string, locationId: string) {
 
     await db.scrapingConnection.delete({
         where: { id, locationId }
+    });
+
+    revalidatePath('/admin/settings/prospecting');
+    return true;
+}
+
+// --- CREDENTIALS ---
+
+export async function getScrapingCredentials(connectionId: string) {
+    if (!connectionId) return [];
+    return await db.scrapingCredential.findMany({
+        where: { connectionId },
+        orderBy: { createdAt: 'desc' }
+    });
+}
+
+export async function createScrapingCredential(connectionId: string, locationId: string, data: any) {
+    const { auth } = await import('@clerk/nextjs/server');
+    const { userId } = await auth();
+    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
+    if (!isAdmin) throw new Error("Unauthorized");
+
+    let encryptedPassword = null;
+    if (data.authPassword) {
+        encryptedPassword = encryptPassword(data.authPassword);
+    }
+
+    const cred = await db.scrapingCredential.create({
+        data: {
+            connectionId,
+            authUsername: data.authUsername,
+            authPassword: encryptedPassword,
+            status: data.status || 'active',
+        }
+    });
+
+    revalidatePath('/admin/settings/prospecting');
+    return cred;
+}
+
+export async function updateScrapingCredential(id: string, locationId: string, data: any) {
+    const { auth } = await import('@clerk/nextjs/server');
+    const { userId } = await auth();
+    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
+    if (!isAdmin) throw new Error("Unauthorized");
+
+    const updateData: any = {
+        authUsername: data.authUsername,
+        status: data.status,
+    };
+
+    if (data.authPassword) {
+        updateData.authPassword = encryptPassword(data.authPassword);
+    }
+
+    const cred = await db.scrapingCredential.update({
+        where: { id }, // connection handles tenant implicit
+        data: updateData
+    });
+
+    revalidatePath('/admin/settings/prospecting');
+    return cred;
+}
+
+export async function deleteScrapingCredential(id: string, locationId: string) {
+    const { auth } = await import('@clerk/nextjs/server');
+    const { userId } = await auth();
+    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
+    if (!isAdmin) throw new Error("Unauthorized");
+
+    await db.scrapingCredential.delete({
+        where: { id }
     });
 
     revalidatePath('/admin/settings/prospecting');

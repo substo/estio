@@ -1856,6 +1856,23 @@ model ScrapingConnection {
   platform          String   // e.g., "bazaraki", "facebook_marketplace"
   enabled           Boolean  @default(true)
   
+  // Rate Limits
+  globalRateLimitMs Int      @default(5000)
+
+  location    Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  tasks       ScrapingTask[]
+  credentials ScrapingCredential[]
+
+  @@index([locationId, enabled])
+  @@index([platform])
+}
+
+model ScrapingCredential {
+  id           String   @id @default(cuid())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  connectionId String
+
   // Authentication Details (Encrypted/Secure)
   authUsername      String?
   authPassword      String?  @db.Text
@@ -1863,14 +1880,15 @@ model ScrapingConnection {
   // Session State (Cookies/Tokens to avoid re-login)
   sessionState      Json?    // Storing Playwright context cookies
   
-  // Rate Limits
-  globalRateLimitMs Int      @default(5000)
+  // Health & Rotation
+  status            String   @default("active") // active, rate_limited, banned, locked
+  healthScore       Int      @default(100)      // 1-100 scale, degrades on 429s/captchas
+  lastUsedAt        DateTime?
 
-  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
-  tasks    ScrapingTask[]
+  connection ScrapingConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
-  @@index([locationId, enabled])
-  @@index([platform])
+  @@index([connectionId, status])
+  @@index([lastUsedAt])
 }
 
 model ScrapingTask {

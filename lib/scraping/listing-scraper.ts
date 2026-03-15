@@ -1,5 +1,5 @@
 import db from '@/lib/db';
-import { ScrapingTask, ScrapingConnection, ScrapingRun } from '@prisma/client';
+import { ScrapingTask, ScrapingConnection, ScrapingRun, ScrapingCredential } from '@prisma/client';
 import { PageFetcher } from './page-fetcher';
 
 export interface RawListing {
@@ -37,6 +37,19 @@ export class ListingScraperService {
             }
         });
 
+        const activeCredential = await this.checkoutCredential(task.connection.id);
+
+        if (!activeCredential) {
+            console.warn(`[ListingScraper] No active credentials available for connection pool ${task.connection.id}. Failing task gracefully.`);
+            await db.scrapingRun.update({
+                where: { id: run.id },
+                data: { status: 'failed', errorLog: 'No active credentials available in the platform pool.' }
+            });
+            return { pagesScraped: 0, listingsFound: 0, leadsCreated: 0, duplicatesFound: 0, errors: 1 };
+        }
+
+        console.log(`[ListingScraper] Checked out credential: ${activeCredential.authUsername || activeCredential.id}`);
+
         const fetcher = new PageFetcher();
         let pagesScraped = 0;
         let listingsFound = 0;
@@ -58,9 +71,9 @@ export class ListingScraperService {
 
                 const content = await fetcher.fetchContent({
                     url: url,
-                    username: task.connection.authUsername || undefined,
-                    password: task.connection.authPassword || undefined,
-                    // FIXME: We will pass connection.sessionState here when PageFetcher supports it in Stage 2
+                    username: activeCredential.authUsername || undefined,
+                    password: activeCredential.authPassword || undefined,
+                    sessionState: activeCredential.sessionState ? activeCredential.sessionState : undefined,
                 });
                 
                 pagesScraped++;
@@ -106,6 +119,15 @@ export class ListingScraperService {
                 // Rate Limiting between index pages
                 await new Promise(r => setTimeout(r, 2000));
             }
+
+            // Update Credential Rotation TS
+            await db.scrapingCredential.update({
+                where: { id: activeCredential.id },
+                data: {
+                    lastUsedAt: new Date(),
+                    healthScore: 100 // Reset/Bump health on successful run
+                }
+            });
 
             // Update Run success
             await db.scrapingRun.update({
@@ -162,6 +184,21 @@ export class ListingScraperService {
         } finally {
             await fetcher.close();
         }
+    }
+
+    /**
+     * Finds the Least Recently Used (LRU) active credential for the pool
+     */
+    private static async checkoutCredential(connectionId: string): Promise<ScrapingCredential | null> {
+        return db.scrapingCredential.findFirst({
+            where: {
+                connectionId,
+                status: 'active'
+            },
+            orderBy: [
+                { lastUsedAt: 'asc' } // The oldest gets priority
+            ]
+        });
     }
 
     /**

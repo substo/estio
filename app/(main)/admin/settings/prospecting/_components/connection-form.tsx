@@ -19,8 +19,6 @@ export function ConnectionForm({ locationId, initialData = null }: { locationId:
             const data = {
                 name: formData.get('name'),
                 platform: formData.get('platform'),
-                authUsername: formData.get('authUsername') || null,
-                authPassword: formData.get('authPassword') || null,
                 enabled: formData.get('enabled') === 'on',
             };
             
@@ -58,17 +56,6 @@ export function ConnectionForm({ locationId, initialData = null }: { locationId:
                     <option value="custom">Custom Site</option>
                 </select>
                 <p className="text-xs text-muted-foreground">Select the base platform to inherit rate-limits and authentication handling patterns.</p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                    <label className="text-sm font-medium">Auto-Login Username (Optional)</label>
-                    <Input name="authUsername" defaultValue={initialData?.authUsername} placeholder="e.g. user@estio.co" />
-                </div>
-                <div className="grid gap-2">
-                    <label className="text-sm font-medium">Password (Encrypted) (Optional)</label>
-                    <Input name="authPassword" type="password" placeholder={initialData?.id ? "•••••••• (Leave blank to keep)" : "Password"} />
-                </div>
             </div>
 
             <div className="flex items-center gap-2 mt-4 border-t pt-4">

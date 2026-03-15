@@ -7,13 +7,14 @@ export interface FetchOptions {
   jsEnabled?: boolean;
   username?: string;
   password?: string;
+  sessionState?: any;
 }
 
 export class PageFetcher {
   private browser: Browser | null = null;
   private page: Page | null = null;
 
-  async init(options: { jsEnabled?: boolean } = {}) {
+  async init(options: { jsEnabled?: boolean, sessionState?: any } = {}) {
     if (!this.browser) {
       this.browser = await chromium.launch({
         headless: true, // Run in headless mode for server environments
@@ -41,6 +42,11 @@ export class PageFetcher {
         });
       });
 
+      if (options.sessionState && Array.isArray(options.sessionState)) {
+          console.log(`[PageFetcher] Injecting ${options.sessionState.length} session cookies into context.`);
+          await context.addCookies(options.sessionState);
+      }
+
       this.page = await context.newPage();
       
       // Route interception for performance
@@ -56,7 +62,7 @@ export class PageFetcher {
   }
 
   async fetchContent(options: FetchOptions): Promise<string> {
-    await this.init({ jsEnabled: options.jsEnabled });
+    await this.init({ jsEnabled: options.jsEnabled, sessionState: options.sessionState });
 
     if (!this.page) {
       throw new Error('Page not initialized');
@@ -93,7 +99,7 @@ export class PageFetcher {
   
   // Custom execution for complex interactions, hands the page context to a callback
   async executeOnPage<T>(options: FetchOptions, callback: (page: Page) => Promise<T>): Promise<T> {
-    await this.init({ jsEnabled: options.jsEnabled });
+    await this.init({ jsEnabled: options.jsEnabled, sessionState: options.sessionState });
     
     if (!this.page) throw new Error('Page not initialized');
     
