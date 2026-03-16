@@ -25,7 +25,7 @@ export function ProspectListingsView({
     total,
     locationId
 }: {
-    prospect: ProspectInboxRow;
+    prospect?: ProspectInboxRow;
     listings: ScrapedListingRow[];
     total: number;
     locationId: string;
@@ -105,60 +105,67 @@ export function ProspectListingsView({
 
     return (
         <div className="flex flex-col h-full bg-slate-50/30 dark:bg-slate-900/10">
-            {/* Prospect Detail Header */}
-            <div className="p-6 border-b bg-background shrink-0">
-                <div className="flex items-start justify-between gap-6">
-                    <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                            <div className="p-2.5 bg-primary/10 rounded-lg text-primary">
-                                {prospect.isAgency ? <Building2 className="w-5 h-5" /> : <UserCheck className="w-5 h-5" />}
-                            </div>
-                            <div>
-                                <h2 className="text-xl font-bold tracking-tight">{prospect.name || 'Unknown Prospect'}</h2>
-                                <div className="flex items-center gap-3 text-sm text-muted-foreground mt-0.5">
-                                    <div className="flex items-center gap-1.5 bg-muted/50 px-2 py-0.5 rounded cursor-pointer hover:bg-muted transition-colors hover:text-foreground">
-                                        <PhoneCall className="w-3.5 h-3.5" />
-                                        <span>{prospect.phone || 'No phone'}</span>
-                                    </div>
-                                    <div className="flex items-center gap-1.5 bg-muted/50 px-2 py-0.5 rounded cursor-pointer hover:bg-muted transition-colors hover:text-foreground">
-                                        <Mail className="w-3.5 h-3.5" />
-                                        <span>{prospect.email || 'No email'}</span>
+            {/* Header: Prospect Detail or All Listings */}
+            {prospect ? (
+                <div className="p-6 border-b bg-background shrink-0">
+                    <div className="flex items-start justify-between gap-6">
+                        <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-2">
+                                <div className="p-2.5 bg-primary/10 rounded-lg text-primary">
+                                    {prospect.isAgency ? <Building2 className="w-5 h-5" /> : <UserCheck className="w-5 h-5" />}
+                                </div>
+                                <div>
+                                    <h2 className="text-xl font-bold tracking-tight">{prospect.name || 'Unknown Prospect'}</h2>
+                                    <div className="flex items-center gap-3 text-sm text-muted-foreground mt-0.5">
+                                        <div className="flex items-center gap-1.5 bg-muted/50 px-2 py-0.5 rounded cursor-pointer hover:bg-muted transition-colors hover:text-foreground">
+                                            <PhoneCall className="w-3.5 h-3.5" />
+                                            <span>{prospect.phone || 'No phone'}</span>
+                                        </div>
+                                        <div className="flex items-center gap-1.5 bg-muted/50 px-2 py-0.5 rounded cursor-pointer hover:bg-muted transition-colors hover:text-foreground">
+                                            <Mail className="w-3.5 h-3.5" />
+                                            <span>{prospect.email || 'No email'}</span>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
-                    </div>
-                    
-                    <div className="flex flex-col items-end gap-3 shrink-0">
-                        <div className="flex items-center gap-3">
-                            <LeadSourceBadge source={prospect.source} />
-                            <LeadScoreBadge score={prospect.aiScore || 0} />
-                            <Badge variant={
-                                prospect.status === 'accepted' ? 'default' :
-                                prospect.status === 'rejected' ? 'destructive' : 'outline'
-                            }>
-                                {prospect.status.toUpperCase()}
-                            </Badge>
+                        
+                        <div className="flex flex-col items-end gap-3 shrink-0">
+                            <div className="flex items-center gap-3">
+                                <LeadSourceBadge source={prospect.source} />
+                                <LeadScoreBadge score={prospect.aiScore || 0} />
+                                <Badge variant={
+                                    prospect.status === 'accepted' ? 'default' :
+                                    prospect.status === 'rejected' ? 'destructive' : 'outline'
+                                }>
+                                    {prospect.status.toUpperCase()}
+                                </Badge>
+                            </div>
+                            {prospect.createdContactId && prospect.status === 'accepted' && (
+                                <Button size="sm" variant="outline" onClick={() => window.open(`/admin/contacts?contactId=${prospect.createdContactId}`, '_blank')}>
+                                    View Full Contact Profile
+                                </Button>
+                            )}
+                            {prospect.sourceUrl && (
+                                 <a href={prospect.sourceUrl} target="_blank" rel="noreferrer" className="text-sm font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1.5">
+                                    <ExternalLink className="h-3.5 w-3.5" /> View Original Profile
+                                </a>
+                            )}
                         </div>
-                        {prospect.createdContactId && prospect.status === 'accepted' && (
-                            <Button size="sm" variant="outline" onClick={() => window.open(`/admin/contacts?contactId=${prospect.createdContactId}`, '_blank')}>
-                                View Full Contact Profile
-                            </Button>
-                        )}
-                        {prospect.sourceUrl && (
-                             <a href={prospect.sourceUrl} target="_blank" rel="noreferrer" className="text-sm font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1.5">
-                                <ExternalLink className="h-3.5 w-3.5" /> View Original Profile
-                            </a>
-                        )}
                     </div>
                 </div>
-            </div>
+            ) : (
+                <div className="p-4 border-b bg-background shrink-0">
+                    <h2 className="text-lg font-bold tracking-tight">Listings Inbox</h2>
+                    <p className="text-sm text-muted-foreground mt-0.5">All new listings from scheduled scrapes. Select a prospect on the left to filter.</p>
+                </div>
+            )}
 
             {/* Listings Section Header & Toolbar */}
             <div className="p-4 border-b bg-muted/10 shrink-0 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                     <Home className="w-4 h-4 text-muted-foreground" />
-                    <h3 className="font-medium">Associated Listings ({total})</h3>
+                    <h3 className="font-medium">{prospect ? `Associated Listings (${total})` : `All Listings (${total})`}</h3>
                 </div>
                 {selectedIds.size > 0 && (
                     <div className="flex items-center gap-3">
@@ -179,7 +186,7 @@ export function ProspectListingsView({
                     <div className="p-12 text-center text-muted-foreground">
                         <Home className="w-12 h-12 mx-auto mb-4 opacity-20" />
                         <h4 className="text-lg font-medium text-foreground mb-1">No Listings Found</h4>
-                        <p className="text-sm">We haven't scraped any specific property listings for this prospect yet.</p>
+                        <p className="text-sm">{prospect ? "We haven't scraped any specific property listings for this prospect yet." : "No new listings from scheduled scrapes. Try running a scrape task."}</p>
                     </div>
                 ) : (
                     <div className="p-4">

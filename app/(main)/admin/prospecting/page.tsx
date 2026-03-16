@@ -21,15 +21,11 @@ export default async function ProspectingHubPage({ searchParams }: { searchParam
     scope: (params.scope as ProspectInboxScope) || 'new',
   });
 
-  // Fetch listings for the selected lead (if any)
-  let listingsResult = { items: [], total: 0 };
-  if (prospectId) {
-    listingsResult = await listScrapedListings(location.id, {
-      prospectLeadId: prospectId,
-      limit: 50,
-      scope: 'all', // Show all their listings when selected
-    });
-  }
+  // Fetch listings: filtered by prospect when selected, or ALL listings by default
+  const listingsResult = await listScrapedListings(location.id, {
+    ...(prospectId ? { prospectLeadId: prospectId, scope: 'all' as const } : { scope: 'new' as const }),
+    limit: 50,
+  });
 
   return (
     <div className="h-full flex flex-col">

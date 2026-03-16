@@ -155,20 +155,21 @@ export function ScrapeListingDialog({
                     )}
 
                     {/* Log stream */}
-                    <div className="bg-muted/40 border rounded-lg p-3 max-h-[200px] overflow-y-auto space-y-1">
+                    <div className="bg-muted/40 border rounded-lg p-3 max-h-[300px] overflow-y-auto space-y-1">
                         <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Activity Log</div>
                         {logs.length === 0 ? (
                             <div className="text-xs text-muted-foreground italic">Waiting to start...</div>
                         ) : (
                             logs.map((log, i) => (
-                                <div key={i} className="flex items-start gap-2 text-xs">
+                                <div key={i} className={`flex items-start gap-2 text-xs ${log.status?.startsWith('phone_debug') ? 'bg-amber-50 dark:bg-amber-950/30 rounded px-1 py-0.5' : ''}`}>
                                     <Badge
                                         variant={
                                             log.status === 'error' ? 'destructive' :
                                                 log.status === 'success' ? 'default' :
-                                                    'outline'
+                                                    log.status?.startsWith('phone_debug') ? 'secondary' :
+                                                        'outline'
                                         }
-                                        className="text-[10px] shrink-0 mt-0.5"
+                                        className={`text-[10px] shrink-0 mt-0.5 ${log.status?.startsWith('phone_debug') ? 'bg-amber-200 text-amber-900 dark:bg-amber-900 dark:text-amber-200' : ''}`}
                                     >
                                         {log.status}
                                     </Badge>

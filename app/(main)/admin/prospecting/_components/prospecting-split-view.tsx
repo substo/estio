@@ -35,24 +35,14 @@ export function ProspectingSplitView({
                 />
             </div>
 
-            {/* Right Pane: Listings for Selected Lead */}
+            {/* Right Pane: Listings */}
             <div className="w-2/3 flex flex-col h-full border rounded-xl bg-card overflow-hidden">
-                {selectedProspectId ? (
-                    <ProspectListingsView 
-                        prospect={selectedProspect} 
-                        listings={listings} 
-                        total={listingsTotal}
-                        locationId={locationId} 
-                    />
-                ) : (
-                    <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-8 text-center">
-                        <div className="text-4xl mb-4">👈</div>
-                        <h3 className="text-lg font-medium text-foreground">Select a Prospect</h3>
-                        <p className="max-w-sm mt-2">
-                            Choose a prospect from the list to view their contact details and all their associated property listings.
-                        </p>
-                    </div>
-                )}
+                <ProspectListingsView 
+                    prospect={selectedProspect} 
+                    listings={listings} 
+                    total={listingsTotal}
+                    locationId={locationId} 
+                />
             </div>
         </div>
     );
