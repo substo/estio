@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
     Dialog,
     DialogContent,
@@ -108,12 +108,15 @@ export function ScrapeListingDialog({
         }
     }, [listingId, listingUrl, platform, onSuccess]);
 
-    // Auto-start on open
-    const handleOpenChange = (open: boolean) => {
-        if (open && phase === 'idle') {
-            // Start automatically when dialog opens
-            setTimeout(startScrape, 100);
+    // Auto-start scrape when dialog opens
+    useEffect(() => {
+        if (isOpen && phase === 'idle') {
+            const timer = setTimeout(startScrape, 100);
+            return () => clearTimeout(timer);
         }
+    }, [isOpen, phase, startScrape]);
+
+    const handleOpenChange = (open: boolean) => {
         if (!open) {
             // Reset state when closing
             setPhase('idle');
