@@ -165,8 +165,8 @@ export function ScrapeListingDialog({
                                     <Badge
                                         variant={
                                             log.status === 'error' ? 'destructive' :
-                                            log.status === 'success' ? 'default' :
-                                            'outline'
+                                                log.status === 'success' ? 'default' :
+                                                    'outline'
                                         }
                                         className="text-[10px] shrink-0 mt-0.5"
                                     >

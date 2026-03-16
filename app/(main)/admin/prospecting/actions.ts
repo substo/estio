@@ -12,6 +12,8 @@ async function getInternalUserId() {
     return user?.id || null;
 }
 
+// --- Prospect (People) Actions ---
+
 export async function acceptProspect(id: string) {
     try {
         const internalUserId = await getInternalUserId();
@@ -35,7 +37,7 @@ export async function acceptProspect(id: string) {
                 message: prospect.message,
                 leadSource: prospect.source,
                 leadScore: prospect.aiScore || 0,
-                qualificationStage: (prospect.aiScore || 0) >= 60 ? 'qualified' : 'basic', 
+                qualificationStage: (prospect.aiScore || 0) >= 60 ? 'qualified' : 'basic',
             }
         });
 
@@ -71,7 +73,7 @@ export async function acceptProspect(id: string) {
             }
         });
 
-        revalidatePath('/admin/prospecting/people');
+        revalidatePath('/admin/prospecting');
         revalidatePath('/admin/contacts');
         return { success: true, contactId: contact.id };
     } catch (e: any) {
@@ -98,7 +100,7 @@ export async function rejectProspect(id: string) {
             }
         });
 
-        revalidatePath('/admin/prospecting/people');
+        revalidatePath('/admin/prospecting');
         return { success: true };
     } catch (e: any) {
         return { success: false, message: e.message || 'Server error' };
@@ -128,7 +130,77 @@ export async function bulkReject(ids: string[]) {
             }
         });
 
-        revalidatePath('/admin/prospecting/people');
+        revalidatePath('/admin/prospecting');
+        return { success: true, count: res.count };
+    } catch (e: any) {
+        return { success: false, message: e.message || 'Server error' };
+    }
+}
+
+// --- Listing Actions ---
+
+export async function acceptScrapedListing(id: string) {
+    try {
+        const internalUserId = await getInternalUserId();
+        if (!internalUserId) return { success: false, message: 'Unauthorized' };
+
+        await db.scrapedListing.update({
+            where: { id },
+            data: { status: 'ACCEPTED' }
+        });
+
+        revalidatePath('/admin/prospecting');
+        return { success: true };
+    } catch (e: any) {
+        return { success: false, message: e.message || 'Server error' };
+    }
+}
+
+export async function rejectScrapedListing(id: string) {
+    try {
+        const internalUserId = await getInternalUserId();
+        if (!internalUserId) return { success: false, message: 'Unauthorized' };
+
+        await db.scrapedListing.update({
+            where: { id },
+            data: { status: 'REJECTED' }
+        });
+
+        revalidatePath('/admin/prospecting');
+        return { success: true };
+    } catch (e: any) {
+        return { success: false, message: e.message || 'Server error' };
+    }
+}
+
+export async function bulkAcceptListings(ids: string[]) {
+    try {
+        const internalUserId = await getInternalUserId();
+        if (!internalUserId) return { success: false, message: 'Unauthorized' };
+
+        const res = await db.scrapedListing.updateMany({
+            where: { id: { in: ids }, status: { in: ['NEW', 'REVIEWING', 'new', 'reviewing'] } },
+            data: { status: 'ACCEPTED' }
+        });
+
+        revalidatePath('/admin/prospecting');
+        return { success: true, count: res.count };
+    } catch (e: any) {
+        return { success: false, message: e.message || 'Server error' };
+    }
+}
+
+export async function bulkRejectListings(ids: string[]) {
+    try {
+        const internalUserId = await getInternalUserId();
+        if (!internalUserId) return { success: false, message: 'Unauthorized' };
+
+        const res = await db.scrapedListing.updateMany({
+            where: { id: { in: ids }, status: { in: ['NEW', 'REVIEWING', 'new', 'reviewing'] } },
+            data: { status: 'REJECTED' }
+        });
+
+        revalidatePath('/admin/prospecting');
         return { success: true, count: res.count };
     } catch (e: any) {
         return { success: false, message: e.message || 'Server error' };

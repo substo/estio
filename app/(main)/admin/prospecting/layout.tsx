@@ -28,33 +28,6 @@ export default function ProspectingLayout({ children }: { children: React.ReactN
                     </Button>
                 </div>
 
-                {/* Tab Navigation */}
-                <div className="flex space-x-6 text-sm">
-                    <Link
-                        href="/admin/prospecting/people"
-                        className={cn(
-                            "flex items-center gap-2 pb-3 border-b-2 font-medium transition-colors hover:text-primary",
-                            pathname.includes('/prospecting/people')
-                                ? "border-primary text-primary"
-                                : "border-transparent text-muted-foreground"
-                        )}
-                    >
-                        <Layers className="h-4 w-4" />
-                        Prospects (People)
-                    </Link>
-                    <Link
-                        href="/admin/prospecting/listings"
-                        className={cn(
-                            "flex items-center gap-2 pb-3 border-b-2 font-medium transition-colors hover:text-primary",
-                            pathname.includes('/prospecting/listings')
-                                ? "border-primary text-primary"
-                                : "border-transparent text-muted-foreground"
-                        )}
-                    >
-                        <List className="h-4 w-4" />
-                        Listings Inbox
-                    </Link>
-                </div>
             </div>
 
             {/* Content Area */}
