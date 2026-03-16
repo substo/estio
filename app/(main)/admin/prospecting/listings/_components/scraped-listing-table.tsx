@@ -9,17 +9,19 @@ import { formatDistanceToNow } from 'date-fns';
 import { type ScrapedListingRow } from '@/lib/leads/scraped-listing-repository';
 import { LeadSourceBadge } from '@/app/(main)/admin/contacts/_components/lead-source-badge';
 import { toast } from 'sonner';
-import { Loader2, Check, ExternalLink, X, Building2, UserCheck, PhoneCall } from 'lucide-react';
+import { Loader2, Check, ExternalLink, X, Building2, UserCheck, PhoneCall, RefreshCw } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { acceptScrapedListing, rejectScrapedListing, bulkAcceptListings, bulkRejectListings } from '../actions';
 import Link from 'next/link';
 import { ProspectReviewDrawer } from './prospect-review-drawer';
+import { ScrapeListingDialog } from './scrape-listing-dialog';
 
 export function ScrapedListingTable({ items, total, locationId }: { items: ScrapedListingRow[], total: number, locationId: string }) {
     const router = useRouter();
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [isPending, startTransition] = useTransition();
     const [reviewListing, setReviewListing] = useState<ScrapedListingRow | null>(null);
+    const [scrapeListing, setScrapeListing] = useState<ScrapedListingRow | null>(null);
 
     const toggleAll = () => {
         if (selectedIds.size === items.length) {
@@ -192,20 +194,25 @@ export function ScrapedListingTable({ items, total, locationId }: { items: Scrap
                                         </Badge>
                                     </TableCell>
                                     <TableCell className="text-right">
-                                        {isNew ? (
-                                            <div className="flex justify-end gap-2">
-                                                <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="Accept" onClick={() => handleAccept(item.id)} disabled={isPending}>
-                                                    <Check className="h-4 w-4 text-green-600" />
-                                                </Button>
-                                                <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="Reject" onClick={() => handleReject(item.id)} disabled={isPending}>
-                                                    <X className="h-4 w-4 text-red-600" />
-                                                </Button>
-                                            </div>
-                                        ) : (
-                                             <Button size="sm" variant="ghost" className="h-8 w-8 p-0" asChild title="View Market listing">
-                                                 <a href={item.url} target="_blank" rel="noreferrer"><ExternalLink className="h-4 w-4 text-muted-foreground"/></a>
-                                             </Button>
-                                        )}
+                                        <div className="flex justify-end gap-1">
+                                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="Scrape / Re-scrape listing" onClick={(e) => { e.stopPropagation(); setScrapeListing(item); }}>
+                                                <RefreshCw className="h-4 w-4 text-blue-500" />
+                                            </Button>
+                                            {isNew ? (
+                                                <>
+                                                    <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="Accept" onClick={() => handleAccept(item.id)} disabled={isPending}>
+                                                        <Check className="h-4 w-4 text-green-600" />
+                                                    </Button>
+                                                    <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="Reject" onClick={() => handleReject(item.id)} disabled={isPending}>
+                                                        <X className="h-4 w-4 text-red-600" />
+                                                    </Button>
+                                                </>
+                                            ) : (
+                                                 <Button size="sm" variant="ghost" className="h-8 w-8 p-0" asChild title="View Market listing">
+                                                     <a href={item.url} target="_blank" rel="noreferrer"><ExternalLink className="h-4 w-4 text-muted-foreground"/></a>
+                                                 </Button>
+                                            )}
+                                        </div>
                                     </TableCell>
                                 </TableRow>
                             );
@@ -223,6 +230,18 @@ export function ScrapedListingTable({ items, total, locationId }: { items: Scrap
                 isOpen={!!reviewListing} 
                 onOpenChange={(open) => !open && setReviewListing(null)} 
             />
+
+            {scrapeListing && (
+                <ScrapeListingDialog
+                    listingId={scrapeListing.id}
+                    listingUrl={scrapeListing.url}
+                    listingTitle={scrapeListing.title}
+                    platform={scrapeListing.platform}
+                    isOpen={!!scrapeListing}
+                    onOpenChange={(open) => !open && setScrapeListing(null)}
+                    onSuccess={() => router.refresh()}
+                />
+            )}
         </div>
     );
 }

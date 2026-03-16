@@ -3,7 +3,7 @@
 
 ## Overview
 
-Phase 2 builds the tooling to **discover property owners and interested parties** from external listing sites. The scraped data feeds into the Lead Inbox (Phase 1.2) for human review and CRM acceptance.
+Phase 2 builds the tooling to **discover property owners and interested parties** from external listing sites. The scraped data feeds into the **Scraped Listings Inbox** for human review and CRM acceptance. The architecture separates **Listings** (properties) from **Prospects** (people/sellers), enabling precise triage workflows.
 
 > [!IMPORTANT]
 > Phase 1 Lead Inbox must be operational before scraping pipelines are activated, otherwise discovered leads have no structured place to land.
@@ -163,14 +163,17 @@ The scraping architecture decouples cron triggering from actual browser executio
 │  │ (config)     │    │   (Worker context)  │       │
 │  └──────────────┘    │  1. PageFetcher     │       │
 │                      │  2. Domain Extractor│       │
-│                      │  3. AI enrichment   │       │
-│                      │  4. Dedup check     │       │
-│                      │  5. Gen ProspectLead│       │
+│                      │  3. Dedup check     │       │
+│                      │  4. Gen Prospect    │       │
+│                      │  5. Gen ScrapedList │       │
 │                      └─────────┬───────────┘       │
 │                                │                   │
 │                    ┌───────────▼──────────┐        │
+│                    │   ScrapedListing     │        │
+│                    │   (Listings Inbox)   │        │
+│                    │        ↕             │        │
 │                    │   ProspectLead       │        │
-│                    │   (Lead Inbox)       │        │
+│                    │   (People / Sellers) │        │
 │                    └─────────────────────┘        │
 └────────────────────────────────────────────────────┘
 ```
@@ -452,6 +455,14 @@ Flow:
 | `app/(main)/admin/settings/prospecting/page.tsx` | **[NEW]** Scraping target admin UI |
 | `app/(main)/admin/settings/prospecting/actions.ts` | **[NEW]** CRUD for ScrapingTarget |
 | `app/(main)/admin/settings/prospecting/_components/run-scraper-button.tsx` | **[NEW]** Manual trigger dropdown button |
+| `lib/scraping/deep-scraper.ts` | **[NEW]** Deep Scrape service: visits individual listing URLs, extracts full descriptions, runs AI `isAgency` classification |
+| `app/(main)/admin/settings/prospecting/_components/run-deep-scraper-button.tsx` | **[NEW]** Manual trigger button for Deep Scrape jobs |
+| `lib/leads/scraped-listing-repository.ts` | **[NEW]** Repository for querying `ScrapedListing` records with prospect data joins |
+| `app/(main)/admin/prospecting/layout.tsx` | **[NEW]** Shared layout with tab navigation between People and Listings Inbox |
+| `app/(main)/admin/prospecting/listings/page.tsx` | **[NEW]** Listings Inbox page |
+| `app/(main)/admin/prospecting/listings/actions.ts` | **[NEW]** Server actions for accept/reject/bulk operations on scraped listings |
+| `app/(main)/admin/prospecting/listings/_components/scraped-listing-table.tsx` | **[NEW]** Interactive table with row-click drawer integration |
+| `app/(main)/admin/prospecting/listings/_components/prospect-review-drawer.tsx` | **[NEW]** Side drawer with listing details, seller profile, and outreach actions |
 
 ---
 
@@ -468,3 +479,99 @@ Flow:
 - Verify prospects appear in Lead Inbox with correct source attribution
 - Verify scraping run stats are displayed in admin UI
 - Verify rate limiting delays between page requests
+
+---
+
+## 3.0 Deep Scraping & Enterprise AI Usage Ledger
+**Status:** Completed
+
+### 3.1 Deep Scraper Service
+
+The initial index scrape (Phase 2) only extracts surface-level data from search result pages. The **Deep Scraper** is a separate background job that visits individual listing URLs to extract full property descriptions and run accurate AI classification.
+
+**Architecture:**
+- **Service:** `lib/scraping/deep-scraper.ts` — `DeepScraperService`
+- **Trigger:** Manual via "Run Deep Scrape" button on `/admin/settings/prospecting`, or scheduled via BullMQ.
+- **Queue:** The `scrapingQueue` worker handles `type: 'deep_scrape'` jobs, routing them to `DeepScraperService.processPendingListings()`.
+
+**Deep Scrape Flow:**
+1. Query `ScrapedListing` records with `status: 'NEW'` that haven't been deep-scraped yet.
+2. For each listing, fetch the full page HTML using `PageFetcher`.
+3. Extract the full description using `extractBazarakiDescription()` from `lib/scraping/extractors/bazaraki.ts`.
+4. Run AI classification via `callLLMWithMetadata()` using Gemini to determine `isAgency` probability.
+5. Update the linked `ProspectLead.isAgency` field accordingly.
+6. Log AI usage to `AgentExecution` with `sourceType: "scraper"`.
+
+### 3.2 Enterprise AI Usage Ledger
+
+To support enterprise-grade AI cost tracking across all features (conversations, scraping, content generation), the `AgentExecution` model was refactored:
+
+| Field | Type | Purpose |
+|---|---|---|
+| `locationId` | String (required) | Links every AI execution to a tenant location for global aggregation |
+| `sourceType` | String | Categorizes the origin: `"conversation"`, `"scraper"`, `"content"`, etc. |
+| `sourceId` | String | Polymorphic ID referencing the source entity (conversation ID, task ID, etc.) |
+| `conversationId` | String? (optional) | Kept for backward compatibility but no longer required |
+
+The `getAggregateAIUsage()` function in `app/(main)/admin/conversations/actions.ts` now queries `AgentExecution` directly by `locationId` and groups costs by `sourceType`, providing accurate global AI cost dashboards.
+
+### 3.3 Data Model: ScrapedListing
+
+Listings are stored separately from Prospects (people) in a dedicated `ScrapedListing` model:
+
+```prisma
+model ScrapedListing {
+  id         String @id @default(cuid())
+  locationId String
+
+  platform   String   // "bazaraki", "facebook"
+  externalId String   // Original ID for deduplication
+  url        String
+
+  title        String?
+  price        Int?
+  propertyType String?
+  locationText String?
+  images       String[]
+
+  status String @default("NEW") // NEW, REVIEWING, ACCEPTED, REJECTED
+
+  prospectLeadId String?
+  prospectLead   ProspectLead? @relation(fields: [prospectLeadId], references: [id], onDelete: Cascade)
+
+  @@unique([platform, externalId])
+}
+```
+
+This creates a clean **1 Person → N Properties** relationship, where `ProspectLead` holds the seller's identity and `ScrapedListing` holds the individual property data.
+
+---
+
+## 4.0 Unified Prospecting Hub UI
+**Status:** Completed
+
+### 4.1 Shared Layout with Tab Navigation
+
+The `/admin/prospecting` section uses a shared Next.js layout (`layout.tsx`) providing:
+- A persistent page header with title and description.
+- Deep-linked tab navigation between **Prospects (People)** and **Listings Inbox**.
+- A **Settings** shortcut button linking to `/admin/settings/prospecting`.
+
+This replaces the previously disconnected pages with a cohesive hub.
+
+### 4.2 Prospect Review & Outreach Drawer
+
+Clicking any listing row in the **Listings Inbox** table opens a side-panel `Sheet` (Drawer) containing:
+
+| Section | Content |
+|---|---|
+| **Property Details** | Hero image, title, price, type, location, link to original listing |
+| **Seller Profile** | Name, phone, AI `isAgency` classification badge ("Agency Detected" vs "Likely Private") |
+| **Outreach Actions** | WhatsApp (pre-filled message), Call Now, Convert to CRM Contact |
+
+The **Convert to CRM Contact** button triggers the `acceptProspect()` server action, which creates a full `Contact` record, logs a `ContactHistory` entry, emits a `lead.created` event, and marks the `ProspectLead` as accepted.
+
+### 4.3 Navigation Updates
+
+- **Sidebar**: The "Leads" menu item was renamed to **"Prospecting"** and now links to `/admin/prospecting/people`.
+- **Mobile Top Nav**: Already updated in a prior session to include both "Prospects (People)" and "Listings Inbox" links.
