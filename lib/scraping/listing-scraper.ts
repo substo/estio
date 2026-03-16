@@ -25,6 +25,7 @@ export interface RawListing {
     ownerEmail?: string;
     url: string;
     images?: string[];
+    thumbnails?: string[];
     rawHtml?: string;
 
     // Property Details
@@ -372,6 +373,7 @@ export class ListingScraperService {
                 listingType: listing.listingType,
                 locationText: listing.location,
                 images: listing.images || [],
+                thumbnails: listing.thumbnails || [],
                 bedrooms: listing.bedrooms,
                 bathrooms: listing.bathrooms,
                 propertyArea: listing.propertyArea,

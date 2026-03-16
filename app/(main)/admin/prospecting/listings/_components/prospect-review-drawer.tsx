@@ -72,9 +72,9 @@ export function ProspectReviewDrawer({ listing, isOpen, onOpenChange }: Prospect
           <h3 className="font-semibold text-lg border-b pb-2">Property Details</h3>
           
           {listing.images && listing.images.length > 0 ? (
-            <div className="rounded-lg overflow-hidden border">
-              <img src={listing.images[0]} alt="Property" className="w-full h-48 object-cover" />
-            </div>
+            <a href={listing.images[0]} target="_blank" rel="noreferrer" title="View Full Original Image" className="rounded-lg overflow-hidden border block hover:opacity-90 transition-opacity">
+              <img src={listing.thumbnails?.[0] || listing.images[0]} alt="Property" className="w-full h-48 object-cover" />
+            </a>
           ) : (
              <div className="w-full h-48 bg-muted rounded-lg flex items-center justify-center text-muted-foreground border">
                 No Preview Image

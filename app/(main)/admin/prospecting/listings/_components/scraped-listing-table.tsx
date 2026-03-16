@@ -147,8 +147,8 @@ export function ScrapedListingTable({ items, total, locationId }: { items: Scrap
                                     </TableCell>
                                     <TableCell className="cursor-pointer" onClick={() => setReviewListing(item)}>
                                         <div className="flex items-center gap-3">
-                                            {item.images?.[0] ? (
-                                                <img src={item.images[0]} alt="Property" className="w-12 h-12 rounded object-cover" />
+                                            {item.thumbnails?.[0] || item.images?.[0] ? (
+                                                <img src={item.thumbnails?.[0] || item.images?.[0]} alt="Property" className="w-12 h-12 rounded object-cover" />
                                             ) : (
                                                 <div className="w-12 h-12 bg-muted rounded flex items-center justify-center text-xs text-muted-foreground">No img</div>
                                             )}

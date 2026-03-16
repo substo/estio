@@ -315,26 +315,56 @@ npm i -D @types/puppeteer @types/puppeteer-extra-plugin-stealth
 
 Filters can be applied via URL params (district, price range, bedrooms).
 
-### Extraction Fields
+### Extraction Fields — Single-Listing Deep Scrape
 
-| Field | Selector Strategy |
-|---|---|
-| Listing title | CSS: `.announcement-block__title` or similar |
-| Price | CSS: price element |
-| Phone number | Click "Show phone" button (Playwright required) |
-| Location | CSS: location breadcrumb or metadata |
-| Description | CSS: description block |
-| Images | CSS: gallery image URLs |
-| Listing URL | Anchor `href` |
-| Posted date | CSS: date metadata |
-| Listing ID | URL path or data attribute |
+**File:** `app/api/admin/scrape-listing/route.ts`
 
-> [!WARNING]
-> Bazaraki may require clicking a "Show phone number" button to reveal the contact. This requires browser automation (Playwright click + wait). Some listings may show phone as image to prevent scraping — AI OCR may be needed as fallback.
+| Field | Selector | Notes |
+|---|---|---|
+| **Title** | `h1.title-announcement`, `#ad-title` (fallback: `h1`) | |
+| **Description** | `.js-description` | |
+| **Price** | `.announcement-price__cost` | Parsed to integer |
+| **Currency** | `meta[itemprop="priceCurrency"]` `content` attr | Defaults to `EUR` |
+| **Location** | `.announcement__location span[itemprop="address"]` | |
+| **Owner Name** | `.author-info .author-name` → `.author-info a[data-user]` → `.author-info [itemprop="name"]` | Overridden by contacts dialog name if available |
+| **Phone** | Click `.phone-author.js-phone-click` → wait for `.contacts-dialog` popup → `a[href^="tel:"]` | Pre-click fallback: `.phone-author-subtext__main` |
+| **Images** | `.gallery img, .swiper-slide img, .swiper-wrapper img` | Uses `data-src \|\| data-lazy \|\| src` for lazy-loaded images, deduped, max 10 |
+| **Thumbnails** | `.gallery img, .swiper-slide img` | Uses `src` attribute. Extracted concurrently with high-res images to enable performant inbox preview avatars. |
+| **Property Type** | `.breadcrumbs__link` (last) | |
+| **Listing Type** | Parsed from URL (`-rent` → `rent`, else `sale`) | |
+| **Listing ID** | Regex from URL: `/adv/(\d+)/` | |
+| **Bedrooms** | `ul.chars-column li` → `.key-chars` = "Bedrooms" | Generic extractor loop |
+| **Bathrooms** | Same pattern, key = "Bathrooms" | |
+| **Property Area** | Same pattern, key = "Property area" | |
+| **Plot Area** | Same pattern, key = "Plot area" | |
+| **Construction Year** | Same pattern, key = "Construction year" | |
+| **Latitude** | `.js-static-map` `data-default-lat` | |
+| **Longitude** | `.js-static-map` `data-default-lng` | |
+| **Seller ID** | `.author-info .author-name[data-user]` | |
+| **Seller Registration** | `.date-registration` (page) or `.contacts-dialog__date` (dialog) | |
+| **Other Listings URL** | `a.other-announcement-author` `href` | |
+| **WhatsApp Phone** | `a._whatsapp[href]` → parse `phone=` param | Free extraction — no click budget |
+| **Contact Channels** | Presence checks: `.js-card-messenger`, `._email`, WhatsApp href | Array: `["whatsapp","chat","email"]` |
+| **Raw Attributes** | All `ul.chars-column li` key-value pairs | Stored as JSON catch-all |
 
-### Selector Configuration (New DOM via `.advert`)
+#### Phone Extraction: Contacts Dialog Flow
 
-Recent changes to Bazaraki require using the nested `.advert__content` classes and extracting the URL from the Swiper slider, as the title itself is now plain text.
+Bazaraki's phone button (`.phone-author.js-phone-click`) does not inline-reveal the number. Instead, it opens a jQuery UI popup dialog (`.contacts-dialog`):
+
+1. **Pre-click**: The phone may be partially visible in `.phone-author-subtext__main` — extract first as fallback.
+2. **Click**: Click the `.phone-author.js-phone-click` button.
+3. **Wait**: Allow 2s for the `.contacts-dialog` popup to appear.
+4. **Extract from dialog**:
+   - Phone: `.contacts-dialog__phone a[href^="tel:"]`
+   - Real Owner Name: `.contacts-dialog__name` (direct text, excluding child elements)
+   - Registration: `.contacts-dialog__date`
+
+> [!TIP]
+> The WhatsApp button `href` contains the phone number without requiring a click. This is a **free extraction** that doesn't consume interaction budget: `a._whatsapp[href]` → parse `phone=` URL param.
+
+### Extraction Fields — Batch Index Scrape
+
+**File:** `lib/scraping/extractors/bazaraki.ts`
 
 ```json
 {
@@ -517,7 +547,7 @@ The `getAggregateAIUsage()` function in `app/(main)/admin/conversations/actions.
 
 ### 3.3 Data Model: ScrapedListing
 
-Listings are stored separately from Prospects (people) in a dedicated `ScrapedListing` model:
+Listings are stored separately from Prospects (people) in a dedicated `ScrapedListing` model. The schema was expanded to capture rich property details, geo coordinates, seller intelligence, and a catch-all JSON field.
 
 ```prisma
 model ScrapedListing {
@@ -533,13 +563,48 @@ model ScrapedListing {
   propertyType String?
   locationText String?
   images       String[]
+  thumbnails   String[] @default([])
+  status       String @default("NEW") // NEW, REVIEWING, ACCEPTED, REJECTED
 
-  status String @default("NEW") // NEW, REVIEWING, ACCEPTED, REJECTED
+  // Property Details (expanded)
+  description      String?  @db.Text
+  currency         String?  @default("EUR")
+  bedrooms         Int?
+  bathrooms        Int?
+  propertyArea     Int?     // m²
+  plotArea         Int?     // m²
+  constructionYear Int?
+  listingType      String?  // "rent" | "sale"
+
+  // Geo
+  latitude  Float?
+  longitude Float?
+
+  // Seller Intelligence
+  sellerExternalId   String?   // Bazaraki user ID (e.g. "9431239")
+  sellerRegisteredAt String?   // "Company, on Bazaraki.com since feb, 2017"
+  otherListingsUrl   String?   // Link to seller's other ads
+  otherListingsCount Int?      // Number of other listings
+  contactChannels    String[]  @default([])  // ["whatsapp","chat","email"]
+  whatsappPhone      String?   // Parsed from WhatsApp button href
+
+  // Metadata
+  rawAttributes  Json?    // All key-value pairs from chars-column
 
   prospectLeadId String?
   prospectLead   ProspectLead? @relation(fields: [prospectLeadId], references: [id], onDelete: Cascade)
 
   @@unique([platform, externalId])
+}
+```
+
+`ProspectLead` was also expanded with seller platform metadata:
+
+```prisma
+model ProspectLead {
+  // ... existing fields ...
+  platformUserId     String?  // Seller's platform ID for cross-referencing
+  platformRegistered String?  // "Posting since sep, 2024"
 }
 ```
 

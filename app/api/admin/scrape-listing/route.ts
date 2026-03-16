@@ -155,6 +155,7 @@ interface ScrapedData {
     ownerName: string;
     ownerPhone: string;
     images: string[];
+    thumbnails: string[];
     propertyType: string;
     externalId: string;
     
@@ -245,36 +246,99 @@ async function scrapeBazarakiListing(
             const propertyType = await page.locator('.breadcrumbs__link').last().textContent().catch(() => '') || '';
             const listingType = url.includes('-rent') || url.includes('to-rent') ? 'rent' : 'sale';
 
-            // Images (Bazaraki lazy-loads with data-src)
+            // Images (Bazaraki lazy-loads with data-src for full images, and src for thumbnails)
             let images: string[] = [];
+            let thumbnails: string[] = [];
             try {
-                images = await page.locator('.gallery img, .announcement-media img, .swiper-slide img, .swiper-wrapper img, .announcement-gallery img, .photos-slider img, .ad-card-image img').evaluateAll(
-                    (els: HTMLImageElement[]) => els.map(el => 
-                        el.getAttribute('data-src') || el.getAttribute('data-lazy') || el.getAttribute('src') || ''
-                    ).filter((s: string) => s && s.startsWith('http'))
+                // First try to extract from the specific multi-image swiper where full hi-res exist
+                const extracted = await page.locator('.announcement__images-item.js-image-show-full, .gallery img, .announcement-media img, .swiper-slide img, .swiper-wrapper img, .announcement-gallery img, .photos-slider img, .ad-card-image img').evaluateAll(
+                    (els: HTMLImageElement[]) => els.map(el => {
+                        const full = el.getAttribute('data-full') || el.getAttribute('data-src') || el.getAttribute('data-lazy') || el.getAttribute('src') || '';
+                        const thumb = el.getAttribute('src') || full;
+                        return { full, thumb };
+                    }).filter((item) => item.full && item.full.startsWith('http'))
                 );
-                // Deduplicate and limit
-                images = [...new Set(images)].slice(0, 10);
+                
+                // Keep only unique ones by full url and limit to 10
+                const uniqueItems: {full: string, thumb: string}[] = [];
+                const seenFulls = new Set();
+                for (const item of extracted) {
+                    if (!seenFulls.has(item.full)) {
+                        seenFulls.add(item.full);
+                        uniqueItems.push(item);
+                    }
+                }
+                
+                const topItems = uniqueItems.slice(0, 10);
+                images = topItems.map(item => item.full);
+                thumbnails = topItems.map(item => item.thumb);
+                
+                // Fallback for thumbnails if they weren't in the main slider
+                if (thumbnails.length === 0) {
+                     const thumbExtracted = await page.locator('.announcement__thumbnails-item.js-select-image, .announcement__thumbnails-wrapper img').evaluateAll(
+                         (els: HTMLImageElement[]) => els.map(el => el.getAttribute('src') || '').filter(s => s && s.startsWith('http'))
+                     );
+                     thumbnails = [...new Set(thumbExtracted)].slice(0, 10);
+                }
             } catch (e) { /* no images */ }
-            sendEvent({ status: 'extracting', message: `Images found: ${images.length}` });
+            sendEvent({ status: 'extracting', message: `Images found: ${images.length}, Thumbnails: ${thumbnails.length}` });
 
-            // Phone number — attempt "Show Phone" click
+            // Phone number — click the phone-author button to open contacts dialog
             let ownerPhone = '';
             try {
-                const phoneBtn = page.locator('.js-phone-number-button, .phone-btn, [data-phone-button]').first();
+                // The actual Bazaraki phone button class
+                const phoneBtn = page.locator('.phone-author.js-phone-click, .js-show-popup-contact-business').first();
                 const btnVisible = await phoneBtn.isVisible({ timeout: 3000 }).catch(() => false);
 
                 if (btnVisible) {
-                    sendEvent({ status: 'extracting', message: 'Clicking "Show Phone" button...' });
-                    await phoneBtn.click();
-                    await page.waitForTimeout(1500);
+                    // Try to get the phone from the visible subtext first (before click)
+                    const preClickPhone = await page.locator('.phone-author-subtext__main').first().textContent().catch(() => '') || '';
+                    if (preClickPhone.trim() && preClickPhone.trim().length > 5) {
+                        ownerPhone = preClickPhone.trim().replace(/\s+/g, '');
+                        sendEvent({ status: 'extracting', message: `Phone (pre-click): ${ownerPhone}` });
+                    }
 
-                    ownerPhone = await page.locator('.js-phone-number-value, .phone-number-value').first().textContent().catch(() => '') || '';
-                    ownerPhone = ownerPhone.trim().replace(/\s+/g, '');
-                    sendEvent({ status: 'extracting', message: `Phone: ${ownerPhone || 'Not revealed'}` });
+                    // Click to open the contacts dialog for more details
+                    sendEvent({ status: 'extracting', message: 'Clicking phone button to open contacts dialog...' });
+                    await phoneBtn.click();
+                    await page.waitForTimeout(2000);
+
+                    // Check if the contacts dialog popup appeared
+                    const dialogVisible = await page.locator('.contacts-dialog, .js-contacts-dialog').first().isVisible({ timeout: 3000 }).catch(() => false);
+                    
+                    if (dialogVisible) {
+                        // Extract phone from the dialog (most reliable)
+                        const dialogPhone = await page.locator('.contacts-dialog__phone a[href^="tel:"]').first().textContent().catch(() => '') || '';
+                        if (dialogPhone.trim()) {
+                            ownerPhone = dialogPhone.trim().replace(/\s+/g, '');
+                            sendEvent({ status: 'extracting', message: `Phone (from dialog): ${ownerPhone}` });
+                        }
+
+                        // Extract real owner name from dialog (more accurate than page)
+                        const dialogOwnerName = await page.locator('.contacts-dialog__name').first().evaluate((el: HTMLElement) => {
+                            // Get direct text content, excluding child elements text
+                            const clone = el.cloneNode(true) as HTMLElement;
+                            const children = clone.querySelectorAll('*');
+                            children.forEach(c => c.remove());
+                            return clone.textContent?.trim() || '';
+                        }).catch(() => '');
+                        if (dialogOwnerName && dialogOwnerName.length > 1) {
+                            ownerName = dialogOwnerName;
+                            sendEvent({ status: 'extracting', message: `Owner (from dialog): ${ownerName}` });
+                        }
+
+                        // Extract registration date from dialog
+                        const dialogRegDate = await page.locator('.contacts-dialog__date').first().textContent().catch(() => '') || '';
+                        if (dialogRegDate.trim()) {
+                            // Override the page-level registration date with the more detailed dialog version
+                            sendEvent({ status: 'extracting', message: `Registration: ${dialogRegDate.trim()}` });
+                        }
+                    } else {
+                        sendEvent({ status: 'extracting', message: 'Contacts dialog did not appear after click' });
+                    }
                 } else {
-                    // Phone might already be visible
-                    ownerPhone = await page.locator('.js-phone-number-value, .phone-number-value').first().textContent().catch(() => '') || '';
+                    // Fallback: try the old selectors
+                    ownerPhone = await page.locator('.phone-author-subtext__main, .js-phone-number-value').first().textContent().catch(() => '') || '';
                     ownerPhone = ownerPhone.trim().replace(/\s+/g, '');
                     if (ownerPhone) {
                         sendEvent({ status: 'extracting', message: `Phone (visible): ${ownerPhone}` });
@@ -343,6 +407,7 @@ async function scrapeBazarakiListing(
                 ownerName: ownerName.trim(),
                 ownerPhone,
                 images,
+                thumbnails,
                 propertyType: propertyType.trim(),
                 externalId,
                 bedrooms,
@@ -435,6 +500,7 @@ async function upsertListingData(
                 listingType: data.listingType || undefined,
                 locationText: data.location || undefined,
                 images: data.images,
+                thumbnails: data.thumbnails,
                 bedrooms: data.bedrooms,
                 bathrooms: data.bathrooms,
                 propertyArea: data.propertyArea,
@@ -467,6 +533,7 @@ async function upsertListingData(
                 listingType: data.listingType || undefined,
                 locationText: data.location || undefined,
                 images: data.images,
+                thumbnails: data.thumbnails,
                 bedrooms: data.bedrooms,
                 bathrooms: data.bathrooms,
                 propertyArea: data.propertyArea,
@@ -495,6 +562,7 @@ async function upsertListingData(
                 listingType: data.listingType || undefined,
                 locationText: data.location || undefined,
                 images: data.images,
+                thumbnails: data.thumbnails,
                 bedrooms: data.bedrooms,
                 bathrooms: data.bathrooms,
                 propertyArea: data.propertyArea,

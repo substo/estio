@@ -1986,6 +1986,7 @@ model ScrapedListing {
   listingType  String?  // "rent" | "sale"
   locationText String?
   images       String[]
+  thumbnails   String[] @default([])
 
   // Property Details
   bedrooms         Int?

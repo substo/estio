@@ -25,6 +25,7 @@ export interface ScrapedListingRow {
   listingType: string | null;
   locationText: string | null;
   images: string[];
+  thumbnails: string[];
   bedrooms: number | null;
   bathrooms: number | null;
   propertyArea: number | null;
@@ -100,6 +101,7 @@ export async function listScrapedListings(
       listingType: r.listingType,
       locationText: r.locationText,
       images: r.images,
+      thumbnails: r.thumbnails,
       bedrooms: r.bedrooms,
       bathrooms: r.bathrooms,
       propertyArea: r.propertyArea,
