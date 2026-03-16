@@ -26,6 +26,7 @@ export interface ScrapedListingRow {
   status: string;
   prospectLeadId: string | null;
   prospectName: string | null;
+  prospectPhone: string | null;
   prospectAgency: boolean;
   createdAt: string;
 }
@@ -70,7 +71,7 @@ export async function listScrapedListings(
       skip: params.skip || 0,
       include: {
         prospectLead: {
-          select: { name: true, isAgency: true }
+          select: { name: true, phone: true, isAgency: true }
         }
       },
       orderBy: [{ createdAt: 'desc' }],
@@ -92,6 +93,7 @@ export async function listScrapedListings(
       status: r.status,
       prospectLeadId: r.prospectLeadId,
       prospectName: r.prospectLead?.name || null,
+      prospectPhone: r.prospectLead?.phone || null,
       prospectAgency: r.prospectLead?.isAgency || false,
       createdAt: r.createdAt.toISOString(),
     })),

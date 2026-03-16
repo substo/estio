@@ -13,11 +13,13 @@ import { Loader2, Check, ExternalLink, X, Building2, UserCheck, PhoneCall } from
 import { useRouter } from 'next/navigation';
 import { acceptScrapedListing, rejectScrapedListing, bulkAcceptListings, bulkRejectListings } from '../actions';
 import Link from 'next/link';
+import { ProspectReviewDrawer } from './prospect-review-drawer';
 
 export function ScrapedListingTable({ items, total, locationId }: { items: ScrapedListingRow[], total: number, locationId: string }) {
     const router = useRouter();
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [isPending, startTransition] = useTransition();
+    const [reviewListing, setReviewListing] = useState<ScrapedListingRow | null>(null);
 
     const toggleAll = () => {
         if (selectedIds.size === items.length) {
@@ -138,9 +140,10 @@ export function ScrapedListingTable({ items, total, locationId }: { items: Scrap
                                             checked={selectedIds.has(item.id)}
                                             onCheckedChange={() => toggleOne(item.id)}
                                             disabled={!isNew || isPending}
+                                            onClick={(e) => e.stopPropagation()}
                                         />
                                     </TableCell>
-                                    <TableCell>
+                                    <TableCell className="cursor-pointer" onClick={() => setReviewListing(item)}>
                                         <div className="flex items-center gap-3">
                                             {item.images?.[0] ? (
                                                 <img src={item.images[0]} alt="Property" className="w-12 h-12 rounded object-cover" />
@@ -157,14 +160,14 @@ export function ScrapedListingTable({ items, total, locationId }: { items: Scrap
                                             </div>
                                         </div>
                                     </TableCell>
-                                    <TableCell>
+                                    <TableCell className="cursor-pointer" onClick={() => setReviewListing(item)}>
                                         <div className="text-sm">{item.locationText || '-'}</div>
                                     </TableCell>
-                                    <TableCell>
+                                    <TableCell className="cursor-pointer" onClick={() => setReviewListing(item)}>
                                         <div className="font-semibold">{item.price ? `€${item.price.toLocaleString()}` : 'POA'}</div>
                                         <div className="text-xs text-muted-foreground">{item.propertyType || 'Unknown'}</div>
                                     </TableCell>
-                                    <TableCell>
+                                    <TableCell className="cursor-pointer" onClick={(e) => { e.stopPropagation(); setReviewListing(item); }}>
                                         <div className="flex flex-col gap-1 items-start">
                                             {item.prospectLeadId ? (
                                                 <div className="flex items-center gap-1">
@@ -214,6 +217,12 @@ export function ScrapedListingTable({ items, total, locationId }: { items: Scrap
             <div className="text-sm text-muted-foreground text-center">
                 Showing {items.length} of {total} listings
             </div>
+
+            <ProspectReviewDrawer 
+                listing={reviewListing} 
+                isOpen={!!reviewListing} 
+                onOpenChange={(open) => !open && setReviewListing(null)} 
+            />
         </div>
     );
 }

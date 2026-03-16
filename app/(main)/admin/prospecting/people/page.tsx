@@ -19,10 +19,7 @@ export default async function LeadInboxPage({ searchParams }: { searchParams: Pr
   });
 
   return (
-    <div className="container mx-auto py-8 px-4">
-      <h1 className="text-3xl font-bold mb-2">Lead Inbox</h1>
-      <p className="text-muted-foreground mb-6">Review and triage discovered prospects before CRM entry.</p>
-      
+    <div className="w-full">
       <ProspectInboxFilters />
       
       <div className="mt-6">
