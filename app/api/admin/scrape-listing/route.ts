@@ -224,8 +224,18 @@ async function scrapeBazarakiListing(
             sendEvent({ status: 'extracting', message: `Location: ${location.trim() || 'N/A'}` });
 
             // Owner Name & Info
-            const ownerName = await page.locator('.author-info .author-name, [itemprop="name"]').first().textContent().catch(() => '') || '';
-            const sellerExternalId = await page.locator('.author-name[data-user]').getAttribute('data-user').catch(() => undefined);
+            let ownerName = '';
+            try {
+                // Try specific selectors within the author info section
+                ownerName = await page.locator('.author-info .author-name').first().textContent().catch(() => '') || '';
+                if (!ownerName.trim()) {
+                    ownerName = await page.locator('.author-info a[data-user]').first().textContent().catch(() => '') || '';
+                }
+                if (!ownerName.trim()) {
+                    ownerName = await page.locator('.author-info [itemprop="name"]').first().textContent().catch(() => '') || '';
+                }
+            } catch(e) { /* ignore */ }
+            const sellerExternalId = await page.locator('.author-info .author-name[data-user], .author-info a[data-user]').first().getAttribute('data-user').catch(() => undefined);
             const sellerRegisteredAt = await page.locator('.date-registration').textContent().catch(() => undefined);
             const otherListingsUrl = await page.locator('a.other-announcement-author').getAttribute('href').catch(() => undefined);
             
@@ -235,12 +245,16 @@ async function scrapeBazarakiListing(
             const propertyType = await page.locator('.breadcrumbs__link').last().textContent().catch(() => '') || '';
             const listingType = url.includes('-rent') || url.includes('to-rent') ? 'rent' : 'sale';
 
-            // Images
+            // Images (Bazaraki lazy-loads with data-src)
             let images: string[] = [];
             try {
-                images = await page.locator('.gallery img, .announcement-media img, .swiper-slide img').evaluateAll(
-                    (els: HTMLImageElement[]) => els.map(el => el.src).filter(Boolean).slice(0, 5)
+                images = await page.locator('.gallery img, .announcement-media img, .swiper-slide img, .swiper-wrapper img, .announcement-gallery img, .photos-slider img, .ad-card-image img').evaluateAll(
+                    (els: HTMLImageElement[]) => els.map(el => 
+                        el.getAttribute('data-src') || el.getAttribute('data-lazy') || el.getAttribute('src') || ''
+                    ).filter((s: string) => s && s.startsWith('http'))
                 );
+                // Deduplicate and limit
+                images = [...new Set(images)].slice(0, 10);
             } catch (e) { /* no images */ }
             sendEvent({ status: 'extracting', message: `Images found: ${images.length}` });
 
