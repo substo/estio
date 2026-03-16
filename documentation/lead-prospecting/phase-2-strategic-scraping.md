@@ -328,8 +328,8 @@ Filters can be applied via URL params (district, price range, bedrooms).
 | **Location** | `.announcement__location span[itemprop="address"]` | |
 | **Owner Name** | `.author-info .author-name` → `.author-info a[data-user]` → `.author-info [itemprop="name"]` | Overridden by contacts dialog name if available |
 | **Phone** | Click `.phone-author.js-phone-click` → wait for `.contacts-dialog` popup → `a[href^="tel:"]` | Pre-click fallback: `.phone-author-subtext__main` |
-| **Images** | `.gallery img, .swiper-slide img, .swiper-wrapper img` | Uses `data-src \|\| data-lazy \|\| src` for lazy-loaded images, deduped, max 10 |
-| **Thumbnails** | `.gallery img, .swiper-slide img` | Uses `src` attribute. Extracted concurrently with high-res images to enable performant inbox preview avatars. |
+| **Images** | `.announcement__images-item.js-image-show-full, .gallery img` | Extracts full resolution from `data-full \|\| data-src`, max 10 |
+| **Thumbnails** | `.announcement__thumbnails-item.js-select-image` | Low-resolution previews from `src` paired with full images |
 | **Property Type** | `.breadcrumbs__link` (last) | |
 | **Listing Type** | Parsed from URL (`-rent` → `rent`, else `sale`) | |
 | **Listing ID** | Regex from URL: `/adv/(\d+)/` | |
@@ -558,6 +558,7 @@ model ScrapedListing {
   externalId String   // Original ID for deduplication
   url        String
 
+  // Core Fields
   title        String?
   price        Int?
   propertyType String?
