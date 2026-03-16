@@ -150,12 +150,29 @@ interface ScrapedData {
     title: string;
     description: string;
     price: number | null;
+    currency: string;
     location: string;
     ownerName: string;
     ownerPhone: string;
     images: string[];
     propertyType: string;
     externalId: string;
+    
+    // New Fields
+    bedrooms?: number;
+    bathrooms?: number;
+    propertyArea?: number;
+    plotArea?: number;
+    constructionYear?: number;
+    listingType?: string;
+    latitude?: number;
+    longitude?: number;
+    sellerExternalId?: string;
+    sellerRegisteredAt?: string;
+    otherListingsUrl?: string;
+    contactChannels?: string[];
+    whatsappPhone?: string;
+    rawAttributes?: Record<string, string>;
 }
 
 async function scrapeBazarakiListing(
@@ -183,7 +200,7 @@ async function scrapeBazarakiListing(
             const externalId = idMatch ? idMatch[1] : `bz-${Date.now()}`;
 
             // Title
-            const titleSelectors = ['.announcement-block__title', 'h1', '.content-title'];
+            const titleSelectors = ['h1.title-announcement', '#ad-title', '.announcement-block__title', 'h1'];
             let title = '';
             for (const sel of titleSelectors) {
                 title = await page.locator(sel).first().textContent().catch(() => '') || '';
@@ -193,24 +210,30 @@ async function scrapeBazarakiListing(
             sendEvent({ status: 'extracting', message: `Title: ${title}` });
 
             // Description
-            const description = await page.locator('.announcement-description').textContent().catch(() => '') || '';
+            const description = await page.locator('.js-description').textContent().catch(() => '') || '';
             sendEvent({ status: 'extracting', message: `Description: ${description.trim().substring(0, 100)}...` });
 
-            // Price
+            // Price & Currency
             const priceText = await page.locator('.announcement-price__cost').textContent().catch(() => '0') || '0';
             const cleanPrice = parseInt(priceText.replace(/\D/g, '') || '0') || null;
-            sendEvent({ status: 'extracting', message: `Price: ${cleanPrice ? `€${cleanPrice.toLocaleString()}` : 'POA'}` });
+            const currency = await page.locator('meta[itemprop="priceCurrency"]').getAttribute('content').catch(() => 'EUR') || 'EUR';
+            sendEvent({ status: 'extracting', message: `Price: ${cleanPrice ? `${currency} ${cleanPrice.toLocaleString()}` : 'POA'}` });
 
             // Location
-            const location = await page.locator('.announcement-location').textContent().catch(() => '') || '';
+            const location = await page.locator('.announcement__location span[itemprop="address"]').textContent().catch(() => '') || '';
             sendEvent({ status: 'extracting', message: `Location: ${location.trim() || 'N/A'}` });
 
-            // Owner Name
-            const ownerName = await page.locator('.author-card__name').textContent().catch(() => '') || '';
-            sendEvent({ status: 'extracting', message: `Owner: ${ownerName.trim() || 'Unknown'}` });
+            // Owner Name & Info
+            const ownerName = await page.locator('.author-info .author-name, [itemprop="name"]').first().textContent().catch(() => '') || '';
+            const sellerExternalId = await page.locator('.author-name[data-user]').getAttribute('data-user').catch(() => undefined);
+            const sellerRegisteredAt = await page.locator('.date-registration').textContent().catch(() => undefined);
+            const otherListingsUrl = await page.locator('a.other-announcement-author').getAttribute('href').catch(() => undefined);
+            
+            sendEvent({ status: 'extracting', message: `Owner: ${ownerName.trim() || 'Unknown'} (ID: ${sellerExternalId || 'N/A'})` });
 
             // Property type from breadcrumbs or metadata
             const propertyType = await page.locator('.breadcrumbs__link').last().textContent().catch(() => '') || '';
+            const listingType = url.includes('-rent') || url.includes('to-rent') ? 'rent' : 'sale';
 
             // Images
             let images: string[] = [];
@@ -249,16 +272,79 @@ async function scrapeBazarakiListing(
                 sendEvent({ status: 'extracting', message: `Phone extraction failed: ${e.message}` });
             }
 
+            // Generic Characteristics Extractor
+            const rawAttributes: Record<string, string> = {};
+            try {
+                const charItems = await page.locator('ul.chars-column li').all();
+                for (const item of charItems) {
+                  const key = await item.locator('.key-chars').textContent().catch(() => '');
+                  const value = await item.locator('.value-chars').textContent().catch(() => '');
+                  if (key && value) {
+                    rawAttributes[key.replace(':', '').trim()] = value.trim();
+                  }
+                }
+                sendEvent({ status: 'extracting', message: `Extracted ${Object.keys(rawAttributes).length} raw attributes` });
+            } catch (e) { /* ignore */ }
+
+            const bedrooms = parseInt(rawAttributes['Bedrooms']) || undefined;
+            const bathrooms = parseInt(rawAttributes['Bathrooms']) || undefined;
+            const propertyArea = parseInt(rawAttributes['Property area']?.replace(/\D/g, '')) || undefined;
+            const plotArea = parseInt(rawAttributes['Plot area']?.replace(/\D/g, '')) || undefined;
+            const constructionYear = parseInt(rawAttributes['Construction year']?.replace(/\D/g, '')) || undefined;
+
+            // Geo
+            const latitudeStr = await page.locator('.js-static-map').getAttribute('data-default-lat').catch(() => undefined);
+            const longitudeStr = await page.locator('.js-static-map').getAttribute('data-default-lng').catch(() => undefined);
+            const latitude = latitudeStr ? parseFloat(latitudeStr) : undefined;
+            const longitude = longitudeStr ? parseFloat(longitudeStr) : undefined;
+
+            // WhatsApp / Contact Channels
+            let whatsappPhone = undefined;
+            try {
+                const waHref = await page.locator('a._whatsapp[href]').first().getAttribute('href').catch(() => undefined);
+                if (waHref) {
+                    const match = waHref.match(/phone=([^&]+)/);
+                    if (match && match[1]) {
+                        whatsappPhone = decodeURIComponent(match[1]);
+                        sendEvent({ status: 'extracting', message: `Found WhatsApp Phone in URL: ${whatsappPhone}` });
+                    }
+                }
+            } catch (e) { /* ignore */ }
+
+            let contactChannels: string[] = [];
+            try {
+                if (whatsappPhone) contactChannels.push('whatsapp');
+                const hasChat = await page.locator('.js-card-messenger').isVisible().catch(() => false);
+                if (hasChat) contactChannels.push('chat');
+                const hasEmail = await page.locator('._email').isVisible().catch(() => false);
+                if (hasEmail) contactChannels.push('email');
+            } catch(e) { /* ignore */ }
+
             return {
                 title,
                 description: description.trim(),
                 price: cleanPrice,
+                currency: currency,
                 location: location.trim(),
                 ownerName: ownerName.trim(),
                 ownerPhone,
                 images,
                 propertyType: propertyType.trim(),
                 externalId,
+                bedrooms,
+                bathrooms,
+                propertyArea,
+                plotArea,
+                constructionYear,
+                listingType,
+                latitude,
+                longitude,
+                sellerExternalId,
+                sellerRegisteredAt,
+                otherListingsUrl,
+                contactChannels,
+                whatsappPhone,
+                rawAttributes
             };
         }
     );
@@ -293,9 +379,11 @@ async function upsertListingData(
                     locationId,
                     source: 'scraper_bot',
                     name: data.ownerName || null,
-                    phone: data.ownerPhone || null,
+                    phone: data.whatsappPhone || data.ownerPhone || null, // Prefer whatsapp phone if found
                     status: 'new',
                     isAgency: false,
+                    platformUserId: data.sellerExternalId,
+                    platformRegistered: data.sellerRegisteredAt,
                 },
             });
             sendEvent({ status: 'saving', message: `Created new prospect: ${data.ownerName || 'Unknown'}` });
@@ -303,7 +391,13 @@ async function upsertListingData(
             // Update existing prospect with new data if richer
             const updateData: any = {};
             if (data.ownerName && !existingProspect.name) updateData.name = data.ownerName;
-            if (data.ownerPhone && !existingProspect.phone) updateData.phone = data.ownerPhone;
+            
+            const bestPhone = data.whatsappPhone || data.ownerPhone;
+            if (bestPhone && !existingProspect.phone) updateData.phone = bestPhone;
+            
+            if (data.sellerExternalId && !existingProspect.platformUserId) updateData.platformUserId = data.sellerExternalId;
+            if (data.sellerRegisteredAt && !existingProspect.platformRegistered) updateData.platformRegistered = data.sellerRegisteredAt;
+
             if (Object.keys(updateData).length > 0) {
                 await db.prospectLead.update({ where: { id: existingProspect.id }, data: updateData });
             }
@@ -320,10 +414,26 @@ async function upsertListingData(
             where: { id: listingId },
             data: {
                 title: data.title,
+                description: data.description,
                 price: data.price,
+                currency: data.currency,
                 propertyType: data.propertyType || undefined,
+                listingType: data.listingType || undefined,
                 locationText: data.location || undefined,
                 images: data.images,
+                bedrooms: data.bedrooms,
+                bathrooms: data.bathrooms,
+                propertyArea: data.propertyArea,
+                plotArea: data.plotArea,
+                constructionYear: data.constructionYear,
+                latitude: data.latitude,
+                longitude: data.longitude,
+                sellerExternalId: data.sellerExternalId,
+                sellerRegisteredAt: data.sellerRegisteredAt,
+                otherListingsUrl: data.otherListingsUrl,
+                contactChannels: data.contactChannels,
+                whatsappPhone: data.whatsappPhone,
+                rawAttributes: data.rawAttributes,
                 prospectLeadId,
             },
         });
@@ -336,10 +446,26 @@ async function upsertListingData(
             },
             update: {
                 title: data.title,
+                description: data.description,
                 price: data.price,
+                currency: data.currency,
                 propertyType: data.propertyType || undefined,
+                listingType: data.listingType || undefined,
                 locationText: data.location || undefined,
                 images: data.images,
+                bedrooms: data.bedrooms,
+                bathrooms: data.bathrooms,
+                propertyArea: data.propertyArea,
+                plotArea: data.plotArea,
+                constructionYear: data.constructionYear,
+                latitude: data.latitude,
+                longitude: data.longitude,
+                sellerExternalId: data.sellerExternalId,
+                sellerRegisteredAt: data.sellerRegisteredAt,
+                otherListingsUrl: data.otherListingsUrl,
+                contactChannels: data.contactChannels,
+                whatsappPhone: data.whatsappPhone,
+                rawAttributes: data.rawAttributes,
                 prospectLeadId,
             },
             create: {
@@ -348,10 +474,26 @@ async function upsertListingData(
                 externalId: data.externalId,
                 url,
                 title: data.title,
+                description: data.description,
                 price: data.price,
+                currency: data.currency,
                 propertyType: data.propertyType || undefined,
+                listingType: data.listingType || undefined,
                 locationText: data.location || undefined,
                 images: data.images,
+                bedrooms: data.bedrooms,
+                bathrooms: data.bathrooms,
+                propertyArea: data.propertyArea,
+                plotArea: data.plotArea,
+                constructionYear: data.constructionYear,
+                latitude: data.latitude,
+                longitude: data.longitude,
+                sellerExternalId: data.sellerExternalId,
+                sellerRegisteredAt: data.sellerRegisteredAt,
+                otherListingsUrl: data.otherListingsUrl,
+                contactChannels: data.contactChannels,
+                whatsappPhone: data.whatsappPhone,
+                rawAttributes: data.rawAttributes,
                 status: 'NEW',
                 prospectLeadId,
             },

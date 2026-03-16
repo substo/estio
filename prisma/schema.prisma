@@ -783,6 +783,11 @@ model ProspectLead {
   isAgency        Boolean          @default(false)
   scrapedListings ScrapedListing[]
 
+  // Seller Platform Intelligence
+  platformUserId     String?  // Seller's platform ID (e.g. Bazaraki user ID "9431239")
+  platformRegistered String?  // "Posting since sep, 2024"
+  listingCount       Int?     // Total active listings this seller has
+
   // AI Scoring
   aiScore          Float? @default(0)
   aiScoreBreakdown Json?
@@ -1974,10 +1979,35 @@ model ScrapedListing {
   url        String
 
   title        String?
+  description  String?  @db.Text
   price        Int?
+  currency     String?  @default("EUR")
   propertyType String?
+  listingType  String?  // "rent" | "sale"
   locationText String?
   images       String[]
+
+  // Property Details
+  bedrooms         Int?
+  bathrooms        Int?
+  propertyArea     Int?     // m²
+  plotArea         Int?     // m²
+  constructionYear Int?
+
+  // Geo
+  latitude  Float?
+  longitude Float?
+
+  // Seller Intelligence
+  sellerExternalId   String?   // Bazaraki user ID (e.g. "9431239")
+  sellerRegisteredAt String?   // "Posting since sep, 2024"
+  otherListingsUrl   String?   // Link to seller's other ads
+  otherListingsCount Int?      // Number of other listings
+  contactChannels    String[]  @default([]) // ["whatsapp","chat","email"]
+  whatsappPhone      String?   // Parsed from WhatsApp button href
+
+  // Flexible catch-all for all listing attributes
+  rawAttributes Json?    // All key-value pairs from chars-column
 
   status String @default("NEW") // NEW, REVIEWING, ACCEPTED, REJECTED
 

@@ -20,9 +20,17 @@ export interface ScrapedListingRow {
   url: string;
   title: string | null;
   price: number | null;
+  currency: string | null;
   propertyType: string | null;
+  listingType: string | null;
   locationText: string | null;
   images: string[];
+  bedrooms: number | null;
+  bathrooms: number | null;
+  propertyArea: number | null;
+  plotArea: number | null;
+  constructionYear: number | null;
+  whatsappPhone: string | null;
   status: string;
   prospectLeadId: string | null;
   prospectName: string | null;
@@ -87,9 +95,17 @@ export async function listScrapedListings(
       url: r.url,
       title: r.title,
       price: r.price,
+      currency: r.currency,
       propertyType: r.propertyType,
+      listingType: r.listingType,
       locationText: r.locationText,
       images: r.images,
+      bedrooms: r.bedrooms,
+      bathrooms: r.bathrooms,
+      propertyArea: r.propertyArea,
+      plotArea: r.plotArea,
+      constructionYear: r.constructionYear,
+      whatsappPhone: r.whatsappPhone,
       status: r.status,
       prospectLeadId: r.prospectLeadId,
       prospectName: r.prospectLead?.name || null,

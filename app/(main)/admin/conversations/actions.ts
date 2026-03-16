@@ -581,6 +581,8 @@ async function persistSelectionAiExecution(args: {
     usage: SelectionUsage;
     latencyMs?: number | null;
 }) {
+    const location = await getAuthenticatedLocationReadOnly();
+    
     const estimatedCost = calculateRunCostFromUsage(args.modelId, {
         promptTokens: args.usage.promptTokens || 0,
         completionTokens: args.usage.completionTokens || 0,
@@ -7081,7 +7083,7 @@ export async function getAggregateAIUsage() {
             const conversationIds = Array.from(normalizedTopConversations.keys());
             const conversationRecords = await db.conversation.findMany({
                 where: {
-                    id: { in: conversationIds },
+                    id: { in: (conversationIds as string[]).filter(Boolean) },
                     locationId: location.id,
                 },
                 select: {
@@ -7103,14 +7105,14 @@ export async function getAggregateAIUsage() {
 
             topConversationRows = conversationIds
                 .map((conversationId) => {
-                    const record = byConversationId.get(conversationId);
+                    const record = byConversationId.get(conversationId as string);
                     const usage = normalizedTopConversations.get(conversationId);
                     if (!record || !usage) return null;
                     return {
                         id: record.id,
                         conversationId: record.ghlConversationId,
-                        contactName: record.contact?.name || "Unknown",
-                        contactEmail: record.contact?.email || null,
+                        contactName: (record as any).contact?.name || "Unknown",
+                        contactEmail: (record as any).contact?.email || null,
                         totalTokens: usage.totalTokens,
                         totalCost: usage.totalCost,
                         lastMessageAt: record.lastMessageAt.toISOString(),

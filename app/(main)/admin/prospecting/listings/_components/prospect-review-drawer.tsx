@@ -30,14 +30,16 @@ export function ProspectReviewDrawer({ listing, isOpen, onOpenChange }: Prospect
   if (!listing) return null;
 
   const handleWhatsApp = () => {
-    if (!listing.prospectPhone) return;
-    const phone = listing.prospectPhone.replace(/\D/g, '');
+    const phoneToUse = listing.whatsappPhone || listing.prospectPhone;
+    if (!phoneToUse) return;
+    const phone = phoneToUse.replace(/\D/g, '');
     window.open(`https://wa.me/${phone}?text=Hi ${listing.prospectName || ''}, I saw your property listing on ${listing.platform}. Are you open to agency cooperation?`, '_blank');
   };
 
   const handleCall = () => {
-    if (!listing.prospectPhone) return;
-    window.open(`tel:${listing.prospectPhone}`, '_self');
+    const phoneToUse = listing.whatsappPhone || listing.prospectPhone;
+    if (!phoneToUse) return;
+    window.open(`tel:${phoneToUse}`, '_self');
   };
 
   const handleConvert = () => {
@@ -84,8 +86,14 @@ export function ProspectReviewDrawer({ listing, isOpen, onOpenChange }: Prospect
                <h4 className="font-medium flex-1">{listing.title || 'Untitled Property'}</h4>
             </div>
             <div className="flex gap-2 mt-2 flex-wrap">
-              <Badge variant="secondary">{listing.price ? `€${listing.price.toLocaleString()}` : 'POA'}</Badge>
-              <Badge variant="outline">{listing.propertyType || 'Unknown Type'}</Badge>
+              <Badge variant="secondary">{listing.price ? `${listing.currency || '€'}${listing.price.toLocaleString()}` : 'POA'}</Badge>
+              <Badge variant="outline">{listing.propertyType || listing.listingType || 'Unknown Type'}</Badge>
+              {listing.bedrooms && <Badge variant="outline">{listing.bedrooms} Beds</Badge>}
+              {listing.bathrooms && <Badge variant="outline">{listing.bathrooms} Baths</Badge>}
+              {(listing.propertyArea || listing.plotArea) && (
+                <Badge variant="outline">{listing.propertyArea || listing.plotArea} m²</Badge>
+              )}
+              {listing.constructionYear && <Badge variant="outline">Built {listing.constructionYear}</Badge>}
               <Badge variant="outline">{listing.locationText || 'Cyprus'}</Badge>
             </div>
             
@@ -128,10 +136,10 @@ export function ProspectReviewDrawer({ listing, isOpen, onOpenChange }: Prospect
           <div className="flex flex-col gap-2">
             <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Outreach Actions</h4>
             <div className="grid grid-cols-2 gap-2">
-                <Button variant="outline" className="w-full gap-2" onClick={handleWhatsApp} disabled={!listing.prospectPhone}>
-                   <MessageCircle className="w-4 h-4 text-green-500" /> WhatsApp
+                <Button variant="outline" className="w-full gap-2" onClick={handleWhatsApp} disabled={!listing.whatsappPhone && !listing.prospectPhone}>
+                   <MessageCircle className="w-4 h-4 text-green-500" /> WhatsApp {listing.whatsappPhone && '(Direct)'}
                 </Button>
-                <Button variant="outline" className="w-full gap-2" onClick={handleCall} disabled={!listing.prospectPhone}>
+                <Button variant="outline" className="w-full gap-2" onClick={handleCall} disabled={!listing.whatsappPhone && !listing.prospectPhone}>
                    <Phone className="w-4 h-4 text-blue-500" /> Call Now
                 </Button>
             </div>

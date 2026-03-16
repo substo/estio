@@ -166,8 +166,8 @@ export function ScrapedListingTable({ items, total, locationId }: { items: Scrap
                                         <div className="text-sm">{item.locationText || '-'}</div>
                                     </TableCell>
                                     <TableCell className="cursor-pointer" onClick={() => setReviewListing(item)}>
-                                        <div className="font-semibold">{item.price ? `€${item.price.toLocaleString()}` : 'POA'}</div>
-                                        <div className="text-xs text-muted-foreground">{item.propertyType || 'Unknown'}</div>
+                                        <div className="font-semibold">{item.price ? `${item.currency || '€'}${item.price.toLocaleString()}` : 'POA'}</div>
+                                        <div className="text-xs text-muted-foreground">{item.propertyType || item.listingType || 'Unknown'}</div>
                                     </TableCell>
                                     <TableCell className="cursor-pointer" onClick={(e) => { e.stopPropagation(); setReviewListing(item); }}>
                                         <div className="flex flex-col gap-1 items-start">

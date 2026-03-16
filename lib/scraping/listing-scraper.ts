@@ -26,6 +26,25 @@ export interface RawListing {
     url: string;
     images?: string[];
     rawHtml?: string;
+
+    // Property Details
+    bedrooms?: number;
+    bathrooms?: number;
+    propertyArea?: number; // m²
+    plotArea?: number; // m²
+    constructionYear?: number;
+
+    // Geo
+    latitude?: number;
+    longitude?: number;
+
+    // Seller Intelligence
+    sellerExternalId?: string; // Platform user ID
+    sellerRegisteredAt?: string; // "Posting since sep, 2024"
+    otherListingsUrl?: string;
+    contactChannels?: string[];
+    whatsappPhone?: string;
+    rawAttributes?: Record<string, string>;
 }
 
 export type ScrapeTaskWithConnection = ScrapingTask & { connection: ScrapingConnection };
@@ -312,13 +331,28 @@ export class ListingScraperService {
                     data: {
                         locationId,
                         source: 'scraper_bot',
-                        name: listing.ownerName,
-                        phone: listing.ownerPhone,
-                        email: listing.ownerEmail,
+                        name: listing.ownerName || null,
+                        phone: listing.whatsappPhone || listing.ownerPhone || null,
+                        email: listing.ownerEmail || null,
                         status: 'new', // Lands in People Inbox
-                        isAgency
+                        isAgency,
+                        platformUserId: listing.sellerExternalId,
+                        platformRegistered: listing.sellerRegisteredAt,
                     }
                 });
+            } else {
+                const updateData: any = {};
+                if (listing.ownerName && !existingProspect.name) updateData.name = listing.ownerName;
+                
+                const bestPhone = listing.whatsappPhone || listing.ownerPhone;
+                if (bestPhone && !existingProspect.phone) updateData.phone = bestPhone;
+                
+                if (listing.sellerExternalId && !existingProspect.platformUserId) updateData.platformUserId = listing.sellerExternalId;
+                if (listing.sellerRegisteredAt && !existingProspect.platformRegistered) updateData.platformRegistered = listing.sellerRegisteredAt;
+
+                if (Object.keys(updateData).length > 0) {
+                    await db.prospectLead.update({ where: { id: existingProspect.id }, data: updateData });
+                }
             }
             prospectLeadId = existingProspect.id;
         }
@@ -331,10 +365,26 @@ export class ListingScraperService {
                 externalId: listing.externalId,
                 url: listing.url,
                 title: listing.title,
+                description: listing.description,
                 price: listing.price,
-                propertyType: listing.listingType ? `${listing.listingType} - ${listing.propertyType}` : listing.propertyType,
+                currency: listing.currency,
+                propertyType: listing.propertyType,
+                listingType: listing.listingType,
                 locationText: listing.location,
                 images: listing.images || [],
+                bedrooms: listing.bedrooms,
+                bathrooms: listing.bathrooms,
+                propertyArea: listing.propertyArea,
+                plotArea: listing.plotArea,
+                constructionYear: listing.constructionYear,
+                latitude: listing.latitude,
+                longitude: listing.longitude,
+                sellerExternalId: listing.sellerExternalId,
+                sellerRegisteredAt: listing.sellerRegisteredAt,
+                otherListingsUrl: listing.otherListingsUrl,
+                contactChannels: listing.contactChannels,
+                whatsappPhone: listing.whatsappPhone,
+                rawAttributes: listing.rawAttributes,
                 status: 'NEW', // Lands in Listings Inbox
                 prospectLeadId
             }
