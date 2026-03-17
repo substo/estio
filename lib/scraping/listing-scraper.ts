@@ -51,13 +51,13 @@ export interface RawListing {
 export type ScrapeTaskWithConnection = ScrapingTask & { connection: ScrapingConnection };
 
 export class ListingScraperService {
-    
+
     /**
      * Main entry point to scrape a specific task configuration
      */
     static async scrapeTask(task: ScrapeTaskWithConnection, options?: { pageLimit?: number }) {
         console.log(`[ListingScraper] Starting scrape for task: ${task.name} (${task.id}) with options:`, options);
-        
+
         // 1. Create a run record
         const run = await db.scrapingRun.create({
             data: {
@@ -85,26 +85,26 @@ export class ListingScraperService {
         let leadsCreated = 0;
         let duplicatesFound = 0;
         let errors = 0;
-        
+
         let interactionsRemaining = task.maxInteractionsPerRun ?? Number.MAX_SAFE_INTEGER;
         // Global safety: Don't exceed connection limit
-        const dailyLimit = task.connection.maxDailyInteractions || 100; 
+        const dailyLimit = task.connection.maxDailyInteractions || 100;
         if (interactionsRemaining > dailyLimit) interactionsRemaining = dailyLimit;
 
         try {
             // Which URLs are we scraping?
-            const urlsToScrape = task.targetUrls && task.targetUrls.length > 0 
+            const urlsToScrape = task.targetUrls && task.targetUrls.length > 0
                 ? task.targetUrls // If absolute paths are provided in targetUrls
                 : []; // We assume targetUrls are always fully qualified URLs now for simplicity since we removed baseUrl from Schema
 
             for (const rootUrl of urlsToScrape) {
                 console.log(`[ListingScraper] Fetching tree starting at: ${rootUrl}`);
-                
+
                 let currentUrl: string | undefined = rootUrl;
                 let pageCount = 0;
                 // Avoid infinite loops, limit to some reasonable max depth if target is infinite
                 const MAX_DEPTH = options?.pageLimit ?? task.maxPagesPerRun ?? 100;
-                
+
                 while (currentUrl && interactionsRemaining > 0 && pageCount < MAX_DEPTH) {
                     pageCount++;
                     console.log(`[ListingScraper] Fetching page ${pageCount}: ${currentUrl}`);
@@ -115,13 +115,13 @@ export class ListingScraperService {
                         password: activeCredential.authPassword || undefined,
                         sessionState: activeCredential.sessionState ? activeCredential.sessionState : undefined,
                     });
-                    
+
                     pagesScraped++;
-                    
+
                     // 2. Delegate Extraction based on connection platform/mode
                     let rawListings: RawListing[] = [];
                     let nextPageUrl: string | undefined = undefined;
-                    
+
                     if (task.connection.platform === 'bazaraki') {
                         const { extractBazarakiIndex } = await import('./extractors/bazaraki');
                         // Pass the strategy context and interaction budget
@@ -134,7 +134,7 @@ export class ListingScraperService {
                         });
                         rawListings = extractionResult.listings;
                         nextPageUrl = extractionResult.nextPageUrl; // Capture pagination link
-                        
+
                         // Deduct budget
                         if (extractionResult.interactionsUsed > 0) {
                             interactionsRemaining -= extractionResult.interactionsUsed;
@@ -158,7 +158,7 @@ export class ListingScraperService {
                         try {
                             // Deduplication Check
                             const isDuplicate = await this.checkDuplicates(listing, task.locationId);
-                            
+
                             if (isDuplicate) {
                                 duplicatesFound++;
                                 continue;
@@ -173,7 +173,7 @@ export class ListingScraperService {
                             errors++;
                         }
                     }
-                    
+
                     if (!nextPageUrl) {
                         console.log(`[ListingScraper] Reached end of pagination for root URL.`);
                         break;
@@ -182,7 +182,7 @@ export class ListingScraperService {
                     // Rate Limiting between index pages with Jitter
                     console.log(`[ListingScraper] Pagination sleep before jumping to ${nextPageUrl}`);
                     await humanDelay(task.delayBetweenPagesMs, task.delayJitterMs);
-                    
+
                     currentUrl = nextPageUrl;
                 }
             }
@@ -224,7 +224,7 @@ export class ListingScraperService {
 
         } catch (error: any) {
             console.error(`[ListingScraper] Task ${task.id} failed deeply:`, error);
-            
+
             await db.scrapingRun.update({
                 where: { id: run.id },
                 data: {
@@ -300,7 +300,7 @@ export class ListingScraperService {
             // Ideally we log an Insight or tie them together, but for Phase 2 spec, we drop it to avoid polluting inbox.
             if (existingContact) {
                 console.log(`[ListingScraper] Found duplicate existing contact (${existingContact.id}) for raw phone/email.`);
-                return true; 
+                return true;
             }
         }
 
@@ -311,21 +311,25 @@ export class ListingScraperService {
      * Maps the extracted Listing into a ScrapedListing and ProspectLead entity
      */
     static async createProspect(listing: RawListing, taskId: string, locationId: string) {
-        
+
         // 1. Default to false for initial scrape. Deep Scrape will classify this later.
         let isAgency = false;
 
-        // 2. Find or Create ProspectLead based on phone/email
+        // 2. Find or Create ProspectLead
         let prospectLeadId: string | null = null;
-        
-        if (listing.ownerPhone || listing.ownerEmail) {
+
+        if (listing.ownerPhone || listing.ownerEmail || listing.sellerExternalId) {
             const orConditions: any[] = [];
             if (listing.ownerPhone) orConditions.push({ phone: { contains: listing.ownerPhone } });
+            if (listing.whatsappPhone) orConditions.push({ phone: { contains: listing.whatsappPhone } });
             if (listing.ownerEmail) orConditions.push({ email: listing.ownerEmail });
+            if (listing.sellerExternalId) orConditions.push({ platformUserId: listing.sellerExternalId });
 
-            let existingProspect = await db.prospectLead.findFirst({
-                where: { locationId, OR: orConditions }
-            });
+            let existingProspect = orConditions.length > 0
+                ? await db.prospectLead.findFirst({
+                    where: { locationId, OR: orConditions }
+                })
+                : null;
 
             if (!existingProspect) {
                 existingProspect = await db.prospectLead.create({
@@ -344,10 +348,10 @@ export class ListingScraperService {
             } else {
                 const updateData: any = {};
                 if (listing.ownerName && !existingProspect.name) updateData.name = listing.ownerName;
-                
+
                 const bestPhone = listing.whatsappPhone || listing.ownerPhone;
                 if (bestPhone && !existingProspect.phone) updateData.phone = bestPhone;
-                
+
                 if (listing.sellerExternalId && !existingProspect.platformUserId) updateData.platformUserId = listing.sellerExternalId;
                 if (listing.sellerRegisteredAt && !existingProspect.platformRegistered) updateData.platformRegistered = listing.sellerRegisteredAt;
 

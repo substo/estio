@@ -5584,26 +5584,30 @@ export async function generateAIDraft(
     });
 
     if (conversationRecord?.id && contactRecord?.id) {
-        const runtimeResult = await runAiSkillDecision({
-            locationId: location.id,
-            conversationId: conversationRecord.id,
-            contactId: contactRecord.id,
-            source: "manual",
-            contextSummary: [
-                `Mode: ${options?.mode || "chat"}`,
-                options?.dealId ? `Deal: ${options.dealId}` : null,
-            ].filter(Boolean).join("\n"),
-            extraInstruction: instruction || "Draft the best next response based on current conversation context.",
-            executeImmediately: true,
-        });
+        try {
+            const runtimeResult = await runAiSkillDecision({
+                locationId: location.id,
+                conversationId: conversationRecord.id,
+                contactId: contactRecord.id,
+                source: "manual",
+                contextSummary: [
+                    `Mode: ${options?.mode || "chat"}`,
+                    options?.dealId ? `Deal: ${options.dealId}` : null,
+                ].filter(Boolean).join("\n"),
+                extraInstruction: instruction || "Draft the best next response based on current conversation context.",
+                executeImmediately: true,
+            });
 
-        if (runtimeResult.success && runtimeResult.draftBody) {
-            return {
-                draft: runtimeResult.draftBody,
-                reasoning: `Generated via unified skill runtime (${runtimeResult.selectedSkillId || "skill"}).`,
-                requiresHumanApproval: true,
-                traceId: runtimeResult.traceId || null,
-            };
+            if (runtimeResult.success && runtimeResult.draftBody) {
+                return {
+                    draft: runtimeResult.draftBody,
+                    reasoning: `Generated via unified skill runtime (${runtimeResult.selectedSkillId || "skill"}).`,
+                    requiresHumanApproval: true,
+                    traceId: runtimeResult.traceId || null,
+                };
+            }
+        } catch (skillError: any) {
+            console.warn("[generateAIDraft] Skill runtime failed, falling back to legacy generateDraft:", skillError?.message || skillError);
         }
     }
 

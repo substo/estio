@@ -51,8 +51,26 @@ const NAME_GREETING_LONG_BREAK_HOURS = 3;
 const TIMELINE_RECENT_EVENT_WINDOW = 36;
 const TIMELINE_LINE_MAX_CHARS = 220;
 const TIMELINE_FETCH_TAKE = 96;
-const DRAFT_MAX_OUTPUT_TOKENS_SIMPLE = 160;
-const DRAFT_MAX_OUTPUT_TOKENS_COMPLEX = 220;
+const MODEL_OUTPUT_TOKEN_LIMITS: Record<string, number> = {
+    "gemini-2.5-flash-lite": 65536,
+    "gemini-2.5-flash": 65536,
+    "gemini-2.5-pro": 65536,
+    "gemini-3-flash-preview": 65536,
+    "gemini-3-pro-preview": 65536,
+    "gemini-3-pro-image-preview": 65536,
+    "gemini-3.1-pro": 65536,
+    "gemini-flash-latest": 65536,
+    "gemini-flash-lite-latest": 65536,
+};
+const MODEL_OUTPUT_DEFAULT_LIMIT = 8192;
+
+function getModelMaxOutputTokens(modelName: string): number {
+    const exact = MODEL_OUTPUT_TOKEN_LIMITS[modelName];
+    if (exact) return exact;
+    // Pattern match for any Gemini 2.5+ or 3.x model
+    if (/gemini-(?:2\.5|3)/i.test(modelName)) return 65536;
+    return MODEL_OUTPUT_DEFAULT_LIMIT;
+}
 const DRAFT_THINKING_BUDGET_SIMPLE = 0;
 const DRAFT_THINKING_BUDGET_COMPLEX = 128;
 const DRAFT_RETRY_BASE_DELAY_MS = 260;
@@ -350,7 +368,7 @@ export async function generateDraft(context: CoordinationContext) {
             actual: context.model || GEMINI_DRAFT_FAST_DEFAULT,
             fallbackUsed: false,
             streamed: false,
-            maxOutputTokens: DRAFT_MAX_OUTPUT_TOKENS_SIMPLE,
+            maxOutputTokens: 0, // Updated after model resolution
             thinkingBudget: DRAFT_THINKING_BUDGET_SIMPLE,
         },
         cache: {
@@ -630,9 +648,7 @@ export async function generateDraft(context: CoordinationContext) {
             telemetry.model.requested = requestedModelName;
         }
 
-        const maxOutputTokens = isComplexDraft
-            ? DRAFT_MAX_OUTPUT_TOKENS_COMPLEX
-            : DRAFT_MAX_OUTPUT_TOKENS_SIMPLE;
+        const maxOutputTokens = getModelMaxOutputTokens(actualModelName);
         const thinkingBudget = isComplexDraft
             ? DRAFT_THINKING_BUDGET_COMPLEX
             : DRAFT_THINKING_BUDGET_SIMPLE;
@@ -872,6 +888,13 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
 
         const response = generationResult.response;
         const rawText = generationResult.rawText;
+
+        // Detect truncation via finishReason
+        const finishReason = response?.candidates?.[0]?.finishReason;
+        const wasTruncated = finishReason === "MAX_TOKENS";
+        if (wasTruncated) {
+            console.warn(`[AI Draft] Output was truncated (finishReason=MAX_TOKENS). Model: ${actualModelName}, maxOutputTokens: ${maxOutputTokens}.`);
+        }
         const withoutRepeatedGreeting = stripLeadingNameGreeting(rawText, contactFirstName, allowNameGreeting);
         if (withoutRepeatedGreeting !== rawText) {
             console.log("[AI Draft] Removed leading name greeting based on timing rule.");
@@ -927,11 +950,17 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
             : `Requested model: ${requestedModelName}; actual model used: ${actualModelName}`;
 
         // 6. Persist to DB
-        // Determine DB conversation ID (internal)
-        const dbConversation = await db.conversation.findUnique({
+        // Determine DB conversation ID (internal) — try both ghlConversationId and local id
+        let dbConversation = await db.conversation.findUnique({
             where: { ghlConversationId: context.conversationId },
             select: { id: true }
         });
+        if (!dbConversation) {
+            dbConversation = await db.conversation.findUnique({
+                where: { id: context.conversationId },
+                select: { id: true }
+            });
+        }
 
         if (dbConversation) {
             // Log Execution
@@ -993,6 +1022,7 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
             policyResult,
             expectedLanguage: languageResolution.expectedLanguage,
             draftLanguage,
+            truncated: wasTruncated,
             telemetry,
         };
 
@@ -1004,6 +1034,68 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
         if (error.message?.includes("API key")) message = "Invalid or missing API Key.";
         if (error.message?.includes("429")) message = "AI Rate limit exceeded. Try again later.";
         telemetry.stageMs.totalMs = Date.now() - overallStartedAt;
+
+        // Persist error to AgentExecution so it shows in Thinking Trace & Usage Dashboard
+        try {
+            let errorDbConversation = await db.conversation.findUnique({
+                where: { ghlConversationId: context.conversationId },
+                select: { id: true }
+            });
+            if (!errorDbConversation) {
+                errorDbConversation = await db.conversation.findUnique({
+                    where: { id: context.conversationId },
+                    select: { id: true }
+                });
+            }
+            if (errorDbConversation) {
+                const errorCost = calculateRunCost(
+                    telemetry.model.actual,
+                    telemetry.usage.promptTokens,
+                    telemetry.usage.completionTokens
+                );
+                await db.agentExecution.create({
+                    data: {
+                        conversationId: errorDbConversation.id,
+                        taskId: "quick-draft",
+                        taskTitle: "Quick AI Draft",
+                        taskStatus: "error",
+                        thoughtSummary: `Draft generation failed: ${error.message || "Unknown error"}`,
+                        latencyMs: Math.max(1, Date.now() - overallStartedAt),
+                        status: "error",
+                        errorMessage: String(error.message || "Unknown error").slice(0, 1000),
+                        toolCalls: [{
+                            tool: "gemini.generateContent",
+                            arguments: {
+                                model: telemetry.model.actual,
+                                streamed: telemetry.model.streamed,
+                                maxOutputTokens: telemetry.model.maxOutputTokens,
+                                thinkingBudget: telemetry.model.thinkingBudget,
+                                cacheState: telemetry.cache.state,
+                            },
+                            result: { error: message },
+                        }] as any,
+                        promptTokens: telemetry.usage.promptTokens,
+                        completionTokens: telemetry.usage.completionTokens,
+                        totalTokens: telemetry.usage.promptTokens + telemetry.usage.completionTokens,
+                        model: telemetry.model.actual,
+                        cost: errorCost,
+                    }
+                });
+                if (telemetry.usage.promptTokens > 0 || telemetry.usage.completionTokens > 0) {
+                    await db.conversation.update({
+                        where: { id: errorDbConversation.id },
+                        data: {
+                            promptTokens: { increment: telemetry.usage.promptTokens },
+                            completionTokens: { increment: telemetry.usage.completionTokens },
+                            totalTokens: { increment: telemetry.usage.promptTokens + telemetry.usage.completionTokens },
+                            totalCost: { increment: errorCost },
+                        }
+                    });
+                }
+            }
+        } catch (dbError) {
+            console.error("[AI Draft] Failed to persist error execution:", dbError);
+        }
 
         return {
             draft: message,

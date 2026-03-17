@@ -70,7 +70,7 @@ export async function initScrapingWorker() {
             // Normal Index Scrape Logic
             if (!taskId) throw new Error("Index scrape requires a taskId");
             const { ListingScraperService } = await import("@/lib/scraping/listing-scraper");
-            
+
             const task = await db.scrapingTask.findUnique({
                 where: { id: taskId },
                 include: { connection: true }
@@ -89,8 +89,8 @@ export async function initScrapingWorker() {
             console.log(`[Scraping] 🔧 Running task "${task.name}" on platform=${task.connection.platform}`);
 
             // Orchestrate the scrape
-            const result = await ListingScraperService.scrapeTask(task as any, { 
-                pageLimit: job.data.pageLimit 
+            const result = await ListingScraperService.scrapeTask(task as any, {
+                pageLimit: job.data.pageLimit
             });
 
             console.log(`[Scraping] ✅ Task "${task.name}" completed:`, JSON.stringify(result));
@@ -98,7 +98,7 @@ export async function initScrapingWorker() {
         } catch (error: any) {
             console.error(`[Scraping] ❌ Task ${taskId} failed:`, error.message);
             console.error(`[Scraping] Stack:`, error.stack);
-            
+
             // Log the error to the database run (fallback if not already handled by Service)
             try {
                 if (taskId) {

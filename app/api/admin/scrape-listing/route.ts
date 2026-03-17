@@ -158,7 +158,7 @@ interface ScrapedData {
     thumbnails: string[];
     propertyType: string;
     externalId: string;
-    
+
     // New Fields
     bedrooms?: number;
     bathrooms?: number;
@@ -215,8 +215,20 @@ async function scrapeBazarakiListing(
             sendEvent({ status: 'extracting', message: `Description: ${description.trim().substring(0, 100)}...` });
 
             // Price & Currency
-            const priceText = await page.locator('.announcement-price__cost').textContent().catch(() => '0') || '0';
-            const cleanPrice = parseInt(priceText.replace(/\D/g, '') || '0') || null;
+            let cleanPrice: number | null = null;
+            const metaPrice = await page.locator('meta[itemprop="price"]').getAttribute('content').catch(() => null);
+            if (metaPrice) {
+                cleanPrice = parseInt(metaPrice, 10) || null;
+            }
+            if (!cleanPrice) {
+                const priceText = await page.locator('.announcement-price__cost').evaluate((el: HTMLElement) => {
+                    const clone = el.cloneNode(true) as HTMLElement;
+                    const perMeter = clone.querySelector('.announcement-price__per-meter');
+                    if (perMeter) perMeter.remove();
+                    return clone.textContent?.trim() || '0';
+                }).catch(() => '0') || '0';
+                cleanPrice = parseInt(priceText.replace(/\D/g, '') || '0') || null;
+            }
             const currency = await page.locator('meta[itemprop="priceCurrency"]').getAttribute('content').catch(() => 'EUR') || 'EUR';
             sendEvent({ status: 'extracting', message: `Price: ${cleanPrice ? `${currency} ${cleanPrice.toLocaleString()}` : 'POA'}` });
 
@@ -235,11 +247,11 @@ async function scrapeBazarakiListing(
                 if (!ownerName.trim()) {
                     ownerName = await page.locator('.author-info [itemprop="name"]').first().textContent().catch(() => '') || '';
                 }
-            } catch(e) { /* ignore */ }
+            } catch (e) { /* ignore */ }
             const sellerExternalId = await page.locator('.author-info .author-name[data-user], .author-info a[data-user]').first().getAttribute('data-user').catch(() => undefined);
             const sellerRegisteredAt = await page.locator('.date-registration').textContent().catch(() => undefined);
             const otherListingsUrl = await page.locator('a.other-announcement-author').getAttribute('href').catch(() => undefined);
-            
+
             sendEvent({ status: 'extracting', message: `Owner: ${ownerName.trim() || 'Unknown'} (ID: ${sellerExternalId || 'N/A'})` });
 
             // Property type from breadcrumbs or metadata
@@ -258,9 +270,9 @@ async function scrapeBazarakiListing(
                         return { full, thumb };
                     }).filter((item) => item.full && item.full.startsWith('http'))
                 );
-                
+
                 // Keep only unique ones by full url and limit to 10
-                const uniqueItems: {full: string, thumb: string}[] = [];
+                const uniqueItems: { full: string, thumb: string }[] = [];
                 const seenFulls = new Set();
                 for (const item of extracted) {
                     if (!seenFulls.has(item.full)) {
@@ -268,86 +280,243 @@ async function scrapeBazarakiListing(
                         uniqueItems.push(item);
                     }
                 }
-                
+
                 const topItems = uniqueItems.slice(0, 10);
                 images = topItems.map(item => item.full);
                 thumbnails = topItems.map(item => item.thumb);
-                
+
                 // Fallback for thumbnails if they weren't in the main slider
                 if (thumbnails.length === 0) {
-                     const thumbExtracted = await page.locator('.announcement__thumbnails-item.js-select-image, .announcement__thumbnails-wrapper img').evaluateAll(
-                         (els: HTMLImageElement[]) => els.map(el => el.getAttribute('src') || '').filter(s => s && s.startsWith('http'))
-                     );
-                     thumbnails = [...new Set(thumbExtracted)].slice(0, 10);
+                    const thumbExtracted = await page.locator('.announcement__thumbnails-item.js-select-image, .announcement__thumbnails-wrapper img').evaluateAll(
+                        (els: HTMLImageElement[]) => els.map(el => el.getAttribute('src') || '').filter(s => s && s.startsWith('http'))
+                    ) as string[];
+                    thumbnails = [...new Set(thumbExtracted)].slice(0, 10);
                 }
             } catch (e) { /* no images */ }
             sendEvent({ status: 'extracting', message: `Images found: ${images.length}, Thumbnails: ${thumbnails.length}` });
 
-            // Phone number — click the phone-author button to open contacts dialog
+            // ===== PHONE NUMBER EXTRACTION =====
             let ownerPhone = '';
             try {
-                // The actual Bazaraki phone button class
-                const phoneBtn = page.locator('.phone-author.js-phone-click, .js-show-popup-contact-business').first();
-                const btnVisible = await phoneBtn.isVisible({ timeout: 3000 }).catch(() => false);
+                // STEP 1: Dismiss cookie consent / CMP overlay
+                sendEvent({ status: 'extracting', message: '📋 Dismissing cookie consent overlay...' });
+                await page.evaluate(() => {
+                    try {
+                        if (typeof (window as any).__cmp === 'function') {
+                            (window as any).__cmp('setConsent', { isConsentTool: true, vendors: { purposes: {}, legitimateInterests: {} } });
+                        }
+                    } catch (e) { /* ignore */ }
+                    const cmpWrapper = document.getElementById('cmpwrapper');
+                    if (cmpWrapper) cmpWrapper.remove();
+                    // Also remove any generic overlay/modal blockers
+                    document.querySelectorAll('.cmpwrapper, [class*="cookie-banner"], [class*="consent-banner"]').forEach(el => (el as HTMLElement).remove());
+                }).catch(() => {});
+                await page.waitForTimeout(300);
 
-                if (btnVisible) {
-                    // Try to get the phone from the visible subtext first (before click)
-                    const preClickPhone = await page.locator('.phone-author-subtext__main').first().textContent().catch(() => '') || '';
-                    if (preClickPhone.trim() && preClickPhone.trim().length > 5) {
-                        ownerPhone = preClickPhone.trim().replace(/\s+/g, '');
-                        sendEvent({ status: 'extracting', message: `Phone (pre-click): ${ownerPhone}` });
-                    }
-
-                    // Click to open the contacts dialog for more details
-                    sendEvent({ status: 'extracting', message: 'Clicking phone button to open contacts dialog...' });
-                    await phoneBtn.click();
-                    await page.waitForTimeout(2000);
-
-                    // Check if the contacts dialog popup appeared
-                    const dialogVisible = await page.locator('.contacts-dialog, .js-contacts-dialog').first().isVisible({ timeout: 3000 }).catch(() => false);
+                // STEP 2: Analyze session state and phone button
+                const phoneDiag = await page.evaluate(() => {
+                    const phoneBtnEl = document.querySelector('.phone-author.js-phone-click') as HTMLElement | null;
+                    const phoneSubtext = document.querySelector('.phone-author-subtext__main');
+                    const isRedirectToLogin = !!document.querySelector('.js-redirect-to-login');
+                    const isShowPopup = !!document.querySelector('.js-show-popup-contact-business');
+                    const dataUrl = phoneBtnEl?.getAttribute('data-url') || '';
+                    const dataAdvert = phoneBtnEl?.getAttribute('data-advert') || '';
                     
-                    if (dialogVisible) {
-                        // Extract phone from the dialog (most reliable)
-                        const dialogPhone = await page.locator('.contacts-dialog__phone a[href^="tel:"]').first().textContent().catch(() => '') || '';
-                        if (dialogPhone.trim()) {
-                            ownerPhone = dialogPhone.trim().replace(/\s+/g, '');
-                            sendEvent({ status: 'extracting', message: `Phone (from dialog): ${ownerPhone}` });
-                        }
+                    return {
+                        exists: !!phoneBtnEl,
+                        isLoggedIn: isShowPopup && !isRedirectToLogin,
+                        isRedirectToLogin,
+                        phoneSubtext: phoneSubtext?.textContent?.trim() || '',
+                        dataUrl,      // e.g. "/phone_check/6186406_office-for-rent/"
+                        dataAdvert,   // e.g. "6186406"
+                        btnClasses: phoneBtnEl?.className || '',
+                    };
+                }).catch(() => ({ exists: false, isLoggedIn: false, isRedirectToLogin: false, phoneSubtext: '', dataUrl: '', dataAdvert: '', btnClasses: '' }));
 
-                        // Extract real owner name from dialog (more accurate than page)
-                        const dialogOwnerName = await page.locator('.contacts-dialog__name').first().evaluate((el: HTMLElement) => {
-                            // Get direct text content, excluding child elements text
-                            const clone = el.cloneNode(true) as HTMLElement;
-                            const children = clone.querySelectorAll('*');
-                            children.forEach(c => c.remove());
-                            return clone.textContent?.trim() || '';
-                        }).catch(() => '');
-                        if (dialogOwnerName && dialogOwnerName.length > 1) {
-                            ownerName = dialogOwnerName;
-                            sendEvent({ status: 'extracting', message: `Owner (from dialog): ${ownerName}` });
-                        }
+                sendEvent({ status: 'phone_debug', message: `Session: ${phoneDiag.isLoggedIn ? '✅ LOGGED IN' : '⚠️ NOT LOGGED IN (js-redirect-to-login)'}, subtext="${phoneDiag.phoneSubtext}", dataUrl="${phoneDiag.dataUrl}"` });
 
-                        // Extract registration date from dialog
-                        const dialogRegDate = await page.locator('.contacts-dialog__date').first().textContent().catch(() => '') || '';
-                        if (dialogRegDate.trim()) {
-                            // Override the page-level registration date with the more detailed dialog version
-                            sendEvent({ status: 'extracting', message: `Registration: ${dialogRegDate.trim()}` });
+                if (!phoneDiag.exists) {
+                    sendEvent({ status: 'extracting', message: '❌ Phone button not found on page' });
+                } else if (phoneDiag.isRedirectToLogin && !phoneDiag.isLoggedIn) {
+                    // === SESSION EXPIRED PATH ===
+                    sendEvent({ status: 'extracting', message: '⚠️ Session expired — trying AJAX phone_check endpoint...' });
+
+                    // Method 1: Try the /phone_check/ AJAX endpoint directly
+                    if (phoneDiag.dataUrl) {
+                        try {
+                            const phoneCheckResult = await page.evaluate(async (checkUrl: string) => {
+                                try {
+                                    const resp = await fetch(checkUrl, {
+                                        headers: {
+                                            'X-Requested-With': 'XMLHttpRequest',
+                                            'Accept': 'application/json, text/html, */*',
+                                        },
+                                        credentials: 'include',
+                                    });
+                                    const text = await resp.text();
+                                    return { status: resp.status, body: text.substring(0, 2000) };
+                                } catch (e: any) {
+                                    return { status: 0, body: e.message };
+                                }
+                            }, phoneDiag.dataUrl);
+
+                            sendEvent({ status: 'phone_debug', message: `phone_check response: status=${phoneCheckResult.status}, body=${phoneCheckResult.body.substring(0, 300)}` });
+
+                            // Try to parse phone from the HTML/JSON response
+                            const phoneMatch = phoneCheckResult.body.match(/(\+?\d[\d\s\-]{7,})/);
+                            if (phoneMatch) {
+                                ownerPhone = phoneMatch[1].replace(/[\s\-]/g, '');
+                                sendEvent({ status: 'extracting', message: `📞 Phone (from AJAX): ${ownerPhone}` });
+                            }
+                        } catch (e: any) {
+                            sendEvent({ status: 'extracting', message: `AJAX phone_check failed: ${e.message?.substring(0, 100)}` });
                         }
-                    } else {
-                        sendEvent({ status: 'extracting', message: 'Contacts dialog did not appear after click' });
                     }
+
+                    // Method 2: Block navigation and try clicking anyway
+                    if (!ownerPhone) {
+                        sendEvent({ status: 'extracting', message: 'Trying JS click with navigation blocked...' });
+
+                        const jsClickResult = await page.evaluate(() => {
+                            // Block any navigation attempts
+                            const origAssign = window.location.assign;
+                            const origReplace = window.location.replace;
+                            let interceptedUrl = '';
+
+                            // Override navigation methods
+                            window.addEventListener('beforeunload', (e) => { e.preventDefault(); e.returnValue = ''; });
+                            
+                            // Remove the js-redirect-to-login class so the click handler doesn't redirect
+                            const btn = document.querySelector('.phone-author.js-phone-click') as HTMLElement;
+                            if (btn) {
+                                btn.classList.remove('js-redirect-to-login');
+                                btn.classList.add('js-show-popup-contact-business');
+                                
+                                // Also remove data-redirect to prevent jQuery handler from navigating
+                                btn.removeAttribute('data-redirect');
+                                
+                                btn.click();
+                                btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                            }
+                            
+                            return { clicked: !!btn };
+                        }).catch(() => ({ clicked: false }));
+
+                        if (jsClickResult.clicked) {
+                            await page.waitForTimeout(2000);
+
+                            // Check if phone was revealed
+                            const postJsClick = await page.evaluate(() => {
+                                const phoneSubtext = document.querySelector('.phone-author-subtext__main');
+                                const phoneBtnEl = document.querySelector('.phone-author.js-phone-click');
+                                const toggled = phoneBtnEl?.classList.contains('phone-author--toggled') || false;
+                                const telLinks = Array.from(document.querySelectorAll('a[href^="tel:"]')).map(a => (a.textContent?.trim() || a.getAttribute('href') || '').replace('tel:', ''));
+                                const dialogExists = !!document.querySelector('.contacts-dialog, .ui-dialog');
+                                return {
+                                    phoneSubtext: phoneSubtext?.textContent?.trim() || '',
+                                    toggled,
+                                    telLinks,
+                                    dialogExists,
+                                    currentUrl: window.location.href,
+                                };
+                            }).catch(() => ({ phoneSubtext: '', toggled: false, telLinks: [] as string[], dialogExists: false, currentUrl: '' }));
+
+                            sendEvent({ status: 'phone_debug', message: `POST-JS-CLICK: subtext="${postJsClick.phoneSubtext}", toggled=${postJsClick.toggled}, telLinks=[${postJsClick.telLinks.join(',')}], dialog=${postJsClick.dialogExists}, url=${postJsClick.currentUrl}` });
+
+                            if (postJsClick.phoneSubtext && postJsClick.phoneSubtext.length > 5 && postJsClick.phoneSubtext !== '+35') {
+                                ownerPhone = postJsClick.phoneSubtext.replace(/\s+/g, '');
+                                sendEvent({ status: 'extracting', message: `📞 Phone (JS click revealed): ${ownerPhone}` });
+                            } else if (postJsClick.telLinks.length > 0) {
+                                const tel = postJsClick.telLinks[0].replace(/\s+/g, '');
+                                if (tel.length > 5) {
+                                    ownerPhone = tel;
+                                    sendEvent({ status: 'extracting', message: `📞 Phone (tel link): ${ownerPhone}` });
+                                }
+                            }
+                        }
+                    }
+
+                    if (!ownerPhone) {
+                        sendEvent({ status: 'extracting', message: '⚠️ Session expired and phone could not be retrieved. Credential may need re-authentication.' });
+                    }
+
                 } else {
-                    // Fallback: try the old selectors
-                    ownerPhone = await page.locator('.phone-author-subtext__main, .js-phone-number-value').first().textContent().catch(() => '') || '';
-                    ownerPhone = ownerPhone.trim().replace(/\s+/g, '');
-                    if (ownerPhone) {
-                        sendEvent({ status: 'extracting', message: `Phone (visible): ${ownerPhone}` });
-                    } else {
-                        sendEvent({ status: 'extracting', message: 'Phone: Button not found, no phone visible' });
+                    // === LOGGED IN PATH (normal flow) ===
+                    sendEvent({ status: 'extracting', message: '✅ Session active — clicking phone button...' });
+
+                    // Block navigation as safety net
+                    await page.evaluate(() => {
+                        window.addEventListener('beforeunload', (e) => { e.preventDefault(); e.returnValue = ''; });
+                    });
+
+                    const phoneBtn = page.locator('.phone-author.js-phone-click, .js-show-popup-contact-business').first();
+                    const btnVisible = await phoneBtn.isVisible({ timeout: 3000 }).catch(() => false);
+
+                    if (btnVisible) {
+                        // Try force click
+                        try {
+                            await phoneBtn.click({ force: true, timeout: 5000 });
+                            sendEvent({ status: 'extracting', message: 'Click succeeded' });
+                        } catch {
+                            // JS fallback
+                            await page.evaluate(() => {
+                                const btn = document.querySelector('.phone-author.js-phone-click') as HTMLElement;
+                                if (btn) { btn.click(); btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); }
+                            }).catch(() => {});
+                            sendEvent({ status: 'extracting', message: 'Used JS click fallback' });
+                        }
+
+                        await page.waitForTimeout(2000);
+
+                        // Extract phone from revealed state
+                        const revealed = await page.evaluate(() => {
+                            const phoneSubtext = document.querySelector('.phone-author-subtext__main');
+                            const dialogPhone = document.querySelector('.contacts-dialog__phone a[href^="tel:"]');
+                            const telLinks = Array.from(document.querySelectorAll('a[href^="tel:"]')).map(a => (a.textContent?.trim() || '').replace('tel:', ''));
+                            const dialogExists = !!document.querySelector('.contacts-dialog, .ui-dialog');
+                            return {
+                                phoneSubtext: phoneSubtext?.textContent?.trim() || '',
+                                dialogPhone: dialogPhone?.textContent?.trim() || '',
+                                telLinks,
+                                dialogExists,
+                            };
+                        }).catch(() => ({ phoneSubtext: '', dialogPhone: '', telLinks: [] as string[], dialogExists: false }));
+
+                        sendEvent({ status: 'phone_debug', message: `REVEALED: subtext="${revealed.phoneSubtext}", dialogPhone="${revealed.dialogPhone}", dialog=${revealed.dialogExists}, telLinks=[${revealed.telLinks.join(',')}]` });
+
+                        // Priority: dialog phone > inline subtext > any tel link
+                        if (revealed.dialogPhone && revealed.dialogPhone.length > 5) {
+                            ownerPhone = revealed.dialogPhone.replace(/\s+/g, '');
+                        } else if (revealed.phoneSubtext && revealed.phoneSubtext.length > 5 && revealed.phoneSubtext !== '+35') {
+                            ownerPhone = revealed.phoneSubtext.replace(/\s+/g, '');
+                        } else if (revealed.telLinks.length > 0) {
+                            const tel = revealed.telLinks[0].replace(/\s+/g, '');
+                            if (tel.length > 5) ownerPhone = tel;
+                        }
+
+                        if (ownerPhone) {
+                            sendEvent({ status: 'extracting', message: `📞 Phone: ${ownerPhone}` });
+                        }
+
+                        // Extract owner name from dialog if available
+                        if (revealed.dialogExists) {
+                            const dialogOwnerName = await page.locator('.contacts-dialog__name').first().evaluate((el: HTMLElement) => {
+                                const clone = el.cloneNode(true) as HTMLElement;
+                                clone.querySelectorAll('*').forEach(c => c.remove());
+                                return clone.textContent?.trim() || '';
+                            }).catch(() => '');
+                            if (dialogOwnerName && dialogOwnerName.length > 1) {
+                                ownerName = dialogOwnerName;
+                                sendEvent({ status: 'extracting', message: `Owner (from dialog): ${ownerName}` });
+                            }
+                        }
                     }
                 }
+
+                // Final summary
+                sendEvent({ status: 'extracting', message: ownerPhone ? `✅ Final phone: ${ownerPhone}` : '❌ No phone number extracted' });
             } catch (e: any) {
-                sendEvent({ status: 'extracting', message: `Phone extraction failed: ${e.message}` });
+                sendEvent({ status: 'extracting', message: `Phone extraction error: ${e.message}` });
             }
 
             // Generic Characteristics Extractor
@@ -355,11 +524,11 @@ async function scrapeBazarakiListing(
             try {
                 const charItems = await page.locator('ul.chars-column li').all();
                 for (const item of charItems) {
-                  const key = await item.locator('.key-chars').textContent().catch(() => '');
-                  const value = await item.locator('.value-chars').textContent().catch(() => '');
-                  if (key && value) {
-                    rawAttributes[key.replace(':', '').trim()] = value.trim();
-                  }
+                    const key = await item.locator('.key-chars').textContent().catch(() => '');
+                    const value = await item.locator('.value-chars').textContent().catch(() => '');
+                    if (key && value) {
+                        rawAttributes[key.replace(':', '').trim()] = value.trim();
+                    }
                 }
                 sendEvent({ status: 'extracting', message: `Extracted ${Object.keys(rawAttributes).length} raw attributes` });
             } catch (e) { /* ignore */ }
@@ -396,7 +565,7 @@ async function scrapeBazarakiListing(
                 if (hasChat) contactChannels.push('chat');
                 const hasEmail = await page.locator('._email').isVisible().catch(() => false);
                 if (hasEmail) contactChannels.push('email');
-            } catch(e) { /* ignore */ }
+            } catch (e) { /* ignore */ }
 
             return {
                 title,
@@ -441,16 +610,36 @@ async function upsertListingData(
     data: ScrapedData,
     sendEvent: (d: any) => void,
 ) {
+    // 0. Locate existing listing if any
+    let existingScrapedListing = null;
+    if (listingId) {
+        existingScrapedListing = await db.scrapedListing.findUnique({ where: { id: listingId } });
+    } else if (data.externalId) {
+        existingScrapedListing = await db.scrapedListing.findUnique({
+             where: { platform_externalId: { platform, externalId: data.externalId } }
+        });
+    }
+
     // 1. Upsert ProspectLead
-    let prospectLeadId: string | null = null;
+    let prospectLeadId: string | null = existingScrapedListing?.prospectLeadId || null;
 
-    if (data.ownerPhone || data.ownerName) {
-        const orConditions: any[] = [];
-        if (data.ownerPhone) orConditions.push({ phone: { contains: data.ownerPhone } });
+    if (data.ownerPhone || data.ownerName || data.sellerExternalId) {
+        let existingProspect = null;
 
-        let existingProspect = orConditions.length > 0
-            ? await db.prospectLead.findFirst({ where: { locationId, OR: orConditions } })
-            : null;
+        if (prospectLeadId) {
+            existingProspect = await db.prospectLead.findUnique({ where: { id: prospectLeadId } });
+        }
+
+        if (!existingProspect) {
+            const orConditions: any[] = [];
+            if (data.ownerPhone) orConditions.push({ phone: { contains: data.ownerPhone } });
+            if (data.whatsappPhone) orConditions.push({ phone: { contains: data.whatsappPhone } });
+            if (data.sellerExternalId) orConditions.push({ platformUserId: data.sellerExternalId });
+
+            existingProspect = orConditions.length > 0
+                ? await db.prospectLead.findFirst({ where: { locationId, OR: orConditions } })
+                : null;
+        }
 
         if (!existingProspect) {
             existingProspect = await db.prospectLead.create({
@@ -470,10 +659,10 @@ async function upsertListingData(
             // Update existing prospect with new data if richer
             const updateData: any = {};
             if (data.ownerName && !existingProspect.name) updateData.name = data.ownerName;
-            
+
             const bestPhone = data.whatsappPhone || data.ownerPhone;
             if (bestPhone && !existingProspect.phone) updateData.phone = bestPhone;
-            
+
             if (data.sellerExternalId && !existingProspect.platformUserId) updateData.platformUserId = data.sellerExternalId;
             if (data.sellerRegisteredAt && !existingProspect.platformRegistered) updateData.platformRegistered = data.sellerRegisteredAt;
 

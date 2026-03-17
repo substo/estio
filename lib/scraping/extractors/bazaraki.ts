@@ -3,11 +3,11 @@ import { PageFetcher } from '../page-fetcher';
 import * as cheerio from 'cheerio';
 
 const BAZARAKI_SELECTORS = {
-    listingContainer: '.advert',
-    title: '.advert__content-title',
-    listingLink: 'a.swiper-slide[href]',
-    price: '.advert__content-price',
-    location: '.advert__content-place',
+    listingContainer: '.advert, .advert-grid',
+    title: '.advert__content-title, .advert-grid__content-title',
+    listingLink: 'a.swiper-slide[href], a.advert-grid__body-image-paginator-container[href]',
+    price: '.advert__content-price, .advert-grid__content-price',
+    location: '.advert__content-place, .advert-grid__content-place, .advert-grid__content-hint .advert-grid__content-place',
     nextPage: 'a.number-list-next, a.number-list-line',
 };
 
@@ -39,7 +39,7 @@ export async function extractBazarakiIndex(content: string, baseUrl: string, fet
     const $ = cheerio.load(content);
     const listings: RawListing[] = [];
     let interactionsUsed = 0;
-    
+
     const opts = options || {
         strategy: 'shallow_duplication',
         sellerType: 'all',
@@ -54,27 +54,33 @@ export async function extractBazarakiIndex(content: string, baseUrl: string, fet
         // Get listing URL from swiper slide link or any <a> with a /adv/ path
         const linkEl = $(el).find(BAZARAKI_SELECTORS.listingLink).first();
         let href = linkEl.attr('href');
-        
-        // Fallback: try any <a> whose href contains /adv/
+
+        // Fallback: try any <a> whose href contains /adv/ and an ID
         if (!href) {
             $(el).find('a[href]').each((_, a) => {
                 const h = $(a).attr('href');
-                if (h && h.includes('/adv/')) { href = h; return false; }
+                if (h && (h.includes('/adv/') || h.match(/(\d+)/))) { href = h; return false; }
             });
         }
         if (!href) return;
-        
+
         const absoluteUrl = href.startsWith('http') ? href : `https://www.bazaraki.com${href}`;
         // Extract numeric ID from URL like /adv/4424521_...
         const matchId = absoluteUrl.match(/\/adv\/(\d+)/) || absoluteUrl.match(/(\d+)/);
         const externalId = matchId ? matchId[1] : `bz-${Date.now()}`;
-        
+
         // Title is plain text inside .advert__content-title (no longer an <a>)
         const title = $(el).find(BAZARAKI_SELECTORS.title).text().trim();
         const priceText = $(el).find(BAZARAKI_SELECTORS.price).text() || '0';
-        const cleanPrice = parseInt(priceText.replace(/\D/g, '') || '0');
+        const priceMatch = priceText.match(/(?:€|£|\$)?\s*([\d., ]+)/);
+        let cleanPrice = 0;
+        if (priceMatch && priceMatch[1]) {
+            cleanPrice = parseInt(priceMatch[1].replace(/\D/g, '') || '0');
+        } else {
+            cleanPrice = parseInt(priceText.replace(/\D/g, '') || '0');
+        }
         const location = $(el).find(BAZARAKI_SELECTORS.location).text().trim() || 'Cyprus';
-        
+
         shallowListings.push({
             url: absoluteUrl,
             externalId,
@@ -127,41 +133,48 @@ export async function extractBazarakiIndex(content: string, baseUrl: string, fet
             console.log(`[BazarakiExtractor] Fetching details for: ${shallow.url}`);
             const detailListing = await fetcher.executeOnPage({ url: shallow.url, jsEnabled: true }, async (page) => {
                 let deepData = { ...shallow };
-                
+
                 // Get basic metadata from DOM
                 const description = await page.locator('.announcement-description').textContent().catch(() => '');
                 deepData.description = description?.trim() || '';
-                
+
                 // Owner Name extraction
                 const ownerName = await page.locator('.author-card__name').textContent().catch(() => 'Bazaraki Owner');
                 deepData.ownerName = ownerName?.trim();
-                
+
                 // --- TARGET SELLER TYPE FILTERING ---
-                const isAgency = deepData.ownerName?.toLowerCase().includes('real estate') || 
-                                 deepData.ownerName?.toLowerCase().includes('properties') || 
-                                 deepData.ownerName?.toLowerCase().includes('agency');
-                
+                const isAgency = deepData.ownerName?.toLowerCase().includes('real estate') ||
+                    deepData.ownerName?.toLowerCase().includes('properties') ||
+                    deepData.ownerName?.toLowerCase().includes('agency');
+
                 if (opts.sellerType === 'individual' && isAgency) {
-                     console.log(`[BazarakiExtractor] Skipping Deep Contact grab, identified as Agency: ${deepData.ownerName}`);
-                     return deepData; // Skip the phone grab
+                    console.log(`[BazarakiExtractor] Skipping Deep Contact grab, identified as Agency: ${deepData.ownerName}`);
+                    return deepData; // Skip the phone grab
                 }
                 if (opts.sellerType === 'agency' && !isAgency) {
-                     console.log(`[BazarakiExtractor] Skipping Deep Contact grab, identified as Individual: ${deepData.ownerName}`);
-                     return deepData;
+                    console.log(`[BazarakiExtractor] Skipping Deep Contact grab, identified as Individual: ${deepData.ownerName}`);
+                    return deepData;
                 }
 
                 // Try to click "Show phone number" button - THIS CONSUMES AN INTERACTION BUDGET
                 let phone = '';
                 try {
-                    const phoneBtn = page.locator('.js-phone-number-button');
+                    const phoneBtn = page.locator('.phone-author.js-phone-click, .js-show-popup-contact-business').first();
                     if (await phoneBtn.isVisible()) {
-                        await phoneBtn.click();
-                        await page.waitForTimeout(1000); // Give JS time to replace inner context
-                        
-                        const phoneEl = page.locator('.js-phone-number-value');
-                        phone = await phoneEl.textContent() || '';
+                        await phoneBtn.click({ force: true });
+                        await page.waitForTimeout(1500); // Give JS time to replace inner context
+
+                        // First check inline
+                        const inlinePhone = await page.locator('.phone-author-subtext__main').first().textContent() || '';
+                        if (inlinePhone && inlinePhone.trim().length > 5 && inlinePhone.trim() !== '+35') {
+                            phone = inlinePhone;
+                        }
+
+                        // Also check dialog if it appears
+                        const dialogPhone = await page.locator('.contacts-dialog__phone a[href^="tel:"]').first().textContent().catch(() => '') || '';
+                        if (dialogPhone) phone = dialogPhone;
                     } else {
-                        phone = await page.locator('.js-phone-number-value').textContent() || '';
+                        phone = await page.locator('.phone-author-subtext__main').first().textContent() || '';
                     }
                     if (phone) deepData.ownerPhone = phone.trim().replace(/\s+/g, '');
                 } catch (e) {
@@ -170,17 +183,17 @@ export async function extractBazarakiIndex(content: string, baseUrl: string, fet
 
                 return deepData;
             });
-            
+
             listings.push(detailListing);
             interactionsUsed++; // Count this page load / interaction against the quota
 
         } catch (detailError) {
-             console.error(`[BazarakiExtractor] Skipping listing ${shallow.url} due to error`);
+            console.error(`[BazarakiExtractor] Skipping listing ${shallow.url} due to error`);
         }
-        
+
         await humanDelay(opts.delayBaseMs, opts.delayJitterMs);
     }
-    
+
     // Merge any skipped/unaffordable shallow lists into the final output
     const deepProcessedIds = new Set(listings.map(l => l.externalId));
     for (const shallow of shallowListings) {

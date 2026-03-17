@@ -15,11 +15,14 @@ export interface ScrapedListingParams {
 
 export interface ScrapedListingRow {
   id: string;
+  locationId: string;
   platform: string;
   externalId: string;
   url: string;
   title: string | null;
   price: number | null;
+  sellerRegisteredAt: string | null;
+  otherListingsUrl: string | null;
   currency: string | null;
   propertyType: string | null;
   listingType: string | null;
@@ -53,7 +56,7 @@ export async function listScrapedListings(
 
   const scope = params.scope || 'new';
   if (scope === 'new') {
-    and.push({ status: { in: ['new', 'NEW', 'REVIEWING'] } }); 
+    and.push({ status: { in: ['new', 'NEW', 'REVIEWING'] } });
   } else if (params.status) {
     and.push({ status: params.status });
   }
@@ -91,6 +94,7 @@ export async function listScrapedListings(
   return {
     items: rows.map((r) => ({
       id: r.id,
+      locationId: r.locationId,
       platform: r.platform,
       externalId: r.externalId,
       url: r.url,
@@ -112,7 +116,9 @@ export async function listScrapedListings(
       prospectLeadId: r.prospectLeadId,
       prospectName: r.prospectLead?.name || null,
       prospectPhone: r.prospectLead?.phone || null,
-      prospectAgency: r.prospectLead?.isAgency || false,
+      prospectAgency: r.prospectLead?.isAgency ?? false,
+      sellerRegisteredAt: r.sellerRegisteredAt,
+      otherListingsUrl: r.otherListingsUrl,
       createdAt: r.createdAt.toISOString(),
     })),
     total,
