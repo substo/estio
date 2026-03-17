@@ -35,6 +35,9 @@ export interface ScrapedListingRow {
   plotArea: number | null;
   constructionYear: number | null;
   whatsappPhone: string | null;
+  description: string | null;
+  contactChannels: string[];
+  sellerExternalId: string | null;
   status: string;
   prospectLeadId: string | null;
   prospectName: string | null;
@@ -112,6 +115,9 @@ export async function listScrapedListings(
       plotArea: r.plotArea,
       constructionYear: r.constructionYear,
       whatsappPhone: r.whatsappPhone,
+      description: r.description,
+      contactChannels: r.contactChannels,
+      sellerExternalId: r.sellerExternalId,
       status: r.status,
       prospectLeadId: r.prospectLeadId,
       prospectName: r.prospectLead?.name || null,

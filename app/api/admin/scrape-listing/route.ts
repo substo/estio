@@ -317,8 +317,8 @@ async function scrapeBazarakiListing(
                 const phoneDiag = await page.evaluate(() => {
                     const phoneBtnEl = document.querySelector('.phone-author.js-phone-click') as HTMLElement | null;
                     const phoneSubtext = document.querySelector('.phone-author-subtext__main');
-                    const isRedirectToLogin = !!document.querySelector('.js-redirect-to-login');
-                    const isShowPopup = !!document.querySelector('.js-show-popup-contact-business');
+                    const isRedirectToLogin = phoneBtnEl ? phoneBtnEl.classList.contains('js-redirect-to-login') : false;
+                    const isShowPopup = phoneBtnEl ? phoneBtnEl.classList.contains('js-show-popup-contact-business') : false;
                     const dataUrl = phoneBtnEl?.getAttribute('data-url') || '';
                     const dataAdvert = phoneBtnEl?.getAttribute('data-advert') || '';
                     
@@ -346,13 +346,14 @@ async function scrapeBazarakiListing(
                         try {
                             const phoneCheckResult = await page.evaluate(async (checkUrl: string) => {
                                 try {
-                                    const resp = await fetch(checkUrl, {
-                                        headers: {
-                                            'X-Requested-With': 'XMLHttpRequest',
-                                            'Accept': 'application/json, text/html, */*',
-                                        },
-                                        credentials: 'include',
-                                    });
+                                     const resp = await fetch(checkUrl, {
+                                         method: 'POST',
+                                         headers: {
+                                             'X-Requested-With': 'XMLHttpRequest',
+                                             'Accept': 'application/json, text/html, */*',
+                                         },
+                                         credentials: 'include',
+                                     });
                                     const text = await resp.text();
                                     return { status: resp.status, body: text.substring(0, 2000) };
                                 } catch (e: any) {

@@ -30,11 +30,9 @@ export default function ProspectingLayout({ children }: { children: React.ReactN
 
             </div>
 
-            {/* Content Area */}
-            <div className="flex-1 overflow-auto">
-                <div className="container mx-auto p-6 max-w-7xl">
-                    {children}
-                </div>
+            {/* Content Area — full bleed for triage layout */}
+            <div className="flex-1 overflow-hidden">
+                {children}
             </div>
         </div>
     );
