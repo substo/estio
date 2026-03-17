@@ -967,6 +967,7 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
             await db.agentExecution.create({
                 data: {
                     conversationId: dbConversation.id,
+                    locationId: context.locationId,
                     taskId: "quick-draft",
                     taskTitle: "Quick AI Draft",
                     taskStatus: "done",
@@ -1056,6 +1057,7 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
                 await db.agentExecution.create({
                     data: {
                         conversationId: errorDbConversation.id,
+                        locationId: context.locationId,
                         taskId: "quick-draft",
                         taskTitle: "Quick AI Draft",
                         taskStatus: "error",

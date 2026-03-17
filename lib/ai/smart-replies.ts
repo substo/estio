@@ -64,6 +64,7 @@ export async function generateSmartReplies(conversationId: string) {
             ?.message?.body || "";
             
         const languageResolution = resolveCommunicationLanguage({
+            manualOverrideLanguage: "en", // Force English language for AI Suggested Replies
             latestInboundText,
             contactPreferredLanguage: conversation.contact?.preferredLang ?? null,
             threadText: conversationText,
