@@ -12,22 +12,21 @@ export default function ProspectingLayout({ children }: { children: React.ReactN
     return (
         <div className="flex flex-col h-full bg-slate-50/50 dark:bg-slate-950/20">
             {/* Unified Header */}
-            <div className="bg-background border-b px-6 py-4 pb-0 flex flex-col justify-end pt-8">
-                <div className="flex justify-between items-start">
-                    <div>
-                        <h1 className="text-3xl font-bold tracking-tight">Prospecting Hub</h1>
-                        <p className="text-sm text-muted-foreground mt-1 mb-8">
-                            Discover new private sellers, analyze market listings, and convert leads into clients.
+            <div className="bg-background border-b px-4 py-2 shrink-0">
+                <div className="flex justify-between items-center">
+                    <div className="flex items-baseline gap-3">
+                        <h1 className="text-lg font-bold tracking-tight">Prospecting Hub</h1>
+                        <p className="text-xs text-muted-foreground hidden lg:block">
+                            Discover new sellers, analyze listings, convert leads.
                         </p>
                     </div>
-                    <Button variant="outline" size="sm" asChild>
+                    <Button variant="outline" size="sm" className="h-7 text-xs px-2" asChild>
                         <Link href="/admin/settings/prospecting">
-                            <Settings className="w-4 h-4 mr-2" />
+                            <Settings className="w-3.5 h-3.5 mr-1" />
                             Settings
                         </Link>
                     </Button>
                 </div>
-
             </div>
 
             {/* Content Area — full bleed for triage layout */}

@@ -108,247 +108,200 @@ export function ProspectDetailPanel({ listing, onAccept, onReject, isPending }: 
         onSuccess={() => router.refresh()}
       />
 
-      {/* Scrollable content */}
-      <ScrollArea className="flex-1">
-        <div className="p-4 lg:p-6 grid grid-cols-1 xl:grid-cols-12 gap-6 lg:gap-8 items-start">
-          
-          {/* LEFT COLUMN: Photos & Description */}
-          <div className="xl:col-span-7 2xl:col-span-8 space-y-6">
+      {/* Strict Viewport Layout */}
+      <div className="flex-1 overflow-hidden p-4 lg:p-6">
+        <div className="flex flex-col md:flex-row gap-6 h-full">
 
-          {/* Photo Carousel */}
-          {listing.images && listing.images.length > 0 ? (
-            <div className="space-y-3">
-              <div className="relative rounded-xl overflow-hidden border group bg-muted aspect-[16/10] max-h-[50vh] xl:max-h-[60vh]">
-                <a href={listing.images[currentImageIndex]} target="_blank" rel="noreferrer" title="View Full Image" className="block hover:opacity-95 transition-opacity w-full h-full">
-                  <img
-                    src={listing.thumbnails?.[currentImageIndex] || listing.images[currentImageIndex]}
-                    alt="Property"
-                    className="w-full h-full object-cover rounded-xl"
-                  />
+          {/* LEFT COLUMN: Details, Seller, Actions */}
+          <ScrollArea className="md:w-1/2 lg:w-[45%] h-full pr-4">
+            <div className="space-y-6 pb-4">
+              
+              {/* Property Info */}
+              <div>
+                <div className="flex justify-between items-start gap-4">
+                  <h2 className="text-xl font-bold leading-tight">{listing.title || 'Untitled Property'}</h2>
+                  <Button variant="ghost" size="icon" className="shrink-0 -mt-1 text-muted-foreground hover:text-foreground" onClick={() => setIsScrapeOpen(true)} title="Re-scrape Listing">
+                    <RefreshCw className="w-4 h-4" />
+                  </Button>
+                </div>
+                <div className="flex gap-1.5 mt-2.5 flex-wrap">
+                  <Badge variant="secondary" className="font-bold text-sm">
+                    {listing.price ? `${listing.currency || '€'}${listing.price.toLocaleString()}` : 'POA'}
+                  </Badge>
+                  <Badge variant="outline">{listing.propertyType || listing.listingType || 'Property'}</Badge>
+                  {listing.bedrooms !== null && <Badge variant="outline">{listing.bedrooms} Beds</Badge>}
+                  {listing.bathrooms !== null && <Badge variant="outline">{listing.bathrooms} Baths</Badge>}
+                  {(listing.propertyArea || listing.plotArea) && (
+                    <Badge variant="outline">{listing.propertyArea || listing.plotArea} m²</Badge>
+                  )}
+                  {listing.constructionYear && <Badge variant="outline">Built {listing.constructionYear}</Badge>}
+                  <Badge variant="outline">{listing.locationText || 'Cyprus'}</Badge>
+                </div>
+
+                <a href={listing.url} target="_blank" rel="noreferrer" className="text-sm text-primary flex items-center gap-1 mt-3 hover:underline font-medium">
+                  View Original Listing <ExternalLink className="w-3 h-3" />
                 </a>
-                {listing.images.length > 1 && (
-                  <>
-                    <Button
-                      variant="secondary"
-                      size="icon"
-                      className="absolute left-2 top-1/2 -translate-y-1/2 w-9 h-9 opacity-0 group-hover:opacity-100 transition-opacity z-10 shadow-lg"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        setCurrentImageIndex((prev) => prev === 0 ? listing.images.length - 1 : prev - 1);
-                      }}
-                    >
-                      <ChevronLeft className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      size="icon"
-                      className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 opacity-0 group-hover:opacity-100 transition-opacity z-10 shadow-lg"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        setCurrentImageIndex((prev) => prev === listing.images.length - 1 ? 0 : prev + 1);
-                      }}
-                    >
-                      <ChevronRight className="w-4 h-4" />
-                    </Button>
-                    <div className="absolute bottom-2 right-2 bg-black/60 text-white text-[10px] font-medium px-2 py-0.5 rounded-full">
-                      {currentImageIndex + 1} / {listing.images.length}
+              </div>
+
+              {/* Description */}
+              {listing.description && (
+                <div className="pt-1">
+                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Description</h3>
+                  <p className="text-sm text-foreground/80 leading-relaxed line-clamp-4 hover:line-clamp-none transition-all whitespace-pre-line cursor-ns-resize">{listing.description}</p>
+                </div>
+              )}
+
+              <Separator />
+
+              {/* Seller Profile Card */}
+              <div className="space-y-3 bg-muted/30 p-4 rounded-xl border">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-base">Seller Profile</h3>
+                  {listing.prospectAgency ? (
+                    <Badge variant="destructive" className="text-xs gap-1"><Building2 className="w-3 h-3" /> Agency Detected</Badge>
+                  ) : (
+                    <Badge variant="default" className="bg-green-600 text-xs gap-1"><UserCheck className="w-3 h-3" /> Likely Private</Badge>
+                  )}
+                </div>
+
+                <div className="grid gap-2 text-sm">
+                  <div className="flex flex-col">
+                    <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Posted By</span>
+                    <span className="font-medium text-base">{listing.prospectName || 'Unknown Owner'}</span>
+                  </div>
+
+                  {listing.prospectPhone ? (
+                    <div className="flex flex-col">
+                      <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Phone</span>
+                      <span className="font-mono text-sm">{listing.prospectPhone}</span>
                     </div>
-                  </>
+                  ) : (
+                    <p className="text-muted-foreground italic text-sm">Phone number not extracted yet.</p>
+                  )}
+
+                  {listing.sellerRegisteredAt && (
+                    <div className="flex flex-col">
+                      <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Registration</span>
+                      <span className="text-sm">{listing.sellerRegisteredAt}</span>
+                    </div>
+                  )}
+
+                  {listing.contactChannels && listing.contactChannels.length > 0 && (
+                    <div className="flex flex-col">
+                      <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Contact Channels</span>
+                      <div className="flex gap-1.5 mt-0.5">
+                        {listing.contactChannels.map(channel => (
+                          <Badge key={channel} variant="outline" className="text-[10px] h-4 px-1.5 capitalize">{channel.toLowerCase()}</Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {listing.otherListingsUrl && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full mt-1 gap-2"
+                    onClick={handleScrapeSeller}
+                    disabled={isScrapingSeller}
+                  >
+                    <DownloadCloud className="w-4 h-4 text-primary" />
+                    {isScrapingSeller ? 'Starting Export...' : 'Scrape All Seller Listings'}
+                  </Button>
                 )}
               </div>
 
-              {/* Thumbnail strip */}
-              {listing.images.length > 1 && (
-                <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
-                  {listing.images.map((_, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => setCurrentImageIndex(idx)}
-                      className={`relative flex-shrink-0 w-14 h-10 rounded-md overflow-hidden border-2 transition-all ${currentImageIndex === idx ? 'border-primary ring-1 ring-primary/30' : 'border-transparent hover:border-muted-foreground/30'}`}
-                    >
-                      <img src={listing.thumbnails?.[idx] || listing.images[idx]} alt="" className="w-full h-full object-cover" />
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="w-full aspect-[16/10] bg-muted rounded-xl flex items-center justify-center text-muted-foreground border">
-              <div className="text-center">
-                <Home className="w-10 h-10 mx-auto mb-2 opacity-20" />
-                <p className="text-sm">No Preview Image</p>
-              </div>
-            </div>
-          )}
+              {/* Action Buttons */}
+              <div className="flex items-center flex-wrap gap-2 pt-2">
+                {/* Outreach */}
+                <Button variant="outline" size="sm" className="gap-1.5" onClick={handleWhatsApp} disabled={!listing.whatsappPhone && !listing.prospectPhone}>
+                  <MessageCircle className="w-4 h-4 text-green-500" /> WhatsApp
+                </Button>
+                <Button variant="outline" size="sm" className="gap-1.5" onClick={handleCall} disabled={!listing.whatsappPhone && !listing.prospectPhone}>
+                  <Phone className="w-4 h-4 text-blue-500" /> Call
+                </Button>
 
-          {/* Description */}
-          {listing.description && (
-            <div className="pt-2">
-              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">Description</h3>
-              <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-line">{listing.description}</p>
-            </div>
-          )}
-          
-          </div> {/* End Left Column */}
+                <div className="flex-1 min-w-[1rem]" />
 
-          {/* RIGHT COLUMN: Property Info & Seller Profile */}
-          <div className="xl:col-span-5 2xl:col-span-4 space-y-6 xl:sticky xl:top-0">
-          
-          {/* Property Info */}
-          <div>
-            <div className="flex justify-between items-start gap-4">
-              <h2 className="text-xl font-bold leading-tight">{listing.title || 'Untitled Property'}</h2>
-              <Button variant="ghost" size="icon" className="shrink-0 -mt-1 text-muted-foreground hover:text-foreground" onClick={() => setIsScrapeOpen(true)} title="Re-scrape Listing">
-                <RefreshCw className="w-4 h-4" />
-              </Button>
-            </div>
-            <div className="flex gap-1.5 mt-2.5 flex-wrap">
-              <Badge variant="secondary" className="font-bold text-sm">
-                {listing.price ? `${listing.currency || '€'}${listing.price.toLocaleString()}` : 'POA'}
-              </Badge>
-              <Badge variant="outline">{listing.propertyType || listing.listingType || 'Property'}</Badge>
-              {listing.bedrooms !== null && <Badge variant="outline">{listing.bedrooms} Beds</Badge>}
-              {listing.bathrooms !== null && <Badge variant="outline">{listing.bathrooms} Baths</Badge>}
-              {(listing.propertyArea || listing.plotArea) && (
-                <Badge variant="outline">{listing.propertyArea || listing.plotArea} m²</Badge>
-              )}
-              {listing.constructionYear && <Badge variant="outline">Built {listing.constructionYear}</Badge>}
-              <Badge variant="outline">{listing.locationText || 'Cyprus'}</Badge>
-            </div>
-
-            <a href={listing.url} target="_blank" rel="noreferrer" className="text-sm text-primary flex items-center gap-1 mt-4 hover:underline font-medium">
-              View Original Listing <ExternalLink className="w-3 h-3" />
-            </a>
-          </div>
-
-          <Separator />
-
-          {/* Seller Profile Card */}
-          <div className="space-y-3 bg-muted/30 p-4 rounded-xl border">
-            <div className="flex items-center justify-between">
-              <h3 className="font-semibold text-base">Seller Profile</h3>
-              {listing.prospectAgency ? (
-                <Badge variant="destructive" className="text-xs gap-1"><Building2 className="w-3 h-3" /> Agency Detected</Badge>
-              ) : (
-                <Badge variant="default" className="bg-green-600 text-xs gap-1"><UserCheck className="w-3 h-3" /> Likely Private</Badge>
-              )}
-            </div>
-
-            <div className="grid gap-2 text-sm">
-              <div className="flex flex-col">
-                <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Posted By</span>
-                <span className="font-medium text-base">{listing.prospectName || 'Unknown Owner'}</span>
+                {/* Primary actions */}
+                {isNew ? (
+                  <>
+                    <Button variant="outline" size="sm" className="gap-1.5 border-red-200 hover:bg-red-50 text-red-700 dark:border-red-900/50 dark:hover:bg-red-950/30" onClick={() => onReject(listing.id)} disabled={isPending}>
+                      <X className="w-4 h-4" /> Reject
+                      <kbd className="ml-1 text-[9px] bg-red-100 dark:bg-red-900/30 px-1 rounded font-mono">R</kbd>
+                    </Button>
+                    <Button size="sm" className="gap-1.5" onClick={() => onAccept(listing.id)} disabled={isPending}>
+                      <Check className="w-4 h-4" /> Accept
+                      <kbd className="ml-1 text-[9px] bg-primary-foreground/20 px-1 rounded font-mono">A</kbd>
+                    </Button>
+                  </>
+                ) : (
+                  <Button variant="default" size="sm" className="gap-1.5" onClick={handleConvert} disabled={isConverting || !listing.prospectLeadId}>
+                    <UserPlus className="w-4 h-4" />
+                    {isConverting ? 'Converting...' : 'Convert to CRM Contact'}
+                  </Button>
+                )}
               </div>
 
-              {listing.prospectPhone ? (
-                <div className="flex flex-col">
-                  <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Phone</span>
-                  <span className="font-mono text-sm">{listing.prospectPhone}</span>
-                </div>
-              ) : (
-                <p className="text-muted-foreground italic text-sm">Phone number not extracted yet.</p>
-              )}
+            </div>
+          </ScrollArea>
 
-              {listing.sellerRegisteredAt && (
-                <div className="flex flex-col">
-                  <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Registration</span>
-                  <span className="text-sm">{listing.sellerRegisteredAt}</span>
+          {/* RIGHT COLUMN: Photos */}
+          <div className="md:w-1/2 lg:w-[55%] flex flex-col h-full min-h-0 bg-muted/10 rounded-xl overflow-hidden border">
+            {listing.images && listing.images.length > 0 ? (
+              <div className="flex flex-col h-full min-h-0 p-2">
+                {/* Main Carousel Image (constrained to flex-1 min-h-0) */}
+                <div className="flex-1 relative rounded-lg overflow-hidden group bg-black/5 dark:bg-black/40 min-h-0">
+                  <a href={listing.images[currentImageIndex]} target="_blank" rel="noreferrer" title="View Full Image" className="block w-full h-full flex items-center justify-center">
+                    <img
+                      src={listing.thumbnails?.[currentImageIndex] || listing.images[currentImageIndex]}
+                      alt="Property"
+                      className="max-w-full max-h-full object-contain drop-shadow-md"
+                    />
+                  </a>
+                  {listing.images.length > 1 && (
+                    <>
+                      <Button variant="secondary" size="icon" className="absolute left-2 top-1/2 -translate-y-1/2 w-9 h-9 opacity-0 group-hover:opacity-100 transition-opacity z-10 shadow-lg" onClick={(e) => { e.preventDefault(); setCurrentImageIndex((prev) => prev === 0 ? listing.images.length - 1 : prev - 1); }}>
+                        <ChevronLeft className="w-4 h-4" />
+                      </Button>
+                      <Button variant="secondary" size="icon" className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 opacity-0 group-hover:opacity-100 transition-opacity z-10 shadow-lg" onClick={(e) => { e.preventDefault(); setCurrentImageIndex((prev) => prev === listing.images.length - 1 ? 0 : prev + 1); }}>
+                        <ChevronRight className="w-4 h-4" />
+                      </Button>
+                      <div className="absolute bottom-2 right-2 bg-black/60 text-white text-[10px] font-medium px-2 py-0.5 rounded-full z-10">
+                        {currentImageIndex + 1} / {listing.images.length}
+                      </div>
+                    </>
+                  )}
                 </div>
-              )}
 
-              {listing.contactChannels && listing.contactChannels.length > 0 && (
-                <div className="flex flex-col">
-                  <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Contact Channels</span>
-                  <div className="flex gap-1.5 mt-0.5">
-                    {listing.contactChannels.map(channel => (
-                      <Badge key={channel} variant="outline" className="text-[10px] h-4 px-1.5 capitalize">{channel.toLowerCase()}</Badge>
+                {/* Thumbnail strip */}
+                {listing.images.length > 1 && (
+                  <div className="flex gap-1.5 overflow-x-auto pt-2 pb-1 shrink-0 scrollbar-thin">
+                    {listing.images.map((img, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => setCurrentImageIndex(idx)}
+                        className={`relative w-12 h-9 shrink-0 flex items-center justify-center rounded overflow-hidden border-2 transition-all ${currentImageIndex === idx ? 'border-primary ring-1 ring-primary/30' : 'border-transparent opacity-60 hover:opacity-100 bg-black/5'}`}
+                      >
+                        <img src={listing.thumbnails?.[idx] || img} alt="" className="max-w-full max-h-full object-cover" />
+                      </button>
                     ))}
                   </div>
-                </div>
-              )}
-            </div>
-
-            {listing.otherListingsUrl && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full mt-1 gap-2"
-                onClick={handleScrapeSeller}
-                disabled={isScrapingSeller}
-              >
-                <DownloadCloud className="w-4 h-4 text-primary" />
-                {isScrapingSeller ? 'Starting Export...' : 'Scrape All Seller Listings'}
-              </Button>
-            )}
-          </div>
-
-          <Separator />
-          
-          {/* Action Buttons */}
-          <div className="flex items-center flex-wrap gap-2 pt-2">
-            {/* Outreach */}
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              onClick={handleWhatsApp}
-              disabled={!listing.whatsappPhone && !listing.prospectPhone}
-            >
-              <MessageCircle className="w-4 h-4 text-green-500" /> WhatsApp
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              onClick={handleCall}
-              disabled={!listing.whatsappPhone && !listing.prospectPhone}
-            >
-              <Phone className="w-4 h-4 text-blue-500" /> Call
-            </Button>
-
-            <div className="flex-1 min-w-[1rem]" />
-
-            {/* Primary actions */}
-            {isNew ? (
-              <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5 border-red-200 hover:bg-red-50 text-red-700 dark:border-red-900/50 dark:hover:bg-red-950/30"
-                  onClick={() => onReject(listing.id)}
-                  disabled={isPending}
-                >
-                  <X className="w-4 h-4" /> Reject
-                  <kbd className="ml-1 text-[9px] bg-red-100 dark:bg-red-900/30 px-1 rounded font-mono">R</kbd>
-                </Button>
-                <Button
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={() => onAccept(listing.id)}
-                  disabled={isPending}
-                >
-                  <Check className="w-4 h-4" /> Accept
-                  <kbd className="ml-1 text-[9px] bg-primary-foreground/20 px-1 rounded font-mono">A</kbd>
-                </Button>
-              </>
+                )}
+              </div>
             ) : (
-              <Button
-                variant="default"
-                size="sm"
-                className="gap-1.5"
-                onClick={handleConvert}
-                disabled={isConverting || !listing.prospectLeadId}
-              >
-                <UserPlus className="w-4 h-4" />
-                {isConverting ? 'Converting...' : 'Convert to CRM Contact'}
-              </Button>
+              <div className="w-full h-full bg-muted flex items-center justify-center text-muted-foreground">
+                <div className="text-center">
+                  <Home className="w-10 h-10 mx-auto mb-2 opacity-20" />
+                  <p className="text-sm">No Preview Image</p>
+                </div>
+              </div>
             )}
           </div>
-          
-          </div> {/* End Right Column */}
 
         </div>
-      </ScrollArea>
+      </div>
     </div>
   );
 }

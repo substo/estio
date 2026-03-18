@@ -23,7 +23,7 @@ export function ListingFeedCard({ listing, isSelected, onClick, isBulkSelected, 
     <div
       onClick={onClick}
       className={cn(
-        "group flex items-start gap-3 p-3 cursor-pointer transition-all border-l-[3px] hover:bg-muted/50",
+        "group flex items-start gap-2.5 p-2.5 cursor-pointer transition-all border-l-[3px] hover:bg-muted/50",
         isSelected
           ? "bg-primary/5 border-l-primary shadow-sm"
           : "border-l-transparent",
@@ -31,7 +31,7 @@ export function ListingFeedCard({ listing, isSelected, onClick, isBulkSelected, 
       )}
     >
       {/* Checkbox */}
-      <div className="mt-[26px] mr-[-4px]" onClick={(e) => e.stopPropagation()}>
+      <div className="mt-[18px] mr-[-4px]" onClick={(e) => e.stopPropagation()}>
         <Checkbox 
           checked={isBulkSelected}
           onCheckedChange={onBulkSelect}
@@ -41,20 +41,20 @@ export function ListingFeedCard({ listing, isSelected, onClick, isBulkSelected, 
 
       {/* Thumbnail */}
       {thumb ? (
-        <div className="w-[72px] h-[72px] rounded-lg overflow-hidden shrink-0 border bg-muted">
+        <div className="w-[60px] h-[60px] rounded-md overflow-hidden shrink-0 border bg-muted">
           <img src={thumb} alt="" className="w-full h-full object-cover" />
         </div>
       ) : (
-        <div className="w-[72px] h-[72px] rounded-lg shrink-0 border bg-muted flex items-center justify-center">
-          <Home className="w-5 h-5 text-muted-foreground/40" />
+        <div className="w-[60px] h-[60px] rounded-md shrink-0 border bg-muted flex items-center justify-center">
+          <Home className="w-4 h-4 text-muted-foreground/40" />
         </div>
       )}
 
       {/* Content */}
-      <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
+      <div className="flex-1 min-w-0 flex flex-col justify-between py-0">
         <div>
           <div className="flex justify-between items-start gap-2">
-            <div className="font-semibold text-sm leading-tight line-clamp-1">
+            <div className="font-semibold text-[13px] leading-tight line-clamp-1">
               {listing.title || 'Untitled Listing'}
             </div>
             {!isNew && (
@@ -68,7 +68,7 @@ export function ListingFeedCard({ listing, isSelected, onClick, isBulkSelected, 
           </div>
           
           <div className="flex items-center gap-1.5 mt-0.5">
-            <span className="font-bold text-xs text-primary">
+            <span className="font-bold text-[13px] text-primary">
               {listing.price ? `€${listing.price.toLocaleString()}` : 'POA'}
             </span>
             <span className="text-[10px] text-muted-foreground truncate">
@@ -79,8 +79,8 @@ export function ListingFeedCard({ listing, isSelected, onClick, isBulkSelected, 
           </div>
         </div>
 
-        <div className="flex items-center justify-between mt-1.5">
-          <div className="flex items-center gap-1 text-xs text-muted-foreground min-w-0 pr-2">
+        <div className="flex items-center justify-between mt-1">
+          <div className="flex items-center gap-1 text-[11px] text-muted-foreground min-w-0 pr-2">
             {listing.prospectAgency ? (
               <Building2 className="w-3 h-3 shrink-0 text-orange-500" />
             ) : (
