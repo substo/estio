@@ -108,34 +108,31 @@ export async function POST(req: Request) {
 
                 sendEvent({ status: 'waiting_qr', message: 'Looking for QR code...' });
 
-                // Look for QR code image - try multiple selectors
-                const qrSelectors = [
-                    'img[src^="data:image"]',
-                    'img[alt="Scan me!"]', 
-                    '.qr-code img',
-                    'canvas',
-                ];
-                
+                // Look for QR code image - robust method avoiding 1x1 placeholders
                 let qrCodeSrc: string | null = null;
                 
-                for (const sel of qrSelectors) {
-                    try {
-                        await page.waitForSelector(sel, { timeout: 10000 });
-                        if (sel === 'canvas') {
-                            qrCodeSrc = await page.evaluate((s: string) => {
-                                const canvas = document.querySelector(s) as HTMLCanvasElement;
-                                return canvas?.toDataURL('image/png') || null;
-                            }, sel);
-                        } else {
-                            qrCodeSrc = await page.getAttribute(sel, 'src');
+                try {
+                    // Wait up to 20s for ANY large base64 image or a canvas to appear
+                    qrCodeSrc = await page.waitForFunction(() => {
+                        // Check canvas
+                        const canvas = document.querySelector('canvas');
+                        if (canvas) return canvas.toDataURL('image/png');
+                        
+                        // Check images for large base64 (qr codes are big, placeholders are tiny)
+                        const imgs = Array.from(document.querySelectorAll('img'));
+                        for (const img of imgs) {
+                            if (img.src && img.src.startsWith('data:image') && img.src.length > 1000) {
+                                return img.src;
+                            }
                         }
-                        if (qrCodeSrc) {
-                            console.log(`[Bazaraki Auth] QR found via selector: ${sel}`);
-                            break;
-                        }
-                    } catch (e) {
-                        continue;
+                        return null;
+                    }, { timeout: 20000 }).then(res => res.jsonValue() as Promise<string | null>);
+                    
+                    if (qrCodeSrc) {
+                        console.log(`[Bazaraki Auth] QR found! Length: ${qrCodeSrc.length}`);
                     }
+                } catch (e) {
+                    console.log("[Bazaraki Auth] Timeout waiting for robust base64 image or canvas");
                 }
 
                 if (!qrCodeSrc) {
