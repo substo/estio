@@ -154,20 +154,21 @@ export function ProspectDetailPanel({ listing, onAccept, onReject, isPending }: 
           </ScrollArea>
 
           {/* RIGHT COLUMN: Photos & Actions */}
-          <div className="md:w-1/2 lg:w-[55%] flex flex-col h-full min-h-0 gap-4 pb-2">
-            
-            {/* Photos Wrapper */}
-            <div className="flex-1 flex flex-col min-h-0 bg-muted/10 rounded-xl overflow-hidden border">
-              <div className="flex flex-col h-full min-h-0 p-2">
-                {/* Main Carousel Image */}
-                <div className="flex-1 relative rounded-lg overflow-hidden group bg-black/5 dark:bg-black/40 min-h-0">
+          <ScrollArea className="md:w-1/2 lg:w-[55%] h-full pr-4">
+            <div className="flex flex-col gap-5 pb-4">
+              
+              {/* Photos Wrapper */}
+              <div className="flex flex-col gap-2 rounded-xl overflow-hidden border bg-muted/10 p-2">
+                
+                {/* Main Carousel Image (Locked to nice 4:3 aspect ratio) */}
+                <div className="w-full aspect-[4/3] relative rounded-lg overflow-hidden group bg-black/5 dark:bg-black/40">
                   {listing.images && listing.images.length > 0 ? (
                     <>
-                      <a href={listing.images[currentImageIndex]} target="_blank" rel="noreferrer" title="View Full Image" className="block w-full h-full flex items-center justify-center">
+                      <a href={listing.images[currentImageIndex]} target="_blank" rel="noreferrer" title="View Full Image" className="block w-full h-full">
                         <img
                           src={listing.thumbnails?.[currentImageIndex] || listing.images[currentImageIndex]}
                           alt="Property"
-                          className="max-w-full max-h-full object-contain drop-shadow-md"
+                          className="w-full h-full object-cover"
                         />
                       </a>
                       {listing.images.length > 1 && (
@@ -196,78 +197,78 @@ export function ProspectDetailPanel({ listing, onAccept, onReject, isPending }: 
 
                 {/* Thumbnail strip */}
                 {listing.images && listing.images.length > 1 && (
-                  <div className="flex gap-1.5 overflow-x-auto pt-2 pb-1 shrink-0 scrollbar-thin">
+                  <div className="flex gap-1.5 overflow-x-auto shrink-0 scrollbar-thin pt-1">
                     {listing.images.map((img, idx) => (
                       <button
                         key={idx}
                         onClick={() => setCurrentImageIndex(idx)}
-                        className={`relative w-12 h-9 shrink-0 flex items-center justify-center rounded overflow-hidden border-2 transition-all ${currentImageIndex === idx ? 'border-primary ring-1 ring-primary/30' : 'border-transparent opacity-60 hover:opacity-100 bg-black/5'}`}
+                        className={`relative w-14 h-10 shrink-0 flex items-center justify-center rounded overflow-hidden border-2 transition-all ${currentImageIndex === idx ? 'border-primary ring-1 ring-primary/30' : 'border-transparent opacity-60 hover:opacity-100 bg-black/5'}`}
                       >
-                        <img src={listing.thumbnails?.[idx] || img} alt="" className="max-w-full max-h-full object-cover" />
+                        <img src={listing.thumbnails?.[idx] || img} alt="" className="w-full h-full object-cover" />
                       </button>
                     ))}
                   </div>
                 )}
               </div>
-            </div>
 
-            {/* Seller Profile & Actions */}
-            <div className="shrink-0 bg-muted/30 p-4 rounded-xl border flex flex-col gap-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground text-[10px] uppercase tracking-wider hidden xl:inline-block">Seller:</span>
-                  <h3 className="font-semibold text-base">{listing.prospectName || 'Unknown Owner'}</h3>
-                  {listing.prospectAgency ? (
-                    <Badge variant="destructive" className="text-[10px] h-5 px-1.5 gap-1"><Building2 className="w-3 h-3" /> Agency</Badge>
+              {/* Seller Profile & Actions */}
+              <div className="bg-muted/30 p-4 rounded-xl border flex flex-col gap-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground text-[10px] uppercase tracking-wider hidden xl:inline-block">Seller:</span>
+                    <h3 className="font-semibold text-base">{listing.prospectName || 'Unknown Owner'}</h3>
+                    {listing.prospectAgency ? (
+                      <Badge variant="destructive" className="text-[10px] h-5 px-1.5 gap-1"><Building2 className="w-3 h-3" /> Agency</Badge>
+                    ) : (
+                      <Badge variant="default" className="bg-green-600 text-[10px] h-5 px-1.5 gap-1"><UserCheck className="w-3 h-3" /> Private</Badge>
+                    )}
+                  </div>
+                  
+                  {listing.prospectPhone ? (
+                    <span className="font-mono text-sm font-medium">{listing.prospectPhone}</span>
                   ) : (
-                    <Badge variant="default" className="bg-green-600 text-[10px] h-5 px-1.5 gap-1"><UserCheck className="w-3 h-3" /> Private</Badge>
+                    <span className="text-muted-foreground italic text-[11px]">No phone</span>
                   )}
                 </div>
-                
-                {listing.prospectPhone ? (
-                  <span className="font-mono text-sm font-medium">{listing.prospectPhone}</span>
-                ) : (
-                  <span className="text-muted-foreground italic text-[11px]">No phone</span>
-                )}
+
+                {/* Action Buttons */}
+                <div className="flex items-center flex-wrap gap-2 pt-1 border-border/50">
+                  <Button variant="outline" size="sm" className="gap-1.5" onClick={handleWhatsApp} disabled={!listing.whatsappPhone && !listing.prospectPhone}>
+                    <MessageCircle className="w-4 h-4 text-green-500" /> WhatsApp
+                  </Button>
+                  <Button variant="outline" size="sm" className="gap-1.5" onClick={handleCall} disabled={!listing.whatsappPhone && !listing.prospectPhone}>
+                    <Phone className="w-4 h-4 text-blue-500" /> Call
+                  </Button>
+
+                  {listing.otherListingsUrl && (
+                    <Button variant="outline" size="sm" className="gap-1.5 hidden xl:flex" onClick={handleScrapeSeller} disabled={isScrapingSeller}>
+                      <DownloadCloud className="w-4 h-4 text-primary" /> {isScrapingSeller ? 'Exporting...' : 'More Listings'}
+                    </Button>
+                  )}
+
+                  <div className="flex-1 min-w-[0.5rem]" />
+
+                  {isNew ? (
+                    <>
+                      <Button variant="outline" size="sm" className="gap-1.5 border-red-200 text-red-700 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-950/30" onClick={() => onReject(listing.id)} disabled={isPending}>
+                        <X className="w-4 h-4" /> Reject
+                        <kbd className="hidden xl:inline ml-1 text-[9px] bg-red-100 dark:bg-red-900/30 px-1 rounded font-mono">R</kbd>
+                      </Button>
+                      <Button size="sm" className="gap-1.5" onClick={() => onAccept(listing.id)} disabled={isPending}>
+                        <Check className="w-4 h-4" /> Accept
+                        <kbd className="hidden xl:inline ml-1 text-[9px] bg-primary-foreground/20 px-1 rounded font-mono">A</kbd>
+                      </Button>
+                    </>
+                  ) : (
+                    <Button variant="default" size="sm" className="gap-1.5" onClick={handleConvert} disabled={isConverting || !listing.prospectLeadId}>
+                      <UserPlus className="w-4 h-4" /> Convert to Contact
+                    </Button>
+                  )}
+                </div>
               </div>
 
-              {/* Action Buttons */}
-              <div className="flex items-center flex-wrap gap-2 pt-1 border-border/50">
-                <Button variant="outline" size="sm" className="gap-1.5" onClick={handleWhatsApp} disabled={!listing.whatsappPhone && !listing.prospectPhone}>
-                  <MessageCircle className="w-4 h-4 text-green-500" /> WhatsApp
-                </Button>
-                <Button variant="outline" size="sm" className="gap-1.5" onClick={handleCall} disabled={!listing.whatsappPhone && !listing.prospectPhone}>
-                  <Phone className="w-4 h-4 text-blue-500" /> Call
-                </Button>
-
-                {listing.otherListingsUrl && (
-                  <Button variant="outline" size="sm" className="gap-1.5 hidden xl:flex" onClick={handleScrapeSeller} disabled={isScrapingSeller}>
-                    <DownloadCloud className="w-4 h-4 text-primary" /> {isScrapingSeller ? 'Exporting...' : 'More Listings'}
-                  </Button>
-                )}
-
-                <div className="flex-1 min-w-[0.5rem]" />
-
-                {isNew ? (
-                  <>
-                    <Button variant="outline" size="sm" className="gap-1.5 border-red-200 text-red-700 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-950/30" onClick={() => onReject(listing.id)} disabled={isPending}>
-                      <X className="w-4 h-4" /> Reject
-                      <kbd className="hidden xl:inline ml-1 text-[9px] bg-red-100 dark:bg-red-900/30 px-1 rounded font-mono">R</kbd>
-                    </Button>
-                    <Button size="sm" className="gap-1.5" onClick={() => onAccept(listing.id)} disabled={isPending}>
-                      <Check className="w-4 h-4" /> Accept
-                      <kbd className="hidden xl:inline ml-1 text-[9px] bg-primary-foreground/20 px-1 rounded font-mono">A</kbd>
-                    </Button>
-                  </>
-                ) : (
-                  <Button variant="default" size="sm" className="gap-1.5" onClick={handleConvert} disabled={isConverting || !listing.prospectLeadId}>
-                    <UserPlus className="w-4 h-4" /> Convert to Contact
-                  </Button>
-                )}
-              </div>
             </div>
-
-          </div>
+          </ScrollArea>
 
         </div>
       </div>
