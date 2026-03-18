@@ -110,10 +110,10 @@ export function ProspectDetailPanel({ listing, onAccept, onReject, isPending }: 
 
       {/* Strict Viewport Layout */}
       <div className="flex-1 overflow-hidden p-4 lg:p-6">
-        <div className="flex flex-col md:flex-row gap-6 h-full">
+        <div className="flex flex-col lg:grid lg:grid-cols-12 gap-6 h-full min-h-0">
 
           {/* LEFT COLUMN: Details, Seller, Actions */}
-          <ScrollArea className="md:w-1/2 lg:w-[45%] h-full pr-4">
+          <ScrollArea className="lg:col-span-5 h-full pr-2">
             <div className="space-y-6 pb-4">
               
               {/* Property Info */}
@@ -154,7 +154,7 @@ export function ProspectDetailPanel({ listing, onAccept, onReject, isPending }: 
           </ScrollArea>
 
           {/* RIGHT COLUMN: Actions & Photos */}
-          <div className="md:w-1/2 lg:w-[55%] h-full flex flex-col gap-4">
+          <div className="lg:col-span-7 h-full flex flex-col gap-4 min-w-0">
             
             {/* Top: Seller Profile & Actions (Fixed height, always visible) */}
             <div className="shrink-0 bg-muted/30 p-4 rounded-xl border flex flex-col gap-4">
