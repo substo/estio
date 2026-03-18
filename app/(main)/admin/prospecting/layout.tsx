@@ -10,7 +10,7 @@ export default function ProspectingLayout({ children }: { children: React.ReactN
     const pathname = usePathname();
 
     return (
-        <div className="flex flex-col h-full bg-slate-50/50 dark:bg-slate-950/20">
+        <div className="flex flex-col h-[calc(100vh-65px)] bg-slate-50/50 dark:bg-slate-950/20">
             {/* Unified Header */}
             <div className="bg-background border-b px-4 py-2 shrink-0">
                 <div className="flex justify-between items-center">
