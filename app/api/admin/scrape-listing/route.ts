@@ -57,6 +57,23 @@ export async function POST(req: Request) {
                         activeCredentialPhone = credential.authUsername || undefined;
                         sendEvent({ status: 'credential_found', message: `Using credential: ${credential.authUsername || credential.id.slice(0, 8)}` });
                     } else {
+                        const needsAuthCred = await db.scrapingCredential.findFirst({
+                            where: { connectionId: connection.id, status: 'needs_auth' },
+                            orderBy: { lastUsedAt: 'asc' },
+                        });
+
+                        if (needsAuthCred) {
+                            sendEvent({ status: 'no_credential', message: 'No active credentials. Authentication required to proceed.' });
+                            sendEvent({ 
+                                status: 'needs_auth', 
+                                message: 'Credential session expired. Please re-authenticate.',
+                                credentialId: needsAuthCred.id,
+                                phone: needsAuthCred.authUsername || ''
+                            });
+                            sendEvent({ status: 'error', error: 'Authentication required. Please scan QR Code.' });
+                            return; // Stop execution here
+                        }
+
                         sendEvent({ status: 'no_credential', message: 'No active credential found. Proceeding without session cookies.' });
                     }
                 } else {
