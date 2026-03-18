@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
 
 interface BazarakiAuthButtonProps {
     credentialId: string;
@@ -63,10 +64,14 @@ export function BazarakiAuthButton({ credentialId, phone, onSuccess }: BazarakiA
                                     setErrorDetails(`${errMsg}\n\n--- Debug HTML ---\n${debugHtml}`);
                                     setLoading(false);
                                 } else if (data.status === 'success') {
-                                    alert('Successfully authenticated with Bazaraki! Session state saved.');
-                                    setLoading(false);
-                                    if (onSuccess) onSuccess();
-                                    router.refresh();
+                                    toast.success('Successfully authenticated with Bazaraki! Session state saved.');
+                                    if (onSuccess) {
+                                        onSuccess();
+                                    } else {
+                                        setLoading(false);
+                                        router.refresh();
+                                    }
+                                    return; // exit loop cleanly before unmount
                                 }
                             } catch (e) {
                                 console.error('Failed to parse stream chunk', line);
