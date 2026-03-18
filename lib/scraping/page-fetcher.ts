@@ -35,10 +35,22 @@ export class PageFetcher {
     }
 
     if (!this.page) {
+      let storageState: any = undefined;
+      let legacyCookies: any = undefined;
+
+      if (options.sessionState) {
+          if (Array.isArray(options.sessionState)) {
+              legacyCookies = options.sessionState;
+          } else {
+              storageState = options.sessionState;
+          }
+      }
+
       const context = await this.browser.newContext({
         userAgent:
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         javaScriptEnabled: options.jsEnabled !== false, // Default true
+        storageState: storageState,
       });
 
       // Simple stealth modifications
@@ -48,9 +60,11 @@ export class PageFetcher {
         });
       });
 
-      if (options.sessionState && Array.isArray(options.sessionState)) {
-          console.log(`[PageFetcher] Injecting ${options.sessionState.length} session cookies into context.`);
-          await context.addCookies(options.sessionState);
+      if (legacyCookies) {
+          console.log(`[PageFetcher] Injecting ${legacyCookies.length} session cookies into context.`);
+          await context.addCookies(legacyCookies);
+      } else if (storageState) {
+          console.log(`[PageFetcher] Initialized context with storageState (Cookies: ${storageState.cookies?.length || 0})`);
       }
 
       this.page = await context.newPage();
