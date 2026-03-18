@@ -65,12 +65,20 @@ export function CredentialForm({ connectionId, locationId, initialData = null, p
                         <option value="rate_limited">Rate Limited (Cooling down)</option>
                         <option value="banned">Banned (Do not use)</option>
                         <option value="locked">Locked</option>
+                        <option value="needs_auth">Needs Authentication (Session Expired)</option>
                     </select>
                 </div>
             )}
 
             {initialData?.id && platform === 'bazaraki' && (
-                <BazarakiAuthButton credentialId={initialData.id} phone={initialData.authUsername} />
+                <div className="space-y-2">
+                    {initialData?.status === 'needs_auth' && (
+                        <div className="p-3 border border-red-200 bg-red-50 text-red-800 rounded-md text-sm">
+                            ⚠️ <strong>Session Expired:</strong> You must generate a new WhatsApp QR code below and scan it to resume scraping.
+                        </div>
+                    )}
+                    <BazarakiAuthButton credentialId={initialData.id} phone={initialData.authUsername} />
+                </div>
             )}
 
             <div className="flex justify-end gap-2 pt-4 border-t">

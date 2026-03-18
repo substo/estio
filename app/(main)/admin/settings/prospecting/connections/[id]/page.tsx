@@ -47,6 +47,18 @@ export default async function EditScrapingConnectionPage({ params }: { params: P
                     </Link>
                 </div>
 
+                {credentials.some((c: any) => c.status === 'needs_auth') && (
+                    <div className="mb-6 p-4 border border-red-200 bg-red-50 text-red-800 rounded-md flex gap-3 items-start">
+                        <div className="mt-0.5">⚠️</div>
+                        <div>
+                            <h3 className="font-semibold text-sm">Authentication Required</h3>
+                            <p className="text-xs mt-1">
+                                One or more credentials have an expired session. Click the edit (pencil) icon next to the credential and generate a new WhatsApp QR code to resume scraping.
+                            </p>
+                        </div>
+                    </div>
+                )}
+
                 <div className="bg-card border rounded-lg shadow-sm">
                     {credentials.length === 0 ? (
                         <div className="p-8 text-center text-muted-foreground flex flex-col items-center justify-center">
@@ -63,6 +75,7 @@ export default async function EditScrapingConnectionPage({ params }: { params: P
                                             {cred.status === 'active' && <span className="text-[10px] font-medium bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full uppercase">Active</span>}
                                             {cred.status === 'rate_limited' && <span className="text-[10px] font-medium bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full uppercase">Rate Limited</span>}
                                             {cred.status === 'banned' && <span className="text-[10px] font-medium bg-red-100 text-red-800 px-2 py-0.5 rounded-full uppercase">Banned</span>}
+                                            {cred.status === 'needs_auth' && <span className="text-[10px] font-medium bg-red-100 text-red-800 px-2 py-0.5 rounded-full uppercase">Needs Auth</span>}
                                         </div>
                                         <div className="text-xs text-muted-foreground flex gap-4">
                                             <span>Health: {cred.healthScore}/100</span>

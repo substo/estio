@@ -42,6 +42,7 @@ export async function POST(req: Request) {
                 });
 
                 let sessionState: any = undefined;
+                let activeCredentialId: string | undefined = undefined;
 
                 if (connection) {
                     const credential = await db.scrapingCredential.findFirst({
@@ -51,6 +52,7 @@ export async function POST(req: Request) {
 
                     if (credential?.sessionState) {
                         sessionState = credential.sessionState;
+                        activeCredentialId = credential.id;
                         sendEvent({ status: 'credential_found', message: `Using credential: ${credential.authUsername || credential.id.slice(0, 8)}` });
                     } else {
                         sendEvent({ status: 'no_credential', message: 'No active credential found. Proceeding without session cookies.' });
@@ -68,6 +70,14 @@ export async function POST(req: Request) {
                 // 3. Platform-specific extraction
                 if (platform === 'bazaraki') {
                     const result = await scrapeBazarakiListing(fetcher, url, sessionState, sendEvent);
+
+                    if (result && result.sessionExpired && activeCredentialId) {
+                        await db.scrapingCredential.update({
+                            where: { id: activeCredentialId },
+                            data: { status: 'needs_auth' }
+                        });
+                        sendEvent({ status: 'error', error: 'Credential session expired. Please re-authenticate via Settings.' });
+                    }
 
                     // 4. Upsert the listing + prospect
                     if (result) {
@@ -174,6 +184,7 @@ interface ScrapedData {
     contactChannels?: string[];
     whatsappPhone?: string;
     rawAttributes?: Record<string, string>;
+    sessionExpired?: boolean;
 }
 
 async function scrapeBazarakiListing(
@@ -297,6 +308,7 @@ async function scrapeBazarakiListing(
 
             // ===== PHONE NUMBER EXTRACTION =====
             let ownerPhone = '';
+            let sessionExpired = false;
             try {
                 // STEP 1: Dismiss cookie consent / CMP overlay
                 sendEvent({ status: 'extracting', message: '📋 Dismissing cookie consent overlay...' });
@@ -338,6 +350,7 @@ async function scrapeBazarakiListing(
                 if (!phoneDiag.exists) {
                     sendEvent({ status: 'extracting', message: '❌ Phone button not found on page' });
                 } else if (phoneDiag.isRedirectToLogin && !phoneDiag.isLoggedIn) {
+                    sessionExpired = true;
                     // === SESSION EXPIRED PATH ===
                     sendEvent({ status: 'extracting', message: '⚠️ Session expired — trying AJAX phone_check endpoint...' });
 
@@ -593,7 +606,8 @@ async function scrapeBazarakiListing(
                 otherListingsUrl,
                 contactChannels,
                 whatsappPhone,
-                rawAttributes
+                rawAttributes,
+                sessionExpired
             };
         }
     );

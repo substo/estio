@@ -55,7 +55,7 @@ To better manage scraping complexity and avoid IP bans, the data model is split 
     *   **Fields:** `name`, `platform`, `enabled`, `globalRateLimitMs`, `maxDailyInteractions`, `maxConcurrentRequests`.
 *   **`ScrapingCredential` Model**
     *   **Purpose:** Specific platform login accounts rotated in a pool.
-    *   **Fields:** `authUsername`, `authPassword`, `sessionState` (Playwright cookies), `status` (active/banned/rate_limited), `healthScore`.
+    *   **Fields:** `authUsername`, `authPassword`, `sessionState` (Playwright cookies), `status` (active/banned/rate_limited/needs_auth), `healthScore`.
 *   **`ScrapingTask` Model**
     *   **Purpose:** Stores configuration for specific scheduled scraping jobs utilizing a Connection Pool.
     *   **Fields:** `name`, `connectionId`, `enabled`, `scrapeFrequency`, `maxPagesPerRun`, `extractionMode` (`css_selectors`, `ai_extraction`, `hybrid`), `scrapeStrategy`, `targetSellerType`, `delayBetweenPagesMs`, `delayJitterMs`, `maxInteractionsPerRun`,  `selectors` (JSON), `aiInstructions` (Text), `targetUrls` (String array), `fieldMappings` (JSON).
@@ -301,6 +301,12 @@ To overcome this, we implemented a **Real-Time Streaming QR Code** flow:
 npm i playwright-extra puppeteer-extra-plugin-stealth
 npm i -D @types/puppeteer @types/puppeteer-extra-plugin-stealth
 ```
+
+### Auto-Triggering Re-authentication
+If an active login session expires or the platform forces a logout, the `ListingScraperService` cleanly intercepts the failure (e.g., being blocked by a sign-in wall during deep scrapes).
+- The credential's `status` in the database is automatically set to `needs_auth`.
+- The run gracefully halts or fails the specific extraction without burning further rate limits.
+- The Admin UI surfaces a `⚠️ Needs Auth` badge, prompting the administrator to edit the credential and re-trigger the QR flow out-of-band. Once a new session is captured via SSE, the credential reverts back to `active`.
 
 ### Target URL Patterns
 
