@@ -281,74 +281,74 @@ export function ProspectDetailPanel({ listing, onAccept, onReject, isPending }: 
               </Button>
             )}
           </div>
+
+          <Separator />
+          
+          {/* Action Buttons */}
+          <div className="flex items-center flex-wrap gap-2 pt-2">
+            {/* Outreach */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={handleWhatsApp}
+              disabled={!listing.whatsappPhone && !listing.prospectPhone}
+            >
+              <MessageCircle className="w-4 h-4 text-green-500" /> WhatsApp
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={handleCall}
+              disabled={!listing.whatsappPhone && !listing.prospectPhone}
+            >
+              <Phone className="w-4 h-4 text-blue-500" /> Call
+            </Button>
+
+            <div className="flex-1 min-w-[1rem]" />
+
+            {/* Primary actions */}
+            {isNew ? (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 border-red-200 hover:bg-red-50 text-red-700 dark:border-red-900/50 dark:hover:bg-red-950/30"
+                  onClick={() => onReject(listing.id)}
+                  disabled={isPending}
+                >
+                  <X className="w-4 h-4" /> Reject
+                  <kbd className="ml-1 text-[9px] bg-red-100 dark:bg-red-900/30 px-1 rounded font-mono">R</kbd>
+                </Button>
+                <Button
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => onAccept(listing.id)}
+                  disabled={isPending}
+                >
+                  <Check className="w-4 h-4" /> Accept
+                  <kbd className="ml-1 text-[9px] bg-primary-foreground/20 px-1 rounded font-mono">A</kbd>
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="default"
+                size="sm"
+                className="gap-1.5"
+                onClick={handleConvert}
+                disabled={isConverting || !listing.prospectLeadId}
+              >
+                <UserPlus className="w-4 h-4" />
+                {isConverting ? 'Converting...' : 'Convert to CRM Contact'}
+              </Button>
+            )}
+          </div>
           
           </div> {/* End Right Column */}
 
         </div>
       </ScrollArea>
-
-      {/* Sticky Action Bar */}
-      <div className="border-t bg-background p-4 shrink-0">
-        <div className="flex items-center gap-2">
-          {/* Outreach */}
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            onClick={handleWhatsApp}
-            disabled={!listing.whatsappPhone && !listing.prospectPhone}
-          >
-            <MessageCircle className="w-4 h-4 text-green-500" /> WhatsApp
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            onClick={handleCall}
-            disabled={!listing.whatsappPhone && !listing.prospectPhone}
-          >
-            <Phone className="w-4 h-4 text-blue-500" /> Call
-          </Button>
-
-          <div className="flex-1" />
-
-          {/* Primary actions */}
-          {isNew ? (
-            <>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1.5 border-red-200 hover:bg-red-50 text-red-700 dark:border-red-900/50 dark:hover:bg-red-950/30"
-                onClick={() => onReject(listing.id)}
-                disabled={isPending}
-              >
-                <X className="w-4 h-4" /> Reject
-                <kbd className="ml-1 text-[9px] bg-red-100 dark:bg-red-900/30 px-1 rounded font-mono">R</kbd>
-              </Button>
-              <Button
-                size="sm"
-                className="gap-1.5"
-                onClick={() => onAccept(listing.id)}
-                disabled={isPending}
-              >
-                <Check className="w-4 h-4" /> Accept
-                <kbd className="ml-1 text-[9px] bg-primary-foreground/20 px-1 rounded font-mono">A</kbd>
-              </Button>
-            </>
-          ) : (
-            <Button
-              variant="default"
-              size="sm"
-              className="gap-1.5"
-              onClick={handleConvert}
-              disabled={isConverting || !listing.prospectLeadId}
-            >
-              <UserPlus className="w-4 h-4" />
-              {isConverting ? 'Converting...' : 'Convert to CRM Contact'}
-            </Button>
-          )}
-        </div>
-      </div>
     </div>
   );
 }
