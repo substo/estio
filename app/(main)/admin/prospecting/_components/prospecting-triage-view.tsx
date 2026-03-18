@@ -4,13 +4,16 @@ import { useState, useEffect, useCallback, useTransition } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { type ScrapedListingRow } from '@/lib/leads/scraped-listing-repository';
 import { type ProspectInboxRow } from '@/lib/leads/prospect-repository';
-import { acceptScrapedListing, rejectScrapedListing } from '../actions';
+import { acceptScrapedListing, rejectScrapedListing, bulkAcceptListings, bulkRejectListings } from '../actions';
 import { toast } from 'sonner';
 import { ListingFeedCard } from './listing-feed-card';
 import { ProspectDetailPanel } from './prospect-detail-panel';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Search, Filter, Home, Sparkles } from 'lucide-react';
+import { Search, Filter, Home, Sparkles, CheckCircle2, XCircle } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
 import {
   Select,
   SelectContent,
@@ -39,6 +42,7 @@ export function ProspectingTriageView({
   const searchParams = useSearchParams();
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [isPending, startTransition] = useTransition();
+  const [selectedListingIds, setSelectedListingIds] = useState<string[]>([]);
 
   // Clamp selected index when listings change
   useEffect(() => {
@@ -74,6 +78,51 @@ export function ProspectingTriageView({
       }
     });
   }, [router]);
+
+  // --- Bulk Actions ---
+  const handleBulkAccept = useCallback(() => {
+    if (selectedListingIds.length === 0) return;
+    startTransition(async () => {
+      const res = await bulkAcceptListings(selectedListingIds);
+      if (res.success) {
+        toast.success(`Accepted ${res.count} listings`);
+        setSelectedListingIds([]);
+        router.refresh();
+      } else {
+        toast.error(res.message);
+      }
+    });
+  }, [selectedListingIds, router]);
+
+  const handleBulkReject = useCallback(() => {
+    if (selectedListingIds.length === 0) return;
+    startTransition(async () => {
+      const res = await bulkRejectListings(selectedListingIds);
+      if (res.success) {
+        toast.success(`Rejected ${res.count} listings`);
+        setSelectedListingIds([]);
+        router.refresh();
+      } else {
+        toast.error(res.message);
+      }
+    });
+  }, [selectedListingIds, router]);
+
+  const toggleBulkSelect = (id: string, checked: boolean) => {
+    if (checked) {
+        setSelectedListingIds(prev => [...prev, id]);
+    } else {
+        setSelectedListingIds(prev => prev.filter(x => x !== id));
+    }
+  };
+
+  const selectAllRendered = (checked: boolean) => {
+    if (checked) {
+        setSelectedListingIds(listings.map(l => l.id));
+    } else {
+        setSelectedListingIds([]);
+    }
+  };
 
   // --- Keyboard shortcuts ---
   useEffect(() => {
@@ -202,16 +251,47 @@ export function ProspectingTriageView({
           )}
         </div>
 
-        {/* Feed Header */}
-        <div className="px-3 py-2 border-b flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
-            <Home className="w-3.5 h-3.5" />
-            <span>{listingsTotal} listings</span>
-          </div>
-          {listings.length > 0 && (
-            <Badge variant="outline" className="text-[10px]">
-              {selectedIndex + 1} / {listings.length}
-            </Badge>
+        {/* Feed Header or Bulk Actions */}
+        <div className={cn("px-3 border-b flex items-center justify-between shrink-0 transition-colors", selectedListingIds.length > 0 ? "bg-muted/30 py-1.5" : "py-2")}>
+          {selectedListingIds.length > 0 ? (
+            <div className="flex items-center justify-between w-full">
+              <div className="flex items-center gap-2">
+                <Checkbox 
+                  checked={selectedListingIds.length === listings.length && listings.length > 0} 
+                  onCheckedChange={selectAllRendered} 
+                  title="Deselect All"
+                />
+                <span className="text-xs font-medium text-primary">{selectedListingIds.length} selected</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-red-600 hover:text-red-700 hover:bg-red-50" onClick={handleBulkReject} disabled={isPending}>
+                   <XCircle className="w-4 h-4" />
+                </Button>
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-green-600 hover:text-green-700 hover:bg-green-50" onClick={handleBulkAccept} disabled={isPending}>
+                   <CheckCircle2 className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+                <Home className="w-3.5 h-3.5" />
+                <span>{listingsTotal} listings</span>
+              </div>
+              {listings.length > 0 && (
+                <div className="flex items-center gap-3">
+                  <Badge variant="outline" className="text-[10px]">
+                    {selectedIndex + 1} / {listings.length}
+                  </Badge>
+                  <Checkbox 
+                    checked={false} 
+                    onCheckedChange={selectAllRendered} 
+                    className="opacity-50 hover:opacity-100 transition-opacity w-3.5 h-3.5"
+                    title="Select All for Bulk Actions"
+                  />
+                </div>
+              )}
+            </>
           )}
         </div>
 
@@ -231,6 +311,8 @@ export function ProspectingTriageView({
                   listing={item}
                   isSelected={idx === selectedIndex}
                   onClick={() => setSelectedIndex(idx)}
+                  isBulkSelected={selectedListingIds.includes(item.id)}
+                  onBulkSelect={(checked) => toggleBulkSelect(item.id, checked === true)}
                 />
               ))}
             </div>

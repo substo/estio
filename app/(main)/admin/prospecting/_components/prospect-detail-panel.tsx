@@ -5,10 +5,11 @@ import { useRouter } from 'next/navigation';
 import { type ScrapedListingRow } from '@/lib/leads/scraped-listing-repository';
 import { acceptProspect } from '../actions';
 import { scrapeSellerProfile } from '../listings/_actions/seller-scrape';
+import { ScrapeListingDialog } from './scrape-listing-dialog';
 import { toast } from 'sonner';
 import {
   Building2, UserCheck, ExternalLink, Phone, MessageCircle,
-  UserPlus, ChevronLeft, ChevronRight, DownloadCloud, Check, X, Home, Keyboard
+  UserPlus, ChevronLeft, ChevronRight, DownloadCloud, Check, X, Home, Keyboard, RefreshCw
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -27,6 +28,7 @@ export function ProspectDetailPanel({ listing, onAccept, onReject, isPending }: 
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isConverting, startConverting] = useTransition();
   const [isScrapingSeller, startScrapingSeller] = useTransition();
+  const [isScrapeOpen, setIsScrapeOpen] = useState(false);
 
   // Reset carousel when listing changes
   useEffect(() => {
@@ -96,6 +98,16 @@ export function ProspectDetailPanel({ listing, onAccept, onReject, isPending }: 
 
   return (
     <div className="flex flex-col h-full">
+      <ScrapeListingDialog
+        isOpen={isScrapeOpen}
+        onOpenChange={setIsScrapeOpen}
+        listingId={listing.id}
+        listingUrl={listing.url}
+        platform={listing.platform}
+        listingTitle={listing.title}
+        onSuccess={() => router.refresh()}
+      />
+
       {/* Scrollable content */}
       <ScrollArea className="flex-1">
         <div className="p-6 space-y-6">
@@ -168,7 +180,12 @@ export function ProspectDetailPanel({ listing, onAccept, onReject, isPending }: 
 
           {/* Property Info */}
           <div>
-            <h2 className="text-xl font-bold leading-tight">{listing.title || 'Untitled Property'}</h2>
+            <div className="flex justify-between items-start gap-4">
+              <h2 className="text-xl font-bold leading-tight">{listing.title || 'Untitled Property'}</h2>
+              <Button variant="ghost" size="icon" className="shrink-0 -mt-1 text-muted-foreground hover:text-foreground" onClick={() => setIsScrapeOpen(true)} title="Re-scrape Listing">
+                <RefreshCw className="w-4 h-4" />
+              </Button>
+            </div>
             <div className="flex gap-1.5 mt-2.5 flex-wrap">
               <Badge variant="secondary" className="font-bold text-sm">
                 {listing.price ? `${listing.currency || '€'}${listing.price.toLocaleString()}` : 'POA'}
@@ -228,6 +245,17 @@ export function ProspectDetailPanel({ listing, onAccept, onReject, isPending }: 
                 <div className="flex flex-col">
                   <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Registration</span>
                   <span className="text-sm">{listing.sellerRegisteredAt}</span>
+                </div>
+              )}
+
+              {listing.contactChannels && listing.contactChannels.length > 0 && (
+                <div className="flex flex-col">
+                  <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Contact Channels</span>
+                  <div className="flex gap-1.5 mt-0.5">
+                    {listing.contactChannels.map(channel => (
+                      <Badge key={channel} variant="outline" className="text-[10px] h-4 px-1.5 capitalize">{channel.toLowerCase()}</Badge>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

@@ -4,15 +4,18 @@ import { formatDistanceToNow } from 'date-fns';
 import { type ScrapedListingRow } from '@/lib/leads/scraped-listing-repository';
 import { Building2, UserCheck, Home } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 
 interface ListingFeedCardProps {
   listing: ScrapedListingRow;
   isSelected: boolean;
   onClick: () => void;
+  isBulkSelected?: boolean;
+  onBulkSelect?: (checked: boolean) => void;
 }
 
-export function ListingFeedCard({ listing, isSelected, onClick }: ListingFeedCardProps) {
+export function ListingFeedCard({ listing, isSelected, onClick, isBulkSelected, onBulkSelect }: ListingFeedCardProps) {
   const isNew = listing.status === 'NEW' || listing.status === 'new' || listing.status === 'REVIEWING';
   const thumb = listing.thumbnails?.[0] || listing.images?.[0];
 
@@ -20,13 +23,22 @@ export function ListingFeedCard({ listing, isSelected, onClick }: ListingFeedCar
     <div
       onClick={onClick}
       className={cn(
-        "flex gap-3 p-3 cursor-pointer transition-all border-l-[3px] hover:bg-muted/50",
+        "group flex items-start gap-3 p-3 cursor-pointer transition-all border-l-[3px] hover:bg-muted/50",
         isSelected
           ? "bg-primary/5 border-l-primary shadow-sm"
           : "border-l-transparent",
         !isNew && "opacity-60"
       )}
     >
+      {/* Checkbox */}
+      <div className="mt-[26px] mr-[-4px]" onClick={(e) => e.stopPropagation()}>
+        <Checkbox 
+          checked={isBulkSelected}
+          onCheckedChange={onBulkSelect}
+          className={cn("transition-opacity", isBulkSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100")}
+        />
+      </div>
+
       {/* Thumbnail */}
       {thumb ? (
         <div className="w-[72px] h-[72px] rounded-lg overflow-hidden shrink-0 border bg-muted">
@@ -41,40 +53,43 @@ export function ListingFeedCard({ listing, isSelected, onClick }: ListingFeedCar
       {/* Content */}
       <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
         <div>
-          <div className="font-semibold text-sm leading-tight line-clamp-1">
-            {listing.title || 'Untitled Listing'}
-          </div>
-          <div className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
-            {listing.locationText || 'Cyprus'}
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between mt-1.5">
-          <div className="flex items-center gap-1.5">
-            <span className="font-bold text-sm">
-              {listing.price ? `€${listing.price.toLocaleString()}` : 'POA'}
-            </span>
-            {listing.bedrooms !== null && (
-              <span className="text-[10px] text-muted-foreground">{listing.bedrooms}B</span>
-            )}
-            {listing.propertyArea !== null && (
-              <span className="text-[10px] text-muted-foreground">{listing.propertyArea}m²</span>
-            )}
-          </div>
-          <div className="flex items-center gap-1">
-            {listing.prospectAgency ? (
-              <Building2 className="w-3 h-3 text-orange-500" />
-            ) : (
-              <UserCheck className="w-3 h-3 text-green-500" />
-            )}
+          <div className="flex justify-between items-start gap-2">
+            <div className="font-semibold text-sm leading-tight line-clamp-1">
+              {listing.title || 'Untitled Listing'}
+            </div>
             {!isNew && (
               <Badge
                 variant={listing.status === 'ACCEPTED' ? 'default' : 'destructive'}
-                className="text-[9px] h-4 px-1"
+                className="text-[9px] h-4 px-1 shrink-0"
               >
                 {listing.status}
               </Badge>
             )}
+          </div>
+          
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span className="font-bold text-xs text-primary">
+              {listing.price ? `€${listing.price.toLocaleString()}` : 'POA'}
+            </span>
+            <span className="text-[10px] text-muted-foreground truncate">
+              · {listing.locationText || 'Cyprus'}
+              {listing.bedrooms !== null && ` · ${listing.bedrooms}B`}
+              {listing.propertyArea !== null && ` · ${listing.propertyArea}m²`}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between mt-1.5">
+          <div className="flex items-center gap-1 text-xs text-muted-foreground min-w-0 pr-2">
+            {listing.prospectAgency ? (
+              <Building2 className="w-3 h-3 shrink-0 text-orange-500" />
+            ) : (
+              <UserCheck className="w-3 h-3 shrink-0 text-green-500" />
+            )}
+            <span className="truncate">{listing.prospectName || 'Unknown'}</span>
+          </div>
+          <div className="text-[10px] text-muted-foreground whitespace-nowrap shrink-0">
+            {formatDistanceToNow(new Date(listing.createdAt), { addSuffix: true })}
           </div>
         </div>
       </div>
