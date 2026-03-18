@@ -613,31 +613,46 @@ This creates a clean **1 Person → N Properties** relationship, where `Prospect
 
 ---
 
-## 4.0 Unified Prospecting Hub UI
+## 4.0 Master-Detail Triage UI
 **Status:** Completed
 
-### 4.1 Shared Layout with Tab Navigation
+### 4.1 Architecture & Layout Reasoning
 
-The `/admin/prospecting` section uses a shared Next.js layout (`layout.tsx`) providing:
-- A persistent page header with title and description.
-- Deep-linked tab navigation between **Prospects (People)** and **Listings Inbox**.
-- A **Settings** shortcut button linking to `/admin/settings/prospecting`.
+The `/admin/prospecting` section is designed as a high-efficiency **Master-Detail split-pane interface**. The primary goal of this layout is to facilitate rapid triage (Accept/Reject decisions) of scraped listings without context switching or navigating away from the list view.
 
-This replaces the previously disconnected pages with a cohesive hub.
+*   **Left Pane (Master Feed):** A scrollable list of compact visually rich cards (`ListingFeedCard`). Each card provides essential context at a glance (thumbnail, price, location, seller name, time added). The feed incorporates a sticky header with scope filters (New vs. All), a text search input, and a dynamic seller dropdown. 
+*   **Right Pane (Detail Panel):** A permanent, sticky detail view (`ProspectDetailPanel`). Selecting a card on the left instantly populates this pane with deep data needed to make a decision.
 
-### 4.2 Prospect Review & Outreach Drawer
+**Why this design?**
+*   **Zero Clicks to View:** Users can ingest full listing details by simply moving down the feed (using arrow keys or clicking), rather than opening and closing modals or drawers.
+*   **Listing-Centric Focus:** By leading with the Property (Listing) rather than the Person (Prospect), agents can visually identify the value of the asset before deciding if the seller is worth contacting.
 
-Clicking any listing row in the **Listings Inbox** table opens a side-panel `Sheet` (Drawer) containing:
+### 4.2 Auto-Advance & Keyboard Accessibility
+
+Triage speed is maximized through an "auto-advance" loop and keyboard shortcuts:
+
+*   **Keyboard Flow:** Users can navigate the feed using `↑` & `↓` (or `k` & `j`).
+*   **One-Key Decisions:** Pressing `A` executes an Accept action; pressing `R` executes a Reject action.
+*   **Auto-Advance:** When a listing is Accepted or Rejected, it instantly disappears from the feed. The system automatically selects the *next* listing in sequence, loading its details into the right pane. This creates a seamless "inbox zero" workflow.
+
+### 4.3 Prospect Detail Panel Capabilities
+
+The Detail Panel is the actionable heart of the hub.
 
 | Section | Content |
 |---|---|
-| **Property Details** | Hero image, title, price, type, location, link to original listing |
-| **Seller Profile** | Name, phone, AI `isAgency` classification badge ("Agency Detected" vs "Likely Private") |
-| **Outreach Actions** | WhatsApp (pre-filled message), Call Now, Convert to CRM Contact |
+| **Property Overview** | Interactive photo carousel (with thumbnail strip), title, price, key specs (beds, baths, area), and full description. |
+| **Seller Intelligence** | Seller name, extracted contact channels (WhatsApp, Email, Phone), AI `isAgency` classification badge ("Agency Detected" vs "Likely Private"). |
+| **Action Bar** | Sticky footer containing quick-links for WhatsApp outreach (pre-filled), Call scripts, and the primary Accept/Reject bindings. |
+| **Re-Scrape Capability** | A dedicated button to re-trigger the headless scraping pipeline on the specific URL, retrieving fresh data or broken images if the source was updated. |
+
+### 4.4 Bulk Actions
+
+For high-volume review (e.g., rejecting 50 duplicate listings from known agencies), the feed supports Bulk Mode. Checking the box on any `ListingFeedCard` swaps the standard header for a Bulk Action Bar, exposing one-click APIs to batch Accept or Reject large segments of data.
 
 The **Convert to CRM Contact** button triggers the `acceptProspect()` server action, which creates a full `Contact` record, logs a `ContactHistory` entry, emits a `lead.created` event, and marks the `ProspectLead` as accepted.
 
-### 4.3 Navigation Updates
+### 4.5 Navigation & URL State
 
-- **Sidebar**: The "Leads" menu item was renamed to **"Prospecting"** and now links to `/admin/prospecting/people`.
-- **Mobile Top Nav**: Already updated in a prior session to include both "Prospects (People)" and "Listings Inbox" links.
+* State variables like `selectedIndex` are maintained locally to ensure snappy UI transitions.
+* Triage filters (`scope`, `q`, `prospectId`) are explicitly bound to URL Search Params (`?scope=new&q=villa`). This guarantees that triage views remain easily shareable and survive page refreshes.

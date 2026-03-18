@@ -110,17 +110,20 @@ export function ProspectDetailPanel({ listing, onAccept, onReject, isPending }: 
 
       {/* Scrollable content */}
       <ScrollArea className="flex-1">
-        <div className="p-6 space-y-6">
+        <div className="p-4 lg:p-6 grid grid-cols-1 xl:grid-cols-12 gap-6 lg:gap-8 items-start">
+          
+          {/* LEFT COLUMN: Photos & Description */}
+          <div className="xl:col-span-7 2xl:col-span-8 space-y-6">
 
           {/* Photo Carousel */}
           {listing.images && listing.images.length > 0 ? (
-            <div className="space-y-2">
-              <div className="relative rounded-xl overflow-hidden border group bg-muted aspect-[16/10]">
+            <div className="space-y-3">
+              <div className="relative rounded-xl overflow-hidden border group bg-muted aspect-[16/10] max-h-[50vh] xl:max-h-[60vh]">
                 <a href={listing.images[currentImageIndex]} target="_blank" rel="noreferrer" title="View Full Image" className="block hover:opacity-95 transition-opacity w-full h-full">
                   <img
                     src={listing.thumbnails?.[currentImageIndex] || listing.images[currentImageIndex]}
                     alt="Property"
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-cover rounded-xl"
                   />
                 </a>
                 {listing.images.length > 1 && (
@@ -178,6 +181,19 @@ export function ProspectDetailPanel({ listing, onAccept, onReject, isPending }: 
             </div>
           )}
 
+          {/* Description */}
+          {listing.description && (
+            <div className="pt-2">
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">Description</h3>
+              <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-line">{listing.description}</p>
+            </div>
+          )}
+          
+          </div> {/* End Left Column */}
+
+          {/* RIGHT COLUMN: Property Info & Seller Profile */}
+          <div className="xl:col-span-5 2xl:col-span-4 space-y-6 xl:sticky xl:top-0">
+          
           {/* Property Info */}
           <div>
             <div className="flex justify-between items-start gap-4">
@@ -200,18 +216,10 @@ export function ProspectDetailPanel({ listing, onAccept, onReject, isPending }: 
               <Badge variant="outline">{listing.locationText || 'Cyprus'}</Badge>
             </div>
 
-            <a href={listing.url} target="_blank" rel="noreferrer" className="text-sm text-primary flex items-center gap-1 mt-3 hover:underline font-medium">
+            <a href={listing.url} target="_blank" rel="noreferrer" className="text-sm text-primary flex items-center gap-1 mt-4 hover:underline font-medium">
               View Original Listing <ExternalLink className="w-3 h-3" />
             </a>
           </div>
-
-          {/* Description */}
-          {listing.description && (
-            <div>
-              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">Description</h3>
-              <p className="text-sm text-foreground/80 leading-relaxed line-clamp-6 whitespace-pre-line">{listing.description}</p>
-            </div>
-          )}
 
           <Separator />
 
@@ -273,6 +281,9 @@ export function ProspectDetailPanel({ listing, onAccept, onReject, isPending }: 
               </Button>
             )}
           </div>
+          
+          </div> {/* End Right Column */}
+
         </div>
       </ScrollArea>
 
