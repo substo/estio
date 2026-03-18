@@ -7,9 +7,10 @@ import { useRouter } from 'next/navigation';
 interface BazarakiAuthButtonProps {
     credentialId: string;
     phone: string;
+    onSuccess?: () => void;
 }
 
-export function BazarakiAuthButton({ credentialId, phone }: BazarakiAuthButtonProps) {
+export function BazarakiAuthButton({ credentialId, phone, onSuccess }: BazarakiAuthButtonProps) {
     const [loading, setLoading] = useState(false);
     const [statusMessage, setStatusMessage] = useState('');
     const [qrCodeData, setQrCodeData] = useState<string | null>(null);
@@ -64,6 +65,7 @@ export function BazarakiAuthButton({ credentialId, phone }: BazarakiAuthButtonPr
                                 } else if (data.status === 'success') {
                                     alert('Successfully authenticated with Bazaraki! Session state saved.');
                                     setLoading(false);
+                                    if (onSuccess) onSuccess();
                                     router.refresh();
                                 }
                             } catch (e) {

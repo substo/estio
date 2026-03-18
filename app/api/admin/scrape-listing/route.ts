@@ -43,6 +43,7 @@ export async function POST(req: Request) {
 
                 let sessionState: any = undefined;
                 let activeCredentialId: string | undefined = undefined;
+                let activeCredentialPhone: string | undefined = undefined;
 
                 if (connection) {
                     const credential = await db.scrapingCredential.findFirst({
@@ -53,6 +54,7 @@ export async function POST(req: Request) {
                     if (credential?.sessionState) {
                         sessionState = credential.sessionState;
                         activeCredentialId = credential.id;
+                        activeCredentialPhone = credential.authUsername || undefined;
                         sendEvent({ status: 'credential_found', message: `Using credential: ${credential.authUsername || credential.id.slice(0, 8)}` });
                     } else {
                         sendEvent({ status: 'no_credential', message: 'No active credential found. Proceeding without session cookies.' });
@@ -75,6 +77,12 @@ export async function POST(req: Request) {
                         await db.scrapingCredential.update({
                             where: { id: activeCredentialId },
                             data: { status: 'needs_auth' }
+                        });
+                        sendEvent({ 
+                            status: 'needs_auth', 
+                            message: 'Credential session expired. Please re-authenticate.',
+                            credentialId: activeCredentialId,
+                            phone: activeCredentialPhone || ''
                         });
                         sendEvent({ status: 'error', error: 'Credential session expired. Please re-authenticate via Settings.' });
                     }

@@ -11,6 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, CheckCircle2, AlertTriangle, RefreshCw, Bug, ChevronDown, ChevronUp } from 'lucide-react';
+import { BazarakiAuthButton } from '../../settings/prospecting/_components/bazaraki-auth-button';
 
 interface ScrapeListingDialogProps {
     listingId: string;
@@ -28,6 +29,8 @@ interface ScrapeEvent {
     error?: string;
     debugHtml?: string;
     data?: any;
+    credentialId?: string;
+    phone?: string;
 }
 
 type ScrapePhase = 'idle' | 'running' | 'success' | 'error';
@@ -47,6 +50,7 @@ export function ScrapeListingDialog({
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [debugHtml, setDebugHtml] = useState<string | null>(null);
     const [showDebugHtml, setShowDebugHtml] = useState(false);
+    const [needsAuth, setNeedsAuth] = useState<{credentialId: string, phone: string} | null>(null);
 
     const startScrape = useCallback(async () => {
         setPhase('running');
@@ -55,6 +59,7 @@ export function ScrapeListingDialog({
         setErrorMessage(null);
         setDebugHtml(null);
         setShowDebugHtml(false);
+        setNeedsAuth(null);
 
         try {
             const res = await fetch('/api/admin/scrape-listing', {
@@ -90,6 +95,10 @@ export function ScrapeListingDialog({
                                     setPhase('error');
                                     setErrorMessage(event.error || 'Unknown error');
                                     if (event.debugHtml) setDebugHtml(event.debugHtml);
+                                } else if (event.status === 'needs_auth') {
+                                    if (event.credentialId && event.phone) {
+                                        setNeedsAuth({ credentialId: event.credentialId, phone: event.phone });
+                                    }
                                 }
                             } catch (e) {
                                 console.error('Failed to parse SSE chunk:', line);
@@ -124,6 +133,7 @@ export function ScrapeListingDialog({
             setExtractedData(null);
             setErrorMessage(null);
             setDebugHtml(null);
+            setNeedsAuth(null);
         }
         onOpenChange(open);
     };
@@ -251,6 +261,19 @@ export function ScrapeListingDialog({
                                             {debugHtml}
                                         </pre>
                                     )}
+                                </div>
+                            )}
+
+                            {needsAuth && (
+                                <div className="mt-4 pt-4 border-t border-red-200 dark:border-red-800">
+                                    <p className="text-sm font-medium text-red-800 dark:text-red-300 mb-2">Authentication Required to continue:</p>
+                                    <BazarakiAuthButton 
+                                        credentialId={needsAuth.credentialId} 
+                                        phone={needsAuth.phone} 
+                                        onSuccess={() => {
+                                            startScrape();
+                                        }}
+                                    />
                                 </div>
                             )}
                         </div>
