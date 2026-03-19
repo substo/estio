@@ -371,9 +371,9 @@ async function scrapeBazarakiListing(
                     const phoneDiag = await page.evaluate(() => {
                         const phoneBtnEl = document.querySelector('.phone-author') as HTMLElement | null;
                         const phoneSubtext = document.querySelector('.phone-author-subtext__main, .phone-author__subtext');
+                        const userMenuEl = document.querySelector('.js-user-menu-header');
 
-                        const isRedirectToLogin = phoneBtnEl ? phoneBtnEl.classList.contains('js-redirect-to-login') : false;
-                        const isShowPopup = phoneBtnEl ? phoneBtnEl.classList.contains('js-show-popup-contact-business') : false;
+                        const isGlobalLoggedIn = !!userMenuEl;
                         const isExpiredByClass = phoneBtnEl ? phoneBtnEl.classList.contains('phone-author--sold') : false;
                         const phoneSubtextContent = phoneSubtext?.textContent?.trim().toLowerCase() || '';
                         const isExpiredByText = phoneSubtextContent.includes('expired');
@@ -388,22 +388,17 @@ async function scrapeBazarakiListing(
                         return {
                             exists,
                             isExpired,
-                            isLoggedIn: isShowPopup && !isRedirectToLogin && !isExpired,
-                            isRedirectToLogin,
+                            isLoggedIn: isGlobalLoggedIn,
                             phoneSubtext: phoneSubtext?.textContent?.trim() || '',
                             dataUrl,      // e.g. "/phone_check/6186406_office-for-rent/"
                             dataAdvert,   // e.g. "6186406"
                             btnClasses: phoneBtnEl?.className || '',
                         };
-                    }).catch(() => ({ exists: false, isExpired: false, isLoggedIn: false, isRedirectToLogin: false, phoneSubtext: '', dataUrl: '', dataAdvert: '', btnClasses: '' }));
+                    }).catch(() => ({ exists: false, isExpired: false, isLoggedIn: false, phoneSubtext: '', dataUrl: '', dataAdvert: '', btnClasses: '' }));
 
                     sendEvent({ status: 'phone_debug', message: `Session: ExpiredAd=${phoneDiag.isExpired}, LoggedIn=${phoneDiag.isLoggedIn}, subtext="${phoneDiag.phoneSubtext}"` });
 
-                    if (phoneDiag.isExpired) {
-                        sendEvent({ status: 'extracting', message: '⚠️ Listing expired.' });
-                    } else if (!phoneDiag.exists) {
-                        sendEvent({ status: 'extracting', message: '❌ Phone button not found on page' });
-                    } else if (phoneDiag.isRedirectToLogin && !phoneDiag.isLoggedIn) {
+                    if (!phoneDiag.isLoggedIn) {
                         sessionExpired = true;
                         // === SESSION EXPIRED PATH ===
                         sendEvent({ status: 'extracting', message: '⚠️ Session expired — trying AJAX phone_check endpoint...' });
@@ -508,6 +503,10 @@ async function scrapeBazarakiListing(
                             sendEvent({ status: 'extracting', message: '⚠️ Session expired and phone could not be retrieved. Credential may need re-authentication.' });
                         }
 
+                    } else if (phoneDiag.isExpired) {
+                        sendEvent({ status: 'extracting', message: '⚠️ Listing expired.' });
+                    } else if (!phoneDiag.exists) {
+                        sendEvent({ status: 'extracting', message: '❌ Phone button not found on page' });
                     } else {
                         // === LOGGED IN PATH (normal flow) ===
                         sendEvent({ status: 'extracting', message: '✅ Session active — clicking phone button...' });
