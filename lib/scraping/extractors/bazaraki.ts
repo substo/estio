@@ -3,11 +3,12 @@ import { PageFetcher } from '../page-fetcher';
 import * as cheerio from 'cheerio';
 
 const BAZARAKI_SELECTORS = {
-    listingContainer: '.advert, .advert-grid',
-    title: '.advert__content-title, .advert-grid__content-title',
-    listingLink: 'a.swiper-slide[href], a.advert-grid__body-image-paginator-container[href]',
-    price: '.advert__content-price, .advert-grid__content-price',
-    location: '.advert__content-place, .advert-grid__content-place, .advert-grid__content-hint .advert-grid__content-place',
+    // Cover search pages (.advert, .advert-grid) AND seller profile pages (.announcement-block, .classified, .list-simple__output)
+    listingContainer: '.advert, .advert-grid, .announcement-block, .classified, .list-simple__output .announcement-container, .list-simple__output > li',
+    title: '.advert__content-title, .advert-grid__content-title, .announcement-block__title a, .classified__title',
+    listingLink: 'a.swiper-slide[href], a.advert-grid__body-image-paginator-container[href], .announcement-block__title a[href], a[href*="/adv/"]',
+    price: '.advert__content-price, .advert-grid__content-price, .announcement-block__price, .classified__price',
+    location: '.advert__content-place, .advert-grid__content-place, .advert-grid__content-hint .advert-grid__content-place, .announcement-block__place, .classified__location',
     nextPage: 'a.number-list-next, a.number-list-line',
 };
 
@@ -109,7 +110,38 @@ export async function extractBazarakiIndex(content: string, baseUrl: string, fet
 
     if (shallowListings.length === 0) {
         console.warn(`[BazarakiExtractor] ⚠️ 0 listings found! Page title: ${$('title').text()}, Content length: ${content.length}`);
-        console.warn(`[BazarakiExtractor] HTML Snippet: ${content.substring(0, 500)}`);
+        console.warn(`[BazarakiExtractor] HTML Snippet (first 1000): ${content.substring(0, 1000)}`);
+
+        // Dump container-level elements for debugging
+        const allAnchors = $('a[href*="/adv/"]').length;
+        console.warn(`[BazarakiExtractor] Total <a href="/adv/..."> links on page: ${allAnchors}`);
+        if (allAnchors > 0) {
+            // Fallback: extract listings from any <a> that links to /adv/
+            console.warn(`[BazarakiExtractor] Attempting fallback extraction from raw /adv/ links...`);
+            const seenIds = new Set<string>();
+            $('a[href*="/adv/"]').each((_, el) => {
+                const href = $(el).attr('href');
+                if (!href || !href.match(/\/adv\/\d+/)) return;
+                const absoluteUrl = href.startsWith('http') ? href : `https://www.bazaraki.com${href}`;
+                const matchId = absoluteUrl.match(/\/adv\/(\d+)/);
+                const externalId = matchId ? matchId[1] : '';
+                if (!externalId || seenIds.has(externalId)) return;
+                seenIds.add(externalId);
+
+                const title = $(el).text().trim() || 'No Title';
+                shallowListings.push({
+                    url: absoluteUrl,
+                    externalId,
+                    title,
+                    description: '',
+                    price: 0,
+                    currency: 'EUR',
+                    location: 'Cyprus',
+                    listingType: absoluteUrl.includes('-rent') || absoluteUrl.includes('to-rent') ? 'rent' : 'sale'
+                });
+            });
+            console.warn(`[BazarakiExtractor] Fallback found ${shallowListings.length} listings from raw links.`);
+        }
     }
 
     // If Strategy is Shallow, we are done! Return immediately

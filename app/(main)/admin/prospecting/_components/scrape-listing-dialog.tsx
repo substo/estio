@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, CheckCircle2, AlertTriangle, RefreshCw, Bug, ChevronDown, ChevronUp } from 'lucide-react';
+import { Loader2, CheckCircle2, AlertTriangle, RefreshCw, Bug, ChevronDown, ChevronUp, Save } from 'lucide-react';
 import { BazarakiAuthButton } from '../../settings/prospecting/_components/bazaraki-auth-button';
 
 interface ScrapeListingDialogProps {
@@ -29,11 +29,12 @@ interface ScrapeEvent {
     error?: string;
     debugHtml?: string;
     data?: any;
+    partialData?: any;
     credentialId?: string;
     phone?: string;
 }
 
-type ScrapePhase = 'idle' | 'running' | 'success' | 'error';
+type ScrapePhase = 'idle' | 'running' | 'success' | 'error' | 'saving';
 
 export function ScrapeListingDialog({
     listingId,
@@ -47,6 +48,7 @@ export function ScrapeListingDialog({
     const [phase, setPhase] = useState<ScrapePhase>('idle');
     const [logs, setLogs] = useState<ScrapeEvent[]>([]);
     const [extractedData, setExtractedData] = useState<any>(null);
+    const [partialData, setPartialData] = useState<any>(null);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [debugHtml, setDebugHtml] = useState<string | null>(null);
     const [showDebugHtml, setShowDebugHtml] = useState(false);
@@ -56,6 +58,7 @@ export function ScrapeListingDialog({
         setPhase('running');
         setLogs([]);
         setExtractedData(null);
+        setPartialData(null);
         setErrorMessage(null);
         setDebugHtml(null);
         setShowDebugHtml(false);
@@ -95,6 +98,7 @@ export function ScrapeListingDialog({
                                     setPhase('error');
                                     setErrorMessage(event.error || 'Unknown error');
                                     if (event.debugHtml) setDebugHtml(event.debugHtml);
+                                    if (event.partialData) setPartialData(event.partialData);
                                 } else if (event.status === 'needs_auth') {
                                     if (event.credentialId && event.phone) {
                                         setNeedsAuth({ credentialId: event.credentialId, phone: event.phone });
@@ -117,6 +121,37 @@ export function ScrapeListingDialog({
         }
     }, [listingId, listingUrl, platform, onSuccess]);
 
+    const handleSaveAnyway = useCallback(async () => {
+        if (!partialData) return;
+        setPhase('saving');
+
+        try {
+            const res = await fetch('/api/admin/save-listing', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    listingId,
+                    platform,
+                    url: listingUrl,
+                    data: partialData,
+                }),
+            });
+
+            const result = await res.json();
+            if (result.success) {
+                setPhase('success');
+                setExtractedData(partialData);
+                onSuccess?.();
+            } else {
+                setPhase('error');
+                setErrorMessage(`Save failed: ${result.error || 'Unknown error'}`);
+            }
+        } catch (e: any) {
+            setPhase('error');
+            setErrorMessage(`Save failed: ${e.message}`);
+        }
+    }, [partialData, listingId, platform, listingUrl, onSuccess]);
+
     // Auto-start scrape when dialog opens
     useEffect(() => {
         if (isOpen && phase === 'idle') {
@@ -131,6 +166,7 @@ export function ScrapeListingDialog({
             setPhase('idle');
             setLogs([]);
             setExtractedData(null);
+            setPartialData(null);
             setErrorMessage(null);
             setDebugHtml(null);
             setNeedsAuth(null);
@@ -146,6 +182,7 @@ export function ScrapeListingDialog({
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
                         {phase === 'running' && <Loader2 className="w-5 h-5 animate-spin text-blue-500" />}
+                        {phase === 'saving' && <Loader2 className="w-5 h-5 animate-spin text-amber-500" />}
                         {phase === 'success' && <CheckCircle2 className="w-5 h-5 text-green-500" />}
                         {phase === 'error' && <AlertTriangle className="w-5 h-5 text-red-500" />}
                         Scrape Listing
@@ -161,6 +198,13 @@ export function ScrapeListingDialog({
                         <div className="flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
                             <Loader2 className="w-4 h-4 animate-spin text-blue-500 shrink-0" />
                             <span className="text-sm text-blue-700 dark:text-blue-300">{latestMessage}</span>
+                        </div>
+                    )}
+
+                    {phase === 'saving' && (
+                        <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
+                            <Loader2 className="w-4 h-4 animate-spin text-amber-500 shrink-0" />
+                            <span className="text-sm text-amber-700 dark:text-amber-300">Saving partial data to database...</span>
                         </div>
                     )}
 
@@ -246,6 +290,48 @@ export function ScrapeListingDialog({
                             </div>
                             <p className="text-xs text-red-600 dark:text-red-400 break-all">{errorMessage}</p>
 
+                            {/* Partial Data Preview */}
+                            {partialData && (
+                                <div className="border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 rounded-lg p-3 space-y-2">
+                                    <div className="flex items-center gap-2">
+                                        <Save className="w-3.5 h-3.5 text-amber-600" />
+                                        <span className="font-semibold text-xs text-amber-700 dark:text-amber-300">Partial Data Available</span>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-1 text-xs">
+                                        {partialData.title && (
+                                            <div className="col-span-2">
+                                                <span className="text-muted-foreground">Title:</span>
+                                                <span className="ml-1 font-medium">{partialData.title}</span>
+                                            </div>
+                                        )}
+                                        {partialData.price != null && (
+                                            <div>
+                                                <span className="text-muted-foreground">Price:</span>
+                                                <span className="ml-1">€{partialData.price?.toLocaleString()}</span>
+                                            </div>
+                                        )}
+                                        {partialData.ownerName && (
+                                            <div>
+                                                <span className="text-muted-foreground">Owner:</span>
+                                                <span className="ml-1">{partialData.ownerName}</span>
+                                            </div>
+                                        )}
+                                        {partialData.ownerPhone && (
+                                            <div>
+                                                <span className="text-muted-foreground">Phone:</span>
+                                                <span className="ml-1 font-mono">{partialData.ownerPhone}</span>
+                                            </div>
+                                        )}
+                                        {partialData.images?.length > 0 && (
+                                            <div>
+                                                <span className="text-muted-foreground">Images:</span>
+                                                <span className="ml-1">{partialData.images.length}</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
                             {debugHtml && (
                                 <div className="space-y-2">
                                     <button
@@ -281,6 +367,12 @@ export function ScrapeListingDialog({
 
                     {/* Action Buttons */}
                     <div className="flex justify-end gap-2 pt-2">
+                        {phase === 'error' && partialData && (
+                            <Button variant="default" size="sm" onClick={handleSaveAnyway} className="gap-2 bg-amber-600 hover:bg-amber-700">
+                                <Save className="w-4 h-4" />
+                                Save Anyway
+                            </Button>
+                        )}
                         {(phase === 'error' || phase === 'success') && (
                             <Button variant="outline" size="sm" onClick={startScrape} className="gap-2">
                                 <RefreshCw className="w-4 h-4" />
@@ -291,6 +383,7 @@ export function ScrapeListingDialog({
                             variant={phase === 'success' ? 'default' : 'ghost'}
                             size="sm"
                             onClick={() => handleOpenChange(false)}
+                            disabled={phase === 'saving'}
                         >
                             {phase === 'success' ? 'Done' : 'Close'}
                         </Button>

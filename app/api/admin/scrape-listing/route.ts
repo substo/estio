@@ -34,6 +34,7 @@ export async function POST(req: Request) {
             sendEvent({ status: 'initializing', message: 'Launching headless browser...' });
 
             let fetcher: any = null;
+            let partialResult: ScrapedData | null = null;
 
             try {
                 // 1. Find a healthy credential for this platform
@@ -113,6 +114,7 @@ export async function POST(req: Request) {
                 // 3. Platform-specific extraction
                 if (platform === 'bazaraki') {
                     const result = await scrapeBazarakiListing(fetcher, url, sessionState, sendEvent, locationId);
+                    partialResult = result;
 
                     if (result && result.sessionExpired && activeCredentialId) {
                         await db.scrapingCredential.update({
@@ -159,6 +161,7 @@ export async function POST(req: Request) {
                     status: 'error',
                     error: error.message || 'Unknown error',
                     debugHtml,
+                    partialData: partialResult || undefined,
                 });
             } finally {
                 if (fetcher) {
@@ -351,6 +354,7 @@ async function scrapeBazarakiListing(
             // ===== PHONE NUMBER EXTRACTION =====
             let ownerPhone = knownPhone || '';
             let sessionExpired = false;
+            let isExpired = false;
             try {
                 if (!ownerPhone) {
                     // STEP 1: Dismiss cookie consent / CMP overlay
@@ -396,6 +400,8 @@ async function scrapeBazarakiListing(
                             btnClasses: phoneBtnEl?.className || '',
                         };
                     }).catch(() => ({ exists: false, isExpired: false, isLoggedIn: false, phoneSubtext: '', dataUrl: '', dataAdvert: '', btnClasses: '' }));
+
+                    isExpired = phoneDiag.isExpired;
 
                     sendEvent({ status: 'phone_debug', message: `Session: ExpiredAd=${phoneDiag.isExpired}, LoggedIn=${phoneDiag.isLoggedIn}, subtext="${phoneDiag.phoneSubtext}"` });
 
@@ -616,7 +622,8 @@ async function scrapeBazarakiListing(
             const longitude = longitudeStr ? parseFloat(longitudeStr) : undefined;
 
             // WhatsApp / Contact Channels
-            let whatsappPhone = undefined;
+            let whatsappPhone: string | undefined = undefined;
+            let contactChannels: string[] = [];
             try {
                 const waHref = await page.locator('a._whatsapp[href]').first().getAttribute('href').catch(() => undefined);
                 if (waHref) {
@@ -626,16 +633,15 @@ async function scrapeBazarakiListing(
                         sendEvent({ status: 'extracting', message: `Found WhatsApp Phone in URL: ${whatsappPhone}` });
                     }
                 }
-            } catch (e) { /* ignore */ }
 
-            let contactChannels: string[] = [];
-            try {
                 if (whatsappPhone) contactChannels.push('whatsapp');
                 const hasChat = await page.locator('.js-card-messenger').isVisible().catch(() => false);
                 if (hasChat) contactChannels.push('chat');
                 const hasEmail = await page.locator('._email').isVisible().catch(() => false);
                 if (hasEmail) contactChannels.push('email');
-            } catch (e) { /* ignore */ }
+            } catch (e: any) {
+                sendEvent({ status: 'extracting', message: `⚠️ WhatsApp/contact-channels extraction error: ${e.message?.substring(0, 100)}` });
+            }
 
             return {
                 title,
@@ -664,7 +670,7 @@ async function scrapeBazarakiListing(
                 whatsappPhone,
                 rawAttributes,
                 sessionExpired,
-                isExpired: phoneDiag.isExpired
+                isExpired
             };
         }
     );
