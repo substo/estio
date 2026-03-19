@@ -164,6 +164,7 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
                       const params = new URLSearchParams(window.location.search);
                       params.set('view', 'properties');
                       params.set('listingId', listing.id);
+                      params.set('scope', 'all');
                       params.delete('contactId');
                       router.push(`?${params.toString()}`);
                     }}

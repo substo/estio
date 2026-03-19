@@ -1,7 +1,7 @@
 import db from '@/lib/db';
 import { Prisma } from '@prisma/client';
 
-export type ScrapedListingScope = 'new' | 'all';
+export type ScrapedListingScope = 'new' | 'all' | 'accepted' | 'rejected';
 
 export interface ScrapedListingParams {
   limit?: number;
@@ -61,6 +61,10 @@ export async function listScrapedListings(
   const scope = params.scope || 'new';
   if (scope === 'new') {
     and.push({ status: { in: ['new', 'NEW', 'REVIEWING'] } });
+  } else if (scope === 'accepted') {
+    and.push({ status: { in: ['imported', 'IMPORTED'] } });
+  } else if (scope === 'rejected') {
+    and.push({ status: { in: ['rejected', 'REJECTED'] } });
   } else if (params.status) {
     and.push({ status: params.status });
   }

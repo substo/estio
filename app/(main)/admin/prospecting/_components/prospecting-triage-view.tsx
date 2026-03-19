@@ -358,11 +358,13 @@ export function ProspectingTriageView({
               />
             </div>
             <Select value={currentScope} onValueChange={handleScopeFilter}>
-              <SelectTrigger className="w-[90px] h-8 text-xs">
+              <SelectTrigger className="w-[110px] h-8 text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="new">New</SelectItem>
+                <SelectItem value="accepted">Accepted</SelectItem>
+                <SelectItem value="rejected">Rejected</SelectItem>
                 <SelectItem value="all">All</SelectItem>
               </SelectContent>
             </Select>

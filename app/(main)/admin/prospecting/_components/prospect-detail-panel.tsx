@@ -174,6 +174,7 @@ export function ProspectDetailPanel({ listing, onAccept, onReject, isPending }: 
                         const params = new URLSearchParams(window.location.search);
                         params.set('view', 'contacts');
                         params.set('contactId', listing.prospectLeadId!);
+                        params.set('scope', 'all');
                         params.delete('listingId');
                         router.push(`?${params.toString()}`);
                       }}

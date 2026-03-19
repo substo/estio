@@ -575,8 +575,8 @@ model ScrapedListing {
   price        Int?
   propertyType String?
   locationText String?
-  images       String[]
-  thumbnails   String[] @default([])
+  images       String[] // Strictly high-resolution versions
+  thumbnails   String[] @default([]) // Strictly low-resolution versions for feed performance
   status       String @default("NEW") // NEW, REVIEWING, IMPORTED, REJECTED, SKIPPED
 
   // Link to imported Property (set when contact is accepted and property is imported)
@@ -658,8 +658,9 @@ All UI state has been migrated to the URL to ensure triage views are **100% book
 
 ### 4.3 Deep Detail Panels & Scraping Operations
 
-Both detail panels contain dedicated action bars:
+Both detail panels contain dedicated action bars and tailored content views:
 
+- **High-Res Photo Gallery:** The `images` array is exclusively used for the main property viewer to ensure agents see high-quality, zoomable photos, while the `thumbnails` array powers the carousel strip and multi-property feed cards to preserve network and layout performance.
 - **Action Outbound:** Pre-filled WhatsApp deep links and direct Call links.
 - **Scrape Other Listings:** A dedicated `DownloadCloud` button that dispatches a background task (`scrapeSellerProfile`) to extract the rest of the seller's portfolio using their `otherListingsUrl`. This button is prominently available in both the Properties View and Contacts View. *(Note: When a single listing is scraped or re-scraped, the backend `scrape-listing` service automatically extracts and syncs this `profileUrl` directly to the `ProspectLead` record, ensuring this button is actionable immediately without needing to visit the contact card).*
 

@@ -1,7 +1,7 @@
 import db from '@/lib/db';
 import { Prisma } from '@prisma/client';
 
-export type ProspectInboxScope = 'new' | 'all';
+export type ProspectInboxScope = 'new' | 'all' | 'accepted' | 'rejected';
 
 export interface ProspectInboxParams {
   limit?: number;
@@ -64,6 +64,10 @@ export async function listProspectInbox(
   const scope = params.scope || 'new';
   if (scope === 'new') {
     and.push({ status: { in: ['new', 'reviewing'] } }); // include reviewing in 'new' scope
+  } else if (scope === 'accepted') {
+    and.push({ status: 'accepted' });
+  } else if (scope === 'rejected') {
+    and.push({ status: 'rejected' });
   } else if (params.status) {
     and.push({ status: params.status });
   }
