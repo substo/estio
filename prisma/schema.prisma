@@ -324,6 +324,9 @@ model Property {
   originalCreatedAt    DateTime?
   originalUpdatedAt    DateTime?
 
+  // Scraping Provenance
+  scrapedListingId String? // Back-reference to original ScrapedListing if imported from scraping
+
   // Feed Integration
   feedId          String?
   feed            PropertyFeed? @relation(fields: [feedId], references: [id])
@@ -786,6 +789,7 @@ model ProspectLead {
   // Seller Platform Intelligence
   platformUserId     String?  // Seller's platform ID (e.g. Bazaraki user ID "9431239")
   platformRegistered String?  // "Posting since sep, 2024"
+  profileUrl         String?  // Seller's profile / other listings page (e.g. "https://www.bazaraki.com/items/author/40951")
   listingCount       Int?     // Total active listings this seller has
 
   // AI Scoring
@@ -2010,7 +2014,10 @@ model ScrapedListing {
   // Flexible catch-all for all listing attributes
   rawAttributes Json?    // All key-value pairs from chars-column
 
-  status String @default("NEW") // NEW, REVIEWING, ACCEPTED, REJECTED
+  status String @default("NEW") // NEW, REVIEWING, IMPORTED, REJECTED, SKIPPED
+
+  // Link to imported Property (set when contact is accepted and property is imported)
+  importedPropertyId String?
 
   // Link to the Prospect / Person
   prospectLeadId String?

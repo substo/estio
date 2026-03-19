@@ -30,6 +30,7 @@ export interface ProspectInboxRow {
   isAgency: boolean;
   platformUserId: string | null;
   platformRegistered: string | null;
+  profileUrl: string | null;
   scrapedListingsCount: number;
   scrapedListings: {
     id: string;
@@ -123,6 +124,7 @@ export async function listProspectInbox(
       isAgency: r.isAgency,
       platformUserId: r.platformUserId,
       platformRegistered: r.platformRegistered,
+      profileUrl: r.profileUrl,
       scrapedListingsCount: (r as any)._count?.scrapedListings || 0,
       scrapedListings: (r as any).scrapedListings || [],
     })),

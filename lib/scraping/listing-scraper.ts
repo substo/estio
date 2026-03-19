@@ -343,6 +343,7 @@ export class ListingScraperService {
                         isAgency,
                         platformUserId: listing.sellerExternalId,
                         platformRegistered: listing.sellerRegisteredAt,
+                        profileUrl: listing.otherListingsUrl || null,
                     }
                 });
             } else {
@@ -354,6 +355,7 @@ export class ListingScraperService {
 
                 if (listing.sellerExternalId && !existingProspect.platformUserId) updateData.platformUserId = listing.sellerExternalId;
                 if (listing.sellerRegisteredAt && !existingProspect.platformRegistered) updateData.platformRegistered = listing.sellerRegisteredAt;
+                if (listing.otherListingsUrl && !existingProspect.profileUrl) updateData.profileUrl = listing.otherListingsUrl;
 
                 if (Object.keys(updateData).length > 0) {
                     await db.prospectLead.update({ where: { id: existingProspect.id }, data: updateData });

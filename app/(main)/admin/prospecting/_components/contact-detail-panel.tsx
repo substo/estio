@@ -53,8 +53,8 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
     window.open(`tel:${prospect.phone}`, '_self');
   };
 
-  // Find a listing with otherListingsUrl for the scrape button
-  const sellerProfileUrl = prospect.scrapedListings?.find((l: any) => l.otherListingsUrl)?.otherListingsUrl as string | undefined;
+  // Use profileUrl directly from the prospect, falling back to listing data
+  const sellerProfileUrl = prospect.profileUrl || prospect.scrapedListings?.find((l: any) => l.otherListingsUrl)?.otherListingsUrl as string | undefined;
 
   const handleScrapeSeller = () => {
     if (!sellerProfileUrl) return;
@@ -89,6 +89,11 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
             )}
           </div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            {sellerProfileUrl && (
+              <a href={sellerProfileUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
+                View Profile <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
             <Badge variant="outline" className="text-xs gap-1"><Hash className="w-3 h-3" /> {prospect.scrapedListingsCount} listings</Badge>
           </div>
         </div>
