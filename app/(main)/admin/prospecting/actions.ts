@@ -206,3 +206,120 @@ export async function bulkRejectListings(ids: string[]) {
         return { success: false, message: e.message || 'Server error' };
     }
 }
+
+// --- Contact-level Cascading Actions ---
+
+export async function rejectProspectWithListings(prospectId: string) {
+    try {
+        const internalUserId = await getInternalUserId();
+        if (!internalUserId) return { success: false, message: 'Unauthorized' };
+
+        const prospect = await db.prospectLead.findUnique({ where: { id: prospectId } });
+        if (!prospect || (prospect.status !== 'new' && prospect.status !== 'reviewing')) {
+            return { success: false, message: 'Prospect not found or already processed' };
+        }
+
+        // Reject prospect AND all their listings in a single transaction
+        const [, listingsResult] = await db.$transaction([
+            db.prospectLead.update({
+                where: { id: prospectId },
+                data: {
+                    status: 'rejected',
+                    reviewedAt: new Date(),
+                    reviewedBy: internalUserId
+                }
+            }),
+            db.scrapedListing.updateMany({
+                where: {
+                    prospectLeadId: prospectId,
+                    status: { in: ['NEW', 'REVIEWING', 'new', 'reviewing'] }
+                },
+                data: { status: 'REJECTED' }
+            })
+        ]);
+
+        revalidatePath('/admin/prospecting');
+        return { success: true, listingsRejected: listingsResult.count };
+    } catch (e: any) {
+        return { success: false, message: e.message || 'Server error' };
+    }
+}
+
+export async function acceptProspectWithListings(prospectId: string) {
+    try {
+        const internalUserId = await getInternalUserId();
+        if (!internalUserId) return { success: false, message: 'Unauthorized' };
+
+        const prospect = await db.prospectLead.findUnique({ where: { id: prospectId } });
+        if (!prospect || (prospect.status !== 'new' && prospect.status !== 'reviewing')) {
+            return { success: false, message: 'Prospect not found or already processed' };
+        }
+
+        // Accept prospect and create CRM contact
+        const contact = await db.contact.create({
+            data: {
+                locationId: prospect.locationId,
+                status: 'active',
+                contactType: 'Lead',
+                name: prospect.name || 'Unknown',
+                firstName: prospect.firstName,
+                lastName: prospect.lastName,
+                email: prospect.email,
+                phone: prospect.phone,
+                message: prospect.message,
+                leadSource: prospect.source,
+                leadScore: prospect.aiScore || 0,
+                qualificationStage: (prospect.aiScore || 0) >= 60 ? 'qualified' : 'basic',
+            }
+        });
+
+        // Accept prospect and all their listings in a transaction
+        const [, listingsResult] = await db.$transaction([
+            db.prospectLead.update({
+                where: { id: prospectId },
+                data: {
+                    status: 'accepted',
+                    createdContactId: contact.id,
+                    reviewedAt: new Date(),
+                    reviewedBy: internalUserId
+                }
+            }),
+            db.scrapedListing.updateMany({
+                where: {
+                    prospectLeadId: prospectId,
+                    status: { in: ['NEW', 'REVIEWING', 'new', 'reviewing'] }
+                },
+                data: { status: 'ACCEPTED' }
+            })
+        ]);
+
+        await db.contactHistory.create({
+            data: {
+                contactId: contact.id,
+                action: 'PROSPECT_ACCEPTED',
+                userId: internalUserId,
+                changes: JSON.stringify([
+                    { field: 'source', old: null, new: prospect.source },
+                    { field: 'prospectId', old: null, new: prospect.id }
+                ])
+            }
+        });
+
+        await eventBus.emit({
+            type: 'lead.created',
+            payload: { contactId: contact.id, locationId: contact.locationId },
+            metadata: {
+                timestamp: new Date(),
+                sourceId: 'ui',
+                contactId: contact.id
+            }
+        });
+
+        revalidatePath('/admin/prospecting');
+        revalidatePath('/admin/contacts');
+        return { success: true, contactId: contact.id, listingsAccepted: listingsResult.count };
+    } catch (e: any) {
+        return { success: false, message: e.message || 'Server error' };
+    }
+}
+

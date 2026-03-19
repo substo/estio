@@ -12,18 +12,20 @@ export default async function ProspectingHubPage({ searchParams }: { searchParam
   const params = await searchParams;
   const prospectId = params.prospectId;
   const scope = (params.scope as 'new' | 'all') || 'new';
+  const view = (params.view as 'properties' | 'contacts') || 'properties';
 
-  // Fetch prospects for seller filter dropdown
+  // Fetch prospects (used for both Contacts view and seller filter dropdown)
   const prospectsResult = await listProspectInbox(location.id, {
     limit: 100,
-    scope: 'all' as ProspectInboxScope,
+    scope: scope as ProspectInboxScope,
+    q: view === 'contacts' ? params.q : undefined,
   });
 
-  // Fetch listings with filters
+  // Fetch listings with filters (for Properties view)
   const listingsResult = await listScrapedListings(location.id, {
     ...(prospectId ? { prospectLeadId: prospectId } : {}),
     scope,
-    q: params.q,
+    q: view === 'properties' ? params.q : undefined,
     limit: 100,
   });
 
@@ -32,8 +34,10 @@ export default async function ProspectingHubPage({ searchParams }: { searchParam
       listings={listingsResult.items as any}
       listingsTotal={listingsResult.total}
       prospects={prospectsResult.items}
+      prospectsTotal={prospectsResult.total}
       locationId={location.id}
       selectedProspectId={prospectId}
+      initialView={view}
     />
   );
 }

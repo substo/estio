@@ -28,8 +28,24 @@ export interface ProspectInboxRow {
   createdContactId: string | null;
   createdAt: string;
   isAgency: boolean;
+  platformUserId: string | null;
+  platformRegistered: string | null;
   scrapedListingsCount: number;
-  scrapedListings: { id: string; url: string; title: string | null; platform: string; price: number | null }[];
+  scrapedListings: {
+    id: string;
+    url: string;
+    title: string | null;
+    platform: string;
+    price: number | null;
+    currency: string | null;
+    locationText: string | null;
+    propertyType: string | null;
+    bedrooms: number | null;
+    propertyArea: number | null;
+    status: string;
+    images: string[];
+    thumbnails: string[];
+  }[];
 }
 
 export interface ProspectInboxResult {
@@ -71,9 +87,15 @@ export async function listProspectInbox(
       take: params.limit || 25,
       skip: params.skip || 0,
       include: {
+        _count: { select: { scrapedListings: true } },
         scrapedListings: {
-          select: { id: true, url: true, title: true, platform: true, price: true },
-          take: 5 // Just preview the first 5 in the inbox list
+          select: {
+            id: true, url: true, title: true, platform: true,
+            price: true, currency: true, locationText: true,
+            propertyType: true, bedrooms: true, propertyArea: true,
+            status: true, images: true, thumbnails: true,
+          },
+          orderBy: { createdAt: 'desc' },
         }
       },
       orderBy: [{ aiScore: 'desc' }, { createdAt: 'desc' }],
@@ -97,7 +119,9 @@ export async function listProspectInbox(
       createdContactId: r.createdContactId,
       createdAt: r.createdAt.toISOString(),
       isAgency: r.isAgency,
-      scrapedListingsCount: (r as any).scrapedListings?.length || 0,
+      platformUserId: r.platformUserId,
+      platformRegistered: r.platformRegistered,
+      scrapedListingsCount: (r as any)._count?.scrapedListings || 0,
       scrapedListings: (r as any).scrapedListings || [],
     })),
     total,
