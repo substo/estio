@@ -152,7 +152,17 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
                 const thumb = listing.thumbnails?.[0] || listing.images?.[0];
                 const isListingNew = listing.status === 'NEW' || listing.status === 'new' || listing.status === 'REVIEWING';
                 return (
-                  <div key={listing.id} className={`rounded-lg border bg-background overflow-hidden transition-opacity ${!isListingNew ? 'opacity-50' : ''}`}>
+                  <div
+                    key={listing.id}
+                    onClick={() => {
+                      const params = new URLSearchParams(window.location.search);
+                      params.set('view', 'properties');
+                      params.set('listingId', listing.id);
+                      params.delete('contactId');
+                      router.push(`?${params.toString()}`);
+                    }}
+                    className={`rounded-lg border bg-background overflow-hidden transition-all cursor-pointer hover:ring-2 hover:ring-primary/30 hover:shadow-md ${!isListingNew ? 'opacity-50' : ''}`}
+                  >
                     {thumb ? (
                       <div className="h-32 bg-muted">
                         <img src={thumb} alt="" className="w-full h-full object-cover" />
@@ -175,9 +185,12 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
                         )}
                       </div>
                       <p className="text-[11px] text-muted-foreground truncate">{listing.locationText || 'Cyprus'}</p>
-                      <a href={listing.url} target="_blank" rel="noreferrer" className="text-[11px] text-primary flex items-center gap-1 hover:underline">
-                        View <ExternalLink className="w-2.5 h-2.5" />
-                      </a>
+                      <div className="flex items-center gap-3">
+                        <span className="text-[11px] text-primary font-medium">Open Details →</span>
+                        <a href={listing.url} target="_blank" rel="noreferrer" className="text-[11px] text-muted-foreground flex items-center gap-1 hover:underline hover:text-primary" onClick={(e) => e.stopPropagation()}>
+                          External <ExternalLink className="w-2.5 h-2.5" />
+                        </a>
+                      </div>
                     </div>
                   </div>
                 );
