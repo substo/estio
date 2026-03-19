@@ -201,8 +201,8 @@ export function ProspectDetailPanel({ listing, onAccept, onReject, isPending }: 
                 </Button>
 
                 {listing.otherListingsUrl && (
-                  <Button variant="outline" size="sm" className="gap-1.5 hidden xl:flex mt-2 ml-1" onClick={handleScrapeSeller} disabled={isScrapingSeller}>
-                    <DownloadCloud className="w-4 h-4 text-primary" /> {isScrapingSeller ? 'Exporting...' : 'More Listings'}
+                  <Button variant="outline" size="sm" className="gap-1.5 mt-2 ml-1" onClick={handleScrapeSeller} disabled={isScrapingSeller}>
+                    <DownloadCloud className="w-4 h-4 text-primary" /> {isScrapingSeller ? 'Scraping...' : 'Scrape Other Listings'}
                   </Button>
                 )}
 

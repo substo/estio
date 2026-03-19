@@ -655,7 +655,7 @@ All UI state has been migrated to the URL to ensure triage views are **100% book
 Both detail panels contain dedicated action bars:
 
 - **Action Outbound:** Pre-filled WhatsApp deep links and direct Call links.
-- **Scrape Other Listings:** A dedicated `DownloadCloud` button that dispatches a background task (`scrapeSellerProfile`) to extract the rest of the seller's portfolio using their `otherListingsUrl`. This button is available in both views.
+- **Scrape Other Listings:** A dedicated `DownloadCloud` button that dispatches a background task (`scrapeSellerProfile`) to extract the rest of the seller's portfolio using their `otherListingsUrl`. This button is prominently available in both the Properties View and Contacts View. *(Note: When a single listing is scraped or re-scraped, the backend `scrape-listing` service automatically extracts and syncs this `profileUrl` directly to the `ProspectLead` record, ensuring this button is actionable immediately without needing to visit the contact card).*
 
 ### 4.4 Cascading Decide Actions & Keyboard Accessibility
 

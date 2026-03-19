@@ -692,6 +692,7 @@ async function upsertListingData(
                     isAgency: false,
                     platformUserId: data.sellerExternalId,
                     platformRegistered: data.sellerRegisteredAt,
+                    profileUrl: data.otherListingsUrl || null,
                 },
             });
             sendEvent({ status: 'saving', message: `Created new prospect: ${data.ownerName || 'Unknown'}` });
@@ -705,6 +706,7 @@ async function upsertListingData(
 
             if (data.sellerExternalId && !existingProspect.platformUserId) updateData.platformUserId = data.sellerExternalId;
             if (data.sellerRegisteredAt && !existingProspect.platformRegistered) updateData.platformRegistered = data.sellerRegisteredAt;
+            if (data.otherListingsUrl && (!existingProspect.profileUrl || existingProspect.profileUrl !== data.otherListingsUrl)) updateData.profileUrl = data.otherListingsUrl;
 
             if (Object.keys(updateData).length > 0) {
                 await db.prospectLead.update({ where: { id: existingProspect.id }, data: updateData });
