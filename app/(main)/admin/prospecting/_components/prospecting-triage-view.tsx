@@ -485,6 +485,7 @@ export function ProspectingTriageView({
             onAccept={handleAcceptContact}
             onReject={handleRejectContact}
             isPending={isPending}
+            locationId={locationId}
           />
         )}
       </div>

@@ -19,9 +19,10 @@ interface ContactDetailPanelProps {
   onAccept: (id: string) => void;
   onReject: (id: string) => void;
   isPending: boolean;
+  locationId: string;
 }
 
-export function ContactDetailPanel({ prospect, onAccept, onReject, isPending }: ContactDetailPanelProps) {
+export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, locationId }: ContactDetailPanelProps) {
   const router = useRouter();
   const [isScrapingSeller, startScrapingSeller] = useTransition();
 
@@ -52,21 +53,20 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending }: 
     window.open(`tel:${prospect.phone}`, '_self');
   };
 
-  // Find a listing with otherListingsUrl
-  const listingWithSellerUrl = prospect.scrapedListings?.find((l: any) => l.otherListingsUrl);
+  // Find a listing with otherListingsUrl for the scrape button
+  const sellerProfileUrl = prospect.scrapedListings?.find((l: any) => l.otherListingsUrl)?.otherListingsUrl as string | undefined;
 
   const handleScrapeSeller = () => {
-    // We need to find the otherListingsUrl from the first listing
-    const firstListing = prospect.scrapedListings?.[0];
-    if (!firstListing) return;
+    if (!sellerProfileUrl) return;
     startScrapingSeller(async () => {
       const res = await scrapeSellerProfile(
-        '', // locationId will be derived from session
+        locationId,
         prospect.name || 'Unknown Owner',
-        (firstListing as any).otherListingsUrl || firstListing.url
+        sellerProfileUrl
       );
       if (res.success) {
         toast.success(res.message);
+        router.refresh();
       } else {
         toast.error(res.message);
       }
@@ -114,6 +114,12 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending }: 
           <Button variant="outline" size="sm" className="gap-1.5" onClick={handleCall} disabled={!prospect.phone}>
             <Phone className="w-4 h-4 text-blue-500" /> Call
           </Button>
+
+          {sellerProfileUrl && (
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={handleScrapeSeller} disabled={isScrapingSeller}>
+              <DownloadCloud className="w-4 h-4 text-primary" /> {isScrapingSeller ? 'Scraping...' : 'Scrape Other Listings'}
+            </Button>
+          )}
 
           <div className="flex-1 min-w-[0.5rem]" />
 

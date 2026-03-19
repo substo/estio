@@ -45,6 +45,7 @@ export interface ProspectInboxRow {
     status: string;
     images: string[];
     thumbnails: string[];
+    otherListingsUrl: string | null;
   }[];
 }
 
@@ -94,6 +95,7 @@ export async function listProspectInbox(
             price: true, currency: true, locationText: true,
             propertyType: true, bedrooms: true, propertyArea: true,
             status: true, images: true, thumbnails: true,
+            otherListingsUrl: true,
           },
           orderBy: { createdAt: 'desc' },
         }
