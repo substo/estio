@@ -319,15 +319,20 @@ async function scrapeBazarakiListing(
 
                 const topItems = uniqueItems.slice(0, 10);
                 images = topItems.map(item => item.full);
-                thumbnails = topItems.map(item => item.thumb);
-
-                // Fallback for thumbnails if they weren't in the main slider
-                if (thumbnails.length === 0) {
-                    const thumbExtracted = await page.locator('.announcement__thumbnails-item.js-select-image, .announcement__thumbnails-wrapper img').evaluateAll(
-                        (els: HTMLImageElement[]) => els.map(el => el.getAttribute('src') || '').filter(s => s && s.startsWith('http'))
-                    ) as string[];
-                    thumbnails = [...new Set(thumbExtracted)].slice(0, 10);
+                
+                // 1. Try to get actual thumbnails from the thumbnail strip
+                const thumbExtracted = await page.locator('.announcement__thumbnails-item.js-select-image, .announcement__thumbnails-wrapper img').evaluateAll(
+                    (els: HTMLImageElement[]) => els.map(el => el.getAttribute('src') || '').filter(s => s && s.startsWith('http'))
+                ) as string[];
+                
+                let actualThumbnails = [...new Set(thumbExtracted)].slice(0, 10);
+                
+                // 2. Fallback to main slider's `src` if no dedicated thumbnails exist
+                if (actualThumbnails.length === 0) {
+                    actualThumbnails = topItems.map(item => item.thumb);
                 }
+                
+                thumbnails = actualThumbnails;
             } catch (e) { /* no images */ }
             sendEvent({ status: 'extracting', message: `Images found: ${images.length}, Thumbnails: ${thumbnails.length}` });
 

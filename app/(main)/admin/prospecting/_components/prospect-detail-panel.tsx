@@ -236,7 +236,7 @@ export function ProspectDetailPanel({ listing, onAccept, onReject, isPending }: 
                   <>
                     <a href={listing.images[currentImageIndex]} target="_blank" rel="noreferrer" title="View Full Image" className="block w-full h-full flex items-center justify-center p-2">
                       <img
-                        src={listing.thumbnails?.[currentImageIndex] || listing.images[currentImageIndex]}
+                        src={listing.images[currentImageIndex]}
                         alt="Property"
                         className="max-w-full max-h-full object-contain drop-shadow-md rounded-md"
                       />
