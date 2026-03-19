@@ -166,7 +166,7 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
                       params.delete('contactId');
                       router.push(`?${params.toString()}`);
                     }}
-                    className={`rounded-lg border bg-background overflow-hidden transition-all cursor-pointer hover:ring-2 hover:ring-primary/30 hover:shadow-md ${!isListingNew ? 'opacity-50' : ''}`}
+                    className={`rounded-lg border bg-background overflow-hidden transition-all cursor-pointer hover:ring-2 hover:ring-primary/30 hover:shadow-md ${(!isListingNew || listing.isExpired) ? 'opacity-50' : ''}`}
                   >
                     {thumb ? (
                       <div className="h-32 bg-muted">
@@ -185,6 +185,9 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
                         </Badge>
                         {listing.bedrooms !== null && <Badge variant="outline" className="text-[10px]">{listing.bedrooms}B</Badge>}
                         {listing.propertyArea !== null && <Badge variant="outline" className="text-[10px]">{listing.propertyArea}m²</Badge>}
+                        {listing.isExpired && (
+                          <Badge variant="destructive" className="bg-slate-800 text-white hover:bg-slate-800 text-[9px]">Expired</Badge>
+                        )}
                         {!isListingNew && (
                           <Badge variant={listing.status === 'IMPORTED' ? 'default' : 'destructive'} className="text-[9px]">{listing.status}</Badge>
                         )}

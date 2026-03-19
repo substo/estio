@@ -57,14 +57,19 @@ export function ListingFeedCard({ listing, isSelected, onClick, isBulkSelected, 
             <div className="font-semibold text-[13px] leading-tight line-clamp-1">
               {listing.title || 'Untitled Listing'}
             </div>
-            {!isNew && (
-              <Badge
-                variant={listing.status === 'IMPORTED' ? 'default' : 'destructive'}
-                className="text-[9px] h-4 px-1 shrink-0"
-              >
-                {listing.status}
-              </Badge>
-            )}
+            <div className="flex gap-1 shrink-0">
+              {listing.isExpired && (
+                <Badge variant="destructive" className="bg-slate-800 text-white hover:bg-slate-800 text-[9px] h-4 px-1 shrink-0">Expired</Badge>
+              )}
+              {!isNew && (
+                <Badge
+                  variant={listing.status === 'IMPORTED' ? 'default' : 'destructive'}
+                  className="text-[9px] h-4 px-1 shrink-0"
+                >
+                  {listing.status}
+                </Badge>
+              )}
+            </div>
           </div>
           
           <div className="flex items-center gap-1.5 mt-0.5">

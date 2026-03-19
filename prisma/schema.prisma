@@ -2014,6 +2014,7 @@ model ScrapedListing {
   // Flexible catch-all for all listing attributes
   rawAttributes Json?    // All key-value pairs from chars-column
 
+  isExpired Boolean @default(false)
   status String @default("NEW") // NEW, REVIEWING, IMPORTED, REJECTED, SKIPPED
 
   // Link to imported Property (set when contact is accepted and property is imported)

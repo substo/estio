@@ -119,7 +119,12 @@ export function ProspectDetailPanel({ listing, onAccept, onReject, isPending }: 
               {/* Property Info */}
               <div>
                 <div className="flex justify-between items-start gap-4">
-                  <h2 className="text-xl font-bold leading-tight">{listing.title || 'Untitled Property'}</h2>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-xl font-bold leading-tight">{listing.title || 'Untitled Property'}</h2>
+                    {listing.isExpired && (
+                      <Badge variant="destructive" className="bg-slate-800 hover:bg-slate-800 text-white uppercase translate-y-px">Expired Listing</Badge>
+                    )}
+                  </div>
                   <Button variant="ghost" size="icon" className="shrink-0 -mt-1 text-muted-foreground hover:text-foreground" onClick={() => setIsScrapeOpen(true)} title="Re-scrape Listing">
                     <RefreshCw className="w-4 h-4" />
                   </Button>

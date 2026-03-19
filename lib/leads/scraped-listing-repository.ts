@@ -43,6 +43,7 @@ export interface ScrapedListingRow {
   prospectName: string | null;
   prospectPhone: string | null;
   prospectAgency: boolean;
+  isExpired: boolean;
   createdAt: string;
 }
 
@@ -125,6 +126,7 @@ export async function listScrapedListings(
       prospectAgency: r.prospectLead?.isAgency ?? false,
       sellerRegisteredAt: r.sellerRegisteredAt,
       otherListingsUrl: r.otherListingsUrl,
+      isExpired: r.isExpired,
       createdAt: r.createdAt.toISOString(),
     })),
     total,

@@ -209,6 +209,7 @@ interface ScrapedData {
     whatsappPhone?: string;
     rawAttributes?: Record<string, string>;
     sessionExpired?: boolean;
+    isExpired?: boolean;
 }
 
 async function scrapeBazarakiListing(
@@ -662,7 +663,8 @@ async function scrapeBazarakiListing(
                 contactChannels,
                 whatsappPhone,
                 rawAttributes,
-                sessionExpired
+                sessionExpired,
+                isExpired: phoneDiag.isExpired
             };
         }
     );
@@ -775,6 +777,7 @@ async function upsertListingData(
                 contactChannels: data.contactChannels,
                 whatsappPhone: data.whatsappPhone,
                 rawAttributes: data.rawAttributes,
+                isExpired: data.isExpired || false,
                 prospectLeadId,
             },
         });
@@ -808,6 +811,7 @@ async function upsertListingData(
                 contactChannels: data.contactChannels,
                 whatsappPhone: data.whatsappPhone,
                 rawAttributes: data.rawAttributes,
+                isExpired: data.isExpired || false,
                 prospectLeadId,
             },
             create: {
@@ -837,6 +841,7 @@ async function upsertListingData(
                 contactChannels: data.contactChannels,
                 whatsappPhone: data.whatsappPhone,
                 rawAttributes: data.rawAttributes,
+                isExpired: data.isExpired || false,
                 status: 'NEW',
                 prospectLeadId,
             },
