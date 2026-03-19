@@ -4,7 +4,7 @@ import db from '@/lib/db';
 import { ListingScraperService } from '@/lib/scraping/listing-scraper';
 import { auth } from '@clerk/nextjs/server';
 
-export async function scrapeSellerProfile(locationId: string, sellerName: string, profileUrl: string) {
+export async function scrapeSellerProfile(locationId: string, sellerName: string, profileUrl: string, prospectId?: string) {
     try {
         const { userId } = await auth();
         if (!userId) return { success: false, message: 'Unauthorized' };
@@ -29,7 +29,8 @@ export async function scrapeSellerProfile(locationId: string, sellerName: string
                 name: taskName,
                 connectionId: connection.id,
                 targetUrls: [profileUrl],
-                scrapeStrategy: 'shallow_duplication', // Best for bulk profile grabbing without using up deep-scrape interactions
+                scrapeStrategy: 'deep_extraction', // Deep extract to fully construct property profiles
+                targetProspectId: prospectId, // Bind explicitly to this CRM Contact
                 extractionMode: 'index_crawler',
                 maxPagesPerRun: 10,
                 maxInteractionsPerRun: 50,

@@ -84,7 +84,8 @@ export function ProspectDetailPanel({ listing, onAccept, onReject, isPending }: 
       const res = await scrapeSellerProfile(
         listing.locationId,
         listing.prospectName || 'Unknown Owner',
-        listing.otherListingsUrl!
+        listing.otherListingsUrl!,
+        listing.prospectLeadId || undefined
       );
       if (res.success) {
         toast.success(res.message);

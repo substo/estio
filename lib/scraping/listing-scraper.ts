@@ -92,6 +92,12 @@ export class ListingScraperService {
         if (interactionsRemaining > dailyLimit) interactionsRemaining = dailyLimit;
 
         try {
+            let knownPhone: string | undefined = undefined;
+            if (task.targetProspectId) {
+                const prospect = await db.prospectLead.findUnique({ where: { id: task.targetProspectId } });
+                if (prospect?.phone) knownPhone = prospect.phone;
+            }
+
             // Which URLs are we scraping?
             const urlsToScrape = task.targetUrls && task.targetUrls.length > 0
                 ? task.targetUrls // If absolute paths are provided in targetUrls
@@ -130,7 +136,8 @@ export class ListingScraperService {
                             sellerType: task.targetSellerType as 'individual' | 'agency' | 'all',
                             interactionsAvailable: interactionsRemaining,
                             delayBaseMs: task.delayBetweenPagesMs,
-                            delayJitterMs: task.delayJitterMs
+                            delayJitterMs: task.delayJitterMs,
+                            knownPhone
                         });
                         rawListings = extractionResult.listings;
                         nextPageUrl = extractionResult.nextPageUrl; // Capture pagination link
@@ -165,7 +172,7 @@ export class ListingScraperService {
                             }
 
                             // Create ProspectLead in the Lead Inbox
-                            await this.createProspect(listing, task.id, task.locationId);
+                            await this.createProspect(listing, task, task.locationId);
                             leadsCreated++;
 
                         } catch (err: any) {
@@ -310,15 +317,15 @@ export class ListingScraperService {
     /**
      * Maps the extracted Listing into a ScrapedListing and ProspectLead entity
      */
-    static async createProspect(listing: RawListing, taskId: string, locationId: string) {
+    static async createProspect(listing: RawListing, task: ScrapeTaskWithConnection, locationId: string) {
 
         // 1. Default to false for initial scrape. Deep Scrape will classify this later.
         let isAgency = false;
 
         // 2. Find or Create ProspectLead
-        let prospectLeadId: string | null = null;
+        let prospectLeadId: string | null = task.targetProspectId || null;
 
-        if (listing.ownerPhone || listing.ownerEmail || listing.sellerExternalId) {
+        if (!prospectLeadId && (listing.ownerPhone || listing.ownerEmail || listing.sellerExternalId)) {
             const orConditions: any[] = [];
             if (listing.ownerPhone) orConditions.push({ phone: { contains: listing.ownerPhone } });
             if (listing.whatsappPhone) orConditions.push({ phone: { contains: listing.whatsappPhone } });

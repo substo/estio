@@ -62,7 +62,8 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
       const res = await scrapeSellerProfile(
         locationId,
         prospect.name || 'Unknown Owner',
-        sellerProfileUrl
+        sellerProfileUrl,
+        prospect.id
       );
       if (res.success) {
         toast.success(res.message);

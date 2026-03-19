@@ -17,6 +17,7 @@ export interface BazarakiExtractionOptions {
     interactionsAvailable: number;
     delayBaseMs: number;
     delayJitterMs: number;
+    knownPhone?: string;
 }
 
 export interface BazarakiExtractionResult {
@@ -156,29 +157,34 @@ export async function extractBazarakiIndex(content: string, baseUrl: string, fet
                     return deepData;
                 }
 
-                // Try to click "Show phone number" button - THIS CONSUMES AN INTERACTION BUDGET
-                let phone = '';
-                try {
-                    const phoneBtn = page.locator('.phone-author.js-phone-click, .js-show-popup-contact-business').first();
-                    if (await phoneBtn.isVisible()) {
-                        await phoneBtn.click({ force: true });
-                        await page.waitForTimeout(1500); // Give JS time to replace inner context
+                if (opts.knownPhone) {
+                    console.log(`[BazarakiExtractor] Skipping interaction: Phone number already known`);
+                    deepData.ownerPhone = opts.knownPhone.replace(/\s+/g, '');
+                } else {
+                    // Try to click "Show phone number" button - THIS CONSUMES AN INTERACTION BUDGET
+                    let phone = '';
+                    try {
+                        const phoneBtn = page.locator('.phone-author.js-phone-click, .js-show-popup-contact-business').first();
+                        if (await phoneBtn.isVisible()) {
+                            await phoneBtn.click({ force: true });
+                            await page.waitForTimeout(1500); // Give JS time to replace inner context
 
-                        // First check inline
-                        const inlinePhone = await page.locator('.phone-author-subtext__main').first().textContent() || '';
-                        if (inlinePhone && inlinePhone.trim().length > 5 && inlinePhone.trim() !== '+35') {
-                            phone = inlinePhone;
+                            // First check inline
+                            const inlinePhone = await page.locator('.phone-author-subtext__main').first().textContent() || '';
+                            if (inlinePhone && inlinePhone.trim().length > 5 && inlinePhone.trim() !== '+35') {
+                                phone = inlinePhone;
+                            }
+
+                            // Also check dialog if it appears
+                            const dialogPhone = await page.locator('.contacts-dialog__phone a[href^="tel:"]').first().textContent().catch(() => '') || '';
+                            if (dialogPhone) phone = dialogPhone;
+                        } else {
+                            phone = await page.locator('.phone-author-subtext__main').first().textContent() || '';
                         }
-
-                        // Also check dialog if it appears
-                        const dialogPhone = await page.locator('.contacts-dialog__phone a[href^="tel:"]').first().textContent().catch(() => '') || '';
-                        if (dialogPhone) phone = dialogPhone;
-                    } else {
-                        phone = await page.locator('.phone-author-subtext__main').first().textContent() || '';
+                        if (phone) deepData.ownerPhone = phone.trim().replace(/\s+/g, '');
+                    } catch (e) {
+                        console.log(`[BazarakiExtractor] Failed to reveal phone for ${shallow.url}`);
                     }
-                    if (phone) deepData.ownerPhone = phone.trim().replace(/\s+/g, '');
-                } catch (e) {
-                    console.log(`[BazarakiExtractor] Failed to reveal phone for ${shallow.url}`);
                 }
 
                 return deepData;

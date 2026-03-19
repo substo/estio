@@ -1937,8 +1937,9 @@ model ScrapingTask {
   maxInteractionsPerRun Int? // Optional hard cap on deep actions per run
 
   // Target Execution specifics
-  targetUrls    String[] @default([]) // Array of specific URLs to scrape (e.g. /real-estate-for-sale/)
-  fieldMappings Json? // Flexible JSON for mapping fields dynamically per platform
+  targetUrls       String[] @default([]) // Array of specific URLs to scrape (e.g. /real-estate-for-sale/)
+  targetProspectId String? // Bind all listings to this CRM prospect
+  fieldMappings    Json? // Flexible JSON for mapping fields dynamically per platform
 
   // Sync state
   lastSyncAt     DateTime?
