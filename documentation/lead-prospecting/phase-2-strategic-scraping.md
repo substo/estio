@@ -273,6 +273,11 @@ The primary bottleneck on classified platforms is **action thresholds** (how man
     *   Executes the "Show Phone Number" interaction.
     *   Deducts 1 point from the Connection's `maxDailyInteractions` budget.
 
+3.  **Targeted Deep Extraction (Profile Rescrape):**
+    *   When an agent clicks "Scrape Other Listings" on a Contact or Property view, a `deep_extraction` task is created explicitly linked to that `prospectLeadId`.
+    *   The scraper dynamically fetches the `knownPhone` of the Prospect.
+    *   All extracted properties are natively bound to the matching CRM Contact, and **the scraper bypasses the "Show Phone Number" interaction**, conserving interaction budgets while capturing High-Res imagery and full property details.
+
 By combining an hourly Shallow sweep with filtered Deep Extractions, Estio maintains full market data without triggering aggressive anti-bot captchas.
 
 ---
@@ -352,6 +357,7 @@ Filters can be applied via URL params (district, price range, bedrooms).
 | **WhatsApp Phone** | `a._whatsapp[href]` → parse `phone=` param | Free extraction — no click budget |
 | **Contact Channels** | Presence checks: `.js-card-messenger`, `._email`, WhatsApp href | Array: `["whatsapp","chat","email"]` |
 | **Raw Attributes** | All `ul.chars-column li` key-value pairs | Stored as JSON catch-all |
+| **Expired Status** | `.phone-author--sold` or `.phone-author__subtext` text | Flags `isExpired` in DB to visually dim the UI across hubs |
 
 #### Phone Extraction: Contacts Dialog Flow
 
