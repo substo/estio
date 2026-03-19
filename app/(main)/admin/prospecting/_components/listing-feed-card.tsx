@@ -59,7 +59,7 @@ export function ListingFeedCard({ listing, isSelected, onClick, isBulkSelected, 
             </div>
             {!isNew && (
               <Badge
-                variant={listing.status === 'ACCEPTED' ? 'default' : 'destructive'}
+                variant={listing.status === 'IMPORTED' ? 'default' : 'destructive'}
                 className="text-[9px] h-4 px-1 shrink-0"
               >
                 {listing.status}

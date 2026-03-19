@@ -186,7 +186,7 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
                         {listing.bedrooms !== null && <Badge variant="outline" className="text-[10px]">{listing.bedrooms}B</Badge>}
                         {listing.propertyArea !== null && <Badge variant="outline" className="text-[10px]">{listing.propertyArea}m²</Badge>}
                         {!isListingNew && (
-                          <Badge variant={listing.status === 'ACCEPTED' ? 'default' : 'destructive'} className="text-[9px]">{listing.status}</Badge>
+                          <Badge variant={listing.status === 'IMPORTED' ? 'default' : 'destructive'} className="text-[9px]">{listing.status}</Badge>
                         )}
                       </div>
                       <p className="text-[11px] text-muted-foreground truncate">{listing.locationText || 'Cyprus'}</p>

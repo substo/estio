@@ -4,6 +4,7 @@ import db from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import { auth } from '@clerk/nextjs/server';
 import { eventBus } from '@/lib/ai/events/event-bus';
+import { importAllListingsForProspect } from '@/lib/leads/property-import';
 
 async function getInternalUserId() {
     const { userId } = await auth();
@@ -36,6 +37,7 @@ export async function acceptProspect(id: string) {
                 phone: prospect.phone,
                 message: prospect.message,
                 leadSource: prospect.source,
+                leadGoal: 'To List', // Scraped sellers are listing their properties
                 leadScore: prospect.aiScore || 0,
                 qualificationStage: (prospect.aiScore || 0) >= 60 ? 'qualified' : 'basic',
             }
@@ -139,35 +141,60 @@ export async function bulkReject(ids: string[]) {
 
 // --- Listing Actions ---
 
+/**
+ * Accept a single listing by cascading to its parent contact.
+ * This ensures all acceptance goes through the contact-centric flow.
+ */
 export async function acceptScrapedListing(id: string) {
     try {
         const internalUserId = await getInternalUserId();
         if (!internalUserId) return { success: false, message: 'Unauthorized' };
 
-        await db.scrapedListing.update({
+        // Find the listing and its parent prospect
+        const listing = await db.scrapedListing.findUnique({
             where: { id },
-            data: { status: 'ACCEPTED' }
+            select: { prospectLeadId: true, status: true }
         });
+        if (!listing) return { success: false, message: 'Listing not found' };
+        if (listing.status === 'IMPORTED') return { success: false, message: 'Listing already imported' };
 
-        revalidatePath('/admin/prospecting');
-        return { success: true };
+        if (!listing.prospectLeadId) {
+            return { success: false, message: 'Listing has no linked contact — cannot accept in isolation' };
+        }
+
+        // Cascade to accept the parent contact (which imports all their listings)
+        return acceptProspectWithListings(listing.prospectLeadId);
     } catch (e: any) {
         return { success: false, message: e.message || 'Server error' };
     }
 }
 
+/**
+ * Reject a single listing by cascading to its parent contact.
+ */
 export async function rejectScrapedListing(id: string) {
     try {
         const internalUserId = await getInternalUserId();
         if (!internalUserId) return { success: false, message: 'Unauthorized' };
 
-        await db.scrapedListing.update({
+        const listing = await db.scrapedListing.findUnique({
             where: { id },
-            data: { status: 'REJECTED' }
+            select: { prospectLeadId: true, status: true }
         });
+        if (!listing) return { success: false, message: 'Listing not found' };
 
-        revalidatePath('/admin/prospecting');
-        return { success: true };
+        if (!listing.prospectLeadId) {
+            // Orphan listing — just reject it directly
+            await db.scrapedListing.update({
+                where: { id },
+                data: { status: 'REJECTED' }
+            });
+            revalidatePath('/admin/prospecting');
+            return { success: true };
+        }
+
+        // Cascade to reject the parent contact
+        return rejectProspectWithListings(listing.prospectLeadId);
     } catch (e: any) {
         return { success: false, message: e.message || 'Server error' };
     }
@@ -178,13 +205,14 @@ export async function bulkAcceptListings(ids: string[]) {
         const internalUserId = await getInternalUserId();
         if (!internalUserId) return { success: false, message: 'Unauthorized' };
 
-        const res = await db.scrapedListing.updateMany({
-            where: { id: { in: ids }, status: { in: ['NEW', 'REVIEWING', 'new', 'reviewing'] } },
-            data: { status: 'ACCEPTED' }
-        });
+        let successCount = 0;
+        for (const id of ids) {
+            const res = await acceptScrapedListing(id);
+            if (res.success) successCount++;
+        }
 
         revalidatePath('/admin/prospecting');
-        return { success: true, count: res.count };
+        return { success: true, count: successCount };
     } catch (e: any) {
         return { success: false, message: e.message || 'Server error' };
     }
@@ -255,7 +283,7 @@ export async function acceptProspectWithListings(prospectId: string) {
             return { success: false, message: 'Prospect not found or already processed' };
         }
 
-        // Accept prospect and create CRM contact
+        // 1. Create CRM Contact with leadGoal
         const contact = await db.contact.create({
             data: {
                 locationId: prospect.locationId,
@@ -268,31 +296,32 @@ export async function acceptProspectWithListings(prospectId: string) {
                 phone: prospect.phone,
                 message: prospect.message,
                 leadSource: prospect.source,
+                leadGoal: 'To List', // Scraped sellers are listing their properties
                 leadScore: prospect.aiScore || 0,
                 qualificationStage: (prospect.aiScore || 0) >= 60 ? 'qualified' : 'basic',
             }
         });
 
-        // Accept prospect and all their listings in a transaction
-        const [, listingsResult] = await db.$transaction([
-            db.prospectLead.update({
-                where: { id: prospectId },
-                data: {
-                    status: 'accepted',
-                    createdContactId: contact.id,
-                    reviewedAt: new Date(),
-                    reviewedBy: internalUserId
-                }
-            }),
-            db.scrapedListing.updateMany({
-                where: {
-                    prospectLeadId: prospectId,
-                    status: { in: ['NEW', 'REVIEWING', 'new', 'reviewing'] }
-                },
-                data: { status: 'ACCEPTED' }
-            })
-        ]);
+        // 2. Mark prospect as accepted
+        await db.prospectLead.update({
+            where: { id: prospectId },
+            data: {
+                status: 'accepted',
+                createdContactId: contact.id,
+                reviewedAt: new Date(),
+                reviewedBy: internalUserId
+            }
+        });
 
+        // 3. Import scraped listings as Property records
+        const { imported, skipped } = await importAllListingsForProspect(
+            prospectId,
+            contact.id,
+            prospect.locationId,
+            internalUserId
+        );
+
+        // 4. Create audit trail
         await db.contactHistory.create({
             data: {
                 contactId: contact.id,
@@ -300,11 +329,13 @@ export async function acceptProspectWithListings(prospectId: string) {
                 userId: internalUserId,
                 changes: JSON.stringify([
                     { field: 'source', old: null, new: prospect.source },
-                    { field: 'prospectId', old: null, new: prospect.id }
+                    { field: 'prospectId', old: null, new: prospect.id },
+                    { field: 'propertiesImported', old: null, new: imported.length },
                 ])
             }
         });
 
+        // 5. Emit event for downstream automation
         await eventBus.emit({
             type: 'lead.created',
             payload: { contactId: contact.id, locationId: contact.locationId },
@@ -317,7 +348,13 @@ export async function acceptProspectWithListings(prospectId: string) {
 
         revalidatePath('/admin/prospecting');
         revalidatePath('/admin/contacts');
-        return { success: true, contactId: contact.id, listingsAccepted: listingsResult.count };
+        revalidatePath('/admin/properties');
+        return {
+            success: true,
+            contactId: contact.id,
+            propertiesImported: imported.length,
+            propertiesSkipped: skipped.length,
+        };
     } catch (e: any) {
         return { success: false, message: e.message || 'Server error' };
     }

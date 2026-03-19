@@ -118,7 +118,7 @@ export function ProspectingTriageView({
     startTransition(async () => {
       const res = await acceptScrapedListing(id);
       if (res.success) {
-        toast.success('Listing accepted');
+        toast.success(`Owner converted to Contact (${(res as any).propertiesImported || 1} properties imported)`);
         router.refresh();
       } else {
         toast.error(res.message);
@@ -133,7 +133,7 @@ export function ProspectingTriageView({
         toast.success('Listing rejected');
         router.refresh();
       } else {
-        toast.error(res.message);
+        toast.error((res as any).message);
       }
     });
   }, [router]);
@@ -143,7 +143,7 @@ export function ProspectingTriageView({
     startTransition(async () => {
       const res = await acceptProspectWithListings(id);
       if (res.success) {
-        toast.success(`Contact accepted (${(res as any).listingsAccepted} listings)`);
+        toast.success(`Contact accepted (${(res as any).propertiesImported || 1} properties imported)`);
         router.refresh();
       } else {
         toast.error(res.message);

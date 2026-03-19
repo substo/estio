@@ -571,7 +571,10 @@ model ScrapedListing {
   locationText String?
   images       String[]
   thumbnails   String[] @default([])
-  status       String @default("NEW") // NEW, REVIEWING, ACCEPTED, REJECTED
+  status       String @default("NEW") // NEW, REVIEWING, IMPORTED, REJECTED, SKIPPED
+
+  // Link to imported Property (set when contact is accepted and property is imported)
+  importedPropertyId String?
 
   // Property Details (expanded)
   description      String?  @db.Text
