@@ -615,6 +615,7 @@ model ProspectLead {
   // ... existing fields ...
   platformUserId     String?  // Seller's platform ID for cross-referencing
   platformRegistered String?  // "Posting since sep, 2024"
+  profileUrl         String?  // Seller's profile / other listings page (e.g. "https://www.bazaraki.com/items/author/40951")
 }
 ```
 
@@ -661,12 +662,12 @@ Both detail panels contain dedicated action bars:
 Triage speed is maximized through keyboard shortcuts and cascading transactions:
 
 - **Keyboard Flow:** Navigate feeds using `↑` & `↓` (which live-updates the URL).
-- **One-Key Decisions:** Press `A` to Accept; press `R` to Reject.
+- **One-Key Decisions:** Press `A` to Accept/Import; press `R` to Reject.
 
 **Cascading Effect:**
-- In the **Properties View**, Accept/Reject applies only to the selected `$1` listing.
-- In the **Contacts View**, Accept/Reject triggers a **cascading database transaction** (`acceptProspectWithListings` / `rejectProspectWithListings`). Rejecting a contact instantly rejects *all* their newly scraped listings simultaneously, preventing the agent from having to manually reject 50 properties from the same unwanted agency.
+- In the **Properties View**, Accept/Import applies only to the selected `$1` listing, marking it as `IMPORTED` and linking it to a newly created CRM Property via `importedPropertyId`.
+- In the **Contacts View**, Accept/Reject triggers a **cascading database transaction** (`acceptProspectWithListings` / `rejectProspectWithListings`). Rejecting a contact instantly rejects *all* their newly scraped listings simultaneously. Accepting a contact creates a CRM Contact and imports their new listings.
 
 ### 4.5 Bulk Actions
 
-For high-volume review, the feed supports Bulk Mode. Checking the box on any feed card swaps the standard header for a Bulk Action Bar, exposing one-click APIs to batch Accept or Reject large segments of selected items based on the active view.
+For high-volume review, the feed supports Bulk Mode. Checking the box on any feed card swaps the standard header for a Bulk Action Bar, exposing one-click APIs to batch Import or Reject large segments of selected items based on the active view.
