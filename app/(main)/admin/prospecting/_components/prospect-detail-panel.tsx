@@ -161,7 +161,22 @@ export function ProspectDetailPanel({ listing, onAccept, onReject, isPending }: 
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="text-muted-foreground text-[10px] uppercase tracking-wider hidden xl:inline-block">Seller:</span>
-                  <h3 className="font-semibold text-base">{listing.prospectName || 'Unknown Owner'}</h3>
+                  {listing.prospectLeadId ? (
+                    <h3
+                      className="font-semibold text-base text-primary cursor-pointer hover:underline"
+                      onClick={() => {
+                        const params = new URLSearchParams(window.location.search);
+                        params.set('view', 'contacts');
+                        params.set('contactId', listing.prospectLeadId!);
+                        params.delete('listingId');
+                        router.push(`?${params.toString()}`);
+                      }}
+                    >
+                      {listing.prospectName || 'Unknown Owner'}
+                    </h3>
+                  ) : (
+                    <h3 className="font-semibold text-base">{listing.prospectName || 'Unknown Owner'}</h3>
+                  )}
                   {listing.prospectAgency ? (
                     <Badge variant="destructive" className="text-[10px] h-5 px-1.5 gap-1"><Building2 className="w-3 h-3" /> Agency</Badge>
                   ) : (
