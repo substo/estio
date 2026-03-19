@@ -622,43 +622,48 @@ This creates a clean **1 Person → N Properties** relationship, where `Prospect
 ## 4.0 Master-Detail Triage UI
 **Status:** Completed
 
-### 4.1 Architecture & Layout Reasoning
+### 4.1 Dual-View Architecture & Layout Reasoning
 
-The `/admin/prospecting` section is designed as a high-efficiency **Master-Detail split-pane interface**. The primary goal of this layout is to facilitate rapid triage (Accept/Reject decisions) of scraped listings without context switching or navigating away from the list view.
+The `/admin/prospecting` section is designed as a high-efficiency **Master-Detail split-pane interface**. The primary goal of this layout is to facilitate rapid triage of scraped data without context switching.
 
-*   **Left Pane (Master Feed):** A scrollable list of compact visually rich cards (`ListingFeedCard`). Each card provides essential context at a glance (thumbnail, price, location, seller name, time added). The feed incorporates a sticky header with scope filters (New vs. All), a text search input, and a dynamic seller dropdown. 
-*   **Right Pane (Detail Panel):** A permanent, sticky detail view (`ProspectDetailPanel`). Selecting a card on the left instantly populates this pane with deep data needed to make a decision.
+To serve different outreach workflows, the hub features a top-level toggle between two distinct views:
 
-**Why this design?**
-*   **Zero Clicks to View:** Users can ingest full listing details by simply moving down the feed (using arrow keys or clicking), rather than opening and closing modals or drawers.
-*   **Listing-Centric Focus:** By leading with the Property (Listing) rather than the Person (Prospect), agents can visually identify the value of the asset before deciding if the seller is worth contacting.
+1. **Properties View (Listing-Centric):** 
+   - **Master Feed:** A scrollable list of property cards (`ListingFeedCard`), providing instant visual context (thumbnail, price, location).
+   - **Detail Panel:** Shows the full property description, photo carousel, and seller snippet. Best for agents who want to qualify the *asset* before contacting the seller.
+2. **Contacts View (Seller-Centric):** 
+   - **Master Feed:** A list of seller profiles (`ContactFeedCard`), showing their name, agency status, total listing count, and contact channels.
+   - **Detail Panel:** Shows the seller's full profile, contact info, and a responsive grid of *all* their associated properties. Best for agents looking to acquire entire portfolios or agencies.
 
-### 4.2 Auto-Advance & Keyboard Accessibility
+### 4.2 URL-Synced Previews & Cross-Navigation
 
-Triage speed is maximized through an "auto-advance" loop and keyboard shortcuts:
+All UI state has been migrated to the URL to ensure triage views are **100% bookmarkable and shareable** between team members:
 
-*   **Keyboard Flow:** Users can navigate the feed using `↑` & `↓` (or `k` & `j`).
-*   **One-Key Decisions:** Pressing `A` executes an Accept action; pressing `R` executes a Reject action.
-*   **Auto-Advance:** When a listing is Accepted or Rejected, it instantly disappears from the feed. The system automatically selects the *next* listing in sequence, loading its details into the right pane. This creates a seamless "inbox zero" workflow.
+- **View State:** `?view=properties` vs `?view=contacts`
+- **Selection State:** `?listingId=<id>` or `?contactId=<id>` replaces local React state.
 
-### 4.3 Prospect Detail Panel Capabilities
+**Cross-Navigation:** The UI allows seamless hopping between the two dimensions:
+- Clicking a property card from within the **Contacts View detail panel** automatically switches the user to the **Properties View** with that specific listing selected.
+- Clicking the seller's name from within the **Properties View detail panel** automatically switches the user to the **Contacts View** to explore the rest of that seller's portfolio.
 
-The Detail Panel is the actionable heart of the hub.
+### 4.3 Deep Detail Panels & Scraping Operations
 
-| Section | Content |
-|---|---|
-| **Property Overview** | Interactive photo carousel (with thumbnail strip), title, price, key specs (beds, baths, area), and full description. |
-| **Seller Intelligence** | Seller name, extracted contact channels (WhatsApp, Email, Phone), AI `isAgency` classification badge ("Agency Detected" vs "Likely Private"). |
-| **Action Bar** | Sticky footer containing quick-links for WhatsApp outreach (pre-filled), Call scripts, and the primary Accept/Reject bindings. |
-| **Re-Scrape Capability** | A dedicated button to re-trigger the headless scraping pipeline on the specific URL, retrieving fresh data or broken images if the source was updated. |
+Both detail panels contain dedicated action bars:
 
-### 4.4 Bulk Actions
+- **Action Outbound:** Pre-filled WhatsApp deep links and direct Call links.
+- **Scrape Other Listings:** A dedicated `DownloadCloud` button that dispatches a background task (`scrapeSellerProfile`) to extract the rest of the seller's portfolio using their `otherListingsUrl`. This button is available in both views.
 
-For high-volume review (e.g., rejecting 50 duplicate listings from known agencies), the feed supports Bulk Mode. Checking the box on any `ListingFeedCard` swaps the standard header for a Bulk Action Bar, exposing one-click APIs to batch Accept or Reject large segments of data.
+### 4.4 Cascading Decide Actions & Keyboard Accessibility
 
-The **Convert to CRM Contact** button triggers the `acceptProspect()` server action, which creates a full `Contact` record, logs a `ContactHistory` entry, emits a `lead.created` event, and marks the `ProspectLead` as accepted.
+Triage speed is maximized through keyboard shortcuts and cascading transactions:
 
-### 4.5 Navigation & URL State
+- **Keyboard Flow:** Navigate feeds using `↑` & `↓` (which live-updates the URL).
+- **One-Key Decisions:** Press `A` to Accept; press `R` to Reject.
 
-* State variables like `selectedIndex` are maintained locally to ensure snappy UI transitions.
-* Triage filters (`scope`, `q`, `prospectId`) are explicitly bound to URL Search Params (`?scope=new&q=villa`). This guarantees that triage views remain easily shareable and survive page refreshes.
+**Cascading Effect:**
+- In the **Properties View**, Accept/Reject applies only to the selected `$1` listing.
+- In the **Contacts View**, Accept/Reject triggers a **cascading database transaction** (`acceptProspectWithListings` / `rejectProspectWithListings`). Rejecting a contact instantly rejects *all* their newly scraped listings simultaneously, preventing the agent from having to manually reject 50 properties from the same unwanted agency.
+
+### 4.5 Bulk Actions
+
+For high-volume review, the feed supports Bulk Mode. Checking the box on any feed card swaps the standard header for a Bulk Action Bar, exposing one-click APIs to batch Accept or Reject large segments of selected items based on the active view.
