@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import Image from "next/image";
 import { cn } from "@/lib/utils";
 
@@ -12,6 +12,13 @@ interface PropertyGalleryProps {
 export function PropertyGallery({ images, title }: PropertyGalleryProps) {
     const [mainImage, setMainImage] = useState(images[0]);
     const [loading, setLoading] = useState(true);
+    const [portraitByImage, setPortraitByImage] = useState<Record<string, boolean>>({});
+
+    const registerOrientation = useCallback((src: string, naturalWidth: number, naturalHeight: number) => {
+        if (!naturalWidth || !naturalHeight) return;
+        const isPortrait = naturalHeight > naturalWidth;
+        setPortraitByImage((prev) => (prev[src] === isPortrait ? prev : { ...prev, [src]: isPortrait }));
+    }, []);
 
     if (!images || images.length === 0) {
         return (
@@ -20,6 +27,8 @@ export function PropertyGallery({ images, title }: PropertyGalleryProps) {
             </div>
         );
     }
+
+    const isMainPortrait = portraitByImage[mainImage];
 
     return (
         <div className="space-y-4">
@@ -30,10 +39,14 @@ export function PropertyGallery({ images, title }: PropertyGalleryProps) {
                     alt={title}
                     fill
                     className={cn(
-                        "object-cover transition-opacity duration-500",
+                        "transition-opacity duration-500",
+                        isMainPortrait ? "object-contain" : "object-cover",
                         loading ? "opacity-0" : "opacity-100"
                     )}
-                    onLoad={() => setLoading(false)}
+                    onLoad={(e) => {
+                        setLoading(false);
+                        registerOrientation(mainImage, e.currentTarget.naturalWidth, e.currentTarget.naturalHeight);
+                    }}
                     priority
                 />
             </div>
@@ -57,7 +70,8 @@ export function PropertyGallery({ images, title }: PropertyGalleryProps) {
                                 src={img}
                                 alt={`View ${idx + 1}`}
                                 fill
-                                className="object-cover"
+                                className={portraitByImage[img] ? "object-contain" : "object-cover"}
+                                onLoad={(e) => registerOrientation(img, e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)}
                             />
                         </button>
                     ))}

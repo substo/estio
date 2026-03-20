@@ -303,16 +303,16 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
             <div className="flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border bg-black/5 dark:bg-black/40">
               
               {/* Main Carousel Image */}
-              <div className="flex-1 relative min-h-0 bg-transparent group">
+              <div className="flex-1 relative min-h-0 bg-transparent group overflow-hidden">
                 {listing.images && listing.images.length > 0 ? (
                   <>
                     <Dialog>
                       <DialogTrigger asChild>
-                        <button title="View Full Image" className="w-full h-full flex items-center justify-center p-2 outline-none cursor-zoom-in">
+                        <button title="View Full Image" className="w-full h-full flex items-center justify-center p-2 outline-none cursor-zoom-in overflow-hidden">
                           <img
                             src={listing.images[currentImageIndex]}
                             alt="Property"
-                            className="max-w-full max-h-full object-contain drop-shadow-md rounded-md transition-transform hover:scale-[1.02]"
+                            className="w-full h-full object-contain drop-shadow-md rounded-md transition-transform hover:scale-[1.02]"
                           />
                         </button>
                       </DialogTrigger>
@@ -323,7 +323,7 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                           <img
                             src={listing.images[currentImageIndex]}
                             alt="Property Full"
-                            className="max-w-full max-h-full object-contain"
+                            className="w-full h-full object-contain"
                           />
                           {listing.images.length > 1 && (
                             <>

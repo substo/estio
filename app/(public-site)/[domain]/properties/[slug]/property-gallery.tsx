@@ -27,6 +27,13 @@ export function PropertyGallery({
 }: PropertyGalleryProps) {
     const [currentIndex, setCurrentIndex] = useState(0);
     const [isLightboxOpen, setIsLightboxOpen] = useState(false);
+    const [portraitByImage, setPortraitByImage] = useState<Record<string, boolean>>({});
+
+    const registerOrientation = useCallback((src: string, naturalWidth: number, naturalHeight: number) => {
+        if (!naturalWidth || !naturalHeight) return;
+        const isPortrait = naturalHeight > naturalWidth;
+        setPortraitByImage((prev) => (prev[src] === isPortrait ? prev : { ...prev, [src]: isPortrait }));
+    }, []);
 
     // Prevent scrolling when lightbox is open (managed by Dialog usually but good to know)
 
@@ -62,19 +69,26 @@ export function PropertyGallery({
         );
     }
 
+    const currentImage = images[currentIndex];
+    const isCurrentPortrait = portraitByImage[currentImage];
+
     return (
         <>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 h-[500px] md:h-[600px]">
                 {/* Main Image */}
                 <div
-                    className="lg:col-span-2 h-full relative group overflow-hidden rounded-sm cursor-pointer"
+                    className="lg:col-span-2 h-full relative group overflow-hidden rounded-sm cursor-pointer bg-secondary/20"
                     onClick={() => setIsLightboxOpen(true)}
                 >
                     <Image
-                        src={images[currentIndex]}
+                        src={currentImage}
                         alt={`${title} - View ${currentIndex + 1}`}
                         fill
-                        className="object-cover transition-transform duration-500 group-hover:scale-105"
+                        className={cn(
+                            "transition-transform duration-500",
+                            isCurrentPortrait ? "object-contain" : "object-cover group-hover:scale-105"
+                        )}
+                        onLoad={(e) => registerOrientation(currentImage, e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)}
                         priority
                     />
 
@@ -139,14 +153,15 @@ export function PropertyGallery({
                         return (
                             <div
                                 key={targetIndex}
-                                className="relative overflow-hidden rounded-sm cursor-pointer hover:opacity-90 transition-opacity"
+                                className="relative overflow-hidden rounded-sm cursor-pointer hover:opacity-90 transition-opacity bg-secondary/20"
                                 onClick={() => setCurrentIndex(targetIndex)}
                             >
                                 <Image
                                     src={imgUrl}
                                     alt={`Thumbnail ${targetIndex + 1}`}
                                     fill
-                                    className="object-cover"
+                                    className={portraitByImage[imgUrl] ? "object-contain" : "object-cover"}
+                                    onLoad={(e) => registerOrientation(imgUrl, e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)}
                                 />
                                 {offset === 3 && images.length > 4 && (
                                     <div

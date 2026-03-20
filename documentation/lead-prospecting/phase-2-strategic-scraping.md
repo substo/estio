@@ -531,6 +531,11 @@ Flow:
 | `app/(main)/admin/prospecting/listings/actions.ts` | **[NEW]** Server actions for accept/reject/bulk operations on scraped listings |
 | `app/(main)/admin/prospecting/listings/_components/scraped-listing-table.tsx` | **[NEW]** Interactive table with row-click drawer integration |
 | `app/(main)/admin/prospecting/listings/_components/prospect-review-drawer.tsx` | **[NEW]** Side drawer with listing details, seller profile, and outreach actions |
+| `lib/ai/prospect-classifier.ts` | **[NEW]** Reusable AI classifier service for Agency/Private detection with confidence scoring and ledger logging |
+| `lib/ai/model-router.ts` | **[MODIFY]** Registers `"prospect_classification"` task mapping to Flash tier |
+| `app/api/admin/scrape-listing/route.ts` | **[MODIFY]** Runs `classifyAndUpdateProspect()` after upsert during single-listing scrape |
+| `app/(main)/admin/prospecting/_components/contact-detail-panel.tsx` | **[MODIFY]** Clickable Agency/Private/AI-Auto badge with confidence tooltip and manual override cycle |
+| `app/(main)/admin/prospecting/actions.ts` | **[MODIFY]** Adds `toggleProspectAgencyStatus(id, isAgencyManual)` server action |
 
 ---
 
@@ -566,9 +571,10 @@ The initial index scrape (Phase 2) only extracts surface-level data from search 
 1. Query `ScrapedListing` records with `status: 'NEW'` that haven't been deep-scraped yet.
 2. For each listing, fetch the full page HTML using `PageFetcher`.
 3. Extract the full description using `extractBazarakiDescription()` from `lib/scraping/extractors/bazaraki.ts`.
-4. Run AI classification via `callLLMWithMetadata()` using Gemini to determine `isAgency` probability.
-5. Update the linked `ProspectLead.isAgency` field accordingly.
-6. Log AI usage to `AgentExecution` with `sourceType: "scraper"`.
+4. Call `classifyAndUpdateProspect()` from `lib/ai/prospect-classifier.ts` (multi-signal AI classifier routed via model-router task type `"prospect_classification"`).
+5. Persist `isAgency`, `agencyConfidence`, and `agencyReasoning` on `ProspectLead`, while respecting manual override (`isAgencyManual` always takes priority).
+6. Apply confidence-aware auto-resolution: confidence `>= 70` is treated as auto-classified; lower confidence is shown as neutral/unclassified in UI.
+7. Log classification to `AgentExecution` (`sourceType: "scraper"`, `skillName: "prospect_classifier"`).
 
 ### 3.2 Enterprise AI Usage Ledger
 
@@ -655,6 +661,95 @@ This creates a clean **1 Person → N Properties** relationship, where `Prospect
 
 ---
 
+### 3.4 AI-Based Agency/Private Classification with Manual Override
+
+Classification has been upgraded from simple keyword checks to a reusable AI service with manual control in the Prospecting UI.
+
+> [!IMPORTANT]
+> Classification runs automatically during both single-listing scrape and deep scrape. It uses the existing Flash-tier routing (`callLLMWithMetadata` + `model-router`) with low per-call cost characteristics (roughly Gemini Flash pricing, around `$0.00005` per classification).
+
+> [!IMPORTANT]
+> Manual override always wins over AI. Implemented confidence threshold is `>= 70` for auto-classification; below that, the UI presents the seller as uncertain/unclassified for human review.
+
+#### Prospect Classifier Service
+
+**File:** `lib/ai/prospect-classifier.ts`
+
+The classifier evaluates multiple signals in one pass:
+- **Name signals**: "Properties", "Real Estate", "Developers", "Group", "Ltd", and other company markers.
+- **Description signals**: Corporate language, portfolio/team phrasing, organizational tone.
+- **Profile/contact signals**: Presence of profile URL and contact channels.
+- **Activity signals**: Listing count context (higher volume increases agency likelihood).
+- **Registration signals**: Platform text patterns indicating "Company" vs individual.
+
+Return payload:
+```ts
+{
+  isAgency: boolean;
+  confidenceScore: number; // 0-100
+  reasoning: string;
+}
+```
+
+The service writes classification telemetry to the enterprise ledger via `AgentExecution` with:
+- `sourceType: "scraper"`
+- `skillName: "prospect_classifier"`
+
+#### Backend Integration (Implemented)
+
+| File | Change |
+|---|---|
+| `lib/scraping/deep-scraper.ts` | Replaced inline classification logic with `classifyAndUpdateProspect()`, passing enriched signals (name, description, listing count, registration, profile URL). |
+| `lib/scraping/extractors/bazaraki.ts` | Seller-type filtering/classification path documented as AI-backed to improve agency/private accuracy over naive keyword-only checks. |
+| `app/api/admin/scrape-listing/route.ts` | After upserting prospect/listing, runs classifier and updates `isAgency` + `agencyConfidence` (+ reasoning) on `ProspectLead`. |
+| `lib/ai/model-router.ts` | Added `"prospect_classification": "flash"` in `TASK_TIER_MAP` for cost-efficient routing. |
+
+#### Database Schema Additions (ProspectLead)
+
+```prisma
+agencyConfidence  Int?     // 0-100 AI confidence score
+agencyReasoning   String?  // 1-2 sentence AI explanation for auditability/tooltips
+isAgencyManual    Boolean? // null = AI-decided, true/false = human override
+```
+
+Resolution logic:
+
+```ts
+effectiveIsAgency = isAgencyManual ?? (agencyConfidence >= 70 ? isAgency : null)
+```
+
+#### Manual Toggle UI
+
+**Files:**  
+- `app/(main)/admin/prospecting/_components/contact-detail-panel.tsx`  
+- `app/(main)/admin/prospecting/actions.ts`
+
+The badge is now interactive and cycles:
+1. **Private** (`isAgencyManual = false`) — green badge, `UserCheck`
+2. **Agency** (`isAgencyManual = true`) — red badge, `Building2`
+3. **AI Auto** (`isAgencyManual = null`) — bot-driven mode, `Bot` icon
+
+Tooltip surfaces model confidence/reasoning (for example: `AI Confidence: 85%`).
+
+Server action:
+- `toggleProspectAgencyStatus(id: string, isAgencyManual: boolean | null)`
+
+Feed card behavior:
+- In `ContactFeedCard`, AI-classified prospects render with a `Bot` icon, while manually set values render with the standard `Building2`/`UserCheck` icon path.
+
+#### Manual Verification Checklist (Classification)
+
+1. Deploy and open `/admin/prospecting` in **Contacts** view.
+2. Scrape a new Bazaraki listing and verify stream/log includes a classification step.
+3. Confirm badge state renders correctly as Agency / Private / Unclassified based on confidence.
+4. Click the badge repeatedly and verify cycle order:
+   - Private → Agency → AI Auto
+5. Refresh and confirm override persists.
+6. Scrape a known agency listing (e.g., "Cyprus Golden Properties") and verify high-confidence Agency classification.
+7. Scrape a likely private listing and verify Private classification (or low-confidence Unclassified requiring human choice).
+
+---
+
 ## 4.0 Master-Detail Triage UI
 **Status:** Completed
 
@@ -688,8 +783,10 @@ All UI state has been migrated to the URL to ensure triage views are **100% book
 Both detail panels contain dedicated action bars and tailored content views:
 
 - **High-Res Photo Gallery:** The `images` array is exclusively used for the main property viewer to ensure agents see high-quality, zoomable photos, while the `thumbnails` array powers the carousel strip and multi-property feed cards to preserve network and layout performance.
+- **Portrait-Safe Preview Sizing:** Gallery previews now treat portrait images as a special case. On image load, the UI checks orientation (`naturalHeight > naturalWidth`) and switches portrait assets to `object-contain` inside fixed-height preview containers. This keeps the gallery frame stable and prevents vertical photos from expanding beyond the fold, while landscape images remain `object-cover` for edge-to-edge presentation.
 - **Action Outbound:** Pre-filled WhatsApp deep links and direct Call links.
 - **Dynamic Feature Extraction:** Scraped listings utilize a schema-on-read JSON field (`rawAttributes`) to capture all non-standard property features (e.g., "Pets allowed", "Energy class"). These are rendered dynamically as badges in the Detail Panel and explicitly mapped to the core CRM `Property.features` array upon lead conversion, ensuring zero data loss.
+- **Agency/Private Override Toggle:** The seller badge is clickable and cycles `Private → Agency → AI Auto`, with manual override stored in `isAgencyManual` and confidence/reasoning exposed via tooltip.
 - **Optimistic UI Data Binding:** Following Enterprise SaaS best practices, detail panels do not wait for hard page refreshes after asynchronous events. When a `ScrapeListingDialog` finishes extracting data, the backend immediately returns the resolved `prospectLeadId` and `prospectName`. The detail panel intercepts this payload and applies a local optimistic state update, instantly revealing the seller's true identity and unmasking the Accept/Convert buttons without a network waterfall.
 - **Scrape Other Listings:** A dedicated `DownloadCloud` button that dispatches a background task (`scrapeSellerProfile`) to extract the rest of the seller's portfolio using their `otherListingsUrl`. This button is prominently available in both the Properties View and Contacts View. *(Note: When a single listing is scraped or re-scraped, the backend `scrape-listing` service automatically extracts and syncs this `profileUrl` directly to the `ProspectLead` record, ensuring this button is actionable immediately without needing to visit the contact card).*
 
