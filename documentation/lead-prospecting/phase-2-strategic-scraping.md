@@ -374,20 +374,46 @@ Bazaraki's phone button (`.phone-author.js-phone-click`) does not inline-reveal 
 > [!TIP]
 > The WhatsApp button `href` contains the phone number without requiring a click. This is a **free extraction** that doesn't consume interaction budget: `a._whatsapp[href]` → parse `phone=` URL param.
 
+#### Defensive Error Handling in Single-Listing Scrape
+
+The WhatsApp/contact-channels extraction section (`a._whatsapp[href]`, `.js-card-messenger`, `._email`) is wrapped in its own `try-catch` to prevent errors in optional fields from crashing the entire scrape. If this section fails, a warning is logged but the rest of the extracted data (title, price, images, phone, etc.) is preserved.
+
+#### Partial Data Recovery: Save Anyway
+
+When a scrape fails mid-extraction (e.g. browser error during phone reveal), the backend now sends the partially-extracted data alongside the error event via `partialData` field in the SSE stream. The `ScrapeListingDialog` UI renders:
+
+1. **Partial Data Preview** — amber card showing what was successfully extracted before the crash
+2. **"Save Anyway" button** — calls `/api/admin/save-listing` to persist the partial data to the database, overwriting the existing listing record
+
+This ensures no data is lost even when the scrape terminates abnormally.
+
+**Endpoint:** `app/api/admin/save-listing/route.ts`
+- **Method:** `POST`
+- **Body:** `{ listingId?, platform, url, data }` — where `data` follows the `ScrapedData` shape
+- **Logic:** Reuses the same upsert logic for `ProspectLead` and `ScrapedListing` as the main scrape route
+
 ### Extraction Fields — Batch Index Scrape
 
 **File:** `lib/scraping/extractors/bazaraki.ts`
 
+The selectors cover both search/category pages and seller profile pages:
+
 ```json
 {
-  "listingContainer": ".advert",
-  "title": ".advert__content-title",
-  "listingLink": "a.swiper-slide[href]",
-  "price": ".advert__content-price",
-  "location": ".advert__content-place",
+  "listingContainer": ".advert, .advert-grid, .announcement-block, .classified, .list-simple__output .announcement-container, .list-simple__output > li",
+  "title": ".advert__content-title, .advert-grid__content-title, .announcement-block__title a, .classified__title",
+  "listingLink": "a.swiper-slide[href], a.advert-grid__body-image-paginator-container[href], .announcement-block__title a[href], a[href*='/adv/']",
+  "price": ".advert__content-price, .advert-grid__content-price, .announcement-block__price, .classified__price",
+  "location": ".advert__content-place, .advert-grid__content-place, .announcement-block__place, .classified__location",
   "nextPage": "a.number-list-next, a.number-list-line"
 }
 ```
+
+#### Fallback Link Extraction for Seller Profiles
+
+When the primary selectors find 0 listings (common on seller profile pages where HTML structure differs from search results), the extractor falls back to scanning all `<a href="/adv/...">` links on the page. This extracts listing URLs and external IDs directly from raw anchors, deduplicating by ID. The fallback results proceed through the same deep-extraction pipeline, ensuring seller profile scrapes are functional even without exact CSS selectors.
+
+Debug logging is emitted when 0 listings are found, dumping the first 1000 chars of page HTML and total `/adv/` anchor count to server logs for selector diagnosis.
 
 ### Bazaraki Pagination Control
 
@@ -493,6 +519,7 @@ Flow:
 | `lib/scraping/extractors/bazaraki.ts` | **[NEW]** Bazaraki-specific extractor |
 | `lib/scraping/extractors/generic.ts` | **[NEW]** AI-based generic extractor |
 | `lib/scraping/page-fetcher.ts` | **[NEW]** Playwright/cheerio page fetcher |
+| `app/api/admin/save-listing/route.ts` | **[NEW]** Save partial scrape data endpoint |
 | `app/api/cron/scrape-listings/route.ts` | **[NEW]** Cron endpoint |
 | `app/(main)/admin/settings/prospecting/page.tsx` | **[NEW]** Scraping target admin UI |
 | `app/(main)/admin/settings/prospecting/actions.ts` | **[NEW]** CRUD for ScrapingTarget |
@@ -651,10 +678,11 @@ All UI state has been migrated to the URL to ensure triage views are **100% book
 
 - **View State:** `?view=properties` vs `?view=contacts`
 - **Selection State:** `?listingId=<id>` or `?contactId=<id>` replaces local React state.
+- **Scope State:** `?scope=<new|accepted|rejected|all>` explicitly controls feed filtering.
 
 **Cross-Navigation:** The UI allows seamless hopping between the two dimensions:
-- Clicking a property card from within the **Contacts View detail panel** automatically switches the user to the **Properties View** with that specific listing selected.
-- Clicking the seller's name from within the **Properties View detail panel** automatically switches the user to the **Contacts View** to explore the rest of that seller's portfolio.
+- Clicking a property card from within the **Contacts View detail panel** automatically switches the user to the **Properties View** with that specific listing selected, enforcing `scope=all` in the URL to guarantee the listing remains visible even if it's already been processed.
+- Clicking the seller's name from within the **Properties View detail panel** automatically switches the user to the **Contacts View** to explore the rest of that seller's portfolio, again enforcing `scope=all` to unmask the owner regardless of their accepted/rejected status.
 
 ### 4.3 Deep Detail Panels & Scraping Operations
 
@@ -675,6 +703,17 @@ Triage speed is maximized through keyboard shortcuts and cascading transactions:
 - In the **Properties View**, Accept/Import applies only to the selected `$1` listing, marking it as `IMPORTED` and linking it to a newly created CRM Property via `importedPropertyId`.
 - In the **Contacts View**, Accept/Reject triggers a **cascading database transaction** (`acceptProspectWithListings` / `rejectProspectWithListings`). Rejecting a contact instantly rejects *all* their newly scraped listings simultaneously. Accepting a contact creates a CRM Contact and imports their new listings.
 
-### 4.5 Bulk Actions
+### 4.5 Explicit State Filtering (Scope)
+
+To maintain an actionable layout and prevent a cluttered "All" view, the Feed provides explicit state filtering dropdowns at the top of the feed structure:
+
+- **New (Default):** Displays only pending items (`NEW`/`REVIEWING` status). This acts as the triage inbox.
+- **Accepted:** Displays items successfully converted to the CRM (`IMPORTED` listings, `accepted` contacts).
+- **Rejected:** Displays explicitly discarded items (`REJECTED` listings, `rejected` contacts), allowing recovery.
+- **All:** An unfiltered view across all terminal states.
+
+By splitting these views natively at the repository layer, Sales teams can focus exclusively on the actionable `New` queue while retaining audited historical access to explicit queues, following standard Enterprise workflow patterns.
+
+### 4.6 Bulk Actions
 
 For high-volume review, the feed supports Bulk Mode. Checking the box on any feed card swaps the standard header for a Bulk Action Bar, exposing one-click APIs to batch Import or Reject large segments of selected items based on the active view.

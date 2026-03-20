@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Dialog, DialogContent, DialogTrigger, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
 interface ProspectDetailPanelProps {
   listing: ScrapedListingRow | null;
@@ -238,23 +239,51 @@ export function ProspectDetailPanel({ listing, onAccept, onReject, isPending }: 
             <div className="flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border bg-black/5 dark:bg-black/40">
               
               {/* Main Carousel Image */}
-              <div className="flex-1 relative min-h-0 bg-transparent">
+              <div className="flex-1 relative min-h-0 bg-transparent group">
                 {listing.images && listing.images.length > 0 ? (
                   <>
-                    <a href={listing.images[currentImageIndex]} target="_blank" rel="noreferrer" title="View Full Image" className="block w-full h-full flex items-center justify-center p-2">
-                      <img
-                        src={listing.images[currentImageIndex]}
-                        alt="Property"
-                        className="max-w-full max-h-full object-contain drop-shadow-md rounded-md"
-                      />
-                    </a>
+                    <Dialog>
+                      <DialogTrigger asChild>
+                        <button title="View Full Image" className="w-full h-full flex items-center justify-center p-2 outline-none cursor-zoom-in">
+                          <img
+                            src={listing.images[currentImageIndex]}
+                            alt="Property"
+                            className="max-w-full max-h-full object-contain drop-shadow-md rounded-md transition-transform hover:scale-[1.02]"
+                          />
+                        </button>
+                      </DialogTrigger>
+                      <DialogContent className="max-w-[95vw] w-auto h-[95vh] p-4 bg-black/95 border-none flex flex-col items-center justify-center">
+                        <DialogTitle className="sr-only">Image Gallery</DialogTitle>
+                        <DialogDescription className="sr-only">Full resolution property image</DialogDescription>
+                        <div className="relative w-full h-full flex items-center justify-center">
+                          <img
+                            src={listing.images[currentImageIndex]}
+                            alt="Property Full"
+                            className="max-w-full max-h-full object-contain"
+                          />
+                          {listing.images.length > 1 && (
+                            <>
+                              <Button variant="ghost" size="icon" className="absolute left-4 top-1/2 -translate-y-1/2 w-12 h-12 bg-black/50 hover:bg-black/80 text-white rounded-full z-10" onClick={(e) => { e.preventDefault(); setCurrentImageIndex((prev) => prev === 0 ? listing.images.length - 1 : prev - 1); }}>
+                                <ChevronLeft className="w-8 h-8" />
+                              </Button>
+                              <Button variant="ghost" size="icon" className="absolute right-4 top-1/2 -translate-y-1/2 w-12 h-12 bg-black/50 hover:bg-black/80 text-white rounded-full z-10" onClick={(e) => { e.preventDefault(); setCurrentImageIndex((prev) => prev === listing.images.length - 1 ? 0 : prev + 1); }}>
+                                <ChevronRight className="w-8 h-8" />
+                              </Button>
+                              <div className="absolute top-4 right-4 bg-black/60 text-white text-sm font-medium px-3 py-1 rounded-full z-10">
+                                {currentImageIndex + 1} / {listing.images.length}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </DialogContent>
+                    </Dialog>
                     {listing.images.length > 1 && (
                       <>
-                        <Button variant="secondary" size="icon" className="absolute left-2 top-1/2 -translate-y-1/2 w-9 h-9 opacity-0 group-hover:opacity-100 transition-opacity z-10 shadow-lg" onClick={(e) => { e.preventDefault(); setCurrentImageIndex((prev) => prev === 0 ? listing.images.length - 1 : prev - 1); }}>
-                          <ChevronLeft className="w-4 h-4" />
+                        <Button variant="secondary" size="icon" className="absolute left-2 top-1/2 -translate-y-1/2 w-9 h-9 opacity-50 bg-black/40 text-white hover:bg-black/70 hover:opacity-100 group-hover:opacity-100 transition-opacity z-10 shadow-lg border-none" onClick={(e) => { e.preventDefault(); setCurrentImageIndex((prev) => prev === 0 ? listing.images.length - 1 : prev - 1); }}>
+                          <ChevronLeft className="w-5 h-5" />
                         </Button>
-                        <Button variant="secondary" size="icon" className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 opacity-0 group-hover:opacity-100 transition-opacity z-10 shadow-lg" onClick={(e) => { e.preventDefault(); setCurrentImageIndex((prev) => prev === listing.images.length - 1 ? 0 : prev + 1); }}>
-                          <ChevronRight className="w-4 h-4" />
+                        <Button variant="secondary" size="icon" className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 opacity-50 bg-black/40 text-white hover:bg-black/70 hover:opacity-100 group-hover:opacity-100 transition-opacity z-10 shadow-lg border-none" onClick={(e) => { e.preventDefault(); setCurrentImageIndex((prev) => prev === listing.images.length - 1 ? 0 : prev + 1); }}>
+                          <ChevronRight className="w-5 h-5" />
                         </Button>
                         <div className="absolute top-3 right-3 bg-black/60 text-white text-[10px] font-medium px-2 py-0.5 rounded-full z-10">
                           {currentImageIndex + 1} / {listing.images.length}
