@@ -45,6 +45,7 @@ export interface ScrapedListingRow {
   prospectAgency: boolean;
   isExpired: boolean;
   createdAt: string;
+  rawAttributes: Record<string, any> | null;
 }
 
 export interface ScrapedListingResult {
@@ -132,6 +133,7 @@ export async function listScrapedListings(
       otherListingsUrl: r.otherListingsUrl,
       isExpired: r.isExpired,
       createdAt: r.createdAt.toISOString(),
+      rawAttributes: r.rawAttributes as Record<string, any> | null,
     })),
     total,
   };

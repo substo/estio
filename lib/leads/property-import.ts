@@ -76,6 +76,17 @@ export async function importScrapedListingAsProperty(
 
   const slug = generateSlug(listing.title, listing.externalId);
 
+  // Format rawAttributes into CRM features array
+  const features: string[] = [];
+  if (listing.rawAttributes && typeof listing.rawAttributes === 'object') {
+    const EXCLUDED_RAW_KEYS = ['Bedrooms', 'Bathrooms', 'Property area', 'Plot area', 'Construction year', 'Location', 'Type'];
+    for (const [key, value] of Object.entries(listing.rawAttributes)) {
+      if (!EXCLUDED_RAW_KEYS.includes(key)) {
+        features.push(`${key}: ${value}`);
+      }
+    }
+  }
+
   // Create Property + PropertyMedia + ContactPropertyRole + update ScrapedListing in a transaction
   const result = await db.$transaction(async (tx) => {
     // 1. Create the Property
@@ -102,6 +113,7 @@ export async function importScrapedListingAsProperty(
         source: 'SCRAPED',
         scrapedListingId: listing.id,
         metadata: listing.rawAttributes || undefined,
+        features,
       },
     });
 

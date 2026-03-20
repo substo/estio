@@ -175,6 +175,16 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                   )}
                   {listing.constructionYear && <Badge variant="outline">Built {listing.constructionYear}</Badge>}
                   <Badge variant="outline">{listing.locationText || 'Cyprus'}</Badge>
+
+                  {/* Dynamic Features from Scraping */}
+                  {listing.rawAttributes && Object.entries(listing.rawAttributes)
+                    .filter(([key]) => !['Bedrooms', 'Bathrooms', 'Property area', 'Plot area', 'Construction year'].includes(key))
+                    .map(([key, value]) => (
+                      <Badge key={key} variant="outline" className="bg-muted/30">
+                        <span className="text-muted-foreground mr-1 font-normal">{key}:</span> {String(value)}
+                      </Badge>
+                    ))
+                  }
                 </div>
 
                 <a href={listing.url} target="_blank" rel="noreferrer" className="text-sm text-primary flex items-center gap-1 mt-3 hover:underline font-medium">
@@ -358,7 +368,7 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
               {/* Thumbnail strip */}
               {listing.images && listing.images.length > 1 && (
                 <div className="shrink-0 flex gap-1.5 overflow-x-auto p-2 scrollbar-thin border-t bg-muted/10">
-                  {listing.images.map((img, idx) => (
+                  {listing.images.map((img: string, idx: number) => (
                     <button
                       key={idx}
                       onClick={() => setCurrentImageIndex(idx)}

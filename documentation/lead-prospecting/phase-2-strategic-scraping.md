@@ -354,7 +354,7 @@ Filters can be applied via URL params (district, price range, bedrooms).
 | **Seller ID** | `.author-info .author-name[data-user]` | |
 | **Seller Registration** | `.date-registration` (page) or `.contacts-dialog__date` (dialog) | |
 | **Other Listings URL** | `a.other-announcement-author` `href` | |
-| **WhatsApp Phone** | `a._whatsapp[href]` → parse `phone=` param | Free extraction — no click budget |
+| **WhatsApp Phone** | `a[href*="wa.me/"], a[href*="api.whatsapp.com/send"]` | Free extraction — no click budget. Ignores generic social share buttons to prevent false positives. |
 | **Contact Channels** | Presence checks: `.js-card-messenger`, `._email`, WhatsApp href | Array: `["whatsapp","chat","email"]` |
 | **Raw Attributes** | All `ul.chars-column li` key-value pairs | Stored as JSON catch-all |
 | **Expired Status** | `.phone-author--sold` or `.phone-author__subtext` text | Flags `isExpired` in DB to visually dim the UI across hubs |
@@ -371,8 +371,7 @@ Bazaraki's phone button (`.phone-author.js-phone-click`) does not inline-reveal 
    - Real Owner Name: `.contacts-dialog__name` (direct text, excluding child elements)
    - Registration: `.contacts-dialog__date`
 
-> [!TIP]
-> The WhatsApp button `href` contains the phone number without requiring a click. This is a **free extraction** that doesn't consume interaction budget: `a._whatsapp[href]` → parse `phone=` URL param.
+> The WhatsApp button `href` contains the phone number without requiring a click. This is a **free extraction** that doesn't consume interaction budget: `a[href*="wa.me/"], a[href*="api.whatsapp.com/send"]` → parse URL for number. We strictly avoid generic `.js-share` parameters to prevent misattributing listings to the wrong tracker ID.
 
 #### Defensive Error Handling in Single-Listing Scrape
 
@@ -684,12 +683,13 @@ All UI state has been migrated to the URL to ensure triage views are **100% book
 - Clicking a property card from within the **Contacts View detail panel** automatically switches the user to the **Properties View** with that specific listing selected, enforcing `scope=all` in the URL to guarantee the listing remains visible even if it's already been processed.
 - Clicking the seller's name from within the **Properties View detail panel** automatically switches the user to the **Contacts View** to explore the rest of that seller's portfolio, again enforcing `scope=all` to unmask the owner regardless of their accepted/rejected status.
 
-### 4.3 Deep Detail Panels & Scraping Operations
+### 4.3 Deep Detail Panels & Optimistic UI
 
 Both detail panels contain dedicated action bars and tailored content views:
 
 - **High-Res Photo Gallery:** The `images` array is exclusively used for the main property viewer to ensure agents see high-quality, zoomable photos, while the `thumbnails` array powers the carousel strip and multi-property feed cards to preserve network and layout performance.
 - **Action Outbound:** Pre-filled WhatsApp deep links and direct Call links.
+- **Optimistic UI Data Binding:** Following Enterprise SaaS best practices, detail panels do not wait for hard page refreshes after asynchronous events. When a `ScrapeListingDialog` finishes extracting data, the backend immediately returns the resolved `prospectLeadId` and `prospectName`. The detail panel intercepts this payload and applies a local optimistic state update, instantly revealing the seller's true identity and unmasking the Accept/Convert buttons without a network waterfall.
 - **Scrape Other Listings:** A dedicated `DownloadCloud` button that dispatches a background task (`scrapeSellerProfile`) to extract the rest of the seller's portfolio using their `otherListingsUrl`. This button is prominently available in both the Properties View and Contacts View. *(Note: When a single listing is scraped or re-scraped, the backend `scrape-listing` service automatically extracts and syncs this `profileUrl` directly to the `ProspectLead` record, ensuring this button is actionable immediately without needing to visit the contact card).*
 
 ### 4.4 Cascading Decide Actions & Keyboard Accessibility
@@ -702,6 +702,7 @@ Triage speed is maximized through keyboard shortcuts and cascading transactions:
 **Cascading Effect:**
 - In the **Properties View**, Accept/Import applies only to the selected `$1` listing, marking it as `IMPORTED` and linking it to a newly created CRM Property via `importedPropertyId`.
 - In the **Contacts View**, Accept/Reject triggers a **cascading database transaction** (`acceptProspectWithListings` / `rejectProspectWithListings`). Rejecting a contact instantly rejects *all* their newly scraped listings simultaneously. Accepting a contact creates a CRM Contact and imports their new listings.
+- **Deleting Prospects:** For corrupted or invalid leads, the UI provides a "Delete Prospect" action (`Trash2`). This permanently removes the `ProspectLead` and uses Prisma's `SetNull` to automatically unlink and reset any erroneously associated `ScrapedListing` records so they safely return to the generic `New` queue for re-triage.
 
 ### 4.5 Explicit State Filtering (Scope)
 
