@@ -3,13 +3,13 @@
 import { useState, useTransition, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { type ScrapedListingRow } from '@/lib/leads/scraped-listing-repository';
-import { acceptProspect } from '../actions';
+import { acceptProspect, deleteProspect } from '../actions';
 import { scrapeSellerProfile } from '../listings/_actions/seller-scrape';
 import { ScrapeListingDialog } from './scrape-listing-dialog';
 import { toast } from 'sonner';
 import {
   Building2, UserCheck, ExternalLink, Phone, MessageCircle,
-  UserPlus, ChevronLeft, ChevronRight, DownloadCloud, Check, X, Home, Keyboard, RefreshCw
+  UserPlus, ChevronLeft, ChevronRight, DownloadCloud, Check, X, Home, Keyboard, RefreshCw, Trash2
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -29,7 +29,9 @@ export function ProspectDetailPanel({ listing, onAccept, onReject, isPending }: 
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isConverting, startConverting] = useTransition();
   const [isScrapingSeller, startScrapingSeller] = useTransition();
+  const [isDeleting, startDeleting] = useTransition();
   const [isScrapeOpen, setIsScrapeOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 
   // Reset carousel when listing changes
   useEffect(() => {
@@ -90,6 +92,21 @@ export function ProspectDetailPanel({ listing, onAccept, onReject, isPending }: 
       );
       if (res.success) {
         toast.success(res.message);
+      } else {
+        toast.error(res.message);
+      }
+    });
+  };
+
+  const handleDelete = () => {
+    if (!listing.prospectLeadId) return;
+    startDeleting(async () => {
+      const res = await deleteProspect(listing.prospectLeadId!);
+      if (res.success) {
+        toast.success('Prospect deleted successfully');
+        setIsDeleteDialogOpen(false);
+        router.push('/admin/prospecting');
+        router.refresh();
       } else {
         toast.error(res.message);
       }
@@ -231,6 +248,28 @@ export function ProspectDetailPanel({ listing, onAccept, onReject, isPending }: 
                   <Button variant="default" size="sm" className="gap-1.5 mt-2" onClick={handleConvert} disabled={isConverting || !listing.prospectLeadId}>
                     <UserPlus className="w-4 h-4" /> Convert to Contact
                   </Button>
+                )}
+
+                {listing.prospectLeadId && (
+                  <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button variant="ghost" size="icon" className="mt-2 ml-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10" disabled={isDeleting}>
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogTitle>Delete Prospect</DialogTitle>
+                      <DialogDescription>
+                        Are you sure you want to permanently delete this prospect? Any currently associated listings will be unlinked and return to the New properties queue.
+                      </DialogDescription>
+                      <div className="flex justify-end gap-2 mt-4">
+                        <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} disabled={isDeleting}>Cancel</Button>
+                        <Button variant="destructive" onClick={handleDelete} disabled={isDeleting}>
+                          {isDeleting ? 'Deleting...' : 'Delete'}
+                        </Button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
                 )}
               </div>
             </div>

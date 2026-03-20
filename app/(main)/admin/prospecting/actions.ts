@@ -109,6 +109,22 @@ export async function rejectProspect(id: string) {
     }
 }
 
+export async function deleteProspect(id: string) {
+    try {
+        const internalUserId = await getInternalUserId();
+        if (!internalUserId) return { success: false, message: 'Unauthorized' };
+
+        // We delete the prospect entirely. Associated ScrapedListing records will have
+        // prospectLeadId set to NULL automatically thanks to Prisma's onDelete: SetNull
+        await db.prospectLead.delete({ where: { id } });
+
+        revalidatePath('/admin/prospecting');
+        return { success: true };
+    } catch (e: any) {
+        return { success: false, message: e.message || 'Server error' };
+    }
+}
+
 export async function bulkAccept(ids: string[]) {
     let count = 0;
     for (const id of ids) {
