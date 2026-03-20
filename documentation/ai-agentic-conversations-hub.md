@@ -220,7 +220,8 @@ While a thread is open, the UI now keeps the chat in sync without manual refresh
 *   **Realtime First**: active list/thread updates now prefer SSE event delivery with idempotent merge and replay support after reconnect.
 *   **Polling Fallback**: if realtime is unavailable, the client falls back to the existing polling path.
 *   **Selected Thread Refresh**: in workspace-v2 mode, the client refreshes `workspaceCore` rather than only raw messages.
-*   **Auto Read Reset**: Opening or live-refreshing an active thread with unread messages triggers `markConversationAsRead(conversationId)` to clear `unreadCount`.
+*   **Unread Badge**: Rows show `unreadCount` badges (capped display), so unread state is visible at a glance.
+*   **Auto Read Reset**: Opening or live-refreshing an active thread with unread messages triggers `markConversationAsRead(conversationId)` to clear `unreadCount` optimistically. Background polling merges are blocked from overriding this during the read-reset flight to prevent badge flashing *(details in [conversations-speed-architecture-and-roadmap.md](conversations-speed-architecture-and-roadmap.md))*.
 *   **Auto-scroll to Latest**: `ChatWindow` already auto-scrolls on message updates; with live refresh in place, new inbound messages are immediately shown at the bottom for the active thread.
 
 ### Email Overflow Containment & Layout Stability

@@ -124,7 +124,7 @@ The inbox updates on-page without requiring a manual refresh:
   - on reconnect/open, the client performs one debounced delta resync
 - **Live Reordering**: Incoming rows are merged **incoming-first** so conversations with newer `lastMessageAt` naturally move to the top immediately.
 - **Unread Badges**: Each row displays `Conversation.unreadCount` as a compact badge (`99+` cap).
-- **Read Reset on Open Thread**: Opening a thread (and live-refreshing an already open thread) calls `markConversationAsRead(conversationId)` to reset unread count to `0`.
+- **Read Reset on Open Thread**: Opening a thread (and live-refreshing an already open thread) calls `markConversationAsRead(conversationId)` to reset unread count to `0`. This updates optimistically and is protected against stale polling flashes. *(See [conversations-speed-architecture-and-roadmap.md](conversations-speed-architecture-and-roadmap.md) for UX performance details).*
 - **Active Thread Refresh**:
   - legacy mode refreshes messages when selected-thread metadata changes
   - workspace v2 refreshes `workspaceCore` on a slower balanced interval

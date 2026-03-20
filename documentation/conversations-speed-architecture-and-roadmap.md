@@ -43,6 +43,7 @@ Main causes identified:
 | 2026-03-10 | `c7b410a` | Faster Gemini draft experience (adjacent UX perf). |
 | 2026-03-10 | `11420df` | Instant open via progressive hydration + no visible scroll jank. |
 | 2026-03-20 | `2e54c54` | Fire-and-forget outbound send with optimistic reconciliation. |
+| 2026-03-20 | `52e82e5` | Optimistic unread badge clearance override during list polling. |
 
 ## Current Architecture (As Implemented)
 
@@ -69,6 +70,7 @@ Other implemented client speedups:
 - realtime/poll refresh is skipped while hydration/backfill is in-flight to avoid duplicate work
 - shallow URL sync via `history.replaceState` when enabled, with `popstate` state restoration
 - fire-and-forget outbound message send with optimistic UI + targeted reconciliation (see §6 below)
+- optimistic unread badge clearance protected against stale background polling via `readResetInFlightRef` (see §7 below)
 
 ### 2) No-Scroll-Jank Opening Behavior
 `ChatWindow` removes first-open travel effects:
@@ -119,6 +121,10 @@ Implemented SSE channel: `/api/conversations/events`
 4. **Targeted reconciliation**: On success, the client fetches only the latest 5 messages (`fetchMessages(id, { take: 5 })`) and swaps the optimistic stub for the real DB message with deduplication.
 5. **Failure handling**: If the server action fails, the optimistic message is marked `status: 'failed'` with a red badge + toast notification.
 6. **SSE safety net**: If the SSE realtime event (`message.outbound`) arrives before reconciliation, the existing realtime merge guards prevent duplicates.
+
+### 7) Optimistic Unread Badge Clearance (Mar 2026)
+When an unread conversation is clicked, the UI clears the badge instantly locally. However, if a background poll or SSE fetch occurs before the server completes the `markConversationAsRead` background core action, the server may reply with a stale `unreadCount > 0`.
+To prevent the UI from flashing the unread badge back on, list merge functions (`applyConversationDeltaPayload`, `replaceConversationListFromResponse`, etc.) intercept the incoming server payload. If `readResetInFlightRef.current` tracks that a read reset was recently initiated for a conversation, the client actively overrides the incoming `unreadCount` to `0`, ensuring the badge remains seamlessly cleared.
 
 ### 5) Data, Index, and Query-plan Safety
 Performance indexes and query-plan checks are in place for:
