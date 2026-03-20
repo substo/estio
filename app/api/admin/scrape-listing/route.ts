@@ -724,22 +724,15 @@ async function upsertListingData(
         if (!existingProspect) {
             // Priority 1: Exact Platform ID match (Most deterministic)
             if (data.sellerExternalId) {
-                existingProspect = await db.prospectLead.findFirst({ 
-                    where: { locationId, platformUserId: data.sellerExternalId } 
+                existingProspect = await db.prospectLead.findFirst({
+                    where: { locationId, platformUserId: data.sellerExternalId }
                 });
             }
 
             // Priority 2: Authoritative Owner Phone match
             if (!existingProspect && data.ownerPhone) {
-                existingProspect = await db.prospectLead.findFirst({ 
-                    where: { locationId, phone: { contains: data.ownerPhone } } 
-                });
-            }
-
-            // Priority 3: Fallback Secondary WhatsApp Phone match
-            if (!existingProspect && data.whatsappPhone && data.whatsappPhone !== data.ownerPhone) {
-                existingProspect = await db.prospectLead.findFirst({ 
-                    where: { locationId, phone: { contains: data.whatsappPhone } } 
+                existingProspect = await db.prospectLead.findFirst({
+                    where: { locationId, phone: { contains: data.ownerPhone } }
                 });
             }
         }

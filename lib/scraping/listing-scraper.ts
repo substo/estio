@@ -348,14 +348,7 @@ export class ListingScraperService {
                     where: { locationId, phone: { contains: listing.ownerPhone } } 
                 });
             }
-
-            // Priority 4: Fallback Secondary WhatsApp Phone match
-            if (!existingProspect && listing.whatsappPhone && listing.whatsappPhone !== listing.ownerPhone) {
-                existingProspect = await db.prospectLead.findFirst({ 
-                    where: { locationId, phone: { contains: listing.whatsappPhone } } 
-                });
-            }
-
+            
             if (!existingProspect) {
                 existingProspect = await db.prospectLead.create({
                     data: {
