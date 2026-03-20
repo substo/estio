@@ -2863,7 +2863,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         const conversationTarget = targetConversation || activeConversation;
         if (!conversationTarget) return;
 
-        // Optimistic UI update
+        // Optimistic UI update — message appears instantly with 'sending' status
         const optimisticMessageId = `opt-${Date.now()}`;
         const optimisticMessage: any = {
             id: optimisticMessageId,
@@ -2882,10 +2882,98 @@ export function ConversationInterface({ locationId, initialConversations, initia
             setMessages((prev) => [...prev, optimisticMessage]);
         }
 
-        try {
-            const res = await sendReply(conversationTarget.id, conversationTarget.contactId, text, type);
-            if (!res.success) {
-                if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
+        // Fire-and-forget: do NOT await the server action.
+        // The UI is free immediately — user can keep typing / sending.
+        // Reconciliation happens in background callbacks.
+        const capturedConversationId = conversationTarget.id;
+        const capturedContactId = conversationTarget.contactId;
+
+        sendReply(capturedConversationId, capturedContactId, text, type)
+            .then(async (res) => {
+                if (!res.success) {
+                    // Mark optimistic message as failed (if still viewing this conversation)
+                    if (viewMode === 'chats' && activeIdRef.current === capturedConversationId) {
+                        setMessages((prev) =>
+                            prev.map((m) =>
+                                m.id === optimisticMessageId ? { ...m, status: 'failed' } : m
+                            )
+                        );
+                    }
+                    toast({
+                        title: 'Failed to send message',
+                        description: typeof res.error === 'string' ? res.error : 'Unknown error occurred',
+                        variant: 'destructive',
+                    });
+                    return;
+                }
+
+                // Deal mode: refresh deal workspace in background
+                if (viewMode === 'deals' && activeDealIdRef.current) {
+                    void refreshActiveDealWorkspace(activeDealIdRef.current, {
+                        reason: "send_message",
+                        refreshSidebar: false,
+                    });
+                }
+
+                // Reconcile: swap the optimistic stub with the real DB message.
+                // Fetch only the latest few messages to find the real one —
+                // much lighter than refetching the entire thread.
+                if (viewMode === 'chats' && activeIdRef.current === capturedConversationId) {
+                    try {
+                        const latestMessages = await fetchMessages(capturedConversationId, { take: 5 });
+                        if (activeIdRef.current !== capturedConversationId) return; // switched away
+
+                        setMessages((prev) => {
+                            // Find the real message: matches body + direction + is recent
+                            const realMessage = latestMessages.find((m: Message) =>
+                                m.body === text
+                                && m.direction === 'outbound'
+                                && !String(m.id).startsWith('opt-')
+                            );
+
+                            if (realMessage) {
+                                // Replace optimistic with real, deduplicating any messages
+                                // that may have arrived via SSE realtime in the meantime
+                                const seen = new Set<string>();
+                                const merged: Message[] = [];
+                                for (const m of prev) {
+                                    if (m.id === optimisticMessageId) {
+                                        // Swap optimistic for real
+                                        if (!seen.has(realMessage.id)) {
+                                            seen.add(realMessage.id);
+                                            merged.push(realMessage);
+                                        }
+                                    } else {
+                                        const mid = String(m.id);
+                                        if (!seen.has(mid)) {
+                                            seen.add(mid);
+                                            merged.push(m);
+                                        }
+                                    }
+                                }
+                                return merged;
+                            }
+
+                            // Real message not found in latest batch — just mark as sent.
+                            // The next realtime/poll cycle will bring in the real message.
+                            return prev.map((m) =>
+                                m.id === optimisticMessageId ? { ...m, status: 'sent' } : m
+                            );
+                        });
+                    } catch {
+                        // Reconcile fetch failed — just mark as sent since server confirmed success
+                        if (activeIdRef.current === capturedConversationId) {
+                            setMessages((prev) =>
+                                prev.map((m) =>
+                                    m.id === optimisticMessageId ? { ...m, status: 'sent' } : m
+                                )
+                            );
+                        }
+                    }
+                }
+            })
+            .catch((e: any) => {
+                if (viewMode === 'chats' && activeIdRef.current === capturedConversationId) {
                     setMessages((prev) =>
                         prev.map((m) =>
                             m.id === optimisticMessageId ? { ...m, status: 'failed' } : m
@@ -2894,39 +2982,10 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 }
                 toast({
                     title: 'Failed to send message',
-                    description: typeof res.error === 'string' ? res.error : 'Unknown error occurred',
+                    description: e?.message || 'Unknown error occurred',
                     variant: 'destructive',
                 });
-                return;
-            }
-
-            if (viewMode === 'deals' && activeDealIdRef.current) {
-                void refreshActiveDealWorkspace(activeDealIdRef.current, {
-                    reason: "send_message",
-                    refreshSidebar: false,
-                });
-            }
-
-            if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
-                // If the action returned the real message, we could swap it. 
-                // For now, refetch to be safe and get the DB-assigned ID.
-                const newMsgs = await fetchMessages(conversationTarget.id);
-                setMessages(newMsgs);
-            }
-        } catch (e: any) {
-            if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
-                setMessages((prev) =>
-                    prev.map((m) =>
-                        m.id === optimisticMessageId ? { ...m, status: 'failed' } : m
-                    )
-                );
-            }
-            toast({
-                title: 'Failed to send message',
-                description: e?.message || 'Unknown error occurred',
-                variant: 'destructive',
             });
-        }
     };
 
     const applyConversationReplyLanguageOverride = useCallback((conversationId: string, replyLanguageOverride: string | null) => {

@@ -5284,25 +5284,28 @@ export async function sendReply(conversationId: string, contactId: string, messa
                             }
                         });
 
-                        // Unified Update Logic
-                        const { updateConversationLastMessage } = await import('@/lib/conversations/update');
-
-                        // We need the internal ID
-                        const internalConv = await db.conversation.findUnique({
-                            where: { ghlConversationId: conversationId },
-                            select: { id: true }
-                        });
-
-                        if (internalConv) {
-                            await updateConversationLastMessage({
-                                conversationId: internalConv.id,
-                                messageBody: messageBody,
-                                messageType: 'TYPE_WHATSAPP',
-                                messageDate: new Date(),
-                                direction: 'outbound',
-                                // Outbound does not increment unread count by default
-                            });
-                        }
+                        // Fire-and-forget: conversation summary update is bookkeeping
+                        // and should not block the server action response to the client.
+                        void (async () => {
+                            try {
+                                const { updateConversationLastMessage } = await import('@/lib/conversations/update');
+                                const internalConv = await db.conversation.findUnique({
+                                    where: { ghlConversationId: conversationId },
+                                    select: { id: true }
+                                });
+                                if (internalConv) {
+                                    await updateConversationLastMessage({
+                                        conversationId: internalConv.id,
+                                        messageBody: messageBody,
+                                        messageType: 'TYPE_WHATSAPP',
+                                        messageDate: new Date(),
+                                        direction: 'outbound',
+                                    });
+                                }
+                            } catch (convUpdateErr) {
+                                console.error('[sendReply] Background conversation update failed:', convUpdateErr);
+                            }
+                        })();
 
                         // [GHL Sync] Fire-and-forget sync to GHL
                         // We now use JIT contact creation to ensure GHL ID exists
