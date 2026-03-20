@@ -290,7 +290,7 @@ async function scrapeBazarakiListing(
             } catch (e) { /* ignore */ }
             const sellerExternalId = await page.locator('.author-info .author-name[data-user], .author-info a[data-user]').first().getAttribute('data-user').catch(() => undefined);
             const sellerRegisteredAt = await page.locator('.date-registration').textContent().catch(() => undefined);
-            const otherListingsUrl = await page.locator('a.other-announcement-author').evaluate((el) => (el as HTMLAnchorElement).href).catch(() => undefined);
+            const otherListingsUrl = await page.locator('a.other-announcement-author').evaluate((el: any) => (el as HTMLAnchorElement).href).catch(() => undefined);
 
             sendEvent({ status: 'extracting', message: `Owner: ${ownerName.trim() || 'Unknown'} (ID: ${sellerExternalId || 'N/A'})` });
 

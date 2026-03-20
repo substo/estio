@@ -704,5 +704,23 @@ export const evolutionClient = {
             console.error('Error updating webhook:', error.response?.data || error);
             throw error;
         }
+    },
+
+    /**
+     * Verify the true network status of a message.
+     * Uses fetchMessages to look up a specific wamId and read its status.
+     * Returns the message object if found, otherwise null.
+     */
+    verifyMessageStatus: async (instanceName: string, remoteJid: string, wamId: string) => {
+        try {
+            // Fetch the last 50 messages of the chat to find our message.
+            const messages = await evolutionClient.fetchMessages(instanceName, remoteJid, 50, 0);
+            const targetMessage = messages.find((msg: any) => msg.key?.id === wamId);
+            return targetMessage || null;
+        } catch (error: any) {
+            console.error(`[Evolution] Error verifying message status for ${wamId}:`, error.message);
+            // If the chat doesn't exist or similar error, it might be dropped entirely.
+            return null;
+        }
     }
 };

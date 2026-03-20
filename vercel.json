@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/purge-trash",
+      "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/cron/whatsapp-reconciliation",
+      "schedule": "*/10 * * * *"
+    }
+  ]
+}
