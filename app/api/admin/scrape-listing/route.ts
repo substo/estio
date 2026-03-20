@@ -722,14 +722,26 @@ async function upsertListingData(
         }
 
         if (!existingProspect) {
-            const orConditions: any[] = [];
-            if (data.ownerPhone) orConditions.push({ phone: { contains: data.ownerPhone } });
-            if (data.whatsappPhone) orConditions.push({ phone: { contains: data.whatsappPhone } });
-            if (data.sellerExternalId) orConditions.push({ platformUserId: data.sellerExternalId });
+            // Priority 1: Exact Platform ID match (Most deterministic)
+            if (data.sellerExternalId) {
+                existingProspect = await db.prospectLead.findFirst({ 
+                    where: { locationId, platformUserId: data.sellerExternalId } 
+                });
+            }
 
-            existingProspect = orConditions.length > 0
-                ? await db.prospectLead.findFirst({ where: { locationId, OR: orConditions } })
-                : null;
+            // Priority 2: Authoritative Owner Phone match
+            if (!existingProspect && data.ownerPhone) {
+                existingProspect = await db.prospectLead.findFirst({ 
+                    where: { locationId, phone: { contains: data.ownerPhone } } 
+                });
+            }
+
+            // Priority 3: Fallback Secondary WhatsApp Phone match
+            if (!existingProspect && data.whatsappPhone && data.whatsappPhone !== data.ownerPhone) {
+                existingProspect = await db.prospectLead.findFirst({ 
+                    where: { locationId, phone: { contains: data.whatsappPhone } } 
+                });
+            }
         }
 
         if (!existingProspect) {
@@ -738,7 +750,7 @@ async function upsertListingData(
                     locationId,
                     source: 'scraper_bot',
                     name: data.ownerName || null,
-                    phone: data.whatsappPhone || data.ownerPhone || null, // Prefer whatsapp phone if found
+                    phone: data.ownerPhone || data.whatsappPhone || null, // Prefer owner phone as it is authoritative
                     status: 'new',
                     isAgency: false,
                     platformUserId: data.sellerExternalId,
@@ -752,7 +764,7 @@ async function upsertListingData(
             const updateData: any = {};
             if (data.ownerName && !existingProspect.name) updateData.name = data.ownerName;
 
-            const bestPhone = data.whatsappPhone || data.ownerPhone;
+            const bestPhone = data.ownerPhone || data.whatsappPhone;
             if (bestPhone && !existingProspect.phone) updateData.phone = bestPhone;
 
             if (data.sellerExternalId && !existingProspect.platformUserId) updateData.platformUserId = data.sellerExternalId;

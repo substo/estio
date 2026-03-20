@@ -326,17 +326,35 @@ export class ListingScraperService {
         let prospectLeadId: string | null = task.targetProspectId || null;
 
         if (!prospectLeadId && (listing.ownerPhone || listing.ownerEmail || listing.sellerExternalId)) {
-            const orConditions: any[] = [];
-            if (listing.ownerPhone) orConditions.push({ phone: { contains: listing.ownerPhone } });
-            if (listing.whatsappPhone) orConditions.push({ phone: { contains: listing.whatsappPhone } });
-            if (listing.ownerEmail) orConditions.push({ email: listing.ownerEmail });
-            if (listing.sellerExternalId) orConditions.push({ platformUserId: listing.sellerExternalId });
+            let existingProspect = null;
 
-            let existingProspect = orConditions.length > 0
-                ? await db.prospectLead.findFirst({
-                    where: { locationId, OR: orConditions }
-                })
-                : null;
+            // Priority 1: Exact Platform ID match (Most deterministic)
+            if (listing.sellerExternalId) {
+                existingProspect = await db.prospectLead.findFirst({ 
+                    where: { locationId, platformUserId: listing.sellerExternalId } 
+                });
+            }
+
+            // Priority 2: Authoritative Owner Email match
+            if (!existingProspect && listing.ownerEmail) {
+                existingProspect = await db.prospectLead.findFirst({ 
+                    where: { locationId, email: listing.ownerEmail } 
+                });
+            }
+
+            // Priority 3: Authoritative Owner Phone match
+            if (!existingProspect && listing.ownerPhone) {
+                existingProspect = await db.prospectLead.findFirst({ 
+                    where: { locationId, phone: { contains: listing.ownerPhone } } 
+                });
+            }
+
+            // Priority 4: Fallback Secondary WhatsApp Phone match
+            if (!existingProspect && listing.whatsappPhone && listing.whatsappPhone !== listing.ownerPhone) {
+                existingProspect = await db.prospectLead.findFirst({ 
+                    where: { locationId, phone: { contains: listing.whatsappPhone } } 
+                });
+            }
 
             if (!existingProspect) {
                 existingProspect = await db.prospectLead.create({
@@ -344,7 +362,7 @@ export class ListingScraperService {
                         locationId,
                         source: 'scraper_bot',
                         name: listing.ownerName || null,
-                        phone: listing.whatsappPhone || listing.ownerPhone || null,
+                        phone: listing.ownerPhone || listing.whatsappPhone || null,
                         email: listing.ownerEmail || null,
                         status: 'new', // Lands in People Inbox
                         isAgency,
@@ -357,7 +375,7 @@ export class ListingScraperService {
                 const updateData: any = {};
                 if (listing.ownerName && !existingProspect.name) updateData.name = listing.ownerName;
 
-                const bestPhone = listing.whatsappPhone || listing.ownerPhone;
+                const bestPhone = listing.ownerPhone || listing.whatsappPhone;
                 if (bestPhone && !existingProspect.phone) updateData.phone = bestPhone;
 
                 if (listing.sellerExternalId && !existingProspect.platformUserId) updateData.platformUserId = listing.sellerExternalId;
