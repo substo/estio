@@ -376,3 +376,28 @@ export async function acceptProspectWithListings(prospectId: string) {
     }
 }
 
+// --- Classification Toggle ---
+
+export async function toggleProspectAgencyStatus(id: string, isAgencyManual: boolean | null) {
+    try {
+        const internalUserId = await getInternalUserId();
+        if (!internalUserId) return { success: false, message: 'Unauthorized' };
+
+        const updateData: any = { isAgencyManual };
+
+        // If manual override is set, also update isAgency to match for downstream queries
+        if (isAgencyManual !== null) {
+            updateData.isAgency = isAgencyManual;
+        }
+
+        await db.prospectLead.update({
+            where: { id },
+            data: updateData,
+        });
+
+        revalidatePath('/admin/prospecting');
+        return { success: true };
+    } catch (e: any) {
+        return { success: false, message: e.message || 'Server error' };
+    }
+}

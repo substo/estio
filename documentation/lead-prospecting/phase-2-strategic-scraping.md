@@ -356,7 +356,7 @@ Filters can be applied via URL params (district, price range, bedrooms).
 | **Other Listings URL** | `a.other-announcement-author` `href` | |
 | **WhatsApp Phone** | `a[href*="wa.me/"], a[href*="api.whatsapp.com/send"]` | Free extraction — no click budget. Ignores generic social share buttons to prevent false positives. |
 | **Contact Channels** | Presence checks: `.js-card-messenger`, `._email`, WhatsApp href | Array: `["whatsapp","chat","email"]` |
-| **Raw Attributes** | All `ul.chars-column li` key-value pairs | Stored as JSON catch-all |
+| **Raw Attributes** | All `ul.chars-column li` key-value pairs | Stored as JSON catch-all. Powers dynamic schema-on-read feature extraction. |
 | **Expired Status** | `.phone-author--sold` or `.phone-author__subtext` text | Flags `isExpired` in DB to visually dim the UI across hubs |
 
 #### Phone Extraction: Contacts Dialog Flow
@@ -630,8 +630,8 @@ model ScrapedListing {
   contactChannels    String[]  @default([])  // ["whatsapp","chat","email"]
   whatsappPhone      String?   // Parsed from WhatsApp button href
 
-  // Metadata
-  rawAttributes  Json?    // All key-value pairs from chars-column
+  // Metadata & Dynamic Features
+  rawAttributes  Json?    // All key-value pairs from chars-column (Schema-on-read)
 
   prospectLeadId String?
   prospectLead   ProspectLead? @relation(fields: [prospectLeadId], references: [id], onDelete: Cascade)
@@ -689,6 +689,7 @@ Both detail panels contain dedicated action bars and tailored content views:
 
 - **High-Res Photo Gallery:** The `images` array is exclusively used for the main property viewer to ensure agents see high-quality, zoomable photos, while the `thumbnails` array powers the carousel strip and multi-property feed cards to preserve network and layout performance.
 - **Action Outbound:** Pre-filled WhatsApp deep links and direct Call links.
+- **Dynamic Feature Extraction:** Scraped listings utilize a schema-on-read JSON field (`rawAttributes`) to capture all non-standard property features (e.g., "Pets allowed", "Energy class"). These are rendered dynamically as badges in the Detail Panel and explicitly mapped to the core CRM `Property.features` array upon lead conversion, ensuring zero data loss.
 - **Optimistic UI Data Binding:** Following Enterprise SaaS best practices, detail panels do not wait for hard page refreshes after asynchronous events. When a `ScrapeListingDialog` finishes extracting data, the backend immediately returns the resolved `prospectLeadId` and `prospectName`. The detail panel intercepts this payload and applies a local optimistic state update, instantly revealing the seller's true identity and unmasking the Accept/Convert buttons without a network waterfall.
 - **Scrape Other Listings:** A dedicated `DownloadCloud` button that dispatches a background task (`scrapeSellerProfile`) to extract the rest of the seller's portfolio using their `otherListingsUrl`. This button is prominently available in both the Properties View and Contacts View. *(Note: When a single listing is scraped or re-scraped, the backend `scrape-listing` service automatically extracts and syncs this `profileUrl` directly to the `ProspectLead` record, ensuring this button is actionable immediately without needing to visit the contact card).*
 

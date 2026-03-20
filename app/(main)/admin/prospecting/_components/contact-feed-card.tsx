@@ -2,7 +2,7 @@
 
 import { formatDistanceToNow } from 'date-fns';
 import { type ProspectInboxRow } from '@/lib/leads/prospect-repository';
-import { Building2, UserCheck, Phone, Home, Hash } from 'lucide-react';
+import { Building2, UserCheck, Phone, Home, Hash, Bot } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
@@ -68,11 +68,17 @@ export function ContactFeedCard({ prospect, isSelected, onClick, isBulkSelected,
           </div>
           
           <div className="flex items-center gap-1.5 mt-0.5">
-            {prospect.isAgency ? (
-              <Badge variant="destructive" className="text-[9px] h-4 px-1 gap-0.5"><Building2 className="w-2.5 h-2.5" /> Agency</Badge>
-            ) : (
-              <Badge variant="default" className="bg-green-600 text-[9px] h-4 px-1 gap-0.5"><UserCheck className="w-2.5 h-2.5" /> Private</Badge>
-            )}
+            {(() => {
+              const effectiveAgency = prospect.isAgencyManual !== null && prospect.isAgencyManual !== undefined
+                ? prospect.isAgencyManual : prospect.isAgency;
+              const isAI = prospect.isAgencyManual === null || prospect.isAgencyManual === undefined;
+              const Icon = isAI && prospect.agencyConfidence ? Bot : (effectiveAgency ? Building2 : UserCheck);
+              return effectiveAgency ? (
+                <Badge variant="destructive" className="text-[9px] h-4 px-1 gap-0.5"><Icon className="w-2.5 h-2.5" /> Agency</Badge>
+              ) : (
+                <Badge variant="default" className="bg-green-600 text-[9px] h-4 px-1 gap-0.5"><Icon className="w-2.5 h-2.5" /> Private</Badge>
+              );
+            })()}
             <span className="text-[10px] text-muted-foreground truncate flex items-center gap-1">
               <Hash className="w-2.5 h-2.5" />{prospect.scrapedListingsCount} listing{prospect.scrapedListingsCount !== 1 ? 's' : ''}
             </span>

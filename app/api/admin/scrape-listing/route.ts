@@ -139,6 +139,29 @@ export async function POST(req: Request) {
                         result.prospectLeadId = upsertResult?.prospectLeadId || undefined;
                         result.prospectName = upsertResult?.prospectName || result.ownerName;
 
+                        // Run AI classification on the prospect
+                        if (upsertResult?.prospectLeadId) {
+                            try {
+                                sendEvent({ status: 'classifying', message: '🤖 Running AI agency/private classification...' });
+                                const { classifyAndUpdateProspect } = await import('@/lib/ai/prospect-classifier');
+                                const classification = await classifyAndUpdateProspect(
+                                    upsertResult.prospectLeadId,
+                                    locationId,
+                                    {
+                                        name: result.ownerName,
+                                        description: result.description,
+                                        listingCount: undefined, // not available in single-scrape context
+                                        platformRegistered: result.sellerRegisteredAt,
+                                        profileUrl: result.otherListingsUrl,
+                                        contactChannels: result.contactChannels,
+                                    }
+                                );
+                                sendEvent({ status: 'classifying', message: `🤖 Classification: ${classification.isAgency ? 'Agency' : 'Private'} (${classification.confidenceScore}% confidence)` });
+                            } catch (classErr: any) {
+                                sendEvent({ status: 'classifying', message: `⚠️ Classification skipped: ${classErr.message?.substring(0, 80)}` });
+                            }
+                        }
+
                         sendEvent({
                             status: 'success',
                             message: 'Scrape completed successfully!',

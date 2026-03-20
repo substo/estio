@@ -1,6 +1,5 @@
 import db from '@/lib/db';
 import { PageFetcher } from './page-fetcher';
-import { callLLMWithMetadata } from '@/lib/ai/llm';
 
 export class DeepScraperService {
     /**
@@ -48,70 +47,41 @@ export class DeepScraperService {
                          fullDescription = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 5000); // Send up to 5k chars to LLM
                     }
 
-                    // Ask Gemini if this is an Agency
-                    const prompt = `
-Analyze the following property listing and contact information to determine if it belongs to a Real Estate Agency/Developer or a Private individual seller/landlord.
-Return a JSON object with a single boolean property "isAgency". True if it appears to be an agency, false if private person.
-
-Title: ${listing.title || 'Unknown'}
-Location: ${listing.locationText || 'Unknown'}
-Description: ${fullDescription}
-                    `;
-                    
-                    const aiResult = await callLLMWithMetadata('gemini-1.5-flash', prompt, '', { 
-                        jsonMode: true, 
-                        temperature: 0.1 
-                    });
-
+                    // Ask AI if this is an Agency using the reusable classifier
                     let isAgency = false;
-                    if (aiResult.text) {
+                    if (listing.prospectLeadId) {
                         try {
-                           const parsed = JSON.parse(aiResult.text);
-                           isAgency = parsed.isAgency === true || parsed.isAgency === 'true';
-                        } catch (e) {
-                           console.warn(`[DeepScraper] Failed to parse AI JSON for ${listing.id}`);
+                            const { classifyAndUpdateProspect } = await import('@/lib/ai/prospect-classifier');
+
+                            // Count how many listings this prospect has
+                            const listingCount = await db.scrapedListing.count({
+                                where: { prospectLeadId: listing.prospectLeadId },
+                            });
+
+                            const classification = await classifyAndUpdateProspect(
+                                listing.prospectLeadId,
+                                locationId,
+                                {
+                                    name: listing.prospectLead?.name,
+                                    description: fullDescription,
+                                    listingCount,
+                                    platformRegistered: listing.prospectLead?.platformRegistered,
+                                    profileUrl: listing.prospectLead?.profileUrl,
+                                }
+                            );
+                            isAgency = classification.isAgency;
+                        } catch (classErr: any) {
+                            console.warn(`[DeepScraper] Classification failed for ${listing.id}: ${classErr.message}`);
                         }
                     }
 
                     if (isAgency) agenciesFound++;
 
-                    // Log the global Enterprise Usage correctly under this location
-                    await db.agentExecution.create({
-                        data: {
-                            locationId: locationId,
-                            sourceType: 'scraper',
-                            sourceId: listing.id,
-                            
-                            taskTitle: "Analyze Deep Listing IsAgency",
-                            taskStatus: "done",
-                            status: "success",
-                            skillName: "listing_classifier",
-                            intent: "classification",
-                            model: 'gemini-1.5-flash',
-                            
-                            promptTokens: aiResult.usage?.promptTokens || 0,
-                            completionTokens: aiResult.usage?.completionTokens || 0,
-                            totalTokens: aiResult.usage?.totalTokens || 0,
-                            cost: 0 // Ideally a runCost calculator here if needed
-                        }
-                    });
-
-                    // Update the ScrapedListing to REVIEWING (or ACCEPTED/REJECTED based on business logic)
+                    // Update the ScrapedListing status out of NEW
                     await db.scrapedListing.update({
                         where: { id: listing.id },
-                        data: { status: 'REVIEWED' } // moving out of NEW
+                        data: { status: 'REVIEWED' }
                     });
-
-                    // If we have an attached person, update their agency status
-                    if (listing.prospectLeadId) {
-                        // Only update if we positively identified an agency, we don't want to revert a known agency to false
-                        if (isAgency) {
-                            await db.prospectLead.update({
-                                where: { id: listing.prospectLeadId },
-                                data: { isAgency: true }
-                            });
-                        }
-                    }
 
                     processed++;
                     

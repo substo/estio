@@ -3,12 +3,12 @@
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { type ProspectInboxRow } from '@/lib/leads/prospect-repository';
-import { acceptProspectWithListings, rejectProspectWithListings } from '../actions';
+import { acceptProspectWithListings, rejectProspectWithListings, toggleProspectAgencyStatus } from '../actions';
 import { scrapeSellerProfile } from '../listings/_actions/seller-scrape';
 import { toast } from 'sonner';
 import {
   Building2, UserCheck, ExternalLink, Phone, MessageCircle,
-  UserPlus, DownloadCloud, Check, X, Home, Keyboard, Hash, Mail
+  UserPlus, DownloadCloud, Check, X, Home, Keyboard, Hash, Mail, Bot
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -41,6 +41,69 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
   }
 
   const isNew = prospect.status === 'new' || prospect.status === 'reviewing';
+
+  // Resolve effective agency status: manual override > AI > default
+  const effectiveIsAgency = prospect.isAgencyManual !== null && prospect.isAgencyManual !== undefined
+    ? prospect.isAgencyManual
+    : prospect.isAgency;
+  const isManualOverride = prospect.isAgencyManual !== null && prospect.isAgencyManual !== undefined;
+
+  const handleToggleAgency = async () => {
+    // Cycle: current state → next state
+    // Private (false manual) → Agency (true manual) → AI Auto (null) → Private ...
+    let next: boolean | null;
+    if (prospect.isAgencyManual === false) {
+      next = true; // Private → Agency
+    } else if (prospect.isAgencyManual === true) {
+      next = null; // Agency → AI Auto
+    } else {
+      next = false; // AI Auto (null) → Private
+    }
+
+    const res = await toggleProspectAgencyStatus(prospect.id, next);
+    if (!res.success) {
+      toast.error(res.message || 'Failed to update');
+    }
+  };
+
+  const agencyBadgeContent = () => {
+    const confidence = prospect.agencyConfidence;
+    const tooltipText = prospect.agencyReasoning
+      ? `${prospect.agencyReasoning}${confidence ? ` (${confidence}% confidence)` : ''}`
+      : confidence ? `AI Confidence: ${confidence}%` : 'Click to toggle';
+
+    if (isManualOverride) {
+      return effectiveIsAgency ? (
+        <Badge variant="destructive" className="text-[10px] h-5 px-1.5 gap-1 cursor-pointer hover:opacity-80 transition-opacity" onClick={handleToggleAgency} title={`Manual: Agency — ${tooltipText}`}>
+          <Building2 className="w-3 h-3" /> Agency
+        </Badge>
+      ) : (
+        <Badge variant="default" className="bg-green-600 text-[10px] h-5 px-1.5 gap-1 cursor-pointer hover:opacity-80 transition-opacity" onClick={handleToggleAgency} title={`Manual: Private — ${tooltipText}`}>
+          <UserCheck className="w-3 h-3" /> Private
+        </Badge>
+      );
+    }
+
+    // AI Auto mode
+    if (confidence && confidence >= 70) {
+      return effectiveIsAgency ? (
+        <Badge variant="destructive" className="text-[10px] h-5 px-1.5 gap-1 cursor-pointer hover:opacity-80 transition-opacity border-dashed" onClick={handleToggleAgency} title={`AI: Agency — ${tooltipText}`}>
+          <Bot className="w-3 h-3" /> Agency <span className="opacity-60 text-[8px] ml-0.5">{confidence}%</span>
+        </Badge>
+      ) : (
+        <Badge variant="default" className="bg-green-600 text-[10px] h-5 px-1.5 gap-1 cursor-pointer hover:opacity-80 transition-opacity border-dashed" onClick={handleToggleAgency} title={`AI: Private — ${tooltipText}`}>
+          <Bot className="w-3 h-3" /> Private <span className="opacity-60 text-[8px] ml-0.5">{confidence}%</span>
+        </Badge>
+      );
+    }
+
+    // Low confidence or no classification
+    return (
+      <Badge variant="outline" className="text-[10px] h-5 px-1.5 gap-1 cursor-pointer hover:opacity-80 transition-opacity" onClick={handleToggleAgency} title={tooltipText}>
+        <Bot className="w-3 h-3" /> {confidence ? `Uncertain ${confidence}%` : 'Unclassified'}
+      </Badge>
+    );
+  };
 
   const handleWhatsApp = () => {
     if (!prospect.phone) return;
@@ -83,11 +146,7 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <h2 className="text-xl font-bold">{prospect.name || 'Unknown Seller'}</h2>
-            {prospect.isAgency ? (
-              <Badge variant="destructive" className="text-[10px] h-5 px-1.5 gap-1"><Building2 className="w-3 h-3" /> Agency</Badge>
-            ) : (
-              <Badge variant="default" className="bg-green-600 text-[10px] h-5 px-1.5 gap-1"><UserCheck className="w-3 h-3" /> Private</Badge>
-            )}
+            {agencyBadgeContent()}
           </div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             {sellerProfileUrl && (

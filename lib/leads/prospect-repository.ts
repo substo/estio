@@ -28,6 +28,9 @@ export interface ProspectInboxRow {
   createdContactId: string | null;
   createdAt: string;
   isAgency: boolean;
+  agencyConfidence: number | null;
+  agencyReasoning: string | null;
+  isAgencyManual: boolean | null;
   platformUserId: string | null;
   platformRegistered: string | null;
   profileUrl: string | null;
@@ -126,6 +129,9 @@ export async function listProspectInbox(
       createdContactId: r.createdContactId,
       createdAt: r.createdAt.toISOString(),
       isAgency: r.isAgency,
+      agencyConfidence: r.agencyConfidence,
+      agencyReasoning: r.agencyReasoning,
+      isAgencyManual: r.isAgencyManual,
       platformUserId: r.platformUserId,
       platformRegistered: r.platformRegistered,
       profileUrl: r.profileUrl,

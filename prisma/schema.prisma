@@ -783,7 +783,10 @@ model ProspectLead {
   sourceUrl String? @db.Text
 
   // Scraped Platform Listings  (1 Person -> N Properties)
-  isAgency        Boolean          @default(false)
+  isAgency           Boolean          @default(false)
+  agencyConfidence   Int?             // 0-100 AI confidence score
+  agencyReasoning    String?          // AI reasoning text for auditability
+  isAgencyManual     Boolean?         // null = AI-decided, true/false = human override
   scrapedListings ScrapedListing[]
 
   // Seller Platform Intelligence
