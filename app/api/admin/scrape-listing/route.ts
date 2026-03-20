@@ -625,11 +625,18 @@ async function scrapeBazarakiListing(
             let whatsappPhone: string | undefined = undefined;
             let contactChannels: string[] = [];
             try {
-                const waHref = await page.locator('a._whatsapp[href]').first().getAttribute('href').catch(() => undefined);
+                // Find direct WhatsApp contact links (wa.me or api.whatsapp) instead of the generic share button (a._whatsapp)
+                const waHref = await page.locator('a[href*="wa.me/"], a[href*="api.whatsapp.com/send"]').first().getAttribute('href').catch(() => undefined);
                 if (waHref) {
-                    const match = waHref.match(/phone=([^&]+)/);
-                    if (match && match[1]) {
-                        whatsappPhone = decodeURIComponent(match[1]);
+                    let extracted = '';
+                    if (waHref.includes('wa.me/')) {
+                        extracted = waHref.split('wa.me/')[1].split('?')[0].replace(/[^\d+]/g, '');
+                    } else {
+                        const match = waHref.match(/[?&]phone=([\d\+]+)/);
+                        if (match) extracted = match[1];
+                    }
+                    if (extracted && extracted.length > 5) {
+                        whatsappPhone = extracted;
                         sendEvent({ status: 'extracting', message: `Found WhatsApp Phone in URL: ${whatsappPhone}` });
                     }
                 }
