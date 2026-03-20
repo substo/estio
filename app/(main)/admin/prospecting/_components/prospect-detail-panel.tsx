@@ -24,7 +24,7 @@ interface ProspectDetailPanelProps {
   isPending: boolean;
 }
 
-export function ProspectDetailPanel({ listing, onAccept, onReject, isPending }: ProspectDetailPanelProps) {
+export function ProspectDetailPanel({ listing: originalListing, onAccept, onReject, isPending }: ProspectDetailPanelProps) {
   const router = useRouter();
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isConverting, startConverting] = useTransition();
@@ -32,11 +32,23 @@ export function ProspectDetailPanel({ listing, onAccept, onReject, isPending }: 
   const [isDeleting, startDeleting] = useTransition();
   const [isScrapeOpen, setIsScrapeOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [optimisticUpdate, setOptimisticUpdate] = useState<any>(null);
 
-  // Reset carousel when listing changes
+  // Reset carousel and optimistic data when listing changes
   useEffect(() => {
     setCurrentImageIndex(0);
-  }, [listing?.id]);
+    setOptimisticUpdate(null);
+  }, [originalListing?.id]);
+
+  const listing = originalListing && optimisticUpdate 
+    ? { 
+        ...originalListing, 
+        ...optimisticUpdate, 
+        prospectLeadId: optimisticUpdate.prospectLeadId || originalListing.prospectLeadId,
+        prospectName: optimisticUpdate.prospectName || optimisticUpdate.ownerName || originalListing.prospectName,
+        prospectPhone: optimisticUpdate.ownerPhone || originalListing.prospectPhone
+      } 
+    : originalListing;
 
   if (!listing) {
     return (
@@ -124,7 +136,10 @@ export function ProspectDetailPanel({ listing, onAccept, onReject, isPending }: 
         listingUrl={listing.url}
         platform={listing.platform}
         listingTitle={listing.title}
-        onSuccess={() => router.refresh()}
+        onSuccess={(data) => {
+          if (data) setOptimisticUpdate(data);
+          router.refresh();
+        }}
       />
 
       {/* Strict Viewport Layout */}

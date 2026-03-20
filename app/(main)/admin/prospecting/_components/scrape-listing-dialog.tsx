@@ -20,7 +20,7 @@ interface ScrapeListingDialogProps {
     platform: string;
     isOpen: boolean;
     onOpenChange: (open: boolean) => void;
-    onSuccess?: () => void;
+    onSuccess?: (data?: any) => void;
 }
 
 interface ScrapeEvent {
@@ -93,7 +93,7 @@ export function ScrapeListingDialog({
                                 if (event.status === 'success') {
                                     setPhase('success');
                                     if (event.data) setExtractedData(event.data);
-                                    onSuccess?.();
+                                    onSuccess?.(event.data);
                                 } else if (event.status === 'error') {
                                     setPhase('error');
                                     setErrorMessage(event.error || 'Unknown error');
@@ -141,7 +141,7 @@ export function ScrapeListingDialog({
             if (result.success) {
                 setPhase('success');
                 setExtractedData(partialData);
-                onSuccess?.();
+                onSuccess?.(partialData);
             } else {
                 setPhase('error');
                 setErrorMessage(`Save failed: ${result.error || 'Unknown error'}`);

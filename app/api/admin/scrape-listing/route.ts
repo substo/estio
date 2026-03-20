@@ -133,7 +133,11 @@ export async function POST(req: Request) {
                     // 4. Upsert the listing + prospect
                     if (result) {
                         sendEvent({ status: 'saving', message: 'Saving extracted data to database...' });
-                        await upsertListingData(listingId, locationId, platform, url, result, sendEvent);
+                        const upsertResult = await upsertListingData(listingId, locationId, platform, url, result, sendEvent);
+
+                        // Attach the database IDs back to the result payload
+                        result.prospectLeadId = upsertResult?.prospectLeadId || undefined;
+                        result.prospectName = upsertResult?.prospectName || result.ownerName;
 
                         sendEvent({
                             status: 'success',
@@ -213,6 +217,8 @@ interface ScrapedData {
     rawAttributes?: Record<string, string>;
     sessionExpired?: boolean;
     isExpired?: boolean;
+    prospectLeadId?: string;
+    prospectName?: string;
 }
 
 async function scrapeBazarakiListing(
@@ -861,4 +867,9 @@ async function upsertListingData(
         });
         sendEvent({ status: 'saving', message: 'Upserted listing record.' });
     }
+
+    return {
+        prospectLeadId,
+        prospectName: data.ownerName || null
+    };
 }
