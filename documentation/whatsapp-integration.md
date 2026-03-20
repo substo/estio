@@ -35,15 +35,21 @@ We use a **Hybrid Approach**:
 1.  **User Action**: User sends a message in the App's custom UI.
     -   **Text**: `sendReply(...)`
     -   **Media (Evolution-only)**: paperclip upload flow (images/audio/documents) + voice recorder in the chat window
-2.  **Text Path**: Server calls `evolutionClient.sendMessage(...)`.
-3.  **Media Path (Evolution-only)**:
+2.  **Client Pattern (fire-and-forget + optimistic reconciliation)**:
+    -   An optimistic message (`status: 'sending'`) is appended to the chat UI immediately.
+    -   The `sendReply(...)` server action is called **non-blocking** (`.then()/.catch()`). The UI is free instantly.
+    -   On success, the client fetches only the latest 5 messages to swap the optimistic stub for the real DB message.
+    -   On failure, the optimistic message is marked `status: 'failed'` with a red badge.
+3.  **Text Path**: Server calls `evolutionClient.sendMessage(...)`.
+4.  **Media Path (Evolution-only)**:
     -   App calls `createWhatsAppMediaUploadUrl(...)` to get a short-lived presigned **R2 `PUT` URL**.
     -   Browser uploads the file directly to the private `whatsapp-media` bucket.
     -   App calls `sendWhatsAppMediaReply(...)`.
     -   Server validates the upload, signs a short-lived **R2 `GET` URL**, then calls `evolutionClient.sendMedia(...)`.
     -   Server creates the local `Message` plus `MessageAttachment` row (stored as `r2://bucket/key`).
-4.  **GHL Sync**:
-    -   Server calls GHL API `POST /conversations/messages` with `type: 'Custom'` and `conversationProviderId`.
+5.  **Server Deferred Work (fire-and-forget)**:
+    -   `updateConversationLastMessage(...)` runs in background (does not block response).
+    -   GHL sync: Server calls GHL API `POST /conversations/messages` with `type: 'Custom'` and `conversationProviderId` (also fire-and-forget).
     -   For media sends, GHL currently receives placeholder/caption text (`[Image]`, `[Audio]`, `[Document]`, or caption text for images/documents); the binary attachment remains in our app/R2 storage.
 
 #### C. Inbound (WhatsApp -> GHL)

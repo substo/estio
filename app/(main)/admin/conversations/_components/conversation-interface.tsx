@@ -1414,7 +1414,15 @@ export function ConversationInterface({ locationId, initialConversations, initia
     }, []);
 
     const replaceConversationListFromResponse = useCallback((data: any) => {
-        setConversations(Array.isArray(data?.conversations) ? data.conversations : []);
+        const fetchedConversations = Array.isArray(data?.conversations)
+            ? data.conversations.map((c: Conversation) => {
+                if (c.id && readResetInFlightRef.current.has(c.id)) {
+                    return { ...c, unreadCount: 0 };
+                }
+                return c;
+            })
+            : [];
+        setConversations(fetchedConversations);
         setConversationListHasMore(!!data?.hasMore);
         setConversationListNextCursor(typeof data?.nextCursor === 'string' ? data.nextCursor : null);
         if (typeof data?.deltaCursor === 'string' || data?.deltaCursor === null) {
@@ -1424,7 +1432,15 @@ export function ConversationInterface({ locationId, initialConversations, initia
     }, []);
 
     const appendConversationPageFromResponse = useCallback((data: any) => {
-        setConversations(prev => mergeConversationLists(prev, Array.isArray(data?.conversations) ? data.conversations : []));
+        const incoming = Array.isArray(data?.conversations)
+            ? data.conversations.map((c: Conversation) => {
+                if (c.id && readResetInFlightRef.current.has(c.id)) {
+                    return { ...c, unreadCount: 0 };
+                }
+                return c;
+            })
+            : [];
+        setConversations(prev => mergeConversationLists(prev, incoming));
         setConversationListHasMore(!!data?.hasMore);
         setConversationListNextCursor(typeof data?.nextCursor === 'string' ? data.nextCursor : null);
         if (typeof data?.deltaCursor === 'string' || data?.deltaCursor === null) {
@@ -1445,7 +1461,14 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
         const incoming = deltas
             .filter((item: any) => !!item?.matchesFilter && !!item?.conversation)
-            .map((item: any) => item.conversation);
+            .map((item: any) => {
+                const conv = { ...item.conversation };
+                // Prevent stale DB reads from reverting our optimistic read state
+                if (conv.id && readResetInFlightRef.current.has(conv.id)) {
+                    conv.unreadCount = 0;
+                }
+                return conv;
+            });
         const removedIds = new Set(
             deltas
                 .filter((item: any) => item && item.matchesFilter === false && item.id)

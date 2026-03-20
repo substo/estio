@@ -1,5 +1,5 @@
 # Conversations Performance Architecture, Change History, and Enterprise Roadmap
-**Last Updated:** 2026-03-11
+**Last Updated:** 2026-03-20
 
 ## Purpose
 This document captures the full performance-improvement thread for `/admin/conversations`:
@@ -42,6 +42,7 @@ Main causes identified:
 | 2026-03-10 | `df84407` | Faster read-state reset path. |
 | 2026-03-10 | `c7b410a` | Faster Gemini draft experience (adjacent UX perf). |
 | 2026-03-10 | `11420df` | Instant open via progressive hydration + no visible scroll jank. |
+| 2026-03-20 | `2e54c54` | Fire-and-forget outbound send with optimistic reconciliation. |
 
 ## Current Architecture (As Implemented)
 
@@ -67,6 +68,7 @@ Other implemented client speedups:
 - active-thread polling starts after grace delay (`ACTIVE_POLL_GRACE_MS = 2500`)
 - realtime/poll refresh is skipped while hydration/backfill is in-flight to avoid duplicate work
 - shallow URL sync via `history.replaceState` when enabled, with `popstate` state restoration
+- fire-and-forget outbound message send with optimistic UI + targeted reconciliation (see §6 below)
 
 ### 2) No-Scroll-Jank Opening Behavior
 `ChatWindow` removes first-open travel effects:
@@ -108,6 +110,16 @@ Implemented SSE channel: `/api/conversations/events`
 - automatic fallback to polling if SSE remains unhealthy/disconnected (>10s)
 - reconnect triggers a single delta resync
 
+### 6) Outbound Message Send Pipeline (Mar 2026)
+`handleSendMessage` uses **fire-and-forget + optimistic reconciliation**:
+
+1. **Optimistic insert**: A local message with `status: 'sending'` is appended immediately. The input box clears and the UI is free.
+2. **Non-blocking server call**: `sendReply(...)` runs as a detached `.then()/.catch()` — the main thread is never blocked.
+3. **Server fast-ack**: `sendReply` returns as soon as the Evolution API confirms and the DB message row is created. Conversation metadata update (`updateConversationLastMessage`) and GHL sync both run fire-and-forget on the server.
+4. **Targeted reconciliation**: On success, the client fetches only the latest 5 messages (`fetchMessages(id, { take: 5 })`) and swaps the optimistic stub for the real DB message with deduplication.
+5. **Failure handling**: If the server action fails, the optimistic message is marked `status: 'failed'` with a red badge + toast notification.
+6. **SSE safety net**: If the SSE realtime event (`message.outbound`) arrives before reconciliation, the existing realtime merge guards prevent duplicates.
+
 ### 5) Data, Index, and Query-plan Safety
 Performance indexes and query-plan checks are in place for:
 - conversation list ordering/filtering
@@ -131,6 +143,7 @@ Validation tooling:
 - Realtime dedupe and out-of-order guards.
 - Dedicated tests for hydration helpers, cache behavior, realtime merge/replay.
 - Perf scripts with pass/fail thresholds for DB and UI benchmarks.
+- Fire-and-forget outbound send with optimistic reconciliation (no UI freeze on message send).
 
 ### Partially Implemented / Gaps
 - UI benchmark currently detects active thread activation (`data-chat-active-conversation-id`) and is a useful proxy, but should be extended to exact first-message-paint instrumentation for stricter UX SLO enforcement.
