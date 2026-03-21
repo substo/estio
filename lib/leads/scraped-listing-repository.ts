@@ -44,6 +44,11 @@ export interface ScrapedListingRow {
   prospectName: string | null;
   prospectPhone: string | null;
   prospectAgency: boolean;
+  prospectAgencyManual: boolean | null;
+  prospectAiScoreBreakdown: Record<string, any> | null;
+  linkedCompanyId: string | null;
+  linkedCompanyName: string | null;
+  stagedCompanyMatchName: string | null;
   isExpired: boolean;
   createdAt: string;
   rawAttributes: Record<string, any> | null;
@@ -93,7 +98,7 @@ export async function listScrapedListings(
       skip: params.skip || 0,
       include: {
         prospectLead: {
-          select: { name: true, phone: true, isAgency: true }
+          select: { name: true, phone: true, isAgency: true, isAgencyManual: true, aiScoreBreakdown: true }
         }
       },
       orderBy: [{ createdAt: 'desc' }],
@@ -103,6 +108,20 @@ export async function listScrapedListings(
 
   return {
     items: rows.map((r) => ({
+      // Strategic scrape payload is optional and JSON-backed.
+      // We keep extraction defensive so older rows still render safely.
+      ...(() => {
+        const breakdown = (r.prospectLead?.aiScoreBreakdown ?? null) as Record<string, any> | null;
+        const strategicScrape = (breakdown?.strategicScrape ?? null) as Record<string, any> | null;
+        const linkedCompany = (strategicScrape?.companyLink ?? null) as Record<string, any> | null;
+        const stagedCompanyMatch = (strategicScrape?.companyMatch ?? null) as Record<string, any> | null;
+        return {
+          prospectAiScoreBreakdown: breakdown,
+          linkedCompanyId: typeof linkedCompany?.companyId === 'string' ? linkedCompany.companyId : null,
+          linkedCompanyName: typeof linkedCompany?.name === 'string' ? linkedCompany.name : null,
+          stagedCompanyMatchName: typeof stagedCompanyMatch?.name === 'string' ? stagedCompanyMatch.name : null,
+        };
+      })(),
       id: r.id,
       locationId: r.locationId,
       platform: r.platform,
@@ -130,6 +149,7 @@ export async function listScrapedListings(
       prospectName: r.prospectLead?.name || null,
       prospectPhone: r.prospectLead?.phone || null,
       prospectAgency: r.prospectLead?.isAgency ?? false,
+      prospectAgencyManual: r.prospectLead?.isAgencyManual ?? null,
       sellerRegisteredAt: r.sellerRegisteredAt,
       otherListingsUrl: r.otherListingsUrl,
       otherListingsCount: r.otherListingsCount,

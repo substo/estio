@@ -389,6 +389,7 @@ For enterprise reliability, this block is handled as an **optional deterministic
 3. Normalize into stable metadata keys (`Seller business *`) for auditability.
 4. Feed these signals into agency/private classification alongside listing count and portfolio samples.
 5. Keep provenance in raw metadata so future parser upgrades are backward-compatible.
+6. Persist normalized fields into `ProspectLead.sellerBusinessProfile` (when present) so downstream company matching is congruent with existing CRM `Company` ingestion patterns.
 
 #### Defensive Error Handling in Single-Listing Scrape
 
@@ -803,8 +804,35 @@ To keep Strategic Scraping congruent with existing CRM entities, agency seller p
    - Upsert/Create `Company` with `type = "Agency"`
    - Persist link metadata in `aiScoreBreakdown.strategicScrape.companyLink`
    - Keep Prospect in prospecting workflow (`new/reviewing`) for cold outreach follow-up
+5. Acceptance path guardrails (implemented):
+   - `acceptProspect`, `acceptProspectWithListings`, and `acceptScrapedListing` now enforce **private-only** acceptance.
+   - Agency records are intentionally blocked from acceptance and instead routed to **Link As Company**.
 
 This mirrors the existing Prospect staging pattern while adding a Company-first track for agency sellers.
+
+#### 3.5.1 Link As Company Decision Flow (Recommended UX)
+
+`Link As Company` should behave as a deterministic decision assistant, not as a blind create action.
+
+1. User clicks **Link As Company**.
+2. Backend computes candidate companies using normalized evidence:
+   - Website host equality (highest trust)
+   - Exact name equality (location-scoped)
+   - Phone overlap
+   - Email equality
+   - Similar-name fallback (tokenized/fuzzy, lower trust)
+3. UI branches:
+   - **Exactly 1 high-confidence match:** show preselected match with `Link` confirmation (not silent auto-link).
+   - **Multiple plausible matches:** show ranked options (name + website/phone/email evidence + confidence) and force explicit user selection.
+   - **No plausible match:** show `Create New Company` CTA prefilled from staged agency profile.
+4. On completion, persist and surface durable state:
+   - Store selected/created link in `aiScoreBreakdown.strategicScrape.companyLink`
+   - Show persistent status badge in both Prospecting views:
+     - `Company Linked: <name>` (click-through to company profile)
+     - Button label changes to `Refresh Company Link` / `Change Link`
+5. Keep the prospect in prospecting (`new/reviewing`) for outreach, with acceptance still blocked for agencies.
+
+This pattern reduces wrong links, prevents duplicate company creation, and gives users confidence that the action actually persisted.
 
 > [!IMPORTANT]
 > Current workflow policy: **Prospect acceptance is private-only**. Agency prospects are handled via outreach and explicit **"Link As Company"** action in Prospecting, without accepting/creating a CRM Contact.
@@ -822,6 +850,11 @@ Feed card behavior:
 5. Refresh and confirm override persists.
 6. Scrape a known agency listing (e.g., "Cyprus Golden Properties") and verify high-confidence Agency classification.
 7. Scrape a likely private listing and verify Private classification (or low-confidence Unclassified requiring human choice).
+8. Mark a prospect as Agency and verify:
+   - Accept actions are disabled/blocked.
+   - **Link As Company** is available and succeeds.
+   - Post-link state is visible and durable in both Properties and Contacts detail panels (`Company Linked: ...`).
+   - No CRM Contact is created from acceptance for agency prospects.
 
 ---
 
@@ -874,7 +907,10 @@ Triage speed is maximized through keyboard shortcuts and cascading transactions:
 
 **Cascading Effect:**
 - In the **Properties View**, Accept/Import applies only to the selected `$1` listing, marking it as `IMPORTED` and linking it to a newly created CRM Property via `importedPropertyId`.
-- In the **Contacts View**, Accept/Reject triggers a **cascading database transaction** (`acceptProspectWithListings` / `rejectProspectWithListings`). Rejecting a contact instantly rejects *all* their newly scraped listings simultaneously. Accepting a contact creates a CRM Contact and imports their new listings.
+- In the **Contacts View**, Accept/Reject still uses cascading actions (`acceptProspectWithListings` / `rejectProspectWithListings`) but with role-aware enforcement:
+  - **Private prospects:** Accept creates a CRM Contact and imports their new listings.
+  - **Agency prospects:** Accept is blocked by policy; users must use **Link As Company** to stage/create CRM Company congruence without contact acceptance.
+  - Reject continues to cascade across the seller's newly scraped listings.
 - **Deleting Prospects:** For corrupted or invalid leads, the UI provides a "Delete Prospect" action (`Trash2`). This permanently removes the `ProspectLead` and uses Prisma's `SetNull` to automatically unlink and reset any erroneously associated `ScrapedListing` records so they safely return to the generic `New` queue for re-triage.
 
 ### 4.5 Explicit State Filtering (Scope)
