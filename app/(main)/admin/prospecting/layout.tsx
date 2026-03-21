@@ -1,16 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { Layers, List, Settings } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 export default function ProspectingLayout({ children }: { children: React.ReactNode }) {
-    const pathname = usePathname();
-
     return (
-        <div className="flex flex-col h-[calc(100vh-65px)] bg-slate-50/50 dark:bg-slate-950/20">
+        <div className="flex min-h-0 flex-col h-[calc(100dvh-88px)] bg-slate-50/50 dark:bg-slate-950/20">
             {/* Unified Header */}
             <div className="bg-background border-b px-4 py-2 shrink-0">
                 <div className="flex justify-between items-center">

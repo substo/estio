@@ -13,7 +13,6 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogTrigger, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
@@ -34,11 +33,17 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
   const [isScrapeOpen, setIsScrapeOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [optimisticUpdate, setOptimisticUpdate] = useState<any>(null);
+  const [linkedCompanyState, setLinkedCompanyState] = useState<{ companyId: string | null; companyName: string | null } | null>(null);
 
   // Reset carousel and optimistic data when listing changes
   useEffect(() => {
     setCurrentImageIndex(0);
     setOptimisticUpdate(null);
+    setLinkedCompanyState(
+      originalListing
+        ? { companyId: originalListing.linkedCompanyId ?? null, companyName: originalListing.linkedCompanyName ?? null }
+        : null
+    );
   }, [originalListing?.id]);
 
   const listing = originalListing && optimisticUpdate 
@@ -50,6 +55,13 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
         prospectPhone: optimisticUpdate.ownerPhone || originalListing.prospectPhone
       } 
     : originalListing;
+
+  const effectiveAgency = listing?.prospectAgencyManual !== null && listing?.prospectAgencyManual !== undefined
+    ? listing.prospectAgencyManual
+    : listing?.prospectAgency;
+  const linkedCompanyId = linkedCompanyState?.companyId || listing?.linkedCompanyId || null;
+  const linkedCompanyName = linkedCompanyState?.companyName || listing?.linkedCompanyName || null;
+  const stagedCompanyMatchName = listing?.stagedCompanyMatchName || null;
 
   if (!listing) {
     return (
@@ -117,6 +129,10 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
       const res = await linkProspectAgencyCompany(listing.prospectLeadId!);
       if (res.success) {
         toast.success(res.message || 'Company linked');
+        setLinkedCompanyState({
+          companyId: (res as any).companyId || null,
+          companyName: (res as any).companyName || null,
+        });
         router.refresh();
       } else {
         toast.error(res.message || 'Failed to link company');
@@ -157,18 +173,18 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
       />
 
       {/* Strict Viewport Layout */}
-      <div className="flex-1 overflow-hidden p-4 lg:p-6">
-        <div className="flex flex-col lg:grid lg:grid-cols-12 gap-6 h-full min-h-0">
+      <div className="flex-1 overflow-hidden p-3 lg:p-4">
+        <div className="flex flex-col lg:grid lg:grid-cols-12 gap-4 h-full min-h-0">
 
           {/* LEFT COLUMN: Details, Seller, Actions */}
-          <ScrollArea className="lg:col-span-5 h-full pr-2">
-            <div className="space-y-6 pb-4">
+          <ScrollArea className="lg:col-span-6 h-full pr-1 lg:pr-2">
+            <div className="space-y-5 pb-4">
               
               {/* Property Info */}
               <div>
                 <div className="flex justify-between items-start gap-4">
                   <div className="flex items-center gap-2">
-                    <h2 className="text-xl font-bold leading-tight">{listing.title || 'Untitled Property'}</h2>
+                    <h2 className="text-lg xl:text-xl font-bold leading-tight">{listing.title || 'Untitled Property'}</h2>
                     {listing.isExpired && (
                       <Badge variant="destructive" className="bg-slate-800 hover:bg-slate-800 text-white uppercase translate-y-px">Expired Listing</Badge>
                     )}
@@ -178,24 +194,24 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                   </Button>
                 </div>
                 <div className="flex gap-1.5 mt-2.5 flex-wrap">
-                  <Badge variant="secondary" className="font-bold text-sm">
+                  <Badge variant="secondary" className="font-semibold text-xs">
                     {listing.price ? `${listing.currency || '€'}${listing.price.toLocaleString()}` : 'POA'}
                   </Badge>
-                  <Badge variant="outline">{listing.propertyType || listing.listingType || 'Property'}</Badge>
-                  {listing.bedrooms !== null && <Badge variant="outline">{listing.bedrooms} Beds</Badge>}
-                  {listing.bathrooms !== null && <Badge variant="outline">{listing.bathrooms} Baths</Badge>}
+                  <Badge variant="outline" className="text-xs">{listing.propertyType || listing.listingType || 'Property'}</Badge>
+                  {listing.bedrooms !== null && <Badge variant="outline" className="text-xs">{listing.bedrooms} Beds</Badge>}
+                  {listing.bathrooms !== null && <Badge variant="outline" className="text-xs">{listing.bathrooms} Baths</Badge>}
                   {(listing.propertyArea || listing.plotArea) && (
-                    <Badge variant="outline">{listing.propertyArea || listing.plotArea} m²</Badge>
+                    <Badge variant="outline" className="text-xs">{listing.propertyArea || listing.plotArea} m²</Badge>
                   )}
-                  {listing.constructionYear && <Badge variant="outline">Built {listing.constructionYear}</Badge>}
-                  <Badge variant="outline">{listing.locationText || 'Cyprus'}</Badge>
+                  {listing.constructionYear && <Badge variant="outline" className="text-xs">Built {listing.constructionYear}</Badge>}
+                  <Badge variant="outline" className="max-w-full whitespace-normal break-words text-xs">{listing.locationText || 'Cyprus'}</Badge>
 
                   {/* Dynamic Features from Scraping */}
                   {listing.rawAttributes && Object.entries(listing.rawAttributes)
                     .filter(([key]) => !['Bedrooms', 'Bathrooms', 'Property area', 'Plot area', 'Construction year'].includes(key))
                     .filter(([key]) => !/^Seller business /i.test(key))
                     .map(([key, value]) => (
-                      <Badge key={key} variant="outline" className="bg-muted/30">
+                      <Badge key={key} variant="outline" className="bg-muted/30 max-w-full whitespace-normal break-words text-[11px] leading-tight">
                         <span className="text-muted-foreground mr-1 font-normal">{key}:</span> {String(value)}
                       </Badge>
                     ))
@@ -211,23 +227,23 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
               {listing.description && (
                 <div className="pt-1">
                   <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Description</h3>
-                  <p className="text-sm text-foreground/80 leading-relaxed line-clamp-5 hover:line-clamp-none transition-all whitespace-pre-line cursor-ns-resize">{listing.description}</p>
+                  <p className="text-sm text-foreground/80 leading-relaxed line-clamp-4 hover:line-clamp-none transition-all whitespace-pre-line cursor-ns-resize">{listing.description}</p>
                 </div>
               )}
             </div>
           </ScrollArea>
 
           {/* RIGHT COLUMN: Actions & Photos */}
-          <div className="lg:col-span-7 h-full flex flex-col gap-4 min-w-0">
+          <div className="lg:col-span-6 h-full flex flex-col gap-3 min-w-0">
             
             {/* Top: Seller Profile & Actions (Fixed height, always visible) */}
-            <div className="shrink-0 bg-muted/30 p-4 rounded-xl border flex flex-col gap-4">
+            <div className="shrink-0 bg-muted/30 p-3 rounded-xl border flex flex-col gap-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="text-muted-foreground text-[10px] uppercase tracking-wider hidden xl:inline-block">Seller:</span>
                   {listing.prospectLeadId ? (
                     <h3
-                      className="font-semibold text-base text-primary cursor-pointer hover:underline"
+                      className="font-semibold text-sm xl:text-base text-primary cursor-pointer hover:underline"
                       onClick={() => {
                         const params = new URLSearchParams(window.location.search);
                         params.set('view', 'contacts');
@@ -240,9 +256,9 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                       {listing.prospectName || 'Unknown Owner'}
                     </h3>
                   ) : (
-                    <h3 className="font-semibold text-base">{listing.prospectName || 'Unknown Owner'}</h3>
+                    <h3 className="font-semibold text-sm xl:text-base">{listing.prospectName || 'Unknown Owner'}</h3>
                   )}
-                  {listing.prospectAgency ? (
+                  {effectiveAgency ? (
                     <Badge variant="destructive" className="text-[10px] h-5 px-1.5 gap-1"><Building2 className="w-3 h-3" /> Agency</Badge>
                   ) : (
                     <Badge variant="default" className="bg-green-600 text-[10px] h-5 px-1.5 gap-1"><UserCheck className="w-3 h-3" /> Private</Badge>
@@ -250,30 +266,48 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                 </div>
                 
                 {listing.prospectPhone ? (
-                  <span className="font-mono text-sm font-medium">{listing.prospectPhone}</span>
+                  <span className="font-mono text-xs sm:text-sm font-medium">{listing.prospectPhone}</span>
                 ) : (
                   <span className="text-muted-foreground italic text-[11px]">No phone</span>
                 )}
               </div>
 
+              {(linkedCompanyName || stagedCompanyMatchName) && (
+                <div className="flex items-center gap-2 -mt-1 text-xs">
+                  {linkedCompanyName ? (
+                    <a
+                      href={linkedCompanyId ? `/admin/companies/${linkedCompanyId}/view` : '/admin/companies'}
+                      className="inline-flex items-center gap-1 text-emerald-700 hover:underline"
+                      title="Linked company profile"
+                    >
+                      <Building2 className="w-3 h-3" /> Company Linked: {linkedCompanyName}
+                    </a>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-muted-foreground" title="Pre-import company match candidate">
+                      <Building2 className="w-3 h-3" /> Company Match: {stagedCompanyMatchName}
+                    </span>
+                  )}
+                </div>
+              )}
+
               {/* Action Buttons */}
-              <div className="flex items-center flex-wrap gap-2 pt-1 border-t border-border/50">
-                <Button variant="outline" size="sm" className="gap-1.5 mt-2" onClick={handleWhatsApp} disabled={!listing.whatsappPhone && !listing.prospectPhone}>
+              <div className="flex items-center flex-wrap gap-1.5 pt-1 border-t border-border/50">
+                <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2.5 text-xs" onClick={handleWhatsApp} disabled={!listing.whatsappPhone && !listing.prospectPhone}>
                   <MessageCircle className="w-4 h-4 text-green-500" /> WhatsApp
                 </Button>
-                <Button variant="outline" size="sm" className="gap-1.5 mt-2" onClick={handleCall} disabled={!listing.whatsappPhone && !listing.prospectPhone}>
+                <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2.5 text-xs" onClick={handleCall} disabled={!listing.whatsappPhone && !listing.prospectPhone}>
                   <Phone className="w-4 h-4 text-blue-500" /> Call
                 </Button>
 
                 {listing.otherListingsUrl && (
-                  <Button variant="outline" size="sm" className="gap-1.5 mt-2 ml-1" onClick={handleScrapeSeller} disabled={isScrapingSeller}>
+                  <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2.5 text-xs" onClick={handleScrapeSeller} disabled={isScrapingSeller}>
                     <DownloadCloud className="w-4 h-4 text-primary" /> {isScrapingSeller ? 'Scraping...' : 'Scrape Other Listings'}
                   </Button>
                 )}
 
-                {listing.prospectAgency && listing.prospectLeadId && (
-                  <Button variant="outline" size="sm" className="gap-1.5 mt-2 ml-1" onClick={handleLinkCompany} disabled={isLinkingCompany}>
-                    <Building2 className="w-4 h-4 text-emerald-600" /> {isLinkingCompany ? 'Linking...' : 'Link As Company'}
+                {effectiveAgency && listing.prospectLeadId && (
+                  <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2.5 text-xs" onClick={handleLinkCompany} disabled={isLinkingCompany}>
+                    <Building2 className="w-4 h-4 text-emerald-600" /> {isLinkingCompany ? 'Linking...' : (linkedCompanyId ? 'Refresh Company Link' : 'Link As Company')}
                   </Button>
                 )}
 
@@ -281,21 +315,21 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
 
                 {isNew ? (
                   <>
-                    <Button variant="outline" size="sm" className="gap-1.5 mt-2 border-red-200 text-red-700 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-950/30" onClick={() => onReject(listing.id)} disabled={isPending}>
+                    <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2.5 text-xs border-red-200 text-red-700 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-950/30" onClick={() => onReject(listing.id)} disabled={isPending}>
                       <X className="w-4 h-4" /> Reject
                       <kbd className="hidden xl:inline ml-1 text-[9px] bg-red-100 dark:bg-red-900/30 px-1 rounded font-mono">R</kbd>
                     </Button>
-                    {!listing.prospectAgency ? (
-                      <Button size="sm" className="gap-1.5 mt-2" onClick={() => onAccept(listing.id)} disabled={isPending}>
+                    {!effectiveAgency ? (
+                      <Button size="sm" className="h-8 gap-1.5 px-2.5 text-xs" onClick={() => onAccept(listing.id)} disabled={isPending}>
                         <Check className="w-4 h-4" /> Accept
                         <kbd className="hidden xl:inline ml-1 text-[9px] bg-primary-foreground/20 px-1 rounded font-mono">A</kbd>
                       </Button>
                     ) : (
-                      <Badge variant="outline" className="text-[10px] mt-2">Agency: private accept disabled</Badge>
+                      <Badge variant="outline" className="text-[10px]">Agency: private accept disabled</Badge>
                     )}
                   </>
                 ) : (
-                  <Button variant="default" size="sm" className="gap-1.5 mt-2" onClick={handleConvert} disabled={isConverting || !listing.prospectLeadId}>
+                  <Button variant="default" size="sm" className="h-8 gap-1.5 px-2.5 text-xs" onClick={handleConvert} disabled={isConverting || !listing.prospectLeadId}>
                     <UserPlus className="w-4 h-4" /> Convert to Contact
                   </Button>
                 )}
@@ -303,7 +337,7 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                 {listing.prospectLeadId && (
                   <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
                     <DialogTrigger asChild>
-                      <Button variant="ghost" size="icon" className="mt-2 ml-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10" disabled={isDeleting}>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 ml-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10" disabled={isDeleting}>
                         <Trash2 className="w-4 h-4" />
                       </Button>
                     </DialogTrigger>

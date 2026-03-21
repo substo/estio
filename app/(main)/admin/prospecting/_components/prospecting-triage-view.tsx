@@ -312,7 +312,7 @@ export function ProspectingTriageView({
   return (
     <div className="flex h-full overflow-hidden">
       {/* Left Pane — Feed */}
-      <div className="w-[380px] shrink-0 flex flex-col h-full border-r bg-background">
+      <div className="w-[clamp(320px,24vw,360px)] shrink-0 flex flex-col h-full border-r bg-background">
 
         {/* View Toggle Tabs */}
         <div className="flex border-b shrink-0">
@@ -341,7 +341,7 @@ export function ProspectingTriageView({
         </div>
 
         {/* Filter Bar */}
-        <div className="p-3 border-b space-y-2 shrink-0 bg-muted/20">
+        <div className="p-2.5 border-b space-y-2 shrink-0 bg-muted/20">
           <div className="flex items-center gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
