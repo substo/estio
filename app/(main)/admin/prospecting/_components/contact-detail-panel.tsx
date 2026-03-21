@@ -244,9 +244,32 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
               )}
             </>
           ) : (
-            <Badge variant={prospect.status === 'accepted' ? 'default' : 'destructive'} className="text-xs">
-              {prospect.status === 'accepted' ? 'Accepted' : 'Rejected'}
-            </Badge>
+            <>
+              <Badge variant={prospect.status === 'accepted' ? 'default' : 'destructive'} className="text-xs">
+                {prospect.status === 'accepted' ? 'Accepted' : 'Rejected'}
+              </Badge>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => onReject(prospect.id)}
+                disabled={isPending || prospect.status === 'rejected'}
+              >
+                <X className="w-4 h-4" /> Mark Rejected
+              </Button>
+              {!effectiveIsAgency ? (
+                <Button
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => onAccept(prospect.id)}
+                  disabled={isPending || prospect.status === 'accepted'}
+                >
+                  <Check className="w-4 h-4" /> Mark Accepted
+                </Button>
+              ) : (
+                <Badge variant="outline" className="text-[10px]">Agency: private accept disabled</Badge>
+              )}
+            </>
           )}
         </div>
       </div>

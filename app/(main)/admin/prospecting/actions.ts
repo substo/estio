@@ -20,103 +20,58 @@ const isEffectiveAgency = (prospect: { isAgency: boolean; isAgencyManual: boolea
         : prospect.isAgency;
 };
 
+async function createOrReactivateContactForProspect(prospect: any) {
+    if (prospect.createdContactId) {
+        const existing = await db.contact.findUnique({ where: { id: prospect.createdContactId }, select: { id: true } });
+        if (existing) {
+            await db.contact.update({
+                where: { id: existing.id },
+                data: {
+                    status: 'active',
+                    name: prospect.name || 'Unknown',
+                    firstName: prospect.firstName,
+                    lastName: prospect.lastName,
+                    email: prospect.email,
+                    phone: prospect.phone,
+                    message: prospect.message,
+                    leadSource: prospect.source,
+                    leadGoal: 'To List',
+                    leadScore: prospect.aiScore || 0,
+                    qualificationStage: (prospect.aiScore || 0) >= 60 ? 'qualified' : 'basic',
+                },
+            });
+            return existing.id;
+        }
+    }
+
+    const created = await db.contact.create({
+        data: {
+            locationId: prospect.locationId,
+            status: 'active',
+            contactType: 'Lead',
+            name: prospect.name || 'Unknown',
+            firstName: prospect.firstName,
+            lastName: prospect.lastName,
+            email: prospect.email,
+            phone: prospect.phone,
+            message: prospect.message,
+            leadSource: prospect.source,
+            leadGoal: 'To List',
+            leadScore: prospect.aiScore || 0,
+            qualificationStage: (prospect.aiScore || 0) >= 60 ? 'qualified' : 'basic',
+        },
+    });
+    return created.id;
+}
+
 // --- Prospect (People) Actions ---
 
 export async function acceptProspect(id: string) {
-    try {
-        const internalUserId = await getInternalUserId();
-        if (!internalUserId) return { success: false, message: 'Unauthorized' };
-
-        const prospect = await db.prospectLead.findUnique({ where: { id } });
-        if (!prospect || (prospect.status !== 'new' && prospect.status !== 'reviewing')) {
-            return { success: false, message: 'Prospect not found or already processed' };
-        }
-        if (isEffectiveAgency(prospect)) {
-            return { success: false, message: 'Agency prospects are not accepted as private contacts. Use "Link As Company" in Prospecting.' };
-        }
-
-        const contact = await db.contact.create({
-            data: {
-                locationId: prospect.locationId,
-                status: 'active',
-                contactType: 'Lead',
-                name: prospect.name || 'Unknown',
-                firstName: prospect.firstName,
-                lastName: prospect.lastName,
-                email: prospect.email,
-                phone: prospect.phone,
-                message: prospect.message,
-                leadSource: prospect.source,
-                leadGoal: 'To List', // Scraped sellers are listing their properties
-                leadScore: prospect.aiScore || 0,
-                qualificationStage: (prospect.aiScore || 0) >= 60 ? 'qualified' : 'basic',
-            }
-        });
-
-        await db.prospectLead.update({
-            where: { id },
-            data: {
-                status: 'accepted',
-                createdContactId: contact.id,
-                reviewedAt: new Date(),
-                reviewedBy: internalUserId
-            }
-        });
-
-        await db.contactHistory.create({
-            data: {
-                contactId: contact.id,
-                action: 'PROSPECT_ACCEPTED',
-                userId: internalUserId,
-                changes: JSON.stringify([
-                    { field: 'source', old: null, new: prospect.source },
-                    { field: 'prospectId', old: null, new: prospect.id }
-                ])
-            }
-        });
-
-        await eventBus.emit({
-            type: 'lead.created',
-            payload: { contactId: contact.id, locationId: contact.locationId },
-            metadata: {
-                timestamp: new Date(),
-                sourceId: 'ui',
-                contactId: contact.id
-            }
-        });
-
-        revalidatePath('/admin/prospecting');
-        revalidatePath('/admin/contacts');
-        return { success: true, contactId: contact.id };
-    } catch (e: any) {
-        return { success: false, message: e.message || 'Server error' };
-    }
+    return acceptProspectWithListings(id);
 }
 
 export async function rejectProspect(id: string) {
-    try {
-        const internalUserId = await getInternalUserId();
-        if (!internalUserId) return { success: false, message: 'Unauthorized' };
-
-        const prospect = await db.prospectLead.findUnique({ where: { id } });
-        if (!prospect || (prospect.status !== 'new' && prospect.status !== 'reviewing')) {
-            return { success: false, message: 'Prospect not found or already processed' };
-        }
-
-        await db.prospectLead.update({
-            where: { id },
-            data: {
-                status: 'rejected',
-                reviewedAt: new Date(),
-                reviewedBy: internalUserId
-            }
-        });
-
-        revalidatePath('/admin/prospecting');
-        return { success: true };
-    } catch (e: any) {
-        return { success: false, message: e.message || 'Server error' };
-    }
+    return rejectProspectWithListings(id);
 }
 
 export async function deleteProspect(id: string) {
@@ -149,17 +104,13 @@ export async function bulkReject(ids: string[]) {
         const internalUserId = await getInternalUserId();
         if (!internalUserId) return { success: false, message: 'Unauthorized' };
 
-        const res = await db.prospectLead.updateMany({
-            where: { id: { in: ids }, status: { in: ['new', 'reviewing'] } },
-            data: {
-                status: 'rejected',
-                reviewedAt: new Date(),
-                reviewedBy: internalUserId
-            }
-        });
+        let count = 0;
+        for (const id of ids) {
+            const res = await rejectProspect(id);
+            if (res.success) count++;
+        }
 
-        revalidatePath('/admin/prospecting');
-        return { success: true, count: res.count };
+        return { success: true, count };
     } catch (e: any) {
         return { success: false, message: e.message || 'Server error' };
     }
@@ -257,13 +208,14 @@ export async function bulkRejectListings(ids: string[]) {
         const internalUserId = await getInternalUserId();
         if (!internalUserId) return { success: false, message: 'Unauthorized' };
 
-        const res = await db.scrapedListing.updateMany({
-            where: { id: { in: ids }, status: { in: ['NEW', 'REVIEWING', 'new', 'reviewing'] } },
-            data: { status: 'REJECTED' }
-        });
+        let successCount = 0;
+        for (const id of ids) {
+            const res = await rejectScrapedListing(id);
+            if (res.success) successCount++;
+        }
 
         revalidatePath('/admin/prospecting');
-        return { success: true, count: res.count };
+        return { success: true, count: successCount };
     } catch (e: any) {
         return { success: false, message: e.message || 'Server error' };
     }
@@ -277,14 +229,15 @@ export async function rejectProspectWithListings(prospectId: string) {
         if (!internalUserId) return { success: false, message: 'Unauthorized' };
 
         const prospect = await db.prospectLead.findUnique({ where: { id: prospectId } });
-        if (!prospect || (prospect.status !== 'new' && prospect.status !== 'reviewing')) {
-            return { success: false, message: 'Prospect not found or already processed' };
-        }
+        if (!prospect) return { success: false, message: 'Prospect not found' };
         if (isEffectiveAgency(prospect)) {
             return { success: false, message: 'Agency prospects are not accepted as private contacts. Use "Link As Company" in Prospecting.' };
         }
+        if (prospect.status === 'rejected') {
+            return { success: true, listingsRejected: 0 };
+        }
 
-        // Reject prospect AND all their listings in a single transaction
+        // Reject prospect AND all still-open listings in a single transaction
         const [, listingsResult] = await db.$transaction([
             db.prospectLead.update({
                 where: { id: prospectId },
@@ -303,7 +256,27 @@ export async function rejectProspectWithListings(prospectId: string) {
             })
         ]);
 
+        if (prospect.createdContactId) {
+            await db.contact.updateMany({
+                where: { id: prospect.createdContactId },
+                data: { status: 'inactive' },
+            });
+
+            await db.contactHistory.create({
+                data: {
+                    contactId: prospect.createdContactId,
+                    action: 'PROSPECT_REJECTED',
+                    userId: internalUserId,
+                    changes: JSON.stringify([
+                        { field: 'prospectId', old: null, new: prospect.id },
+                        { field: 'prospectStatus', old: 'accepted', new: 'rejected' },
+                    ]),
+                },
+            });
+        }
+
         revalidatePath('/admin/prospecting');
+        revalidatePath('/admin/contacts');
         return { success: true, listingsRejected: listingsResult.count };
     } catch (e: any) {
         return { success: false, message: e.message || 'Server error' };
@@ -316,35 +289,27 @@ export async function acceptProspectWithListings(prospectId: string) {
         if (!internalUserId) return { success: false, message: 'Unauthorized' };
 
         const prospect = await db.prospectLead.findUnique({ where: { id: prospectId } });
-        if (!prospect || (prospect.status !== 'new' && prospect.status !== 'reviewing')) {
-            return { success: false, message: 'Prospect not found or already processed' };
+        if (!prospect) return { success: false, message: 'Prospect not found' };
+        if (isEffectiveAgency(prospect)) {
+            return { success: false, message: 'Agency prospects are not accepted as private contacts. Use "Link As Company" in Prospecting.' };
         }
 
-        // 1. Create CRM Contact with leadGoal
-        const contact = await db.contact.create({
-            data: {
-                locationId: prospect.locationId,
-                status: 'active',
-                contactType: 'Lead',
-                name: prospect.name || 'Unknown',
-                firstName: prospect.firstName,
-                lastName: prospect.lastName,
-                email: prospect.email,
-                phone: prospect.phone,
-                message: prospect.message,
-                leadSource: prospect.source,
-                leadGoal: 'To List', // Scraped sellers are listing their properties
-                leadScore: prospect.aiScore || 0,
-                qualificationStage: (prospect.aiScore || 0) >= 60 ? 'qualified' : 'basic',
-            }
-        });
+        if (prospect.status === 'rejected') {
+            await db.scrapedListing.updateMany({
+                where: { prospectLeadId: prospectId, status: 'REJECTED' },
+                data: { status: 'NEW' },
+            });
+        }
+
+        // 1. Create or reactivate CRM Contact with leadGoal
+        const contactId = await createOrReactivateContactForProspect(prospect);
 
         // 2. Mark prospect as accepted
         await db.prospectLead.update({
             where: { id: prospectId },
             data: {
                 status: 'accepted',
-                createdContactId: contact.id,
+                createdContactId: contactId,
                 reviewedAt: new Date(),
                 reviewedBy: internalUserId
             }
@@ -353,7 +318,7 @@ export async function acceptProspectWithListings(prospectId: string) {
         // 3. Import scraped listings as Property records
         const { imported, skipped } = await importAllListingsForProspect(
             prospectId,
-            contact.id,
+            contactId,
             prospect.locationId,
             internalUserId
         );
@@ -361,13 +326,14 @@ export async function acceptProspectWithListings(prospectId: string) {
         // 4. Create audit trail
         await db.contactHistory.create({
             data: {
-                contactId: contact.id,
+                contactId,
                 action: 'PROSPECT_ACCEPTED',
                 userId: internalUserId,
                 changes: JSON.stringify([
                     { field: 'source', old: null, new: prospect.source },
                     { field: 'prospectId', old: null, new: prospect.id },
                     { field: 'propertiesImported', old: null, new: imported.length },
+                    { field: 'propertiesSkipped', old: null, new: skipped.length },
                 ])
             }
         });
@@ -375,11 +341,11 @@ export async function acceptProspectWithListings(prospectId: string) {
         // 5. Emit event for downstream automation
         await eventBus.emit({
             type: 'lead.created',
-            payload: { contactId: contact.id, locationId: contact.locationId },
+            payload: { contactId, locationId: prospect.locationId },
             metadata: {
                 timestamp: new Date(),
                 sourceId: 'ui',
-                contactId: contact.id
+                contactId
             }
         });
 
@@ -388,7 +354,7 @@ export async function acceptProspectWithListings(prospectId: string) {
         revalidatePath('/admin/properties');
         return {
             success: true,
-            contactId: contact.id,
+            contactId,
             propertiesImported: imported.length,
             propertiesSkipped: skipped.length,
         };

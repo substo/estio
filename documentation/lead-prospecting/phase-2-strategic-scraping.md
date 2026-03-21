@@ -216,6 +216,25 @@ interface ListingScraper {
 > [!NOTE]
 > **Implementation Decision**: The stack uses `Playwright` encapsulated in `lib/scraping/page-fetcher.ts` as the primary driver instead of Puppeteer or raw fetch. This allows trivial bypassing of standard anti-bot protections and handles JS-heavy sites natively.
 
+### Triage Decision Reversibility (Enterprise Guardrail)
+
+To prevent irreversible operator mistakes in the Prospecting Inbox, accept/reject decisions must be reversible with an auditable state transition flow:
+
+- `rejected -> accepted`:
+  - restore staged listing statuses (`REJECTED -> NEW`) for the prospect
+  - reuse the previously created contact when available (reactivate instead of creating duplicates)
+  - import eligible listings via the standard contact-centric import pipeline
+- `accepted -> rejected`:
+  - keep already imported properties as historical records (no destructive deletes)
+  - set created contact status to `inactive` (soft reversal)
+  - mark still-open staged listings as `REJECTED`
+- Auditability:
+  - write `ContactHistory` entries for decision changes
+  - keep `reviewedAt/reviewedBy` updated on each decision transition
+- UI behavior:
+  - expose explicit `Mark Accepted` / `Mark Rejected` actions for processed records
+  - do not hide actions behind New-only gating
+
 ### AI Extraction Pipeline
 
 For unstructured or varied listing formats, use Gemini to extract structured data:

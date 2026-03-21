@@ -329,9 +329,21 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                     )}
                   </>
                 ) : (
-                  <Button variant="default" size="sm" className="h-8 gap-1.5 px-2.5 text-xs" onClick={handleConvert} disabled={isConverting || !listing.prospectLeadId}>
-                    <UserPlus className="w-4 h-4" /> Convert to Contact
-                  </Button>
+                  <>
+                    <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2.5 text-xs border-red-200 text-red-700 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-950/30" onClick={() => onReject(listing.id)} disabled={isPending}>
+                      <X className="w-4 h-4" /> Mark Rejected
+                    </Button>
+                    {!effectiveAgency ? (
+                      <Button size="sm" className="h-8 gap-1.5 px-2.5 text-xs" onClick={() => onAccept(listing.id)} disabled={isPending}>
+                        <Check className="w-4 h-4" /> Mark Accepted
+                      </Button>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px]">Agency: private accept disabled</Badge>
+                    )}
+                    <Button variant="default" size="sm" className="h-8 gap-1.5 px-2.5 text-xs" onClick={handleConvert} disabled={isConverting || !listing.prospectLeadId}>
+                      <UserPlus className="w-4 h-4" /> Convert to Contact
+                    </Button>
+                  </>
                 )}
 
                 {listing.prospectLeadId && (

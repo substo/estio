@@ -224,25 +224,17 @@ export function ProspectingTriageView({
         case 'A':
           e.preventDefault();
           if (currentView === 'properties' && selectedListing) {
-            if (selectedListing.status === 'NEW' || selectedListing.status === 'new' || selectedListing.status === 'REVIEWING') {
-              handleAcceptListing(selectedListing.id);
-            }
+            handleAcceptListing(selectedListing.id);
           } else if (currentView === 'contacts' && selectedProspect) {
-            if (selectedProspect.status === 'new' || selectedProspect.status === 'reviewing') {
-              handleAcceptContact(selectedProspect.id);
-            }
+            handleAcceptContact(selectedProspect.id);
           }
           break;
         case 'r':
           e.preventDefault();
           if (currentView === 'properties' && selectedListing) {
-            if (selectedListing.status === 'NEW' || selectedListing.status === 'new' || selectedListing.status === 'REVIEWING') {
-              handleRejectListing(selectedListing.id);
-            }
+            handleRejectListing(selectedListing.id);
           } else if (currentView === 'contacts' && selectedProspect) {
-            if (selectedProspect.status === 'new' || selectedProspect.status === 'reviewing') {
-              handleRejectContact(selectedProspect.id);
-            }
+            handleRejectContact(selectedProspect.id);
           }
           break;
         case 'ArrowDown':
