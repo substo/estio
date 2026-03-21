@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { Conversation } from "@/lib/ghl/conversations";
-import { GEMINI_FLASH_LATEST_ALIAS, GOOGLE_AI_MODELS } from "@/lib/ai/models";
 import {
     getReplyLanguageLabel,
     normalizeReplyLanguage,
@@ -15,11 +14,12 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Check, ChevronsUpDown, Loader2, Send, Paperclip, Mic, Square, Sparkles } from "lucide-react";
 import { SuggestionBubbles } from "./suggestion-bubbles";
+import { AiModelSelect } from "@/components/ai/ai-model-select";
 import {
-    getAiDraftModelPickerStateAction,
     getSmsChannelEligibility,
     getWhatsAppChannelEligibility,
 } from "@/app/(main)/admin/conversations/actions";
+import { useAiModelCatalog } from "@/components/ai/use-ai-model-catalog";
 import { toast } from "sonner";
 
 type ComposerChannel = "SMS" | "Email" | "WhatsApp";
@@ -92,9 +92,9 @@ export function ConversationComposer({
     const [sending, setSending] = useState(false);
     const [generatingDraft, setGeneratingDraft] = useState(false);
     const [selectedChannel, setSelectedChannel] = useState<ComposerChannel>(getInitialChannel(conversation));
-    const [selectedModel, setSelectedModel] = useState(GEMINI_FLASH_LATEST_ALIAS);
+    const [selectedModel, setSelectedModel] = useState("");
     const [hasUserSelectedModel, setHasUserSelectedModel] = useState(false);
-    const [availableModels, setAvailableModels] = useState<any[]>([]);
+    const { models: availableModels, resolveModelForKind } = useAiModelCatalog();
     const [selectedReplyLanguage, setSelectedReplyLanguage] = useState<string>(
         conversation?.replyLanguageOverride || REPLY_LANGUAGE_AUTO_VALUE
     );
@@ -117,23 +117,11 @@ export function ConversationComposer({
     }, [selectedModel, onModelChange]);
 
     useEffect(() => {
-        let mounted = true;
-        getAiDraftModelPickerStateAction()
-            .then(({ models, defaultModel }) => {
-                if (!mounted) return;
-                if (models && models.length > 0) {
-                    setAvailableModels(models);
-                }
-                if (!hasUserSelectedModelRef.current && defaultModel) {
-                    setSelectedModel(defaultModel);
-                }
-            })
-            .catch((err) => console.error("Failed to load AI models:", err));
-
-        return () => {
-            mounted = false;
-        };
-    }, []);
+        if (hasUserSelectedModelRef.current) return;
+        const preferredModel = resolveModelForKind("general") || resolveModelForKind("draft");
+        if (!preferredModel) return;
+        setSelectedModel(preferredModel);
+    }, [resolveModelForKind]);
 
     useEffect(() => {
         setSelectedChannel(getInitialChannel(conversation));
@@ -561,7 +549,7 @@ export function ConversationComposer({
                             {onGenerateDraft && (
                                 <>
                                     <div className="w-px h-4 bg-slate-200" />
-                                    <Select
+                                    <AiModelSelect
                                         value={selectedModel}
                                         onValueChange={(value) => {
                                             hasUserSelectedModelRef.current = true;
@@ -569,18 +557,10 @@ export function ConversationComposer({
                                             setSelectedModel(value);
                                         }}
                                         disabled={isUnavailable}
-                                    >
-                                        <SelectTrigger className="h-7 w-[94px] sm:w-[110px] text-[11px] border-0 bg-slate-50 hover:bg-slate-100 focus:ring-0 px-2">
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {(availableModels.length > 0 ? availableModels : GOOGLE_AI_MODELS).map((model) => (
-                                                <SelectItem key={model.value} value={model.value} className="text-xs">
-                                                    {model.label}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
+                                        triggerClassName="h-7 w-[94px] sm:w-[110px] text-[11px] border-0 bg-slate-50 hover:bg-slate-100 focus:ring-0 px-2"
+                                        itemClassName="text-xs"
+                                        models={availableModels}
+                                    />
                                     <Popover open={replyLanguageOpen} onOpenChange={setReplyLanguageOpen}>
                                         <PopoverTrigger asChild>
                                             <Button

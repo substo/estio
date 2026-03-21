@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Conversation, Message } from "@/lib/ghl/conversations";
-import { GEMINI_FLASH_LATEST_ALIAS } from "@/lib/ai/models";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -161,7 +160,7 @@ export function ChatWindow({
 }: ChatWindowProps & { suggestions?: string[] }) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const timelineContentRef = useRef<HTMLDivElement>(null);
-    const [selectedModel, setSelectedModel] = useState(GEMINI_FLASH_LATEST_ALIAS);
+    const [selectedModel, setSelectedModel] = useState("");
     const [selectionBatch, setSelectionBatch] = useState<SelectionBatchItem[]>([]);
     const [isSummarizingBatch, setIsSummarizingBatch] = useState(false);
     const [bulkTranscriptWindow, setBulkTranscriptWindow] = useState<"30d" | "all">("30d");
@@ -242,6 +241,7 @@ export function ChatWindow({
                 noteType: "activity",
                 conversationId: conversation.id,
                 contactId: conversation.contactId,
+                modelOverride: selectedModel || undefined,
             });
             if (!result.success) {
                 toast.error(result.error || "Failed to improve note");

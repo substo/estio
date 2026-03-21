@@ -38,6 +38,7 @@ import {
     deleteViewing,
 } from '@/app/(main)/admin/contacts/actions';
 import { improveInternalNoteText } from '@/app/(main)/admin/conversations/actions';
+import { useAiModelCatalog } from '@/components/ai/use-ai-model-catalog';
 import { getContactViewings, getPropertiesForSelect, getUsersForSelect } from '@/app/(main)/admin/contacts/fetch-helpers';
 import { SearchableSelect } from '@/app/(main)/admin/contacts/_components/searchable-select';
 import {
@@ -252,6 +253,7 @@ export function ContactViewingManager({
     // Initial Defaults
     const [defaultUserId, setDefaultUserId] = useState('');
     const [interestedProps, setInterestedProps] = useState<string[]>([]);
+    const { resolveModelForKind } = useAiModelCatalog();
 
     const loadRequestIdRef = useRef(0);
     const browserTimeZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC', []);
@@ -332,6 +334,7 @@ export function ContactViewingManager({
                 text: sourceText,
                 noteType: "viewing",
                 contactId,
+                modelOverride: resolveModelForKind("general") || undefined,
                 context: {
                     propertyReference: selectedViewingPropertyReference || undefined,
                     scheduledLocal: viewingDate || undefined,

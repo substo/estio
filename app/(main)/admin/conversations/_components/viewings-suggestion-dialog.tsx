@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2, Home, ListTodo, Minus, Plus, Wand2 } from "lucide-react";
 import { SearchableSelect } from "@/app/(main)/admin/contacts/_components/searchable-select";
+import { useAiModelCatalog } from "@/components/ai/use-ai-model-catalog";
 import {
     suggestViewingsFromSelection,
     applySuggestedViewingsFromSelection,
@@ -67,6 +68,7 @@ export function ViewingsSuggestionDialog({ open, onOpenChange, selectionText, co
     const [suggestions, setSuggestions] = useState<SuggestedViewingState[]>([]);
     const [resolvedContactId, setResolvedContactId] = useState<string | null>(null);
     const [improvingSuggestionNoteIds, setImprovingSuggestionNoteIds] = useState<Record<string, boolean>>({});
+    const { resolveModelForKind } = useAiModelCatalog();
 
     // Dropdown data
     const [properties, setProperties] = useState<{ id: string; title: string; reference?: string | null; unitNumber?: string | null }[]>([]);
@@ -140,6 +142,7 @@ export function ViewingsSuggestionDialog({ open, onOpenChange, selectionText, co
                 noteType: "viewing",
                 conversationId: conversationId || undefined,
                 contactId: resolvedContactId || undefined,
+                modelOverride: activeAiModel || resolveModelForKind("general") || undefined,
                 context: {
                     propertyReference: suggestion.propertyDescription || undefined,
                     scheduledLocal: suggestion.date && suggestion.time ? `${suggestion.date}T${suggestion.time}` : undefined,

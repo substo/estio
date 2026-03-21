@@ -5,6 +5,38 @@ import { getModelForTask } from "./model-router";
 interface CallLLMOptions {
     jsonMode?: boolean;
     temperature?: number;
+    maxOutputTokens?: number;
+    thinkingBudget?: number;
+}
+
+function buildGenerationConfig(options: CallLLMOptions): Record<string, unknown> {
+    const generationConfig: Record<string, unknown> = {
+        responseMimeType: options.jsonMode ? "application/json" : "text/plain",
+    };
+
+    if (typeof options.temperature === "number" && Number.isFinite(options.temperature)) {
+        generationConfig.temperature = options.temperature;
+    }
+
+    if (
+        typeof options.maxOutputTokens === "number"
+        && Number.isFinite(options.maxOutputTokens)
+        && options.maxOutputTokens > 0
+    ) {
+        generationConfig.maxOutputTokens = Math.floor(options.maxOutputTokens);
+    }
+
+    if (
+        typeof options.thinkingBudget === "number"
+        && Number.isFinite(options.thinkingBudget)
+        && options.thinkingBudget >= 0
+    ) {
+        generationConfig.thinkingConfig = {
+            thinkingBudget: Math.floor(options.thinkingBudget),
+        };
+    }
+
+    return generationConfig;
 }
 
 /**
@@ -37,10 +69,7 @@ export async function callLLM(
 
     const model = genAI.getGenerativeModel({
         model: modelId,
-        generationConfig: {
-            responseMimeType: options.jsonMode ? "application/json" : "text/plain",
-            temperature: options.temperature
-        }
+        generationConfig: buildGenerationConfig(options),
     });
 
     const prompt = userContent
@@ -84,10 +113,7 @@ export async function callLLMWithMetadata(
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
         model: modelId,
-        generationConfig: {
-            responseMimeType: options.jsonMode ? "application/json" : "text/plain",
-            temperature: options.temperature
-        }
+        generationConfig: buildGenerationConfig(options),
     });
 
     const prompt = userContent ? [systemPrompt, userContent] : [systemPrompt];

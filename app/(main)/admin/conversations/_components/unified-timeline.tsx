@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Conversation } from '@/lib/ghl/conversations';
-import { GEMINI_FLASH_LATEST_ALIAS } from '@/lib/ai/models';
 import { calculatePrependScrollTop } from '@/lib/conversations/thread-hydration';
 
 import { MessageBubble } from './message-bubble';
@@ -68,7 +67,7 @@ export function UnifiedTimeline({
     composerInsertSeed,
     onResendMessage,
 }: UnifiedTimelineProps) {
-    const [selectedModel, setSelectedModel] = useState(GEMINI_FLASH_LATEST_ALIAS);
+    const [selectedModel, setSelectedModel] = useState("");
     const [isTimelineReady, setIsTimelineReady] = useState(false);
     const timelineRef = useRef<HTMLDivElement>(null);
     const timelineContentRef = useRef<HTMLDivElement>(null);

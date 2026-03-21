@@ -79,9 +79,18 @@ const MAX_CUSTOM_OUTPUT_LENGTH = 2200;
 const CRM_LOG_DEDUPE_RECENT_LIMIT = 30;
 const MAX_NOTE_IMPROVEMENT_INPUT_LENGTH = 5000;
 const NOTE_IMPROVEMENT_OUTPUT_MAX_CHARS = {
-    activity: 360,
-    viewing: 520,
+    activity: 200,
+    viewing: 360,
 } as const;
+const NOTE_IMPROVEMENT_MAX_WORDS = {
+    activity: 24,
+    viewingSegment: 8,
+} as const;
+const NOTE_IMPROVEMENT_MAX_OUTPUT_TOKENS = {
+    activity: 90,
+    viewing: 130,
+} as const;
+const NOTE_IMPROVEMENT_THINKING_BUDGET = 0;
 const WHATSAPP_TRANSCRIPT_BULK_DEFAULT_WINDOW_DAYS = 30;
 const MAX_TASK_SUGGESTIONS = 6;
 const MAX_TASK_SUGGESTION_TITLE_LENGTH = 180;
@@ -386,6 +395,14 @@ function trimToMaxCharsPreservingWords(value: string, maxChars: number): string 
     return hardTrimmed.slice(0, lastWhitespace).trim();
 }
 
+function trimToMaxWords(value: string, maxWords: number): string {
+    const normalized = normalizeSingleLine(value, "");
+    if (!normalized || maxWords <= 0) return normalized;
+    const words = normalized.split(" ").filter(Boolean);
+    if (words.length <= maxWords) return normalized;
+    return words.slice(0, maxWords).join(" ");
+}
+
 function buildImprovedViewingTemplateLine(value: string): string {
     const cleaned = normalizeSingleLine(value, "");
     if (!cleaned) {
@@ -403,9 +420,9 @@ function buildImprovedViewingTemplateLine(value: string): string {
         if (!existing) return "n/a";
         if (new RegExp(`^${label}\\s*:`, "i").test(existing)) {
             const stripped = existing.replace(/^[^:]+:\s*/i, "").trim();
-            return stripped || "n/a";
+            return trimToMaxWords(stripped || "n/a", NOTE_IMPROVEMENT_MAX_WORDS.viewingSegment) || "n/a";
         }
-        return existing;
+        return trimToMaxWords(existing, NOTE_IMPROVEMENT_MAX_WORDS.viewingSegment) || "n/a";
     });
 
     return labels
@@ -433,8 +450,9 @@ function normalizeImprovedNoteOutput(
     );
     const normalized = normalizeSingleLine(rawOutput, fallback)
         .replace(/\s*\|\s*/g, " | ");
+    const wordLimited = trimToMaxWords(normalized, NOTE_IMPROVEMENT_MAX_WORDS.activity);
     return trimToMaxCharsPreservingWords(
-        normalized,
+        wordLimited,
         NOTE_IMPROVEMENT_OUTPUT_MAX_CHARS.activity
     );
 }
@@ -462,10 +480,11 @@ function buildImproveNotePrompt(args: {
             "Return exactly one plain-text line using this exact format:",
             "Prospect: <short phrase> | Fit: <short phrase> | Concerns: <short phrase> | Next step: <short phrase>",
             "Rules:",
-            "- Keep each segment short and factual.",
+            "- Keep each segment 3-8 words and factual.",
             "- Preserve only facts present in the source note.",
             "- Do not invent details, promises, numbers, dates, or outcomes.",
             "- Fix grammar and structure, remove fluff, keep concise.",
+            "- Keep the full line compact and easy to scan quickly.",
             "- Use n/a for missing segments.",
             "- Do not include markdown, bullets, emojis, quotes, or extra labels.",
             args.contactFirstName
@@ -484,7 +503,7 @@ function buildImproveNotePrompt(args: {
 
     return [
         "You improve internal CRM timeline notes for real-estate teams.",
-        "Return exactly one plain-text sentence.",
+        "Return exactly one plain-text sentence (max 24 words).",
         "Rules:",
         "- Keep it concise, factual, and action-oriented.",
         "- Fix grammar and clarity while preserving original meaning.",
@@ -496,6 +515,7 @@ function buildImproveNotePrompt(args: {
             ? `- If mentioning the contact, use first name only (${args.contactFirstName}).`
             : "- If a name appears, use first name only.",
         "- Never include phone or email.",
+        "- Prefer one clear action/outcome statement.",
         "",
         contextHints.length > 0 ? "Optional context:" : null,
         ...contextHints,
@@ -9304,9 +9324,17 @@ export async function improveInternalNoteText(input: z.infer<typeof ImproveNoteI
             contact?.email
         );
 
+        let resolvedDefaultModel = "";
+        try {
+            const { resolveAiModelDefault } = await import("@/lib/ai/fetch-models");
+            resolvedDefaultModel = await resolveAiModelDefault(location.id, "general");
+        } catch (resolveError) {
+            console.warn("[improveInternalNoteText] Failed to resolve AI model default:", resolveError);
+        }
+
         const modelId = typeof modelOverride === "string" && modelOverride.trim()
             ? modelOverride.trim()
-            : getModelForTask("simple_generation");
+            : (resolvedDefaultModel || getModelForTask("simple_generation"));
         const startedAt = Date.now();
         const prompt = buildImproveNotePrompt({
             noteType,
@@ -9319,7 +9347,11 @@ export async function improveInternalNoteText(input: z.infer<typeof ImproveNoteI
             modelId,
             prompt,
             undefined,
-            { temperature: noteType === "viewing" ? 0.15 : 0.2 }
+            {
+                temperature: noteType === "viewing" ? 0.1 : 0.15,
+                maxOutputTokens: NOTE_IMPROVEMENT_MAX_OUTPUT_TOKENS[noteType],
+                thinkingBudget: NOTE_IMPROVEMENT_THINKING_BUDGET,
+            }
         );
         const latencyMs = Date.now() - startedAt;
         const normalizedOutput = normalizeImprovedNoteOutput(noteType, rawOutput, text);
