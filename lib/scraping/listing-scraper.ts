@@ -277,10 +277,16 @@ export class ListingScraperService {
     private static async classifyTouchedProspects(locationId: string, prospectIds: string[]): Promise<void> {
         if (prospectIds.length === 0) return;
 
-        const { classifyAndUpdateProspect, buildClassificationInputForProspect } = await import('@/lib/ai/prospect-classifier');
+        const {
+            classifyAndUpdateProspect,
+            buildClassificationInputForProspect,
+            shouldRunProspectClassification,
+        } = await import('@/lib/ai/prospect-classifier');
 
         for (const prospectId of prospectIds) {
             try {
+                const decision = await shouldRunProspectClassification(prospectId);
+                if (!decision.shouldClassify) continue;
                 const input = await buildClassificationInputForProspect(prospectId);
                 if (!input) continue;
                 await classifyAndUpdateProspect(prospectId, locationId, input);

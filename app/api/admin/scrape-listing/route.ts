@@ -139,28 +139,37 @@ export async function POST(req: Request) {
                         result.prospectLeadId = upsertResult?.prospectLeadId || undefined;
                         result.prospectName = upsertResult?.prospectName || result.ownerName;
 
-                        // Run AI classification on the prospect
+                        // Run AI classification on the prospect (idempotent guard)
                         if (upsertResult?.prospectLeadId) {
                             try {
-                                sendEvent({ status: 'classifying', message: '🤖 Running AI agency/private classification...' });
-                                const { classifyAndUpdateProspect, buildClassificationInputForProspect } = await import('@/lib/ai/prospect-classifier');
-                                const classificationInput = await buildClassificationInputForProspect(
-                                    upsertResult.prospectLeadId,
-                                    {
-                                        name: result.ownerName,
-                                        description: result.description,
-                                        platformRegistered: result.sellerRegisteredAt,
-                                        profileUrl: result.otherListingsUrl,
-                                        contactChannels: result.contactChannels,
-                                    }
-                                );
-                                if (!classificationInput) throw new Error('No classification input available.');
-                                const classification = await classifyAndUpdateProspect(
-                                    upsertResult.prospectLeadId,
-                                    locationId,
-                                    classificationInput
-                                );
-                                sendEvent({ status: 'classifying', message: `🤖 Classification: ${classification.isAgency ? 'Agency' : 'Private'} (${classification.confidenceScore}% confidence)` });
+                                const {
+                                    classifyAndUpdateProspect,
+                                    buildClassificationInputForProspect,
+                                    shouldRunProspectClassification,
+                                } = await import('@/lib/ai/prospect-classifier');
+                                const decision = await shouldRunProspectClassification(upsertResult.prospectLeadId);
+                                if (!decision.shouldClassify) {
+                                    sendEvent({ status: 'classifying', message: `⏭️ Classification skipped: ${decision.reason}` });
+                                } else {
+                                    sendEvent({ status: 'classifying', message: '🤖 Running AI agency/private classification...' });
+                                    const classificationInput = await buildClassificationInputForProspect(
+                                        upsertResult.prospectLeadId,
+                                        {
+                                            name: result.ownerName,
+                                            description: result.description,
+                                            platformRegistered: result.sellerRegisteredAt,
+                                            profileUrl: result.otherListingsUrl,
+                                            contactChannels: result.contactChannels,
+                                        }
+                                    );
+                                    if (!classificationInput) throw new Error('No classification input available.');
+                                    const classification = await classifyAndUpdateProspect(
+                                        upsertResult.prospectLeadId,
+                                        locationId,
+                                        classificationInput
+                                    );
+                                    sendEvent({ status: 'classifying', message: `🤖 Classification: ${classification.isAgency ? 'Agency' : 'Private'} (${classification.confidenceScore}% confidence)` });
+                                }
                             } catch (classErr: any) {
                                 sendEvent({ status: 'classifying', message: `⚠️ Classification skipped: ${classErr.message?.substring(0, 80)}` });
                             }
@@ -247,6 +256,53 @@ interface ScrapedData {
     isExpired?: boolean;
     prospectLeadId?: string;
     prospectName?: string;
+}
+
+async function resolveKnownSellerPhone(
+    locationId: string,
+    platform: string,
+    externalId: string,
+    sellerExternalId?: string,
+): Promise<string | undefined> {
+    const existingListing = await db.scrapedListing.findFirst({
+        where: {
+            locationId,
+            platform,
+            externalId,
+            prospectLead: { phone: { not: null } },
+        },
+        select: { prospectLead: { select: { phone: true } } },
+    });
+    if (existingListing?.prospectLead?.phone) return existingListing.prospectLead.phone;
+
+    if (!sellerExternalId) return undefined;
+
+    const existingProspect = await db.prospectLead.findFirst({
+        where: { locationId, platformUserId: sellerExternalId },
+        select: {
+            phone: true,
+            createdContactId: true,
+            matchedContactId: true,
+        },
+        orderBy: { updatedAt: 'desc' },
+    });
+    if (existingProspect?.phone) return existingProspect.phone;
+
+    const candidateContactIds = [
+        existingProspect?.createdContactId,
+        existingProspect?.matchedContactId,
+    ].filter((id): id is string => Boolean(id));
+    if (candidateContactIds.length === 0) return undefined;
+
+    const linkedContact = await db.contact.findFirst({
+        where: {
+            locationId,
+            id: { in: candidateContactIds },
+            phone: { not: null },
+        },
+        select: { phone: true },
+    });
+    return linkedContact?.phone || undefined;
 }
 
 async function scrapeBazarakiListing(
@@ -360,15 +416,9 @@ async function scrapeBazarakiListing(
 
             sendEvent({ status: 'extracting', message: `Owner: ${ownerName.trim() || 'Unknown'} (ID: ${sellerExternalId || 'N/A'})` });
 
-            let knownPhone = undefined;
-            if (sellerExternalId) {
-                const existing = await db.prospectLead.findFirst({
-                    where: { platformUserId: sellerExternalId, locationId, phone: { not: null } }
-                });
-                if (existing?.phone) {
-                    knownPhone = existing.phone;
-                    sendEvent({ status: 'extracting', message: `✅ Phone already known for this seller (${knownPhone}). Skipping phone button interactions.` });
-                }
+            const knownPhone = await resolveKnownSellerPhone(locationId, 'bazaraki', externalId, sellerExternalId);
+            if (knownPhone) {
+                sendEvent({ status: 'extracting', message: `✅ Phone already known for this seller (${knownPhone}). Skipping phone button interactions.` });
             }
 
             // Property type from breadcrumbs or metadata

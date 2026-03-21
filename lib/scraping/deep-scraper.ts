@@ -51,27 +51,34 @@ export class DeepScraperService {
                     let isAgency = false;
                     if (listing.prospectLeadId) {
                         try {
-                            const { classifyAndUpdateProspect, buildClassificationInputForProspect } = await import('@/lib/ai/prospect-classifier');
-                            const classificationInput = await buildClassificationInputForProspect(
-                                listing.prospectLeadId,
-                                {
-                                    name: listing.prospectLead?.name,
-                                    description: fullDescription,
-                                    platformRegistered: listing.prospectLead?.platformRegistered,
-                                    profileUrl: listing.prospectLead?.profileUrl,
+                            const {
+                                classifyAndUpdateProspect,
+                                buildClassificationInputForProspect,
+                                shouldRunProspectClassification,
+                            } = await import('@/lib/ai/prospect-classifier');
+                            const decision = await shouldRunProspectClassification(listing.prospectLeadId);
+                            if (decision.shouldClassify) {
+                                const classificationInput = await buildClassificationInputForProspect(
+                                    listing.prospectLeadId,
+                                    {
+                                        name: listing.prospectLead?.name,
+                                        description: fullDescription,
+                                        platformRegistered: listing.prospectLead?.platformRegistered,
+                                        profileUrl: listing.prospectLead?.profileUrl,
+                                    }
+                                );
+
+                                if (!classificationInput) {
+                                    throw new Error('No prospect classification input available.');
                                 }
-                            );
 
-                            if (!classificationInput) {
-                                throw new Error('No prospect classification input available.');
+                                const classification = await classifyAndUpdateProspect(
+                                    listing.prospectLeadId,
+                                    locationId,
+                                    classificationInput
+                                );
+                                isAgency = classification.isAgency;
                             }
-
-                            const classification = await classifyAndUpdateProspect(
-                                listing.prospectLeadId,
-                                locationId,
-                                classificationInput
-                            );
-                            isAgency = classification.isAgency;
                         } catch (classErr: any) {
                             console.warn(`[DeepScraper] Classification failed for ${listing.id}: ${classErr.message}`);
                         }

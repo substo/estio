@@ -36,6 +36,11 @@ export interface ClassificationResult {
     reasoning: string;
 }
 
+export interface ProspectClassificationDecision {
+    shouldClassify: boolean;
+    reason: string;
+}
+
 const CLASSIFICATION_PROMPT = `You are an expert real estate industry classifier for a CRM application in Cyprus.
 
 Your task is to determine whether a property seller/landlord on a classifieds platform is:
@@ -231,6 +236,41 @@ export async function buildClassificationInputForProspect(
         businessWebsite: overrides.businessWebsite ?? businessWebsiteFromPortfolio ?? null,
         businessDescription: overrides.businessDescription ?? businessDescriptionFromPortfolio ?? null,
     };
+}
+
+/**
+ * Idempotency guard for prospect classification.
+ * Skip reruns when a manual override exists or AI classification already populated fields.
+ */
+export async function shouldRunProspectClassification(
+    prospectId: string,
+): Promise<ProspectClassificationDecision> {
+    const prospect = await db.prospectLead.findUnique({
+        where: { id: prospectId },
+        select: {
+            isAgencyManual: true,
+            agencyConfidence: true,
+            agencyReasoning: true,
+        },
+    });
+
+    if (!prospect) {
+        return { shouldClassify: false, reason: 'Prospect not found.' };
+    }
+
+    if (prospect.isAgencyManual !== null) {
+        return { shouldClassify: false, reason: 'Manual agency/private override already set.' };
+    }
+
+    const hasExistingAiClassification =
+        prospect.agencyConfidence !== null ||
+        Boolean(prospect.agencyReasoning && prospect.agencyReasoning.trim().length > 0);
+
+    if (hasExistingAiClassification) {
+        return { shouldClassify: false, reason: 'Existing AI classification already present.' };
+    }
+
+    return { shouldClassify: true, reason: 'No existing classification found.' };
 }
 
 /**
