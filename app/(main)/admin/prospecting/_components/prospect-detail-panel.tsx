@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogTrigger, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { cn } from '@/lib/utils';
 
 interface ProspectDetailPanelProps {
   listing: ScrapedListingRow | null;
@@ -34,17 +35,24 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [optimisticUpdate, setOptimisticUpdate] = useState<any>(null);
   const [linkedCompanyState, setLinkedCompanyState] = useState<{ companyId: string | null; companyName: string | null } | null>(null);
+  const [portraitByImage, setPortraitByImage] = useState<Record<string, boolean>>({});
 
   // Reset carousel and optimistic data when listing changes
   useEffect(() => {
     setCurrentImageIndex(0);
     setOptimisticUpdate(null);
+    setPortraitByImage({});
     setLinkedCompanyState(
       originalListing
         ? { companyId: originalListing.linkedCompanyId ?? null, companyName: originalListing.linkedCompanyName ?? null }
         : null
     );
   }, [originalListing?.id]);
+
+  useEffect(() => {
+    if (!originalListing?.images?.length) return;
+    setCurrentImageIndex((prev) => Math.min(prev, originalListing.images.length - 1));
+  }, [originalListing?.images?.length]);
 
   const listing = originalListing && optimisticUpdate 
     ? { 
@@ -62,6 +70,15 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
   const linkedCompanyId = linkedCompanyState?.companyId || listing?.linkedCompanyId || null;
   const linkedCompanyName = linkedCompanyState?.companyName || listing?.linkedCompanyName || null;
   const stagedCompanyMatchName = listing?.stagedCompanyMatchName || null;
+  const imageCount = listing?.images?.length || 0;
+  const activeImageIndex = imageCount > 0 ? Math.min(currentImageIndex, imageCount - 1) : 0;
+  const activeImageSrc = imageCount > 0 ? listing!.images[activeImageIndex] : null;
+
+  const registerImageOrientation = (src: string, naturalWidth: number, naturalHeight: number) => {
+    if (!naturalWidth || !naturalHeight) return;
+    const isPortrait = naturalHeight > naturalWidth;
+    setPortraitByImage((prev) => (prev[src] === isPortrait ? prev : { ...prev, [src]: isPortrait }));
+  };
 
   if (!listing) {
     return (
@@ -234,7 +251,7 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
           </ScrollArea>
 
           {/* RIGHT COLUMN: Actions & Photos */}
-          <div className="lg:col-span-6 h-full flex flex-col gap-3 min-w-0">
+          <div className="lg:col-span-6 h-full min-h-0 flex flex-col gap-3 min-w-0">
             
             {/* Top: Seller Profile & Actions (Fixed height, always visible) */}
             <div className="shrink-0 bg-muted/30 p-3 rounded-xl border flex flex-col gap-3">
@@ -379,23 +396,64 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                   <>
                     <Dialog>
                       <DialogTrigger asChild>
-                        <button title="View Full Image" className="w-full h-full flex items-center justify-center p-2 outline-none cursor-zoom-in overflow-hidden">
+                        <button
+                          title="View Full Image"
+                          className={cn(
+                            "w-full h-full flex justify-center p-2 outline-none cursor-zoom-in",
+                            activeImageSrc && portraitByImage[activeImageSrc]
+                              ? "items-start overflow-y-auto overflow-x-hidden"
+                              : "items-center overflow-hidden"
+                          )}
+                        >
                           <img
-                            src={listing.images[currentImageIndex]}
+                            src={activeImageSrc!}
                             alt="Property"
-                            className="w-full h-full object-contain drop-shadow-md rounded-md transition-transform hover:scale-[1.02]"
+                            className={cn(
+                              "object-contain drop-shadow-md rounded-md",
+                              activeImageSrc && portraitByImage[activeImageSrc]
+                                ? "w-full h-auto max-h-none"
+                                : "w-full h-full transition-transform hover:scale-[1.02]"
+                            )}
+                            onLoad={(event) => {
+                              registerImageOrientation(
+                                activeImageSrc!,
+                                event.currentTarget.naturalWidth,
+                                event.currentTarget.naturalHeight
+                              );
+                            }}
                           />
                         </button>
                       </DialogTrigger>
-                      <DialogContent className="max-w-[95vw] w-auto h-[95vh] p-4 bg-black/95 border-none flex flex-col items-center justify-center">
+                      <DialogContent className="max-w-[95vw] w-[95vw] h-[95vh] p-4 bg-black/95 border-none flex flex-col items-center justify-center overflow-hidden">
                         <DialogTitle className="sr-only">Image Gallery</DialogTitle>
                         <DialogDescription className="sr-only">Full resolution property image</DialogDescription>
-                        <div className="relative w-full h-full flex items-center justify-center">
-                          <img
-                            src={listing.images[currentImageIndex]}
-                            alt="Property Full"
-                            className="w-full h-full object-contain"
-                          />
+                        <div className="relative w-full h-full min-h-0 flex items-center justify-center overflow-hidden">
+                          <div
+                            className={cn(
+                              "w-full h-full min-h-0 flex justify-center rounded-md",
+                              activeImageSrc && portraitByImage[activeImageSrc]
+                                ? "items-start overflow-y-auto overflow-x-hidden"
+                                : "items-center overflow-hidden"
+                            )}
+                          >
+                            <img
+                              src={activeImageSrc!}
+                              alt="Property Full"
+                              className={cn(
+                                "object-contain",
+                                activeImageSrc && portraitByImage[activeImageSrc]
+                                  ? "w-full h-auto max-h-none"
+                                  : "w-full h-full"
+                              )}
+                              onLoad={(event) => {
+                                registerImageOrientation(
+                                  activeImageSrc!,
+                                  event.currentTarget.naturalWidth,
+                                  event.currentTarget.naturalHeight
+                                );
+                              }}
+                            />
+                          </div>
                           {listing.images.length > 1 && (
                             <>
                               <Button variant="ghost" size="icon" className="absolute left-4 top-1/2 -translate-y-1/2 w-12 h-12 bg-black/50 hover:bg-black/80 text-white rounded-full z-10" onClick={(e) => { e.preventDefault(); setCurrentImageIndex((prev) => prev === 0 ? listing.images.length - 1 : prev - 1); }}>
@@ -405,7 +463,7 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                                 <ChevronRight className="w-8 h-8" />
                               </Button>
                               <div className="absolute top-4 right-4 bg-black/60 text-white text-sm font-medium px-3 py-1 rounded-full z-10">
-                                {currentImageIndex + 1} / {listing.images.length}
+                                {activeImageIndex + 1} / {listing.images.length}
                               </div>
                             </>
                           )}
@@ -421,7 +479,7 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                           <ChevronRight className="w-5 h-5" />
                         </Button>
                         <div className="absolute top-3 right-3 bg-black/60 text-white text-[10px] font-medium px-2 py-0.5 rounded-full z-10">
-                          {currentImageIndex + 1} / {listing.images.length}
+                          {activeImageIndex + 1} / {listing.images.length}
                         </div>
                       </>
                     )}
@@ -443,7 +501,7 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                     <button
                       key={idx}
                       onClick={() => setCurrentImageIndex(idx)}
-                      className={`relative w-14 h-10 shrink-0 flex items-center justify-center rounded overflow-hidden border-2 transition-all ${currentImageIndex === idx ? 'border-primary ring-1 ring-primary/30' : 'border-transparent opacity-60 hover:opacity-100 bg-black/5'}`}
+                      className={`relative w-14 h-10 shrink-0 flex items-center justify-center rounded overflow-hidden border-2 transition-all ${activeImageIndex === idx ? 'border-primary ring-1 ring-primary/30' : 'border-transparent opacity-60 hover:opacity-100 bg-black/5'}`}
                     >
                       <img src={listing.thumbnails?.[idx] || img} alt="" className="w-full h-full object-cover" />
                     </button>
