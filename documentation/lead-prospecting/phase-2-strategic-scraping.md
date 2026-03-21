@@ -799,13 +799,15 @@ To keep Strategic Scraping congruent with existing CRM entities, agency seller p
 3. We persist staging output under:
    - `ProspectLead.aiScoreBreakdown.strategicScrape.agencyProfile`
    - `ProspectLead.aiScoreBreakdown.strategicScrape.companyMatch`
-4. On acceptance, if seller is agency:
+4. Via explicit Prospecting action **"Link As Company"** (no Prospect acceptance):
    - Upsert/Create `Company` with `type = "Agency"`
-   - Link accepted Contact to Company via `ContactCompanyRole`
-   - Link imported Properties to Company via `CompanyPropertyRole` role `"Agency"`
    - Persist link metadata in `aiScoreBreakdown.strategicScrape.companyLink`
+   - Keep Prospect in prospecting workflow (`new/reviewing`) for cold outreach follow-up
 
-This mirrors the existing Prospect → Contact import pattern while adding a Company-first track for agency sellers.
+This mirrors the existing Prospect staging pattern while adding a Company-first track for agency sellers.
+
+> [!IMPORTANT]
+> Current workflow policy: **Prospect acceptance is private-only**. Agency prospects are handled via outreach and explicit **"Link As Company"** action in Prospecting, without accepting/creating a CRM Contact.
 
 Feed card behavior:
 - In `ContactFeedCard`, AI-classified prospects render with a `Bot` icon, while manually set values render with the standard `Building2`/`UserCheck` icon path.

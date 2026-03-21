@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { type ProspectInboxRow } from '@/lib/leads/prospect-repository';
-import { acceptProspectWithListings, rejectProspectWithListings, toggleProspectAgencyStatus } from '../actions';
+import { acceptProspectWithListings, rejectProspectWithListings, toggleProspectAgencyStatus, linkProspectAgencyCompany } from '../actions';
 import { scrapeSellerProfile } from '../listings/_actions/seller-scrape';
 import { toast } from 'sonner';
 import {
@@ -25,6 +25,7 @@ interface ContactDetailPanelProps {
 export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, locationId }: ContactDetailPanelProps) {
   const router = useRouter();
   const [isScrapingSeller, startScrapingSeller] = useTransition();
+  const [isLinkingCompany, startLinkingCompany] = useTransition();
 
   if (!prospect) {
     return (
@@ -137,6 +138,18 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
     });
   };
 
+  const handleLinkCompany = () => {
+    startLinkingCompany(async () => {
+      const res = await linkProspectAgencyCompany(prospect.id);
+      if (res.success) {
+        toast.success(res.message || 'Company linked');
+        router.refresh();
+      } else {
+        toast.error(res.message || 'Failed to link company');
+      }
+    });
+  };
+
   const newListingsCount = prospect.scrapedListings?.filter(l => l.status === 'NEW' || l.status === 'new' || l.status === 'REVIEWING').length || 0;
   const strategicScrape = (prospect.aiScoreBreakdown as any)?.strategicScrape || {};
   const stagedCompanyMatch = strategicScrape?.companyMatch;
@@ -207,6 +220,12 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
             </Button>
           )}
 
+          {effectiveIsAgency && (
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={handleLinkCompany} disabled={isLinkingCompany}>
+              <Building2 className="w-4 h-4 text-emerald-600" /> {isLinkingCompany ? 'Linking...' : (linkedCompany?.companyId ? 'Refresh Company Link' : 'Link As Company')}
+            </Button>
+          )}
+
           <div className="flex-1 min-w-[0.5rem]" />
 
           {isNew ? (
@@ -215,10 +234,14 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
                 <X className="w-4 h-4" /> Reject All ({newListingsCount})
                 <kbd className="hidden xl:inline ml-1 text-[9px] bg-red-100 dark:bg-red-900/30 px-1 rounded font-mono">R</kbd>
               </Button>
-              <Button size="sm" className="gap-1.5" onClick={() => onAccept(prospect.id)} disabled={isPending}>
-                <Check className="w-4 h-4" /> Accept All ({newListingsCount})
-                <kbd className="hidden xl:inline ml-1 text-[9px] bg-primary-foreground/20 px-1 rounded font-mono">A</kbd>
-              </Button>
+              {!effectiveIsAgency ? (
+                <Button size="sm" className="gap-1.5" onClick={() => onAccept(prospect.id)} disabled={isPending}>
+                  <Check className="w-4 h-4" /> Accept All ({newListingsCount})
+                  <kbd className="hidden xl:inline ml-1 text-[9px] bg-primary-foreground/20 px-1 rounded font-mono">A</kbd>
+                </Button>
+              ) : (
+                <Badge variant="outline" className="text-[10px]">Agency: private accept disabled</Badge>
+              )}
             </>
           ) : (
             <Badge variant={prospect.status === 'accepted' ? 'default' : 'destructive'} className="text-xs">

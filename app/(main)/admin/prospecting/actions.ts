@@ -5,7 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { auth } from '@clerk/nextjs/server';
 import { eventBus } from '@/lib/ai/events/event-bus';
 import { importAllListingsForProspect } from '@/lib/leads/property-import';
-import { ensureAgencyCompanyForAcceptedProspect } from '@/lib/leads/agency-company-linker';
+import { ensureAgencyCompanyForProspect } from '@/lib/leads/agency-company-linker';
 
 async function getInternalUserId() {
     const { userId } = await auth();
@@ -13,6 +13,12 @@ async function getInternalUserId() {
     const user = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } });
     return user?.id || null;
 }
+
+const isEffectiveAgency = (prospect: { isAgency: boolean; isAgencyManual: boolean | null }) => {
+    return prospect.isAgencyManual !== null && prospect.isAgencyManual !== undefined
+        ? prospect.isAgencyManual
+        : prospect.isAgency;
+};
 
 // --- Prospect (People) Actions ---
 
@@ -24,6 +30,9 @@ export async function acceptProspect(id: string) {
         const prospect = await db.prospectLead.findUnique({ where: { id } });
         if (!prospect || (prospect.status !== 'new' && prospect.status !== 'reviewing')) {
             return { success: false, message: 'Prospect not found or already processed' };
+        }
+        if (isEffectiveAgency(prospect)) {
+            return { success: false, message: 'Agency prospects are not accepted as private contacts. Use "Link As Company" in Prospecting.' };
         }
 
         const contact = await db.contact.create({
@@ -53,13 +62,6 @@ export async function acceptProspect(id: string) {
                 reviewedBy: internalUserId
             }
         });
-
-        // If this seller is an agency, create/link Company during acceptance.
-        try {
-            await ensureAgencyCompanyForAcceptedProspect(id, prospect.locationId, contact.id);
-        } catch (companyErr: any) {
-            console.warn(`[acceptProspect] Company link skipped for prospect ${id}: ${companyErr.message}`);
-        }
 
         await db.contactHistory.create({
             data: {
@@ -186,6 +188,14 @@ export async function acceptScrapedListing(id: string) {
             return { success: false, message: 'Listing has no linked contact — cannot accept in isolation' };
         }
 
+        const prospect = await db.prospectLead.findUnique({
+            where: { id: listing.prospectLeadId },
+            select: { isAgency: true, isAgencyManual: true },
+        });
+        if (prospect && isEffectiveAgency({ isAgency: prospect.isAgency, isAgencyManual: prospect.isAgencyManual })) {
+            return { success: false, message: 'Agency listings cannot be accepted as private contacts. Use "Link As Company" in Contacts view.' };
+        }
+
         // Cascade to accept the parent contact (which imports all their listings)
         return acceptProspectWithListings(listing.prospectLeadId);
     } catch (e: any) {
@@ -270,6 +280,9 @@ export async function rejectProspectWithListings(prospectId: string) {
         if (!prospect || (prospect.status !== 'new' && prospect.status !== 'reviewing')) {
             return { success: false, message: 'Prospect not found or already processed' };
         }
+        if (isEffectiveAgency(prospect)) {
+            return { success: false, message: 'Agency prospects are not accepted as private contacts. Use "Link As Company" in Prospecting.' };
+        }
 
         // Reject prospect AND all their listings in a single transaction
         const [, listingsResult] = await db.$transaction([
@@ -337,29 +350,15 @@ export async function acceptProspectWithListings(prospectId: string) {
             }
         });
 
-        // 3. Ensure agency prospects are linked to Company before property import
-        let linkedCompanyId: string | null = null;
-        try {
-            const companyLink = await ensureAgencyCompanyForAcceptedProspect(
-                prospectId,
-                prospect.locationId,
-                contact.id
-            );
-            linkedCompanyId = companyLink.companyId;
-        } catch (companyErr: any) {
-            console.warn(`[acceptProspectWithListings] Company link skipped for prospect ${prospectId}: ${companyErr.message}`);
-        }
-
-        // 4. Import scraped listings as Property records
+        // 3. Import scraped listings as Property records
         const { imported, skipped } = await importAllListingsForProspect(
             prospectId,
             contact.id,
             prospect.locationId,
-            internalUserId,
-            linkedCompanyId
+            internalUserId
         );
 
-        // 5. Create audit trail
+        // 4. Create audit trail
         await db.contactHistory.create({
             data: {
                 contactId: contact.id,
@@ -369,12 +368,11 @@ export async function acceptProspectWithListings(prospectId: string) {
                     { field: 'source', old: null, new: prospect.source },
                     { field: 'prospectId', old: null, new: prospect.id },
                     { field: 'propertiesImported', old: null, new: imported.length },
-                    ...(linkedCompanyId ? [{ field: 'companyLinked', old: null, new: linkedCompanyId }] : []),
                 ])
             }
         });
 
-        // 6. Emit event for downstream automation
+        // 5. Emit event for downstream automation
         await eventBus.emit({
             type: 'lead.created',
             payload: { contactId: contact.id, locationId: contact.locationId },
@@ -393,6 +391,59 @@ export async function acceptProspectWithListings(prospectId: string) {
             contactId: contact.id,
             propertiesImported: imported.length,
             propertiesSkipped: skipped.length,
+        };
+    } catch (e: any) {
+        return { success: false, message: e.message || 'Server error' };
+    }
+}
+
+/**
+ * Explicit agency workflow for prospecting stage:
+ * create/update a CRM Company from a staged agency prospect without accepting the prospect as Contact.
+ */
+export async function linkProspectAgencyCompany(prospectId: string) {
+    try {
+        const internalUserId = await getInternalUserId();
+        if (!internalUserId) return { success: false, message: 'Unauthorized' };
+
+        const prospect = await db.prospectLead.findUnique({
+            where: { id: prospectId },
+            select: {
+                id: true,
+                locationId: true,
+                status: true,
+                isAgency: true,
+                isAgencyManual: true,
+            },
+        });
+
+        if (!prospect) return { success: false, message: 'Prospect not found' };
+        if (prospect.status !== 'new' && prospect.status !== 'reviewing') {
+            return { success: false, message: 'Prospect already processed' };
+        }
+        if (!isEffectiveAgency({ isAgency: prospect.isAgency, isAgencyManual: prospect.isAgencyManual })) {
+            return { success: false, message: 'This prospect is marked as private. Mark as Agency first, then link company.' };
+        }
+
+        const linked = await ensureAgencyCompanyForProspect(
+            prospect.id,
+            prospect.locationId
+        );
+
+        if (!linked.companyId) {
+            return { success: false, message: 'Could not derive a valid agency profile to link.' };
+        }
+
+        revalidatePath('/admin/prospecting');
+        revalidatePath('/admin/companies');
+        return {
+            success: true,
+            companyId: linked.companyId,
+            companyName: linked.companyName,
+            created: linked.created,
+            message: linked.created
+                ? `Created company "${linked.companyName}" and linked it to this prospect.`
+                : `Linked prospect to existing company "${linked.companyName}".`,
         };
     } catch (e: any) {
         return { success: false, message: e.message || 'Server error' };

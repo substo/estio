@@ -3,7 +3,7 @@
 import { useState, useTransition, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { type ScrapedListingRow } from '@/lib/leads/scraped-listing-repository';
-import { acceptProspect, deleteProspect } from '../actions';
+import { acceptProspect, deleteProspect, linkProspectAgencyCompany } from '../actions';
 import { scrapeSellerProfile } from '../listings/_actions/seller-scrape';
 import { ScrapeListingDialog } from './scrape-listing-dialog';
 import { toast } from 'sonner';
@@ -29,6 +29,7 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isConverting, startConverting] = useTransition();
   const [isScrapingSeller, startScrapingSeller] = useTransition();
+  const [isLinkingCompany, startLinkingCompany] = useTransition();
   const [isDeleting, startDeleting] = useTransition();
   const [isScrapeOpen, setIsScrapeOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -106,6 +107,19 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
         toast.success(res.message);
       } else {
         toast.error(res.message);
+      }
+    });
+  };
+
+  const handleLinkCompany = () => {
+    if (!listing.prospectLeadId) return;
+    startLinkingCompany(async () => {
+      const res = await linkProspectAgencyCompany(listing.prospectLeadId!);
+      if (res.success) {
+        toast.success(res.message || 'Company linked');
+        router.refresh();
+      } else {
+        toast.error(res.message || 'Failed to link company');
       }
     });
   };
@@ -257,6 +271,12 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                   </Button>
                 )}
 
+                {listing.prospectAgency && listing.prospectLeadId && (
+                  <Button variant="outline" size="sm" className="gap-1.5 mt-2 ml-1" onClick={handleLinkCompany} disabled={isLinkingCompany}>
+                    <Building2 className="w-4 h-4 text-emerald-600" /> {isLinkingCompany ? 'Linking...' : 'Link As Company'}
+                  </Button>
+                )}
+
                 <div className="flex-1 min-w-[0.5rem]" />
 
                 {isNew ? (
@@ -265,10 +285,14 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                       <X className="w-4 h-4" /> Reject
                       <kbd className="hidden xl:inline ml-1 text-[9px] bg-red-100 dark:bg-red-900/30 px-1 rounded font-mono">R</kbd>
                     </Button>
-                    <Button size="sm" className="gap-1.5 mt-2" onClick={() => onAccept(listing.id)} disabled={isPending}>
-                      <Check className="w-4 h-4" /> Accept
-                      <kbd className="hidden xl:inline ml-1 text-[9px] bg-primary-foreground/20 px-1 rounded font-mono">A</kbd>
-                    </Button>
+                    {!listing.prospectAgency ? (
+                      <Button size="sm" className="gap-1.5 mt-2" onClick={() => onAccept(listing.id)} disabled={isPending}>
+                        <Check className="w-4 h-4" /> Accept
+                        <kbd className="hidden xl:inline ml-1 text-[9px] bg-primary-foreground/20 px-1 rounded font-mono">A</kbd>
+                      </Button>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px] mt-2">Agency: private accept disabled</Badge>
+                    )}
                   </>
                 ) : (
                   <Button variant="default" size="sm" className="gap-1.5 mt-2" onClick={handleConvert} disabled={isConverting || !listing.prospectLeadId}>

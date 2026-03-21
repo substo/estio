@@ -206,10 +206,10 @@ export async function stageAgencyProfileCompanyMatch(
   return { profile, match };
 }
 
-export async function ensureAgencyCompanyForAcceptedProspect(
+export async function ensureAgencyCompanyForProspect(
   prospectId: string,
   locationId: string,
-  contactId: string,
+  contactId?: string | null,
 ): Promise<{ companyId: string | null; companyName: string | null; created: boolean }> {
   const prospect = await db.prospectLead.findUnique({
     where: { id: prospectId },
@@ -299,21 +299,23 @@ export async function ensureAgencyCompanyForAcceptedProspect(
     }
   }
 
-  await db.contactCompanyRole.upsert({
-    where: {
-      contactId_companyId_role: {
+  if (contactId) {
+    await db.contactCompanyRole.upsert({
+      where: {
+        contactId_companyId_role: {
+          contactId,
+          companyId: company.id,
+          role: 'associate',
+        },
+      },
+      update: {},
+      create: {
         contactId,
         companyId: company.id,
         role: 'associate',
       },
-    },
-    update: {},
-    create: {
-      contactId,
-      companyId: company.id,
-      role: 'associate',
-    },
-  });
+    });
+  }
 
   const nextBreakdown = mergeStrategicScrapePayload(prospect.aiScoreBreakdown, {
     agencyProfile: profile,
@@ -322,6 +324,7 @@ export async function ensureAgencyCompanyForAcceptedProspect(
       name: company.name,
       linkedAt: new Date().toISOString(),
       created,
+      linkedToContactId: contactId || null,
     },
   });
 
@@ -331,4 +334,13 @@ export async function ensureAgencyCompanyForAcceptedProspect(
   });
 
   return { companyId: company.id, companyName: company.name, created };
+}
+
+// Backward-compatible alias for older call-sites.
+export async function ensureAgencyCompanyForAcceptedProspect(
+  prospectId: string,
+  locationId: string,
+  contactId: string,
+): Promise<{ companyId: string | null; companyName: string | null; created: boolean }> {
+  return ensureAgencyCompanyForProspect(prospectId, locationId, contactId);
 }
