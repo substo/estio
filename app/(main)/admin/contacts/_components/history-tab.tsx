@@ -7,9 +7,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { format } from 'date-fns';
-import { CalendarIcon, Plus } from 'lucide-react';
+import { CalendarIcon, Plus, Wand2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { addContactHistoryEntry } from '../actions';
+import { improveInternalNoteText } from '@/app/(main)/admin/conversations/actions';
 import { toast } from 'sonner';
 import { LeadScoreBadge } from './lead-score-badge';
 
@@ -72,6 +73,7 @@ export function HistoryTab({ history, loading, contact }: HistoryTabProps) {
     const [noteDate, setNoteDate] = useState<Date | undefined>(new Date());
     const [isPending, startTransition] = useTransition();
     const [isAddingNote, setIsAddingNote] = useState(false);
+    const [isImprovingNote, setIsImprovingNote] = useState(false);
 
     const handleAddNote = () => {
         if (!noteText.trim() || !contact?.id) return;
@@ -87,6 +89,30 @@ export function HistoryTab({ history, loading, contact }: HistoryTabProps) {
                 toast.error(result.message);
             }
         });
+    };
+
+    const handleImproveNote = async () => {
+        const sourceText = noteText.trim();
+        if (!sourceText || !contact?.id || isImprovingNote) return;
+
+        setIsImprovingNote(true);
+        try {
+            const result = await improveInternalNoteText({
+                text: sourceText,
+                noteType: 'activity',
+                contactId: contact.id,
+            });
+            if (!result.success) {
+                toast.error(result.error || 'Failed to improve note');
+                return;
+            }
+            setNoteText(result.improvedText);
+            toast.success('Entry improved');
+        } catch (error: any) {
+            toast.error(error?.message || 'Failed to improve note');
+        } finally {
+            setIsImprovingNote(false);
+        }
     };
 
     return (
@@ -137,9 +163,18 @@ export function HistoryTab({ history, loading, contact }: HistoryTabProps) {
                                 />
                                 <Button
                                     size="sm"
+                                    variant="outline"
+                                    className="w-full h-7 text-xs"
+                                    onClick={handleImproveNote}
+                                    disabled={isPending || isImprovingNote || !noteText.trim()}
+                                >
+                                    {isImprovingNote ? <><Wand2 className="mr-1 h-3 w-3 animate-pulse" />Improving...</> : <><Wand2 className="mr-1 h-3 w-3" />Improve</>}
+                                </Button>
+                                <Button
+                                    size="sm"
                                     className="w-full h-7 text-xs"
                                     onClick={handleAddNote}
-                                    disabled={isPending || !noteText.trim()}
+                                    disabled={isPending || isImprovingNote || !noteText.trim()}
                                 >
                                     {isPending ? 'Saving...' : 'Save Entry'}
                                 </Button>

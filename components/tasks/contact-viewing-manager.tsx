@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { format } from 'date-fns';
-import { Loader2, Plus, Trash2, CheckCircle2, Clock3, AlertCircle, Ban, Pencil, Minus } from 'lucide-react';
+import { Loader2, Plus, Trash2, CheckCircle2, Clock3, AlertCircle, Ban, Pencil, Minus, Wand2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -37,6 +37,7 @@ import {
     updateViewing,
     deleteViewing,
 } from '@/app/(main)/admin/contacts/actions';
+import { improveInternalNoteText } from '@/app/(main)/admin/conversations/actions';
 import { getContactViewings, getPropertiesForSelect, getUsersForSelect } from '@/app/(main)/admin/contacts/fetch-helpers';
 import { SearchableSelect } from '@/app/(main)/admin/contacts/_components/searchable-select';
 import {
@@ -44,6 +45,7 @@ import {
     formatViewingDateTimeWithTimeZoneLabel,
     getTimeZoneShortLabel,
 } from '@/lib/viewings/datetime';
+import { toast } from 'sonner';
 
 // Reuse the badge logic from Tasks, adapting it for viewings
 const VIEWING_SYNC_MAX_ATTEMPTS = 6;
@@ -239,6 +241,7 @@ export function ContactViewingManager({
     const [viewingUserId, setViewingUserId] = useState('');
     const [viewingTitle, setViewingTitle] = useState('');
     const [viewingDescription, setViewingDescription] = useState('');
+    const [improvingViewingDescription, setImprovingViewingDescription] = useState(false);
     const [viewingLocation, setViewingLocation] = useState('');
     const [viewingDuration, setViewingDuration] = useState<number>(VIEWING_DURATION_DEFAULT);
     const [editingViewingId, setEditingViewingId] = useState<string | null>(null);
@@ -306,10 +309,46 @@ export function ContactViewingManager({
         }
     }, [selectedViewingAgentTimeZone]);
 
+    const selectedViewingPropertyReference = useMemo(() => {
+        const selected = properties.find((property) => property.id === viewingPropertyId);
+        if (!selected) return "";
+        if (selected.unitNumber) return `[${selected.unitNumber}] ${selected.title}`;
+        return selected.title;
+    }, [properties, viewingPropertyId]);
+
     const canSubmit = useMemo(
         () => Boolean(viewingDate && viewingPropertyId && viewingUserId && selectedViewingAgentTimeZone && !submitting),
         [viewingDate, viewingPropertyId, viewingUserId, selectedViewingAgentTimeZone, submitting]
     );
+
+    const handleImproveViewingDescription = async () => {
+        const sourceText = viewingDescription.trim();
+        if (!sourceText || improvingViewingDescription) return;
+
+        setImprovingViewingDescription(true);
+        setError(null);
+        try {
+            const result = await improveInternalNoteText({
+                text: sourceText,
+                noteType: "viewing",
+                contactId,
+                context: {
+                    propertyReference: selectedViewingPropertyReference || undefined,
+                    scheduledLocal: viewingDate || undefined,
+                },
+            });
+            if (!result.success) {
+                setError(result.error || "Failed to improve viewing notes.");
+                return;
+            }
+            setViewingDescription(result.improvedText);
+            toast.success("Viewing notes improved");
+        } catch (error: any) {
+            setError(error?.message || "Failed to improve viewing notes.");
+        } finally {
+            setImprovingViewingDescription(false);
+        }
+    };
 
     const handleSubmit = async () => {
         if (!canSubmit) return;
@@ -638,6 +677,17 @@ export function ContactViewingManager({
                                 placeholder="Detailed agenda, access codes, or pre-viewing notes..."
                                 rows={3}
                             />
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-xs"
+                                onClick={handleImproveViewingDescription}
+                                disabled={improvingViewingDescription || !viewingDescription.trim()}
+                            >
+                                {improvingViewingDescription ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Wand2 className="mr-1 h-3 w-3" />}
+                                {improvingViewingDescription ? "Improving..." : "Improve Notes"}
+                            </Button>
                         </div>
                     </div>
                     {error && <div className="text-xs text-red-600 pb-2">{error}</div>}

@@ -77,6 +77,11 @@ import {
 const MAX_SELECTION_TEXT_LENGTH = 12000;
 const MAX_CUSTOM_OUTPUT_LENGTH = 2200;
 const CRM_LOG_DEDUPE_RECENT_LIMIT = 30;
+const MAX_NOTE_IMPROVEMENT_INPUT_LENGTH = 5000;
+const NOTE_IMPROVEMENT_OUTPUT_MAX_CHARS = {
+    activity: 360,
+    viewing: 520,
+} as const;
 const WHATSAPP_TRANSCRIPT_BULK_DEFAULT_WINDOW_DAYS = 30;
 const MAX_TASK_SUGGESTIONS = 6;
 const MAX_TASK_SUGGESTION_TITLE_LENGTH = 180;
@@ -107,6 +112,19 @@ type TranscriptVisibilityPolicy = typeof TRANSCRIPT_VISIBILITY_POLICIES[keyof ty
 type TranscriptManualAuditEventType = typeof TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES[keyof typeof TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES];
 
 const TaskSuggestionPrioritySchema = z.enum(["low", "medium", "high"]);
+const ImproveNoteTypeSchema = z.enum(["activity", "viewing"]);
+const ImproveNoteInputSchema = z.object({
+    text: z.string().trim().min(3).max(MAX_NOTE_IMPROVEMENT_INPUT_LENGTH),
+    noteType: ImproveNoteTypeSchema,
+    conversationId: z.string().trim().optional(),
+    contactId: z.string().trim().optional(),
+    modelOverride: z.string().trim().optional(),
+    context: z.object({
+        propertyReference: z.string().trim().max(140).optional(),
+        scheduledAtIso: z.string().trim().max(80).optional(),
+        scheduledLocal: z.string().trim().max(80).optional(),
+    }).optional(),
+});
 
 const SelectionTaskSuggestionSchema = z.object({
     title: z.string().min(1).max(MAX_TASK_SUGGESTION_TITLE_LENGTH),
@@ -356,6 +374,137 @@ function replaceContactIdentityMentionsWithFirstName(
     rewritten = rewritten.replace(roleBeforeEmailOrPhone, firstName);
 
     return rewritten;
+}
+
+function trimToMaxCharsPreservingWords(value: string, maxChars: number): string {
+    const normalized = String(value || "").trim();
+    if (!normalized || normalized.length <= maxChars) return normalized;
+
+    const hardTrimmed = normalized.slice(0, Math.max(0, maxChars)).trim();
+    const lastWhitespace = hardTrimmed.lastIndexOf(" ");
+    if (lastWhitespace <= Math.floor(maxChars * 0.55)) return hardTrimmed;
+    return hardTrimmed.slice(0, lastWhitespace).trim();
+}
+
+function buildImprovedViewingTemplateLine(value: string): string {
+    const cleaned = normalizeSingleLine(value, "");
+    if (!cleaned) {
+        return "Prospect: n/a | Fit: n/a | Concerns: n/a | Next step: n/a";
+    }
+
+    const splitSegments = cleaned
+        .split("|")
+        .map((segment) => normalizeSingleLine(segment, ""))
+        .filter(Boolean);
+
+    const labels = ["Prospect", "Fit", "Concerns", "Next step"];
+    const values = labels.map((label, index) => {
+        const existing = splitSegments[index] || "";
+        if (!existing) return "n/a";
+        if (new RegExp(`^${label}\\s*:`, "i").test(existing)) {
+            const stripped = existing.replace(/^[^:]+:\s*/i, "").trim();
+            return stripped || "n/a";
+        }
+        return existing;
+    });
+
+    return labels
+        .map((label, index) => `${label}: ${values[index]}`)
+        .join(" | ");
+}
+
+function normalizeImprovedNoteOutput(
+    noteType: z.infer<typeof ImproveNoteTypeSchema>,
+    rawOutput: string,
+    originalText: string
+): string {
+    if (noteType === "viewing") {
+        const fallback = buildImprovedViewingTemplateLine(originalText);
+        const templated = buildImprovedViewingTemplateLine(rawOutput || fallback);
+        return trimToMaxCharsPreservingWords(
+            templated,
+            NOTE_IMPROVEMENT_OUTPUT_MAX_CHARS.viewing
+        );
+    }
+
+    const fallback = normalizeSingleLine(
+        originalText,
+        "Captured lead update and next step."
+    );
+    const normalized = normalizeSingleLine(rawOutput, fallback)
+        .replace(/\s*\|\s*/g, " | ");
+    return trimToMaxCharsPreservingWords(
+        normalized,
+        NOTE_IMPROVEMENT_OUTPUT_MAX_CHARS.activity
+    );
+}
+
+function buildImproveNotePrompt(args: {
+    noteType: z.infer<typeof ImproveNoteTypeSchema>;
+    text: string;
+    contactFirstName?: string;
+    context?: {
+        propertyReference?: string;
+        scheduledAtIso?: string;
+        scheduledLocal?: string;
+    };
+}) {
+    const trimmedText = trimSelectionText(args.text, MAX_NOTE_IMPROVEMENT_INPUT_LENGTH);
+    const contextHints = [
+        args.context?.propertyReference ? `Property reference: ${args.context.propertyReference}` : null,
+        args.context?.scheduledLocal ? `Scheduled local datetime: ${args.context.scheduledLocal}` : null,
+        args.context?.scheduledAtIso ? `Scheduled UTC datetime: ${args.context.scheduledAtIso}` : null,
+    ].filter(Boolean);
+
+    if (args.noteType === "viewing") {
+        return [
+            "You improve internal real-estate viewing notes for fast owner and agent handoff.",
+            "Return exactly one plain-text line using this exact format:",
+            "Prospect: <short phrase> | Fit: <short phrase> | Concerns: <short phrase> | Next step: <short phrase>",
+            "Rules:",
+            "- Keep each segment short and factual.",
+            "- Preserve only facts present in the source note.",
+            "- Do not invent details, promises, numbers, dates, or outcomes.",
+            "- Fix grammar and structure, remove fluff, keep concise.",
+            "- Use n/a for missing segments.",
+            "- Do not include markdown, bullets, emojis, quotes, or extra labels.",
+            args.contactFirstName
+                ? `- If the prospect is named, prefer first name only (${args.contactFirstName}).`
+                : "- If a prospect name appears, use first name only.",
+            "",
+            contextHints.length > 0 ? "Optional context:" : null,
+            ...contextHints,
+            contextHints.length > 0 ? "" : null,
+            "Source note:",
+            '"""',
+            trimmedText,
+            '"""',
+        ].filter(Boolean).join("\n");
+    }
+
+    return [
+        "You improve internal CRM timeline notes for real-estate teams.",
+        "Return exactly one plain-text sentence.",
+        "Rules:",
+        "- Keep it concise, factual, and action-oriented.",
+        "- Fix grammar and clarity while preserving original meaning.",
+        "- Preserve only facts from the source; do not invent details.",
+        "- Include next step only if present in source.",
+        "- Remove fluff and repetition.",
+        "- No markdown, bullets, emojis, quotes, date prefixes, or agent signature.",
+        args.contactFirstName
+            ? `- If mentioning the contact, use first name only (${args.contactFirstName}).`
+            : "- If a name appears, use first name only.",
+        "- Never include phone or email.",
+        "",
+        contextHints.length > 0 ? "Optional context:" : null,
+        ...contextHints,
+        contextHints.length > 0 ? "" : null,
+        "Source note:",
+        '"""',
+        trimmedText,
+        '"""',
+    ].filter(Boolean).join("\n");
 }
 
 function formatCrmLogEntry(actorFirstName: string, body: string, date: Date = new Date()): string {
@@ -9070,6 +9219,151 @@ function parseLegacyCrmLeadNotificationEmail(args: {
         fields,
         parsedLeadData: buildParsedLeadDataFromLegacyCrmEmail(classification, fields, leadUrl),
     };
+}
+
+export async function improveInternalNoteText(input: z.infer<typeof ImproveNoteInputSchema>) {
+    const parsed = ImproveNoteInputSchema.safeParse(input || {});
+    if (!parsed.success) {
+        return { success: false as const, error: "Invalid note improvement request." };
+    }
+
+    const {
+        text,
+        noteType,
+        conversationId,
+        contactId,
+        modelOverride,
+        context,
+    } = parsed.data;
+
+    try {
+        const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+        const requestedConversationId = String(conversationId || "").trim();
+        const requestedContactId = String(contactId || "").trim();
+
+        let conversation = null as Awaited<ReturnType<typeof resolveConversationForCrmLog>> | null;
+        if (requestedConversationId) {
+            conversation = await resolveConversationForCrmLog(location.id, requestedConversationId);
+        }
+
+        let contact =
+            conversation?.contact || null;
+
+        if (!contact && requestedContactId) {
+            const directContact = await db.contact.findFirst({
+                where: {
+                    locationId: location.id,
+                    OR: [
+                        { id: requestedContactId },
+                        { ghlContactId: requestedContactId },
+                    ],
+                },
+                select: {
+                    id: true,
+                    firstName: true,
+                    name: true,
+                    email: true,
+                    phone: true,
+                },
+            });
+            if (directContact) {
+                contact = directContact;
+            }
+        }
+
+        if (!conversation && contact && "id" in contact && contact.id) {
+            const fallbackConversation = await db.conversation.findFirst({
+                where: {
+                    locationId: location.id,
+                    contactId: contact.id,
+                },
+                orderBy: { lastMessageAt: "desc" },
+                select: {
+                    id: true,
+                    ghlConversationId: true,
+                    contactId: true,
+                    contact: {
+                        select: {
+                            firstName: true,
+                            name: true,
+                            email: true,
+                            phone: true,
+                        },
+                    },
+                },
+            });
+            if (fallbackConversation) {
+                conversation = fallbackConversation as any;
+                contact = fallbackConversation.contact;
+            }
+        }
+
+        const contactFirstName = deriveOptionalFirstName(
+            contact?.firstName,
+            contact?.name,
+            contact?.email
+        );
+
+        const modelId = typeof modelOverride === "string" && modelOverride.trim()
+            ? modelOverride.trim()
+            : getModelForTask("simple_generation");
+        const startedAt = Date.now();
+        const prompt = buildImproveNotePrompt({
+            noteType,
+            text,
+            contactFirstName: contactFirstName || undefined,
+            context,
+        });
+
+        const { text: rawOutput, usage } = await callLLMWithMetadata(
+            modelId,
+            prompt,
+            undefined,
+            { temperature: noteType === "viewing" ? 0.15 : 0.2 }
+        );
+        const latencyMs = Date.now() - startedAt;
+        const normalizedOutput = normalizeImprovedNoteOutput(noteType, rawOutput, text);
+        const improvedText = replaceContactIdentityMentionsWithFirstName(
+            normalizedOutput,
+            contact
+        );
+
+        if (conversation?.id) {
+            try {
+                await persistSelectionAiExecution({
+                    conversationInternalId: conversation.id,
+                    taskTitle: noteType === "viewing" ? "Improve Viewing Note" : "Improve Activity Note",
+                    intent: noteType === "viewing" ? "viewing_note_improvement" : "activity_note_improvement",
+                    modelId,
+                    promptText: prompt,
+                    rawOutput,
+                    normalizedOutput: improvedText,
+                    usage: {
+                        promptTokens: usage.promptTokens || 0,
+                        completionTokens: usage.completionTokens || 0,
+                        totalTokens: usage.totalTokens || 0,
+                        thoughtsTokens: usage.thoughtsTokens || 0,
+                        toolUsePromptTokens: usage.toolUsePromptTokens || 0,
+                    },
+                    latencyMs,
+                });
+            } catch (traceError) {
+                console.warn("[improveInternalNoteText] Failed to persist AI usage trace:", traceError);
+            }
+        }
+
+        return {
+            success: true as const,
+            improvedText,
+            modelId,
+        };
+    } catch (error: any) {
+        console.error("[improveInternalNoteText] Error:", error);
+        return {
+            success: false as const,
+            error: error?.message || "Failed to improve note.",
+        };
+    }
 }
 
 export async function summarizeSelectionToCrmLog(conversationId: string, selectedText: string, modelOverride?: string) {

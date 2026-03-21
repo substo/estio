@@ -3,11 +3,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Home, ListTodo, Minus, Plus } from "lucide-react";
+import { Loader2, Home, ListTodo, Minus, Plus, Wand2 } from "lucide-react";
 import { SearchableSelect } from "@/app/(main)/admin/contacts/_components/searchable-select";
 import {
     suggestViewingsFromSelection,
     applySuggestedViewingsFromSelection,
+    improveInternalNoteText,
     type ApplySuggestedViewingWarning,
     type SelectionViewingSuggestion,
     getDropdownsForViewingsSuggestion,
@@ -65,6 +66,7 @@ export function ViewingsSuggestionDialog({ open, onOpenChange, selectionText, co
     const [isApplying, setIsApplying] = useState(false);
     const [suggestions, setSuggestions] = useState<SuggestedViewingState[]>([]);
     const [resolvedContactId, setResolvedContactId] = useState<string | null>(null);
+    const [improvingSuggestionNoteIds, setImprovingSuggestionNoteIds] = useState<Record<string, boolean>>({});
 
     // Dropdown data
     const [properties, setProperties] = useState<{ id: string; title: string; reference?: string | null; unitNumber?: string | null }[]>([]);
@@ -125,6 +127,35 @@ export function ViewingsSuggestionDialog({ open, onOpenChange, selectionText, co
 
     const handlePatchSuggestion = (id: string, patch: Partial<SuggestedViewingState>) => {
         setSuggestions((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+    };
+
+    const handleImproveSuggestionNote = async (suggestion: SuggestedViewingState) => {
+        const sourceText = String(suggestion.notes || "").trim();
+        if (!sourceText || improvingSuggestionNoteIds[suggestion.id]) return;
+
+        setImprovingSuggestionNoteIds((prev) => ({ ...prev, [suggestion.id]: true }));
+        try {
+            const result = await improveInternalNoteText({
+                text: sourceText,
+                noteType: "viewing",
+                conversationId: conversationId || undefined,
+                contactId: resolvedContactId || undefined,
+                context: {
+                    propertyReference: suggestion.propertyDescription || undefined,
+                    scheduledLocal: suggestion.date && suggestion.time ? `${suggestion.date}T${suggestion.time}` : undefined,
+                },
+            });
+            if (!result.success) {
+                toast.error(result.error || "Failed to improve note.");
+                return;
+            }
+            handlePatchSuggestion(suggestion.id, { notes: result.improvedText });
+            toast.success("Viewing note improved");
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to improve note.");
+        } finally {
+            setImprovingSuggestionNoteIds((prev) => ({ ...prev, [suggestion.id]: false }));
+        }
     };
 
     const handleApplyViewings = async () => {
@@ -356,7 +387,24 @@ export function ViewingsSuggestionDialog({ open, onOpenChange, selectionText, co
                                     </div>
 
                                     <div className="space-y-1">
-                                        <label className="text-[11px] font-medium text-slate-600">Notes / Instructions</label>
+                                        <div className="flex items-center justify-between gap-2">
+                                            <label className="text-[11px] font-medium text-slate-600">Notes / Instructions</label>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-6 px-2 text-[10px]"
+                                                onClick={() => handleImproveSuggestionNote(suggestion)}
+                                                disabled={!!improvingSuggestionNoteIds[suggestion.id] || !String(suggestion.notes || "").trim()}
+                                            >
+                                                {improvingSuggestionNoteIds[suggestion.id] ? (
+                                                    <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                                ) : (
+                                                    <Wand2 className="mr-1 h-3 w-3" />
+                                                )}
+                                                {improvingSuggestionNoteIds[suggestion.id] ? "Improving" : "Improve"}
+                                            </Button>
+                                        </div>
                                         <Textarea
                                             className="min-h-[60px] text-xs"
                                             value={suggestion.notes || ""}

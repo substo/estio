@@ -4,7 +4,7 @@ import { GEMINI_FLASH_LATEST_ALIAS } from "@/lib/ai/models";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, MessageSquare, RefreshCw, FileText, Trash2, Search, AudioLines, NotebookPen, ArrowLeft, ListTodo, MoreHorizontal } from "lucide-react";
+import { Loader2, MessageSquare, RefreshCw, FileText, Trash2, Search, AudioLines, NotebookPen, ArrowLeft, ListTodo, MoreHorizontal, Wand2 } from "lucide-react";
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -86,6 +86,7 @@ function getChannelName(type: string): string {
 import { MessageBubble } from "./message-bubble";
 
 import {
+    improveInternalNoteText,
     summarizeSelectionToCrmLog,
     searchConversationTranscriptMatches,
 } from "@/app/(main)/admin/conversations/actions";
@@ -189,6 +190,7 @@ export function ChatWindow({
     const [addNoteText, setAddNoteText] = useState("");
     const [addNoteDate, setAddNoteDate] = useState(new Date().toISOString().slice(0, 16));
     const [addingNote, setAddingNote] = useState(false);
+    const [improvingNote, setImprovingNote] = useState(false);
 
     // Merge messages and activity log into a single timeline
     const timelineItems = useMemo(() => {
@@ -226,6 +228,31 @@ export function ChatWindow({
             toast.error(e?.message || "Failed to add note");
         } finally {
             setAddingNote(false);
+        }
+    };
+
+    const handleImproveNote = async () => {
+        const sourceText = addNoteText.trim();
+        if (!sourceText || improvingNote) return;
+
+        setImprovingNote(true);
+        try {
+            const result = await improveInternalNoteText({
+                text: sourceText,
+                noteType: "activity",
+                conversationId: conversation.id,
+                contactId: conversation.contactId,
+            });
+            if (!result.success) {
+                toast.error(result.error || "Failed to improve note");
+                return;
+            }
+            setAddNoteText(result.improvedText);
+            toast.success("Note improved");
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to improve note");
+        } finally {
+            setImprovingNote(false);
         }
     };
 
@@ -691,9 +718,19 @@ export function ChatWindow({
                                     />
                                     <Button
                                         size="sm"
+                                        variant="outline"
+                                        className="w-full h-7 text-xs"
+                                        onClick={handleImproveNote}
+                                        disabled={improvingNote || addingNote || !addNoteText.trim()}
+                                    >
+                                        {improvingNote ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Wand2 className="h-3 w-3 mr-1" />}
+                                        {improvingNote ? "Improving..." : "Improve"}
+                                    </Button>
+                                    <Button
+                                        size="sm"
                                         className="w-full h-7 text-xs"
                                         onClick={handleAddNote}
-                                        disabled={addingNote || !addNoteText.trim()}
+                                        disabled={addingNote || improvingNote || !addNoteText.trim()}
                                     >
                                         {addingNote ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
                                         {addingNote ? "Saving..." : "Save Note"}
