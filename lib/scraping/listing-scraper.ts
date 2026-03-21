@@ -43,6 +43,7 @@ export interface RawListing {
     sellerExternalId?: string; // Platform user ID
     sellerRegisteredAt?: string; // "Posting since sep, 2024"
     otherListingsUrl?: string;
+    otherListingsCount?: number;
     contactChannels?: string[];
     whatsappPhone?: string;
     rawAttributes?: Record<string, string>;
@@ -85,6 +86,7 @@ export class ListingScraperService {
         let leadsCreated = 0;
         let duplicatesFound = 0;
         let errors = 0;
+        const touchedProspectIds = new Set<string>();
 
         let interactionsRemaining = task.maxInteractionsPerRun ?? Number.MAX_SAFE_INTEGER;
         // Global safety: Don't exceed connection limit
@@ -172,7 +174,10 @@ export class ListingScraperService {
                             }
 
                             // Create ProspectLead in the Lead Inbox
-                            await this.createProspect(listing, task, task.locationId);
+                            const prospectLeadId = await this.createProspect(listing, task, task.locationId);
+                            if (prospectLeadId) {
+                                touchedProspectIds.add(prospectLeadId);
+                            }
                             leadsCreated++;
 
                         } catch (err: any) {
@@ -192,6 +197,11 @@ export class ListingScraperService {
 
                     currentUrl = nextPageUrl;
                 }
+            }
+
+            // Re-classify touched prospects using full portfolio signals from the latest scrape
+            if (touchedProspectIds.size > 0) {
+                await this.classifyTouchedProspects(task.locationId, Array.from(touchedProspectIds));
             }
 
             // Update Credential Rotation TS
@@ -261,6 +271,26 @@ export class ListingScraperService {
     }
 
     /**
+     * Runs agency/private classification for all prospects touched in a scrape run.
+     * Uses aggregated portfolio context (listing count + sample listings) for better accuracy.
+     */
+    private static async classifyTouchedProspects(locationId: string, prospectIds: string[]): Promise<void> {
+        if (prospectIds.length === 0) return;
+
+        const { classifyAndUpdateProspect, buildClassificationInputForProspect } = await import('@/lib/ai/prospect-classifier');
+
+        for (const prospectId of prospectIds) {
+            try {
+                const input = await buildClassificationInputForProspect(prospectId);
+                if (!input) continue;
+                await classifyAndUpdateProspect(prospectId, locationId, input);
+            } catch (e: any) {
+                console.warn(`[ListingScraper] Prospect classification skipped for ${prospectId}: ${e.message}`);
+            }
+        }
+    }
+
+    /**
      * Finds the Least Recently Used (LRU) active credential for the pool
      */
     private static async checkoutCredential(connectionId: string): Promise<ScrapingCredential | null> {
@@ -317,7 +347,7 @@ export class ListingScraperService {
     /**
      * Maps the extracted Listing into a ScrapedListing and ProspectLead entity
      */
-    static async createProspect(listing: RawListing, task: ScrapeTaskWithConnection, locationId: string) {
+    static async createProspect(listing: RawListing, task: ScrapeTaskWithConnection, locationId: string): Promise<string | null> {
 
         // 1. Default to false for initial scrape. Deep Scrape will classify this later.
         let isAgency = false;
@@ -362,6 +392,7 @@ export class ListingScraperService {
                         platformUserId: listing.sellerExternalId,
                         platformRegistered: listing.sellerRegisteredAt,
                         profileUrl: listing.otherListingsUrl || null,
+                        listingCount: listing.otherListingsCount ?? null,
                     }
                 });
             } else {
@@ -373,7 +404,8 @@ export class ListingScraperService {
 
                 if (listing.sellerExternalId && !existingProspect.platformUserId) updateData.platformUserId = listing.sellerExternalId;
                 if (listing.sellerRegisteredAt && !existingProspect.platformRegistered) updateData.platformRegistered = listing.sellerRegisteredAt;
-                if (listing.otherListingsUrl && !existingProspect.profileUrl) updateData.profileUrl = listing.otherListingsUrl;
+                if (listing.otherListingsUrl && (!existingProspect.profileUrl || existingProspect.profileUrl !== listing.otherListingsUrl)) updateData.profileUrl = listing.otherListingsUrl;
+                if (listing.otherListingsCount && (existingProspect.listingCount || 0) < listing.otherListingsCount) updateData.listingCount = listing.otherListingsCount;
 
                 if (Object.keys(updateData).length > 0) {
                     await db.prospectLead.update({ where: { id: existingProspect.id }, data: updateData });
@@ -408,6 +440,7 @@ export class ListingScraperService {
                 sellerExternalId: listing.sellerExternalId,
                 sellerRegisteredAt: listing.sellerRegisteredAt,
                 otherListingsUrl: listing.otherListingsUrl,
+                otherListingsCount: listing.otherListingsCount,
                 contactChannels: listing.contactChannels,
                 whatsappPhone: listing.whatsappPhone,
                 rawAttributes: listing.rawAttributes,
@@ -415,5 +448,7 @@ export class ListingScraperService {
                 prospectLeadId
             }
         });
+
+        return prospectLeadId;
     }
 }

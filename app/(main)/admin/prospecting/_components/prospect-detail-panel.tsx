@@ -179,6 +179,7 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                   {/* Dynamic Features from Scraping */}
                   {listing.rawAttributes && Object.entries(listing.rawAttributes)
                     .filter(([key]) => !['Bedrooms', 'Bathrooms', 'Property area', 'Plot area', 'Construction year'].includes(key))
+                    .filter(([key]) => !/^Seller business /i.test(key))
                     .map(([key, value]) => (
                       <Badge key={key} variant="outline" className="bg-muted/30">
                         <span className="text-muted-foreground mr-1 font-normal">{key}:</span> {String(value)}

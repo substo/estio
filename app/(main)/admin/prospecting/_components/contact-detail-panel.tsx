@@ -138,6 +138,9 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
   };
 
   const newListingsCount = prospect.scrapedListings?.filter(l => l.status === 'NEW' || l.status === 'new' || l.status === 'REVIEWING').length || 0;
+  const strategicScrape = (prospect.aiScoreBreakdown as any)?.strategicScrape || {};
+  const stagedCompanyMatch = strategicScrape?.companyMatch;
+  const linkedCompany = strategicScrape?.companyLink;
 
   return (
     <div className="flex flex-col h-full">
@@ -170,6 +173,24 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
             <span className="text-xs text-muted-foreground">{prospect.platformRegistered}</span>
           )}
         </div>
+
+        {(stagedCompanyMatch?.name || linkedCompany?.name) && (
+          <div className="flex items-center gap-2 mt-2 text-xs">
+            {linkedCompany?.name ? (
+              <a
+                href={linkedCompany.companyId ? `/admin/companies/${linkedCompany.companyId}/view` : '/admin/companies'}
+                className="inline-flex items-center gap-1 text-emerald-700 hover:underline"
+                title="Linked company profile"
+              >
+                <Building2 className="w-3 h-3" /> Company Linked: {linkedCompany.name}
+              </a>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-muted-foreground" title="Pre-import company match candidate">
+                <Building2 className="w-3 h-3" /> Company Match: {stagedCompanyMatch.name}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Action Buttons */}
         <div className="flex items-center flex-wrap gap-2 pt-3 mt-3 border-t border-border/50">
@@ -216,6 +237,9 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
               {prospect.scrapedListings.map((listing) => {
                 const thumb = listing.thumbnails?.[0] || listing.images?.[0];
                 const isListingNew = listing.status === 'NEW' || listing.status === 'new' || listing.status === 'REVIEWING';
+                const petsAllowed = listing.rawAttributes
+                  ? Object.entries(listing.rawAttributes).find(([key]) => /pet/i.test(key))?.[1]
+                  : null;
                 return (
                   <div
                     key={listing.id}
@@ -245,7 +269,9 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
                           {listing.price ? `${listing.currency || '€'}${listing.price.toLocaleString()}` : 'POA'}
                         </Badge>
                         {listing.bedrooms !== null && <Badge variant="outline" className="text-[10px]">{listing.bedrooms}B</Badge>}
+                        {listing.bathrooms !== null && <Badge variant="outline" className="text-[10px]">{listing.bathrooms}Bath</Badge>}
                         {listing.propertyArea !== null && <Badge variant="outline" className="text-[10px]">{listing.propertyArea}m²</Badge>}
+                        {petsAllowed && <Badge variant="outline" className="text-[10px]">Pets {String(petsAllowed)}</Badge>}
                         {listing.isExpired && (
                           <Badge variant="destructive" className="bg-slate-800 text-white hover:bg-slate-800 text-[9px]">Expired</Badge>
                         )}

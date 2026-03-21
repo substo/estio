@@ -23,6 +23,7 @@ export interface ScrapedListingRow {
   price: number | null;
   sellerRegisteredAt: string | null;
   otherListingsUrl: string | null;
+  otherListingsCount: number | null;
   currency: string | null;
   propertyType: string | null;
   listingType: string | null;
@@ -131,6 +132,7 @@ export async function listScrapedListings(
       prospectAgency: r.prospectLead?.isAgency ?? false,
       sellerRegisteredAt: r.sellerRegisteredAt,
       otherListingsUrl: r.otherListingsUrl,
+      otherListingsCount: r.otherListingsCount,
       isExpired: r.isExpired,
       createdAt: r.createdAt.toISOString(),
       rawAttributes: r.rawAttributes as Record<string, any> | null,

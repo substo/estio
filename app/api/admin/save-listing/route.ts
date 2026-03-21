@@ -85,6 +85,7 @@ export async function POST(req: Request) {
                         platformUserId: data.sellerExternalId,
                         platformRegistered: data.sellerRegisteredAt,
                         profileUrl: data.otherListingsUrl || null,
+                        listingCount: data.otherListingsCount ?? null,
                     },
                 });
             } else {
@@ -95,6 +96,7 @@ export async function POST(req: Request) {
                 if (data.sellerExternalId && !existingProspect.platformUserId) updateData.platformUserId = data.sellerExternalId;
                 if (data.sellerRegisteredAt && !existingProspect.platformRegistered) updateData.platformRegistered = data.sellerRegisteredAt;
                 if (data.otherListingsUrl && (!existingProspect.profileUrl || existingProspect.profileUrl !== data.otherListingsUrl)) updateData.profileUrl = data.otherListingsUrl;
+                if (data.otherListingsCount && (existingProspect.listingCount || 0) < data.otherListingsCount) updateData.listingCount = data.otherListingsCount;
 
                 if (Object.keys(updateData).length > 0) {
                     await db.prospectLead.update({ where: { id: existingProspect.id }, data: updateData });
@@ -125,6 +127,7 @@ export async function POST(req: Request) {
             sellerExternalId: data.sellerExternalId,
             sellerRegisteredAt: data.sellerRegisteredAt,
             otherListingsUrl: data.otherListingsUrl,
+            otherListingsCount: data.otherListingsCount,
             contactChannels: data.contactChannels,
             whatsappPhone: data.whatsappPhone,
             rawAttributes: data.rawAttributes,

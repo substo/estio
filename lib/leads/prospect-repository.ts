@@ -31,6 +31,7 @@ export interface ProspectInboxRow {
   agencyConfidence: number | null;
   agencyReasoning: string | null;
   isAgencyManual: boolean | null;
+  aiScoreBreakdown: Record<string, any> | null;
   platformUserId: string | null;
   platformRegistered: string | null;
   profileUrl: string | null;
@@ -45,11 +46,15 @@ export interface ProspectInboxRow {
     locationText: string | null;
     propertyType: string | null;
     bedrooms: number | null;
+    bathrooms: number | null;
     propertyArea: number | null;
+    rawAttributes: Record<string, any> | null;
     status: string;
+    isExpired: boolean;
     images: string[];
     thumbnails: string[];
     otherListingsUrl: string | null;
+    otherListingsCount: number | null;
   }[];
 }
 
@@ -101,9 +106,9 @@ export async function listProspectInbox(
           select: {
             id: true, url: true, title: true, platform: true,
             price: true, currency: true, locationText: true,
-            propertyType: true, bedrooms: true, propertyArea: true,
-            status: true, images: true, thumbnails: true,
-            otherListingsUrl: true,
+            propertyType: true, bedrooms: true, bathrooms: true, propertyArea: true,
+            status: true, isExpired: true, images: true, thumbnails: true,
+            otherListingsUrl: true, otherListingsCount: true, rawAttributes: true,
           },
           orderBy: { createdAt: 'desc' },
         }
@@ -132,6 +137,7 @@ export async function listProspectInbox(
       agencyConfidence: r.agencyConfidence,
       agencyReasoning: r.agencyReasoning,
       isAgencyManual: r.isAgencyManual,
+      aiScoreBreakdown: r.aiScoreBreakdown as Record<string, any> | null,
       platformUserId: r.platformUserId,
       platformRegistered: r.platformRegistered,
       profileUrl: r.profileUrl,

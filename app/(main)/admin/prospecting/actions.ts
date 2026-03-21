@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { auth } from '@clerk/nextjs/server';
 import { eventBus } from '@/lib/ai/events/event-bus';
 import { importAllListingsForProspect } from '@/lib/leads/property-import';
+import { ensureAgencyCompanyForAcceptedProspect } from '@/lib/leads/agency-company-linker';
 
 async function getInternalUserId() {
     const { userId } = await auth();
@@ -52,6 +53,13 @@ export async function acceptProspect(id: string) {
                 reviewedBy: internalUserId
             }
         });
+
+        // If this seller is an agency, create/link Company during acceptance.
+        try {
+            await ensureAgencyCompanyForAcceptedProspect(id, prospect.locationId, contact.id);
+        } catch (companyErr: any) {
+            console.warn(`[acceptProspect] Company link skipped for prospect ${id}: ${companyErr.message}`);
+        }
 
         await db.contactHistory.create({
             data: {
@@ -329,15 +337,29 @@ export async function acceptProspectWithListings(prospectId: string) {
             }
         });
 
-        // 3. Import scraped listings as Property records
+        // 3. Ensure agency prospects are linked to Company before property import
+        let linkedCompanyId: string | null = null;
+        try {
+            const companyLink = await ensureAgencyCompanyForAcceptedProspect(
+                prospectId,
+                prospect.locationId,
+                contact.id
+            );
+            linkedCompanyId = companyLink.companyId;
+        } catch (companyErr: any) {
+            console.warn(`[acceptProspectWithListings] Company link skipped for prospect ${prospectId}: ${companyErr.message}`);
+        }
+
+        // 4. Import scraped listings as Property records
         const { imported, skipped } = await importAllListingsForProspect(
             prospectId,
             contact.id,
             prospect.locationId,
-            internalUserId
+            internalUserId,
+            linkedCompanyId
         );
 
-        // 4. Create audit trail
+        // 5. Create audit trail
         await db.contactHistory.create({
             data: {
                 contactId: contact.id,
@@ -347,11 +369,12 @@ export async function acceptProspectWithListings(prospectId: string) {
                     { field: 'source', old: null, new: prospect.source },
                     { field: 'prospectId', old: null, new: prospect.id },
                     { field: 'propertiesImported', old: null, new: imported.length },
+                    ...(linkedCompanyId ? [{ field: 'companyLinked', old: null, new: linkedCompanyId }] : []),
                 ])
             }
         });
 
-        // 5. Emit event for downstream automation
+        // 6. Emit event for downstream automation
         await eventBus.emit({
             type: 'lead.created',
             payload: { contactId: contact.id, locationId: contact.locationId },

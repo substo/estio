@@ -354,8 +354,15 @@ Filters can be applied via URL params (district, price range, bedrooms).
 | **Seller ID** | `.author-info .author-name[data-user]` | |
 | **Seller Registration** | `.date-registration` (page) or `.contacts-dialog__date` (dialog) | |
 | **Other Listings URL** | `a.other-announcement-author` `href` | |
+| **Other Listings Count** | `a.other-announcement-author` text (regex int parse) | Example: `"Other ads from this seller (21)"` → `21` |
+| **Business Name** | `.author_business__wrapper .author_business__header h1` | Agency/business profile title |
+| **Business Verified** | `.author_business__wrapper .author_business__header-verified` | Boolean signal (`Verified account`) |
+| **Business Posting Since** | `.author_business__wrapper .author_business__header-since` | Used as seller registration fallback |
+| **Business Address** | `.author_business__wrapper .author_business__contacts .address` | Office/location context |
+| **Business Website** | `.author_business__wrapper a.website` | Stored as metadata + `website` contact channel |
+| **Business Description** | `.author_business__wrapper .author_business__description` | Corporate language classification signal |
 | **WhatsApp Phone** | `a[href*="wa.me/"], a[href*="api.whatsapp.com/send"]` | Free extraction — no click budget. Ignores generic social share buttons to prevent false positives. |
-| **Contact Channels** | Presence checks: `.js-card-messenger`, `._email`, WhatsApp href | Array: `["whatsapp","chat","email"]` |
+| **Contact Channels** | Presence checks: `.js-card-messenger`, `._email`, WhatsApp href, business website | Array: `["whatsapp","chat","email","website"]` |
 | **Raw Attributes** | All `ul.chars-column li` key-value pairs | Stored as JSON catch-all. Powers dynamic schema-on-read feature extraction. |
 | **Expired Status** | `.phone-author--sold` or `.phone-author__subtext` text | Flags `isExpired` in DB to visually dim the UI across hubs |
 
@@ -372,6 +379,16 @@ Bazaraki's phone button (`.phone-author.js-phone-click`) does not inline-reveal 
    - Registration: `.contacts-dialog__date`
 
 > The WhatsApp button `href` contains the phone number without requiring a click. This is a **free extraction** that doesn't consume interaction budget: `a[href*="wa.me/"], a[href*="api.whatsapp.com/send"]` → parse URL for number. We strictly avoid generic `.js-share` parameters to prevent misattributing listings to the wrong tracker ID.
+
+#### Enterprise Practice: `author_business__wrapper` Extraction
+
+For enterprise reliability, this block is handled as an **optional deterministic enrichment layer**:
+
+1. Extract only with strict CSS selectors (no AI parsing for this block).
+2. Never fail the listing scrape if the wrapper is missing or partially malformed.
+3. Normalize into stable metadata keys (`Seller business *`) for auditability.
+4. Feed these signals into agency/private classification alongside listing count and portfolio samples.
+5. Keep provenance in raw metadata so future parser upgrades are backward-compatible.
 
 #### Defensive Error Handling in Single-Listing Scrape
 
@@ -407,6 +424,40 @@ The selectors cover both search/category pages and seller profile pages:
   "nextPage": "a.number-list-next, a.number-list-line"
 }
 ```
+
+#### Seller Profile Card Mapping ("Other ads from this seller")
+
+For seller profile pages (`.list-simple__output .advert-grid`), each card now maps to structured portfolio fields used by both inbox rendering and agency/private evaluation:
+
+| Visible Card Field | Selector | Stored Field |
+|---|---|---|
+| Property link | `a.advert-grid__body-image-paginator-container[href]` or `a[href*="/adv/"]` | `url`, `externalId` |
+| Title | `.advert-grid__content-title` | `title` |
+| Price | `.advert-grid__content-price` | `price`, `currency` |
+| Bedrooms (feature #1) | `.advert-grid__content-features .advert-grid__content-feature:nth-of-type(1)` | `bedrooms` + `rawAttributes["Bedrooms"]` |
+| Bathrooms (feature #2) | `.advert-grid__content-features .advert-grid__content-feature:nth-of-type(2)` | `bathrooms` + `rawAttributes["Bathrooms"]` |
+| Pets allowed (feature #3) | `.advert-grid__content-features .advert-grid__content-feature:nth-of-type(3)` | `rawAttributes["Pets allowed"]` |
+| Size m² (feature #4) | `.advert-grid__content-features .advert-grid__content-feature:nth-of-type(4)` | `propertyArea` + `rawAttributes["Property area"]` |
+| Location | `.advert-grid__content-place` | `locationText` |
+
+> [!NOTE]
+> Feature slots are interpreted in visual order from the card UI: beds → baths → pets → size. This aligns with current Bazaraki profile-grid markup and is resilient to icon URL changes.
+
+#### Seller Listing Count in Evaluation
+
+Agency/private classification now uses seller portfolio context, not only a single listing page:
+
+1. `ScrapedListing.otherListingsCount` is parsed from `a.other-announcement-author` text when present.
+2. `ProspectLead.listingCount` is normalized as the max of:
+   - Existing stored `listingCount`
+   - Count of DB-linked scraped listings for the prospect
+   - Max observed `otherListingsCount` from seller pages
+3. Classifier input includes:
+   - Listing count
+   - Sample listing titles
+   - Sample listing detail rows (`price`, `beds`, `baths`, `pets`, `size`, `location`, `url`)
+
+This gives a reliable signal for distinguishing agencies from private owners based on actual seller inventory depth.
 
 #### Fallback Link Extraction for Seller Profiles
 
@@ -678,7 +729,7 @@ Classification has been upgraded from simple keyword checks to a reusable AI ser
 The classifier evaluates multiple signals in one pass:
 - **Name signals**: "Properties", "Real Estate", "Developers", "Group", "Ltd", and other company markers.
 - **Description signals**: Corporate language, portfolio/team phrasing, organizational tone.
-- **Profile/contact signals**: Presence of profile URL and contact channels.
+- **Profile/contact signals**: Presence of profile URL, contact channels, and `author_business__wrapper` business profile fields (verified, website, address, business description).
 - **Activity signals**: Listing count context (higher volume increases agency likelihood).
 - **Registration signals**: Platform text patterns indicating "Company" vs individual.
 
@@ -702,6 +753,7 @@ The service writes classification telemetry to the enterprise ledger via `AgentE
 | `lib/scraping/deep-scraper.ts` | Replaced inline classification logic with `classifyAndUpdateProspect()`, passing enriched signals (name, description, listing count, registration, profile URL). |
 | `lib/scraping/extractors/bazaraki.ts` | Seller-type filtering/classification path documented as AI-backed to improve agency/private accuracy over naive keyword-only checks. |
 | `app/api/admin/scrape-listing/route.ts` | After upserting prospect/listing, runs classifier and updates `isAgency` + `agencyConfidence` (+ reasoning) on `ProspectLead`. |
+| `lib/leads/agency-company-linker.ts` | Stages agency profile + Company match candidate in `ProspectLead.aiScoreBreakdown.strategicScrape` before CRM import. |
 | `lib/ai/model-router.ts` | Added `"prospect_classification": "flash"` in `TASK_TIER_MAP` for cost-efficient routing. |
 
 #### Database Schema Additions (ProspectLead)
@@ -733,6 +785,27 @@ Tooltip surfaces model confidence/reasoning (for example: `AI Confidence: 85%`).
 
 Server action:
 - `toggleProspectAgencyStatus(id: string, isAgencyManual: boolean | null)`
+
+### 3.5 Company Congruence Stage (Pre-Import)
+
+To keep Strategic Scraping congruent with existing CRM entities, agency seller profiles are now staged against the existing `Company` model *before* acceptance/import:
+
+1. During classification, we derive a normalized agency profile from scraped metadata (`author_business__wrapper` + prospect fields).
+2. We run deterministic Company matching in this order:
+   - Website host equality (highest confidence)
+   - Exact name match (case-insensitive, location-scoped)
+   - Phone overlap
+   - Email equality
+3. We persist staging output under:
+   - `ProspectLead.aiScoreBreakdown.strategicScrape.agencyProfile`
+   - `ProspectLead.aiScoreBreakdown.strategicScrape.companyMatch`
+4. On acceptance, if seller is agency:
+   - Upsert/Create `Company` with `type = "Agency"`
+   - Link accepted Contact to Company via `ContactCompanyRole`
+   - Link imported Properties to Company via `CompanyPropertyRole` role `"Agency"`
+   - Persist link metadata in `aiScoreBreakdown.strategicScrape.companyLink`
+
+This mirrors the existing Prospect → Contact import pattern while adding a Company-first track for agency sellers.
 
 Feed card behavior:
 - In `ContactFeedCard`, AI-classified prospects render with a `Bot` icon, while manually set values render with the standard `Building2`/`UserCheck` icon path.

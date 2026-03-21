@@ -69,7 +69,8 @@ export async function importScrapedListingAsProperty(
   },
   contactId: string,
   locationId: string,
-  userId: string
+  userId: string,
+  companyId?: string | null
 ): Promise<ImportResult | null> {
   // Skip already-imported listings
   if (listing.status === 'IMPORTED') return null;
@@ -139,6 +140,25 @@ export async function importScrapedListingAsProperty(
       },
     });
 
+    // 3b. If this prospect is an agency linked to a Company, attach CompanyPropertyRole
+    if (companyId) {
+      await tx.companyPropertyRole.upsert({
+        where: {
+          companyId_propertyId_role: {
+            companyId,
+            propertyId: property.id,
+            role: 'Agency',
+          },
+        },
+        update: {},
+        create: {
+          companyId,
+          propertyId: property.id,
+          role: 'Agency',
+        },
+      });
+    }
+
     // 4. Mark the ScrapedListing as imported
     await tx.scrapedListing.update({
       where: { id: listing.id },
@@ -168,7 +188,8 @@ export async function importAllListingsForProspect(
   prospectLeadId: string,
   contactId: string,
   locationId: string,
-  userId: string
+  userId: string,
+  companyId?: string | null
 ): Promise<{ imported: ImportResult[]; skipped: string[] }> {
   const listings = await db.scrapedListing.findMany({
     where: {
@@ -186,7 +207,8 @@ export async function importAllListingsForProspect(
         listing,
         contactId,
         locationId,
-        userId
+        userId,
+        companyId
       );
       if (result) {
         imported.push(result);

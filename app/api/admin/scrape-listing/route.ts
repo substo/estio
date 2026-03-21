@@ -143,18 +143,22 @@ export async function POST(req: Request) {
                         if (upsertResult?.prospectLeadId) {
                             try {
                                 sendEvent({ status: 'classifying', message: '🤖 Running AI agency/private classification...' });
-                                const { classifyAndUpdateProspect } = await import('@/lib/ai/prospect-classifier');
-                                const classification = await classifyAndUpdateProspect(
+                                const { classifyAndUpdateProspect, buildClassificationInputForProspect } = await import('@/lib/ai/prospect-classifier');
+                                const classificationInput = await buildClassificationInputForProspect(
                                     upsertResult.prospectLeadId,
-                                    locationId,
                                     {
                                         name: result.ownerName,
                                         description: result.description,
-                                        listingCount: undefined, // not available in single-scrape context
                                         platformRegistered: result.sellerRegisteredAt,
                                         profileUrl: result.otherListingsUrl,
                                         contactChannels: result.contactChannels,
                                     }
+                                );
+                                if (!classificationInput) throw new Error('No classification input available.');
+                                const classification = await classifyAndUpdateProspect(
+                                    upsertResult.prospectLeadId,
+                                    locationId,
+                                    classificationInput
                                 );
                                 sendEvent({ status: 'classifying', message: `🤖 Classification: ${classification.isAgency ? 'Agency' : 'Private'} (${classification.confidenceScore}% confidence)` });
                             } catch (classErr: any) {
@@ -235,6 +239,7 @@ interface ScrapedData {
     sellerExternalId?: string;
     sellerRegisteredAt?: string;
     otherListingsUrl?: string;
+    otherListingsCount?: number;
     contactChannels?: string[];
     whatsappPhone?: string;
     rawAttributes?: Record<string, string>;
@@ -318,8 +323,40 @@ async function scrapeBazarakiListing(
                 }
             } catch (e) { /* ignore */ }
             const sellerExternalId = await page.locator('.author-info .author-name[data-user], .author-info a[data-user]').first().getAttribute('data-user').catch(() => undefined);
-            const sellerRegisteredAt = await page.locator('.date-registration').textContent().catch(() => undefined);
+            let sellerRegisteredAt = await page.locator('.date-registration').textContent().catch(() => undefined);
             const otherListingsUrl = await page.locator('a.other-announcement-author').evaluate((el: any) => (el as HTMLAnchorElement).href).catch(() => undefined);
+            const otherListingsText = await page.locator('a.other-announcement-author').textContent().catch(() => undefined);
+            const otherListingsCount = otherListingsText
+                ? (() => {
+                    const match = otherListingsText.match(/(\d{1,4})/);
+                    return match ? parseInt(match[1], 10) : undefined;
+                })()
+                : undefined;
+
+            // Business profile block for agency accounts
+            const authorBusiness = await page.evaluate(() => {
+                const wrapper = document.querySelector('.author_business__wrapper');
+                if (!wrapper) return null;
+
+                const text = (selector: string) => wrapper.querySelector(selector)?.textContent?.trim() || '';
+                const websiteEl = wrapper.querySelector('a.website') as HTMLAnchorElement | null;
+
+                return {
+                    name: text('.author_business__header h1'),
+                    verified: !!wrapper.querySelector('.author_business__header-verified'),
+                    postingSince: text('.author_business__header-since'),
+                    address: text('.author_business__contacts .address'),
+                    website: websiteEl?.href || websiteEl?.textContent?.trim() || '',
+                    description: text('.author_business__description'),
+                };
+            }).catch(() => null as any);
+
+            if (authorBusiness?.name) {
+                ownerName = authorBusiness.name;
+            }
+            if (authorBusiness?.postingSince && !sellerRegisteredAt) {
+                sellerRegisteredAt = authorBusiness.postingSince;
+            }
 
             sendEvent({ status: 'extracting', message: `Owner: ${ownerName.trim() || 'Unknown'} (ID: ${sellerExternalId || 'N/A'})` });
 
@@ -638,6 +675,15 @@ async function scrapeBazarakiListing(
                 sendEvent({ status: 'extracting', message: `Extracted ${Object.keys(rawAttributes).length} raw attributes` });
             } catch (e) { /* ignore */ }
 
+            if (authorBusiness) {
+                if (authorBusiness.name) rawAttributes['Seller business name'] = authorBusiness.name;
+                rawAttributes['Seller business verified'] = authorBusiness.verified ? 'Yes' : 'No';
+                if (authorBusiness.postingSince) rawAttributes['Seller business posting since'] = authorBusiness.postingSince;
+                if (authorBusiness.address) rawAttributes['Seller business address'] = authorBusiness.address;
+                if (authorBusiness.website) rawAttributes['Seller business website'] = authorBusiness.website;
+                if (authorBusiness.description) rawAttributes['Seller business description'] = authorBusiness.description;
+            }
+
             const bedrooms = parseInt(rawAttributes['Bedrooms']) || undefined;
             const bathrooms = parseInt(rawAttributes['Bathrooms']) || undefined;
             const propertyArea = parseInt(rawAttributes['Property area']?.replace(/\D/g, '')) || undefined;
@@ -675,6 +721,8 @@ async function scrapeBazarakiListing(
                 if (hasChat) contactChannels.push('chat');
                 const hasEmail = await page.locator('._email').isVisible().catch(() => false);
                 if (hasEmail) contactChannels.push('email');
+                if (authorBusiness?.website) contactChannels.push('website');
+                contactChannels = Array.from(new Set(contactChannels));
             } catch (e: any) {
                 sendEvent({ status: 'extracting', message: `⚠️ WhatsApp/contact-channels extraction error: ${e.message?.substring(0, 100)}` });
             }
@@ -702,6 +750,7 @@ async function scrapeBazarakiListing(
                 sellerExternalId,
                 sellerRegisteredAt,
                 otherListingsUrl,
+                otherListingsCount,
                 contactChannels,
                 whatsappPhone,
                 rawAttributes,
@@ -772,6 +821,7 @@ async function upsertListingData(
                     platformUserId: data.sellerExternalId,
                     platformRegistered: data.sellerRegisteredAt,
                     profileUrl: data.otherListingsUrl || null,
+                    listingCount: data.otherListingsCount ?? null,
                 },
             });
             sendEvent({ status: 'saving', message: `Created new prospect: ${data.ownerName || 'Unknown'}` });
@@ -786,6 +836,7 @@ async function upsertListingData(
             if (data.sellerExternalId && !existingProspect.platformUserId) updateData.platformUserId = data.sellerExternalId;
             if (data.sellerRegisteredAt && !existingProspect.platformRegistered) updateData.platformRegistered = data.sellerRegisteredAt;
             if (data.otherListingsUrl && (!existingProspect.profileUrl || existingProspect.profileUrl !== data.otherListingsUrl)) updateData.profileUrl = data.otherListingsUrl;
+            if (data.otherListingsCount && (existingProspect.listingCount || 0) < data.otherListingsCount) updateData.listingCount = data.otherListingsCount;
 
             if (Object.keys(updateData).length > 0) {
                 await db.prospectLead.update({ where: { id: existingProspect.id }, data: updateData });
@@ -821,6 +872,7 @@ async function upsertListingData(
                 sellerExternalId: data.sellerExternalId,
                 sellerRegisteredAt: data.sellerRegisteredAt,
                 otherListingsUrl: data.otherListingsUrl,
+                otherListingsCount: data.otherListingsCount,
                 contactChannels: data.contactChannels,
                 whatsappPhone: data.whatsappPhone,
                 rawAttributes: data.rawAttributes,
@@ -855,6 +907,7 @@ async function upsertListingData(
                 sellerExternalId: data.sellerExternalId,
                 sellerRegisteredAt: data.sellerRegisteredAt,
                 otherListingsUrl: data.otherListingsUrl,
+                otherListingsCount: data.otherListingsCount,
                 contactChannels: data.contactChannels,
                 whatsappPhone: data.whatsappPhone,
                 rawAttributes: data.rawAttributes,
@@ -885,6 +938,7 @@ async function upsertListingData(
                 sellerExternalId: data.sellerExternalId,
                 sellerRegisteredAt: data.sellerRegisteredAt,
                 otherListingsUrl: data.otherListingsUrl,
+                otherListingsCount: data.otherListingsCount,
                 contactChannels: data.contactChannels,
                 whatsappPhone: data.whatsappPhone,
                 rawAttributes: data.rawAttributes,
