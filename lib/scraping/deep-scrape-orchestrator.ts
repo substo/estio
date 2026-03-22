@@ -575,12 +575,6 @@ export class DeepScrapeOrchestratorService {
                             });
                             continue;
                         }
-                        processedProspectIds.add(prospectLeadId);
-
-                        const sellerKeys = ListingScraperService.collectSellerProcessingKeys(seedListing, prospectLeadId);
-                        for (const sellerKey of sellerKeys) {
-                            processedSellerKeys.add(sellerKey);
-                        }
                         const contactKey = `prospect:${prospectLeadId}`;
 
                         let knownPhone = normalizePhone(seedListing.ownerPhone || seedListing.whatsappPhone);
@@ -608,6 +602,15 @@ export class DeepScrapeOrchestratorService {
                                 metadata: { listingUrl: seedListing.url, externalId: seedListing.externalId, prospectLeadId },
                             });
                             continue;
+                        }
+
+                        // Only lock seller/prospect dedupe after contact gate passes.
+                        // This allows another seed from the same seller to retry phone reveal
+                        // when the first seed listing did not expose a phone number.
+                        processedProspectIds.add(prospectLeadId);
+                        const sellerKeys = ListingScraperService.collectSellerProcessingKeys(seedListing, prospectLeadId);
+                        for (const sellerKey of sellerKeys) {
+                            processedSellerKeys.add(sellerKey);
                         }
 
                         if (knownPhone && !seenContactsWithPhone.has(contactKey)) {
