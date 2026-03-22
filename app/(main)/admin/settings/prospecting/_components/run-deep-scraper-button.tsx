@@ -14,9 +14,12 @@ export function RunDeepScraperButton({ locationId }: { locationId: string }) {
     const handleRun = async () => {
         setIsLoading(true);
         try {
-            await manualTriggerDeepScrape(locationId, 50); // Defaulting to 50 for manual sweeps
-            toast.success('Deep scraping task queued. Check back soon for updated AI classifications.');
-            router.refresh(); // Or handle optimistically
+            const result = await manualTriggerDeepScrape(locationId, 50); // Defaulting to 50 for manual sweeps
+            if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('deep-run-queued', { detail: result }));
+            }
+            toast.success(`Deep scrape queued (run ${result.runId.slice(0, 8)}).`);
+            router.refresh();
         } catch (error: any) {
             toast.error(error.message || 'Failed to queue deep scraping task');
         } finally {

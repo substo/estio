@@ -3,11 +3,12 @@
 import { revalidatePath } from 'next/cache';
 import db from '@/lib/db';
 import { verifyUserIsLocationAdmin } from '@/lib/auth/permissions';
-import { scrapingQueue } from '@/lib/queue/scraping-queue';
+import { getScrapingQueueDiagnostics, scrapingQueue } from '@/lib/queue/scraping-queue';
 import { encryptPassword } from '@/lib/crypto/password-encryption';
 import {
     DEFAULT_PRIVATE_CONFIDENCE_THRESHOLD,
     type DeepScrapeConfigSnapshot,
+    isDeepScrapeTerminalStatus,
 } from '@/lib/scraping/deep-scrape-types';
 
 export interface ScrapingRunOverview {
@@ -31,10 +32,12 @@ export interface ScrapingRunOverview {
 export interface DeepScrapeRunOverview {
     windowHours: number;
     totalRuns: number;
+    queuedRuns: number;
     runningRuns: number;
     completedRuns: number;
     partialRuns: number;
     failedRuns: number;
+    cancelledRuns: number;
     successRate: number;
     avgDurationSeconds: number | null;
     p95DurationSeconds: number | null;
@@ -51,6 +54,74 @@ export interface DeepScrapeRunOverview {
         omittedDuplicate: number;
         omittedBudgetExhausted: number;
         errorsTotal: number;
+    };
+}
+
+export interface DeepScrapeQueueDiagnostics {
+    generatedAt: string;
+    workerAlive: boolean;
+    workerHeartbeatAgeSeconds: number | null;
+    activeWorkers: Array<{
+        instanceId: string;
+        role: string;
+        pid: number | null;
+        hostname: string | null;
+        startedAt: string | null;
+        updatedAt: string;
+    }>;
+    queueDepth: {
+        waiting: number;
+        active: number;
+        delayed: number;
+        paused: number;
+        failed: number;
+        completed: number;
+    };
+    recentFailedJobs: Array<{
+        id: string;
+        name: string;
+        failedReason: string | null;
+        finishedOn: string | null;
+        attemptsMade: number;
+    }>;
+}
+
+export interface ManualDeepScrapeTriggerResult {
+    runId: string;
+    status: 'queued';
+    run: {
+        id: string;
+        createdAt: string;
+        status: string;
+        queuedAt: string | null;
+        completedAt: string | null;
+        triggeredBy: string | null;
+        triggeredByUserId: string | null;
+        queueJobId: string | null;
+        seedListingsFound: number;
+        contactsWithPhone: number;
+        contactsWithoutPhone: number;
+        portfolioListingsDeepScraped: number;
+        omittedAgency: number;
+        omittedUncertain: number;
+        omittedMissingPhone: number;
+        omittedNonRealEstate: number;
+        omittedDuplicate: number;
+        omittedBudgetExhausted: number;
+        errorsTotal: number;
+        errorLog: string | null;
+        configSnapshot: Record<string, unknown> | null;
+        stages: Array<{
+            id: string;
+            createdAt: string;
+            taskId: string | null;
+            stage: string;
+            status: string;
+            reasonCode: string | null;
+            message: string | null;
+            counters: Record<string, unknown> | null;
+            metadata: Record<string, unknown> | null;
+        }>;
     };
 }
 
@@ -312,13 +383,17 @@ export async function manualTriggerScrape(id: string, locationId: string, pageLi
     return true;
 }
 
-export async function manualTriggerDeepScrape(locationId: string, limit?: number) {
+export async function manualTriggerDeepScrape(
+    locationId: string,
+    limit?: number,
+): Promise<ManualDeepScrapeTriggerResult> {
     const { auth } = await import('@clerk/nextjs/server');
     const { userId } = await auth();
     const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
     if (!isAdmin) throw new Error("Unauthorized");
 
     const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(500, Math.floor(limit as number))) : 50;
+    const queuedAt = new Date();
     const deepScrapeConfig: DeepScrapeConfigSnapshot = {
         version: 'manual_deep_orchestrator_v1',
         maxSeedListingsPerTask: safeLimit,
@@ -331,18 +406,151 @@ export async function manualTriggerDeepScrape(locationId: string, limit?: number
         },
     };
 
-    // We can piggy-back on the same BullMQ scraping queue but with a distinct job name format
-    await scrapingQueue.add(`manual-deep-scrape-${locationId}-${Date.now()}`, {
-        type: 'deep_scrape',
-        locationId: locationId,
-        limit: safeLimit,
-        deepScrapeConfig,
-        triggeredBy: 'manual',
-        triggeredByUserId: userId || undefined,
-        queuedAt: new Date().toISOString(),
+    const run = await db.deepScrapeRun.create({
+        data: {
+            locationId,
+            status: 'queued',
+            triggeredBy: 'manual',
+            triggeredByUserId: userId || null,
+            queuedAt,
+            startedAt: queuedAt,
+            configSnapshot: deepScrapeConfig as any,
+            metadata: {
+                trigger: {
+                    source: 'manual',
+                    initiatedByUserId: userId || null,
+                    queuedAt: queuedAt.toISOString(),
+                },
+                flow: 'manual_deep_orchestrator',
+                orchestration: deepScrapeConfig,
+            } as any,
+        },
     });
 
-    return true;
+    await db.deepScrapeRunStage.create({
+        data: {
+            runId: run.id,
+            locationId,
+            stage: 'run_queued',
+            status: 'info',
+            message: 'Manual deep scrape queued.',
+            metadata: {
+                runId: run.id,
+                locationId,
+                triggeredByUserId: userId || null,
+                queuedAt: queuedAt.toISOString(),
+            } as any,
+        },
+    });
+
+    try {
+        const job = await scrapingQueue.add(`manual-deep-scrape-${locationId}-${Date.now()}`, {
+            type: 'deep_scrape',
+            runId: run.id,
+            locationId,
+            limit: safeLimit,
+            deepScrapeConfig,
+            triggeredBy: 'manual',
+            triggeredByUserId: userId || undefined,
+            queuedAt: queuedAt.toISOString(),
+        });
+
+        const queueJobId = String(job?.id ?? '');
+        const updatedRun = await db.deepScrapeRun.update({
+            where: { id: run.id },
+            data: {
+                queueJobId: queueJobId || null,
+                metadata: {
+                    trigger: {
+                        source: 'manual',
+                        initiatedByUserId: userId || null,
+                        queuedAt: queuedAt.toISOString(),
+                        queueJobId: queueJobId || null,
+                    },
+                    flow: 'manual_deep_orchestrator',
+                    orchestration: deepScrapeConfig,
+                } as any,
+            },
+            include: {
+                stages: {
+                    orderBy: { createdAt: 'desc' },
+                    take: 60,
+                },
+            },
+        });
+
+        revalidatePath('/admin/settings/prospecting');
+
+        return {
+            runId: updatedRun.id,
+            status: 'queued',
+            run: {
+                id: updatedRun.id,
+                createdAt: updatedRun.createdAt.toISOString(),
+                status: updatedRun.status,
+                queuedAt: updatedRun.queuedAt ? updatedRun.queuedAt.toISOString() : null,
+                completedAt: updatedRun.completedAt ? updatedRun.completedAt.toISOString() : null,
+                triggeredBy: updatedRun.triggeredBy || null,
+                triggeredByUserId: updatedRun.triggeredByUserId || null,
+                queueJobId: updatedRun.queueJobId || null,
+                seedListingsFound: updatedRun.seedListingsFound,
+                contactsWithPhone: updatedRun.contactsWithPhone,
+                contactsWithoutPhone: updatedRun.contactsWithoutPhone,
+                portfolioListingsDeepScraped: updatedRun.portfolioListingsDeepScraped,
+                omittedAgency: updatedRun.omittedAgency,
+                omittedUncertain: updatedRun.omittedUncertain,
+                omittedMissingPhone: updatedRun.omittedMissingPhone,
+                omittedNonRealEstate: updatedRun.omittedNonRealEstate,
+                omittedDuplicate: updatedRun.omittedDuplicate,
+                omittedBudgetExhausted: updatedRun.omittedBudgetExhausted,
+                errorsTotal: updatedRun.errorsTotal,
+                errorLog: updatedRun.errorLog || null,
+                configSnapshot: (updatedRun.configSnapshot as Record<string, unknown> | null) ?? null,
+                stages: (updatedRun.stages || []).map((stage) => ({
+                    id: stage.id,
+                    createdAt: stage.createdAt.toISOString(),
+                    taskId: stage.taskId || null,
+                    stage: stage.stage,
+                    status: stage.status,
+                    reasonCode: stage.reasonCode || null,
+                    message: stage.message || null,
+                    counters: (stage.counters as Record<string, unknown> | null) ?? null,
+                    metadata: (stage.metadata as Record<string, unknown> | null) ?? null,
+                })),
+            },
+        };
+    } catch (error: any) {
+        const errorMessage = error?.message || 'Failed to enqueue deep scrape run';
+
+        await db.$transaction([
+            db.deepScrapeRun.update({
+                where: { id: run.id },
+                data: {
+                    status: 'failed',
+                    errorLog: errorMessage,
+                    completedAt: new Date(),
+                },
+            }),
+            db.deepScrapeRunStage.create({
+                data: {
+                    runId: run.id,
+                    locationId,
+                    stage: 'run_enqueue_failed',
+                    status: 'error',
+                    reasonCode: 'task_error',
+                    message: `Failed to enqueue deep scrape run: ${errorMessage}`,
+                    metadata: {
+                        runId: run.id,
+                        locationId,
+                        triggeredByUserId: userId || null,
+                    } as any,
+                },
+            }),
+        ]);
+
+        revalidatePath('/admin/settings/prospecting');
+        throw new Error(errorMessage);
+    }
 }
 
 export async function getDeepScrapeRuns(locationId: string, limit = 15) {
@@ -392,6 +600,15 @@ export async function getDeepScrapeRunDetails(locationId: string, runId: string,
     return run;
 }
 
+export async function getDeepScrapeQueueDiagnostics(locationId: string): Promise<DeepScrapeQueueDiagnostics> {
+    const { auth } = await import('@clerk/nextjs/server');
+    const { userId } = await auth();
+    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
+    if (!isAdmin) throw new Error("Unauthorized");
+
+    return getScrapingQueueDiagnostics();
+}
+
 export async function getDeepScrapeRunOverview(locationId: string, windowHours = 24): Promise<DeepScrapeRunOverview> {
     const { auth } = await import('@clerk/nextjs/server');
     const { userId } = await auth();
@@ -428,12 +645,14 @@ export async function getDeepScrapeRunOverview(locationId: string, windowHours =
     });
 
     const totalRuns = runs.length;
+    const queuedRuns = runs.filter((run) => run.status === 'queued').length;
     const runningRuns = runs.filter((run) => run.status === 'running').length;
     const completedRuns = runs.filter((run) => run.status === 'completed').length;
     const partialRuns = runs.filter((run) => run.status === 'partial').length;
     const failedRuns = runs.filter((run) => run.status === 'failed').length;
+    const cancelledRuns = runs.filter((run) => run.status === 'cancelled').length;
 
-    const finishedRuns = runs.filter((run) => run.status !== 'running');
+    const finishedRuns = runs.filter((run) => isDeepScrapeTerminalStatus(run.status));
     const successRate = finishedRuns.length > 0
         ? Number(((completedRuns / finishedRuns.length) * 100).toFixed(1))
         : 0;
@@ -483,10 +702,12 @@ export async function getDeepScrapeRunOverview(locationId: string, windowHours =
     return {
         windowHours: safeWindowHours,
         totalRuns,
+        queuedRuns,
         runningRuns,
         completedRuns,
         partialRuns,
         failedRuns,
+        cancelledRuns,
         successRate,
         avgDurationSeconds,
         p95DurationSeconds,

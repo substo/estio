@@ -1,4 +1,4 @@
-§# Phase 2 — Strategic Scraping Infrastructure
+# Phase 2 — Strategic Scraping Infrastructure
 **Status:** Completed
 
 ## Overview
@@ -570,11 +570,15 @@ Each portal connector follows the same `ScrapingTarget` + `ListingScraperService
 
 Scraping is an inherently long-running task that is prone to network timeouts and anti-bot bans. Running it synchronously in a Next.js API route is an anti-pattern.
 
-`lib/queue/scraping-queue.ts` implements a dedicated BullMQ queue specifically for scraping isolated targets. The `initScrapingWorker()` function is called globally during server boot inside `instrumentation.ts` to ensure background jobs are always processed.
+`lib/queue/scraping-queue.ts` implements a dedicated BullMQ queue specifically for scraping isolated targets. Worker startup is now role-gated by `PROCESS_ROLE` (`web` vs `scrape-worker`) via `instrumentation.ts`, so production web processes do not consume scraping jobs.
 - **Worker Concurrency**: 1 (Processes one target at a time to prevent server IP bans)
 - **Rate Limit**: 1 job per 5 seconds globally.
 - **Retries**: Configured to 1 attempt initially to prevent spamming failing target sites automatically.
 - **Run Correlation Metadata:** queue payload now carries trigger context (`triggeredBy`, `triggeredByUserId`, `queuedAt`) so each worker execution can be traced end-to-end in `ScrapingRun.metadata`.
+- **Deep Run Correlation:** deep jobs now also carry `runId` and are processed against an already-persisted `DeepScrapeRun` lifecycle record.
+- **Deep Scrape Routing (Implemented):** `type: "deep_scrape"` jobs are routed to `DeepScrapeOrchestratorService.processLocation()` (manual-first strategic flow), not to the legacy NEW-listings-only deep pass.
+- **Orchestration Config Snapshot (Implemented):** deep queue payload includes a versioned config snapshot so each deep run stores the exact execution parameters used at trigger time.
+- **Dedicated Worker Health:** scraping worker heartbeats are written to Redis and exposed through diagnostics for live operational visibility.
 
 ### Manual Scrape Trigger ("Run Now")
 
@@ -623,9 +627,17 @@ Flow:
 | `app/(main)/admin/settings/prospecting/actions.ts` | **[NEW]** CRUD for ScrapingTarget + scoped run-history retrieval |
 | `app/(main)/admin/settings/prospecting/_components/run-history-panel.tsx` | **[NEW]** Expandable run telemetry panel with status/flow/error metadata |
 | `app/(main)/admin/settings/prospecting/_components/run-scraper-button.tsx` | **[NEW]** Manual trigger dropdown button |
-| `lib/scraping/deep-scraper.ts` | **[NEW]** Deep Scrape service: visits individual listing URLs, extracts full descriptions, runs AI `isAgency` classification |
+| `lib/scraping/deep-scrape-orchestrator.ts` | **[NEW]** Manual-first deep orchestration service (seed URLs → phone gate → seller portfolio → agency/private decision → selective deep portfolio scraping) |
+| `lib/scraping/deep-scrape-types.ts` | **[NEW]** Typed deep-run telemetry contracts (`DeepScrapeRunSummary`, `DeepScrapeStageLog`, `OmissionReason`, reason codes, error categories) |
+| `app/(main)/admin/settings/prospecting/_components/deep-runs-panel.tsx` | **[NEW]** Top-level Deep Runs monitoring panel with KPI summary, expandable stage logs, omission reasons, and metadata/error payload drill-down |
 | `app/(main)/admin/settings/prospecting/_components/run-deep-scraper-button.tsx` | **[NEW]** Manual trigger button for Deep Scrape jobs |
-| `lib/queue/scraping-queue.ts` | **[NEW]** BullMQ queue/worker with trigger-context propagation and robust run-failure correlation |
+| `app/api/admin/prospecting/deep-runs/stream/route.ts` | **[NEW]** SSE stream endpoint for live deep-run status, stage, and diagnostics snapshots |
+| `app/api/admin/prospecting/deep-runs/diagnostics/route.ts` | **[NEW]** Admin diagnostics endpoint for worker heartbeat + queue depth + recent failures |
+| `prisma/migrations/20260322113000_deep_scrape_orchestrator/migration.sql` | **[NEW]** Deep run history tables + status backfill (`REVIEWED -> REVIEWING`) |
+| `lib/scraping/deep-scraper.ts` | **[LEGACY COMPATIBILITY]** Status transition kept compatible with triage/import lifecycle (`REVIEWING`), no longer primary deep orchestration path |
+| `lib/queue/scraping-queue.ts` | **[NEW]** BullMQ queue/worker with trigger-context propagation, deep-run lifecycle correlation, shutdown safety, and heartbeat diagnostics |
+| `instrumentation.ts` | **[MODIFY]** Queue bootstrap role-gated by `PROCESS_ROLE` to isolate web and scrape-worker runtimes |
+| `deploy-local-build.sh` | **[MODIFY]** Blue/green web deploy now starts web role explicitly and maintains a dedicated `estio-scrape-worker` PM2 process |
 | `lib/leads/scraped-listing-repository.ts` | **[NEW]** Repository for querying `ScrapedListing` records with prospect data joins |
 | `app/(main)/admin/prospecting/layout.tsx` | **[NEW]** Shared layout with tab navigation between People and Listings Inbox |
 | `app/(main)/admin/prospecting/listings/page.tsx` | **[NEW]** Listings Inbox page |
@@ -659,23 +671,127 @@ Flow:
 ## 3.0 Deep Scraping & Enterprise AI Usage Ledger
 **Status:** Completed
 
-### 3.1 Deep Scraper Service
+### 3.1 Deep Scrape Orchestrator (Manual-First)
 
-The initial index scrape (Phase 2) only extracts surface-level data from search result pages. The **Deep Scraper** is a separate background job that visits individual listing URLs to extract full property descriptions and run accurate AI classification.
+The deep path is now implemented as a **manual-first strategic orchestrator** driven by the `Run Deep Scrape` button. This replaced the old behavior that only deep-processed existing `NEW` inbox listings.
 
-**Architecture:**
-- **Service:** `lib/scraping/deep-scraper.ts` — `DeepScraperService`
-- **Trigger:** Manual via "Run Deep Scrape" button on `/admin/settings/prospecting`, or scheduled via BullMQ.
-- **Queue:** The `scrapingQueue` worker handles `type: 'deep_scrape'` jobs, routing them to `DeepScraperService.processPendingListings()`.
+#### What Was Implemented
 
-**Deep Scrape Flow:**
-1. Query `ScrapedListing` records with `status: 'NEW'` that haven't been deep-scraped yet.
-2. For each listing, fetch the full page HTML using `PageFetcher`.
-3. Extract the full description using `extractBazarakiDescription()` from `lib/scraping/extractors/bazaraki.ts`.
-4. Call `classifyAndUpdateProspect()` from `lib/ai/prospect-classifier.ts` (multi-signal AI classifier routed via model-router task type `"prospect_classification"`).
-5. Persist `isAgency`, `agencyConfidence`, and `agencyReasoning` on `ProspectLead`, while respecting manual override (`isAgencyManual` always takes priority).
-6. Apply confidence-aware auto-resolution: confidence `>= 70` is treated as auto-classified; lower confidence is shown as neutral/unclassified in UI.
-7. Log classification to `AgentExecution` (`sourceType: "scraper"`, `skillName: "prospect_classifier"`).
+- **Primary trigger path:** `manualTriggerDeepScrape(locationId, limit?)` now creates `DeepScrapeRun` immediately as `queued`, then enqueues `type: "deep_scrape"` with `runId` and deep orchestration config snapshot.
+- **Queue execution:** the scraping worker routes deep jobs to `DeepScrapeOrchestratorService.processLocation(locationId, { runId, ... })`.
+- **Scope:** each deep run scans all **enabled `bazaraki` tasks with non-empty `targetUrls`**.
+- **Per-task Run Now unchanged:** task-level manual runs still execute the normal task path for isolated debugging.
+- **Lifecycle semantics:** deep runs now follow explicit state transitions: `queued -> running -> completed|partial|failed|cancelled`.
+
+#### Reliability + Enterprise Observability Upgrade (Implemented)
+
+This upgrade was implemented to remove production ambiguity where queue consumers could diverge across blue/green slots and to provide immediate operator feedback after clicking **Run Deep Scrape**.
+
+##### Why
+
+- During production diagnosis, deep jobs were successfully enqueued but UI visibility could lag or disappear when queue consumers were split across mixed process versions.
+- The old model persisted deep runs only when worker execution started, so a successful enqueue could still show “nothing” in the dashboard until later.
+
+##### What
+
+- **Queued-first persistence contract:** deep run rows are created at click-time before enqueue.
+- **Authoritative worker role isolation:** production web processes run with `PROCESS_ROLE=web`; scraping consumption runs in dedicated `PROCESS_ROLE=scrape-worker`.
+- **Graceful interruption handling:** active deep runs are marked `cancelled` on worker shutdown signals instead of being left ambiguous.
+- **Structured heartbeat and queue diagnostics:** worker liveness, queue depth, and recent failed jobs are surfaced in admin diagnostics.
+- **Realtime delivery:** deep-run monitoring now supports SSE live snapshots with polling fallback.
+- **Immediate UI visibility:** optimistic queued card appears instantly after trigger; UI keeps refreshing while `queued|running`, including short burst refresh right after click.
+- **Stale queued detection:** dashboard warns when queued runs exceed SLA window (worker unavailable/delayed signal).
+
+##### How
+
+- `manualTriggerDeepScrape` now:
+  - creates `DeepScrapeRun(status='queued')`
+  - writes `run_queued` stage log
+  - enqueues BullMQ deep job with `runId`
+  - on enqueue failure, marks run `failed` and writes `run_enqueue_failed`
+- `DeepScrapeOrchestratorService.processLocation` now:
+  - accepts `runId`
+  - transitions existing queued/in-flight run to `running`
+  - preserves existing counters when resuming correlated run
+  - writes terminal status safely without overriding externally terminalized runs
+- `scraping-queue` worker now:
+  - includes run correlation (`runId`, `jobId`, `locationId`, `triggeredByUserId`)
+  - marks deep runs `failed` on unhandled worker-level failures
+  - emits Redis heartbeat with worker identity and role
+  - supports diagnostics reads for admin visibility
+
+#### Why This Change Was Needed
+
+The old deep flow did not guarantee execution from manually-added Bazaraki seed URLs at task level. The new orchestrator ensures deep scraping starts from configured task URLs, resolves seller contact context first, and only spends deep interaction budget where it is strategically valuable.
+
+#### How The Strategic Deep Orchestration Works
+
+For each eligible task, execution now follows explicit staged flow:
+
+1. **Stage A: Seed crawl from configured target URLs**
+   - Crawl paginated task URLs.
+   - Build unique seed listing set (`externalId` dedupe).
+2. **Stage B: Deep scrape each seed listing**
+   - Extract richer listing details and attempt seller contact resolution.
+3. **Stage C: Phone gate**
+   - If no phone is resolved, omit and continue (`missing_phone`).
+4. **Stage D: Seller portfolio discovery**
+   - If seller profile URL exists, crawl seller listings.
+5. **Stage E: Seller classification**
+   - Resolve `private | agency | uncertain` using confidence + manual override precedence.
+6. **Stage F: Selective deep portfolio behavior**
+   - `private`: deep scrape eligible portfolio listings.
+   - `agency`: skip deep portfolio listings (`agency_skipped`).
+   - `uncertain`: skip deep portfolio listings (`uncertain_skipped`).
+7. **Stage G: Persistence and dedupe accounting**
+   - Upsert listings/prospects, track duplicate and relevance outcomes, preserve interaction budgets.
+
+This flow preserves existing dedupe semantics (`platform+externalId` listing uniqueness plus seller-level dedupe keys) while making deep work deterministic and auditable.
+
+#### Deep Run Monitoring History (Implemented)
+
+Deep orchestration telemetry is now separated from task run telemetry:
+
+- **`DeepScrapeRun`**: run lifecycle, trigger context, config snapshot, aggregate counters, status.
+- **`DeepScrapeRunStage`**: stage-level structured logs per task, including counters, reason codes, and metadata payloads.
+
+Run-level counters include:
+- task scan/start/complete/skip counts
+- URL/page/listing discovery metrics
+- prospect create/match metrics
+- phone gate metrics
+- portfolio discovery/deep-scrape metrics
+- omission totals by reason
+- error totals by category
+
+Implemented stage reason codes include:
+- `agency_skipped`
+- `uncertain_skipped`
+- `missing_phone`
+- `non_real_estate`
+- `duplicate_listing`
+- `duplicate_contact`
+- `interaction_budget_exhausted`
+- `task_config_ineligible`
+- `task_error`
+
+#### Monitoring UI and Read APIs
+
+- A new top-level **Deep Runs** panel is available on `/admin/settings/prospecting`, separate from per-task run cards.
+- The panel shows run status, duration, trigger source, KPI summary row, worker/queue diagnostics, and expandable stage logs with counters/reason codes/metadata.
+- The panel now supports optimistic queued insertion, stale-queue warning, and live state transitions (`Queued`, `Starting`, `Running`, `Partial`, `Failed`, `Completed`, `Cancelled`).
+- Read APIs support:
+  - deep run list (paged)
+  - deep run details with stages
+  - windowed deep KPI overview
+  - realtime deep run stream (SSE snapshots)
+  - queue/worker diagnostics summary
+
+#### Status Compatibility and Backfill
+
+- Deep lifecycle now uses actionable inbox statuses (`NEW/REVIEWING/IMPORTED/REJECTED/SKIPPED`) without `REVIEWED`.
+- A one-time backfill migration converts existing `ScrapedListing.status = REVIEWED` to `REVIEWING`.
+- This keeps import/triage queries congruent with deep-processed pending records.
 
 ### 3.2 Enterprise AI Usage Ledger
 

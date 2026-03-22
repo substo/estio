@@ -14,6 +14,8 @@ GREEN_DIR="$BASE_DIR/estio-app-green"
 BLUE_PORT=3001
 GREEN_PORT=3002
 APP_NAME_PREFIX="estio-app"
+SCRAPE_WORKER_APP_NAME="estio-scrape-worker"
+SCRAPE_WORKER_PORT=3010
 
 # Keep previous color process alive briefly after traffic switch to reduce abrupt cutovers.
 # Override with DRAIN_SECONDS=0 for immediate cleanup.
@@ -218,6 +220,8 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
     ACTIVE_PORT="$ACTIVE_PORT"
     ACTIVE_DIR="$ACTIVE_DIR"
     ACTIVE_COLOR="$ACTIVE_COLOR"
+    SCRAPE_WORKER_APP_NAME="$SCRAPE_WORKER_APP_NAME"
+    SCRAPE_WORKER_PORT="$SCRAPE_WORKER_PORT"
     DRAIN_SECONDS="$DRAIN_SECONDS"
     SWITCH_SOAK_SECONDS="$SWITCH_SOAK_SECONDS"
     DEPLOY_TOKEN="$DEPLOY_TOKEN"
@@ -232,7 +236,7 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
     fi
 
     cd "\$TARGET_DIR"
-    PORT="\$TARGET_PORT" NODE_ENV=production pm2 start npm --name "\$TARGET_APP_NAME" -- start
+    PORT="\$TARGET_PORT" NODE_ENV=production PROCESS_ROLE=web pm2 start npm --name "\$TARGET_APP_NAME" -- start
 
     echo "🩺 Waiting for target health check..."
     for i in \$(seq 1 45); do
@@ -301,7 +305,7 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
         if [ -n "\$ACTIVE_APP_NAME" ] && [ -n "\$ACTIVE_DIR" ] && [ -n "\$ACTIVE_PORT" ]; then
             if ! pm2 describe "\$ACTIVE_APP_NAME" > /dev/null 2>&1; then
                 cd "\$ACTIVE_DIR"
-                PORT="\$ACTIVE_PORT" NODE_ENV=production pm2 start npm --name "\$ACTIVE_APP_NAME" -- start
+                PORT="\$ACTIVE_PORT" NODE_ENV=production PROCESS_ROLE=web pm2 start npm --name "\$ACTIVE_APP_NAME" -- start
             fi
         fi
 
@@ -310,6 +314,13 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
         exit 1
     fi
     echo "✅ Post-switch soak checks passed"
+
+    echo "🧠 Ensuring dedicated scraping worker is running (\$SCRAPE_WORKER_APP_NAME)..."
+    if pm2 describe "\$SCRAPE_WORKER_APP_NAME" > /dev/null 2>&1; then
+        pm2 delete "\$SCRAPE_WORKER_APP_NAME" || true
+    fi
+    PORT="\$SCRAPE_WORKER_PORT" NODE_ENV=production PROCESS_ROLE=scrape-worker \
+        pm2 start npm --name "\$SCRAPE_WORKER_APP_NAME" --cwd "\$SYMLINK_PATH" -- start
 
     # Mark this deployment as current so stale delayed cleanup jobs become no-ops.
     printf "%s\n" "\$DEPLOY_TOKEN" > "\$CURRENT_DEPLOY_TOKEN_FILE"

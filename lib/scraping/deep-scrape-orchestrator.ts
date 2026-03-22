@@ -17,6 +17,7 @@ import {
     createEmptyDeepScrapeRunSummary,
     categorizeScrapeError,
     errorCategoryToSummaryKey,
+    isDeepScrapeInFlightStatus,
     omissionReasonToSummaryKey,
     resolveProspectDeepDecision,
 } from './deep-scrape-types';
@@ -49,6 +50,7 @@ interface DeepScrapeOrchestratorOptions {
 }
 
 interface ProcessDeepScrapeRequest {
+    runId?: string;
     limit?: number;
     configSnapshot?: Partial<DeepScrapeConfigSnapshot>;
     triggerContext?: DeepScrapeTriggerContext;
@@ -146,6 +148,64 @@ function applyTaskCountersToRun(run: DeepScrapeRunSummary, task: DeepScrapeRunSu
     run.errorsTotal += task.errorsTotal;
 }
 
+function toRunSummaryFromRecord(run: {
+    tasksScanned: number;
+    tasksStarted: number;
+    tasksCompleted: number;
+    tasksSkipped: number;
+    rootUrlsProcessed: number;
+    indexPagesScraped: number;
+    seedListingsFound: number;
+    seedListingsNew: number;
+    seedListingsDuplicate: number;
+    prospectsCreated: number;
+    prospectsMatched: number;
+    contactsWithPhone: number;
+    contactsWithoutPhone: number;
+    sellerPortfoliosDiscovered: number;
+    portfolioListingsDeepScraped: number;
+    omittedAgency: number;
+    omittedUncertain: number;
+    omittedMissingPhone: number;
+    omittedNonRealEstate: number;
+    omittedDuplicate: number;
+    omittedBudgetExhausted: number;
+    errorsAuth: number;
+    errorsNetwork: number;
+    errorsExtraction: number;
+    errorsUnknown: number;
+    errorsTotal: number;
+}): DeepScrapeRunSummary {
+    return {
+        tasksScanned: run.tasksScanned,
+        tasksStarted: run.tasksStarted,
+        tasksCompleted: run.tasksCompleted,
+        tasksSkipped: run.tasksSkipped,
+        rootUrlsProcessed: run.rootUrlsProcessed,
+        indexPagesScraped: run.indexPagesScraped,
+        seedListingsFound: run.seedListingsFound,
+        seedListingsNew: run.seedListingsNew,
+        seedListingsDuplicate: run.seedListingsDuplicate,
+        prospectsCreated: run.prospectsCreated,
+        prospectsMatched: run.prospectsMatched,
+        contactsWithPhone: run.contactsWithPhone,
+        contactsWithoutPhone: run.contactsWithoutPhone,
+        sellerPortfoliosDiscovered: run.sellerPortfoliosDiscovered,
+        portfolioListingsDeepScraped: run.portfolioListingsDeepScraped,
+        omittedAgency: run.omittedAgency,
+        omittedUncertain: run.omittedUncertain,
+        omittedMissingPhone: run.omittedMissingPhone,
+        omittedNonRealEstate: run.omittedNonRealEstate,
+        omittedDuplicate: run.omittedDuplicate,
+        omittedBudgetExhausted: run.omittedBudgetExhausted,
+        errorsAuth: run.errorsAuth,
+        errorsNetwork: run.errorsNetwork,
+        errorsExtraction: run.errorsExtraction,
+        errorsUnknown: run.errorsUnknown,
+        errorsTotal: run.errorsTotal,
+    };
+}
+
 export class DeepScrapeOrchestratorService {
     static async processLocation(
         locationId: string,
@@ -154,31 +214,83 @@ export class DeepScrapeOrchestratorService {
         const options = buildOrchestratorOptions(request?.limit, request?.configSnapshot);
         const configSnapshot = buildDefaultConfigSnapshot(options.maxSeedListingsPerTask, request?.configSnapshot);
         const trigger = request?.triggerContext;
+        const requestedRunId = request?.runId?.trim();
 
-        const run = await db.deepScrapeRun.create({
-            data: {
-                locationId,
-                status: 'running',
-                triggeredBy: trigger?.source || 'system',
-                triggeredByUserId: trigger?.initiatedByUserId || null,
-                queueJobId: trigger?.queueJobId || null,
-                queuedAt: trigger?.queuedAt ? new Date(trigger.queuedAt) : null,
-                startedAt: new Date(),
-                configSnapshot: configSnapshot as any,
-                metadata: {
-                    trigger: {
-                        source: trigger?.source || 'system',
-                        initiatedByUserId: trigger?.initiatedByUserId || null,
-                        queueJobId: trigger?.queueJobId || null,
-                        queuedAt: trigger?.queuedAt || null,
+        const run = await (async () => {
+            if (requestedRunId) {
+                const existingRun = await db.deepScrapeRun.findFirst({
+                    where: {
+                        id: requestedRunId,
+                        locationId,
                     },
-                    flow: 'manual_deep_orchestrator',
-                    options,
-                } as any,
-            },
-        });
+                });
 
-        const runSummary = createEmptyDeepScrapeRunSummary();
+                if (existingRun) {
+                    if (!isDeepScrapeInFlightStatus(existingRun.status)) {
+                        return existingRun;
+                    }
+
+                    const nextMetadata = {
+                        ...((existingRun.metadata as Record<string, unknown> | null) || {}),
+                        trigger: {
+                            source: trigger?.source || existingRun.triggeredBy || 'system',
+                            initiatedByUserId: trigger?.initiatedByUserId || existingRun.triggeredByUserId || null,
+                            queueJobId: trigger?.queueJobId || existingRun.queueJobId || null,
+                            queuedAt: trigger?.queuedAt || existingRun.queuedAt?.toISOString?.() || null,
+                        },
+                        flow: 'manual_deep_orchestrator',
+                        options,
+                    };
+
+                    return db.deepScrapeRun.update({
+                        where: { id: existingRun.id },
+                        data: {
+                            status: 'running',
+                            triggeredBy: trigger?.source || existingRun.triggeredBy || 'system',
+                            triggeredByUserId: trigger?.initiatedByUserId || existingRun.triggeredByUserId || null,
+                            queueJobId: trigger?.queueJobId || existingRun.queueJobId || null,
+                            queuedAt: existingRun.queuedAt || (trigger?.queuedAt ? new Date(trigger.queuedAt) : null),
+                            startedAt: new Date(),
+                            configSnapshot: (existingRun.configSnapshot || configSnapshot) as any,
+                            metadata: nextMetadata as any,
+                        },
+                    });
+                }
+            }
+
+            return db.deepScrapeRun.create({
+                data: {
+                    locationId,
+                    status: 'running',
+                    triggeredBy: trigger?.source || 'system',
+                    triggeredByUserId: trigger?.initiatedByUserId || null,
+                    queueJobId: trigger?.queueJobId || null,
+                    queuedAt: trigger?.queuedAt ? new Date(trigger.queuedAt) : null,
+                    startedAt: new Date(),
+                    configSnapshot: configSnapshot as any,
+                    metadata: {
+                        trigger: {
+                            source: trigger?.source || 'system',
+                            initiatedByUserId: trigger?.initiatedByUserId || null,
+                            queueJobId: trigger?.queueJobId || null,
+                            queuedAt: trigger?.queuedAt || null,
+                        },
+                        flow: 'manual_deep_orchestrator',
+                        options,
+                    } as any,
+                },
+            });
+        })();
+
+        const runSummary = toRunSummaryFromRecord(run);
+
+        if (!isDeepScrapeInFlightStatus(run.status)) {
+            return {
+                runId: run.id,
+                status: run.status,
+                ...runSummary,
+            };
+        }
 
         try {
             const tasks = await db.scrapingTask.findMany({
@@ -207,19 +319,28 @@ export class DeepScrapeOrchestratorService {
                     tasksScanned: tasks.length,
                 },
                 metadata: {
+                    runId: run.id,
+                    queueJobId: run.queueJobId || null,
+                    locationId,
+                    triggeredByUserId: run.triggeredByUserId || null,
                     configSnapshot,
                 },
             });
 
             if (tasks.length === 0) {
                 const completedAt = new Date();
-                await db.deepScrapeRun.update({
-                    where: { id: run.id },
+                await db.deepScrapeRun.updateMany({
+                    where: { id: run.id, status: { in: ['queued', 'running'] } },
                     data: {
                         status: 'completed',
                         completedAt,
                         ...runSummary,
                     },
+                });
+
+                const latestRun = await db.deepScrapeRun.findUnique({
+                    where: { id: run.id },
+                    select: { status: true },
                 });
 
                 await this.logStage(run.id, locationId, {
@@ -233,7 +354,7 @@ export class DeepScrapeOrchestratorService {
 
                 return {
                     runId: run.id,
-                    status: 'completed',
+                    status: latestRun?.status || 'completed',
                     ...runSummary,
                 };
             }
@@ -695,8 +816,8 @@ export class DeepScrapeOrchestratorService {
             const completedAt = new Date();
             const runStatus = runSummary.errorsTotal > 0 ? 'partial' : 'completed';
 
-            await db.deepScrapeRun.update({
-                where: { id: run.id },
+            await db.deepScrapeRun.updateMany({
+                where: { id: run.id, status: { in: ['queued', 'running'] } },
                 data: {
                     status: runStatus,
                     completedAt,
@@ -704,10 +825,16 @@ export class DeepScrapeOrchestratorService {
                 },
             });
 
+            const latestRun = await db.deepScrapeRun.findUnique({
+                where: { id: run.id },
+                select: { status: true },
+            });
+            const effectiveStatus = latestRun?.status || runStatus;
+
             await this.logStage(run.id, locationId, {
                 stage: 'run_completed',
-                status: runStatus === 'completed' ? 'success' : 'warning',
-                message: `Deep orchestration ${runStatus}.`,
+                status: effectiveStatus === 'completed' ? 'success' : 'warning',
+                message: `Deep orchestration ${effectiveStatus}.`,
                 counters: {
                     tasksScanned: runSummary.tasksScanned,
                     tasksStarted: runSummary.tasksStarted,
@@ -719,11 +846,17 @@ export class DeepScrapeOrchestratorService {
                     portfolioListingsDeepScraped: runSummary.portfolioListingsDeepScraped,
                     errorsTotal: runSummary.errorsTotal,
                 },
+                metadata: {
+                    runId: run.id,
+                    queueJobId: run.queueJobId || null,
+                    locationId,
+                    triggeredByUserId: run.triggeredByUserId || null,
+                },
             });
 
             return {
                 runId: run.id,
-                status: runStatus,
+                status: effectiveStatus,
                 ...runSummary,
             };
         } catch (error: any) {
@@ -731,8 +864,8 @@ export class DeepScrapeOrchestratorService {
             const category = categorizeScrapeError(error);
             addError(runSummary, category);
 
-            await db.deepScrapeRun.update({
-                where: { id: run.id },
+            await db.deepScrapeRun.updateMany({
+                where: { id: run.id, status: { in: ['queued', 'running'] } },
                 data: {
                     status: 'failed',
                     completedAt,
@@ -746,7 +879,13 @@ export class DeepScrapeOrchestratorService {
                 status: 'error',
                 reasonCode: 'task_error',
                 message: `Deep orchestration failed: ${error?.message || 'Unknown error'}`,
-                metadata: { category },
+                metadata: {
+                    runId: run.id,
+                    queueJobId: run.queueJobId || null,
+                    locationId,
+                    triggeredByUserId: run.triggeredByUserId || null,
+                    category,
+                },
             });
 
             throw error;
@@ -822,6 +961,12 @@ export class DeepScrapeOrchestratorService {
         locationId: string,
         payload: DeepScrapeStageLog & { taskId?: string },
     ) {
+        const metadata = {
+            runId,
+            locationId,
+            ...(payload.metadata || {}),
+        };
+
         await db.deepScrapeRunStage.create({
             data: {
                 runId,
@@ -832,7 +977,7 @@ export class DeepScrapeOrchestratorService {
                 reasonCode: payload.reasonCode as StageReasonCode | null,
                 message: payload.message || null,
                 counters: (payload.counters || null) as any,
-                metadata: (payload.metadata || null) as any,
+                metadata: metadata as any,
             },
         });
     }

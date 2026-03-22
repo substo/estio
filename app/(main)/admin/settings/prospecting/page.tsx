@@ -4,6 +4,7 @@ import {
     getScrapingRuns,
     getScrapingRunOverview,
     getDeepScrapeRuns,
+    getDeepScrapeQueueDiagnostics,
     getDeepScrapeRunOverview,
 } from './actions';
 import db from '@/lib/db';
@@ -26,12 +27,13 @@ export default async function ProspectingSettingsPage() {
     const locationId = user?.locations?.[0]?.id;
     if (!locationId) return <div>Unauthorized</div>;
 
-    const [connections, tasks, runOverview, deepRunOverview, deepRuns] = await Promise.all([
+    const [connections, tasks, runOverview, deepRunOverview, deepRuns, deepQueueDiagnostics] = await Promise.all([
         getScrapingConnections(locationId),
         getScrapingTasks(locationId),
         getScrapingRunOverview(locationId, 24),
         getDeepScrapeRunOverview(locationId, 24),
         getDeepScrapeRuns(locationId, 20),
+        getDeepScrapeQueueDiagnostics(locationId),
     ]);
 
     // Fetch run history for all tasks in parallel
@@ -90,6 +92,7 @@ export default async function ProspectingSettingsPage() {
                 locationId={locationId}
                 overview={deepRunOverview}
                 initialRuns={deepRuns as any}
+                initialDiagnostics={deepQueueDiagnostics}
             />
 
             {runOverview.topFailingTasks.length > 0 && (

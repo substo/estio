@@ -25,6 +25,66 @@ export type StageReasonCode = (typeof STAGE_REASON_CODES)[number];
 
 export type DeepScrapeErrorCategory = 'auth' | 'network' | 'extraction' | 'unknown';
 
+export const DEEP_SCRAPE_RUN_STATUSES = [
+    'queued',
+    'running',
+    'completed',
+    'partial',
+    'failed',
+    'cancelled',
+] as const;
+
+export type DeepScrapeRunStatus = (typeof DEEP_SCRAPE_RUN_STATUSES)[number];
+export type DeepScrapeInFlightStatus = Extract<DeepScrapeRunStatus, 'queued' | 'running'>;
+export type DeepScrapeTerminalStatus = Exclude<DeepScrapeRunStatus, DeepScrapeInFlightStatus>;
+
+const TERMINAL_DEEP_RUN_STATUSES = new Set<DeepScrapeRunStatus>([
+    'completed',
+    'partial',
+    'failed',
+    'cancelled',
+]);
+
+const DEEP_RUN_TRANSITION_MAP: Record<DeepScrapeRunStatus, Set<DeepScrapeRunStatus>> = {
+    queued: new Set(['running', 'failed', 'cancelled']),
+    running: new Set(['completed', 'partial', 'failed', 'cancelled']),
+    completed: new Set([]),
+    partial: new Set([]),
+    failed: new Set([]),
+    cancelled: new Set([]),
+};
+
+export function isDeepScrapeTerminalStatus(status: string): status is DeepScrapeTerminalStatus {
+    return TERMINAL_DEEP_RUN_STATUSES.has(status as DeepScrapeRunStatus);
+}
+
+export function isDeepScrapeInFlightStatus(status: string): status is DeepScrapeInFlightStatus {
+    return status === 'queued' || status === 'running';
+}
+
+export function canTransitionDeepScrapeRunStatus(
+    fromStatus: string,
+    toStatus: string,
+): boolean {
+    if (fromStatus === toStatus) return true;
+    if (!DEEP_SCRAPE_RUN_STATUSES.includes(fromStatus as DeepScrapeRunStatus)) return false;
+    if (!DEEP_SCRAPE_RUN_STATUSES.includes(toStatus as DeepScrapeRunStatus)) return false;
+
+    const allowedTransitions = DEEP_RUN_TRANSITION_MAP[fromStatus as DeepScrapeRunStatus];
+    return allowedTransitions.has(toStatus as DeepScrapeRunStatus);
+}
+
+export function isQueuedRunStale(
+    queuedAt: Date | string | null | undefined,
+    nowMs = Date.now(),
+    thresholdMs = 60_000,
+): boolean {
+    if (!queuedAt) return false;
+    const queuedTimestamp = new Date(queuedAt).getTime();
+    if (!Number.isFinite(queuedTimestamp)) return false;
+    return nowMs - queuedTimestamp >= thresholdMs;
+}
+
 export interface DeepScrapeRunSummary {
     tasksScanned: number;
     tasksStarted: number;
