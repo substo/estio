@@ -571,6 +571,7 @@ Each portal connector follows the same `ScrapingTarget` + `ListingScraperService
 Scraping is an inherently long-running task that is prone to network timeouts and anti-bot bans. Running it synchronously in a Next.js API route is an anti-pattern.
 
 `lib/queue/scraping-queue.ts` implements a dedicated BullMQ queue specifically for scraping isolated targets. Worker startup is now role-gated by `PROCESS_ROLE` (`web` vs `scrape-worker`) via `instrumentation.ts`, so production web processes do not consume scraping jobs.
+- **Headless Worker Runtime:** production scrape worker is launched via `npm run start:scrape-worker` (instrumentation bootstrap only), not `next start`.
 - **Worker Concurrency**: 1 (Processes one target at a time to prevent server IP bans)
 - **Rate Limit**: 1 job per 5 seconds globally.
 - **Retries**: Configured to 1 attempt initially to prevent spamming failing target sites automatically.
@@ -634,10 +635,13 @@ Flow:
 | `app/api/admin/prospecting/deep-runs/stream/route.ts` | **[NEW]** SSE stream endpoint for live deep-run status, stage, and diagnostics snapshots |
 | `app/api/admin/prospecting/deep-runs/diagnostics/route.ts` | **[NEW]** Admin diagnostics endpoint for worker heartbeat + queue depth + recent failures |
 | `prisma/migrations/20260322113000_deep_scrape_orchestrator/migration.sql` | **[NEW]** Deep run history tables + status backfill (`REVIEWED -> REVIEWING`) |
+| `prisma/migrations/20260322170000_deep_scrape_queued_startedat_backfill/migration.sql` | **[NEW]** Backfill queued deep runs so `startedAt` is null until worker transition to `running` |
 | `lib/scraping/deep-scraper.ts` | **[LEGACY COMPATIBILITY]** Status transition kept compatible with triage/import lifecycle (`REVIEWING`), no longer primary deep orchestration path |
 | `lib/queue/scraping-queue.ts` | **[NEW]** BullMQ queue/worker with trigger-context propagation, deep-run lifecycle correlation, shutdown safety, and heartbeat diagnostics |
 | `instrumentation.ts` | **[MODIFY]** Queue bootstrap role-gated by `PROCESS_ROLE` to isolate web and scrape-worker runtimes |
-| `deploy-local-build.sh` | **[MODIFY]** Blue/green web deploy now starts web role explicitly and maintains a dedicated `estio-scrape-worker` PM2 process |
+| `scripts/start-scrape-worker.js` | **[NEW]** Headless scrape worker bootstrap (loads built instrumentation, initializes queue workers, no HTTP server binding) |
+| `deploy-local-build.sh` | **[MODIFY]** Enforced production deploy path with unmanaged-process preflight guardrail, dedicated headless scrape-worker startup, and worker readiness gating |
+| `deploy.sh` + `deploy-direct.sh` | **[MODIFY]** Marked unsupported for production (hard exit wrapper); use `deploy-local-build.sh` only |
 | `lib/leads/scraped-listing-repository.ts` | **[NEW]** Repository for querying `ScrapedListing` records with prospect data joins |
 | `app/(main)/admin/prospecting/layout.tsx` | **[NEW]** Shared layout with tab navigation between People and Listings Inbox |
 | `app/(main)/admin/prospecting/listings/page.tsx` | **[NEW]** Listings Inbox page |
@@ -696,11 +700,16 @@ This upgrade was implemented to remove production ambiguity where queue consumer
 
 - **Queued-first persistence contract:** deep run rows are created at click-time before enqueue.
 - **Authoritative worker role isolation:** production web processes run with `PROCESS_ROLE=web`; scraping consumption runs in dedicated `PROCESS_ROLE=scrape-worker`.
+- **Headless worker runtime:** scrape worker now boots queue consumers directly (`npm run start:scrape-worker`) instead of `next start`, eliminating HTTP port contention failure modes.
 - **Graceful interruption handling:** active deep runs are marked `cancelled` on worker shutdown signals instead of being left ambiguous.
-- **Structured heartbeat and queue diagnostics:** worker liveness, queue depth, and recent failed jobs are surfaced in admin diagnostics.
+- **Structured heartbeat and queue diagnostics:** worker liveness, readiness, queue depth, and recent failed jobs are surfaced in admin diagnostics.
 - **Realtime delivery:** deep-run monitoring now supports SSE live snapshots with polling fallback.
 - **Immediate UI visibility:** optimistic queued card appears instantly after trigger; UI keeps refreshing while `queued|running`, including short burst refresh right after click.
 - **Stale queued detection:** dashboard warns when queued runs exceed SLA window (worker unavailable/delayed signal).
+- **Fail-safe deploy guardrails:** deploy preflight aborts on unmanaged Node/Next process drift for managed app paths/ports and never auto-kills unknown processes.
+- **Post-start readiness gate:** deploy fails if scrape worker is not both PM2-online and heartbeat-ready.
+- **Queue + warn trigger contract:** manual trigger still queues runs while returning immediate warning metadata when worker readiness is missing.
+- **Lifecycle timestamp correction:** queued runs keep `startedAt = null` until queued->running transition.
 
 ##### How
 
@@ -791,6 +800,7 @@ Implemented stage reason codes include:
 
 - Deep lifecycle now uses actionable inbox statuses (`NEW/REVIEWING/IMPORTED/REJECTED/SKIPPED`) without `REVIEWED`.
 - A one-time backfill migration converts existing `ScrapedListing.status = REVIEWED` to `REVIEWING`.
+- A one-time backfill migration clears `DeepScrapeRun.startedAt` for legacy queued rows created before queued-first timestamp fix.
 - This keeps import/triage queries congruent with deep-processed pending records.
 
 ### 3.2 Enterprise AI Usage Ledger

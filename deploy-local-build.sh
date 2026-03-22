@@ -15,7 +15,7 @@ BLUE_PORT=3001
 GREEN_PORT=3002
 APP_NAME_PREFIX="estio-app"
 SCRAPE_WORKER_APP_NAME="estio-scrape-worker"
-SCRAPE_WORKER_PORT=3010
+LEGACY_SCRAPE_WORKER_PORT=3010
 
 # Keep previous color process alive briefly after traffic switch to reduce abrupt cutovers.
 # Override with DRAIN_SECONDS=0 for immediate cleanup.
@@ -221,7 +221,9 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
     ACTIVE_DIR="$ACTIVE_DIR"
     ACTIVE_COLOR="$ACTIVE_COLOR"
     SCRAPE_WORKER_APP_NAME="$SCRAPE_WORKER_APP_NAME"
-    SCRAPE_WORKER_PORT="$SCRAPE_WORKER_PORT"
+    BLUE_PORT="$BLUE_PORT"
+    GREEN_PORT="$GREEN_PORT"
+    LEGACY_SCRAPE_WORKER_PORT="$LEGACY_SCRAPE_WORKER_PORT"
     DRAIN_SECONDS="$DRAIN_SECONDS"
     SWITCH_SOAK_SECONDS="$SWITCH_SOAK_SECONDS"
     DEPLOY_TOKEN="$DEPLOY_TOKEN"
@@ -229,6 +231,139 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
     CURRENT_DEPLOY_TOKEN_FILE="$CURRENT_DEPLOY_TOKEN_FILE"
 
     mkdir -p "\$DEPLOY_STATE_DIR"
+
+    echo "🔎 Preflight: checking for unmanaged runtime process drift..."
+    if ! ESTIO_MANAGED_BASE_DIR="/home/martin/estio-app" \
+        ESTIO_MANAGED_PORTS="\$BLUE_PORT,\$GREEN_PORT,\$LEGACY_SCRAPE_WORKER_PORT" \
+        ESTIO_MANAGED_PM2_NAMES="\$TARGET_APP_NAME,\$ACTIVE_APP_NAME,\$SCRAPE_WORKER_APP_NAME" \
+        node <<'NODE'
+const { execSync } = require('child_process');
+const fs = require('fs');
+
+const managedBaseDir = process.env.ESTIO_MANAGED_BASE_DIR || '/home/martin/estio-app';
+const managedPorts = new Set(
+    String(process.env.ESTIO_MANAGED_PORTS || '')
+        .split(',')
+        .map((value) => Number(value.trim()))
+        .filter((value) => Number.isFinite(value) && value > 0)
+);
+const managedPm2Names = new Set(
+    String(process.env.ESTIO_MANAGED_PM2_NAMES || '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
+);
+
+let pm2Processes = [];
+try {
+    pm2Processes = JSON.parse(execSync('pm2 jlist', { encoding: 'utf8' }));
+} catch (error) {
+    console.error('Unable to read PM2 process list:', error?.message || error);
+    process.exit(2);
+}
+
+const managedPids = new Set();
+for (const processInfo of pm2Processes) {
+    if (!managedPm2Names.has(processInfo?.name || '')) continue;
+    const pid = Number(processInfo?.pid || 0);
+    if (Number.isFinite(pid) && pid > 0) managedPids.add(pid);
+}
+
+const listenersByPid = new Map();
+try {
+    const ssOutput = execSync('ss -ltnpH 2>/dev/null || true', { encoding: 'utf8' });
+    for (const line of ssOutput.split('\n')) {
+        if (!line.trim()) continue;
+        const portMatch = line.match(/:([0-9]+)\s/);
+        const pidMatch = line.match(/pid=([0-9]+)/);
+        if (!portMatch || !pidMatch) continue;
+        const port = Number(portMatch[1]);
+        const pid = Number(pidMatch[1]);
+        if (!Number.isFinite(port) || !Number.isFinite(pid)) continue;
+        const current = listenersByPid.get(pid) || new Set();
+        current.add(port);
+        listenersByPid.set(pid, current);
+    }
+} catch {
+    // Keep empty listener map on platforms where ss output parsing fails.
+}
+
+const offenders = [];
+const seenKeys = new Set();
+
+function readProcessDetails(pid) {
+    let cwd = '';
+    let cmd = '';
+    try { cwd = fs.readlinkSync(`/proc/${pid}/cwd`); } catch {}
+    try { cmd = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\u0000/g, ' ').trim(); } catch {}
+    if (!cmd) {
+        try {
+            cmd = execSync(`ps -p ${pid} -o args=`, { encoding: 'utf8' }).trim();
+        } catch {}
+    }
+    return { cwd, cmd };
+}
+
+function addOffender(pid, reason) {
+    const key = `${pid}:${reason}`;
+    if (seenKeys.has(key)) return;
+    seenKeys.add(key);
+    const ports = Array.from(listenersByPid.get(pid) || []).filter((port) => managedPorts.has(port));
+    const details = readProcessDetails(pid);
+    offenders.push({
+        pid,
+        reason,
+        ports,
+        cwd: details.cwd || '(unknown)',
+        cmd: details.cmd || '(unknown)',
+    });
+}
+
+for (const [pid, ports] of listenersByPid.entries()) {
+    const hasManagedPort = Array.from(ports).some((port) => managedPorts.has(port));
+    if (hasManagedPort && !managedPids.has(pid)) {
+        addOffender(pid, 'managed_port_listener');
+    }
+}
+
+let psOutput = '';
+try {
+    psOutput = execSync('ps -eo pid=,args= 2>/dev/null || true', { encoding: 'utf8' });
+} catch {}
+
+for (const rawLine of psOutput.split('\n')) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const match = line.match(/^([0-9]+)\s+(.+)$/);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    const cmd = match[2];
+    if (!Number.isFinite(pid) || managedPids.has(pid)) continue;
+    if (!/(node|next-server|next start|npm start)/i.test(cmd)) continue;
+
+    const details = readProcessDetails(pid);
+    const cwdManaged = details.cwd.startsWith(managedBaseDir);
+    const cmdManaged = cmd.includes(managedBaseDir) || details.cmd.includes(managedBaseDir);
+    const hasManagedPort = Array.from(listenersByPid.get(pid) || []).some((port) => managedPorts.has(port));
+
+    if (cwdManaged || cmdManaged || hasManagedPort) {
+        addOffender(pid, 'managed_app_process');
+    }
+}
+
+if (offenders.length > 0) {
+    console.error('Detected unmanaged Node/Next runtime drift on managed paths/ports. Deployment aborted.');
+    console.error(JSON.stringify({ offenders }, null, 2));
+    console.error('Remediation: stop the listed unmanaged PIDs manually, then rerun ./deploy-local-build.sh');
+    process.exit(3);
+}
+
+console.log('✅ No unmanaged runtime drift detected.');
+NODE
+    then
+        echo "❌ Preflight guardrail failed. Aborting deploy before any runtime switch."
+        exit 1
+    fi
 
     echo "▶️  Starting target process \$TARGET_APP_NAME on :\$TARGET_PORT"
     if pm2 describe "\$TARGET_APP_NAME" > /dev/null 2>&1; then
@@ -319,8 +454,132 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
     if pm2 describe "\$SCRAPE_WORKER_APP_NAME" > /dev/null 2>&1; then
         pm2 delete "\$SCRAPE_WORKER_APP_NAME" || true
     fi
-    PORT="\$SCRAPE_WORKER_PORT" NODE_ENV=production PROCESS_ROLE=scrape-worker \
-        pm2 start npm --name "\$SCRAPE_WORKER_APP_NAME" --cwd "\$SYMLINK_PATH" -- start
+    NODE_ENV=production PROCESS_ROLE=scrape-worker \
+        pm2 start npm --name "\$SCRAPE_WORKER_APP_NAME" --cwd "\$SYMLINK_PATH" -- run start:scrape-worker
+
+    echo "🩺 Waiting for scrape worker readiness..."
+    WORKER_READY=0
+    for i in \$(seq 1 45); do
+        if SCRAPE_WORKER_APP_NAME="\$SCRAPE_WORKER_APP_NAME" SCRAPE_WORKER_ENV_PATH="\$SYMLINK_PATH/.env" node <<'NODE'
+const { execSync } = require('child_process');
+const fs = require('fs');
+
+function parseEnvFile(path) {
+    const values = {};
+    if (!path || !fs.existsSync(path)) return values;
+    const content = fs.readFileSync(path, 'utf8');
+    for (const rawLine of content.split('\n')) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith('#')) continue;
+        const index = line.indexOf('=');
+        if (index <= 0) continue;
+        const key = line.slice(0, index).trim();
+        let value = line.slice(index + 1).trim();
+        if (
+            (value.startsWith('"') && value.endsWith('"')) ||
+            (value.startsWith("'") && value.endsWith("'"))
+        ) {
+            value = value.slice(1, -1);
+        }
+        values[key] = value;
+    }
+    return values;
+}
+
+(async () => {
+    const appName = process.env.SCRAPE_WORKER_APP_NAME || 'estio-scrape-worker';
+    const envPath = process.env.SCRAPE_WORKER_ENV_PATH || '';
+
+    let pm2List = [];
+    try {
+        pm2List = JSON.parse(execSync('pm2 jlist', { encoding: 'utf8' }));
+    } catch {
+        process.exit(2);
+    }
+
+    const worker = pm2List.find((entry) => entry && entry.name === appName);
+    const workerPid = Number(worker?.pid || 0);
+    const workerStatus = String(worker?.pm2_env?.status || worker?.status || '');
+    if (workerStatus !== 'online' || !Number.isFinite(workerPid) || workerPid <= 0) {
+        process.exit(3);
+    }
+
+    const envValues = parseEnvFile(envPath);
+    const redisHost = envValues.REDIS_HOST || process.env.REDIS_HOST || '127.0.0.1';
+    const redisPortRaw = envValues.REDIS_PORT || process.env.REDIS_PORT || '6379';
+    const redisPort = Number(redisPortRaw);
+    if (!Number.isFinite(redisPort) || redisPort <= 0) {
+        process.exit(4);
+    }
+
+    const Redis = require('ioredis');
+    const redis = new Redis({ host: redisHost, port: redisPort, lazyConnect: true });
+
+    try {
+        await redis.connect();
+        const pattern = 'scraping-worker:heartbeat:instance:*';
+        let cursor = '0';
+        const keys = [];
+        do {
+            const [nextCursor, batch] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+            cursor = nextCursor;
+            for (const key of batch) keys.push(key);
+        } while (cursor !== '0');
+
+        if (keys.length === 0) {
+            process.exit(5);
+        }
+
+        const values = await redis.mget(...keys);
+        const now = Date.now();
+        let hasReadyHeartbeat = false;
+
+        for (const value of values) {
+            if (!value) continue;
+            try {
+                const payload = JSON.parse(value);
+                const role = String(payload?.role || '');
+                const updatedAtMs = new Date(payload?.updatedAt || '').getTime();
+                const ageMs = now - updatedAtMs;
+                if ((role === 'scrape-worker' || role === 'all') && Number.isFinite(ageMs) && ageMs <= 60_000) {
+                    hasReadyHeartbeat = true;
+                    break;
+                }
+            } catch {
+                // Ignore malformed heartbeat payloads.
+            }
+        }
+
+        if (!hasReadyHeartbeat) {
+            process.exit(6);
+        }
+
+        process.exit(0);
+    } catch {
+        process.exit(7);
+    } finally {
+        try {
+            await redis.quit();
+        } catch {
+            redis.disconnect();
+        }
+    }
+})();
+NODE
+        then
+            WORKER_READY=1
+            echo "✅ Scrape worker is online and heartbeat-ready"
+            break
+        fi
+        sleep 1
+    done
+
+    if [ "\$WORKER_READY" -ne 1 ]; then
+        echo "❌ Scrape worker failed readiness checks (PM2 online + heartbeat)."
+        pm2 describe "\$SCRAPE_WORKER_APP_NAME" || true
+        pm2 logs "\$SCRAPE_WORKER_APP_NAME" --lines 120 --nostream || true
+        exit 1
+    fi
 
     # Mark this deployment as current so stale delayed cleanup jobs become no-ops.
     printf "%s\n" "\$DEPLOY_TOKEN" > "\$CURRENT_DEPLOY_TOKEN_FILE"

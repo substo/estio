@@ -241,6 +241,9 @@ export class DeepScrapeOrchestratorService {
                         flow: 'manual_deep_orchestrator',
                         options,
                     };
+                    const startedAtForUpdate = existingRun.status === 'queued'
+                        ? new Date()
+                        : (existingRun.startedAt || new Date());
 
                     return db.deepScrapeRun.update({
                         where: { id: existingRun.id },
@@ -250,7 +253,7 @@ export class DeepScrapeOrchestratorService {
                             triggeredByUserId: trigger?.initiatedByUserId || existingRun.triggeredByUserId || null,
                             queueJobId: trigger?.queueJobId || existingRun.queueJobId || null,
                             queuedAt: existingRun.queuedAt || (trigger?.queuedAt ? new Date(trigger.queuedAt) : null),
-                            startedAt: new Date(),
+                            startedAt: startedAtForUpdate,
                             configSnapshot: (existingRun.configSnapshot || configSnapshot) as any,
                             metadata: nextMetadata as any,
                         },

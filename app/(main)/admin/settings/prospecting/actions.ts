@@ -60,6 +60,7 @@ export interface DeepScrapeRunOverview {
 export interface DeepScrapeQueueDiagnostics {
     generatedAt: string;
     workerAlive: boolean;
+    workerReady: boolean;
     workerHeartbeatAgeSeconds: number | null;
     activeWorkers: Array<{
         instanceId: string;
@@ -89,6 +90,10 @@ export interface DeepScrapeQueueDiagnostics {
 export interface ManualDeepScrapeTriggerResult {
     runId: string;
     status: 'queued';
+    warning?: {
+        code: 'worker_unavailable';
+        message: string;
+    } | null;
     run: {
         id: string;
         createdAt: string;
@@ -406,6 +411,18 @@ export async function manualTriggerDeepScrape(
         },
     };
 
+    // One-time hygiene backfill safety: queued runs should not have startedAt.
+    await db.deepScrapeRun.updateMany({
+        where: {
+            locationId,
+            status: 'queued',
+            startedAt: { not: null },
+        },
+        data: {
+            startedAt: null,
+        },
+    });
+
     const run = await db.deepScrapeRun.create({
         data: {
             locationId,
@@ -413,7 +430,6 @@ export async function manualTriggerDeepScrape(
             triggeredBy: 'manual',
             triggeredByUserId: userId || null,
             queuedAt,
-            startedAt: queuedAt,
             configSnapshot: deepScrapeConfig as any,
             metadata: {
                 trigger: {
@@ -456,57 +472,103 @@ export async function manualTriggerDeepScrape(
         });
 
         const queueJobId = String(job?.id ?? '');
-        const updatedRun = await db.deepScrapeRun.update({
-            where: { id: run.id },
-            data: {
-                queueJobId: queueJobId || null,
-                metadata: {
-                    trigger: {
-                        source: 'manual',
-                        initiatedByUserId: userId || null,
-                        queuedAt: queuedAt.toISOString(),
-                        queueJobId: queueJobId || null,
-                    },
-                    flow: 'manual_deep_orchestrator',
-                    orchestration: deepScrapeConfig,
-                } as any,
-            },
-            include: {
-                stages: {
-                    orderBy: { createdAt: 'desc' },
-                    take: 60,
+        const [updatedRun, diagnostics] = await Promise.all([
+            db.deepScrapeRun.update({
+                where: { id: run.id },
+                data: {
+                    queueJobId: queueJobId || null,
+                    metadata: {
+                        trigger: {
+                            source: 'manual',
+                            initiatedByUserId: userId || null,
+                            queuedAt: queuedAt.toISOString(),
+                            queueJobId: queueJobId || null,
+                        },
+                        flow: 'manual_deep_orchestrator',
+                        orchestration: deepScrapeConfig,
+                    } as any,
                 },
-            },
-        });
+                include: {
+                    stages: {
+                        orderBy: { createdAt: 'desc' },
+                        take: 60,
+                    },
+                },
+            }),
+            getScrapingQueueDiagnostics().catch(() => null),
+        ]);
+
+        const workerUnavailableWarning = diagnostics && !diagnostics.workerReady
+            ? {
+                code: 'worker_unavailable' as const,
+                message: 'Deep scrape was queued, but no healthy scrape worker heartbeat is currently detected.',
+            }
+            : null;
+
+        if (workerUnavailableWarning) {
+            await db.deepScrapeRunStage.create({
+                data: {
+                    runId: run.id,
+                    locationId,
+                    stage: 'worker_unavailable_warning',
+                    status: 'warning',
+                    reasonCode: 'task_error',
+                    message: workerUnavailableWarning.message,
+                    metadata: {
+                        runId: run.id,
+                        locationId,
+                        queueJobId: queueJobId || null,
+                        workerAlive: diagnostics?.workerAlive ?? null,
+                        workerReady: diagnostics?.workerReady ?? null,
+                        workerHeartbeatAgeSeconds: diagnostics?.workerHeartbeatAgeSeconds ?? null,
+                    } as any,
+                },
+            });
+        }
+
+        const refreshedRun = workerUnavailableWarning
+            ? await db.deepScrapeRun.findUnique({
+                where: { id: run.id },
+                include: {
+                    stages: {
+                        orderBy: { createdAt: 'desc' },
+                        take: 60,
+                    },
+                },
+            })
+            : updatedRun;
+
+        const runPayload = refreshedRun || updatedRun;
 
         revalidatePath('/admin/settings/prospecting');
 
         return {
-            runId: updatedRun.id,
+            runId: runPayload.id,
             status: 'queued',
+            warning: workerUnavailableWarning,
             run: {
-                id: updatedRun.id,
-                createdAt: updatedRun.createdAt.toISOString(),
-                status: updatedRun.status,
-                queuedAt: updatedRun.queuedAt ? updatedRun.queuedAt.toISOString() : null,
-                completedAt: updatedRun.completedAt ? updatedRun.completedAt.toISOString() : null,
-                triggeredBy: updatedRun.triggeredBy || null,
-                triggeredByUserId: updatedRun.triggeredByUserId || null,
-                queueJobId: updatedRun.queueJobId || null,
-                seedListingsFound: updatedRun.seedListingsFound,
-                contactsWithPhone: updatedRun.contactsWithPhone,
-                contactsWithoutPhone: updatedRun.contactsWithoutPhone,
-                portfolioListingsDeepScraped: updatedRun.portfolioListingsDeepScraped,
-                omittedAgency: updatedRun.omittedAgency,
-                omittedUncertain: updatedRun.omittedUncertain,
-                omittedMissingPhone: updatedRun.omittedMissingPhone,
-                omittedNonRealEstate: updatedRun.omittedNonRealEstate,
-                omittedDuplicate: updatedRun.omittedDuplicate,
-                omittedBudgetExhausted: updatedRun.omittedBudgetExhausted,
-                errorsTotal: updatedRun.errorsTotal,
-                errorLog: updatedRun.errorLog || null,
-                configSnapshot: (updatedRun.configSnapshot as Record<string, unknown> | null) ?? null,
-                stages: (updatedRun.stages || []).map((stage) => ({
+                id: runPayload.id,
+                createdAt: runPayload.createdAt.toISOString(),
+                status: runPayload.status,
+                queuedAt: runPayload.queuedAt ? runPayload.queuedAt.toISOString() : null,
+                completedAt: runPayload.completedAt ? runPayload.completedAt.toISOString() : null,
+                triggeredBy: runPayload.triggeredBy || null,
+                triggeredByUserId: runPayload.triggeredByUserId || null,
+                queueJobId: runPayload.queueJobId || null,
+                seedListingsFound: runPayload.seedListingsFound,
+                contactsWithPhone: runPayload.contactsWithPhone,
+                contactsWithoutPhone: runPayload.contactsWithoutPhone,
+                portfolioListingsDeepScraped: runPayload.portfolioListingsDeepScraped,
+                omittedAgency: runPayload.omittedAgency,
+                omittedUncertain: runPayload.omittedUncertain,
+                omittedMissingPhone: runPayload.omittedMissingPhone,
+                omittedNonRealEstate: runPayload.omittedNonRealEstate,
+                omittedDuplicate: runPayload.omittedDuplicate,
+                omittedBudgetExhausted: runPayload.omittedBudgetExhausted,
+                errorsTotal: runPayload.errorsTotal,
+                errorLog: runPayload.errorLog || null,
+                configSnapshot: (runPayload.configSnapshot as Record<string, unknown> | null) ?? null,
+                stages: (runPayload.stages || []).map((stage) => ({
                     id: stage.id,
                     createdAt: stage.createdAt.toISOString(),
                     taskId: stage.taskId || null,

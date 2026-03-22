@@ -1992,7 +1992,7 @@ model DeepScrapeRun {
   triggeredByUserId String?
   queueJobId      String?
   queuedAt        DateTime?
-  startedAt       DateTime  @default(now())
+  startedAt       DateTime?
   completedAt     DateTime?
   errorLog        String?   @db.Text
   configSnapshot  Json?

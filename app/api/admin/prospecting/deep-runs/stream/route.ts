@@ -23,6 +23,7 @@ function buildSnapshotFingerprint(payload: {
     }>;
     diagnostics: {
         workerAlive: boolean;
+        workerReady: boolean;
         workerHeartbeatAgeSeconds: number | null;
         queueDepth: {
             waiting: number;
@@ -137,6 +138,7 @@ export async function GET(req: NextRequest) {
                         runs: snapshot.runs,
                         diagnostics: {
                             workerAlive: snapshot.diagnostics.workerAlive,
+                            workerReady: snapshot.diagnostics.workerReady,
                             workerHeartbeatAgeSeconds: snapshot.diagnostics.workerHeartbeatAgeSeconds,
                             queueDepth: snapshot.diagnostics.queueDepth,
                             recentFailedJobs: snapshot.diagnostics.recentFailedJobs.map((job) => ({

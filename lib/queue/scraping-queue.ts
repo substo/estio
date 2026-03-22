@@ -30,6 +30,10 @@ interface WorkerHeartbeatPayload {
     updatedAt: string;
 }
 
+function isScrapeWorkerRole(role: string | null | undefined): boolean {
+    return role === 'scrape-worker' || role === 'all';
+}
+
 interface ActiveDeepRunContext {
     runId: string;
     locationId: string;
@@ -52,6 +56,7 @@ export interface ScrapingJobData {
 export interface ScrapingQueueDiagnostics {
     generatedAt: string;
     workerAlive: boolean;
+    workerReady: boolean;
     workerHeartbeatAgeSeconds: number | null;
     activeWorkers: Array<{
         instanceId: string;
@@ -342,8 +347,9 @@ export async function getScrapingQueueDiagnostics(): Promise<ScrapingQueueDiagno
         queue.getJobs(['failed'], 0, MAX_FAILED_JOB_DIAGNOSTICS - 1, true),
     ]);
 
+    const readyWorkers = heartbeats.filter((workerHeartbeat) => isScrapeWorkerRole(workerHeartbeat.role));
     const now = Date.now();
-    const freshestHeartbeat = heartbeats[0];
+    const freshestHeartbeat = readyWorkers[0] || heartbeats[0];
     const heartbeatAgeSeconds = freshestHeartbeat
         ? Math.max(0, Math.floor((now - new Date(freshestHeartbeat.updatedAt).getTime()) / 1000))
         : null;
@@ -351,6 +357,7 @@ export async function getScrapingQueueDiagnostics(): Promise<ScrapingQueueDiagno
     return {
         generatedAt: new Date().toISOString(),
         workerAlive: heartbeats.length > 0,
+        workerReady: readyWorkers.length > 0,
         workerHeartbeatAgeSeconds: heartbeatAgeSeconds,
         activeWorkers: heartbeats.map((workerHeartbeat) => ({
             instanceId: workerHeartbeat.instanceId,

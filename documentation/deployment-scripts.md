@@ -1,11 +1,12 @@
 # Deployment Scripts Guide
 
-**Last Updated:** 2026-02-27
+**Last Updated:** 2026-03-22
 
 This project uses a Blue/Green deployment layout on the production server:
 
 - `estio-app-blue` on port `3001`
 - `estio-app-green` on port `3002`
+- `estio-scrape-worker` as a dedicated headless BullMQ consumer (no HTTP port binding)
 - Symlink `estio-app` points to the currently live slot
 - Caddy routes public traffic to the active slot
 
@@ -26,17 +27,32 @@ What it does:
 7. Runs `npm ci --omit=dev --legacy-peer-deps` and `npx prisma@6.19.0 generate` on target.
 8. Starts the target PM2 process and health-checks `http://127.0.0.1:<target-port>/api/health`.
 9. Updates Caddy upstream to target port and reloads Caddy.
-10. Keeps old slot running for a drain window, then deletes it.
+10. Starts dedicated scrape worker via `npm run start:scrape-worker` (headless runtime).
+11. Verifies scrape worker readiness (`pm2 online` + fresh Redis heartbeat) before completing deploy.
+12. Keeps old slot running for a drain window, then deletes it.
 
 ### Runtime Start Behavior (Important)
 
-`deploy-local-build.sh` starts Next.js with:
+`deploy-local-build.sh` starts web slots with:
 
 ```bash
 pm2 start npm --name <estio-app-color> -- start
 ```
 
-It intentionally **does not** pass `-H 127.0.0.1`.
+It starts the dedicated scraping worker with:
+
+```bash
+pm2 start npm --name estio-scrape-worker --cwd /home/martin/estio-app -- run start:scrape-worker
+```
+
+This worker does not run `next start` and does not bind an HTTP port.
+
+### Deploy Guardrails (Fail-Safe)
+
+- Preflight blocks deploy when unmanaged Node/Next processes are detected on managed app paths or managed ports.
+- The script does **not** auto-kill unknown processes.
+- Operator must clean offending PIDs and rerun deploy.
+- Deploy fails hard if scrape worker readiness cannot be proven after start.
 
 ### Optional Evolution Restart
 
@@ -64,15 +80,9 @@ DRAIN_SECONDS=0 ./deploy-local-build.sh
 
 ## Other Scripts
 
-## `deploy-direct.sh`
+## `deploy-direct.sh` and `deploy.sh`
 
-Local-to-server deploy path for full/quick server-side workflows.
-
-## `deploy.sh`
-
-GitHub-to-server deploy path.
-
-> Keep `deploy-direct.sh` and `deploy.sh` aligned when changing env blocks, PM2 args, or Caddy behavior.
+These scripts are now intentionally blocked for production use and exit with an instruction to use `deploy-local-build.sh`.
 
 ## Blue/Green Cutover Sequence
 
@@ -118,6 +128,7 @@ Check PM2 process state:
 ssh root@138.199.214.117 "pm2 list"
 ssh root@138.199.214.117 "pm2 describe estio-app-blue"
 ssh root@138.199.214.117 "pm2 describe estio-app-green"
+ssh root@138.199.214.117 "pm2 describe estio-scrape-worker"
 ```
 
 Tail logs (active slot):
@@ -125,6 +136,7 @@ Tail logs (active slot):
 ```bash
 ssh root@138.199.214.117 "pm2 logs estio-app-blue --lines 120 --nostream"
 ssh root@138.199.214.117 "pm2 logs estio-app-green --lines 120 --nostream"
+ssh root@138.199.214.117 "pm2 logs estio-scrape-worker --lines 120 --nostream"
 ```
 
 ## Operational Notes

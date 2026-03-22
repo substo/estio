@@ -182,6 +182,7 @@ export function DeepRunsPanel({
     const [loadingDetailsRunId, setLoadingDetailsRunId] = useState<string | null>(null);
     const [sseConnected, setSseConnected] = useState(false);
     const [sseFallbackMessage, setSseFallbackMessage] = useState<string | null>(null);
+    const [triggerWarningMessage, setTriggerWarningMessage] = useState<string | null>(null);
 
     const hasInFlight = useMemo(
         () => runs.some((run) => isInFlightStatus(run.status)),
@@ -195,7 +196,7 @@ export function DeepRunsPanel({
         () => runs.filter((run) => run.status === 'queued' && isQueuedRunStale(run.queuedAt || run.createdAt)).length,
         [runs],
     );
-    const showWorkerUnavailableWarning = staleQueuedCount > 0 && !diagnostics.workerAlive;
+    const showWorkerUnavailableWarning = staleQueuedCount > 0 && !diagnostics.workerReady;
 
     const refresh = useCallback(async () => {
         try {
@@ -252,6 +253,9 @@ export function DeepRunsPanel({
             if (detail?.run?.id) {
                 setRuns((prev) => mergeRunById(prev, detail.run as unknown as DeepScrapeRun));
             }
+            if (detail?.warning?.message) {
+                setTriggerWarningMessage(detail.warning.message);
+            }
 
             void refresh();
             setTimeout(() => void refresh(), 2000);
@@ -261,6 +265,14 @@ export function DeepRunsPanel({
         window.addEventListener('deep-run-queued', handler);
         return () => window.removeEventListener('deep-run-queued', handler);
     }, [refresh]);
+
+    useEffect(() => {
+        if (!triggerWarningMessage) return;
+        const timeout = setTimeout(() => {
+            setTriggerWarningMessage(null);
+        }, 12_000);
+        return () => clearTimeout(timeout);
+    }, [triggerWarningMessage]);
 
     useEffect(() => {
         let source: EventSource | null = null;
@@ -352,6 +364,12 @@ export function DeepRunsPanel({
                 </div>
             )}
 
+            {triggerWarningMessage && (
+                <div className="mb-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-300">
+                    {triggerWarningMessage}
+                </div>
+            )}
+
             {showWorkerUnavailableWarning && (
                 <div className="mb-3 rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] text-red-700 dark:text-red-300 flex items-start gap-2">
                     <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
@@ -392,8 +410,8 @@ export function DeepRunsPanel({
             <div className="mb-4 grid gap-2 sm:grid-cols-3 lg:grid-cols-6 text-[11px]">
                 <div className="rounded border bg-background px-2 py-1.5">
                     <span className="text-muted-foreground">Worker</span>
-                    <div className={diagnostics.workerAlive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
-                        {diagnostics.workerAlive ? 'Online' : 'Offline'}
+                    <div className={diagnostics.workerReady ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
+                        {diagnostics.workerReady ? 'Ready' : 'Unavailable'}
                     </div>
                 </div>
                 <div className="rounded border bg-background px-2 py-1.5">

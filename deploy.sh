@@ -6,6 +6,10 @@
 
 set -e
 
+echo "❌ deploy.sh is no longer supported for production deploys."
+echo "Use ./deploy-local-build.sh as the single enforced deploy path."
+exit 1
+
 SERVER="root@138.199.214.117"
 REPO_URL="git@github.com:martingreen/estio-app.git"
 BASE_DIR="/home/martin"

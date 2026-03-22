@@ -6,6 +6,10 @@
 
 set -e
 
+echo "❌ deploy-direct.sh is no longer supported for production deploys."
+echo "Use ./deploy-local-build.sh as the single enforced deploy path."
+exit 1
+
 SERVER="root@138.199.214.117"
 BASE_DIR="/home/martin"
 SYMLINK_NAME="estio-app"

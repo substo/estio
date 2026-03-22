@@ -19,6 +19,9 @@ export function RunDeepScraperButton({ locationId }: { locationId: string }) {
                 window.dispatchEvent(new CustomEvent('deep-run-queued', { detail: result }));
             }
             toast.success(`Deep scrape queued (run ${result.runId.slice(0, 8)}).`);
+            if (result.warning?.message) {
+                toast.warning(result.warning.message);
+            }
             router.refresh();
         } catch (error: any) {
             toast.error(error.message || 'Failed to queue deep scraping task');
