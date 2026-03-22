@@ -65,7 +65,12 @@ To better manage scraping complexity and avoid IP bans, the data model is split 
 
 ### Run History UI
 
-Each scheduled or manually triggered run emits a `ScrapingRun` record. The Admin UI features an expandable **Run History Panel** for each task card that displays these records in real-time. This provides immediate observability into pages scraped, listings found, and surfaces any error stack traces without needing to check server logs.
+Each scheduled or manually triggered run emits a `ScrapingRun` record. The Admin UI now includes:
+- **24h KPI cards** (total runs, success rate, failed/partial, running, avg/p95 duration, top failing tasks).
+- An expandable **Run History Panel** per task card with status chips, trigger source (manual vs cron), flow mode (`strategic_contact_first` vs `standard`), interaction budget usage, and structured metadata/error details.
+- **Partial-run semantics:** runs that finish with recoverable errors are stored as `partial` (instead of always `completed`) so operators can distinguish clean vs degraded executions.
+
+This gives immediate observability into scraping health without checking server logs.
 
 #### Data Model
 
@@ -569,14 +574,15 @@ Scraping is an inherently long-running task that is prone to network timeouts an
 - **Worker Concurrency**: 1 (Processes one target at a time to prevent server IP bans)
 - **Rate Limit**: 1 job per 5 seconds globally.
 - **Retries**: Configured to 1 attempt initially to prevent spamming failing target sites automatically.
+- **Run Correlation Metadata:** queue payload now carries trigger context (`triggeredBy`, `triggeredByUserId`, `queuedAt`) so each worker execution can be traced end-to-end in `ScrapingRun.metadata`.
 
 ### Manual Scrape Trigger ("Run Now")
 
 In addition to scheduled cron runs, tasks can be triggered manually from the Admin UI.
 
-- **`ScrapingJobData`** now accepts an optional `pageLimit?: number` field.
+- **`ScrapingJobData`** accepts `pageLimit?: number` plus trigger context fields (`triggeredBy`, `triggeredByUserId`, `queuedAt`).
 - **`ListingScraperService.scrapeTask()`** accepts `options?: { pageLimit?: number }` — this caps `MAX_DEPTH` for the pagination loop, overriding the task's `maxPagesPerRun` default.
-- **`manualTriggerScrape(taskId, locationId, pageLimit?)`** server action enqueues the task into BullMQ with the selected page limit.
+- **`manualTriggerScrape(taskId, locationId, pageLimit?)`** server action enqueues the task with the selected page limit and source metadata (`manual` + actor id) for auditing.
 - **`RunScraperButton`** — a client component rendered on each task card in the Admin UI, providing a dropdown with:
   - **Scrape 1 Page (Test Run)** — ideal for verifying selectors work.
   - **Scrape 5 Pages** — quick validation with broader data.
@@ -597,7 +603,7 @@ GET /api/cron/scrape-listings
 
 Flow:
   1. Fetch active ScrapingTargets where nextRunDue <= now()
-  2. For each target, push job params onto BullMQ `scrapingQueue`
+  2. For each target, push job params onto BullMQ `scrapingQueue` with `triggeredBy = "cron"` and timestamp context
   3. Return summary JSON of enqueued jobs immediately.
 ```
 
@@ -613,11 +619,13 @@ Flow:
 | `lib/scraping/page-fetcher.ts` | **[NEW]** Playwright/cheerio page fetcher |
 | `app/api/admin/save-listing/route.ts` | **[NEW]** Save partial scrape data endpoint |
 | `app/api/cron/scrape-listings/route.ts` | **[NEW]** Cron endpoint |
-| `app/(main)/admin/settings/prospecting/page.tsx` | **[NEW]** Scraping target admin UI |
-| `app/(main)/admin/settings/prospecting/actions.ts` | **[NEW]** CRUD for ScrapingTarget |
+| `app/(main)/admin/settings/prospecting/page.tsx` | **[NEW]** Scraping target admin UI + 24h run KPI dashboard |
+| `app/(main)/admin/settings/prospecting/actions.ts` | **[NEW]** CRUD for ScrapingTarget + scoped run-history retrieval |
+| `app/(main)/admin/settings/prospecting/_components/run-history-panel.tsx` | **[NEW]** Expandable run telemetry panel with status/flow/error metadata |
 | `app/(main)/admin/settings/prospecting/_components/run-scraper-button.tsx` | **[NEW]** Manual trigger dropdown button |
 | `lib/scraping/deep-scraper.ts` | **[NEW]** Deep Scrape service: visits individual listing URLs, extracts full descriptions, runs AI `isAgency` classification |
 | `app/(main)/admin/settings/prospecting/_components/run-deep-scraper-button.tsx` | **[NEW]** Manual trigger button for Deep Scrape jobs |
+| `lib/queue/scraping-queue.ts` | **[NEW]** BullMQ queue/worker with trigger-context propagation and robust run-failure correlation |
 | `lib/leads/scraped-listing-repository.ts` | **[NEW]** Repository for querying `ScrapedListing` records with prospect data joins |
 | `app/(main)/admin/prospecting/layout.tsx` | **[NEW]** Shared layout with tab navigation between People and Listings Inbox |
 | `app/(main)/admin/prospecting/listings/page.tsx` | **[NEW]** Listings Inbox page |
