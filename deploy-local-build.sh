@@ -269,6 +269,40 @@ for (const processInfo of pm2Processes) {
     if (Number.isFinite(pid) && pid > 0) managedPids.add(pid);
 }
 
+let psOutput = '';
+try {
+    psOutput = execSync('ps -eo pid=,ppid=,args= 2>/dev/null || true', { encoding: 'utf8' });
+} catch {}
+
+const processRows = [];
+const childrenByParent = new Map();
+for (const rawLine of psOutput.split('\n')) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const match = line.match(/^([0-9]+)\s+([0-9]+)\s+(.+)$/);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    const ppid = Number(match[2]);
+    const cmd = match[3];
+    if (!Number.isFinite(pid) || pid <= 0) continue;
+    processRows.push({ pid, ppid, cmd });
+    const existing = childrenByParent.get(ppid) || [];
+    existing.push(pid);
+    childrenByParent.set(ppid, existing);
+}
+
+const managedProcessPids = new Set(managedPids);
+const queue = Array.from(managedPids);
+while (queue.length > 0) {
+    const current = queue.shift();
+    const children = childrenByParent.get(current) || [];
+    for (const childPid of children) {
+        if (managedProcessPids.has(childPid)) continue;
+        managedProcessPids.add(childPid);
+        queue.push(childPid);
+    }
+}
+
 const listenersByPid = new Map();
 try {
     const ssOutput = execSync('ss -ltnpH 2>/dev/null || true', { encoding: 'utf8' });
@@ -321,24 +355,15 @@ function addOffender(pid, reason) {
 
 for (const [pid, ports] of listenersByPid.entries()) {
     const hasManagedPort = Array.from(ports).some((port) => managedPorts.has(port));
-    if (hasManagedPort && !managedPids.has(pid)) {
+    if (hasManagedPort && !managedProcessPids.has(pid)) {
         addOffender(pid, 'managed_port_listener');
     }
 }
 
-let psOutput = '';
-try {
-    psOutput = execSync('ps -eo pid=,args= 2>/dev/null || true', { encoding: 'utf8' });
-} catch {}
-
-for (const rawLine of psOutput.split('\n')) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    const match = line.match(/^([0-9]+)\s+(.+)$/);
-    if (!match) continue;
-    const pid = Number(match[1]);
-    const cmd = match[2];
-    if (!Number.isFinite(pid) || managedPids.has(pid)) continue;
+for (const row of processRows) {
+    const pid = row.pid;
+    const cmd = row.cmd;
+    if (!Number.isFinite(pid) || managedProcessPids.has(pid)) continue;
     if (!/(node|next-server|next start|npm start)/i.test(cmd)) continue;
 
     const details = readProcessDetails(pid);
