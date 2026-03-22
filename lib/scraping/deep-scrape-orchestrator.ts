@@ -21,6 +21,11 @@ import {
     omissionReasonToSummaryKey,
     resolveProspectDeepDecision,
 } from './deep-scrape-types';
+import {
+    buildCrawlVisitKey,
+    normalizeTargetUrls,
+    normalizeUrlForPlatform,
+} from './url-utils';
 
 const DEFAULT_MAX_SEED_LISTINGS_PER_TASK = 50;
 
@@ -79,6 +84,15 @@ const mergeSellerContext = (seedListing: RawListing, portfolioListing: RawListin
     ])),
     whatsappPhone: portfolioListing.whatsappPhone || seedListing.whatsappPhone,
 });
+
+class DeepScrapeRunCancelledError extends Error {
+    constructor(message = 'Deep scrape run was cancelled') {
+        super(message);
+        this.name = 'DeepScrapeRunCancelledError';
+    }
+}
+
+type RunCancellationCheckpoint = (force?: boolean) => Promise<void>;
 
 function buildDefaultConfigSnapshot(
     limit: number,
@@ -295,7 +309,11 @@ export class DeepScrapeOrchestratorService {
             };
         }
 
+        const cancellationCheckpoint = this.createCancellationCheckpoint(run.id, locationId);
+
         try {
+            await cancellationCheckpoint(true);
+
             const tasks = await db.scrapingTask.findMany({
                 where: {
                     locationId,
@@ -330,6 +348,8 @@ export class DeepScrapeOrchestratorService {
                 },
             });
 
+            await cancellationCheckpoint();
+
             if (tasks.length === 0) {
                 const completedAt = new Date();
                 await db.deepScrapeRun.updateMany({
@@ -363,6 +383,8 @@ export class DeepScrapeOrchestratorService {
             }
 
             for (const task of tasks) {
+                await cancellationCheckpoint();
+
                 const taskSummary = createEmptyDeepScrapeRunSummary();
                 runSummary.tasksStarted += 1;
 
@@ -398,11 +420,17 @@ export class DeepScrapeOrchestratorService {
 
                 const fetcher = new PageFetcher();
                 const processedSellerKeys = new Set<string>();
+                const processedProspectIds = new Set<string>();
                 const seenContactsWithPhone = new Set<string>();
                 const seenContactsWithoutPhone = new Set<string>();
 
                 try {
-                    const crawlResult = await this.crawlSeedListings(task as ScrapeTaskWithConnection, activeCredential, fetcher);
+                    const crawlResult = await this.crawlSeedListings(
+                        task as ScrapeTaskWithConnection,
+                        activeCredential,
+                        fetcher,
+                        cancellationCheckpoint,
+                    );
 
                     taskSummary.rootUrlsProcessed += crawlResult.rootUrlsProcessed;
                     taskSummary.indexPagesScraped += crawlResult.pagesScraped;
@@ -427,13 +455,15 @@ export class DeepScrapeOrchestratorService {
                     let seedProcessed = 0;
 
                     for (const seed of crawlResult.seedListings) {
+                        await cancellationCheckpoint();
+
                         if (seedProcessed >= options.maxSeedListingsPerTask) {
                             break;
                         }
                         seedProcessed += 1;
 
-                        const baseSellerKey = ListingScraperService.buildSellerProcessingKey(seed) || `seed:${seed.externalId}`;
-                        if (processedSellerKeys.has(baseSellerKey)) {
+                        const seedSellerKeys = ListingScraperService.collectSellerProcessingKeys(seed);
+                        if (seedSellerKeys.some((key) => processedSellerKeys.has(key))) {
                             addOmission(taskSummary, 'duplicate');
                             await this.logStage(run.id, locationId, {
                                 taskId: task.id,
@@ -533,9 +563,25 @@ export class DeepScrapeOrchestratorService {
                             continue;
                         }
 
-                        const sellerKey = ListingScraperService.buildSellerProcessingKey(seedListing)
-                            || `prospect:${prospectLeadId}`;
-                        processedSellerKeys.add(sellerKey);
+                        if (processedProspectIds.has(prospectLeadId)) {
+                            addOmission(taskSummary, 'duplicate');
+                            await this.logStage(run.id, locationId, {
+                                taskId: task.id,
+                                stage: 'stage_b_seed_skipped',
+                                status: 'skipped',
+                                reasonCode: 'duplicate_listing',
+                                message: 'Seed listing skipped due to prospect-level dedupe.',
+                                metadata: { listingUrl: seedListing.url, externalId: seedListing.externalId, prospectLeadId },
+                            });
+                            continue;
+                        }
+                        processedProspectIds.add(prospectLeadId);
+
+                        const sellerKeys = ListingScraperService.collectSellerProcessingKeys(seedListing, prospectLeadId);
+                        for (const sellerKey of sellerKeys) {
+                            processedSellerKeys.add(sellerKey);
+                        }
+                        const contactKey = `prospect:${prospectLeadId}`;
 
                         let knownPhone = normalizePhone(seedListing.ownerPhone || seedListing.whatsappPhone);
                         if (!knownPhone) {
@@ -548,8 +594,8 @@ export class DeepScrapeOrchestratorService {
 
                         if (options.requirePhoneForPortfolio && !knownPhone) {
                             addOmission(taskSummary, 'missing_phone');
-                            if (!seenContactsWithoutPhone.has(sellerKey)) {
-                                seenContactsWithoutPhone.add(sellerKey);
+                            if (!seenContactsWithoutPhone.has(contactKey)) {
+                                seenContactsWithoutPhone.add(contactKey);
                                 taskSummary.contactsWithoutPhone += 1;
                             }
 
@@ -564,8 +610,8 @@ export class DeepScrapeOrchestratorService {
                             continue;
                         }
 
-                        if (knownPhone && !seenContactsWithPhone.has(sellerKey)) {
-                            seenContactsWithPhone.add(sellerKey);
+                        if (knownPhone && !seenContactsWithPhone.has(contactKey)) {
+                            seenContactsWithPhone.add(contactKey);
                             taskSummary.contactsWithPhone += 1;
                         }
 
@@ -577,6 +623,8 @@ export class DeepScrapeOrchestratorService {
                         const eligiblePortfolioListings: RawListing[] = [];
 
                         if (seedListing.otherListingsUrl) {
+                            await cancellationCheckpoint();
+
                             taskSummary.sellerPortfoliosDiscovered += 1;
 
                             const portfolio = await ListingScraperService.collectBazarakiPortfolioListings({
@@ -702,6 +750,8 @@ export class DeepScrapeOrchestratorService {
                         }
 
                         for (const listing of eligiblePortfolioListings) {
+                            await cancellationCheckpoint();
+
                             if (interactionsRemaining <= 0) {
                                 addOmission(taskSummary, 'budget_exhausted');
                                 await this.logStage(run.id, locationId, {
@@ -789,6 +839,10 @@ export class DeepScrapeOrchestratorService {
                         },
                     });
                 } catch (error: any) {
+                    if (error instanceof DeepScrapeRunCancelledError) {
+                        throw error;
+                    }
+
                     runSummary.tasksSkipped += 1;
                     const category = categorizeScrapeError(error);
                     addError(taskSummary, category);
@@ -863,6 +917,55 @@ export class DeepScrapeOrchestratorService {
                 ...runSummary,
             };
         } catch (error: any) {
+            if (error instanceof DeepScrapeRunCancelledError) {
+                const completedAt = new Date();
+
+                await db.deepScrapeRun.updateMany({
+                    where: { id: run.id, status: { in: ['queued', 'running'] } },
+                    data: {
+                        status: 'cancelled',
+                        completedAt,
+                        ...runSummary,
+                    },
+                });
+
+                const latestRun = await db.deepScrapeRun.findUnique({
+                    where: { id: run.id },
+                    select: { status: true },
+                });
+                const effectiveStatus = latestRun?.status || 'cancelled';
+
+                await this.logStage(run.id, locationId, {
+                    stage: 'run_cancelled',
+                    status: 'warning',
+                    message: `Deep orchestration ${effectiveStatus} by manual request.`,
+                    counters: {
+                        tasksScanned: runSummary.tasksScanned,
+                        tasksStarted: runSummary.tasksStarted,
+                        tasksCompleted: runSummary.tasksCompleted,
+                        tasksSkipped: runSummary.tasksSkipped,
+                        seedListingsFound: runSummary.seedListingsFound,
+                        contactsWithPhone: runSummary.contactsWithPhone,
+                        contactsWithoutPhone: runSummary.contactsWithoutPhone,
+                        portfolioListingsDeepScraped: runSummary.portfolioListingsDeepScraped,
+                        errorsTotal: runSummary.errorsTotal,
+                    },
+                    metadata: {
+                        runId: run.id,
+                        queueJobId: run.queueJobId || null,
+                        locationId,
+                        triggeredByUserId: run.triggeredByUserId || null,
+                        cancelledByWorkerCheckpoint: true,
+                    },
+                });
+
+                return {
+                    runId: run.id,
+                    status: effectiveStatus,
+                    ...runSummary,
+                };
+            }
+
             const completedAt = new Date();
             const category = categorizeScrapeError(error);
             addError(runSummary, category);
@@ -895,27 +998,82 @@ export class DeepScrapeOrchestratorService {
         }
     }
 
+    private static createCancellationCheckpoint(runId: string, locationId: string): RunCancellationCheckpoint {
+        let lastCheckedAtMs = 0;
+        let cancellationDetected = false;
+
+        return async (force = false) => {
+            if (cancellationDetected) {
+                throw new DeepScrapeRunCancelledError();
+            }
+
+            const nowMs = Date.now();
+            if (!force && nowMs - lastCheckedAtMs < 1_500) {
+                return;
+            }
+            lastCheckedAtMs = nowMs;
+
+            const latestRun = await db.deepScrapeRun.findUnique({
+                where: { id: runId },
+                select: {
+                    status: true,
+                    locationId: true,
+                },
+            });
+
+            if (!latestRun || latestRun.locationId !== locationId) {
+                cancellationDetected = true;
+                throw new DeepScrapeRunCancelledError('Deep run context could not be resolved.');
+            }
+
+            if (!isDeepScrapeInFlightStatus(latestRun.status)) {
+                cancellationDetected = true;
+                throw new DeepScrapeRunCancelledError(`Deep run transitioned to ${latestRun.status}.`);
+            }
+        };
+    }
+
     private static async crawlSeedListings(
         task: ScrapeTaskWithConnection,
         activeCredential: { authUsername: string | null; authPassword: string | null; sessionState: unknown },
         fetcher: PageFetcher,
+        cancellationCheckpoint?: RunCancellationCheckpoint,
     ): Promise<CrawlSeedResult> {
         let rootUrlsProcessed = 0;
         let pagesScraped = 0;
         let seedListingsFound = 0;
         const seedByExternalId = new Map<string, RawListing>();
 
-        for (const rootUrl of task.targetUrls || []) {
+        const normalizedRootUrls = normalizeTargetUrls(task.targetUrls, task.connection.platform);
+        for (const rootUrl of normalizedRootUrls) {
+            if (cancellationCheckpoint) {
+                await cancellationCheckpoint();
+            }
+
             rootUrlsProcessed += 1;
-            let currentUrl: string | undefined = rootUrl;
+            let currentUrl: string | undefined = normalizeUrlForPlatform(rootUrl, task.connection.platform);
             let pageCount = 0;
             const maxDepth = task.maxPagesPerRun ?? 10;
+            const visitedPageUrls = new Set<string>();
 
             while (currentUrl && pageCount < maxDepth) {
+                if (cancellationCheckpoint) {
+                    await cancellationCheckpoint();
+                }
+
+                const normalizedCurrentUrl = normalizeUrlForPlatform(currentUrl, task.connection.platform);
+                if (!normalizedCurrentUrl) break;
+
+                const currentVisitKey = buildCrawlVisitKey(normalizedCurrentUrl);
+                if (visitedPageUrls.has(currentVisitKey)) {
+                    break;
+                }
+                visitedPageUrls.add(currentVisitKey);
+
                 pageCount += 1;
 
                 const content = await fetcher.fetchContent({
-                    url: currentUrl,
+                    url: normalizedCurrentUrl,
                     username: activeCredential.authUsername || undefined,
                     password: activeCredential.authPassword || undefined,
                     sessionState: activeCredential.sessionState || undefined,
@@ -923,7 +1081,7 @@ export class DeepScrapeOrchestratorService {
 
                 pagesScraped += 1;
 
-                const extractionResult = await extractBazarakiIndex(content, currentUrl, fetcher, {
+                const extractionResult = await extractBazarakiIndex(content, normalizedCurrentUrl, fetcher, {
                     strategy: 'shallow_duplication',
                     sellerType: 'all',
                     interactionsAvailable: 0,
@@ -943,8 +1101,16 @@ export class DeepScrapeOrchestratorService {
                     break;
                 }
 
+                const normalizedNextPageUrl = normalizeUrlForPlatform(extractionResult.nextPageUrl, task.connection.platform);
+                if (!normalizedNextPageUrl) {
+                    break;
+                }
+                if (visitedPageUrls.has(buildCrawlVisitKey(normalizedNextPageUrl))) {
+                    break;
+                }
+
                 await humanDelay(task.delayBetweenPagesMs, task.delayJitterMs);
-                currentUrl = extractionResult.nextPageUrl;
+                currentUrl = normalizedNextPageUrl;
             }
         }
 

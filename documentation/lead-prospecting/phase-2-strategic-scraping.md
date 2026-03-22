@@ -711,6 +711,27 @@ This upgrade was implemented to remove production ambiguity where queue consumer
 - **Queue + warn trigger contract:** manual trigger still queues runs while returning immediate warning metadata when worker readiness is missing.
 - **Lifecycle timestamp correction:** queued runs keep `startedAt = null` until queued->running transition.
 
+##### Deep Scrape Reliability Fix: Headless Worker Refactor + Strict Deploy Guardrails (March 22, 2026)
+
+After the first production trial of the upgraded flow, we observed a real deployment-time reliability gap and completed a hardening pass so the runtime contract is now deterministic.
+
+**Observed production failure mode**
+- Deep runs were queued, but worker startup was unstable across deploy boundaries.
+- Preflight drift checks initially over-flagged healthy PM2-managed app listeners because `next-server` runs as child processes of PM2 parent PIDs.
+- Worker bootstrap could fail on instrumentation import shape (`register()` available under CommonJS default export), which caused repeated worker restarts and readiness-gate failure.
+
+**Implemented reliability hardening**
+- **Headless worker bootstrap finalized:** `scripts/start-scrape-worker.js` now initializes queue workers without HTTP server binding, enforces `PROCESS_ROLE=scrape-worker`, and resolves instrumentation register via either `module.register` or `module.default.register`.
+- **Strict deploy path governance:** production deploy is enforced through `deploy-local-build.sh`; `deploy.sh` and `deploy-direct.sh` are blocked for production usage.
+- **Fail-safe unmanaged-process preflight:** deploy aborts before runtime switch when unmanaged Node/Next drift is detected on managed app paths/ports, with explicit PID/cwd/cmd/port diagnostics and manual remediation instructions (no auto-kill).
+- **PM2 process lineage awareness:** preflight now includes PM2 descendant processes in the managed PID set, preventing false positives on healthy `next-server` child listeners.
+- **Strict worker readiness gate:** deploy requires both PM2 `online` state and fresh Redis scrape-worker heartbeat before success.
+- **Queue + warn UX contract maintained:** manual deep trigger remains queue-first and returns warning metadata when worker readiness is unavailable, so operators see immediate queued visibility plus delay warning.
+
+**Operational outcome**
+- Deploy now fails loudly and early on worker health/preflight violations, rather than completing with a dead or non-consuming scrape worker.
+- Successful deploy confirms all three layers before completion: web health, traffic switch soak, and scrape-worker heartbeat readiness.
+
 ##### How
 
 - `manualTriggerDeepScrape` now:

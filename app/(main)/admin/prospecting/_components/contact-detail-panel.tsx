@@ -293,8 +293,10 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
                       const params = new URLSearchParams(window.location.search);
                       params.set('view', 'properties');
                       params.set('listingId', listing.id);
+                      params.set('prospectId', prospect.id);
                       params.set('scope', 'all');
                       params.delete('contactId');
+                      params.delete('q');
                       router.push(`?${params.toString()}`);
                     }}
                     className={`rounded-lg border bg-background overflow-hidden transition-all cursor-pointer hover:ring-2 hover:ring-primary/30 hover:shadow-md ${(!isListingNew || listing.isExpired) ? 'opacity-50' : ''}`}

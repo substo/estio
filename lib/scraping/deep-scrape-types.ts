@@ -213,7 +213,9 @@ export function mergeDeepScrapeRunSummary(
 export function categorizeScrapeError(error: unknown): DeepScrapeErrorCategory {
     const message = String((error as any)?.message || '').toLowerCase();
     if (!message) return 'unknown';
-    if (message.includes('credential') || message.includes('session') || message.includes('auth')) return 'auth';
+    const hasAuthSignal = /\b(auth|authorization|unauthorized|forbidden|credential|credentials|session|token|cookie|login)\b/.test(message);
+    if (hasAuthSignal) return 'auth';
+    if (message.includes('invalid url') || message.includes('cannot navigate')) return 'extraction';
     if (message.includes('network') || message.includes('econn') || message.includes('fetch') || message.includes('dns')) return 'network';
     if (message.includes('selector') || message.includes('extract') || message.includes('parse')) return 'extraction';
     return 'unknown';

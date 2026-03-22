@@ -5,6 +5,11 @@ import {
     buildListingRelevanceRawAttributes,
     classifyListingRelevance,
 } from './listing-relevance-classifier';
+import {
+    buildCrawlVisitKey,
+    normalizeTargetUrls,
+    normalizeUrlForPlatform,
+} from './url-utils';
 
 // Random Gaussian-like delay for human emulation
 const humanDelay = async (baseMs: number, jitterMs: number) => {
@@ -197,23 +202,32 @@ export class ListingScraperService {
                     if (prospect?.phone) knownPhone = prospect.phone;
                 }
 
-                const urlsToScrape = task.targetUrls && task.targetUrls.length > 0
-                    ? task.targetUrls
-                    : [];
+                const urlsToScrape = normalizeTargetUrls(task.targetUrls, task.connection.platform);
 
                 for (const rootUrl of urlsToScrape) {
                     console.log(`[ListingScraper] Fetching tree starting at: ${rootUrl}`);
 
-                    let currentUrl: string | undefined = rootUrl;
+                    let currentUrl: string | undefined = normalizeUrlForPlatform(rootUrl, task.connection.platform);
                     let pageCount = 0;
                     const maxDepth = options?.pageLimit ?? task.maxPagesPerRun ?? 100;
+                    const visitedPageUrls = new Set<string>();
 
                     while (currentUrl && interactionsRemaining > 0 && pageCount < maxDepth) {
+                        const normalizedCurrentUrl = normalizeUrlForPlatform(currentUrl, task.connection.platform);
+                        if (!normalizedCurrentUrl) break;
+
+                        const currentVisitKey = buildCrawlVisitKey(normalizedCurrentUrl);
+                        if (visitedPageUrls.has(currentVisitKey)) {
+                            console.log(`[ListingScraper] Pagination loop detected for ${normalizedCurrentUrl}. Stopping this root URL.`);
+                            break;
+                        }
+                        visitedPageUrls.add(currentVisitKey);
+
                         pageCount++;
-                        console.log(`[ListingScraper] Fetching page ${pageCount}: ${currentUrl}`);
+                        console.log(`[ListingScraper] Fetching page ${pageCount}: ${normalizedCurrentUrl}`);
 
                         const content = await fetcher.fetchContent({
-                            url: currentUrl,
+                            url: normalizedCurrentUrl,
                             username: activeCredential.authUsername || undefined,
                             password: activeCredential.authPassword || undefined,
                             sessionState: activeCredential.sessionState ? activeCredential.sessionState : undefined,
@@ -231,7 +245,7 @@ export class ListingScraperService {
                             const extractionStrategy = shouldRunTargetedDeepPortfolio
                                 ? 'shallow_duplication'
                                 : (task.scrapeStrategy as 'shallow_duplication' | 'deep_extraction');
-                            const extractionResult = await extractBazarakiIndex(content, currentUrl, fetcher, {
+                            const extractionResult = await extractBazarakiIndex(content, normalizedCurrentUrl, fetcher, {
                                 strategy: extractionStrategy,
                                 sellerType: task.targetSellerType as 'individual' | 'agency' | 'all',
                                 interactionsAvailable: interactionsRemaining,
@@ -313,10 +327,21 @@ export class ListingScraperService {
                             break;
                         }
 
+                        const normalizedNextPageUrl = normalizeUrlForPlatform(nextPageUrl, task.connection.platform);
+                        if (!normalizedNextPageUrl) {
+                            console.log('[ListingScraper] Next page URL was empty after normalization. Stopping this root URL.');
+                            break;
+                        }
+                        const nextVisitKey = buildCrawlVisitKey(normalizedNextPageUrl);
+                        if (visitedPageUrls.has(nextVisitKey)) {
+                            console.log(`[ListingScraper] Pagination loop detected at next page ${normalizedNextPageUrl}. Stopping this root URL.`);
+                            break;
+                        }
+
                         console.log(`[ListingScraper] Pagination sleep before jumping to ${nextPageUrl}`);
                         await humanDelay(task.delayBetweenPagesMs, task.delayJitterMs);
 
-                        currentUrl = nextPageUrl;
+                        currentUrl = normalizedNextPageUrl;
                     }
                 }
             }
@@ -439,7 +464,9 @@ export class ListingScraperService {
     private static categorizeRunError(error: any): string {
         const message = String(error?.message || '').toLowerCase();
         if (!message) return 'unknown';
-        if (message.includes('credential') || message.includes('session') || message.includes('auth')) return 'auth';
+        const hasAuthSignal = /\b(auth|authorization|unauthorized|forbidden|credential|credentials|session|token|cookie|login)\b/.test(message);
+        if (hasAuthSignal) return 'auth';
+        if (message.includes('invalid url') || message.includes('cannot navigate')) return 'extraction';
         if (message.includes('timeout')) return 'timeout';
         if (message.includes('429') || message.includes('rate limit') || message.includes('too many requests')) return 'rate_limit';
         if (message.includes('network') || message.includes('econn') || message.includes('fetch')) return 'network';
@@ -477,22 +504,33 @@ export class ListingScraperService {
             deepScrapeBazarakiListing,
         } = await import('./extractors/bazaraki');
 
-        const urlsToScrape = task.targetUrls && task.targetUrls.length > 0 ? task.targetUrls : [];
+        const urlsToScrape = normalizeTargetUrls(task.targetUrls, task.connection.platform);
         const seedListings = new Map<string, RawListing>();
         const discoveredExternalIds = new Set<string>();
         const processedSellerKeys = new Set<string>();
 
         for (const rootUrl of urlsToScrape) {
-            let currentUrl: string | undefined = rootUrl;
+            let currentUrl: string | undefined = normalizeUrlForPlatform(rootUrl, task.connection.platform);
             let pageCount = 0;
             const maxDepth = options?.pageLimit ?? task.maxPagesPerRun ?? 100;
+            const visitedPageUrls = new Set<string>();
 
             while (currentUrl && pageCount < maxDepth) {
+                const normalizedCurrentUrl = normalizeUrlForPlatform(currentUrl, task.connection.platform);
+                if (!normalizedCurrentUrl) break;
+
+                const currentVisitKey = buildCrawlVisitKey(normalizedCurrentUrl);
+                if (visitedPageUrls.has(currentVisitKey)) {
+                    console.log(`[ListingScraper][Strategic] Pagination loop detected for ${normalizedCurrentUrl}. Stopping this root URL.`);
+                    break;
+                }
+                visitedPageUrls.add(currentVisitKey);
+
                 pageCount++;
-                console.log(`[ListingScraper][Strategic] Index page ${pageCount}: ${currentUrl}`);
+                console.log(`[ListingScraper][Strategic] Index page ${pageCount}: ${normalizedCurrentUrl}`);
 
                 const content = await fetcher.fetchContent({
-                    url: currentUrl,
+                    url: normalizedCurrentUrl,
                     username: activeCredential.authUsername || undefined,
                     password: activeCredential.authPassword || undefined,
                     sessionState: activeCredential.sessionState ? activeCredential.sessionState : undefined,
@@ -500,7 +538,7 @@ export class ListingScraperService {
 
                 counters.pagesScraped++;
 
-                const extractionResult = await extractBazarakiIndex(content, currentUrl, fetcher, {
+                const extractionResult = await extractBazarakiIndex(content, normalizedCurrentUrl, fetcher, {
                     strategy: 'shallow_duplication',
                     sellerType: 'all',
                     interactionsAvailable: 0,
@@ -519,8 +557,14 @@ export class ListingScraperService {
                 }
 
                 if (!extractionResult.nextPageUrl) break;
+                const normalizedNextPageUrl = normalizeUrlForPlatform(extractionResult.nextPageUrl, task.connection.platform);
+                if (!normalizedNextPageUrl) break;
+                if (visitedPageUrls.has(buildCrawlVisitKey(normalizedNextPageUrl))) {
+                    console.log(`[ListingScraper][Strategic] Pagination loop detected at next page ${normalizedNextPageUrl}. Stopping this root URL.`);
+                    break;
+                }
                 await humanDelay(task.delayBetweenPagesMs, task.delayJitterMs);
-                currentUrl = extractionResult.nextPageUrl;
+                currentUrl = normalizedNextPageUrl;
             }
         }
 
@@ -528,8 +572,8 @@ export class ListingScraperService {
 
         for (const seed of seedListings.values()) {
             if (assignedToProcessedSeller.has(seed.externalId)) continue;
-            const seedSellerKey = this.buildSellerProcessingKey(seed);
-            if (seedSellerKey && processedSellerKeys.has(seedSellerKey)) continue;
+            const seedSellerKeys = this.collectSellerProcessingKeys(seed);
+            if (seedSellerKeys.some((key) => processedSellerKeys.has(key))) continue;
 
             let seedListing = seed;
 
@@ -556,9 +600,8 @@ export class ListingScraperService {
                 }
 
                 assignedToProcessedSeller.add(seedListing.externalId);
-                const processedSeedSellerKey = this.buildSellerProcessingKey(seedListing);
-                if (processedSeedSellerKey) {
-                    processedSellerKeys.add(processedSeedSellerKey);
+                for (const sellerKey of this.collectSellerProcessingKeys(seedListing, seedSave.prospectLeadId)) {
+                    processedSellerKeys.add(sellerKey);
                 }
 
                 if (!seedSave.isRealEstate) {
@@ -619,9 +662,8 @@ export class ListingScraperService {
                         }
 
                         assignedToProcessedSeller.add(listingWithSellerContext.externalId);
-                        const processedPortfolioSellerKey = this.buildSellerProcessingKey(listingWithSellerContext);
-                        if (processedPortfolioSellerKey) {
-                            processedSellerKeys.add(processedPortfolioSellerKey);
+                        for (const sellerKey of this.collectSellerProcessingKeys(listingWithSellerContext, portfolioSave.prospectLeadId)) {
+                            processedSellerKeys.add(sellerKey);
                         }
 
                         if (listingWithSellerContext.externalId !== seedListing.externalId && portfolioSave.isRealEstate) {
@@ -697,16 +739,27 @@ export class ListingScraperService {
 
         let pagesScraped = 0;
         const listings = new Map<string, RawListing>();
-        let currentUrl: string | undefined = profileUrl;
+        let currentUrl: string | undefined = normalizeUrlForPlatform(profileUrl, task.connection.platform);
         let pageCount = 0;
         const maxDepth = Math.max(1, options?.pageLimit ?? task.maxPagesPerRun ?? 10);
+        const visitedPageUrls = new Set<string>();
 
         while (currentUrl && pageCount < maxDepth) {
+            const normalizedCurrentUrl = normalizeUrlForPlatform(currentUrl, task.connection.platform);
+            if (!normalizedCurrentUrl) break;
+
+            const currentVisitKey = buildCrawlVisitKey(normalizedCurrentUrl);
+            if (visitedPageUrls.has(currentVisitKey)) {
+                console.log(`[ListingScraper][Strategic] Seller profile pagination loop detected for ${normalizedCurrentUrl}. Stopping profile crawl.`);
+                break;
+            }
+            visitedPageUrls.add(currentVisitKey);
+
             pageCount++;
-            console.log(`[ListingScraper][Strategic] Seller profile page ${pageCount}: ${currentUrl}`);
+            console.log(`[ListingScraper][Strategic] Seller profile page ${pageCount}: ${normalizedCurrentUrl}`);
 
             const content = await fetcher.fetchContent({
-                url: currentUrl,
+                url: normalizedCurrentUrl,
                 username: activeCredential.authUsername || undefined,
                 password: activeCredential.authPassword || undefined,
                 sessionState: activeCredential.sessionState ? activeCredential.sessionState : undefined,
@@ -714,7 +767,7 @@ export class ListingScraperService {
 
             pagesScraped++;
 
-            const extractionResult = await extractBazarakiIndex(content, currentUrl, fetcher, {
+            const extractionResult = await extractBazarakiIndex(content, normalizedCurrentUrl, fetcher, {
                 strategy: 'shallow_duplication',
                 sellerType: 'all',
                 interactionsAvailable: 0,
@@ -732,8 +785,15 @@ export class ListingScraperService {
                 break;
             }
 
+            const normalizedNextPageUrl = normalizeUrlForPlatform(extractionResult.nextPageUrl, task.connection.platform);
+            if (!normalizedNextPageUrl) break;
+            if (visitedPageUrls.has(buildCrawlVisitKey(normalizedNextPageUrl))) {
+                console.log(`[ListingScraper][Strategic] Seller profile pagination loop detected at ${normalizedNextPageUrl}. Stopping profile crawl.`);
+                break;
+            }
+
             await humanDelay(task.delayBetweenPagesMs, task.delayJitterMs);
-            currentUrl = extractionResult.nextPageUrl;
+            currentUrl = normalizedNextPageUrl;
         }
 
         return {
@@ -838,6 +898,55 @@ export class ListingScraperService {
         }
 
         return null;
+    }
+
+    static collectSellerProcessingKeys(
+        listing: RawListing,
+        prospectLeadId?: string | null,
+    ): string[] {
+        const keys = new Set<string>();
+
+        const primaryKey = this.buildSellerProcessingKey(listing);
+        if (primaryKey) keys.add(primaryKey);
+
+        if (listing.sellerExternalId) {
+            const normalizedSellerId = listing.sellerExternalId.trim();
+            if (normalizedSellerId) keys.add(`seller:${normalizedSellerId}`);
+        }
+
+        if (listing.otherListingsUrl) {
+            const normalizedProfileUrl = normalizeUrlForPlatform(listing.otherListingsUrl, 'bazaraki');
+            if (normalizedProfileUrl) {
+                try {
+                    const parsed = new URL(normalizedProfileUrl);
+                    const pathname = parsed.pathname.length > 1
+                        ? parsed.pathname.replace(/\/+$/, '')
+                        : parsed.pathname;
+                    keys.add(`profile:${parsed.origin}${pathname}`);
+                } catch {
+                    keys.add(`profile:${normalizedProfileUrl.toLowerCase()}`);
+                }
+            }
+        }
+
+        const normalizedPhone = this.normalizePhoneForSellerKey(listing.ownerPhone || listing.whatsappPhone);
+        if (normalizedPhone) keys.add(`phone:${normalizedPhone}`);
+
+        if (listing.ownerName) {
+            const normalizedName = listing.ownerName.trim().toLowerCase();
+            if (normalizedName.length >= 3) {
+                keys.add(`name:${normalizedName}`);
+                if (normalizedPhone) {
+                    keys.add(`name_phone:${normalizedName}:${normalizedPhone}`);
+                }
+            }
+        }
+
+        if (prospectLeadId) {
+            keys.add(`prospect:${prospectLeadId}`);
+        }
+
+        return Array.from(keys);
     }
 
     /**

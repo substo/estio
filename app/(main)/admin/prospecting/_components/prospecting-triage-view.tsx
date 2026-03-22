@@ -62,24 +62,28 @@ export function ProspectingTriageView({
   const urlContactId = searchParams.get('contactId');
 
   // Compute selectedIndex from URL param
-  const selectedIndex = useMemo(() => {
+  const selectedIndex = useMemo<number | null>(() => {
     if (currentView === 'properties') {
       if (urlListingId) {
         const idx = listings.findIndex(l => l.id === urlListingId);
-        return idx >= 0 ? idx : 0;
+        return idx >= 0 ? idx : null;
       }
-      return 0;
+      return listings.length > 0 ? 0 : null;
     } else {
       if (urlContactId) {
         const idx = prospects.findIndex(p => p.id === urlContactId);
-        return idx >= 0 ? idx : 0;
+        return idx >= 0 ? idx : null;
       }
-      return 0;
+      return prospects.length > 0 ? 0 : null;
     }
   }, [currentView, urlListingId, urlContactId, listings, prospects]);
 
-  const selectedListing = currentView === 'properties' ? (listings[selectedIndex] ?? null) : null;
-  const selectedProspect = currentView === 'contacts' ? (prospects[selectedIndex] ?? null) : null;
+  const selectedListing = currentView === 'properties' && selectedIndex !== null
+    ? (listings[selectedIndex] ?? null)
+    : null;
+  const selectedProspect = currentView === 'contacts' && selectedIndex !== null
+    ? (prospects[selectedIndex] ?? null)
+    : null;
 
   // --- Helper to push URL params without losing existing ones ---
   const pushParam = useCallback((key: string, value: string | null, removeKeys?: string[]) => {
@@ -109,6 +113,9 @@ export function ProspectingTriageView({
     params.set('view', v);
     params.delete('listingId');
     params.delete('contactId');
+    if (v === 'contacts') {
+      params.delete('prospectId');
+    }
     setSelectedBulkIds([]);
     router.push(`?${params.toString()}`, { scroll: false });
   }, [searchParams, router]);
@@ -240,12 +247,14 @@ export function ProspectingTriageView({
         case 'ArrowDown':
         case 'j':
           e.preventDefault();
-          selectItem(Math.min(selectedIndex + 1, feedItems.length - 1));
+          if (feedItems.length === 0) break;
+          selectItem(Math.min((selectedIndex ?? -1) + 1, feedItems.length - 1));
           break;
         case 'ArrowUp':
         case 'k':
           e.preventDefault();
-          selectItem(Math.max(selectedIndex - 1, 0));
+          if (feedItems.length === 0) break;
+          selectItem(Math.max((selectedIndex ?? 0) - 1, 0));
           break;
       }
     };
@@ -410,7 +419,7 @@ export function ProspectingTriageView({
               {feedItems.length > 0 && (
                 <div className="flex items-center gap-3">
                   <Badge variant="outline" className="text-[10px]">
-                    {selectedIndex + 1} / {feedItems.length}
+                    {selectedIndex !== null ? selectedIndex + 1 : 0} / {feedItems.length}
                   </Badge>
                   {currentView === 'properties' && (
                     <Checkbox 

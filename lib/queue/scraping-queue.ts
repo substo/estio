@@ -83,6 +83,14 @@ export interface ScrapingQueueDiagnostics {
     }>;
 }
 
+export interface ScrapingQueueCancellationResult {
+    jobId: string | null;
+    found: boolean;
+    state: string | null;
+    removed: boolean;
+    note: string | null;
+}
+
 // 1. Queue Instance (Producer) - Lazy Loaded via Dynamic Import
 let _queuePromise: Promise<any> | null = null;
 let _redisPromise: Promise<RedisClient> | null = null;
@@ -335,6 +343,67 @@ export const scrapingQueue = {
         return queue.add(name, data, opts);
     }
 };
+
+export async function cancelScrapingQueueJob(queueJobId: string | null | undefined): Promise<ScrapingQueueCancellationResult> {
+    const normalizedJobId = String(queueJobId || '').trim();
+    if (!normalizedJobId) {
+        return {
+            jobId: null,
+            found: false,
+            state: null,
+            removed: false,
+            note: 'No queue job id was attached to this run.',
+        };
+    }
+
+    const queue = await getQueueInstance();
+    const job = await queue.getJob(normalizedJobId);
+    if (!job) {
+        return {
+            jobId: normalizedJobId,
+            found: false,
+            state: null,
+            removed: false,
+            note: 'Queue job not found (it may have already finished).',
+        };
+    }
+
+    let state: string | null = null;
+    try {
+        state = await job.getState();
+    } catch {
+        state = null;
+    }
+
+    if (state === 'active') {
+        return {
+            jobId: normalizedJobId,
+            found: true,
+            state,
+            removed: false,
+            note: 'Queue job is already active; cancellation will proceed cooperatively via run status.',
+        };
+    }
+
+    try {
+        await job.remove();
+        return {
+            jobId: normalizedJobId,
+            found: true,
+            state,
+            removed: true,
+            note: null,
+        };
+    } catch (error: any) {
+        return {
+            jobId: normalizedJobId,
+            found: true,
+            state,
+            removed: false,
+            note: String(error?.message || error || 'Failed to remove queue job'),
+        };
+    }
+}
 
 export async function getScrapingQueueDiagnostics(): Promise<ScrapingQueueDiagnostics> {
     const [queue, heartbeats] = await Promise.all([

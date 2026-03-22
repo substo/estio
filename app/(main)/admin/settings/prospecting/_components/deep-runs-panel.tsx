@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+    cancelDeepScrapeRun,
     getDeepScrapeQueueDiagnostics,
     getDeepScrapeRunDetails,
     getDeepScrapeRuns,
@@ -20,6 +21,16 @@ import {
     MinusCircle,
     XCircle,
 } from 'lucide-react';
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 interface DeepScrapeRunStage {
     id: string;
@@ -183,6 +194,9 @@ export function DeepRunsPanel({
     const [sseConnected, setSseConnected] = useState(false);
     const [sseFallbackMessage, setSseFallbackMessage] = useState<string | null>(null);
     const [triggerWarningMessage, setTriggerWarningMessage] = useState<string | null>(null);
+    const [cancellingRunId, setCancellingRunId] = useState<string | null>(null);
+    const [cancelTargetRun, setCancelTargetRun] = useState<DeepScrapeRun | null>(null);
+    const [runActionMessage, setRunActionMessage] = useState<{ tone: 'success' | 'error' | 'info'; text: string } | null>(null);
 
     const hasInFlight = useMemo(
         () => runs.some((run) => isInFlightStatus(run.status)),
@@ -210,6 +224,50 @@ export function DeepRunsPanel({
             // silent fallback while polling
         }
     }, [locationId]);
+
+    const requestCancelRun = useCallback((run: DeepScrapeRun) => {
+        if (cancellingRunId) return;
+        if (!isInFlightStatus(run.status)) return;
+        setCancelTargetRun(run);
+    }, [cancellingRunId]);
+
+    const handleCancelRun = useCallback(async () => {
+        const run = cancelTargetRun;
+        if (!run) return;
+        if (cancellingRunId) return;
+        if (!isInFlightStatus(run.status)) {
+            setCancelTargetRun(null);
+            return;
+        }
+
+        setCancellingRunId(run.id);
+        setRunActionMessage(null);
+
+        try {
+            const result = await cancelDeepScrapeRun(locationId, run.id);
+
+            if (result.run) {
+                setRuns((prev) => prev.map((item) => (
+                    item.id === result.run!.id
+                        ? { ...item, ...(result.run as unknown as DeepScrapeRun) }
+                        : item
+                )));
+            }
+
+            const tone = result.queue.removed ? 'success' : 'info';
+            setRunActionMessage({ tone, text: result.message });
+            void refresh();
+            setTimeout(() => void refresh(), 2000);
+        } catch (error: any) {
+            setRunActionMessage({
+                tone: 'error',
+                text: error?.message || 'Failed to cancel deep run.',
+            });
+        } finally {
+            setCancellingRunId(null);
+            setCancelTargetRun(null);
+        }
+    }, [cancelTargetRun, cancellingRunId, locationId, refresh]);
 
     useEffect(() => {
         if (!expandedRunId) return;
@@ -273,6 +331,14 @@ export function DeepRunsPanel({
         }, 12_000);
         return () => clearTimeout(timeout);
     }, [triggerWarningMessage]);
+
+    useEffect(() => {
+        if (!runActionMessage) return;
+        const timeout = setTimeout(() => {
+            setRunActionMessage(null);
+        }, 12_000);
+        return () => clearTimeout(timeout);
+    }, [runActionMessage]);
 
     useEffect(() => {
         let source: EventSource | null = null;
@@ -370,6 +436,18 @@ export function DeepRunsPanel({
                 </div>
             )}
 
+            {runActionMessage && (
+                <div className={`mb-3 rounded border px-3 py-2 text-[11px] ${
+                    runActionMessage.tone === 'success'
+                        ? 'border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-300'
+                        : runActionMessage.tone === 'error'
+                            ? 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300'
+                            : 'border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300'
+                }`}>
+                    {runActionMessage.text}
+                </div>
+            )}
+
             {showWorkerUnavailableWarning && (
                 <div className="mb-3 rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] text-red-700 dark:text-red-300 flex items-start gap-2">
                     <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
@@ -464,13 +542,30 @@ export function DeepRunsPanel({
                                             </span>
                                         )}
                                     </div>
-                                    <button
-                                        type="button"
-                                        onClick={() => setExpandedRunId(isExpanded ? null : run.id)}
-                                        className="text-muted-foreground hover:text-foreground"
-                                    >
-                                        {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        {isInFlightStatus(run.status) && (
+                                            <button
+                                                type="button"
+                                                onClick={() => requestCancelRun(run)}
+                                                disabled={Boolean(cancellingRunId)}
+                                                className="inline-flex items-center gap-1 rounded border border-red-500/30 bg-red-500/10 px-2 py-1 text-[11px] text-red-700 hover:bg-red-500/15 disabled:opacity-60 dark:text-red-300"
+                                            >
+                                                {cancellingRunId === run.id ? (
+                                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                                ) : (
+                                                    <MinusCircle className="w-3 h-3" />
+                                                )}
+                                                Cancel
+                                            </button>
+                                        )}
+                                        <button
+                                            type="button"
+                                            onClick={() => setExpandedRunId(isExpanded ? null : run.id)}
+                                            className="text-muted-foreground hover:text-foreground"
+                                        >
+                                            {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                                        </button>
+                                    </div>
                                 </div>
 
                                 <div className="mt-2 flex flex-wrap items-center gap-2 text-muted-foreground">
@@ -558,6 +653,36 @@ export function DeepRunsPanel({
                     })
                 )}
             </div>
+
+            <AlertDialog
+                open={Boolean(cancelTargetRun)}
+                onOpenChange={(open) => {
+                    if (!open && !cancellingRunId) setCancelTargetRun(null);
+                }}
+            >
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>
+                            {cancelTargetRun?.status === 'queued' ? 'Cancel queued run?' : 'Cancel active run?'}
+                        </AlertDialogTitle>
+                        <AlertDialogDescription>
+                            {cancelTargetRun?.status === 'queued'
+                                ? 'The queued job will be removed from the queue and the run will be marked as cancelled.'
+                                : 'Cancellation is cooperative for active runs. The worker will stop at the next safe checkpoint and mark the run as cancelled.'}
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel disabled={Boolean(cancellingRunId)}>Keep Run</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={() => void handleCancelRun()}
+                            disabled={Boolean(cancellingRunId)}
+                            className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+                        >
+                            {cancellingRunId ? 'Cancelling...' : 'Cancel Run'}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 }

@@ -7,11 +7,25 @@ import { manualTriggerDeepScrape } from '../actions';
 import { toast } from 'sonner';
 import { Zap, Loader2 } from 'lucide-react';
 
-export function RunDeepScraperButton({ locationId }: { locationId: string }) {
+interface RunDeepScraperButtonProps {
+    locationId: string;
+    workerReady: boolean;
+    workerHeartbeatAgeSeconds: number | null;
+}
+
+export function RunDeepScraperButton({ locationId, workerReady, workerHeartbeatAgeSeconds }: RunDeepScraperButtonProps) {
     const [isLoading, setIsLoading] = useState(false);
     const router = useRouter();
+    const unavailableMessage = workerReady
+        ? null
+        : `Scrape worker is unavailable${workerHeartbeatAgeSeconds === null ? '' : ` (last heartbeat ${workerHeartbeatAgeSeconds}s ago)`}. Start it and retry.`;
 
     const handleRun = async () => {
+        if (!workerReady) {
+            toast.error(unavailableMessage || 'Scrape worker is unavailable. Start it and retry.');
+            return;
+        }
+
         setIsLoading(true);
         try {
             const result = await manualTriggerDeepScrape(locationId, 50); // Defaulting to 50 for manual sweeps
@@ -35,11 +49,12 @@ export function RunDeepScraperButton({ locationId }: { locationId: string }) {
             variant="default" 
             size="sm" 
             onClick={handleRun} 
-            disabled={isLoading} 
-            className="gap-2 bg-indigo-600 hover:bg-indigo-700"
+            disabled={isLoading || !workerReady}
+            title={unavailableMessage || undefined}
+            className={workerReady ? 'gap-2 bg-indigo-600 hover:bg-indigo-700' : 'gap-2'}
         >
             {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4 fill-current" />}
-            Run Deep Scrape
+            {workerReady ? 'Run Deep Scrape' : 'Worker Unavailable'}
         </Button>
     );
 }

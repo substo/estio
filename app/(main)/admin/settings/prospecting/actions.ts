@@ -3,13 +3,19 @@
 import { revalidatePath } from 'next/cache';
 import db from '@/lib/db';
 import { verifyUserIsLocationAdmin } from '@/lib/auth/permissions';
-import { getScrapingQueueDiagnostics, scrapingQueue } from '@/lib/queue/scraping-queue';
+import {
+    cancelScrapingQueueJob,
+    getScrapingQueueDiagnostics,
+    scrapingQueue,
+    type ScrapingQueueCancellationResult,
+} from '@/lib/queue/scraping-queue';
 import { encryptPassword } from '@/lib/crypto/password-encryption';
 import {
     DEFAULT_PRIVATE_CONFIDENCE_THRESHOLD,
     type DeepScrapeConfigSnapshot,
     isDeepScrapeTerminalStatus,
 } from '@/lib/scraping/deep-scrape-types';
+import { normalizeTargetUrls } from '@/lib/scraping/url-utils';
 
 export interface ScrapingRunOverview {
     windowHours: number;
@@ -127,6 +133,51 @@ export interface ManualDeepScrapeTriggerResult {
             counters: Record<string, unknown> | null;
             metadata: Record<string, unknown> | null;
         }>;
+    };
+}
+
+export interface CancelDeepScrapeRunResult {
+    success: boolean;
+    runId: string;
+    message: string;
+    queue: ScrapingQueueCancellationResult;
+    run: ManualDeepScrapeTriggerResult['run'] | null;
+}
+
+function serializeDeepRunForClient(runPayload: any): ManualDeepScrapeTriggerResult['run'] {
+    return {
+        id: runPayload.id,
+        createdAt: runPayload.createdAt.toISOString(),
+        status: runPayload.status,
+        queuedAt: runPayload.queuedAt ? runPayload.queuedAt.toISOString() : null,
+        completedAt: runPayload.completedAt ? runPayload.completedAt.toISOString() : null,
+        triggeredBy: runPayload.triggeredBy || null,
+        triggeredByUserId: runPayload.triggeredByUserId || null,
+        queueJobId: runPayload.queueJobId || null,
+        seedListingsFound: runPayload.seedListingsFound,
+        contactsWithPhone: runPayload.contactsWithPhone,
+        contactsWithoutPhone: runPayload.contactsWithoutPhone,
+        portfolioListingsDeepScraped: runPayload.portfolioListingsDeepScraped,
+        omittedAgency: runPayload.omittedAgency,
+        omittedUncertain: runPayload.omittedUncertain,
+        omittedMissingPhone: runPayload.omittedMissingPhone,
+        omittedNonRealEstate: runPayload.omittedNonRealEstate,
+        omittedDuplicate: runPayload.omittedDuplicate,
+        omittedBudgetExhausted: runPayload.omittedBudgetExhausted,
+        errorsTotal: runPayload.errorsTotal,
+        errorLog: runPayload.errorLog || null,
+        configSnapshot: (runPayload.configSnapshot as Record<string, unknown> | null) ?? null,
+        stages: (runPayload.stages || []).map((stage: any) => ({
+            id: stage.id,
+            createdAt: stage.createdAt.toISOString(),
+            taskId: stage.taskId || null,
+            stage: stage.stage,
+            status: stage.status,
+            reasonCode: stage.reasonCode || null,
+            message: stage.message || null,
+            counters: (stage.counters as Record<string, unknown> | null) ?? null,
+            metadata: (stage.metadata as Record<string, unknown> | null) ?? null,
+        })),
     };
 }
 
@@ -284,7 +335,16 @@ export async function createScrapingTask(locationId: string, data: any) {
     const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
     if (!isAdmin) throw new Error("Unauthorized to create scraping tasks");
 
-    const targetUrls = data.targetUrls ? data.targetUrls.split(',').map((s: string) => s.trim()).filter(Boolean) : [];
+    const connection = await db.scrapingConnection.findFirst({
+        where: { id: data.connectionId, locationId },
+        select: { platform: true },
+    });
+    if (!connection) throw new Error("Connection not found");
+
+    const parsedTargetUrls = data.targetUrls
+        ? data.targetUrls.split(',').map((s: string) => s.trim()).filter(Boolean)
+        : [];
+    const targetUrls = normalizeTargetUrls(parsedTargetUrls, connection.platform);
 
     const task = await db.scrapingTask.create({
         data: {
@@ -315,9 +375,22 @@ export async function updateScrapingTask(id: string, locationId: string, data: a
     const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
     if (!isAdmin) throw new Error("Unauthorized");
 
+    const existingTask = await db.scrapingTask.findFirst({
+        where: { id, locationId },
+        select: { connectionId: true },
+    });
+    if (!existingTask) throw new Error("Task not found");
+
+    const nextConnectionId = data.connectionId || existingTask.connectionId;
+    const connection = await db.scrapingConnection.findFirst({
+        where: { id: nextConnectionId, locationId },
+        select: { platform: true },
+    });
+    if (!connection) throw new Error("Connection not found");
+
     const updateData: any = {
         name: data.name,
-        connectionId: data.connectionId,
+        connectionId: nextConnectionId,
         enabled: data.enabled,
         scrapeFrequency: data.scrapeFrequency,
         extractionMode: data.extractionMode,
@@ -330,9 +403,10 @@ export async function updateScrapingTask(id: string, locationId: string, data: a
     };
 
     if (data.targetUrls !== undefined) {
-         updateData.targetUrls = typeof data.targetUrls === 'string' 
-            ? data.targetUrls.split(',').map((s: string) => s.trim()).filter(Boolean) 
-            : data.targetUrls;
+        const parsedTargetUrls = typeof data.targetUrls === 'string'
+            ? data.targetUrls.split(',').map((s: string) => s.trim()).filter(Boolean)
+            : (Array.isArray(data.targetUrls) ? data.targetUrls : []);
+        updateData.targetUrls = normalizeTargetUrls(parsedTargetUrls, connection.platform);
     }
 
     if (data.fieldMappings !== undefined) {
@@ -410,6 +484,15 @@ export async function manualTriggerDeepScrape(
             targetUrlsRequired: true,
         },
     };
+    const diagnosticsAtTrigger = await getScrapingQueueDiagnostics().catch(() => null);
+    if (!diagnosticsAtTrigger?.workerReady) {
+        const availabilityDetails = diagnosticsAtTrigger
+            ? `workerAlive=${diagnosticsAtTrigger.workerAlive}, workerReady=${diagnosticsAtTrigger.workerReady}, workerHeartbeatAgeSeconds=${diagnosticsAtTrigger.workerHeartbeatAgeSeconds ?? 'null'}`
+            : 'queue diagnostics unavailable';
+        throw new Error(
+            `Deep scrape cannot be queued because the scrape worker is unavailable (${availabilityDetails}). Start the scrape worker and retry.`,
+        );
+    }
 
     // One-time hygiene backfill safety: queued runs should not have startedAt.
     await db.deepScrapeRun.updateMany({
@@ -472,7 +555,7 @@ export async function manualTriggerDeepScrape(
         });
 
         const queueJobId = String(job?.id ?? '');
-        const [updatedRun, diagnostics] = await Promise.all([
+        const [updatedRun, postEnqueueDiagnostics] = await Promise.all([
             db.deepScrapeRun.update({
                 where: { id: run.id },
                 data: {
@@ -498,7 +581,7 @@ export async function manualTriggerDeepScrape(
             getScrapingQueueDiagnostics().catch(() => null),
         ]);
 
-        const workerUnavailableWarning = diagnostics && !diagnostics.workerReady
+        const workerUnavailableWarning = postEnqueueDiagnostics && !postEnqueueDiagnostics.workerReady
             ? {
                 code: 'worker_unavailable' as const,
                 message: 'Deep scrape was queued, but no healthy scrape worker heartbeat is currently detected.',
@@ -518,9 +601,9 @@ export async function manualTriggerDeepScrape(
                         runId: run.id,
                         locationId,
                         queueJobId: queueJobId || null,
-                        workerAlive: diagnostics?.workerAlive ?? null,
-                        workerReady: diagnostics?.workerReady ?? null,
-                        workerHeartbeatAgeSeconds: diagnostics?.workerHeartbeatAgeSeconds ?? null,
+                        workerAlive: postEnqueueDiagnostics?.workerAlive ?? null,
+                        workerReady: postEnqueueDiagnostics?.workerReady ?? null,
+                        workerHeartbeatAgeSeconds: postEnqueueDiagnostics?.workerHeartbeatAgeSeconds ?? null,
                     } as any,
                 },
             });
@@ -546,40 +629,7 @@ export async function manualTriggerDeepScrape(
             runId: runPayload.id,
             status: 'queued',
             warning: workerUnavailableWarning,
-            run: {
-                id: runPayload.id,
-                createdAt: runPayload.createdAt.toISOString(),
-                status: runPayload.status,
-                queuedAt: runPayload.queuedAt ? runPayload.queuedAt.toISOString() : null,
-                completedAt: runPayload.completedAt ? runPayload.completedAt.toISOString() : null,
-                triggeredBy: runPayload.triggeredBy || null,
-                triggeredByUserId: runPayload.triggeredByUserId || null,
-                queueJobId: runPayload.queueJobId || null,
-                seedListingsFound: runPayload.seedListingsFound,
-                contactsWithPhone: runPayload.contactsWithPhone,
-                contactsWithoutPhone: runPayload.contactsWithoutPhone,
-                portfolioListingsDeepScraped: runPayload.portfolioListingsDeepScraped,
-                omittedAgency: runPayload.omittedAgency,
-                omittedUncertain: runPayload.omittedUncertain,
-                omittedMissingPhone: runPayload.omittedMissingPhone,
-                omittedNonRealEstate: runPayload.omittedNonRealEstate,
-                omittedDuplicate: runPayload.omittedDuplicate,
-                omittedBudgetExhausted: runPayload.omittedBudgetExhausted,
-                errorsTotal: runPayload.errorsTotal,
-                errorLog: runPayload.errorLog || null,
-                configSnapshot: (runPayload.configSnapshot as Record<string, unknown> | null) ?? null,
-                stages: (runPayload.stages || []).map((stage) => ({
-                    id: stage.id,
-                    createdAt: stage.createdAt.toISOString(),
-                    taskId: stage.taskId || null,
-                    stage: stage.stage,
-                    status: stage.status,
-                    reasonCode: stage.reasonCode || null,
-                    message: stage.message || null,
-                    counters: (stage.counters as Record<string, unknown> | null) ?? null,
-                    metadata: (stage.metadata as Record<string, unknown> | null) ?? null,
-                })),
-            },
+            run: serializeDeepRunForClient(runPayload),
         };
     } catch (error: any) {
         const errorMessage = error?.message || 'Failed to enqueue deep scrape run';
@@ -660,6 +710,125 @@ export async function getDeepScrapeRunDetails(locationId: string, runId: string,
 
     if (!run) throw new Error("Deep scrape run not found");
     return run;
+}
+
+export async function cancelDeepScrapeRun(locationId: string, runId: string): Promise<CancelDeepScrapeRunResult> {
+    const { auth } = await import('@clerk/nextjs/server');
+    const { userId } = await auth();
+    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
+    if (!isAdmin) throw new Error("Unauthorized");
+
+    const safeRunId = String(runId || '').trim();
+    if (!safeRunId) throw new Error('Deep scrape run id is required');
+
+    const run = await db.deepScrapeRun.findFirst({
+        where: {
+            id: safeRunId,
+            locationId,
+        },
+        include: {
+            stages: {
+                orderBy: { createdAt: 'desc' },
+                take: 60,
+            },
+        },
+    });
+
+    if (!run) throw new Error('Deep scrape run not found');
+
+    const terminalQueueNote: ScrapingQueueCancellationResult = {
+        jobId: run.queueJobId || null,
+        found: false,
+        state: null,
+        removed: false,
+        note: 'Run is already terminal.',
+    };
+
+    if (isDeepScrapeTerminalStatus(run.status)) {
+        return {
+            success: true,
+            runId: run.id,
+            message: `Run is already ${run.status}.`,
+            queue: terminalQueueNote,
+            run: serializeDeepRunForClient(run),
+        };
+    }
+
+    const queueCancellation = await cancelScrapingQueueJob(run.queueJobId || null);
+    const now = new Date();
+    const manualCancelNote = `Manual cancellation requested by ${userId || 'unknown'} at ${now.toISOString()}.`;
+    const queueCancellationMode = queueCancellation.removed
+        ? 'queue_removed'
+        : (queueCancellation.state === 'active' ? 'cooperative_stop' : 'queue_unavailable');
+
+    await db.$transaction([
+        db.deepScrapeRun.updateMany({
+            where: {
+                id: run.id,
+                status: { in: ['queued', 'running'] },
+            },
+            data: {
+                status: 'cancelled',
+                completedAt: now,
+                errorLog: run.errorLog ? `${run.errorLog}\n${manualCancelNote}` : manualCancelNote,
+                metadata: {
+                    ...((run.metadata as Record<string, unknown> | null) || {}),
+                    cancellation: {
+                        requestedAt: now.toISOString(),
+                        requestedByUserId: userId || null,
+                        queueJobId: run.queueJobId || null,
+                        queueCancellation: queueCancellation,
+                        mode: queueCancellationMode,
+                    },
+                } as any,
+            },
+        }),
+        db.deepScrapeRunStage.create({
+            data: {
+                runId: run.id,
+                locationId,
+                stage: 'run_cancelled',
+                status: 'warning',
+                message: run.status === 'queued'
+                    ? 'Run cancelled before worker execution began.'
+                    : 'Run cancellation requested. Worker will stop at the next safe checkpoint.',
+                metadata: {
+                    runId: run.id,
+                    locationId,
+                    queueJobId: run.queueJobId || null,
+                    requestedByUserId: userId || null,
+                    queueCancellation,
+                    queueCancellationMode,
+                } as any,
+            },
+        }),
+    ]);
+
+    const refreshedRun = await db.deepScrapeRun.findUnique({
+        where: { id: run.id },
+        include: {
+            stages: {
+                orderBy: { createdAt: 'desc' },
+                take: 60,
+            },
+        },
+    });
+
+    revalidatePath('/admin/settings/prospecting');
+
+    return {
+        success: true,
+        runId: run.id,
+        message: queueCancellation.removed
+            ? 'Run cancelled and removed from queue.'
+            : queueCancellation.state === 'active'
+                ? 'Run cancellation requested. Active worker will stop at the next safe checkpoint.'
+                : queueCancellation.note
+                    ? `Run cancelled. ${queueCancellation.note}`
+                    : 'Run cancelled.',
+        queue: queueCancellation,
+        run: refreshedRun ? serializeDeepRunForClient(refreshedRun) : null,
+    };
 }
 
 export async function getDeepScrapeQueueDiagnostics(locationId: string): Promise<DeepScrapeQueueDiagnostics> {

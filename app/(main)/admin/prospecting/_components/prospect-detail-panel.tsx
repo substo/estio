@@ -268,6 +268,8 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                         params.set('contactId', listing.prospectLeadId!);
                         params.set('scope', 'all');
                         params.delete('listingId');
+                        params.delete('prospectId');
+                        params.delete('q');
                         router.push(`?${params.toString()}`);
                       }}
                     >

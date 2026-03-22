@@ -54,7 +54,11 @@ export default async function ProspectingSettingsPage() {
                     </p>
                 </div>
                 <div className="flex gap-2">
-                    <RunDeepScraperButton locationId={locationId} />
+                    <RunDeepScraperButton
+                        locationId={locationId}
+                        workerReady={deepQueueDiagnostics.workerReady}
+                        workerHeartbeatAgeSeconds={deepQueueDiagnostics.workerHeartbeatAgeSeconds}
+                    />
                 </div>
             </div>
 
