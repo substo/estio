@@ -29,7 +29,9 @@ export async function scrapeSellerProfile(locationId: string, sellerName: string
                 name: taskName,
                 connectionId: connection.id,
                 targetUrls: [profileUrl],
-                scrapeStrategy: 'deep_extraction', // Deep extract to fully construct property profiles
+                // Start shallow; ListingScraperService now performs targeted deep scrape
+                // only for listings classified as real-estate relevant.
+                scrapeStrategy: 'shallow_duplication',
                 targetProspectId: prospectId, // Bind explicitly to this CRM Contact
                 extractionMode: 'index_crawler',
                 maxPagesPerRun: 10,

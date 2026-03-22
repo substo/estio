@@ -227,6 +227,7 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                   {listing.rawAttributes && Object.entries(listing.rawAttributes)
                     .filter(([key]) => !['Bedrooms', 'Bathrooms', 'Property area', 'Plot area', 'Construction year'].includes(key))
                     .filter(([key]) => !/^Seller business /i.test(key))
+                    .filter(([key]) => !key.startsWith('System listing relevance'))
                     .map(([key, value]) => (
                       <Badge key={key} variant="outline" className="bg-muted/30 max-w-full whitespace-normal break-words text-[11px] leading-tight">
                         <span className="text-muted-foreground mr-1 font-normal">{key}:</span> {String(value)}

@@ -44,6 +44,7 @@ const TASK_TIER_MAP: Record<string, 'flash' | 'pro'> = {
     "property_search": "flash",
     "lead_parsing": "flash",
     "prospect_classification": "flash",
+    "listing_relevance_classification": "flash",
 
     "draft_reply": "pro",
     "qualification": "pro",

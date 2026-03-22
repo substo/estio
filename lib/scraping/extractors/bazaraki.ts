@@ -27,6 +27,11 @@ export interface BazarakiExtractionResult {
     nextPageUrl?: string;
 }
 
+export interface BazarakiDeepListingOptions {
+    sellerType?: 'individual' | 'agency' | 'all';
+    knownPhone?: string;
+}
+
 // Random Gaussian-like delay for human emulation
 const humanDelay = async (baseMs: number, jitterMs: number) => {
     const offset = Math.floor(Math.random() * (jitterMs * 2 + 1)) - jitterMs;
@@ -60,6 +65,14 @@ const parseOtherListingsCount = (value?: string | null): number | undefined => {
     if (!match) return undefined;
     const parsed = parseInt(match[1], 10);
     return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+const isLikelyAgencyName = (name?: string): boolean => {
+    if (!name) return false;
+    const normalized = name.toLowerCase();
+    return normalized.includes('real estate') ||
+        normalized.includes('properties') ||
+        normalized.includes('agency');
 };
 
 const extractCardFeatures = ($: cheerio.CheerioAPI, el: any): Pick<RawListing, 'bedrooms' | 'bathrooms' | 'propertyArea' | 'rawAttributes'> => {
@@ -224,157 +237,13 @@ export async function extractBazarakiIndex(content: string, baseUrl: string, fet
 
         try {
             console.log(`[BazarakiExtractor] Fetching details for: ${shallow.url}`);
-            const detailListing = await fetcher.executeOnPage({ url: shallow.url, jsEnabled: true }, async (page) => {
-                let deepData = { ...shallow };
-
-                // Get basic metadata from DOM
-                const description = await page.locator('.announcement-description, .js-description').first().textContent().catch(() => '');
-                deepData.description = description?.trim() || '';
-
-                // Keep detail location when available (profile-card location can be abbreviated)
-                const locationText = await page.locator('.announcement__location span[itemprop="address"]').first().textContent().catch(() => '');
-                if (locationText?.trim()) {
-                    deepData.location = locationText.trim();
-                }
-
-                // Owner Name extraction
-                const ownerName = await page.locator('.author-card__name, .author-info .author-name, .author-info [itemprop="name"]').first().textContent().catch(() => 'Bazaraki Owner');
-                deepData.ownerName = ownerName?.trim();
-                const sellerExternalId = await page.locator('.author-info .author-name[data-user], .author-info a[data-user]').first().getAttribute('data-user').catch(() => undefined);
-                if (sellerExternalId) deepData.sellerExternalId = sellerExternalId;
-
-                const sellerRegisteredAt = await page.locator('.date-registration, .contacts-dialog__date').first().textContent().catch(() => undefined);
-                if (sellerRegisteredAt?.trim()) deepData.sellerRegisteredAt = sellerRegisteredAt.trim();
-
-                const otherListingsHref = await page.locator('a.other-announcement-author').first().getAttribute('href').catch(() => undefined);
-                if (otherListingsHref) deepData.otherListingsUrl = toAbsoluteBazarakiUrl(otherListingsHref);
-
-                const otherListingsText = await page.locator('a.other-announcement-author').first().textContent().catch(() => undefined);
-                const otherListingsCount = parseOtherListingsCount(otherListingsText);
-                if (otherListingsCount !== undefined) deepData.otherListingsCount = otherListingsCount;
-
-                // Business profile block ("author_business__wrapper") — appears for agency/business accounts.
-                const authorBusiness = await page.evaluate(() => {
-                    const wrapper = document.querySelector('.author_business__wrapper');
-                    if (!wrapper) return null;
-
-                    const text = (selector: string) => wrapper.querySelector(selector)?.textContent?.trim() || '';
-                    const websiteEl = wrapper.querySelector('a.website') as HTMLAnchorElement | null;
-
-                    return {
-                        name: text('.author_business__header h1'),
-                        verified: !!wrapper.querySelector('.author_business__header-verified'),
-                        postingSince: text('.author_business__header-since'),
-                        address: text('.author_business__contacts .address'),
-                        website: websiteEl?.href || websiteEl?.textContent?.trim() || '',
-                        description: text('.author_business__description'),
-                    };
-                }).catch(() => null as any);
-
-                if (authorBusiness?.name) {
-                    // Prefer explicit business profile title when present.
-                    deepData.ownerName = authorBusiness.name;
-                }
-                if (authorBusiness?.postingSince && !deepData.sellerRegisteredAt) {
-                    deepData.sellerRegisteredAt = authorBusiness.postingSince;
-                }
-                if (authorBusiness?.website) {
-                    const channels = new Set(deepData.contactChannels || []);
-                    channels.add('website');
-                    deepData.contactChannels = Array.from(channels);
-                }
-
-                // Parse structured key-value attributes
-                const rawAttributes = await page.$$eval('ul.chars-column li', (items) => {
-                    const output: Record<string, string> = {};
-                    for (const li of items) {
-                        const key = li.querySelector('.key-chars')?.textContent?.replace(':', '').trim();
-                        const value = li.querySelector('.value-chars')?.textContent?.trim();
-                        if (key && value) output[key] = value;
-                    }
-                    return output;
-                }).catch(() => ({} as Record<string, string>));
-
-                if (rawAttributes && Object.keys(rawAttributes).length > 0) {
-                    deepData.rawAttributes = {
-                        ...(deepData.rawAttributes || {}),
-                        ...rawAttributes,
-                    };
-                }
-
-                if (authorBusiness) {
-                    deepData.rawAttributes = {
-                        ...(deepData.rawAttributes || {}),
-                        ...(authorBusiness.name ? { 'Seller business name': authorBusiness.name } : {}),
-                        ...(authorBusiness.verified !== undefined ? { 'Seller business verified': authorBusiness.verified ? 'Yes' : 'No' } : {}),
-                        ...(authorBusiness.postingSince ? { 'Seller business posting since': authorBusiness.postingSince } : {}),
-                        ...(authorBusiness.address ? { 'Seller business address': authorBusiness.address } : {}),
-                        ...(authorBusiness.website ? { 'Seller business website': authorBusiness.website } : {}),
-                        ...(authorBusiness.description ? { 'Seller business description': authorBusiness.description } : {}),
-                    };
-                }
-
-                const parsedBedrooms = parseBedroomsValue(rawAttributes?.['Bedrooms']);
-                const parsedBathrooms = parseFirstInt(rawAttributes?.['Bathrooms']);
-                const parsedPropertyArea = parseFirstInt(rawAttributes?.['Property area']);
-                const parsedPlotArea = parseFirstInt(rawAttributes?.['Plot area']);
-                const parsedConstructionYear = parseFirstInt(rawAttributes?.['Construction year']);
-
-                if (parsedBedrooms !== undefined) deepData.bedrooms = parsedBedrooms;
-                if (parsedBathrooms !== undefined) deepData.bathrooms = parsedBathrooms;
-                if (parsedPropertyArea !== undefined) deepData.propertyArea = parsedPropertyArea;
-                if (parsedPlotArea !== undefined) deepData.plotArea = parsedPlotArea;
-                if (parsedConstructionYear !== undefined) deepData.constructionYear = parsedConstructionYear;
-
-                // --- TARGET SELLER TYPE FILTERING ---
-                const isAgency = deepData.ownerName?.toLowerCase().includes('real estate') ||
-                    deepData.ownerName?.toLowerCase().includes('properties') ||
-                    deepData.ownerName?.toLowerCase().includes('agency');
-
-                if (opts.sellerType === 'individual' && isAgency) {
-                    console.log(`[BazarakiExtractor] Skipping Deep Contact grab, identified as Agency: ${deepData.ownerName}`);
-                    return deepData; // Skip the phone grab
-                }
-                if (opts.sellerType === 'agency' && !isAgency) {
-                    console.log(`[BazarakiExtractor] Skipping Deep Contact grab, identified as Individual: ${deepData.ownerName}`);
-                    return deepData;
-                }
-
-                if (opts.knownPhone) {
-                    console.log(`[BazarakiExtractor] Skipping interaction: Phone number already known`);
-                    deepData.ownerPhone = opts.knownPhone.replace(/\s+/g, '');
-                } else {
-                    // Try to click "Show phone number" button - THIS CONSUMES AN INTERACTION BUDGET
-                    let phone = '';
-                    try {
-                        const phoneBtn = page.locator('.phone-author.js-phone-click, .js-show-popup-contact-business').first();
-                        if (await phoneBtn.isVisible()) {
-                            await phoneBtn.click({ force: true });
-                            await page.waitForTimeout(1500); // Give JS time to replace inner context
-
-                            // First check inline
-                            const inlinePhone = await page.locator('.phone-author-subtext__main').first().textContent() || '';
-                            if (inlinePhone && inlinePhone.trim().length > 5 && inlinePhone.trim() !== '+35') {
-                                phone = inlinePhone;
-                            }
-
-                            // Also check dialog if it appears
-                            const dialogPhone = await page.locator('.contacts-dialog__phone a[href^="tel:"]').first().textContent().catch(() => '') || '';
-                            if (dialogPhone) phone = dialogPhone;
-                        } else {
-                            phone = await page.locator('.phone-author-subtext__main').first().textContent() || '';
-                        }
-                        if (phone) deepData.ownerPhone = phone.trim().replace(/\s+/g, '');
-                    } catch (e) {
-                        console.log(`[BazarakiExtractor] Failed to reveal phone for ${shallow.url}`);
-                    }
-                }
-
-                return deepData;
+            const deepResult = await deepScrapeBazarakiListing(shallow, fetcher, {
+                sellerType: opts.sellerType,
+                knownPhone: opts.knownPhone,
             });
 
-            listings.push(detailListing);
-            interactionsUsed++; // Count this page load / interaction against the quota
+            listings.push(deepResult.listing);
+            interactionsUsed += deepResult.interactionsUsed;
 
         } catch (detailError) {
             console.error(`[BazarakiExtractor] Skipping listing ${shallow.url} due to error`);
@@ -401,4 +270,169 @@ export function extractBazarakiDescription(html: string): string {
     const $ = cheerio.load(html);
     const description = $('.announcement-description').text();
     return description ? description.trim() : '';
+}
+
+export async function deepScrapeBazarakiListing(
+    shallow: RawListing,
+    fetcher: PageFetcher,
+    options?: BazarakiDeepListingOptions
+): Promise<{ listing: RawListing; interactionsUsed: number; skippedBySellerType: boolean }> {
+    const opts = options || {};
+    const sellerType = opts.sellerType || 'all';
+
+    const result = await fetcher.executeOnPage({ url: shallow.url, jsEnabled: true }, async (page) => {
+        let deepData = { ...shallow };
+        let skippedBySellerType = false;
+
+        // Get basic metadata from DOM
+        const description = await page.locator('.announcement-description, .js-description').first().textContent().catch(() => '');
+        deepData.description = description?.trim() || '';
+
+        // Keep detail location when available (profile-card location can be abbreviated)
+        const locationText = await page.locator('.announcement__location span[itemprop="address"]').first().textContent().catch(() => '');
+        if (locationText?.trim()) {
+            deepData.location = locationText.trim();
+        }
+
+        // Owner Name extraction
+        const ownerName = await page.locator('.author-card__name, .author-info .author-name, .author-info [itemprop="name"]').first().textContent().catch(() => 'Bazaraki Owner');
+        deepData.ownerName = ownerName?.trim();
+        const sellerExternalId = await page.locator('.author-info .author-name[data-user], .author-info a[data-user]').first().getAttribute('data-user').catch(() => undefined);
+        if (sellerExternalId) deepData.sellerExternalId = sellerExternalId;
+
+        const sellerRegisteredAt = await page.locator('.date-registration, .contacts-dialog__date').first().textContent().catch(() => undefined);
+        if (sellerRegisteredAt?.trim()) deepData.sellerRegisteredAt = sellerRegisteredAt.trim();
+
+        const otherListingsHref = await page.locator('a.other-announcement-author').first().getAttribute('href').catch(() => undefined);
+        if (otherListingsHref) deepData.otherListingsUrl = toAbsoluteBazarakiUrl(otherListingsHref);
+
+        const otherListingsText = await page.locator('a.other-announcement-author').first().textContent().catch(() => undefined);
+        const otherListingsCount = parseOtherListingsCount(otherListingsText);
+        if (otherListingsCount !== undefined) deepData.otherListingsCount = otherListingsCount;
+
+        // Business profile block ("author_business__wrapper") — appears for agency/business accounts.
+        const authorBusiness = await page.evaluate(() => {
+            const wrapper = document.querySelector('.author_business__wrapper');
+            if (!wrapper) return null;
+
+            const text = (selector: string) => wrapper.querySelector(selector)?.textContent?.trim() || '';
+            const websiteEl = wrapper.querySelector('a.website') as HTMLAnchorElement | null;
+
+            return {
+                name: text('.author_business__header h1'),
+                verified: !!wrapper.querySelector('.author_business__header-verified'),
+                postingSince: text('.author_business__header-since'),
+                address: text('.author_business__contacts .address'),
+                website: websiteEl?.href || websiteEl?.textContent?.trim() || '',
+                description: text('.author_business__description'),
+            };
+        }).catch(() => null as any);
+
+        if (authorBusiness?.name) {
+            // Prefer explicit business profile title when present.
+            deepData.ownerName = authorBusiness.name;
+        }
+        if (authorBusiness?.postingSince && !deepData.sellerRegisteredAt) {
+            deepData.sellerRegisteredAt = authorBusiness.postingSince;
+        }
+        if (authorBusiness?.website) {
+            const channels = new Set(deepData.contactChannels || []);
+            channels.add('website');
+            deepData.contactChannels = Array.from(channels);
+        }
+
+        // Parse structured key-value attributes
+        const rawAttributes = await page.$$eval('ul.chars-column li', (items) => {
+            const output: Record<string, string> = {};
+            for (const li of items) {
+                const key = li.querySelector('.key-chars')?.textContent?.replace(':', '').trim();
+                const value = li.querySelector('.value-chars')?.textContent?.trim();
+                if (key && value) output[key] = value;
+            }
+            return output;
+        }).catch(() => ({} as Record<string, string>));
+
+        if (rawAttributes && Object.keys(rawAttributes).length > 0) {
+            deepData.rawAttributes = {
+                ...(deepData.rawAttributes || {}),
+                ...rawAttributes,
+            };
+        }
+
+        if (authorBusiness) {
+            deepData.rawAttributes = {
+                ...(deepData.rawAttributes || {}),
+                ...(authorBusiness.name ? { 'Seller business name': authorBusiness.name } : {}),
+                ...(authorBusiness.verified !== undefined ? { 'Seller business verified': authorBusiness.verified ? 'Yes' : 'No' } : {}),
+                ...(authorBusiness.postingSince ? { 'Seller business posting since': authorBusiness.postingSince } : {}),
+                ...(authorBusiness.address ? { 'Seller business address': authorBusiness.address } : {}),
+                ...(authorBusiness.website ? { 'Seller business website': authorBusiness.website } : {}),
+                ...(authorBusiness.description ? { 'Seller business description': authorBusiness.description } : {}),
+            };
+        }
+
+        const parsedBedrooms = parseBedroomsValue(rawAttributes?.['Bedrooms']);
+        const parsedBathrooms = parseFirstInt(rawAttributes?.['Bathrooms']);
+        const parsedPropertyArea = parseFirstInt(rawAttributes?.['Property area']);
+        const parsedPlotArea = parseFirstInt(rawAttributes?.['Plot area']);
+        const parsedConstructionYear = parseFirstInt(rawAttributes?.['Construction year']);
+
+        if (parsedBedrooms !== undefined) deepData.bedrooms = parsedBedrooms;
+        if (parsedBathrooms !== undefined) deepData.bathrooms = parsedBathrooms;
+        if (parsedPropertyArea !== undefined) deepData.propertyArea = parsedPropertyArea;
+        if (parsedPlotArea !== undefined) deepData.plotArea = parsedPlotArea;
+        if (parsedConstructionYear !== undefined) deepData.constructionYear = parsedConstructionYear;
+
+        // --- TARGET SELLER TYPE FILTERING ---
+        const isAgency = isLikelyAgencyName(deepData.ownerName);
+
+        if (sellerType === 'individual' && isAgency) {
+            console.log(`[BazarakiExtractor] Skipping Deep Contact grab, identified as Agency: ${deepData.ownerName}`);
+            skippedBySellerType = true;
+            return { deepData, skippedBySellerType };
+        }
+        if (sellerType === 'agency' && !isAgency) {
+            console.log(`[BazarakiExtractor] Skipping Deep Contact grab, identified as Individual: ${deepData.ownerName}`);
+            skippedBySellerType = true;
+            return { deepData, skippedBySellerType };
+        }
+
+        if (opts.knownPhone) {
+            console.log('[BazarakiExtractor] Skipping interaction: Phone number already known');
+            deepData.ownerPhone = opts.knownPhone.replace(/\s+/g, '');
+        } else {
+            // Try to click "Show phone number" button
+            let phone = '';
+            try {
+                const phoneBtn = page.locator('.phone-author.js-phone-click, .js-show-popup-contact-business').first();
+                if (await phoneBtn.isVisible()) {
+                    await phoneBtn.click({ force: true });
+                    await page.waitForTimeout(1500);
+
+                    // First check inline
+                    const inlinePhone = await page.locator('.phone-author-subtext__main').first().textContent() || '';
+                    if (inlinePhone && inlinePhone.trim().length > 5 && inlinePhone.trim() !== '+35') {
+                        phone = inlinePhone;
+                    }
+
+                    // Also check dialog if it appears
+                    const dialogPhone = await page.locator('.contacts-dialog__phone a[href^="tel:"]').first().textContent().catch(() => '') || '';
+                    if (dialogPhone) phone = dialogPhone;
+                } else {
+                    phone = await page.locator('.phone-author-subtext__main').first().textContent() || '';
+                }
+                if (phone) deepData.ownerPhone = phone.trim().replace(/\s+/g, '');
+            } catch (e) {
+                console.log(`[BazarakiExtractor] Failed to reveal phone for ${shallow.url}`);
+            }
+        }
+
+        return { deepData, skippedBySellerType };
+    });
+
+    return {
+        listing: result.deepData,
+        interactionsUsed: opts.knownPhone || result.skippedBySellerType ? 0 : 1,
+        skippedBySellerType: result.skippedBySellerType,
+    };
 }

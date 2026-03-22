@@ -101,8 +101,10 @@ export async function listProspectInbox(
       take: params.limit || 25,
       skip: params.skip || 0,
       include: {
-        _count: { select: { scrapedListings: true } },
         scrapedListings: {
+          where: {
+            status: { not: 'SKIPPED' },
+          },
           select: {
             id: true, url: true, title: true, platform: true,
             price: true, currency: true, locationText: true,
@@ -141,7 +143,7 @@ export async function listProspectInbox(
       platformUserId: r.platformUserId,
       platformRegistered: r.platformRegistered,
       profileUrl: r.profileUrl,
-      scrapedListingsCount: (r as any)._count?.scrapedListings || 0,
+      scrapedListingsCount: ((r as any).scrapedListings || []).length,
       scrapedListings: (r as any).scrapedListings || [],
     })),
     total,

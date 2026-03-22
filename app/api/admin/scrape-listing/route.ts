@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import db from '@/lib/db';
+import {
+    buildListingRelevanceRawAttributes,
+    classifyListingRelevance,
+} from '@/lib/scraping/listing-relevance-classifier';
 
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
@@ -833,10 +837,68 @@ async function upsertListingData(
         });
     }
 
+    const existingRawAttributes = (
+        existingScrapedListing?.rawAttributes && typeof existingScrapedListing.rawAttributes === 'object'
+            ? existingScrapedListing.rawAttributes
+            : null
+    ) as Record<string, string> | null;
+
+    const relevanceDecision = await classifyListingRelevance(
+        {
+            externalId: data.externalId,
+            title: data.title,
+            description: data.description || '',
+            price: data.price ?? undefined,
+            currency: data.currency || undefined,
+            location: data.location || undefined,
+            propertyType: data.propertyType || undefined,
+            listingType: data.listingType || undefined,
+            ownerName: data.ownerName || undefined,
+            ownerPhone: data.ownerPhone || undefined,
+            ownerEmail: undefined,
+            url,
+            images: data.images,
+            thumbnails: data.thumbnails,
+            bedrooms: data.bedrooms,
+            bathrooms: data.bathrooms,
+            propertyArea: data.propertyArea,
+            plotArea: data.plotArea,
+            constructionYear: data.constructionYear,
+            latitude: data.latitude,
+            longitude: data.longitude,
+            sellerExternalId: data.sellerExternalId,
+            sellerRegisteredAt: data.sellerRegisteredAt,
+            otherListingsUrl: data.otherListingsUrl,
+            otherListingsCount: data.otherListingsCount,
+            contactChannels: data.contactChannels,
+            whatsappPhone: data.whatsappPhone,
+            rawAttributes: data.rawAttributes,
+        },
+        existingRawAttributes
+    );
+    const relevanceAttributes = buildListingRelevanceRawAttributes(relevanceDecision);
+    const mergedRawAttributes = {
+        ...(existingRawAttributes || {}),
+        ...(data.rawAttributes || {}),
+        ...relevanceAttributes,
+    };
+    const normalizedStatus = existingScrapedListing?.status?.toUpperCase?.() || null;
+    const resolvedExistingStatus = relevanceDecision.isRealEstate
+        ? (normalizedStatus === 'SKIPPED' ? 'NEW' : (existingScrapedListing?.status || 'NEW'))
+        : (normalizedStatus === 'IMPORTED' || normalizedStatus === 'REJECTED'
+            ? (existingScrapedListing?.status || 'SKIPPED')
+            : 'SKIPPED');
+    const shouldAttachProspect = relevanceDecision.isRealEstate || Boolean(existingScrapedListing?.prospectLeadId);
+
+    sendEvent({
+        status: 'classifying_listing',
+        message: `Listing relevance: ${relevanceDecision.isRealEstate ? 'real-estate' : 'non-real-estate'} (${relevanceDecision.confidence}% ${relevanceDecision.source})`,
+    });
+
     // 1. Upsert ProspectLead
     let prospectLeadId: string | null = existingScrapedListing?.prospectLeadId || null;
 
-    if (data.ownerPhone || data.ownerName || data.sellerExternalId) {
+    if (shouldAttachProspect && (data.ownerPhone || data.ownerName || data.sellerExternalId)) {
         let existingProspect = null;
 
         if (prospectLeadId) {
@@ -925,8 +987,9 @@ async function upsertListingData(
                 otherListingsCount: data.otherListingsCount,
                 contactChannels: data.contactChannels,
                 whatsappPhone: data.whatsappPhone,
-                rawAttributes: data.rawAttributes,
+                rawAttributes: mergedRawAttributes as any,
                 isExpired: data.isExpired || false,
+                status: resolvedExistingStatus,
                 prospectLeadId,
             },
         });
@@ -960,8 +1023,9 @@ async function upsertListingData(
                 otherListingsCount: data.otherListingsCount,
                 contactChannels: data.contactChannels,
                 whatsappPhone: data.whatsappPhone,
-                rawAttributes: data.rawAttributes,
+                rawAttributes: mergedRawAttributes as any,
                 isExpired: data.isExpired || false,
+                status: resolvedExistingStatus,
                 prospectLeadId,
             },
             create: {
@@ -991,9 +1055,9 @@ async function upsertListingData(
                 otherListingsCount: data.otherListingsCount,
                 contactChannels: data.contactChannels,
                 whatsappPhone: data.whatsappPhone,
-                rawAttributes: data.rawAttributes,
+                rawAttributes: mergedRawAttributes as any,
                 isExpired: data.isExpired || false,
-                status: 'NEW',
+                status: relevanceDecision.isRealEstate ? 'NEW' : 'SKIPPED',
                 prospectLeadId,
             },
         });

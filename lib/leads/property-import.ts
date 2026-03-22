@@ -79,10 +79,13 @@ export async function importScrapedListingAsProperty(
 
   // Format rawAttributes into CRM features array
   const features: string[] = [];
+  const cleanRawAttributes: Record<string, unknown> = {};
   if (listing.rawAttributes && typeof listing.rawAttributes === 'object') {
     const EXCLUDED_RAW_KEYS = ['Bedrooms', 'Bathrooms', 'Property area', 'Plot area', 'Construction year', 'Location', 'Type'];
     for (const [key, value] of Object.entries(listing.rawAttributes)) {
-      if (!EXCLUDED_RAW_KEYS.includes(key)) {
+      if (key.startsWith('System listing relevance')) continue;
+      cleanRawAttributes[key] = value;
+      if (!EXCLUDED_RAW_KEYS.includes(key) && !key.startsWith('System listing relevance')) {
         features.push(`${key}: ${value}`);
       }
     }
@@ -113,7 +116,7 @@ export async function importScrapedListingAsProperty(
         publicationStatus: 'DRAFT', // Never auto-publish scraped properties
         source: 'SCRAPED',
         scrapedListingId: listing.id,
-        metadata: listing.rawAttributes || undefined,
+        metadata: Object.keys(cleanRawAttributes).length > 0 ? (cleanRawAttributes as any) : undefined,
         features,
       },
     });

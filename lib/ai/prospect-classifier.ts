@@ -124,6 +124,9 @@ export async function buildClassificationInputForProspect(
             email: true,
             phone: true,
             scrapedListings: {
+                where: {
+                    status: { not: 'SKIPPED' },
+                },
                 orderBy: { createdAt: 'desc' },
                 take: 12,
                 select: {
@@ -141,18 +144,23 @@ export async function buildClassificationInputForProspect(
                     rawAttributes: true,
                 },
             },
-            _count: { select: { scrapedListings: true } },
         },
     });
 
     if (!prospect) return null;
+
+    const dbListingCount = await db.scrapedListing.count({
+        where: {
+            prospectLeadId: prospectId,
+            status: { not: 'SKIPPED' },
+        },
+    });
 
     const maxOtherListingsCount = prospect.scrapedListings.reduce((max, listing) => {
         const current = listing.otherListingsCount || 0;
         return current > max ? current : max;
     }, 0);
 
-    const dbListingCount = prospect._count.scrapedListings || 0;
     const normalizedListingCount = Math.max(
         prospect.listingCount || 0,
         dbListingCount,

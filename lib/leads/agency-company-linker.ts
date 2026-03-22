@@ -79,6 +79,9 @@ export async function deriveAgencyProfileForProspect(prospectId: string): Promis
       email: true,
       platformRegistered: true,
       scrapedListings: {
+        where: {
+          status: { not: 'SKIPPED' },
+        },
         orderBy: { createdAt: 'desc' },
         take: 20,
         select: { rawAttributes: true },

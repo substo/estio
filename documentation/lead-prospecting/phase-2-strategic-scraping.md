@@ -293,11 +293,33 @@ The primary bottleneck on classified platforms is **action thresholds** (how man
     *   Deducts 1 point from the Connection's `maxDailyInteractions` budget.
 
 3.  **Targeted Deep Extraction (Profile Rescrape):**
-    *   When an agent clicks "Scrape Other Listings" on a Contact or Property view, a `deep_extraction` task is created explicitly linked to that `prospectLeadId`.
-    *   The scraper dynamically fetches the `knownPhone` of the Prospect.
-    *   All extracted properties are natively bound to the matching CRM Contact, and **the scraper bypasses the "Show Phone Number" interaction**, conserving interaction budgets while capturing High-Res imagery and full property details.
+    *   When an agent clicks "Scrape Other Listings" on a Contact or Property view, a task is created and linked to that `prospectLeadId`, but execution starts in `shallow_duplication`.
+    *   Every discovered portfolio listing is first passed through a **listing relevance gate** (`real-estate` vs `non-real-estate`).
+    *   Only real-estate relevant listings are promoted to deep extraction for full details/phone enrichment.
+    *   Non-real-estate listings are persisted with `status = SKIPPED` plus system relevance metadata, so future runs reuse cached classification and avoid repeated AI/runtime cost.
+    *   The scraper dynamically fetches the `knownPhone` of the Prospect and bypasses "Show Phone Number" when already known, conserving interaction budgets.
 
 By combining an hourly Shallow sweep with filtered Deep Extractions, Estio maintains full market data without triggering aggressive anti-bot captchas.
+
+### Enterprise Guardrails for Relevance Classification
+
+To keep scraping economically viable and auditable at enterprise scale:
+
+1. **Decision Caching + Versioning**
+   - Persist relevance decision metadata in `ScrapedListing.rawAttributes` (decision, confidence, source, reason, checked timestamp, classifier version).
+   - Reuse cached decisions on future runs when version matches; reclassify only after model/rule version upgrades.
+
+2. **Cost-Aware Multi-Stage Classification**
+   - Stage 1: deterministic rules (high precision on obvious non-real-estate categories).
+   - Stage 2: AI fallback only for uncertain cases.
+   - This minimizes token burn while keeping recall high.
+
+3. **Workflow Isolation**
+   - Preserve business terminal states (`IMPORTED`, `REJECTED`) even if relevance later flips to non-real-estate.
+   - Mark operationally irrelevant rows as `SKIPPED` to keep triage queues clean without deleting audit history.
+
+4. **Portfolio De-Duping by Seller Identity**
+   - Strategic flow de-duplicates by seller signatures (`sellerExternalId`, profile URL, phone fallback) so the same seller portfolio is not reprocessed repeatedly inside one run.
 
 ---
 
@@ -916,7 +938,7 @@ Both detail panels contain dedicated action bars and tailored content views:
 - **Dynamic Feature Extraction:** Scraped listings utilize a schema-on-read JSON field (`rawAttributes`) to capture all non-standard property features (e.g., "Pets allowed", "Energy class"). These are rendered dynamically as badges in the Detail Panel and explicitly mapped to the core CRM `Property.features` array upon lead conversion, ensuring zero data loss.
 - **Agency/Private Override Toggle:** The seller badge is clickable and cycles `Private → Agency → AI Auto`, with manual override stored in `isAgencyManual` and confidence/reasoning exposed via tooltip.
 - **Optimistic UI Data Binding:** Following Enterprise SaaS best practices, detail panels do not wait for hard page refreshes after asynchronous events. When a `ScrapeListingDialog` finishes extracting data, the backend immediately returns the resolved `prospectLeadId` and `prospectName`. The detail panel intercepts this payload and applies a local optimistic state update, instantly revealing the seller's true identity and unmasking the Accept/Convert buttons without a network waterfall.
-- **Scrape Other Listings:** A dedicated `DownloadCloud` button that dispatches a background task (`scrapeSellerProfile`) to extract the rest of the seller's portfolio using their `otherListingsUrl`. This button is prominently available in both the Properties View and Contacts View. *(Note: When a single listing is scraped or re-scraped, the backend `scrape-listing` service automatically extracts and syncs this `profileUrl` directly to the `ProspectLead` record, ensuring this button is actionable immediately without needing to visit the contact card).*
+- **Scrape Other Listings:** A dedicated `DownloadCloud` button dispatches a background task (`scrapeSellerProfile`) that crawls the seller portfolio in shallow mode first, classifies each listing for relevance, and deep-scrapes only real-estate listings. Non-real-estate rows are persisted as `SKIPPED` with cached relevance metadata. The button is prominently available in both the Properties View and Contacts View. *(Note: When a single listing is scraped or re-scraped, the backend `scrape-listing` service automatically extracts and syncs this `profileUrl` directly to the `ProspectLead` record, ensuring this button is actionable immediately without needing to visit the contact card).*
 
 ### 4.4 Cascading Decide Actions & Keyboard Accessibility
 
