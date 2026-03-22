@@ -38,11 +38,17 @@ async function main() {
     console.log(`[ScrapeWorkerBootstrap] Loading instrumentation from ${instrumentationPath}`);
 
     const instrumentationModule = await import(pathToFileURL(instrumentationPath).href);
-    if (typeof instrumentationModule.register !== 'function') {
+    const register =
+        (instrumentationModule && instrumentationModule.register) ||
+        (instrumentationModule &&
+            instrumentationModule.default &&
+            instrumentationModule.default.register);
+
+    if (typeof register !== 'function') {
         throw new Error('Instrumentation bundle does not export register()');
     }
 
-    await instrumentationModule.register();
+    await register();
     console.log('[ScrapeWorkerBootstrap] Scrape worker runtime initialized.');
 
     process.on('SIGINT', () => {
