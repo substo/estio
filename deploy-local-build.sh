@@ -294,18 +294,18 @@ const seenKeys = new Set();
 function readProcessDetails(pid) {
     let cwd = '';
     let cmd = '';
-    try { cwd = fs.readlinkSync(`/proc/${pid}/cwd`); } catch {}
-    try { cmd = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\u0000/g, ' ').trim(); } catch {}
+    try { cwd = fs.readlinkSync('/proc/' + pid + '/cwd'); } catch {}
+    try { cmd = fs.readFileSync('/proc/' + pid + '/cmdline', 'utf8').replace(/\u0000/g, ' ').trim(); } catch {}
     if (!cmd) {
         try {
-            cmd = execSync(`ps -p ${pid} -o args=`, { encoding: 'utf8' }).trim();
+            cmd = execSync('ps -p ' + pid + ' -o args=', { encoding: 'utf8' }).trim();
         } catch {}
     }
     return { cwd, cmd };
 }
 
 function addOffender(pid, reason) {
-    const key = `${pid}:${reason}`;
+    const key = String(pid) + ':' + String(reason);
     if (seenKeys.has(key)) return;
     seenKeys.add(key);
     const ports = Array.from(listenersByPid.get(pid) || []).filter((port) => managedPorts.has(port));
