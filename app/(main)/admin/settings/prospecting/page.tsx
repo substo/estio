@@ -3,6 +3,8 @@ import {
     getScrapingTasks,
     getScrapingRuns,
     getScrapingRunOverview,
+    getDeepScrapeRuns,
+    getDeepScrapeRunOverview,
 } from './actions';
 import db from '@/lib/db';
 import { auth } from '@clerk/nextjs/server';
@@ -11,6 +13,7 @@ import Link from 'next/link';
 import { RunScraperButton } from './_components/run-scraper-button';
 import { RunHistoryPanel } from './_components/run-history-panel';
 import { RunDeepScraperButton } from './_components/run-deep-scraper-button';
+import { DeepRunsPanel } from './_components/deep-runs-panel';
 
 export default async function ProspectingSettingsPage() {
     const { userId } = await auth();
@@ -23,10 +26,12 @@ export default async function ProspectingSettingsPage() {
     const locationId = user?.locations?.[0]?.id;
     if (!locationId) return <div>Unauthorized</div>;
 
-    const [connections, tasks, runOverview] = await Promise.all([
+    const [connections, tasks, runOverview, deepRunOverview, deepRuns] = await Promise.all([
         getScrapingConnections(locationId),
         getScrapingTasks(locationId),
         getScrapingRunOverview(locationId, 24),
+        getDeepScrapeRunOverview(locationId, 24),
+        getDeepScrapeRuns(locationId, 20),
     ]);
 
     // Fetch run history for all tasks in parallel
@@ -80,6 +85,12 @@ export default async function ProspectingSettingsPage() {
                     </p>
                 </div>
             </div>
+
+            <DeepRunsPanel
+                locationId={locationId}
+                overview={deepRunOverview}
+                initialRuns={deepRuns as any}
+            />
 
             {runOverview.topFailingTasks.length > 0 && (
                 <div className="mb-6 rounded-lg border bg-card p-3">

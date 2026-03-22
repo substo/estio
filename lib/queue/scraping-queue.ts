@@ -1,4 +1,5 @@
 import db from '@/lib/db';
+import type { DeepScrapeConfigSnapshot } from '@/lib/scraping/deep-scrape-types';
 
 const REDIS_CONNECTION = {
     host: '127.0.0.1',
@@ -14,6 +15,7 @@ export interface ScrapingJobData {
     pageLimit?: number;
     type?: 'index_scrape' | 'deep_scrape';
     limit?: number;
+    deepScrapeConfig?: Partial<DeepScrapeConfigSnapshot>;
     triggeredBy?: 'manual' | 'scheduled' | 'system';
     triggeredByUserId?: string;
     queuedAt?: string;
@@ -64,9 +66,18 @@ export async function initScrapingWorker() {
         try {
             // Check if this is a Deep Scrape job
             if (type === 'deep_scrape') {
-                const { DeepScraperService } = await import("@/lib/scraping/deep-scraper");
-                const result = await DeepScraperService.processPendingListings(locationId, limit || 20);
-                console.log(`[Scraping] ✅ Deep Scrape completed:`, JSON.stringify(result));
+                const { DeepScrapeOrchestratorService } = await import("@/lib/scraping/deep-scrape-orchestrator");
+                const result = await DeepScrapeOrchestratorService.processLocation(locationId, {
+                    limit: limit || 50,
+                    configSnapshot: job.data.deepScrapeConfig,
+                    triggerContext: {
+                        source: job.data.triggeredBy || 'system',
+                        initiatedByUserId: job.data.triggeredByUserId || undefined,
+                        queueJobId: String(job.id),
+                        queuedAt: job.data.queuedAt,
+                    },
+                });
+                console.log(`[Scraping] ✅ Deep Orchestration completed:`, JSON.stringify(result));
                 return;
             }
 

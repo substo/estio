@@ -5,6 +5,10 @@ import db from '@/lib/db';
 import { verifyUserIsLocationAdmin } from '@/lib/auth/permissions';
 import { scrapingQueue } from '@/lib/queue/scraping-queue';
 import { encryptPassword } from '@/lib/crypto/password-encryption';
+import {
+    DEFAULT_PRIVATE_CONFIDENCE_THRESHOLD,
+    type DeepScrapeConfigSnapshot,
+} from '@/lib/scraping/deep-scrape-types';
 
 export interface ScrapingRunOverview {
     windowHours: number;
@@ -22,6 +26,32 @@ export interface ScrapingRunOverview {
         taskName: string;
         failures: number;
     }>;
+}
+
+export interface DeepScrapeRunOverview {
+    windowHours: number;
+    totalRuns: number;
+    runningRuns: number;
+    completedRuns: number;
+    partialRuns: number;
+    failedRuns: number;
+    successRate: number;
+    avgDurationSeconds: number | null;
+    p95DurationSeconds: number | null;
+    lastFailureAt: string | null;
+    totals: {
+        seedListingsFound: number;
+        contactsWithPhone: number;
+        contactsWithoutPhone: number;
+        portfolioListingsDeepScraped: number;
+        omittedAgency: number;
+        omittedUncertain: number;
+        omittedMissingPhone: number;
+        omittedNonRealEstate: number;
+        omittedDuplicate: number;
+        omittedBudgetExhausted: number;
+        errorsTotal: number;
+    };
 }
 
 // --- CONNECTIONS ---
@@ -288,17 +318,181 @@ export async function manualTriggerDeepScrape(locationId: string, limit?: number
     const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
     if (!isAdmin) throw new Error("Unauthorized");
 
+    const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(500, Math.floor(limit as number))) : 50;
+    const deepScrapeConfig: DeepScrapeConfigSnapshot = {
+        version: 'manual_deep_orchestrator_v1',
+        maxSeedListingsPerTask: safeLimit,
+        privateConfidenceThreshold: DEFAULT_PRIVATE_CONFIDENCE_THRESHOLD,
+        requirePhoneForPortfolio: true,
+        scope: {
+            platform: 'bazaraki',
+            enabledTasksOnly: true,
+            targetUrlsRequired: true,
+        },
+    };
+
     // We can piggy-back on the same BullMQ scraping queue but with a distinct job name format
     await scrapingQueue.add(`manual-deep-scrape-${locationId}-${Date.now()}`, {
         type: 'deep_scrape',
         locationId: locationId,
-        limit: limit || 50,
+        limit: safeLimit,
+        deepScrapeConfig,
         triggeredBy: 'manual',
         triggeredByUserId: userId || undefined,
         queuedAt: new Date().toISOString(),
     });
 
     return true;
+}
+
+export async function getDeepScrapeRuns(locationId: string, limit = 15) {
+    const { auth } = await import('@clerk/nextjs/server');
+    const { userId } = await auth();
+    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
+    if (!isAdmin) throw new Error("Unauthorized");
+
+    const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(100, Math.floor(limit))) : 15;
+    return db.deepScrapeRun.findMany({
+        where: { locationId },
+        include: {
+            stages: {
+                orderBy: { createdAt: 'desc' },
+                take: 60,
+            },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: safeLimit,
+    });
+}
+
+export async function getDeepScrapeRunDetails(locationId: string, runId: string, stageLimit = 200) {
+    const { auth } = await import('@clerk/nextjs/server');
+    const { userId } = await auth();
+    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
+    if (!isAdmin) throw new Error("Unauthorized");
+
+    const safeStageLimit = Number.isFinite(stageLimit)
+        ? Math.max(1, Math.min(1000, Math.floor(stageLimit)))
+        : 200;
+
+    const run = await db.deepScrapeRun.findFirst({
+        where: {
+            id: runId,
+            locationId,
+        },
+        include: {
+            stages: {
+                orderBy: { createdAt: 'desc' },
+                take: safeStageLimit,
+            },
+        },
+    });
+
+    if (!run) throw new Error("Deep scrape run not found");
+    return run;
+}
+
+export async function getDeepScrapeRunOverview(locationId: string, windowHours = 24): Promise<DeepScrapeRunOverview> {
+    const { auth } = await import('@clerk/nextjs/server');
+    const { userId } = await auth();
+    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
+    if (!isAdmin) throw new Error("Unauthorized");
+
+    const safeWindowHours = Number.isFinite(windowHours) ? Math.max(1, Math.min(24 * 30, Math.floor(windowHours))) : 24;
+    const since = new Date(Date.now() - safeWindowHours * 60 * 60 * 1000);
+
+    const runs = await db.deepScrapeRun.findMany({
+        where: {
+            locationId,
+            createdAt: { gte: since },
+        },
+        select: {
+            id: true,
+            status: true,
+            createdAt: true,
+            completedAt: true,
+            seedListingsFound: true,
+            contactsWithPhone: true,
+            contactsWithoutPhone: true,
+            portfolioListingsDeepScraped: true,
+            omittedAgency: true,
+            omittedUncertain: true,
+            omittedMissingPhone: true,
+            omittedNonRealEstate: true,
+            omittedDuplicate: true,
+            omittedBudgetExhausted: true,
+            errorsTotal: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 500,
+    });
+
+    const totalRuns = runs.length;
+    const runningRuns = runs.filter((run) => run.status === 'running').length;
+    const completedRuns = runs.filter((run) => run.status === 'completed').length;
+    const partialRuns = runs.filter((run) => run.status === 'partial').length;
+    const failedRuns = runs.filter((run) => run.status === 'failed').length;
+
+    const finishedRuns = runs.filter((run) => run.status !== 'running');
+    const successRate = finishedRuns.length > 0
+        ? Number(((completedRuns / finishedRuns.length) * 100).toFixed(1))
+        : 0;
+
+    const durationsSeconds = runs
+        .filter((run) => Boolean(run.completedAt))
+        .map((run) => ((run.completedAt as Date).getTime() - run.createdAt.getTime()) / 1000)
+        .filter((seconds) => Number.isFinite(seconds) && seconds >= 0)
+        .sort((a, b) => a - b);
+
+    const avgDurationSeconds = durationsSeconds.length > 0
+        ? Number((durationsSeconds.reduce((sum, value) => sum + value, 0) / durationsSeconds.length).toFixed(1))
+        : null;
+    const p95DurationSeconds = durationsSeconds.length > 0
+        ? Number(durationsSeconds[Math.min(durationsSeconds.length - 1, Math.floor(durationsSeconds.length * 0.95))].toFixed(1))
+        : null;
+
+    const totals = runs.reduce((acc, run) => {
+        acc.seedListingsFound += run.seedListingsFound || 0;
+        acc.contactsWithPhone += run.contactsWithPhone || 0;
+        acc.contactsWithoutPhone += run.contactsWithoutPhone || 0;
+        acc.portfolioListingsDeepScraped += run.portfolioListingsDeepScraped || 0;
+        acc.omittedAgency += run.omittedAgency || 0;
+        acc.omittedUncertain += run.omittedUncertain || 0;
+        acc.omittedMissingPhone += run.omittedMissingPhone || 0;
+        acc.omittedNonRealEstate += run.omittedNonRealEstate || 0;
+        acc.omittedDuplicate += run.omittedDuplicate || 0;
+        acc.omittedBudgetExhausted += run.omittedBudgetExhausted || 0;
+        acc.errorsTotal += run.errorsTotal || 0;
+        return acc;
+    }, {
+        seedListingsFound: 0,
+        contactsWithPhone: 0,
+        contactsWithoutPhone: 0,
+        portfolioListingsDeepScraped: 0,
+        omittedAgency: 0,
+        omittedUncertain: 0,
+        omittedMissingPhone: 0,
+        omittedNonRealEstate: 0,
+        omittedDuplicate: 0,
+        omittedBudgetExhausted: 0,
+        errorsTotal: 0,
+    });
+
+    const lastFailure = runs.find((run) => run.status === 'failed' || run.status === 'partial');
+
+    return {
+        windowHours: safeWindowHours,
+        totalRuns,
+        runningRuns,
+        completedRuns,
+        partialRuns,
+        failedRuns,
+        successRate,
+        avgDurationSeconds,
+        p95DurationSeconds,
+        lastFailureAt: lastFailure?.createdAt?.toISOString?.() || null,
+        totals,
+    };
 }
 
 export async function getScrapingRuns(taskId: string, locationId: string, limit = 15) {

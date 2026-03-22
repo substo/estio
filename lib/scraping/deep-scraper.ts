@@ -86,10 +86,10 @@ export class DeepScraperService {
 
                     if (isAgency) agenciesFound++;
 
-                    // Update the ScrapedListing status out of NEW
+                    // Keep status compatible with triage/import flows.
                     await db.scrapedListing.update({
                         where: { id: listing.id },
-                        data: { status: 'REVIEWED' }
+                        data: { status: 'REVIEWING' }
                     });
 
                     processed++;

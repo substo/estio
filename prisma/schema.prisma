@@ -52,6 +52,8 @@ model Location {
   taskReminderJobs              TaskReminderJob[]
   scrapingConnections           ScrapingConnection[]
   scrapingTasks                 ScrapingTask[]
+  deepScrapeRuns                DeepScrapeRun[]
+  deepScrapeRunStages           DeepScrapeRunStage[]
   agentExecutions               AgentExecution[]
 
   // WhatsApp Integration (Native)
@@ -1953,6 +1955,7 @@ model ScrapingTask {
   location   Location           @relation(fields: [locationId], references: [id], onDelete: Cascade)
   connection ScrapingConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
   runs       ScrapingRun[]
+  deepScrapeStages DeepScrapeRunStage[]
 
   @@index([locationId, enabled])
   @@index([connectionId])
@@ -1976,6 +1979,85 @@ model ScrapingRun {
   task ScrapingTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
   @@index([taskId, createdAt(sort: Desc)])
+}
+
+model DeepScrapeRun {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  locationId String
+
+  status          String    @default("running") // running, completed, partial, failed
+  triggeredBy     String?
+  triggeredByUserId String?
+  queueJobId      String?
+  queuedAt        DateTime?
+  startedAt       DateTime  @default(now())
+  completedAt     DateTime?
+  errorLog        String?   @db.Text
+  configSnapshot  Json?
+  metadata        Json?
+
+  tasksScanned    Int       @default(0)
+  tasksStarted    Int       @default(0)
+  tasksCompleted  Int       @default(0)
+  tasksSkipped    Int       @default(0)
+
+  rootUrlsProcessed          Int @default(0)
+  indexPagesScraped          Int @default(0)
+  seedListingsFound          Int @default(0)
+  seedListingsNew            Int @default(0)
+  seedListingsDuplicate      Int @default(0)
+  prospectsCreated           Int @default(0)
+  prospectsMatched           Int @default(0)
+  contactsWithPhone          Int @default(0)
+  contactsWithoutPhone       Int @default(0)
+  sellerPortfoliosDiscovered Int @default(0)
+  portfolioListingsDeepScraped Int @default(0)
+
+  omittedAgency           Int @default(0)
+  omittedUncertain        Int @default(0)
+  omittedMissingPhone     Int @default(0)
+  omittedNonRealEstate    Int @default(0)
+  omittedDuplicate        Int @default(0)
+  omittedBudgetExhausted  Int @default(0)
+
+  errorsAuth        Int @default(0)
+  errorsNetwork     Int @default(0)
+  errorsExtraction  Int @default(0)
+  errorsUnknown     Int @default(0)
+  errorsTotal       Int @default(0)
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  stages   DeepScrapeRunStage[]
+
+  @@index([locationId, createdAt(sort: Desc)])
+  @@index([locationId, status, createdAt(sort: Desc)])
+}
+
+model DeepScrapeRunStage {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  runId     String
+  locationId String
+  taskId    String?
+
+  stage      String
+  status     String   @default("info") // info, success, warning, error, skipped
+  reasonCode String?
+  message    String?  @db.Text
+  counters   Json?
+  metadata   Json?
+
+  run      DeepScrapeRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  location Location      @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  task     ScrapingTask? @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([runId, createdAt(sort: Desc)])
+  @@index([locationId, createdAt(sort: Desc)])
+  @@index([taskId, createdAt(sort: Desc)])
+  @@index([reasonCode])
+  @@index([stage])
 }
 
 model ScrapedListing {

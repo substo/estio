@@ -67,6 +67,8 @@ interface UpsertListingResult {
     listingCreated: boolean;
     listingAlreadyExisted: boolean;
     skippedAsDuplicateContact: boolean;
+    prospectCreated: boolean;
+    prospectMatched: boolean;
     isRealEstate: boolean;
     relevanceSource: string;
     relevanceConfidence: number;
@@ -676,7 +678,7 @@ export class ListingScraperService {
         };
     }
 
-    private static async collectBazarakiPortfolioListings(params: {
+    static async collectBazarakiPortfolioListings(params: {
         profileUrl: string;
         task: ScrapeTaskWithConnection;
         options?: { pageLimit?: number };
@@ -740,7 +742,7 @@ export class ListingScraperService {
         };
     }
 
-    private static async ensureProspectClassification(
+    static async ensureProspectClassification(
         locationId: string,
         prospectId: string,
         seedListing: RawListing,
@@ -787,7 +789,7 @@ export class ListingScraperService {
         };
     }
 
-    private static shouldDeepScrapePrivatePortfolio(state: ProspectClassificationState): boolean {
+    static shouldDeepScrapePrivatePortfolio(state: ProspectClassificationState): boolean {
         if (state.manualOverride !== null && state.manualOverride !== undefined) {
             return state.manualOverride === false;
         }
@@ -809,7 +811,7 @@ export class ListingScraperService {
         return normalized.length >= 6 ? normalized : null;
     }
 
-    private static buildSellerProcessingKey(listing: RawListing): string | null {
+    static buildSellerProcessingKey(listing: RawListing): string | null {
         if (listing.sellerExternalId) {
             return `seller:${listing.sellerExternalId.trim()}`;
         }
@@ -866,7 +868,7 @@ export class ListingScraperService {
     /**
      * Finds the Least Recently Used (LRU) active credential for the pool
      */
-    private static async checkoutCredential(connectionId: string): Promise<ScrapingCredential | null> {
+    static async checkoutCredential(connectionId: string): Promise<ScrapingCredential | null> {
         return db.scrapingCredential.findFirst({
             where: {
                 connectionId,
@@ -881,7 +883,7 @@ export class ListingScraperService {
     /**
      * Upserts listing + prospect while preserving existing records and allowing richer re-scrapes.
      */
-    private static async upsertListingAndProspect(
+    static async upsertListingAndProspect(
         listing: RawListing,
         task: ScrapeTaskWithConnection,
         locationId: string,
@@ -906,6 +908,8 @@ export class ListingScraperService {
                 listingCreated: false,
                 listingAlreadyExisted: true,
                 skippedAsDuplicateContact: true,
+                prospectCreated: false,
+                prospectMatched: false,
                 isRealEstate: true,
                 relevanceSource: 'cached',
                 relevanceConfidence: 100,
@@ -944,6 +948,8 @@ export class ListingScraperService {
                         listingCreated: false,
                         listingAlreadyExisted: false,
                         skippedAsDuplicateContact: true,
+                        prospectCreated: false,
+                        prospectMatched: false,
                         isRealEstate: relevanceDecision.isRealEstate,
                         relevanceSource: relevanceDecision.source,
                         relevanceConfidence: relevanceDecision.confidence,
@@ -953,14 +959,18 @@ export class ListingScraperService {
         }
 
         let prospect = null as any;
+        let prospectCreated = false;
+        let prospectMatched = false;
 
         if (shouldAttachProspect) {
             if (task.targetProspectId) {
                 prospect = await db.prospectLead.findUnique({ where: { id: task.targetProspectId } });
+                if (prospect) prospectMatched = true;
             }
 
             if (!prospect && existingListing?.prospectLeadId) {
                 prospect = await db.prospectLead.findUnique({ where: { id: existingListing.prospectLeadId } });
+                if (prospect) prospectMatched = true;
             }
 
             if (!prospect && (listing.ownerPhone || listing.ownerEmail || listing.sellerExternalId)) {
@@ -968,18 +978,21 @@ export class ListingScraperService {
                     prospect = await db.prospectLead.findFirst({
                         where: { locationId, platformUserId: listing.sellerExternalId }
                     });
+                    if (prospect) prospectMatched = true;
                 }
 
                 if (!prospect && listing.ownerEmail) {
                     prospect = await db.prospectLead.findFirst({
                         where: { locationId, email: listing.ownerEmail }
                     });
+                    if (prospect) prospectMatched = true;
                 }
 
                 if (!prospect && listing.ownerPhone) {
                     prospect = await db.prospectLead.findFirst({
                         where: { locationId, phone: { contains: listing.ownerPhone } }
                     });
+                    if (prospect) prospectMatched = true;
                 }
             }
 
@@ -999,7 +1012,9 @@ export class ListingScraperService {
                         listingCount: listing.otherListingsCount ?? null,
                     }
                 });
+                prospectCreated = true;
             } else if (prospect) {
+                prospectMatched = true;
                 const updateData: any = {};
 
                 if (listing.ownerName && (!prospect.name || prospect.name === 'Bazaraki Owner')) {
@@ -1111,6 +1126,8 @@ export class ListingScraperService {
                 listingCreated: false,
                 listingAlreadyExisted: true,
                 skippedAsDuplicateContact: false,
+                prospectCreated,
+                prospectMatched,
                 isRealEstate: relevanceDecision.isRealEstate,
                 relevanceSource: relevanceDecision.source,
                 relevanceConfidence: relevanceDecision.confidence,
@@ -1156,6 +1173,8 @@ export class ListingScraperService {
             listingCreated: true,
             listingAlreadyExisted: false,
             skippedAsDuplicateContact: false,
+            prospectCreated,
+            prospectMatched,
             isRealEstate: relevanceDecision.isRealEstate,
             relevanceSource: relevanceDecision.source,
             relevanceConfidence: relevanceDecision.confidence,
