@@ -84,19 +84,56 @@ interface BazarakiPortfolioResult {
     listings: RawListing[];
 }
 
+interface ScrapeTriggerContext {
+    source?: 'manual' | 'scheduled' | 'system';
+    initiatedByUserId?: string;
+    queueJobId?: string;
+    queuedAt?: string;
+}
+
+interface ScrapeTaskOptions {
+    pageLimit?: number;
+    triggerContext?: ScrapeTriggerContext;
+}
+
 export class ListingScraperService {
 
     /**
      * Main entry point to scrape a specific task configuration
      */
-    static async scrapeTask(task: ScrapeTaskWithConnection, options?: { pageLimit?: number }) {
+    static async scrapeTask(task: ScrapeTaskWithConnection, options?: ScrapeTaskOptions) {
         console.log(`[ListingScraper] Starting scrape for task: ${task.name} (${task.id}) with options:`, options);
+
+        let initialInteractionsBudget = task.maxInteractionsPerRun ?? Number.MAX_SAFE_INTEGER;
+        const dailyLimit = task.connection.maxDailyInteractions || 100;
+        if (initialInteractionsBudget > dailyLimit) initialInteractionsBudget = dailyLimit;
+        const isStrategicFlow = this.shouldUseStrategicContactFlow(task);
+        const runMetadataBase = {
+            trigger: {
+                source: options?.triggerContext?.source || 'system',
+                initiatedByUserId: options?.triggerContext?.initiatedByUserId || null,
+                queueJobId: options?.triggerContext?.queueJobId || null,
+                queuedAt: options?.triggerContext?.queuedAt || null,
+            },
+            flow: isStrategicFlow ? 'strategic_contact_first' : 'standard',
+            pageLimitRequested: options?.pageLimit ?? null,
+            scrapeStrategy: task.scrapeStrategy,
+            targetSellerType: task.targetSellerType,
+            targetUrlsCount: task.targetUrls?.length || 0,
+            interactionBudget: {
+                initial: initialInteractionsBudget,
+                dailyLimit,
+                maxPerRun: task.maxInteractionsPerRun ?? null,
+            },
+            startedAt: new Date().toISOString(),
+        };
 
         // 1. Create a run record
         const run = await db.scrapingRun.create({
             data: {
                 taskId: task.id,
                 status: 'running',
+                metadata: runMetadataBase,
             }
         });
 
@@ -106,7 +143,16 @@ export class ListingScraperService {
             console.warn(`[ListingScraper] No active credentials available for connection pool ${task.connection.id}. Failing task gracefully.`);
             await db.scrapingRun.update({
                 where: { id: run.id },
-                data: { status: 'failed', errorLog: 'No active credentials available in the platform pool.' }
+                data: {
+                    status: 'failed',
+                    errorLog: 'No active credentials available in the platform pool.',
+                    completedAt: new Date(),
+                    metadata: {
+                        ...runMetadataBase,
+                        failedAt: new Date().toISOString(),
+                        errorCategory: 'auth',
+                    }
+                }
             });
             return { pagesScraped: 0, listingsFound: 0, leadsCreated: 0, duplicatesFound: 0, errors: 1 };
         }
@@ -123,9 +169,7 @@ export class ListingScraperService {
         };
         const touchedProspectIds = new Set<string>();
 
-        let interactionsRemaining = task.maxInteractionsPerRun ?? Number.MAX_SAFE_INTEGER;
-        const dailyLimit = task.connection.maxDailyInteractions || 100;
-        if (interactionsRemaining > dailyLimit) interactionsRemaining = dailyLimit;
+        let interactionsRemaining = initialInteractionsBudget;
 
         try {
             if (this.shouldUseStrategicContactFlow(task)) {
@@ -287,18 +331,30 @@ export class ListingScraperService {
                 }
             });
 
+            const completedAt = new Date();
+            const interactionsUsed = Math.max(0, initialInteractionsBudget - interactionsRemaining);
+            const runStatus = counters.errors > 0 ? 'partial' : 'completed';
+
             await db.scrapingRun.update({
                 where: { id: run.id },
                 data: {
-                    status: 'completed',
-                    completedAt: new Date(),
+                    status: runStatus,
+                    completedAt,
                     pagesScraped: counters.pagesScraped,
                     listingsFound: counters.listingsFound,
                     leadsCreated: counters.leadsCreated,
                     duplicatesFound: counters.duplicatesFound,
                     errors: counters.errors,
                     metadata: {
+                        ...runMetadataBase,
+                        completedAt: completedAt.toISOString(),
+                        interactionsUsed,
                         interactionsRemaining,
+                        pagesScraped: counters.pagesScraped,
+                        listingsFound: counters.listingsFound,
+                        leadsCreated: counters.leadsCreated,
+                        duplicatesFound: counters.duplicatesFound,
+                        errors: counters.errors,
                     },
                 }
             });
@@ -306,14 +362,17 @@ export class ListingScraperService {
             await db.scrapingTask.update({
                 where: { id: task.id },
                 data: {
-                    lastSyncAt: new Date(),
-                    lastSyncStatus: 'success',
+                    lastSyncAt: completedAt,
+                    lastSyncStatus: runStatus === 'completed' ? 'success' : 'partial',
+                    lastSyncError: runStatus === 'completed' ? null : `${counters.errors} non-fatal errors during last run`,
                     lastSyncStats: {
                         pagesScraped: counters.pagesScraped,
                         listingsFound: counters.listingsFound,
                         leadsCreated: counters.leadsCreated,
                         duplicatesFound: counters.duplicatesFound,
                         errors: counters.errors,
+                        interactionsUsed,
+                        interactionsRemaining,
                     }
                 }
             });
@@ -323,26 +382,46 @@ export class ListingScraperService {
         } catch (error: any) {
             console.error(`[ListingScraper] Task ${task.id} failed deeply:`, error);
 
+            const failedAt = new Date();
+            const interactionsUsed = Math.max(0, initialInteractionsBudget - interactionsRemaining);
+
             await db.scrapingRun.update({
                 where: { id: run.id },
                 data: {
                     status: 'failed',
-                    completedAt: new Date(),
+                    completedAt: failedAt,
                     errorLog: error.message,
                     pagesScraped: counters.pagesScraped,
                     listingsFound: counters.listingsFound,
                     leadsCreated: counters.leadsCreated,
                     duplicatesFound: counters.duplicatesFound,
                     errors: counters.errors,
+                    metadata: {
+                        ...runMetadataBase,
+                        failedAt: failedAt.toISOString(),
+                        interactionsUsed,
+                        interactionsRemaining,
+                        errorCategory: this.categorizeRunError(error),
+                        errorName: error?.name || null,
+                    }
                 }
             });
 
             await db.scrapingTask.update({
                 where: { id: task.id },
                 data: {
-                    lastSyncAt: new Date(),
+                    lastSyncAt: failedAt,
                     lastSyncStatus: 'failed',
-                    lastSyncError: error.message
+                    lastSyncError: error.message,
+                    lastSyncStats: {
+                        pagesScraped: counters.pagesScraped,
+                        listingsFound: counters.listingsFound,
+                        leadsCreated: counters.leadsCreated,
+                        duplicatesFound: counters.duplicatesFound,
+                        errors: counters.errors,
+                        interactionsUsed,
+                        interactionsRemaining,
+                    }
                 }
             });
             throw error;
@@ -353,6 +432,17 @@ export class ListingScraperService {
 
     private static shouldUseStrategicContactFlow(task: ScrapeTaskWithConnection): boolean {
         return task.connection.platform === 'bazaraki' && task.targetSellerType === 'individual' && !task.targetProspectId;
+    }
+
+    private static categorizeRunError(error: any): string {
+        const message = String(error?.message || '').toLowerCase();
+        if (!message) return 'unknown';
+        if (message.includes('credential') || message.includes('session') || message.includes('auth')) return 'auth';
+        if (message.includes('timeout')) return 'timeout';
+        if (message.includes('429') || message.includes('rate limit') || message.includes('too many requests')) return 'rate_limit';
+        if (message.includes('network') || message.includes('econn') || message.includes('fetch')) return 'network';
+        if (message.includes('selector') || message.includes('extract')) return 'extraction';
+        return 'unknown';
     }
 
     private static async runStrategicBazarakiFlow(params: {

@@ -14,6 +14,9 @@ export interface ScrapingJobData {
     pageLimit?: number;
     type?: 'index_scrape' | 'deep_scrape';
     limit?: number;
+    triggeredBy?: 'manual' | 'scheduled' | 'system';
+    triggeredByUserId?: string;
+    queuedAt?: string;
 }
 
 // 1. Queue Instance (Producer) - Lazy Loaded via Dynamic Import
@@ -90,7 +93,13 @@ export async function initScrapingWorker() {
 
             // Orchestrate the scrape
             const result = await ListingScraperService.scrapeTask(task as any, {
-                pageLimit: job.data.pageLimit
+                pageLimit: job.data.pageLimit,
+                triggerContext: {
+                    source: job.data.triggeredBy || (type === 'deep_scrape' ? 'system' : 'scheduled'),
+                    initiatedByUserId: job.data.triggeredByUserId || undefined,
+                    queueJobId: String(job.id),
+                    queuedAt: job.data.queuedAt,
+                },
             });
 
             console.log(`[Scraping] ✅ Task "${task.name}" completed:`, JSON.stringify(result));
@@ -102,14 +111,46 @@ export async function initScrapingWorker() {
             // Log the error to the database run (fallback if not already handled by Service)
             try {
                 if (taskId) {
-                    await db.scrapingRun.create({
-                        data: {
+                    const activeRun = await db.scrapingRun.findFirst({
+                        where: {
                             taskId,
-                            status: 'failed',
-                            errorLog: error.message || 'Unknown error',
-                            completedAt: new Date()
-                        }
+                            status: 'running',
+                        },
+                        orderBy: { createdAt: 'desc' },
                     });
+
+                    const fallbackMetadata = {
+                        trigger: {
+                            source: job.data.triggeredBy || 'system',
+                            initiatedByUserId: job.data.triggeredByUserId || null,
+                            queueJobId: String(job.id),
+                            queuedAt: job.data.queuedAt || null,
+                        },
+                        fallbackFailureLoggedBy: 'scraping-queue-worker',
+                        errorName: error?.name || null,
+                    };
+
+                    if (activeRun) {
+                        await db.scrapingRun.update({
+                            where: { id: activeRun.id },
+                            data: {
+                                status: 'failed',
+                                errorLog: error.message || 'Unknown error',
+                                completedAt: new Date(),
+                                metadata: fallbackMetadata,
+                            }
+                        });
+                    } else {
+                        await db.scrapingRun.create({
+                            data: {
+                                taskId,
+                                status: 'failed',
+                                errorLog: error.message || 'Unknown error',
+                                completedAt: new Date(),
+                                metadata: fallbackMetadata,
+                            }
+                        });
+                    }
                 }
             } catch (dbErr: any) {
                 console.error(`[Scraping] ❌ Failed to write error to DB:`, dbErr.message);

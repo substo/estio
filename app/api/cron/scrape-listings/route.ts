@@ -64,7 +64,9 @@ export async function GET(req: Request) {
                 // Enqueue to BullMQ
                 await scrapingQueue.add(`scrape-${task.id}-${Date.now()}`, {
                     taskId: task.id,
-                    locationId: task.locationId
+                    locationId: task.locationId,
+                    triggeredBy: 'scheduled',
+                    queuedAt: new Date().toISOString(),
                 });
                 enqueuedJobs.push(task.id);
             }

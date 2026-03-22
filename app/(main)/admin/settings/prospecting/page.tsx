@@ -1,4 +1,9 @@
-import { getScrapingConnections, getScrapingTasks, getScrapingRuns } from './actions';
+import {
+    getScrapingConnections,
+    getScrapingTasks,
+    getScrapingRuns,
+    getScrapingRunOverview,
+} from './actions';
 import db from '@/lib/db';
 import { auth } from '@clerk/nextjs/server';
 import { Button } from '@/components/ui/button';
@@ -18,16 +23,17 @@ export default async function ProspectingSettingsPage() {
     const locationId = user?.locations?.[0]?.id;
     if (!locationId) return <div>Unauthorized</div>;
 
-    const [connections, tasks] = await Promise.all([
+    const [connections, tasks, runOverview] = await Promise.all([
         getScrapingConnections(locationId),
-        getScrapingTasks(locationId)
+        getScrapingTasks(locationId),
+        getScrapingRunOverview(locationId, 24),
     ]);
 
     // Fetch run history for all tasks in parallel
     const runsByTask: Record<string, any[]> = {};
     await Promise.all(
         tasks.map(async (task: any) => {
-            runsByTask[task.id] = await getScrapingRuns(task.id, 5);
+            runsByTask[task.id] = await getScrapingRuns(task.id, locationId, 15);
         })
     );
 
@@ -44,6 +50,49 @@ export default async function ProspectingSettingsPage() {
                     <RunDeepScraperButton locationId={locationId} />
                 </div>
             </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5 mb-6">
+                <div className="rounded-lg border bg-card p-3">
+                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Runs (24h)</p>
+                    <p className="text-xl font-semibold mt-1">{runOverview.totalRuns}</p>
+                </div>
+                <div className="rounded-lg border bg-card p-3">
+                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Success Rate</p>
+                    <p className="text-xl font-semibold mt-1">{runOverview.successRate}%</p>
+                    <p className="text-[11px] text-muted-foreground mt-1">{runOverview.completedRuns} completed</p>
+                </div>
+                <div className="rounded-lg border bg-card p-3">
+                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Failed / Partial</p>
+                    <p className="text-xl font-semibold mt-1">{runOverview.failedRuns + runOverview.partialRuns}</p>
+                    <p className="text-[11px] text-muted-foreground mt-1">{runOverview.failedRuns} failed · {runOverview.partialRuns} partial</p>
+                </div>
+                <div className="rounded-lg border bg-card p-3">
+                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Running</p>
+                    <p className="text-xl font-semibold mt-1">{runOverview.runningRuns}</p>
+                </div>
+                <div className="rounded-lg border bg-card p-3">
+                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Avg / P95 Duration</p>
+                    <p className="text-xl font-semibold mt-1">
+                        {runOverview.avgDurationSeconds !== null ? `${runOverview.avgDurationSeconds}s` : '—'}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                        P95: {runOverview.p95DurationSeconds !== null ? `${runOverview.p95DurationSeconds}s` : '—'}
+                    </p>
+                </div>
+            </div>
+
+            {runOverview.topFailingTasks.length > 0 && (
+                <div className="mb-6 rounded-lg border bg-card p-3">
+                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2">Top Failing Tasks (24h)</p>
+                    <div className="flex flex-wrap gap-2">
+                        {runOverview.topFailingTasks.map((task) => (
+                            <span key={task.taskId} className="text-xs rounded bg-red-500/10 text-red-600 dark:text-red-400 px-2 py-1">
+                                {task.taskName}: {task.failures}
+                            </span>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* Platform Connections Section */}
             <div className="mt-8 mb-4 flex justify-between items-center border-b pb-2">
@@ -134,7 +183,7 @@ export default async function ProspectingSettingsPage() {
                             </div>
 
                             {/* Run History */}
-                            <RunHistoryPanel taskId={task.id} initialRuns={runsByTask[task.id] || []} />
+                            <RunHistoryPanel taskId={task.id} locationId={locationId} initialRuns={runsByTask[task.id] || []} />
                         </div>
                     ))
                 )}
