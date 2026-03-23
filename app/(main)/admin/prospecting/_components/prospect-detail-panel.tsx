@@ -3,9 +3,10 @@
 import { useState, useTransition, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { type ScrapedListingRow } from '@/lib/leads/scraped-listing-repository';
-import { acceptProspect, deleteProspect, linkProspectAgencyCompany } from '../actions';
+import { acceptProspect, deleteProspect } from '../actions';
 import { scrapeSellerProfile } from '../listings/_actions/seller-scrape';
 import { ScrapeListingDialog } from './scrape-listing-dialog';
+import { CompanyLinkDialog } from './company-link-dialog';
 import { toast } from 'sonner';
 import {
   Building2, UserCheck, ExternalLink, Phone, MessageCircle,
@@ -16,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogTrigger, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
+import { isProspectStatusLinkable } from '@/lib/leads/prospect-status';
 
 interface ProspectDetailPanelProps {
   listing: ScrapedListingRow | null;
@@ -29,9 +31,9 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isConverting, startConverting] = useTransition();
   const [isScrapingSeller, startScrapingSeller] = useTransition();
-  const [isLinkingCompany, startLinkingCompany] = useTransition();
   const [isDeleting, startDeleting] = useTransition();
   const [isScrapeOpen, setIsScrapeOpen] = useState(false);
+  const [isCompanyDialogOpen, setIsCompanyDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [optimisticUpdate, setOptimisticUpdate] = useState<any>(null);
   const [linkedCompanyState, setLinkedCompanyState] = useState<{ companyId: string | null; companyName: string | null } | null>(null);
@@ -42,6 +44,7 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
     setCurrentImageIndex(0);
     setOptimisticUpdate(null);
     setPortraitByImage({});
+    setIsCompanyDialogOpen(false);
     setLinkedCompanyState(
       originalListing
         ? { companyId: originalListing.linkedCompanyId ?? null, companyName: originalListing.linkedCompanyName ?? null }
@@ -70,6 +73,8 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
   const linkedCompanyId = linkedCompanyState?.companyId || listing?.linkedCompanyId || null;
   const linkedCompanyName = linkedCompanyState?.companyName || listing?.linkedCompanyName || null;
   const stagedCompanyMatchName = listing?.stagedCompanyMatchName || null;
+  const isLinkableProspectStatus = isProspectStatusLinkable(listing?.prospectStatus);
+  const canLinkCompany = Boolean(effectiveAgency && listing?.prospectLeadId && isLinkableProspectStatus);
   const imageCount = listing?.images?.length || 0;
   const activeImageIndex = imageCount > 0 ? Math.min(currentImageIndex, imageCount - 1) : 0;
   const activeImageSrc = imageCount > 0 ? listing!.images[activeImageIndex] : null;
@@ -140,23 +145,6 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
     });
   };
 
-  const handleLinkCompany = () => {
-    if (!listing.prospectLeadId) return;
-    startLinkingCompany(async () => {
-      const res = await linkProspectAgencyCompany(listing.prospectLeadId!);
-      if (res.success) {
-        toast.success(res.message || 'Company linked');
-        setLinkedCompanyState({
-          companyId: (res as any).companyId || null,
-          companyName: (res as any).companyName || null,
-        });
-        router.refresh();
-      } else {
-        toast.error(res.message || 'Failed to link company');
-      }
-    });
-  };
-
   const handleDelete = () => {
     if (!listing.prospectLeadId) return;
     startDeleting(async () => {
@@ -185,6 +173,15 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
         listingTitle={listing.title}
         onSuccess={(data) => {
           if (data) setOptimisticUpdate(data);
+          router.refresh();
+        }}
+      />
+      <CompanyLinkDialog
+        prospectId={listing.prospectLeadId || null}
+        open={isCompanyDialogOpen}
+        onOpenChange={setIsCompanyDialogOpen}
+        onLinked={(result) => {
+          setLinkedCompanyState({ companyId: result.companyId, companyName: result.companyName });
           router.refresh();
         }}
       />
@@ -326,8 +323,15 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                 )}
 
                 {effectiveAgency && listing.prospectLeadId && (
-                  <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2.5 text-xs" onClick={handleLinkCompany} disabled={isLinkingCompany}>
-                    <Building2 className="w-4 h-4 text-emerald-600" /> {isLinkingCompany ? 'Linking...' : (linkedCompanyId ? 'Refresh Company Link' : 'Link As Company')}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5 px-2.5 text-xs"
+                    onClick={() => setIsCompanyDialogOpen(true)}
+                    disabled={!canLinkCompany}
+                    title={!isLinkableProspectStatus ? 'Prospect must be in New/Reviewing status to link company.' : undefined}
+                  >
+                    <Building2 className="w-4 h-4 text-emerald-600" /> {linkedCompanyId ? 'Refresh Company Link' : 'Link As Company'}
                   </Button>
                 )}
 

@@ -5,7 +5,16 @@ import { revalidatePath } from 'next/cache';
 import { auth } from '@clerk/nextjs/server';
 import { eventBus } from '@/lib/ai/events/event-bus';
 import { importAllListingsForProspect } from '@/lib/leads/property-import';
-import { ensureAgencyCompanyForProspect } from '@/lib/leads/agency-company-linker';
+import {
+    applyProspectCompanyLinkSelection,
+    COMPANY_LINK_HIGH_CONFIDENCE_THRESHOLD,
+    getCompanyLinkOptionsForProspect,
+    stageAgencyProfileCompanyMatch,
+    type CompanyMatchCandidate,
+    type ProspectCompanyLinkSelection,
+    type ScrapedAgencyProfile,
+} from '@/lib/leads/agency-company-linker';
+import { isProspectStatusLinkable } from '@/lib/leads/prospect-status';
 
 async function getInternalUserId() {
     const { userId } = await auth();
@@ -19,6 +28,48 @@ const isEffectiveAgency = (prospect: { isAgency: boolean; isAgencyManual: boolea
         ? prospect.isAgencyManual
         : prospect.isAgency;
 };
+
+const getProspectCompanyLinkability = (prospect: {
+    status: string | null | undefined;
+    isAgency: boolean;
+    isAgencyManual: boolean | null;
+}) => {
+    if (!isProspectStatusLinkable(prospect.status)) {
+        return {
+            linkable: false as const,
+            reason: 'Prospect already processed',
+            code: 'not_linkable' as const,
+        };
+    }
+    if (!isEffectiveAgency({ isAgency: prospect.isAgency, isAgencyManual: prospect.isAgencyManual })) {
+        return {
+            linkable: false as const,
+            reason: 'This prospect is marked as private. Mark as Agency first, then link company.',
+            code: 'not_agency' as const,
+        };
+    }
+    return {
+        linkable: true as const,
+        reason: null,
+        code: null,
+    };
+};
+
+export interface ProspectCompanyLinkCandidate extends CompanyMatchCandidate {}
+
+export interface ProspectCompanyLinkOptionsResponse {
+    success: boolean;
+    code?: 'not_linkable' | 'not_agency';
+    message?: string;
+    linkable: boolean;
+    reason: string | null;
+    agencyProfile: ScrapedAgencyProfile | null;
+    candidates: ProspectCompanyLinkCandidate[];
+    suggestedMode: 'existing' | 'create' | null;
+    suggestedCompanyId: string | null;
+}
+
+export type ProspectCompanyLinkApplyInput = ProspectCompanyLinkSelection;
 
 async function createOrReactivateContactForProspect(prospect: any) {
     if (prospect.createdContactId) {
@@ -367,7 +418,88 @@ export async function acceptProspectWithListings(prospectId: string) {
  * Explicit agency workflow for prospecting stage:
  * create/update a CRM Company from a staged agency prospect without accepting the prospect as Contact.
  */
-export async function linkProspectAgencyCompany(prospectId: string) {
+export async function getProspectCompanyLinkOptions(prospectId: string): Promise<ProspectCompanyLinkOptionsResponse> {
+    try {
+        const internalUserId = await getInternalUserId();
+        if (!internalUserId) {
+            return {
+                success: false,
+                message: 'Unauthorized',
+                linkable: false,
+                reason: 'Unauthorized',
+                agencyProfile: null,
+                candidates: [],
+                suggestedMode: null,
+                suggestedCompanyId: null,
+            };
+        }
+
+        const prospect = await db.prospectLead.findUnique({
+            where: { id: prospectId },
+            select: {
+                id: true,
+                locationId: true,
+                status: true,
+                isAgency: true,
+                isAgencyManual: true,
+            },
+        });
+
+        if (!prospect) {
+            return {
+                success: false,
+                message: 'Prospect not found',
+                linkable: false,
+                reason: 'Prospect not found',
+                agencyProfile: null,
+                candidates: [],
+                suggestedMode: null,
+                suggestedCompanyId: null,
+            };
+        }
+
+        const linkability = getProspectCompanyLinkability(prospect);
+        if (!linkability.linkable) {
+            return {
+                success: false,
+                code: linkability.code || undefined,
+                message: linkability.reason || 'Prospect is not linkable',
+                linkable: false,
+                reason: linkability.reason,
+                agencyProfile: null,
+                candidates: [],
+                suggestedMode: null,
+                suggestedCompanyId: null,
+            };
+        }
+
+        await stageAgencyProfileCompanyMatch(prospect.id, prospect.locationId);
+        const options = await getCompanyLinkOptionsForProspect(prospect.id, prospect.locationId);
+
+        return {
+            success: true,
+            linkable: true,
+            reason: null,
+            agencyProfile: options.agencyProfile,
+            candidates: options.candidates,
+            suggestedMode: options.suggestedMode,
+            suggestedCompanyId: options.suggestedCompanyId,
+        };
+    } catch (e: any) {
+        return {
+            success: false,
+            message: e.message || 'Server error',
+            linkable: false,
+            reason: e.message || 'Server error',
+            agencyProfile: null,
+            candidates: [],
+            suggestedMode: null,
+            suggestedCompanyId: null,
+        };
+    }
+}
+
+export async function applyProspectCompanyLink(prospectId: string, selection: ProspectCompanyLinkApplyInput) {
     try {
         const internalUserId = await getInternalUserId();
         if (!internalUserId) return { success: false, message: 'Unauthorized' };
@@ -384,20 +516,24 @@ export async function linkProspectAgencyCompany(prospectId: string) {
         });
 
         if (!prospect) return { success: false, message: 'Prospect not found' };
-        if (prospect.status !== 'new' && prospect.status !== 'reviewing') {
-            return { success: false, message: 'Prospect already processed' };
-        }
-        if (!isEffectiveAgency({ isAgency: prospect.isAgency, isAgencyManual: prospect.isAgencyManual })) {
-            return { success: false, message: 'This prospect is marked as private. Mark as Agency first, then link company.' };
+
+        const linkability = getProspectCompanyLinkability(prospect);
+        if (!linkability.linkable) {
+            return {
+                success: false,
+                code: linkability.code,
+                message: linkability.reason || 'Prospect is not linkable',
+            };
         }
 
-        const linked = await ensureAgencyCompanyForProspect(
+        const linked = await applyProspectCompanyLinkSelection(
             prospect.id,
-            prospect.locationId
+            prospect.locationId,
+            selection
         );
 
-        if (!linked.companyId) {
-            return { success: false, message: 'Could not derive a valid agency profile to link.' };
+        if (!linked.success) {
+            return { success: false, code: linked.code, message: linked.message };
         }
 
         revalidatePath('/admin/prospecting');
@@ -411,6 +547,41 @@ export async function linkProspectAgencyCompany(prospectId: string) {
                 ? `Created company "${linked.companyName}" and linked it to this prospect.`
                 : `Linked prospect to existing company "${linked.companyName}".`,
         };
+    } catch (e: any) {
+        return { success: false, message: e.message || 'Server error' };
+    }
+}
+
+export async function linkProspectAgencyCompany(prospectId: string) {
+    try {
+        const options = await getProspectCompanyLinkOptions(prospectId);
+        if (!options.success || !options.linkable) {
+            return {
+                success: false,
+                code: options.code || 'not_linkable',
+                message: options.message || options.reason || 'Prospect is not linkable',
+            };
+        }
+
+        const top = options.candidates[0] || null;
+        const hasSingleHighConfidence = Boolean(
+            top &&
+            options.candidates.length === 1 &&
+            top.confidence >= COMPANY_LINK_HIGH_CONFIDENCE_THRESHOLD
+        );
+
+        if (!hasSingleHighConfidence || !top) {
+            return {
+                success: false,
+                code: 'selection_required',
+                message: options.candidates.length > 0
+                    ? 'Multiple or low-confidence matches found. Select company manually.'
+                    : 'No reliable match found. Choose “Create New Company” manually.',
+                options,
+            };
+        }
+
+        return applyProspectCompanyLink(prospectId, { mode: 'existing', companyId: top.companyId });
     } catch (e: any) {
         return { success: false, message: e.message || 'Server error' };
     }
@@ -430,10 +601,15 @@ export async function toggleProspectAgencyStatus(id: string, isAgencyManual: boo
             updateData.isAgency = isAgencyManual;
         }
 
-        await db.prospectLead.update({
+        const updated = await db.prospectLead.update({
             where: { id },
             data: updateData,
+            select: { id: true, locationId: true, isAgency: true, isAgencyManual: true },
         });
+
+        if (isEffectiveAgency({ isAgency: updated.isAgency, isAgencyManual: updated.isAgencyManual })) {
+            await stageAgencyProfileCompanyMatch(updated.id, updated.locationId);
+        }
 
         revalidatePath('/admin/prospecting');
         return { success: true };

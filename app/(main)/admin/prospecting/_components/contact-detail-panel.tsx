@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { type ProspectInboxRow } from '@/lib/leads/prospect-repository';
-import { acceptProspectWithListings, rejectProspectWithListings, toggleProspectAgencyStatus, linkProspectAgencyCompany } from '../actions';
+import { toggleProspectAgencyStatus } from '../actions';
 import { scrapeSellerProfile } from '../listings/_actions/seller-scrape';
 import { toast } from 'sonner';
 import {
@@ -13,6 +13,8 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { CompanyLinkDialog } from './company-link-dialog';
+import { isProspectStatusLinkable } from '@/lib/leads/prospect-status';
 
 interface ContactDetailPanelProps {
   prospect: ProspectInboxRow | null;
@@ -25,7 +27,11 @@ interface ContactDetailPanelProps {
 export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, locationId }: ContactDetailPanelProps) {
   const router = useRouter();
   const [isScrapingSeller, startScrapingSeller] = useTransition();
-  const [isLinkingCompany, startLinkingCompany] = useTransition();
+  const [isCompanyDialogOpen, setIsCompanyDialogOpen] = useState(false);
+
+  useEffect(() => {
+    setIsCompanyDialogOpen(false);
+  }, [prospect?.id]);
 
   if (!prospect) {
     return (
@@ -64,7 +70,9 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
     const res = await toggleProspectAgencyStatus(prospect.id, next);
     if (!res.success) {
       toast.error(res.message || 'Failed to update');
+      return;
     }
+    router.refresh();
   };
 
   const agencyBadgeContent = () => {
@@ -138,25 +146,20 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
     });
   };
 
-  const handleLinkCompany = () => {
-    startLinkingCompany(async () => {
-      const res = await linkProspectAgencyCompany(prospect.id);
-      if (res.success) {
-        toast.success(res.message || 'Company linked');
-        router.refresh();
-      } else {
-        toast.error(res.message || 'Failed to link company');
-      }
-    });
-  };
-
   const newListingsCount = prospect.scrapedListings?.filter(l => l.status === 'NEW' || l.status === 'new' || l.status === 'REVIEWING').length || 0;
+  const canLinkCompany = effectiveIsAgency && isProspectStatusLinkable(prospect.status);
   const strategicScrape = (prospect.aiScoreBreakdown as any)?.strategicScrape || {};
   const stagedCompanyMatch = strategicScrape?.companyMatch;
   const linkedCompany = strategicScrape?.companyLink;
 
   return (
     <div className="flex flex-col h-full">
+      <CompanyLinkDialog
+        prospectId={prospect.id}
+        open={isCompanyDialogOpen}
+        onOpenChange={setIsCompanyDialogOpen}
+        onLinked={() => router.refresh()}
+      />
       {/* Contact Header */}
       <div className="shrink-0 bg-muted/30 p-4 border-b">
         <div className="flex items-center justify-between">
@@ -221,8 +224,15 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
           )}
 
           {effectiveIsAgency && (
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={handleLinkCompany} disabled={isLinkingCompany}>
-              <Building2 className="w-4 h-4 text-emerald-600" /> {isLinkingCompany ? 'Linking...' : (linkedCompany?.companyId ? 'Refresh Company Link' : 'Link As Company')}
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => setIsCompanyDialogOpen(true)}
+              disabled={!canLinkCompany}
+              title={!isProspectStatusLinkable(prospect.status) ? 'Prospect must be in New/Reviewing status to link company.' : undefined}
+            >
+              <Building2 className="w-4 h-4 text-emerald-600" /> {(linkedCompany?.companyId ? 'Refresh Company Link' : 'Link As Company')}
             </Button>
           )}
 

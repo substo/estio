@@ -287,7 +287,7 @@ The primary bottleneck on classified platforms is **action thresholds** (how man
 
 1.  **Shallow Duplication:**
     *   The scraper rapidly traverses index pages (Listings List).
-    *   It extracts surface-level data: `listingId`, `title`, `price`, `status`, `sellerType` (if available visually).
+    *   It extracts surface-level data: `listingId`, `title`, `price`, `status`, `sellerType` (if available visually), plus card media (`images` / `thumbnails`) when present.
     *   **No Deep Interactions.** The scraper does not open listing detail pages or click reveal buttons.
     *   This data is used to continuously map the market state quickly.
 2.  **Deep Extraction:**
@@ -302,6 +302,7 @@ The primary bottleneck on classified platforms is **action thresholds** (how man
     *   Every discovered portfolio listing is first passed through a **listing relevance gate** (`real-estate` vs `non-real-estate`).
     *   Only real-estate relevant listings are promoted to deep extraction for full details/phone enrichment.
     *   Non-real-estate listings are persisted with `status = SKIPPED` plus system relevance metadata, so future runs reuse cached classification and avoid repeated AI/runtime cost.
+    *   For uncertain cases, classification is **fail-closed**: if AI relevance classification is unavailable/invalid after retries, listing is treated as `non-real-estate` and remains `SKIPPED`.
     *   The scraper dynamically fetches the `knownPhone` of the Prospect and bypasses "Show Phone Number" when already known, conserving interaction budgets.
 
 By combining an hourly Shallow sweep with filtered Deep Extractions, Estio maintains full market data without triggering aggressive anti-bot captchas.
@@ -316,7 +317,8 @@ To keep scraping economically viable and auditable at enterprise scale:
 
 2. **Cost-Aware Multi-Stage Classification**
    - Stage 1: deterministic rules (high precision on obvious non-real-estate categories).
-   - Stage 2: AI fallback only for uncertain cases.
+   - Stage 2: AI fallback only for uncertain cases, with bounded retry/backoff and timeout safeguards.
+   - If AI remains unavailable for an uncertain case, classification is fail-closed (`non_real_estate`) with explicit diagnostic metadata.
    - This minimizes token burn while keeping recall high.
 
 3. **Workflow Isolation**
@@ -325,6 +327,10 @@ To keep scraping economically viable and auditable at enterprise scale:
 
 4. **Portfolio De-Duping by Seller Identity**
    - Strategic flow de-duplicates by seller signatures (`sellerExternalId`, profile URL, phone fallback) so the same seller portfolio is not reprocessed repeatedly inside one run.
+
+5. **Operational Circuit Breaker**
+   - Deep orchestration tracks repeated relevance fail-closed events caused by AI-unavailability diagnostics.
+   - When threshold is exceeded in a run, the task trips a circuit breaker, emits a stage error with reason code `relevance_ai_unavailable`, and ends as degraded/partial instead of continuing to process noisy uncertain items.
 
 ---
 
@@ -416,13 +422,15 @@ Filters can be applied via URL params (district, price range, bedrooms).
 
 Bazaraki's phone button (`.phone-author.js-phone-click`) does not inline-reveal the number. Instead, it opens a jQuery UI popup dialog (`.contacts-dialog`):
 
-1. **Pre-click**: The phone may be partially visible in `.phone-author-subtext__main` — extract first as fallback.
-2. **Click**: Click the `.phone-author.js-phone-click` button.
-3. **Wait**: Allow 2s for the `.contacts-dialog` popup to appear.
-4. **Extract from dialog**:
+1. **Overlay cleanup**: Remove known consent/banner overlays that can block interaction (`#cmpwrapper`, cookie/consent wrappers).
+2. **Pre-click read**: Attempt inline extraction from `.phone-author-subtext__main` and existing `tel:` links first.
+3. **Retry click**: Click `.phone-author.js-phone-click` / `.js-show-popup-contact-business` with bounded retries, waiting between attempts.
+4. **Dialog + tel extraction**:
    - Phone: `.contacts-dialog__phone a[href^="tel:"]`
    - Real Owner Name: `.contacts-dialog__name` (direct text, excluding child elements)
    - Registration: `.contacts-dialog__date`
+5. **AJAX fallback**: If still unresolved, call the button `data-url` endpoint (`POST`, `X-Requested-With: XMLHttpRequest`) and parse phone from response payload.
+6. **Normalization**: Phone values are normalized and placeholders (e.g. `+35`) are rejected.
 
 > The WhatsApp button `href` contains the phone number without requiring a click. This is a **free extraction** that doesn't consume interaction budget: `a[href*="wa.me/"], a[href*="api.whatsapp.com/send"]` → parse URL for number. We strictly avoid generic `.js-share` parameters to prevent misattributing listings to the wrong tracker ID.
 
@@ -489,6 +497,28 @@ For seller profile pages (`.list-simple__output .advert-grid`), each card now ma
 
 > [!NOTE]
 > Feature slots are interpreted in visual order from the card UI: beds → baths → pets → size. This aligns with current Bazaraki profile-grid markup and is resilient to icon URL changes.
+
+#### Batch Card Media Extraction (Implemented)
+
+For index/profile cards, shallow extraction now also captures card media without deep interactions:
+
+- Candidate attributes: `data-full`, `data-src`, `data-lazy`, `src`
+- URL normalization: absolute HTTP(S), protocol-relative (`//...`), and root-relative (`/...`) paths
+- Deduplicated per listing and stored as:
+  - `images`: first 3 normalized card images
+  - `thumbnails`: first 3 normalized card images
+
+This ensures listings discovered in initial sweeps have immediate visual context before any deep listing revisit.
+
+#### Deep Listing Media Extraction (Parity with Re-scrape)
+
+Deep listing extraction now collects gallery and thumbnail media directly from listing detail pages:
+
+- Gallery sources include `.announcement__images-item.js-image-show-full`, `.gallery img`, `.announcement-media img`, `.swiper-slide img`, `.announcement-gallery img`, and related slider containers.
+- Thumbnails are extracted from dedicated thumbnail wrappers when present, otherwise fall back to gallery images.
+- Persisted limits:
+  - `images`: up to 10 high-resolution entries
+  - `thumbnails`: up to 10 preview entries
 
 #### Seller Listing Count in Evaluation
 
@@ -630,6 +660,8 @@ Flow:
 | `app/(main)/admin/settings/prospecting/_components/run-scraper-button.tsx` | **[NEW]** Manual trigger dropdown button |
 | `lib/scraping/deep-scrape-orchestrator.ts` | **[NEW]** Manual-first deep orchestration service (seed URLs → phone gate → seller portfolio → agency/private decision → selective deep portfolio scraping) |
 | `lib/scraping/deep-scrape-types.ts` | **[NEW]** Typed deep-run telemetry contracts (`DeepScrapeRunSummary`, `DeepScrapeStageLog`, `OmissionReason`, reason codes, error categories) |
+| `lib/scraping/listing-relevance-classifier.ts` | **[MODIFY]** Relevance classifier hardened to `v2` (fail-closed uncertain path, word-boundary matching, AI retry/backoff + timeout diagnostics) |
+| `lib/scraping/listing-scraper.ts` | **[MODIFY]** Added explicit status resolver for relevance outcomes to enforce `SKIPPED` on non-RE while preserving `IMPORTED/REJECTED` |
 | `app/(main)/admin/settings/prospecting/_components/deep-runs-panel.tsx` | **[NEW]** Top-level Deep Runs monitoring panel with KPI summary, expandable stage logs, omission reasons, and metadata/error payload drill-down |
 | `app/(main)/admin/settings/prospecting/_components/run-deep-scraper-button.tsx` | **[NEW]** Manual trigger button for Deep Scrape jobs |
 | `app/api/admin/prospecting/deep-runs/stream/route.ts` | **[NEW]** SSE stream endpoint for live deep-run status, stage, and diagnostics snapshots |
@@ -653,6 +685,9 @@ Flow:
 | `app/api/admin/scrape-listing/route.ts` | **[MODIFY]** Runs `classifyAndUpdateProspect()` after upsert during single-listing scrape |
 | `app/(main)/admin/prospecting/_components/contact-detail-panel.tsx` | **[MODIFY]** Clickable Agency/Private/AI-Auto badge with confidence tooltip and manual override cycle |
 | `app/(main)/admin/prospecting/actions.ts` | **[MODIFY]** Adds `toggleProspectAgencyStatus(id, isAgencyManual)` server action |
+| `scripts/reclassify-scraped-listings.ts` | **[NEW]** One-time/operational remediation CLI to force reclassification and repair statuses for a run/date range (`--dry-run` / `--apply`) |
+| `lib/scraping/listing-relevance-classifier.test.ts` | **[NEW]** Unit coverage for fail-closed uncertain handling and token-boundary matching |
+| `lib/scraping/listing-scraper.relevance.test.ts` | **[NEW]** Unit coverage for status resolution safety (`NEW/REVIEWING -> SKIPPED`, preserve terminal statuses) |
 
 ---
 
@@ -765,6 +800,7 @@ For each eligible task, execution now follows explicit staged flow:
    - Extract richer listing details and attempt seller contact resolution.
 3. **Stage C: Phone gate**
    - If no phone is resolved, omit and continue (`missing_phone`).
+   - Seller/prospect dedupe lock is intentionally delayed until this gate passes, so another seed from the same seller can still attempt phone resolution within the same run.
 4. **Stage D: Seller portfolio discovery**
    - If seller profile URL exists, crawl seller listings.
 5. **Stage E: Seller classification**
@@ -775,8 +811,10 @@ For each eligible task, execution now follows explicit staged flow:
    - `uncertain`: skip deep portfolio listings (`uncertain_skipped`).
 7. **Stage G: Persistence and dedupe accounting**
    - Upsert listings/prospects, track duplicate and relevance outcomes, preserve interaction budgets.
+   - Emit explicit stage diagnostics when relevance falls back fail-closed due to AI unavailability.
+   - Trip a relevance circuit breaker on repeated fail-closed diagnostics and mark task/run degraded (`partial`) instead of continuing noisy uncertain intake.
 
-This flow preserves existing dedupe semantics (`platform+externalId` listing uniqueness plus seller-level dedupe keys) while making deep work deterministic and auditable.
+This flow preserves listing-level uniqueness (`platform+externalId`) and seller-level dedupe keys, while allowing phone-resolution retries across same-seller seeds before contact gate lock-in. This keeps deep work deterministic and auditable without prematurely suppressing recoverable contacts.
 
 #### Deep Run Monitoring History (Implemented)
 
@@ -799,17 +837,25 @@ Implemented stage reason codes include:
 - `uncertain_skipped`
 - `missing_phone`
 - `non_real_estate`
+- `relevance_ai_unavailable`
 - `duplicate_listing`
 - `duplicate_contact`
 - `interaction_budget_exhausted`
 - `task_config_ineligible`
 - `task_error`
 
+Additional operational stages include:
+- `worker_unavailable_warning` (run queued while no healthy scrape worker heartbeat is detected)
+- `run_cancelled` (queued removal or cooperative active-stop request)
+
 #### Monitoring UI and Read APIs
 
 - A new top-level **Deep Runs** panel is available on `/admin/settings/prospecting`, separate from per-task run cards.
 - The panel shows run status, duration, trigger source, KPI summary row, worker/queue diagnostics, and expandable stage logs with counters/reason codes/metadata.
 - The panel now supports optimistic queued insertion, stale-queue warning, and live state transitions (`Queued`, `Starting`, `Running`, `Partial`, `Failed`, `Completed`, `Cancelled`).
+- Manual cancellation uses reusable confirmation dialogs with status-aware messaging:
+  - queued: remove from queue and mark run cancelled
+  - running: cooperative cancel at next safe checkpoint
 - Read APIs support:
   - deep run list (paged)
   - deep run details with stages
@@ -817,12 +863,67 @@ Implemented stage reason codes include:
   - realtime deep run stream (SSE snapshots)
   - queue/worker diagnostics summary
 
+#### Manual Trigger + Worker Availability Contract
+
+- Manual trigger checks worker readiness in UI and disables the trigger button when heartbeat is unavailable (`Worker Unavailable` state).
+- Queueing still persists a `DeepScrapeRun` and can emit warning metadata when post-enqueue diagnostics show no healthy worker.
+- Warning stage metadata includes `workerAlive`, `workerReady`, and `workerHeartbeatAgeSeconds` for immediate operator diagnosis.
+
+#### Cancellation Semantics (Queued vs Active)
+
+`cancelDeepScrapeRun(locationId, runId)` supports safe cancellation in both states:
+
+1. **Queued run**
+   - Attempts queue-job removal.
+   - Marks run `cancelled` with completion timestamp.
+   - Logs `run_cancelled` stage: "Run cancelled before worker execution began."
+2. **Active run**
+   - Queue removal may fail when state is `active`; cancellation switches to cooperative stop.
+   - Marks run `cancelled` and records cancellation metadata.
+   - Worker halts at next safe checkpoint and logs terminal cancellation outcome.
+
+Cancellation metadata is persisted in run `metadata.cancellation` (request time, actor, queue result, mode), and an explicit manual-cancel note is appended to `errorLog` for forensic traceability.
+
 #### Status Compatibility and Backfill
 
 - Deep lifecycle now uses actionable inbox statuses (`NEW/REVIEWING/IMPORTED/REJECTED/SKIPPED`) without `REVIEWED`.
 - A one-time backfill migration converts existing `ScrapedListing.status = REVIEWED` to `REVIEWING`.
 - A one-time backfill migration clears `DeepScrapeRun.startedAt` for legacy queued rows created before queued-first timestamp fix.
 - This keeps import/triage queries congruent with deep-processed pending records.
+
+#### Relevance Hardening & Run-17 Remediation (March 2026)
+
+Following production analysis of deep run `cmn27e7z80007a4c5hb95lutu` (job `17`), a targeted hardening/remediation pass was implemented.
+
+**Observed issue**
+- A small set of obvious non-real-estate items (e.g. lighting/headset/fridge listings) entered `NEW`.
+- Root cause: uncertain relevance outcomes could resolve permissively when AI classification was unavailable.
+
+**Implemented fix set**
+- Relevance classifier upgraded to **`v2`**:
+  - uncertain path is now **fail-closed** (`non_real_estate`) when AI is unavailable/invalid after retries
+  - deterministic term matching uses boundary-aware matching (prevents substring collisions such as `cargo` → `car`)
+  - AI relevance calls use bounded retry/backoff + timeout and persist diagnostic metadata
+- Classifier contract updated for remediation workflows:
+  - `classifyListingRelevance(listing, existingRawAttributes, { forceReclassify?: boolean })`
+  - force refresh bypasses cached `v1`/stale outcomes so run-level cleanup can be applied deterministically
+- Persisted relevance metadata now includes diagnostics:
+  - `System listing relevance diagnostic code`
+  - `System listing relevance ai attempted`
+  - `System listing relevance ai attempts`
+- Deep orchestrator now:
+  - logs fail-closed relevance diagnostics into stage telemetry
+  - emits `relevance_ai_unavailable` reason code for visibility
+  - trips a small circuit breaker on repeated relevance fail-closed events to avoid degraded noisy continuation
+- Listing persistence logic now centralizes status resolution to guarantee non-RE rows remain `SKIPPED` while preserving terminal business statuses (`IMPORTED`, `REJECTED`).
+
+**Operational remediation**
+- Added CLI: `npm run prospecting:reclassify -- --locationId <id> --runId <deepRunId> --dry-run|--apply`
+- Run-17 remediation executed with dry-run then apply:
+  - `scanned: 503`
+  - `statusChanged: 24` (to `SKIPPED`)
+  - final window state: `NEW: 478`, `SKIPPED: 25`
+  - relevance metadata standardized to `v2` for all 503 rows in that run window.
 
 ### 3.2 Enterprise AI Usage Ledger
 
@@ -982,6 +1083,7 @@ Tooltip surfaces model confidence/reasoning (for example: `AI Confidence: 85%`).
 
 Server action:
 - `toggleProspectAgencyStatus(id: string, isAgencyManual: boolean | null)`
+- When the resulting effective state is Agency, the action now stages `agencyProfile/companyMatch` immediately so Link As Company options are pre-populated without waiting for reclassification.
 
 ### 3.5 Company Congruence Stage (Pre-Import)
 
@@ -1006,7 +1108,7 @@ To keep Strategic Scraping congruent with existing CRM entities, agency seller p
 
 This mirrors the existing Prospect staging pattern while adding a Company-first track for agency sellers.
 
-#### 3.5.1 Link As Company Decision Flow (Recommended UX)
+#### 3.5.1 Link As Company Decision Flow (Implemented)
 
 `Link As Company` should behave as a deterministic decision assistant, not as a blind create action.
 
@@ -1017,16 +1119,30 @@ This mirrors the existing Prospect staging pattern while adding a Company-first 
    - Phone overlap
    - Email equality
    - Similar-name fallback (tokenized/fuzzy, lower trust)
-3. UI branches:
-   - **Exactly 1 high-confidence match:** show preselected match with `Link` confirmation (not silent auto-link).
-   - **Multiple plausible matches:** show ranked options (name + website/phone/email evidence + confidence) and force explicit user selection.
-   - **No plausible match:** show `Create New Company` CTA prefilled from staged agency profile.
-4. On completion, persist and surface durable state:
+3. Actions and response contracts:
+   - `getProspectCompanyLinkOptions(prospectId)` returns:
+     - `linkable`, `reason`
+     - `agencyProfile`
+     - `candidates[]`
+     - `suggestedMode`, `suggestedCompanyId`
+   - `applyProspectCompanyLink(prospectId, selection)` applies explicit selection:
+     - `{ mode: "existing", companyId }`
+     - `{ mode: "create", profileOverrides? }`
+   - Compatibility wrapper `linkProspectAgencyCompany(prospectId)` now auto-links only when there is exactly one high-confidence candidate; otherwise it returns structured `code: "selection_required"`.
+4. UI branches (implemented in both Properties and Contacts detail panels via shared dialog):
+   - **Exactly 1 high-confidence match:** preselected existing company with explicit confirmation.
+   - **Multiple plausible matches:** ranked options + confidence/evidence, explicit user selection required.
+   - **No plausible match:** prefilled `Create New Company` form.
+5. On completion, persist and surface durable state:
    - Store selected/created link in `aiScoreBreakdown.strategicScrape.companyLink`
    - Show persistent status badge in both Prospecting views:
      - `Company Linked: <name>` (click-through to company profile)
      - Button label changes to `Refresh Company Link` / `Change Link`
-5. Keep the prospect in prospecting (`new/reviewing`) for outreach, with acceptance still blocked for agencies.
+6. Guardrails and duplicate safety:
+   - Linkability is status-gated with case-tolerant checks (`new/reviewing`, including uppercase variants).
+   - Properties view now uses `prospectStatus` from listing row data for button enablement (instead of listing status only).
+   - Create mode executes a transactional deterministic conflict re-check and reuses existing Company when exact website/email/phone/name conflicts are found.
+7. Keep the prospect in prospecting (`new/reviewing`) for outreach, with acceptance still blocked for agencies.
 
 This pattern reduces wrong links, prevents duplicate company creation, and gives users confidence that the action actually persisted.
 
@@ -1049,6 +1165,7 @@ Feed card behavior:
 8. Mark a prospect as Agency and verify:
    - Accept actions are disabled/blocked.
    - **Link As Company** is available and succeeds.
+   - Link button is disabled for non-linkable prospect statuses (accepted/rejected/archived).
    - Post-link state is visible and durable in both Properties and Contacts detail panels (`Company Linked: ...`).
    - No CRM Contact is created from acceptance for agency prospects.
 
@@ -1093,7 +1210,7 @@ Both detail panels contain dedicated action bars and tailored content views:
 - **Dynamic Feature Extraction:** Scraped listings utilize a schema-on-read JSON field (`rawAttributes`) to capture all non-standard property features (e.g., "Pets allowed", "Energy class"). These are rendered dynamically as badges in the Detail Panel and explicitly mapped to the core CRM `Property.features` array upon lead conversion, ensuring zero data loss.
 - **Agency/Private Override Toggle:** The seller badge is clickable and cycles `Private → Agency → AI Auto`, with manual override stored in `isAgencyManual` and confidence/reasoning exposed via tooltip.
 - **Optimistic UI Data Binding:** Following Enterprise SaaS best practices, detail panels do not wait for hard page refreshes after asynchronous events. When a `ScrapeListingDialog` finishes extracting data, the backend immediately returns the resolved `prospectLeadId` and `prospectName`. The detail panel intercepts this payload and applies a local optimistic state update, instantly revealing the seller's true identity and unmasking the Accept/Convert buttons without a network waterfall.
-- **Scrape Other Listings:** A dedicated `DownloadCloud` button dispatches a background task (`scrapeSellerProfile`) that crawls the seller portfolio in shallow mode first, classifies each listing for relevance, and deep-scrapes only real-estate listings. Non-real-estate rows are persisted as `SKIPPED` with cached relevance metadata. The button is prominently available in both the Properties View and Contacts View. *(Note: When a single listing is scraped or re-scraped, the backend `scrape-listing` service automatically extracts and syncs this `profileUrl` directly to the `ProspectLead` record, ensuring this button is actionable immediately without needing to visit the contact card).*
+- **Scrape Other Listings:** A dedicated `DownloadCloud` button dispatches a background task (`scrapeSellerProfile`) that crawls the seller portfolio in shallow mode first, classifies each listing for relevance, and deep-scrapes only real-estate listings. Non-real-estate rows are persisted as `SKIPPED` with cached relevance metadata. Uncertain relevance decisions are fail-closed when AI is unavailable, and deep-run telemetry includes explicit diagnostics/reason codes for that path. The button is prominently available in both the Properties View and Contacts View. *(Note: When a single listing is scraped or re-scraped, the backend `scrape-listing` service automatically extracts and syncs this `profileUrl` directly to the `ProspectLead` record, ensuring this button is actionable immediately without needing to visit the contact card).*
 
 ### 4.4 Cascading Decide Actions & Keyboard Accessibility
 

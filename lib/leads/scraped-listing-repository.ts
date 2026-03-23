@@ -41,6 +41,7 @@ export interface ScrapedListingRow {
   sellerExternalId: string | null;
   status: string;
   prospectLeadId: string | null;
+  prospectStatus: string | null;
   prospectName: string | null;
   prospectPhone: string | null;
   prospectAgency: boolean;
@@ -98,7 +99,7 @@ export async function listScrapedListings(
       skip: params.skip || 0,
       include: {
         prospectLead: {
-          select: { name: true, phone: true, isAgency: true, isAgencyManual: true, aiScoreBreakdown: true }
+          select: { status: true, name: true, phone: true, isAgency: true, isAgencyManual: true, aiScoreBreakdown: true }
         }
       },
       orderBy: [{ createdAt: 'desc' }],
@@ -146,6 +147,7 @@ export async function listScrapedListings(
       sellerExternalId: r.sellerExternalId,
       status: r.status,
       prospectLeadId: r.prospectLeadId,
+      prospectStatus: r.prospectLead?.status || null,
       prospectName: r.prospectLead?.name || null,
       prospectPhone: r.prospectLead?.phone || null,
       prospectAgency: r.prospectLead?.isAgency ?? false,
