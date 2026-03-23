@@ -1,5 +1,14 @@
 import db from '@/lib/db';
 import { Prisma } from '@prisma/client';
+import {
+  isNonPrivateSellerType,
+  normalizeProspectSellerType,
+  type ProspectSellerType,
+  type ProspectSellerTypeFilter,
+  buildSellerTypeWhereClause,
+  resolveEffectiveSellerType,
+  sellerTypeToLegacyAgencyFlag,
+} from '@/lib/leads/seller-type';
 
 export type ProspectInboxScope = 'new' | 'all' | 'accepted' | 'rejected';
 
@@ -11,6 +20,7 @@ export interface ProspectInboxParams {
   status?: string;
   scope?: ProspectInboxScope;
   dedupStatus?: string;
+  sellerType?: ProspectSellerTypeFilter;
 }
 
 export interface ProspectInboxRow {
@@ -31,6 +41,10 @@ export interface ProspectInboxRow {
   agencyConfidence: number | null;
   agencyReasoning: string | null;
   isAgencyManual: boolean | null;
+  sellerType: ProspectSellerType;
+  sellerTypeManual: ProspectSellerType | null;
+  effectiveSellerType: ProspectSellerType;
+  isNonPrivateSellerType: boolean;
   aiScoreBreakdown: Record<string, any> | null;
   platformUserId: string | null;
   platformRegistered: string | null;
@@ -50,6 +64,7 @@ export interface ProspectInboxRow {
     propertyArea: number | null;
     rawAttributes: Record<string, any> | null;
     status: string;
+    importedPropertyId: string | null;
     isExpired: boolean;
     images: string[];
     thumbnails: string[];
@@ -82,6 +97,9 @@ export async function listProspectInbox(
 
   if (params.source) and.push({ source: params.source });
   if (params.dedupStatus) and.push({ dedupStatus: params.dedupStatus });
+  if (params.sellerType && params.sellerType !== 'all') {
+    and.push(buildSellerTypeWhereClause(params.sellerType as ProspectSellerType) as Prisma.ProspectLeadWhereInput);
+  }
 
   if (params.q) {
     and.push({
@@ -110,7 +128,7 @@ export async function listProspectInbox(
             price: true, currency: true, locationText: true,
             propertyType: true, bedrooms: true, bathrooms: true, propertyArea: true,
             status: true, isExpired: true, images: true, thumbnails: true,
-            otherListingsUrl: true, otherListingsCount: true, rawAttributes: true,
+            otherListingsUrl: true, otherListingsCount: true, rawAttributes: true, importedPropertyId: true,
           },
           orderBy: { createdAt: 'desc' },
         }
@@ -121,31 +139,44 @@ export async function listProspectInbox(
   ]);
 
   return {
-    items: rows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      email: r.email,
-      phone: r.phone,
-      source: r.source,
-      sourceUrl: r.sourceUrl,
-      aiScore: r.aiScore,
-      matchedContactId: r.matchedContactId,
-      matchConfidence: r.matchConfidence,
-      dedupStatus: r.dedupStatus,
-      status: r.status,
-      createdContactId: r.createdContactId,
-      createdAt: r.createdAt.toISOString(),
-      isAgency: r.isAgency,
-      agencyConfidence: r.agencyConfidence,
-      agencyReasoning: r.agencyReasoning,
-      isAgencyManual: r.isAgencyManual,
-      aiScoreBreakdown: r.aiScoreBreakdown as Record<string, any> | null,
-      platformUserId: r.platformUserId,
-      platformRegistered: r.platformRegistered,
-      profileUrl: r.profileUrl,
-      scrapedListingsCount: ((r as any).scrapedListings || []).length,
-      scrapedListings: (r as any).scrapedListings || [],
-    })),
+    items: rows.map((r) => {
+      const effectiveSellerType = resolveEffectiveSellerType({
+        sellerType: r.sellerType || null,
+        sellerTypeManual: r.sellerTypeManual || null,
+        isAgency: r.isAgency,
+        isAgencyManual: r.isAgencyManual,
+      });
+      const storedSellerType = normalizeProspectSellerType(r.sellerType || null) || effectiveSellerType;
+      return {
+        id: r.id,
+        name: r.name,
+        email: r.email,
+        phone: r.phone,
+        source: r.source,
+        sourceUrl: r.sourceUrl,
+        aiScore: r.aiScore,
+        matchedContactId: r.matchedContactId,
+        matchConfidence: r.matchConfidence,
+        dedupStatus: r.dedupStatus,
+        status: r.status,
+        createdContactId: r.createdContactId,
+        createdAt: r.createdAt.toISOString(),
+        isAgency: sellerTypeToLegacyAgencyFlag(effectiveSellerType),
+        agencyConfidence: r.agencyConfidence,
+        agencyReasoning: r.agencyReasoning,
+        isAgencyManual: r.isAgencyManual,
+        sellerType: storedSellerType,
+        sellerTypeManual: (r.sellerTypeManual as ProspectSellerType | null) || null,
+        effectiveSellerType,
+        isNonPrivateSellerType: isNonPrivateSellerType(effectiveSellerType),
+        aiScoreBreakdown: r.aiScoreBreakdown as Record<string, any> | null,
+        platformUserId: r.platformUserId,
+        platformRegistered: r.platformRegistered,
+        profileUrl: r.profileUrl,
+        scrapedListingsCount: ((r as any).scrapedListings || []).length,
+        scrapedListings: (r as any).scrapedListings || [],
+      };
+    }),
     total,
   };
 }

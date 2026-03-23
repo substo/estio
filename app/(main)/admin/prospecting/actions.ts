@@ -15,6 +15,12 @@ import {
     type ScrapedAgencyProfile,
 } from '@/lib/leads/agency-company-linker';
 import { isProspectStatusLinkable } from '@/lib/leads/prospect-status';
+import {
+    type ProspectSellerType,
+    isNonPrivateSellerType,
+    resolveEffectiveSellerType,
+    sellerTypeToLegacyAgencyFlag,
+} from '@/lib/leads/seller-type';
 
 async function getInternalUserId() {
     const { userId } = await auth();
@@ -23,14 +29,24 @@ async function getInternalUserId() {
     return user?.id || null;
 }
 
-const isEffectiveAgency = (prospect: { isAgency: boolean; isAgencyManual: boolean | null }) => {
-    return prospect.isAgencyManual !== null && prospect.isAgencyManual !== undefined
-        ? prospect.isAgencyManual
-        : prospect.isAgency;
+const resolveProspectEffectiveSellerType = (prospect: {
+    sellerType?: string | null;
+    sellerTypeManual?: string | null;
+    isAgency: boolean;
+    isAgencyManual: boolean | null;
+}) => {
+    return resolveEffectiveSellerType({
+        sellerType: prospect.sellerType || null,
+        sellerTypeManual: prospect.sellerTypeManual || null,
+        isAgency: prospect.isAgency,
+        isAgencyManual: prospect.isAgencyManual,
+    });
 };
 
 const getProspectCompanyLinkability = (prospect: {
     status: string | null | undefined;
+    sellerType?: string | null;
+    sellerTypeManual?: string | null;
     isAgency: boolean;
     isAgencyManual: boolean | null;
 }) => {
@@ -41,10 +57,10 @@ const getProspectCompanyLinkability = (prospect: {
             code: 'not_linkable' as const,
         };
     }
-    if (!isEffectiveAgency({ isAgency: prospect.isAgency, isAgencyManual: prospect.isAgencyManual })) {
+    if (!isNonPrivateSellerType(resolveProspectEffectiveSellerType(prospect))) {
         return {
             linkable: false as const,
-            reason: 'This prospect is marked as private. Mark as Agency first, then link company.',
+            reason: 'This prospect is marked as private. Set seller type to non-private, then link company.',
             code: 'not_agency' as const,
         };
     }
@@ -70,6 +86,22 @@ export interface ProspectCompanyLinkOptionsResponse {
 }
 
 export type ProspectCompanyLinkApplyInput = ProspectCompanyLinkSelection;
+
+export type AcceptProspectResponse =
+    | {
+        success: true;
+        contactId: string;
+        propertiesImported: number;
+        propertiesSkipped: number;
+        companyId?: string | null;
+      }
+    | {
+        success: false;
+        code?: 'selection_required' | 'not_linkable' | 'not_agency' | 'invalid_selection' | 'company_not_found' | 'profile_missing';
+        message: string;
+        prospectId?: string;
+        companyLinkOptions?: ProspectCompanyLinkOptionsResponse;
+      };
 
 async function createOrReactivateContactForProspect(prospect: any) {
     if (prospect.createdContactId) {
@@ -190,14 +222,6 @@ export async function acceptScrapedListing(id: string) {
             return { success: false, message: 'Listing has no linked contact — cannot accept in isolation' };
         }
 
-        const prospect = await db.prospectLead.findUnique({
-            where: { id: listing.prospectLeadId },
-            select: { isAgency: true, isAgencyManual: true },
-        });
-        if (prospect && isEffectiveAgency({ isAgency: prospect.isAgency, isAgencyManual: prospect.isAgencyManual })) {
-            return { success: false, message: 'Agency listings cannot be accepted as private contacts. Use "Link As Company" in Contacts view.' };
-        }
-
         // Cascade to accept the parent contact (which imports all their listings)
         return acceptProspectWithListings(listing.prospectLeadId);
     } catch (e: any) {
@@ -281,9 +305,6 @@ export async function rejectProspectWithListings(prospectId: string) {
 
         const prospect = await db.prospectLead.findUnique({ where: { id: prospectId } });
         if (!prospect) return { success: false, message: 'Prospect not found' };
-        if (isEffectiveAgency(prospect)) {
-            return { success: false, message: 'Agency prospects are not accepted as private contacts. Use "Link As Company" in Prospecting.' };
-        }
         if (prospect.status === 'rejected') {
             return { success: true, listingsRejected: 0 };
         }
@@ -334,15 +355,98 @@ export async function rejectProspectWithListings(prospectId: string) {
     }
 }
 
-export async function acceptProspectWithListings(prospectId: string) {
+interface AcceptProspectWithListingsOptions {
+    companySelection?: ProspectCompanyLinkApplyInput;
+}
+
+const parseLinkedCompanyIdFromBreakdown = (breakdown: unknown): string | null => {
+    const safeBreakdown = (breakdown && typeof breakdown === 'object') ? (breakdown as Record<string, any>) : null;
+    const strategic = safeBreakdown?.strategicScrape && typeof safeBreakdown.strategicScrape === 'object'
+        ? (safeBreakdown.strategicScrape as Record<string, any>)
+        : null;
+    const companyLink = strategic?.companyLink && typeof strategic.companyLink === 'object'
+        ? (strategic.companyLink as Record<string, any>)
+        : null;
+    return typeof companyLink?.companyId === 'string' ? companyLink.companyId : null;
+};
+
+export async function acceptProspectWithListings(
+    prospectId: string,
+    options: AcceptProspectWithListingsOptions = {}
+): Promise<AcceptProspectResponse> {
     try {
         const internalUserId = await getInternalUserId();
         if (!internalUserId) return { success: false, message: 'Unauthorized' };
 
-        const prospect = await db.prospectLead.findUnique({ where: { id: prospectId } });
+        const prospect = await db.prospectLead.findUnique({
+            where: { id: prospectId },
+            select: {
+                id: true,
+                locationId: true,
+                source: true,
+                status: true,
+                name: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+                phone: true,
+                message: true,
+                aiScore: true,
+                createdContactId: true,
+                isAgency: true,
+                isAgencyManual: true,
+                sellerType: true,
+                sellerTypeManual: true,
+                aiScoreBreakdown: true,
+            },
+        });
         if (!prospect) return { success: false, message: 'Prospect not found' };
-        if (isEffectiveAgency(prospect)) {
-            return { success: false, message: 'Agency prospects are not accepted as private contacts. Use "Link As Company" in Prospecting.' };
+
+        const effectiveSellerType = resolveProspectEffectiveSellerType(prospect);
+        const requiresCompanyLink = isNonPrivateSellerType(effectiveSellerType);
+        let companyId: string | null = null;
+        let companySelection = options.companySelection || null;
+
+        if (requiresCompanyLink) {
+            if (!companySelection) {
+                const alreadyLinkedCompanyId = parseLinkedCompanyIdFromBreakdown(prospect.aiScoreBreakdown);
+                if (alreadyLinkedCompanyId) {
+                    companySelection = { mode: 'existing', companyId: alreadyLinkedCompanyId };
+                }
+            }
+
+            if (!companySelection) {
+                await stageAgencyProfileCompanyMatch(prospect.id, prospect.locationId);
+                const linkOptions = await getCompanyLinkOptionsForProspect(prospect.id, prospect.locationId);
+                const topCandidate = linkOptions.candidates[0] || null;
+                const hasSingleHighConfidence = Boolean(
+                    topCandidate &&
+                    linkOptions.candidates.length === 1 &&
+                    topCandidate.confidence >= COMPANY_LINK_HIGH_CONFIDENCE_THRESHOLD
+                );
+
+                if (hasSingleHighConfidence && topCandidate) {
+                    companySelection = { mode: 'existing', companyId: topCandidate.companyId };
+                } else if (linkOptions.candidates.length === 0) {
+                    companySelection = { mode: 'create' };
+                } else {
+                    return {
+                        success: false,
+                        code: 'selection_required',
+                        message: 'Select an existing company or create a new one to continue acceptance.',
+                        prospectId: prospect.id,
+                        companyLinkOptions: {
+                            success: true,
+                            linkable: true,
+                            reason: null,
+                            agencyProfile: linkOptions.agencyProfile,
+                            candidates: linkOptions.candidates,
+                            suggestedMode: linkOptions.suggestedMode,
+                            suggestedCompanyId: linkOptions.suggestedCompanyId,
+                        },
+                    };
+                }
+            }
         }
 
         if (prospect.status === 'rejected') {
@@ -352,8 +456,51 @@ export async function acceptProspectWithListings(prospectId: string) {
             });
         }
 
+        if (requiresCompanyLink && companySelection) {
+            const linked = await applyProspectCompanyLinkSelection(
+                prospect.id,
+                prospect.locationId,
+                companySelection
+            );
+            if (!linked.success) {
+                return {
+                    success: false,
+                    code: linked.code,
+                    message: linked.message,
+                    prospectId: prospect.id,
+                };
+            }
+            companyId = linked.companyId;
+        }
+
         // 1. Create or reactivate CRM Contact with leadGoal
         const contactId = await createOrReactivateContactForProspect(prospect);
+
+        if (companyId) {
+            await db.contactCompanyRole.upsert({
+                where: {
+                    contactId_companyId_role: {
+                        contactId,
+                        companyId,
+                        role: 'associate',
+                    },
+                },
+                update: {},
+                create: {
+                    contactId,
+                    companyId,
+                    role: 'associate',
+                },
+            });
+
+            // Refresh strategic metadata with linked contact reference.
+            await applyProspectCompanyLinkSelection(
+                prospect.id,
+                prospect.locationId,
+                { mode: 'existing', companyId },
+                contactId
+            );
+        }
 
         // 2. Mark prospect as accepted
         await db.prospectLead.update({
@@ -371,7 +518,8 @@ export async function acceptProspectWithListings(prospectId: string) {
             prospectId,
             contactId,
             prospect.locationId,
-            internalUserId
+            internalUserId,
+            companyId
         );
 
         // 4. Create audit trail
@@ -408,6 +556,7 @@ export async function acceptProspectWithListings(prospectId: string) {
             contactId,
             propertiesImported: imported.length,
             propertiesSkipped: skipped.length,
+            companyId,
         };
     } catch (e: any) {
         return { success: false, message: e.message || 'Server error' };
@@ -442,6 +591,8 @@ export async function getProspectCompanyLinkOptions(prospectId: string): Promise
                 status: true,
                 isAgency: true,
                 isAgencyManual: true,
+                sellerType: true,
+                sellerTypeManual: true,
             },
         });
 
@@ -512,6 +663,8 @@ export async function applyProspectCompanyLink(prospectId: string, selection: Pr
                 status: true,
                 isAgency: true,
                 isAgencyManual: true,
+                sellerType: true,
+                sellerTypeManual: true,
             },
         });
 
@@ -590,24 +743,42 @@ export async function linkProspectAgencyCompany(prospectId: string) {
 // --- Classification Toggle ---
 
 export async function toggleProspectAgencyStatus(id: string, isAgencyManual: boolean | null) {
+    const sellerTypeManual: ProspectSellerType | null = isAgencyManual === null
+        ? null
+        : (isAgencyManual ? 'agency' : 'private');
+    return setProspectSellerTypeManual(id, sellerTypeManual);
+}
+
+export async function setProspectSellerTypeManual(id: string, sellerTypeManual: ProspectSellerType | null) {
     try {
         const internalUserId = await getInternalUserId();
         if (!internalUserId) return { success: false, message: 'Unauthorized' };
 
-        const updateData: any = { isAgencyManual };
+        const updateData: any = {
+            sellerTypeManual,
+            isAgencyManual: sellerTypeManual === null ? null : sellerTypeToLegacyAgencyFlag(sellerTypeManual),
+        };
 
-        // If manual override is set, also update isAgency to match for downstream queries
-        if (isAgencyManual !== null) {
-            updateData.isAgency = isAgencyManual;
+        if (sellerTypeManual !== null) {
+            updateData.sellerType = sellerTypeManual;
+            updateData.isAgency = sellerTypeToLegacyAgencyFlag(sellerTypeManual);
         }
 
         const updated = await db.prospectLead.update({
             where: { id },
             data: updateData,
-            select: { id: true, locationId: true, isAgency: true, isAgencyManual: true },
+            select: {
+                id: true,
+                locationId: true,
+                isAgency: true,
+                isAgencyManual: true,
+                sellerType: true,
+                sellerTypeManual: true,
+            },
         });
 
-        if (isEffectiveAgency({ isAgency: updated.isAgency, isAgencyManual: updated.isAgencyManual })) {
+        const effectiveSellerType = resolveProspectEffectiveSellerType(updated);
+        if (isNonPrivateSellerType(effectiveSellerType)) {
             await stageAgencyProfileCompanyMatch(updated.id, updated.locationId);
         }
 

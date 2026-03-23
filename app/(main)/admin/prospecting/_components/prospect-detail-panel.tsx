@@ -3,14 +3,15 @@
 import { useState, useTransition, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { type ScrapedListingRow } from '@/lib/leads/scraped-listing-repository';
-import { acceptProspect, deleteProspect } from '../actions';
+import { deleteProspect } from '../actions';
+import { openOrStartConversationForContact } from '@/app/(main)/admin/contacts/actions';
 import { scrapeSellerProfile } from '../listings/_actions/seller-scrape';
 import { ScrapeListingDialog } from './scrape-listing-dialog';
 import { CompanyLinkDialog } from './company-link-dialog';
 import { toast } from 'sonner';
 import {
-  Building2, UserCheck, ExternalLink, Phone, MessageCircle,
-  UserPlus, ChevronLeft, ChevronRight, DownloadCloud, Check, X, Home, Keyboard, RefreshCw, Trash2
+  Building2, ExternalLink, Phone, MessageCircle, MessageSquare,
+  Link2, ChevronLeft, ChevronRight, DownloadCloud, Check, X, Home, Keyboard, RefreshCw, Trash2
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -18,6 +19,12 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogTrigger, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { isProspectStatusLinkable } from '@/lib/leads/prospect-status';
+import {
+  isNonPrivateSellerType,
+  resolveEffectiveSellerType,
+  type ProspectSellerType,
+} from '@/lib/leads/seller-type';
+import { resolveProspectingReviewState } from '@/lib/leads/prospecting-status';
 
 interface ProspectDetailPanelProps {
   listing: ScrapedListingRow | null;
@@ -26,12 +33,44 @@ interface ProspectDetailPanelProps {
   isPending: boolean;
 }
 
+function getSellerTypeLabel(value: ProspectSellerType): string {
+  switch (value) {
+    case 'agency':
+      return 'Agency';
+    case 'management':
+      return 'Management';
+    case 'developer':
+      return 'Developer';
+    case 'other':
+      return 'Other';
+    default:
+      return 'Private';
+  }
+}
+
+function getSellerTypeBadgeClass(value: ProspectSellerType): string {
+  switch (value) {
+    case 'private':
+      return 'bg-green-600 text-white';
+    case 'agency':
+      return 'bg-orange-600 text-white';
+    case 'management':
+      return 'bg-blue-600 text-white';
+    case 'developer':
+      return 'bg-indigo-600 text-white';
+    case 'other':
+      return 'bg-slate-700 text-white';
+    default:
+      return 'bg-green-600 text-white';
+  }
+}
+
 export function ProspectDetailPanel({ listing: originalListing, onAccept, onReject, isPending }: ProspectDetailPanelProps) {
   const router = useRouter();
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
-  const [isConverting, startConverting] = useTransition();
   const [isScrapingSeller, startScrapingSeller] = useTransition();
   const [isDeleting, startDeleting] = useTransition();
+  const [isOpeningConversation, startOpeningConversation] = useTransition();
   const [isScrapeOpen, setIsScrapeOpen] = useState(false);
   const [isCompanyDialogOpen, setIsCompanyDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -67,14 +106,24 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
       } 
     : originalListing;
 
-  const effectiveAgency = listing?.prospectAgencyManual !== null && listing?.prospectAgencyManual !== undefined
-    ? listing.prospectAgencyManual
-    : listing?.prospectAgency;
+  const effectiveSellerType = resolveEffectiveSellerType({
+    sellerType: listing?.prospectSellerType || null,
+    sellerTypeManual: listing?.prospectSellerTypeManual || null,
+    isAgency: listing?.prospectAgency ?? null,
+    isAgencyManual: listing?.prospectAgencyManual ?? null,
+  });
+  const reviewState = resolveProspectingReviewState({
+    listingStatus: listing?.status,
+    prospectStatus: listing?.prospectStatus,
+  });
+  const isAcceptedListing = reviewState === 'accepted';
+  const isRejectedListing = reviewState === 'rejected';
+  const isNewListing = reviewState === 'new';
   const linkedCompanyId = linkedCompanyState?.companyId || listing?.linkedCompanyId || null;
   const linkedCompanyName = linkedCompanyState?.companyName || listing?.linkedCompanyName || null;
   const stagedCompanyMatchName = listing?.stagedCompanyMatchName || null;
   const isLinkableProspectStatus = isProspectStatusLinkable(listing?.prospectStatus);
-  const canLinkCompany = Boolean(effectiveAgency && listing?.prospectLeadId && isLinkableProspectStatus);
+  const canLinkCompany = Boolean(isNonPrivateSellerType(effectiveSellerType) && listing?.prospectLeadId && isLinkableProspectStatus);
   const imageCount = listing?.images?.length || 0;
   const activeImageIndex = imageCount > 0 ? Math.min(currentImageIndex, imageCount - 1) : 0;
   const activeImageSrc = imageCount > 0 ? listing!.images[activeImageIndex] : null;
@@ -112,19 +161,20 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
     window.open(`tel:${phoneToUse}`, '_self');
   };
 
-  const handleConvert = () => {
-    if (!listing.prospectLeadId) {
-      toast.error('No prospect profile linked.');
+  const handleOpenConversation = () => {
+    if (!listing.createdContactId) {
+      toast.error('No CRM contact is linked yet. Accept this listing first.');
       return;
     }
-    startConverting(async () => {
-      const res = await acceptProspect(listing.prospectLeadId!);
-      if (res.success) {
-        toast.success('Prospect converted to CRM Contact!');
+
+    startOpeningConversation(async () => {
+      const res = await openOrStartConversationForContact(listing.createdContactId!);
+      if (res?.success && res.conversationId) {
+        router.push(`/admin/conversations?id=${encodeURIComponent(res.conversationId)}`);
         router.refresh();
-      } else {
-        toast.error(res.message);
+        return;
       }
+      toast.error(res?.error || 'Failed to open conversation');
     });
   };
 
@@ -159,8 +209,6 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
       }
     });
   };
-
-  const isNew = listing.status === 'NEW' || listing.status === 'new' || listing.status === 'REVIEWING';
 
   return (
     <div className="flex flex-col h-full">
@@ -275,11 +323,9 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                   ) : (
                     <h3 className="font-semibold text-sm xl:text-base">{listing.prospectName || 'Unknown Owner'}</h3>
                   )}
-                  {effectiveAgency ? (
-                    <Badge variant="destructive" className="text-[10px] h-5 px-1.5 gap-1"><Building2 className="w-3 h-3" /> Agency</Badge>
-                  ) : (
-                    <Badge variant="default" className="bg-green-600 text-[10px] h-5 px-1.5 gap-1"><UserCheck className="w-3 h-3" /> Private</Badge>
-                  )}
+                  <Badge className={`text-[10px] h-5 px-1.5 gap-1 ${getSellerTypeBadgeClass(effectiveSellerType)}`}>
+                    <Building2 className="w-3 h-3" /> {getSellerTypeLabel(effectiveSellerType)}
+                  </Badge>
                 </div>
                 
                 {listing.prospectPhone ? (
@@ -309,9 +355,15 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
 
               {/* Action Buttons */}
               <div className="flex items-center flex-wrap gap-1.5 pt-1 border-t border-border/50">
-                <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2.5 text-xs" onClick={handleWhatsApp} disabled={!listing.whatsappPhone && !listing.prospectPhone}>
-                  <MessageCircle className="w-4 h-4 text-green-500" /> WhatsApp
-                </Button>
+                {isAcceptedListing ? (
+                  <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2.5 text-xs" onClick={handleOpenConversation} disabled={isOpeningConversation || !listing.createdContactId}>
+                    <MessageSquare className="w-4 h-4 text-primary" /> {isOpeningConversation ? 'Opening...' : 'Open Conversation'}
+                  </Button>
+                ) : (
+                  <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2.5 text-xs" onClick={handleWhatsApp} disabled={!listing.whatsappPhone && !listing.prospectPhone}>
+                    <MessageCircle className="w-4 h-4 text-green-500" /> WhatsApp
+                  </Button>
+                )}
                 <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2.5 text-xs" onClick={handleCall} disabled={!listing.whatsappPhone && !listing.prospectPhone}>
                   <Phone className="w-4 h-4 text-blue-500" /> Call
                 </Button>
@@ -322,7 +374,7 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                   </Button>
                 )}
 
-                {effectiveAgency && listing.prospectLeadId && (
+                {isNonPrivateSellerType(effectiveSellerType) && listing.prospectLeadId && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -335,37 +387,58 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                   </Button>
                 )}
 
+                {listing.importedPropertyId && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5 px-2.5 text-xs"
+                    onClick={() => router.push(`/admin/properties/${listing.importedPropertyId}/view`)}
+                  >
+                    <Link2 className="w-4 h-4 text-indigo-600" /> Open Property
+                  </Button>
+                )}
+
+                {listing.createdContactId && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5 px-2.5 text-xs"
+                    onClick={() => router.push(`/admin/contacts/${listing.createdContactId}/view`)}
+                  >
+                    <Link2 className="w-4 h-4 text-indigo-600" /> Open CRM Contact
+                  </Button>
+                )}
+
                 <div className="flex-1 min-w-[0.5rem]" />
 
-                {isNew ? (
+                {isNewListing ? (
                   <>
                     <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2.5 text-xs border-red-200 text-red-700 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-950/30" onClick={() => onReject(listing.id)} disabled={isPending}>
                       <X className="w-4 h-4" /> Reject
                       <kbd className="hidden xl:inline ml-1 text-[9px] bg-red-100 dark:bg-red-900/30 px-1 rounded font-mono">R</kbd>
                     </Button>
-                    {!effectiveAgency ? (
-                      <Button size="sm" className="h-8 gap-1.5 px-2.5 text-xs" onClick={() => onAccept(listing.id)} disabled={isPending}>
-                        <Check className="w-4 h-4" /> Accept
-                        <kbd className="hidden xl:inline ml-1 text-[9px] bg-primary-foreground/20 px-1 rounded font-mono">A</kbd>
-                      </Button>
-                    ) : (
-                      <Badge variant="outline" className="text-[10px]">Agency: private accept disabled</Badge>
-                    )}
+                    <Button size="sm" className="h-8 gap-1.5 px-2.5 text-xs" onClick={() => onAccept(listing.id)} disabled={isPending}>
+                      <Check className="w-4 h-4" /> Accept
+                      <kbd className="hidden xl:inline ml-1 text-[9px] bg-primary-foreground/20 px-1 rounded font-mono">A</kbd>
+                    </Button>
                   </>
-                ) : (
+                ) : isAcceptedListing ? (
                   <>
+                    <Badge variant="default" className="text-[10px]">Accepted</Badge>
                     <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2.5 text-xs border-red-200 text-red-700 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-950/30" onClick={() => onReject(listing.id)} disabled={isPending}>
                       <X className="w-4 h-4" /> Mark Rejected
                     </Button>
-                    {!effectiveAgency ? (
-                      <Button size="sm" className="h-8 gap-1.5 px-2.5 text-xs" onClick={() => onAccept(listing.id)} disabled={isPending}>
-                        <Check className="w-4 h-4" /> Mark Accepted
-                      </Button>
-                    ) : (
-                      <Badge variant="outline" className="text-[10px]">Agency: private accept disabled</Badge>
-                    )}
-                    <Button variant="default" size="sm" className="h-8 gap-1.5 px-2.5 text-xs" onClick={handleConvert} disabled={isConverting || !listing.prospectLeadId}>
-                      <UserPlus className="w-4 h-4" /> Convert to Contact
+                  </>
+                ) : (
+                  <>
+                    <Badge variant={isRejectedListing ? 'destructive' : 'outline'} className="text-[10px]">
+                      {isRejectedListing ? 'Rejected' : 'Processed'}
+                    </Badge>
+                    <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2.5 text-xs border-red-200 text-red-700 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-950/30" onClick={() => onReject(listing.id)} disabled={isPending}>
+                      <X className="w-4 h-4" /> Mark Rejected
+                    </Button>
+                    <Button size="sm" className="h-8 gap-1.5 px-2.5 text-xs" onClick={() => onAccept(listing.id)} disabled={isPending}>
+                      <Check className="w-4 h-4" /> Mark Accepted
                     </Button>
                   </>
                 )}

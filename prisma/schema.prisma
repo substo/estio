@@ -789,6 +789,8 @@ model ProspectLead {
   agencyConfidence   Int?             // 0-100 AI confidence score
   agencyReasoning    String?          // AI reasoning text for auditability
   isAgencyManual     Boolean?         // null = AI-decided, true/false = human override
+  sellerType         String           @default("private") // private, agency, management, developer, other
+  sellerTypeManual   String?          // null = AI-decided, typed manual override
   scrapedListings ScrapedListing[]
 
   // Seller Platform Intelligence

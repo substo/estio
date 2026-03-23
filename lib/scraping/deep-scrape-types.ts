@@ -14,6 +14,7 @@ export const STAGE_REASON_CODES = [
     'uncertain_skipped',
     'missing_phone',
     'non_real_estate',
+    'relevance_ai_unavailable',
     'duplicate_listing',
     'duplicate_contact',
     'interaction_budget_exhausted',

@@ -922,13 +922,15 @@ async function upsertListingData(
         }
 
         if (!existingProspect) {
-            existingProspect = await db.prospectLead.create({
+                existingProspect = await db.prospectLead.create({
                 data: {
                     locationId,
                     source: 'scraper_bot',
                     name: data.ownerName || null,
                     phone: data.ownerPhone || data.whatsappPhone || null, // Prefer owner phone as it is authoritative
                     status: 'new',
+                    sellerType: 'private',
+                    sellerTypeManual: null,
                     isAgency: false,
                     platformUserId: data.sellerExternalId,
                     platformRegistered: data.sellerRegisteredAt,

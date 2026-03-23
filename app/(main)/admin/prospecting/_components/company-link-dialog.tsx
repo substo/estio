@@ -5,6 +5,7 @@ import { Building2, Loader2 } from 'lucide-react';
 import {
   applyProspectCompanyLink,
   getProspectCompanyLinkOptions,
+  type ProspectCompanyLinkApplyInput,
   type ProspectCompanyLinkOptionsResponse,
 } from '../actions';
 import { toast } from 'sonner';
@@ -27,6 +28,9 @@ interface CompanyLinkDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onLinked?: (result: { companyId: string; companyName: string }) => void;
+  optionsOverride?: ProspectCompanyLinkOptionsResponse | null;
+  onSubmitSelection?: (selection: ProspectCompanyLinkApplyInput) => Promise<void> | void;
+  submitLabel?: string;
 }
 
 type SelectionMode = 'existing' | 'create';
@@ -50,7 +54,15 @@ function normalizeFormValue(value: string): string | null {
   return trimmed || null;
 }
 
-export function CompanyLinkDialog({ prospectId, open, onOpenChange, onLinked }: CompanyLinkDialogProps) {
+export function CompanyLinkDialog({
+  prospectId,
+  open,
+  onOpenChange,
+  onLinked,
+  optionsOverride,
+  onSubmitSelection,
+  submitLabel,
+}: CompanyLinkDialogProps) {
   const [isLoadingOptions, startLoadingOptions] = useTransition();
   const [isApplying, startApplying] = useTransition();
   const [options, setOptions] = useState<ProspectCompanyLinkOptionsResponse | null>(null);
@@ -67,6 +79,25 @@ export function CompanyLinkDialog({ prospectId, open, onOpenChange, onLinked }: 
 
   useEffect(() => {
     if (!open) return;
+    if (optionsOverride) {
+      setInlineError(null);
+      setOptions(optionsOverride);
+      const defaultName = optionsOverride.agencyProfile?.name || '';
+      setCreateForm({
+        name: defaultName,
+        website: optionsOverride.agencyProfile?.website || '',
+        phone: optionsOverride.agencyProfile?.phone || '',
+        email: optionsOverride.agencyProfile?.email || '',
+      });
+      if (optionsOverride.linkable && optionsOverride.candidates.length > 0) {
+        setSelectionMode('existing');
+        setSelectedCompanyId(optionsOverride.suggestedCompanyId || optionsOverride.candidates[0]!.companyId);
+      } else {
+        setSelectionMode('create');
+        setSelectedCompanyId(null);
+      }
+      return;
+    }
     if (!prospectId) {
       setOptions(null);
       setInlineError('No prospect selected.');
@@ -94,7 +125,7 @@ export function CompanyLinkDialog({ prospectId, open, onOpenChange, onLinked }: 
         setSelectedCompanyId(null);
       }
     });
-  }, [open, prospectId]);
+  }, [open, prospectId, optionsOverride]);
 
   const canSubmit = useMemo(() => {
     if (!prospectId || !options?.linkable || isLoadingOptions || isApplying) return false;
@@ -114,33 +145,43 @@ export function CompanyLinkDialog({ prospectId, open, onOpenChange, onLinked }: 
 
     setInlineError(null);
     startApplying(async () => {
-      const payload = selectionMode === 'existing'
-        ? { mode: 'existing' as const, companyId: String(selectedCompanyId || '') }
-        : {
-            mode: 'create' as const,
-            profileOverrides: {
-              name: normalizeFormValue(createForm.name),
-              website: normalizeFormValue(createForm.website),
-              phone: normalizeFormValue(createForm.phone),
-              email: normalizeFormValue(createForm.email),
-            },
-          };
+      try {
+        const payload = selectionMode === 'existing'
+          ? { mode: 'existing' as const, companyId: String(selectedCompanyId || '') }
+          : {
+              mode: 'create' as const,
+              profileOverrides: {
+                name: normalizeFormValue(createForm.name),
+                website: normalizeFormValue(createForm.website),
+                phone: normalizeFormValue(createForm.phone),
+                email: normalizeFormValue(createForm.email),
+              },
+            };
 
-      const result = await applyProspectCompanyLink(prospectId, payload);
+        if (onSubmitSelection) {
+          await onSubmitSelection(payload);
+          onOpenChange(false);
+          return;
+        }
 
-      if (!result.success) {
-        setInlineError(result.message || 'Failed to link company.');
-        return;
+        const result = await applyProspectCompanyLink(prospectId, payload);
+
+        if (!result.success) {
+          setInlineError(result.message || 'Failed to link company.');
+          return;
+        }
+
+        if (!result.companyId || !result.companyName) {
+          setInlineError('Linking succeeded but returned incomplete company data. Please refresh and retry.');
+          return;
+        }
+
+        toast.success(result.message || 'Company linked');
+        onLinked?.({ companyId: result.companyId, companyName: result.companyName });
+        onOpenChange(false);
+      } catch (error: any) {
+        setInlineError(error?.message || 'Failed to apply company link selection.');
       }
-
-      if (!result.companyId || !result.companyName) {
-        setInlineError('Linking succeeded but returned incomplete company data. Please refresh and retry.');
-        return;
-      }
-
-      toast.success(result.message || 'Company linked');
-      onLinked?.({ companyId: result.companyId, companyName: result.companyName });
-      onOpenChange(false);
     });
   };
 
@@ -304,7 +345,7 @@ export function CompanyLinkDialog({ prospectId, open, onOpenChange, onLinked }: 
               <span className="inline-flex items-center gap-1.5">
                 <Loader2 className="h-4 w-4 animate-spin" /> Linking...
               </span>
-            ) : selectionMode === 'create' ? 'Create & Link' : 'Link Company'}
+            ) : submitLabel || (selectionMode === 'create' ? 'Create & Link' : 'Link Company')}
           </Button>
         </DialogFooter>
       </DialogContent>

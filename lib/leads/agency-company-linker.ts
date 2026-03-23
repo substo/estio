@@ -1,5 +1,10 @@
 import db from '@/lib/db';
 import type { Prisma } from '@prisma/client';
+import {
+  isNonPrivateSellerType,
+  resolveEffectiveSellerType,
+  sellerTypeToCompanyType,
+} from '@/lib/leads/seller-type';
 
 export interface ScrapedAgencyProfile {
   name: string;
@@ -572,6 +577,8 @@ export async function applyProspectCompanyLinkSelection(
       email: true,
       isAgency: true,
       isAgencyManual: true,
+      sellerType: true,
+      sellerTypeManual: true,
       aiScoreBreakdown: true,
     },
   });
@@ -580,11 +587,14 @@ export async function applyProspectCompanyLinkSelection(
     return { success: false, code: 'profile_missing', message: 'Prospect not found.' };
   }
 
-  const effectiveAgency = prospect.isAgencyManual !== null && prospect.isAgencyManual !== undefined
-    ? prospect.isAgencyManual
-    : prospect.isAgency;
+  const effectiveSellerType = resolveEffectiveSellerType({
+    sellerType: prospect.sellerType || null,
+    sellerTypeManual: prospect.sellerTypeManual || null,
+    isAgency: prospect.isAgency,
+    isAgencyManual: prospect.isAgencyManual,
+  });
 
-  if (!effectiveAgency) {
+  if (!isNonPrivateSellerType(effectiveSellerType)) {
     return { success: false, code: 'not_agency', message: 'This prospect is marked as private.' };
   }
 
@@ -639,7 +649,7 @@ export async function applyProspectCompanyLinkSelection(
             email: profile.email || null,
             phone: profile.phone || null,
             website: profile.website || null,
-            type: 'Agency',
+            type: sellerTypeToCompanyType(effectiveSellerType) || 'Agency',
           },
           select: { id: true, name: true, email: true, phone: true, website: true },
         });

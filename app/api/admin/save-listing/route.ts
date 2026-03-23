@@ -81,6 +81,8 @@ export async function POST(req: Request) {
                         name: data.ownerName || null,
                         phone: data.whatsappPhone || data.ownerPhone || null,
                         status: 'new',
+                        sellerType: 'private',
+                        sellerTypeManual: null,
                         isAgency: false,
                         platformUserId: data.sellerExternalId,
                         platformRegistered: data.sellerRegisteredAt,

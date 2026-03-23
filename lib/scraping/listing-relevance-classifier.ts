@@ -3,6 +3,10 @@ import { getModelForTask } from '@/lib/ai/model-router';
 import type { RawListing } from './listing-scraper';
 
 type RelevanceSource = 'cached' | 'rule' | 'ai' | 'fallback';
+export type ListingRelevanceDiagnosticCode =
+    | 'none'
+    | 'ai_unavailable_fail_closed'
+    | 'ai_invalid_response_fail_closed';
 
 export interface ListingRelevanceDecision {
     isRealEstate: boolean;
@@ -11,9 +15,17 @@ export interface ListingRelevanceDecision {
     reason: string;
     checkedAt: string;
     version: string;
+    diagnosticCode: ListingRelevanceDiagnosticCode;
+    aiAttempted: boolean;
+    aiAttempts: number;
 }
 
-const RELEVANCE_VERSION = 'v1';
+export interface ClassifyListingRelevanceOptions {
+    forceReclassify?: boolean;
+    disableAI?: boolean;
+}
+
+const RELEVANCE_VERSION = 'v2';
 
 const RELEVANCE_RAW_ATTRIBUTE_KEYS = {
     decision: 'System listing relevance',
@@ -22,6 +34,9 @@ const RELEVANCE_RAW_ATTRIBUTE_KEYS = {
     reason: 'System listing relevance reason',
     checkedAt: 'System listing relevance checked at',
     version: 'System listing relevance version',
+    diagnosticCode: 'System listing relevance diagnostic code',
+    aiAttempted: 'System listing relevance ai attempted',
+    aiAttempts: 'System listing relevance ai attempts',
 } as const;
 
 const POSITIVE_TERMS = [
@@ -100,6 +115,44 @@ const readText = (value: unknown): string => {
     return '';
 };
 
+const escapeRegExp = (value: string): string =>
+    value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const buildTermRegex = (term: string): RegExp => {
+    const escaped = escapeRegExp(term).replace(/\s+/g, '\\s+');
+    return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i');
+};
+
+const POSITIVE_TERM_PATTERNS = POSITIVE_TERMS.map((term) => ({ term, regex: buildTermRegex(term) }));
+const NEGATIVE_TERM_PATTERNS = NEGATIVE_TERMS.map((term) => ({ term, regex: buildTermRegex(term) }));
+
+const NON_REAL_ESTATE_URL_HINTS = [
+    '/for-sale/home-garden',
+    '/for-sale/electronics',
+    '/for-sale/clothes-shoes',
+    '/for-sale/children-babies',
+    '/for-sale/animals',
+    '/for-sale/jobs',
+];
+
+const delay = async (ms: number): Promise<void> =>
+    new Promise((resolve) => setTimeout(resolve, ms));
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+    let timeoutId: NodeJS.Timeout | null = null;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+            reject(new Error(`timeout:${timeoutMs}`));
+        }, timeoutMs);
+    });
+
+    try {
+        return await Promise.race([promise, timeoutPromise]);
+    } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+    }
+}
+
 export function buildListingRelevanceRawAttributes(
     decision: ListingRelevanceDecision
 ): Record<string, string> {
@@ -110,6 +163,9 @@ export function buildListingRelevanceRawAttributes(
         [RELEVANCE_RAW_ATTRIBUTE_KEYS.reason]: decision.reason.slice(0, 240),
         [RELEVANCE_RAW_ATTRIBUTE_KEYS.checkedAt]: decision.checkedAt,
         [RELEVANCE_RAW_ATTRIBUTE_KEYS.version]: decision.version,
+        [RELEVANCE_RAW_ATTRIBUTE_KEYS.diagnosticCode]: decision.diagnosticCode,
+        [RELEVANCE_RAW_ATTRIBUTE_KEYS.aiAttempted]: decision.aiAttempted ? 'true' : 'false',
+        [RELEVANCE_RAW_ATTRIBUTE_KEYS.aiAttempts]: String(Math.max(0, Math.floor(decision.aiAttempts))),
     };
 }
 
@@ -127,10 +183,18 @@ export function getCachedListingRelevanceDecision(
     if (!version || version !== RELEVANCE_VERSION) return null;
 
     const confidence = parseNumber(attrs[RELEVANCE_RAW_ATTRIBUTE_KEYS.confidence]) ?? 90;
-    const source = normalizeText(attrs[RELEVANCE_RAW_ATTRIBUTE_KEYS.source]) || 'cached';
     const reason = readText(attrs[RELEVANCE_RAW_ATTRIBUTE_KEYS.reason]) || 'cached listing relevance decision';
     const checkedAtRaw = readText(attrs[RELEVANCE_RAW_ATTRIBUTE_KEYS.checkedAt]);
     const checkedAt = checkedAtRaw || new Date(0).toISOString();
+    const diagnosticCodeRaw = normalizeText(attrs[RELEVANCE_RAW_ATTRIBUTE_KEYS.diagnosticCode]);
+    const diagnosticCode: ListingRelevanceDiagnosticCode = (
+        diagnosticCodeRaw === 'ai_unavailable_fail_closed'
+        || diagnosticCodeRaw === 'ai_invalid_response_fail_closed'
+    )
+        ? diagnosticCodeRaw
+        : 'none';
+    const aiAttempted = parseBoolean(attrs[RELEVANCE_RAW_ATTRIBUTE_KEYS.aiAttempted]) ?? false;
+    const aiAttempts = Math.max(0, parseNumber(attrs[RELEVANCE_RAW_ATTRIBUTE_KEYS.aiAttempts]) ?? 0);
 
     return {
         isRealEstate: boolDecision,
@@ -139,6 +203,9 @@ export function getCachedListingRelevanceDecision(
         reason,
         checkedAt,
         version,
+        diagnosticCode,
+        aiAttempted,
+        aiAttempts,
     };
 }
 
@@ -164,7 +231,18 @@ function buildRuleInput(listing: RawListing): string {
         .toLowerCase();
 }
 
-function classifyWithRules(listing: RawListing): ListingRelevanceDecision & { uncertain: boolean } {
+function collectTermHits(
+    haystack: string,
+    patterns: Array<{ term: string; regex: RegExp }>
+): string[] {
+    return patterns
+        .filter(({ regex }) => regex.test(haystack))
+        .map(({ term }) => term);
+}
+
+export function classifyListingRelevanceWithRules(
+    listing: RawListing
+): ListingRelevanceDecision & { uncertain: boolean; score: number } {
     let score = 0;
     const reasons: string[] = [];
 
@@ -174,6 +252,10 @@ function classifyWithRules(listing: RawListing): ListingRelevanceDecision & { un
     if (url.includes('/real-estate')) {
         score += 4;
         reasons.push('URL is inside real-estate taxonomy');
+    }
+    if (NON_REAL_ESTATE_URL_HINTS.some((hint) => url.includes(hint))) {
+        score -= 5;
+        reasons.push('URL is inside non-real-estate taxonomy');
     }
 
     if (typeof listing.bedrooms === 'number' || typeof listing.bathrooms === 'number') {
@@ -185,35 +267,79 @@ function classifyWithRules(listing: RawListing): ListingRelevanceDecision & { un
         reasons.push('has property size structure');
     }
 
-    const positiveHits = POSITIVE_TERMS.filter((term) => haystack.includes(term));
-    const negativeHits = NEGATIVE_TERMS.filter((term) => haystack.includes(term));
+    const positiveHits = collectTermHits(haystack, POSITIVE_TERM_PATTERNS);
+    const negativeHits = collectTermHits(haystack, NEGATIVE_TERM_PATTERNS);
 
     if (positiveHits.length > 0) {
-        score += Math.min(4, positiveHits.length);
+        score += Math.min(6, positiveHits.length);
         reasons.push(`positive terms: ${positiveHits.slice(0, 3).join(', ')}`);
     }
 
     if (negativeHits.length > 0) {
-        score -= Math.min(5, negativeHits.length);
+        score -= Math.min(8, negativeHits.length * 2);
         reasons.push(`negative terms: ${negativeHits.slice(0, 3).join(', ')}`);
     }
 
-    const uncertain = score > -2 && score < 2;
-    const isRealEstate = score >= 0;
-    const confidence = clamp(58 + Math.abs(score) * 10, 30, 97);
+    const uncertain = score > -3 && score < 3;
+    const isRealEstate = score >= 3;
+    const confidence = uncertain
+        ? clamp(45 + Math.abs(score) * 5, 45, 64)
+        : clamp(68 + Math.abs(score) * 6, 65, 98);
 
     return {
         isRealEstate,
         confidence,
         source: 'rule',
-        reason: reasons.length > 0 ? reasons.join('; ') : 'rule-based fallback',
+        reason: (reasons.length > 0 ? reasons.join('; ') : 'rule-based fallback') + `; score=${score}`,
         checkedAt: new Date().toISOString(),
         version: RELEVANCE_VERSION,
+        diagnosticCode: 'none',
+        aiAttempted: false,
+        aiAttempts: 0,
         uncertain,
+        score,
     };
 }
 
-async function classifyWithAI(listing: RawListing): Promise<ListingRelevanceDecision | null> {
+interface AIClassificationAttemptResult {
+    decision: ListingRelevanceDecision | null;
+    attempts: number;
+    failure: 'none' | 'unavailable' | 'invalid_response';
+}
+
+function parseAIRelevanceResponse(text: string): {
+    isRealEstate: boolean;
+    confidence: number;
+    reason: string;
+} | null {
+    const parsed = JSON.parse(text || '{}') as Record<string, unknown>;
+    if (typeof parsed.isRealEstate !== 'boolean') {
+        return null;
+    }
+    const confidence = parseNumber(parsed.confidence);
+    const reason = typeof parsed.reason === 'string' && parsed.reason.trim()
+        ? parsed.reason.trim().slice(0, 240)
+        : 'ai listing relevance classification';
+
+    return {
+        isRealEstate: parsed.isRealEstate,
+        confidence: clamp(confidence ?? 55, 0, 100),
+        reason,
+    };
+}
+
+async function classifyWithAI(
+    listing: RawListing,
+    options: Pick<ClassifyListingRelevanceOptions, 'disableAI'> = {}
+): Promise<AIClassificationAttemptResult> {
+    if (options.disableAI) {
+        return {
+            decision: null,
+            attempts: 0,
+            failure: 'unavailable',
+        };
+    }
+
     const model = getModelForTask('listing_relevance_classification');
 
     const systemPrompt = `You classify marketplace listings for a real-estate CRM.
@@ -228,7 +354,7 @@ Return JSON only:
 Rules:
 - Real estate includes homes, apartments, land, offices, shops, warehouses, rentals, sales.
 - Non-real-estate includes vehicles, electronics, services, jobs, pets, fashion, general goods.
-- If uncertain, prefer true with lower confidence (45-60).`;
+- If uncertain, choose false with confidence between 35 and 55.`;
 
     const payload = {
         url: listing.url,
@@ -240,53 +366,93 @@ Rules:
         rawAttributes: listing.rawAttributes || null,
     };
 
-    try {
-        const aiResult = await callLLMWithMetadata(
-            model,
-            systemPrompt,
-            JSON.stringify(payload),
-            { jsonMode: true, temperature: 0.1, maxOutputTokens: 220 }
-        );
+    const maxAttempts = 3;
+    let failure: AIClassificationAttemptResult['failure'] = 'unavailable';
 
-        const parsed = JSON.parse(aiResult.text || '{}') as Record<string, unknown>;
-        const isRealEstate = parsed.isRealEstate === true;
-        const confidence = clamp(parseNumber(parsed.confidence) ?? 55, 0, 100);
-        const reason = typeof parsed.reason === 'string' && parsed.reason.trim()
-            ? parsed.reason.trim().slice(0, 240)
-            : 'ai listing relevance classification';
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+            const aiResult = await withTimeout(
+                callLLMWithMetadata(
+                    model,
+                    systemPrompt,
+                    JSON.stringify(payload),
+                    { jsonMode: true, temperature: 0.1, maxOutputTokens: 220 }
+                ),
+                15_000,
+            );
 
-        return {
-            isRealEstate,
-            confidence,
-            source: 'ai',
-            reason,
-            checkedAt: new Date().toISOString(),
-            version: RELEVANCE_VERSION,
-        };
-    } catch {
-        return null;
+            const parsed = parseAIRelevanceResponse(aiResult.text || '');
+            if (!parsed) {
+                failure = 'invalid_response';
+            } else {
+                return {
+                    decision: {
+                        isRealEstate: parsed.isRealEstate,
+                        confidence: parsed.confidence,
+                        source: 'ai',
+                        reason: parsed.reason,
+                        checkedAt: new Date().toISOString(),
+                        version: RELEVANCE_VERSION,
+                        diagnosticCode: 'none',
+                        aiAttempted: true,
+                        aiAttempts: attempt,
+                    },
+                    attempts: attempt,
+                    failure: 'none',
+                };
+            }
+        } catch {
+            failure = 'unavailable';
+        }
+
+        if (attempt < maxAttempts) {
+            await delay(250 * attempt);
+        }
     }
+
+    return {
+        decision: null,
+        attempts: maxAttempts,
+        failure,
+    };
 }
 
 export async function classifyListingRelevance(
     listing: RawListing,
-    existingRawAttributes?: unknown
+    existingRawAttributes?: unknown,
+    options: ClassifyListingRelevanceOptions = {}
 ): Promise<ListingRelevanceDecision> {
-    const cached = getCachedListingRelevanceDecision(existingRawAttributes);
+    const cached = options.forceReclassify
+        ? null
+        : getCachedListingRelevanceDecision(existingRawAttributes);
     if (cached) return cached;
 
-    const ruleDecision = classifyWithRules(listing);
+    const ruleDecision = classifyListingRelevanceWithRules(listing);
     if (!ruleDecision.uncertain) {
         return ruleDecision;
     }
 
-    const aiDecision = await classifyWithAI(listing);
-    if (aiDecision) return aiDecision;
+    const aiAttempt = await classifyWithAI(listing, {
+        disableAI: options.disableAI,
+    });
+    if (aiAttempt.decision) return aiAttempt.decision;
+
+    const failureReason = aiAttempt.failure === 'invalid_response'
+        ? `AI returned invalid JSON after ${aiAttempt.attempts} attempt(s); fail-closed`
+        : `AI unavailable after ${aiAttempt.attempts} attempt(s); fail-closed`;
 
     return {
-        ...ruleDecision,
+        isRealEstate: false,
+        confidence: clamp(ruleDecision.confidence - 10, 20, 60),
         source: 'fallback',
-        reason: `${ruleDecision.reason}; AI unavailable, using rule fallback`.slice(0, 240),
+        reason: `${ruleDecision.reason}; ${failureReason}`.slice(0, 240),
+        checkedAt: new Date().toISOString(),
+        version: RELEVANCE_VERSION,
+        diagnosticCode: aiAttempt.failure === 'invalid_response'
+            ? 'ai_invalid_response_fail_closed'
+            : 'ai_unavailable_fail_closed',
+        aiAttempted: true,
+        aiAttempts: aiAttempt.attempts,
     };
 }
 

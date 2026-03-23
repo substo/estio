@@ -4,12 +4,17 @@ import { PageFetcher } from './page-fetcher';
 import {
     buildListingRelevanceRawAttributes,
     classifyListingRelevance,
+    type ListingRelevanceDiagnosticCode,
 } from './listing-relevance-classifier';
 import {
     buildCrawlVisitKey,
     normalizeTargetUrls,
     normalizeUrlForPlatform,
 } from './url-utils';
+import {
+    resolveEffectiveSellerType,
+    sellerTypeToLegacyAgencyFlag,
+} from '@/lib/leads/seller-type';
 
 // Random Gaussian-like delay for human emulation
 const humanDelay = async (baseMs: number, jitterMs: number) => {
@@ -77,6 +82,10 @@ interface UpsertListingResult {
     isRealEstate: boolean;
     relevanceSource: string;
     relevanceConfidence: number;
+    relevanceReason: string;
+    relevanceDiagnosticCode: ListingRelevanceDiagnosticCode;
+    relevanceAiAttempted: boolean;
+    relevanceAiAttempts: number;
 }
 
 interface ProspectClassificationState {
@@ -101,6 +110,19 @@ interface ScrapeTriggerContext {
 interface ScrapeTaskOptions {
     pageLimit?: number;
     triggerContext?: ScrapeTriggerContext;
+}
+
+export function resolveListingStatusForRelevance(
+    existingStatus: string | null | undefined,
+    isRealEstate: boolean
+): string {
+    const normalizedStatus = existingStatus?.toUpperCase?.() || null;
+    if (isRealEstate) {
+        return normalizedStatus === 'SKIPPED' ? 'NEW' : (existingStatus || 'NEW');
+    }
+    return (normalizedStatus === 'IMPORTED' || normalizedStatus === 'REJECTED')
+        ? (existingStatus || 'SKIPPED')
+        : 'SKIPPED';
 }
 
 export class ListingScraperService {
@@ -837,14 +859,27 @@ export class ListingScraperService {
                 isAgency: true,
                 agencyConfidence: true,
                 isAgencyManual: true,
+                sellerType: true,
+                sellerTypeManual: true,
                 phone: true,
             }
         });
 
-        return {
+        const effectiveSellerType = resolveEffectiveSellerType({
+            sellerType: prospect?.sellerType || null,
+            sellerTypeManual: prospect?.sellerTypeManual || null,
             isAgency: prospect?.isAgency ?? null,
+            isAgencyManual: prospect?.isAgencyManual ?? null,
+        });
+        const manualOverride =
+            prospect?.sellerTypeManual !== null && prospect?.sellerTypeManual !== undefined
+                ? sellerTypeToLegacyAgencyFlag(effectiveSellerType)
+                : (prospect?.isAgencyManual ?? null);
+
+        return {
+            isAgency: sellerTypeToLegacyAgencyFlag(effectiveSellerType),
             confidence: prospect?.agencyConfidence ?? null,
-            manualOverride: prospect?.isAgencyManual ?? null,
+            manualOverride,
             phone: prospect?.phone ?? null,
         };
     }
@@ -1022,6 +1057,10 @@ export class ListingScraperService {
                 isRealEstate: true,
                 relevanceSource: 'cached',
                 relevanceConfidence: 100,
+                relevanceReason: 'Listing belongs to another location.',
+                relevanceDiagnosticCode: 'none',
+                relevanceAiAttempted: false,
+                relevanceAiAttempts: 0,
             };
         }
 
@@ -1062,6 +1101,10 @@ export class ListingScraperService {
                         isRealEstate: relevanceDecision.isRealEstate,
                         relevanceSource: relevanceDecision.source,
                         relevanceConfidence: relevanceDecision.confidence,
+                        relevanceReason: relevanceDecision.reason,
+                        relevanceDiagnosticCode: relevanceDecision.diagnosticCode,
+                        relevanceAiAttempted: relevanceDecision.aiAttempted,
+                        relevanceAiAttempts: relevanceDecision.aiAttempts,
                     };
                 }
             }
@@ -1114,6 +1157,8 @@ export class ListingScraperService {
                         phone: listing.ownerPhone || listing.whatsappPhone || null,
                         email: listing.ownerEmail || null,
                         status: 'new',
+                        sellerType: 'private',
+                        sellerTypeManual: null,
                         isAgency: false,
                         platformUserId: listing.sellerExternalId,
                         platformRegistered: listing.sellerRegisteredAt,
@@ -1190,12 +1235,10 @@ export class ListingScraperService {
                 ...(existingRawAttributes || {}),
                 ...relevanceAttributes,
             };
-        const normalizedStatus = existingListing?.status?.toUpperCase?.() || null;
-        const resolvedExistingStatus = relevanceDecision.isRealEstate
-            ? (normalizedStatus === 'SKIPPED' ? 'NEW' : (existingListing?.status || 'NEW'))
-            : (normalizedStatus === 'IMPORTED' || normalizedStatus === 'REJECTED'
-                ? (existingListing?.status || 'SKIPPED')
-                : 'SKIPPED');
+        const resolvedExistingStatus = resolveListingStatusForRelevance(
+            existingListing?.status,
+            relevanceDecision.isRealEstate,
+        );
 
         if (existingListing) {
             await db.scrapedListing.update({
@@ -1240,6 +1283,10 @@ export class ListingScraperService {
                 isRealEstate: relevanceDecision.isRealEstate,
                 relevanceSource: relevanceDecision.source,
                 relevanceConfidence: relevanceDecision.confidence,
+                relevanceReason: relevanceDecision.reason,
+                relevanceDiagnosticCode: relevanceDecision.diagnosticCode,
+                relevanceAiAttempted: relevanceDecision.aiAttempted,
+                relevanceAiAttempts: relevanceDecision.aiAttempts,
             };
         }
 
@@ -1272,7 +1319,7 @@ export class ListingScraperService {
                 contactChannels: listing.contactChannels || [],
                 whatsappPhone: listing.whatsappPhone,
                 rawAttributes: mergedRawAttributes as any,
-                status: relevanceDecision.isRealEstate ? 'NEW' : 'SKIPPED',
+                status: resolveListingStatusForRelevance(null, relevanceDecision.isRealEstate),
                 prospectLeadId,
             }
         });
@@ -1287,6 +1334,10 @@ export class ListingScraperService {
             isRealEstate: relevanceDecision.isRealEstate,
             relevanceSource: relevanceDecision.source,
             relevanceConfidence: relevanceDecision.confidence,
+            relevanceReason: relevanceDecision.reason,
+            relevanceDiagnosticCode: relevanceDecision.diagnosticCode,
+            relevanceAiAttempted: relevanceDecision.aiAttempted,
+            relevanceAiAttempts: relevanceDecision.aiAttempts,
         };
     }
 }

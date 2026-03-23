@@ -1,6 +1,12 @@
 import { callLLMWithMetadata } from './llm';
 import { getModelForTask } from './model-router';
 import db from '@/lib/db';
+import {
+    type ProspectSellerType,
+    normalizeProspectSellerType,
+    resolveEffectiveSellerType,
+    sellerTypeToLegacyAgencyFlag,
+} from '@/lib/leads/seller-type';
 
 export interface ClassificationSampleListing {
     title?: string | null;
@@ -31,6 +37,7 @@ export interface ClassificationInput {
 }
 
 export interface ClassificationResult {
+    sellerType: ProspectSellerType;
     isAgency: boolean;
     confidenceScore: number;
     reasoning: string;
@@ -44,8 +51,11 @@ export interface ProspectClassificationDecision {
 const CLASSIFICATION_PROMPT = `You are an expert real estate industry classifier for a CRM application in Cyprus.
 
 Your task is to determine whether a property seller/landlord on a classifieds platform is:
-- A **Real Estate Agency / Developer / Property Management Company** ("agency")
 - A **Private Individual** seller or landlord ("private")
+- A **Real Estate Agency** ("agency")
+- A **Property Management Company** ("management")
+- A **Property Developer / Development Company** ("developer")
+- A **Non-private real-estate business that does not cleanly fit agency/management/developer** ("other")
 
 ## Signals to Evaluate
 
@@ -73,7 +83,7 @@ Your task is to determine whether a property seller/landlord on a classifieds pl
 ## Output Format
 Return a JSON object:
 {
-  "isAgency": true/false,
+  "sellerType": "private" | "agency" | "management" | "developer" | "other",
   "confidenceScore": 0-100,
   "reasoning": "Brief 1-2 sentence explanation"
 }
@@ -82,7 +92,7 @@ Rules:
 - confidenceScore >= 70 means you are fairly certain
 - confidenceScore 40-69 means ambiguous, lean one way
 - confidenceScore < 40 means very uncertain
-- If almost no data is provided, return confidenceScore: 30 with isAgency: false (default to private)`;
+- If almost no data is provided, return confidenceScore: 30 with sellerType: "private"`;
 
 const parsePetsAllowed = (rawAttributes: unknown): string | null => {
     if (!rawAttributes || typeof rawAttributes !== 'object') return null;
@@ -256,6 +266,8 @@ export async function shouldRunProspectClassification(
     const prospect = await db.prospectLead.findUnique({
         where: { id: prospectId },
         select: {
+            sellerTypeManual: true,
+            sellerType: true,
             isAgencyManual: true,
             agencyConfidence: true,
             agencyReasoning: true,
@@ -266,8 +278,8 @@ export async function shouldRunProspectClassification(
         return { shouldClassify: false, reason: 'Prospect not found.' };
     }
 
-    if (prospect.isAgencyManual !== null) {
-        return { shouldClassify: false, reason: 'Manual agency/private override already set.' };
+    if (prospect.sellerTypeManual !== null || prospect.isAgencyManual !== null) {
+        return { shouldClassify: false, reason: 'Manual seller type override already set.' };
     }
 
     const hasExistingAiClassification =
@@ -320,7 +332,7 @@ export async function classifyProspect(input: ClassificationInput): Promise<Clas
     }
 
     if (signals.length === 0) {
-        return { isAgency: false, confidenceScore: 20, reasoning: 'No data available for classification.' };
+        return { sellerType: 'private', isAgency: false, confidenceScore: 20, reasoning: 'No data available for classification.' };
     }
 
     const userContent = `Classify this seller:\n\n${signals.join('\n')}`;
@@ -333,8 +345,12 @@ export async function classifyProspect(input: ClassificationInput): Promise<Clas
 
         if (aiResult.text) {
             const parsed = JSON.parse(aiResult.text);
+            const typedSellerType = normalizeProspectSellerType(parsed.sellerType);
+            const fallbackFromBoolean = parsed.isAgency === true ? 'agency' : 'private';
+            const resolvedSellerType = typedSellerType || fallbackFromBoolean;
             return {
-                isAgency: parsed.isAgency === true,
+                sellerType: resolvedSellerType,
+                isAgency: sellerTypeToLegacyAgencyFlag(resolvedSellerType),
                 confidenceScore: Math.min(100, Math.max(0, parseInt(parsed.confidenceScore) || 50)),
                 reasoning: parsed.reasoning || '',
             };
@@ -344,7 +360,12 @@ export async function classifyProspect(input: ClassificationInput): Promise<Clas
     }
 
     // Fallback: default to private with low confidence
-    return { isAgency: false, confidenceScore: 20, reasoning: 'Classification failed, defaulting to private.' };
+    return {
+        sellerType: 'private',
+        isAgency: false,
+        confidenceScore: 20,
+        reasoning: 'Classification failed, defaulting to private.',
+    };
 }
 
 /**
@@ -360,10 +381,24 @@ export async function classifyAndUpdateProspect(
     // Check if there's a manual override — if so, skip AI entirely
     const prospect = await db.prospectLead.findUnique({
         where: { id: prospectId },
-        select: { isAgencyManual: true },
+        select: {
+            sellerType: true,
+            sellerTypeManual: true,
+            isAgency: true,
+            isAgencyManual: true,
+        },
     });
 
-    if (prospect?.isAgencyManual !== null && prospect?.isAgencyManual !== undefined) {
+    if (
+        prospect?.sellerTypeManual !== null && prospect?.sellerTypeManual !== undefined ||
+        prospect?.isAgencyManual !== null && prospect?.isAgencyManual !== undefined
+    ) {
+        const effectiveSellerType = resolveEffectiveSellerType({
+            sellerType: prospect?.sellerType || null,
+            sellerTypeManual: prospect?.sellerTypeManual || null,
+            isAgency: prospect?.isAgency ?? null,
+            isAgencyManual: prospect?.isAgencyManual ?? null,
+        });
         try {
             const { stageAgencyProfileCompanyMatch } = await import('@/lib/leads/agency-company-linker');
             await stageAgencyProfileCompanyMatch(prospectId, locationId);
@@ -372,7 +407,8 @@ export async function classifyAndUpdateProspect(
         }
 
         return {
-            isAgency: prospect.isAgencyManual,
+            sellerType: effectiveSellerType,
+            isAgency: sellerTypeToLegacyAgencyFlag(effectiveSellerType),
             confidenceScore: 100,
             reasoning: 'Manual override by user.',
         };
@@ -381,13 +417,16 @@ export async function classifyAndUpdateProspect(
     const model = getModelForTask('prospect_classification');
     const result = await classifyProspect(input);
 
-    // Only auto-set isAgency if confidence is >= 70
+    // Only auto-set sellerType if confidence is >= 70
     const shouldAutoSet = result.confidenceScore >= 70;
+    const storedSellerType: ProspectSellerType = shouldAutoSet ? result.sellerType : 'private';
+    const storedAgencyFlag = sellerTypeToLegacyAgencyFlag(storedSellerType);
 
     await db.prospectLead.update({
         where: { id: prospectId },
         data: {
-            isAgency: shouldAutoSet ? result.isAgency : false,
+            sellerType: storedSellerType,
+            isAgency: storedAgencyFlag,
             agencyConfidence: result.confidenceScore,
             agencyReasoning: result.reasoning,
         },

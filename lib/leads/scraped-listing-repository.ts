@@ -1,5 +1,13 @@
 import db from '@/lib/db';
 import { Prisma } from '@prisma/client';
+import {
+  normalizeProspectSellerType,
+  type ProspectSellerType,
+  type ProspectSellerTypeFilter,
+  buildSellerTypeWhereClause,
+  resolveEffectiveSellerType,
+  sellerTypeToLegacyAgencyFlag,
+} from '@/lib/leads/seller-type';
 
 export type ScrapedListingScope = 'new' | 'all' | 'accepted' | 'rejected';
 
@@ -11,6 +19,7 @@ export interface ScrapedListingParams {
   status?: string;
   scope?: ScrapedListingScope;
   prospectLeadId?: string;
+  sellerType?: ProspectSellerTypeFilter;
 }
 
 export interface ScrapedListingRow {
@@ -40,12 +49,17 @@ export interface ScrapedListingRow {
   contactChannels: string[];
   sellerExternalId: string | null;
   status: string;
+  importedPropertyId: string | null;
   prospectLeadId: string | null;
   prospectStatus: string | null;
   prospectName: string | null;
   prospectPhone: string | null;
+  prospectSellerType: ProspectSellerType;
+  prospectSellerTypeManual: ProspectSellerType | null;
+  effectiveSellerType: ProspectSellerType;
   prospectAgency: boolean;
   prospectAgencyManual: boolean | null;
+  createdContactId: string | null;
   prospectAiScoreBreakdown: Record<string, any> | null;
   linkedCompanyId: string | null;
   linkedCompanyName: string | null;
@@ -68,17 +82,42 @@ export async function listScrapedListings(
 
   const scope = params.scope || 'new';
   if (scope === 'new') {
-    and.push({ status: { in: ['new', 'NEW', 'REVIEWING'] } });
+    and.push({
+      AND: [
+        { status: { in: ['new', 'NEW', 'REVIEWING'] } },
+        {
+          OR: [
+            { prospectLeadId: null },
+            { prospectLead: { status: { in: ['new', 'reviewing'] } } },
+          ],
+        },
+      ],
+    });
   } else if (scope === 'accepted') {
-    and.push({ status: { in: ['imported', 'IMPORTED'] } });
+    and.push({
+      OR: [
+        { status: { in: ['imported', 'IMPORTED'] } },
+        { prospectLead: { status: 'accepted' } },
+      ],
+    });
   } else if (scope === 'rejected') {
-    and.push({ status: { in: ['rejected', 'REJECTED'] } });
+    and.push({
+      OR: [
+        { status: { in: ['rejected', 'REJECTED'] } },
+        { prospectLead: { status: 'rejected' } },
+      ],
+    });
   } else if (params.status) {
     and.push({ status: params.status });
   }
 
   if (params.source) and.push({ platform: params.source });
   if (params.prospectLeadId) and.push({ prospectLeadId: params.prospectLeadId });
+  if (params.sellerType && params.sellerType !== 'all') {
+    and.push({
+      prospectLead: buildSellerTypeWhereClause(params.sellerType as ProspectSellerType) as Prisma.ProspectLeadWhereInput,
+    });
+  }
 
   if (params.q) {
     and.push({
@@ -99,7 +138,17 @@ export async function listScrapedListings(
       skip: params.skip || 0,
       include: {
         prospectLead: {
-          select: { status: true, name: true, phone: true, isAgency: true, isAgencyManual: true, aiScoreBreakdown: true }
+          select: {
+            status: true,
+            name: true,
+            phone: true,
+            isAgency: true,
+            isAgencyManual: true,
+            sellerType: true,
+            sellerTypeManual: true,
+            aiScoreBreakdown: true,
+            createdContactId: true,
+          }
         }
       },
       orderBy: [{ createdAt: 'desc' }],
@@ -116,8 +165,20 @@ export async function listScrapedListings(
         const strategicScrape = (breakdown?.strategicScrape ?? null) as Record<string, any> | null;
         const linkedCompany = (strategicScrape?.companyLink ?? null) as Record<string, any> | null;
         const stagedCompanyMatch = (strategicScrape?.companyMatch ?? null) as Record<string, any> | null;
+        const effectiveSellerType = resolveEffectiveSellerType({
+          sellerType: r.prospectLead?.sellerType || null,
+          sellerTypeManual: r.prospectLead?.sellerTypeManual || null,
+          isAgency: r.prospectLead?.isAgency ?? null,
+          isAgencyManual: r.prospectLead?.isAgencyManual ?? null,
+        });
+        const storedSellerType = normalizeProspectSellerType(r.prospectLead?.sellerType || null) || effectiveSellerType;
         return {
           prospectAiScoreBreakdown: breakdown,
+          prospectSellerType: storedSellerType,
+          prospectSellerTypeManual: r.prospectLead?.sellerTypeManual as ProspectSellerType | null,
+          effectiveSellerType,
+          prospectAgency: sellerTypeToLegacyAgencyFlag(effectiveSellerType),
+          createdContactId: r.prospectLead?.createdContactId || null,
           linkedCompanyId: typeof linkedCompany?.companyId === 'string' ? linkedCompany.companyId : null,
           linkedCompanyName: typeof linkedCompany?.name === 'string' ? linkedCompany.name : null,
           stagedCompanyMatchName: typeof stagedCompanyMatch?.name === 'string' ? stagedCompanyMatch.name : null,
@@ -146,11 +207,11 @@ export async function listScrapedListings(
       contactChannels: r.contactChannels,
       sellerExternalId: r.sellerExternalId,
       status: r.status,
+      importedPropertyId: r.importedPropertyId,
       prospectLeadId: r.prospectLeadId,
       prospectStatus: r.prospectLead?.status || null,
       prospectName: r.prospectLead?.name || null,
       prospectPhone: r.prospectLead?.phone || null,
-      prospectAgency: r.prospectLead?.isAgency ?? false,
       prospectAgencyManual: r.prospectLead?.isAgencyManual ?? null,
       sellerRegisteredAt: r.sellerRegisteredAt,
       otherListingsUrl: r.otherListingsUrl,

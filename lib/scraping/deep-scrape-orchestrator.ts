@@ -28,6 +28,11 @@ import {
 } from './url-utils';
 
 const DEFAULT_MAX_SEED_LISTINGS_PER_TASK = 50;
+const RELEVANCE_AI_CIRCUIT_BREAKER_THRESHOLD = 3;
+const RELEVANCE_AI_DIAGNOSTICS = new Set([
+    'ai_unavailable_fail_closed',
+    'ai_invalid_response_fail_closed',
+]);
 
 const humanDelay = async (baseMs: number, jitterMs: number) => {
     const offset = Math.floor(Math.random() * (jitterMs * 2 + 1)) - jitterMs;
@@ -423,6 +428,69 @@ export class DeepScrapeOrchestratorService {
                 const processedProspectIds = new Set<string>();
                 const seenContactsWithPhone = new Set<string>();
                 const seenContactsWithoutPhone = new Set<string>();
+                let relevanceAIFailClosedCount = 0;
+                let relevanceCircuitBreakerTripped = false;
+
+                const trackRelevanceFallback = async (
+                    save: {
+                        relevanceDiagnosticCode?: string;
+                        relevanceSource?: string;
+                        relevanceConfidence?: number;
+                        relevanceReason?: string;
+                        relevanceAiAttempts?: number;
+                    },
+                    context: {
+                        stage: string;
+                        listingUrl: string;
+                        externalId: string;
+                        prospectLeadId?: string | null;
+                    },
+                ): Promise<void> => {
+                    const diagnosticCode = save.relevanceDiagnosticCode || 'none';
+                    if (!RELEVANCE_AI_DIAGNOSTICS.has(diagnosticCode)) {
+                        return;
+                    }
+
+                    relevanceAIFailClosedCount += 1;
+
+                    await this.logStage(run.id, locationId, {
+                        taskId: task.id,
+                        stage: context.stage,
+                        status: 'warning',
+                        reasonCode: 'relevance_ai_unavailable',
+                        message: 'Listing relevance fell back to fail-closed due to AI classification unavailability.',
+                        metadata: {
+                            listingUrl: context.listingUrl,
+                            externalId: context.externalId,
+                            prospectLeadId: context.prospectLeadId || null,
+                            relevanceDiagnosticCode: diagnosticCode,
+                            relevanceSource: save.relevanceSource || null,
+                            relevanceConfidence: save.relevanceConfidence ?? null,
+                            relevanceReason: save.relevanceReason || null,
+                            relevanceAiAttempts: save.relevanceAiAttempts ?? null,
+                            relevanceAIFailClosedCount,
+                        },
+                    });
+
+                    if (
+                        !relevanceCircuitBreakerTripped
+                        && relevanceAIFailClosedCount >= RELEVANCE_AI_CIRCUIT_BREAKER_THRESHOLD
+                    ) {
+                        relevanceCircuitBreakerTripped = true;
+                        addError(taskSummary, 'extraction');
+                        await this.logStage(run.id, locationId, {
+                            taskId: task.id,
+                            stage: 'stage_g_relevance_circuit_breaker',
+                            status: 'error',
+                            reasonCode: 'relevance_ai_unavailable',
+                            message: `Circuit breaker tripped after ${relevanceAIFailClosedCount} relevance fail-closed events.`,
+                            metadata: {
+                                threshold: RELEVANCE_AI_CIRCUIT_BREAKER_THRESHOLD,
+                                relevanceAIFailClosedCount,
+                            },
+                        });
+                    }
+                };
 
                 try {
                     const crawlResult = await this.crawlSeedListings(
@@ -456,6 +524,10 @@ export class DeepScrapeOrchestratorService {
 
                     for (const seed of crawlResult.seedListings) {
                         await cancellationCheckpoint();
+
+                        if (relevanceCircuitBreakerTripped) {
+                            break;
+                        }
 
                         if (seedProcessed >= options.maxSeedListingsPerTask) {
                             break;
@@ -518,6 +590,15 @@ export class DeepScrapeOrchestratorService {
 
                         if (seedSave.prospectCreated) taskSummary.prospectsCreated += 1;
                         if (seedSave.prospectMatched) taskSummary.prospectsMatched += 1;
+                        await trackRelevanceFallback(seedSave, {
+                            stage: 'stage_g_upsert',
+                            listingUrl: seedListing.url,
+                            externalId: seedListing.externalId,
+                        });
+
+                        if (relevanceCircuitBreakerTripped) {
+                            break;
+                        }
 
                         if (seedSave.skippedAsDuplicateContact) {
                             addOmission(taskSummary, 'duplicate');
@@ -538,9 +619,19 @@ export class DeepScrapeOrchestratorService {
                                 taskId: task.id,
                                 stage: 'stage_g_upsert',
                                 status: 'skipped',
-                                reasonCode: 'non_real_estate',
+                                reasonCode: RELEVANCE_AI_DIAGNOSTICS.has(seedSave.relevanceDiagnosticCode || '')
+                                    ? 'relevance_ai_unavailable'
+                                    : 'non_real_estate',
                                 message: 'Seed listing omitted because it is not real-estate relevant.',
-                                metadata: { listingUrl: seedListing.url, externalId: seedListing.externalId },
+                                metadata: {
+                                    listingUrl: seedListing.url,
+                                    externalId: seedListing.externalId,
+                                    relevanceSource: seedSave.relevanceSource,
+                                    relevanceConfidence: seedSave.relevanceConfidence,
+                                    relevanceReason: seedSave.relevanceReason,
+                                    relevanceDiagnosticCode: seedSave.relevanceDiagnosticCode,
+                                    relevanceAiAttempts: seedSave.relevanceAiAttempts,
+                                },
                             });
                             continue;
                         }
@@ -656,6 +747,10 @@ export class DeepScrapeOrchestratorService {
                             });
 
                             for (const listing of portfolio.listings) {
+                                if (relevanceCircuitBreakerTripped) {
+                                    break;
+                                }
+
                                 const listingWithSellerContext = mergeSellerContext(seedListing, listing);
 
                                 const save = await ListingScraperService.upsertListingAndProspect(
@@ -666,6 +761,16 @@ export class DeepScrapeOrchestratorService {
 
                                 if (save.prospectCreated) taskSummary.prospectsCreated += 1;
                                 if (save.prospectMatched) taskSummary.prospectsMatched += 1;
+                                await trackRelevanceFallback(save, {
+                                    stage: 'stage_g_upsert',
+                                    listingUrl: listingWithSellerContext.url,
+                                    externalId: listingWithSellerContext.externalId,
+                                    prospectLeadId,
+                                });
+
+                                if (relevanceCircuitBreakerTripped) {
+                                    break;
+                                }
 
                                 if (save.skippedAsDuplicateContact) {
                                     addOmission(taskSummary, 'duplicate');
@@ -674,6 +779,25 @@ export class DeepScrapeOrchestratorService {
 
                                 if (!save.isRealEstate) {
                                     addOmission(taskSummary, 'non_real_estate');
+                                    await this.logStage(run.id, locationId, {
+                                        taskId: task.id,
+                                        stage: 'stage_g_upsert',
+                                        status: 'skipped',
+                                        reasonCode: RELEVANCE_AI_DIAGNOSTICS.has(save.relevanceDiagnosticCode || '')
+                                            ? 'relevance_ai_unavailable'
+                                            : 'non_real_estate',
+                                        message: 'Portfolio listing omitted because it is not real-estate relevant.',
+                                        metadata: {
+                                            listingUrl: listingWithSellerContext.url,
+                                            externalId: listingWithSellerContext.externalId,
+                                            prospectLeadId,
+                                            relevanceSource: save.relevanceSource,
+                                            relevanceConfidence: save.relevanceConfidence,
+                                            relevanceReason: save.relevanceReason,
+                                            relevanceDiagnosticCode: save.relevanceDiagnosticCode,
+                                            relevanceAiAttempts: save.relevanceAiAttempts,
+                                        },
+                                    });
                                     continue;
                                 }
 
@@ -685,6 +809,10 @@ export class DeepScrapeOrchestratorService {
                                     eligiblePortfolioListings.push(listingWithSellerContext);
                                 }
                             }
+                        }
+
+                        if (relevanceCircuitBreakerTripped) {
+                            break;
                         }
 
                         const classification = await ListingScraperService.ensureProspectClassification(
@@ -755,6 +883,10 @@ export class DeepScrapeOrchestratorService {
                         for (const listing of eligiblePortfolioListings) {
                             await cancellationCheckpoint();
 
+                            if (relevanceCircuitBreakerTripped) {
+                                break;
+                            }
+
                             if (interactionsRemaining <= 0) {
                                 addOmission(taskSummary, 'budget_exhausted');
                                 await this.logStage(run.id, locationId, {
@@ -791,6 +923,16 @@ export class DeepScrapeOrchestratorService {
 
                                 if (deepSave.prospectCreated) taskSummary.prospectsCreated += 1;
                                 if (deepSave.prospectMatched) taskSummary.prospectsMatched += 1;
+                                await trackRelevanceFallback(deepSave, {
+                                    stage: 'stage_f_portfolio_listing_upsert',
+                                    listingUrl: deepPortfolioListing.listing.url,
+                                    externalId: deepPortfolioListing.listing.externalId,
+                                    prospectLeadId,
+                                });
+
+                                if (relevanceCircuitBreakerTripped) {
+                                    break;
+                                }
 
                                 if (deepSave.skippedAsDuplicateContact || deepSave.listingAlreadyExisted) {
                                     addOmission(taskSummary, 'duplicate');
@@ -798,6 +940,25 @@ export class DeepScrapeOrchestratorService {
 
                                 if (!deepSave.isRealEstate) {
                                     addOmission(taskSummary, 'non_real_estate');
+                                    await this.logStage(run.id, locationId, {
+                                        taskId: task.id,
+                                        stage: 'stage_f_portfolio_listing_upsert',
+                                        status: 'skipped',
+                                        reasonCode: RELEVANCE_AI_DIAGNOSTICS.has(deepSave.relevanceDiagnosticCode || '')
+                                            ? 'relevance_ai_unavailable'
+                                            : 'non_real_estate',
+                                        message: 'Deep portfolio listing omitted because it is not real-estate relevant.',
+                                        metadata: {
+                                            listingUrl: deepPortfolioListing.listing.url,
+                                            externalId: deepPortfolioListing.listing.externalId,
+                                            prospectLeadId,
+                                            relevanceSource: deepSave.relevanceSource,
+                                            relevanceConfidence: deepSave.relevanceConfidence,
+                                            relevanceReason: deepSave.relevanceReason,
+                                            relevanceDiagnosticCode: deepSave.relevanceDiagnosticCode,
+                                            relevanceAiAttempts: deepSave.relevanceAiAttempts,
+                                        },
+                                    });
                                 } else {
                                     taskSummary.portfolioListingsDeepScraped += 1;
                                 }

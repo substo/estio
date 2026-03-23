@@ -3,18 +3,43 @@
 import { useState, useTransition, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { type ProspectInboxRow } from '@/lib/leads/prospect-repository';
-import { toggleProspectAgencyStatus } from '../actions';
+import { setProspectSellerTypeManual } from '../actions';
+import { openOrStartConversationForContact } from '@/app/(main)/admin/contacts/actions';
 import { scrapeSellerProfile } from '../listings/_actions/seller-scrape';
 import { toast } from 'sonner';
 import {
-  Building2, UserCheck, ExternalLink, Phone, MessageCircle,
-  UserPlus, DownloadCloud, Check, X, Home, Keyboard, Hash, Mail, Bot
+  Building2,
+  ExternalLink,
+  Phone,
+  MessageCircle,
+  DownloadCloud,
+  Check,
+  X,
+  Home,
+  Keyboard,
+  Hash,
+  Mail,
+  MessageSquare,
+  Link2,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { CompanyLinkDialog } from './company-link-dialog';
 import { isProspectStatusLinkable } from '@/lib/leads/prospect-status';
+import {
+  type ProspectSellerType,
+  isNonPrivateSellerType,
+  resolveEffectiveSellerType,
+} from '@/lib/leads/seller-type';
+import { resolveProspectingReviewState } from '@/lib/leads/prospecting-status';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 interface ContactDetailPanelProps {
   prospect: ProspectInboxRow | null;
@@ -24,10 +49,42 @@ interface ContactDetailPanelProps {
   locationId: string;
 }
 
+const SELLER_TYPE_OPTIONS: Array<{ value: ProspectSellerType; label: string }> = [
+  { value: 'private', label: 'Private' },
+  { value: 'agency', label: 'Agency' },
+  { value: 'management', label: 'Management' },
+  { value: 'developer', label: 'Developer' },
+  { value: 'other', label: 'Other' },
+];
+
+function getSellerTypeLabel(value: ProspectSellerType): string {
+  const option = SELLER_TYPE_OPTIONS.find((item) => item.value === value);
+  return option?.label || 'Private';
+}
+
+function getSellerTypeBadgeClass(value: ProspectSellerType): string {
+  switch (value) {
+    case 'private':
+      return 'bg-green-600 text-white';
+    case 'agency':
+      return 'bg-orange-600 text-white';
+    case 'management':
+      return 'bg-blue-600 text-white';
+    case 'developer':
+      return 'bg-indigo-600 text-white';
+    case 'other':
+      return 'bg-slate-700 text-white';
+    default:
+      return 'bg-green-600 text-white';
+  }
+}
+
 export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, locationId }: ContactDetailPanelProps) {
   const router = useRouter();
   const [isScrapingSeller, startScrapingSeller] = useTransition();
   const [isCompanyDialogOpen, setIsCompanyDialogOpen] = useState(false);
+  const [isUpdatingSellerType, startUpdatingSellerType] = useTransition();
+  const [isOpeningConversation, startOpeningConversation] = useTransition();
 
   useEffect(() => {
     setIsCompanyDialogOpen(false);
@@ -47,71 +104,46 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
     );
   }
 
-  const isNew = prospect.status === 'new' || prospect.status === 'reviewing';
+  const effectiveSellerType = resolveEffectiveSellerType({
+    sellerType: prospect.sellerType,
+    sellerTypeManual: prospect.sellerTypeManual,
+    isAgency: prospect.isAgency,
+    isAgencyManual: prospect.isAgencyManual,
+  });
+  const isManualOverride = Boolean(prospect.sellerTypeManual);
+  const reviewState = resolveProspectingReviewState({ prospectStatus: prospect.status });
+  const isNew = reviewState === 'new';
+  const hasAcceptedContact = Boolean(prospect.createdContactId);
+  const showConversationCta = reviewState === 'accepted' && hasAcceptedContact;
 
-  // Resolve effective agency status: manual override > AI > default
-  const effectiveIsAgency = prospect.isAgencyManual !== null && prospect.isAgencyManual !== undefined
-    ? prospect.isAgencyManual
-    : prospect.isAgency;
-  const isManualOverride = prospect.isAgencyManual !== null && prospect.isAgencyManual !== undefined;
-
-  const handleToggleAgency = async () => {
-    // Cycle: current state → next state
-    // Private (false manual) → Agency (true manual) → AI Auto (null) → Private ...
-    let next: boolean | null;
-    if (prospect.isAgencyManual === false) {
-      next = true; // Private → Agency
-    } else if (prospect.isAgencyManual === true) {
-      next = null; // Agency → AI Auto
-    } else {
-      next = false; // AI Auto (null) → Private
-    }
-
-    const res = await toggleProspectAgencyStatus(prospect.id, next);
-    if (!res.success) {
-      toast.error(res.message || 'Failed to update');
-      return;
-    }
-    router.refresh();
+  const handleSetSellerType = (value: string) => {
+    const nextValue: ProspectSellerType | null = value === 'auto' ? null : (value as ProspectSellerType);
+    startUpdatingSellerType(async () => {
+      const res = await setProspectSellerTypeManual(prospect.id, nextValue);
+      if (!res.success) {
+        toast.error(res.message || 'Failed to update seller type');
+        return;
+      }
+      toast.success(nextValue ? `Seller type set to ${getSellerTypeLabel(nextValue)}` : 'Seller type reset to AI/auto');
+      router.refresh();
+    });
   };
 
-  const agencyBadgeContent = () => {
-    const confidence = prospect.agencyConfidence;
-    const tooltipText = prospect.agencyReasoning
-      ? `${prospect.agencyReasoning}${confidence ? ` (${confidence}% confidence)` : ''}`
-      : confidence ? `AI Confidence: ${confidence}%` : 'Click to toggle';
-
-    if (isManualOverride) {
-      return effectiveIsAgency ? (
-        <Badge variant="destructive" className="text-[10px] h-5 px-1.5 gap-1 cursor-pointer hover:opacity-80 transition-opacity" onClick={handleToggleAgency} title={`Manual: Agency — ${tooltipText}`}>
-          <Building2 className="w-3 h-3" /> Agency
-        </Badge>
-      ) : (
-        <Badge variant="default" className="bg-green-600 text-[10px] h-5 px-1.5 gap-1 cursor-pointer hover:opacity-80 transition-opacity" onClick={handleToggleAgency} title={`Manual: Private — ${tooltipText}`}>
-          <UserCheck className="w-3 h-3" /> Private
-        </Badge>
-      );
+  const handleOpenConversation = () => {
+    if (!prospect.createdContactId) {
+      toast.error('No CRM contact is linked yet. Accept this prospect first.');
+      return;
     }
 
-    // AI Auto mode
-    if (confidence && confidence >= 70) {
-      return effectiveIsAgency ? (
-        <Badge variant="destructive" className="text-[10px] h-5 px-1.5 gap-1 cursor-pointer hover:opacity-80 transition-opacity border-dashed" onClick={handleToggleAgency} title={`AI: Agency — ${tooltipText}`}>
-          <Bot className="w-3 h-3" /> Agency <span className="opacity-60 text-[8px] ml-0.5">{confidence}%</span>
-        </Badge>
-      ) : (
-        <Badge variant="default" className="bg-green-600 text-[10px] h-5 px-1.5 gap-1 cursor-pointer hover:opacity-80 transition-opacity border-dashed" onClick={handleToggleAgency} title={`AI: Private — ${tooltipText}`}>
-          <Bot className="w-3 h-3" /> Private <span className="opacity-60 text-[8px] ml-0.5">{confidence}%</span>
-        </Badge>
-      );
-    }
-
-    // Low confidence or no classification
-    return (
-      <Badge variant="outline" className="text-[10px] h-5 px-1.5 gap-1 cursor-pointer hover:opacity-80 transition-opacity" onClick={handleToggleAgency} title={tooltipText}>
-        <Bot className="w-3 h-3" /> {confidence ? `Uncertain ${confidence}%` : 'Unclassified'}
-      </Badge>
-    );
+    startOpeningConversation(async () => {
+      const res = await openOrStartConversationForContact(prospect.createdContactId!);
+      if (res?.success && res.conversationId) {
+        router.push(`/admin/conversations?id=${encodeURIComponent(res.conversationId)}`);
+        router.refresh();
+        return;
+      }
+      toast.error(res?.error || 'Failed to open conversation');
+    });
   };
 
   const handleWhatsApp = () => {
@@ -125,7 +157,6 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
     window.open(`tel:${prospect.phone}`, '_self');
   };
 
-  // Use profileUrl directly from the prospect, falling back to listing data
   const sellerProfileUrl = prospect.profileUrl || prospect.scrapedListings?.find((l: any) => l.otherListingsUrl)?.otherListingsUrl as string | undefined;
 
   const handleScrapeSeller = () => {
@@ -146,8 +177,14 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
     });
   };
 
-  const newListingsCount = prospect.scrapedListings?.filter(l => l.status === 'NEW' || l.status === 'new' || l.status === 'REVIEWING').length || 0;
-  const canLinkCompany = effectiveIsAgency && isProspectStatusLinkable(prospect.status);
+  const newListingsCount = prospect.scrapedListings?.filter((listing) => {
+    return resolveProspectingReviewState({
+      listingStatus: listing.status,
+      prospectStatus: prospect.status,
+    }) === 'new';
+  }).length || 0;
+
+  const canLinkCompany = isNonPrivateSellerType(effectiveSellerType) && isProspectStatusLinkable(prospect.status);
   const strategicScrape = (prospect.aiScoreBreakdown as any)?.strategicScrape || {};
   const stagedCompanyMatch = strategicScrape?.companyMatch;
   const linkedCompany = strategicScrape?.companyLink;
@@ -160,12 +197,13 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
         onOpenChange={setIsCompanyDialogOpen}
         onLinked={() => router.refresh()}
       />
-      {/* Contact Header */}
       <div className="shrink-0 bg-muted/30 p-4 border-b">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-3">
             <h2 className="text-xl font-bold">{prospect.name || 'Unknown Seller'}</h2>
-            {agencyBadgeContent()}
+            <Badge className={`text-[10px] h-5 px-1.5 gap-1 ${getSellerTypeBadgeClass(effectiveSellerType)}`}>
+              <Building2 className="w-3 h-3" /> {getSellerTypeLabel(effectiveSellerType)}
+            </Badge>
           </div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             {sellerProfileUrl && (
@@ -177,7 +215,6 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
           </div>
         </div>
 
-        {/* Contact details */}
         <div className="flex items-center gap-4 mt-2 text-sm">
           {prospect.phone && (
             <span className="flex items-center gap-1 font-mono"><Phone className="w-3.5 h-3.5 text-blue-500" /> {prospect.phone}</span>
@@ -187,6 +224,33 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
           )}
           {prospect.platformRegistered && (
             <span className="text-xs text-muted-foreground">{prospect.platformRegistered}</span>
+          )}
+        </div>
+
+        <div className="mt-2 flex items-center gap-2">
+          <Select
+            value={prospect.sellerTypeManual || 'auto'}
+            onValueChange={handleSetSellerType}
+            disabled={isUpdatingSellerType}
+          >
+            <SelectTrigger className="h-8 w-[220px] text-xs">
+              <SelectValue placeholder="Seller type" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">Auto (AI)</SelectItem>
+              {SELLER_TYPE_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Badge variant="outline" className="text-[10px]">
+            {isManualOverride ? 'Manual override' : 'AI/auto'}
+            {prospect.agencyConfidence !== null && prospect.agencyConfidence !== undefined ? ` · ${prospect.agencyConfidence}%` : ''}
+          </Badge>
+          {prospect.agencyReasoning && (
+            <span className="hidden xl:inline text-[11px] text-muted-foreground truncate max-w-[360px]" title={prospect.agencyReasoning}>
+              {prospect.agencyReasoning}
+            </span>
           )}
         </div>
 
@@ -208,11 +272,16 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
           </div>
         )}
 
-        {/* Action Buttons */}
         <div className="flex items-center flex-wrap gap-2 pt-3 mt-3 border-t border-border/50">
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={handleWhatsApp} disabled={!prospect.phone}>
-            <MessageCircle className="w-4 h-4 text-green-500" /> WhatsApp
-          </Button>
+          {showConversationCta ? (
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={handleOpenConversation} disabled={isOpeningConversation || !prospect.createdContactId}>
+              <MessageSquare className="w-4 h-4 text-primary" /> {isOpeningConversation ? 'Opening...' : 'Open Conversation'}
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={handleWhatsApp} disabled={!prospect.phone}>
+              <MessageCircle className="w-4 h-4 text-green-500" /> WhatsApp
+            </Button>
+          )}
           <Button variant="outline" size="sm" className="gap-1.5" onClick={handleCall} disabled={!prospect.phone}>
             <Phone className="w-4 h-4 text-blue-500" /> Call
           </Button>
@@ -223,7 +292,18 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
             </Button>
           )}
 
-          {effectiveIsAgency && (
+          {hasAcceptedContact && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => router.push(`/admin/contacts/${prospect.createdContactId}/view`)}
+            >
+              <Link2 className="w-4 h-4 text-indigo-600" /> Open CRM Contact
+            </Button>
+          )}
+
+          {isNonPrivateSellerType(effectiveSellerType) && (
             <Button
               variant="outline"
               size="sm"
@@ -244,47 +324,51 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
                 <X className="w-4 h-4" /> Reject All ({newListingsCount})
                 <kbd className="hidden xl:inline ml-1 text-[9px] bg-red-100 dark:bg-red-900/30 px-1 rounded font-mono">R</kbd>
               </Button>
-              {!effectiveIsAgency ? (
-                <Button size="sm" className="gap-1.5" onClick={() => onAccept(prospect.id)} disabled={isPending}>
-                  <Check className="w-4 h-4" /> Accept All ({newListingsCount})
-                  <kbd className="hidden xl:inline ml-1 text-[9px] bg-primary-foreground/20 px-1 rounded font-mono">A</kbd>
-                </Button>
-              ) : (
-                <Badge variant="outline" className="text-[10px]">Agency: private accept disabled</Badge>
-              )}
+              <Button size="sm" className="gap-1.5" onClick={() => onAccept(prospect.id)} disabled={isPending}>
+                <Check className="w-4 h-4" /> Accept All ({newListingsCount})
+                <kbd className="hidden xl:inline ml-1 text-[9px] bg-primary-foreground/20 px-1 rounded font-mono">A</kbd>
+              </Button>
+            </>
+          ) : reviewState === 'accepted' ? (
+            <>
+              <Badge variant="default" className="text-xs">Accepted</Badge>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => onReject(prospect.id)}
+                disabled={isPending}
+              >
+                <X className="w-4 h-4" /> Mark Rejected
+              </Button>
             </>
           ) : (
             <>
-              <Badge variant={prospect.status === 'accepted' ? 'default' : 'destructive'} className="text-xs">
-                {prospect.status === 'accepted' ? 'Accepted' : 'Rejected'}
+              <Badge variant={reviewState === 'rejected' ? 'destructive' : 'outline'} className="text-xs">
+                {reviewState === 'rejected' ? 'Rejected' : 'Processed'}
               </Badge>
               <Button
                 variant="outline"
                 size="sm"
                 className="gap-1.5"
                 onClick={() => onReject(prospect.id)}
-                disabled={isPending || prospect.status === 'rejected'}
+                disabled={isPending || reviewState === 'rejected'}
               >
                 <X className="w-4 h-4" /> Mark Rejected
               </Button>
-              {!effectiveIsAgency ? (
-                <Button
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={() => onAccept(prospect.id)}
-                  disabled={isPending || prospect.status === 'accepted'}
-                >
-                  <Check className="w-4 h-4" /> Mark Accepted
-                </Button>
-              ) : (
-                <Badge variant="outline" className="text-[10px]">Agency: private accept disabled</Badge>
-              )}
+              <Button
+                size="sm"
+                className="gap-1.5"
+                onClick={() => onAccept(prospect.id)}
+                disabled={isPending}
+              >
+                <Check className="w-4 h-4" /> Mark Accepted
+              </Button>
             </>
           )}
         </div>
       </div>
 
-      {/* Properties Grid */}
       <ScrollArea className="flex-1">
         <div className="p-4">
           <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Properties ({prospect.scrapedListingsCount})</h3>
@@ -292,10 +376,15 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
               {prospect.scrapedListings.map((listing) => {
                 const thumb = listing.thumbnails?.[0] || listing.images?.[0];
-                const isListingNew = listing.status === 'NEW' || listing.status === 'new' || listing.status === 'REVIEWING';
+                const listingReviewState = resolveProspectingReviewState({
+                  listingStatus: listing.status,
+                  prospectStatus: prospect.status,
+                });
+                const isListingNew = listingReviewState === 'new';
                 const petsAllowed = listing.rawAttributes
                   ? Object.entries(listing.rawAttributes).find(([key]) => /pet/i.test(key))?.[1]
                   : null;
+
                 return (
                   <div
                     key={listing.id}
@@ -309,7 +398,7 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
                       params.delete('q');
                       router.push(`?${params.toString()}`);
                     }}
-                    className={`rounded-lg border bg-background overflow-hidden transition-all cursor-pointer hover:ring-2 hover:ring-primary/30 hover:shadow-md ${(!isListingNew || listing.isExpired) ? 'opacity-50' : ''}`}
+                    className={`rounded-lg border bg-background overflow-hidden transition-all cursor-pointer hover:ring-2 hover:ring-primary/30 hover:shadow-md ${(!isListingNew || listing.isExpired) ? 'opacity-60' : ''}`}
                   >
                     {thumb ? (
                       <div className="h-32 bg-muted">
@@ -333,14 +422,25 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
                         {listing.isExpired && (
                           <Badge variant="destructive" className="bg-slate-800 text-white hover:bg-slate-800 text-[9px]">Expired</Badge>
                         )}
-                        {!isListingNew && (
-                          <Badge variant={listing.status === 'IMPORTED' ? 'default' : 'destructive'} className="text-[9px]">{listing.status}</Badge>
+                        {listingReviewState !== 'new' && (
+                          <Badge variant={listingReviewState === 'accepted' ? 'default' : 'destructive'} className="text-[9px]">
+                            {listingReviewState === 'accepted' ? 'Accepted' : listingReviewState === 'rejected' ? 'Rejected' : listing.status}
+                          </Badge>
                         )}
                       </div>
                       <p className="text-[11px] text-muted-foreground truncate">{listing.locationText || 'Cyprus'}</p>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 flex-wrap">
                         <span className="text-[11px] text-primary font-medium">Open Details →</span>
-                        <a href={listing.url} target="_blank" rel="noreferrer" className="text-[11px] text-muted-foreground flex items-center gap-1 hover:underline hover:text-primary" onClick={(e) => e.stopPropagation()}>
+                        {listing.importedPropertyId && (
+                          <a
+                            href={`/admin/properties/${listing.importedPropertyId}/view`}
+                            className="text-[11px] text-indigo-700 flex items-center gap-1 hover:underline"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            Open Property <Link2 className="w-2.5 h-2.5" />
+                          </a>
+                        )}
+                        <a href={listing.url} target="_blank" rel="noreferrer" className="text-[11px] text-muted-foreground flex items-center gap-1 hover:underline hover:text-primary" onClick={(event) => event.stopPropagation()}>
                           External <ExternalLink className="w-2.5 h-2.5" />
                         </a>
                       </div>

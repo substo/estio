@@ -10,6 +10,66 @@ Phase 2 builds the tooling to **discover property owners and interested parties*
 
 ---
 
+## Implementation Update — Deterministic Accepted State + Multi-Type Prospect Classification
+
+The Prospecting stack was updated to remove non-deterministic triage behavior and replace binary agency/private classification with a typed seller model.
+
+### 1) Canonical seller type model (with legacy compatibility)
+
+- `ProspectLead` now stores:
+  - `sellerType` (canonical, default `private`)
+  - `sellerTypeManual` (nullable manual override)
+- Existing `isAgency/isAgencyManual` fields remain as compatibility mirrors for legacy flows.
+- Backfill/migration maps legacy booleans to seller type values (`agency` vs `private`).
+- Shared helpers centralize:
+  - effective seller type resolution,
+  - non-private detection for gating/linking,
+  - seller-type → company-type mapping (`Agency`, `Management`, `Developer`, `Other`).
+
+### 2) Classifier + scraping pipeline changes
+
+- Prospect classifier contract now returns typed `sellerType` + confidence + reasoning.
+- Legacy boolean is still derived from typed output for backwards compatibility.
+- Prospect create paths in scraping/save pipelines initialize typed seller state (`private` + manual unset).
+- Deep-scrape private-only behavior is preserved by treating all non-private types as agency-side.
+
+### 3) Accept/reject flow determinism and company-link fallback
+
+- Accept is now allowed for all seller types.
+- For non-private accepts:
+  - auto-link company is attempted first,
+  - if ambiguous, action returns `selection_required` with company options (existing/create),
+  - selected company is applied before import.
+- Accept response contract now supports structured non-success codes (`selection_required`, `not_linkable`, `invalid_selection`, etc.).
+- Property import receives linked `companyId` so imported properties can get the correct company role linkage.
+
+### 4) UI determinism for accepted/rejected state
+
+- Listing and contact detail panels now use normalized review-state resolution (`new`, `accepted`, `rejected`, `processed`) with prospect context priority.
+- Accepted records no longer show contradictory actions:
+  - `Mark Accepted` and `Convert to Contact` are removed from accepted state.
+  - `Mark Rejected` remains available.
+- Listing scope filtering is refresh-stable:
+  - accepted/rejected scopes include prospect context,
+  - “new” excludes listings already under accepted/rejected prospects.
+
+### 5) Prospecting links and in-app conversation routing
+
+- Prospecting panels now expose explicit quick links when available:
+  - `Open Property`
+  - `Open CRM Contact`
+  - `Open Conversation`
+- Accepted-state messaging action is now in-app conversation-first (not external WhatsApp URL).
+- Conversation open flow reuses existing conversation or creates one and then routes to `/admin/conversations?id=...`.
+
+### 6) Full seller-type filtering in Prospecting Hub
+
+- Seller-type filter is now available in both Properties and Contacts views:
+  - `All`, `Private`, `Agency`, `Management`, `Developer`, `Other`
+- Filter is query-param driven and server-side in repositories/loaders for deterministic refresh behavior.
+
+---
+
 ## 2.1 Scraping Connection & Task Configuration
 
 ### Admin UI

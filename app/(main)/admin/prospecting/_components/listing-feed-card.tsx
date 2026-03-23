@@ -2,10 +2,11 @@
 
 import { formatDistanceToNow } from 'date-fns';
 import { type ScrapedListingRow } from '@/lib/leads/scraped-listing-repository';
-import { Building2, UserCheck, Home } from 'lucide-react';
+import { Building2, Home } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
+import { resolveProspectingReviewState } from '@/lib/leads/prospecting-status';
 
 interface ListingFeedCardProps {
   listing: ScrapedListingRow;
@@ -16,7 +17,11 @@ interface ListingFeedCardProps {
 }
 
 export function ListingFeedCard({ listing, isSelected, onClick, isBulkSelected, onBulkSelect }: ListingFeedCardProps) {
-  const isNew = listing.status === 'NEW' || listing.status === 'new' || listing.status === 'REVIEWING';
+  const reviewState = resolveProspectingReviewState({
+    listingStatus: listing.status,
+    prospectStatus: listing.prospectStatus,
+  });
+  const isNew = reviewState === 'new';
   const thumb = listing.thumbnails?.[0] || listing.images?.[0];
 
   return (
@@ -63,10 +68,10 @@ export function ListingFeedCard({ listing, isSelected, onClick, isBulkSelected, 
               )}
               {!isNew && (
                 <Badge
-                  variant={listing.status === 'IMPORTED' ? 'default' : 'destructive'}
+                  variant={reviewState === 'accepted' ? 'default' : 'destructive'}
                   className="text-[9px] h-4 px-1 shrink-0"
                 >
-                  {listing.status}
+                  {reviewState === 'accepted' ? 'ACCEPTED' : reviewState === 'rejected' ? 'REJECTED' : listing.status}
                 </Badge>
               )}
             </div>
@@ -86,12 +91,8 @@ export function ListingFeedCard({ listing, isSelected, onClick, isBulkSelected, 
 
         <div className="flex items-center justify-between mt-1">
           <div className="flex items-center gap-1 text-[11px] text-muted-foreground min-w-0 pr-2">
-            {listing.prospectAgency ? (
-              <Building2 className="w-3 h-3 shrink-0 text-orange-500" />
-            ) : (
-              <UserCheck className="w-3 h-3 shrink-0 text-green-500" />
-            )}
-            <span className="truncate">{listing.prospectName || 'Unknown'}</span>
+            <Building2 className={cn('w-3 h-3 shrink-0', listing.effectiveSellerType === 'private' ? 'text-green-500' : 'text-orange-500')} />
+            <span className="truncate">{listing.prospectName || 'Unknown'} · {listing.effectiveSellerType}</span>
           </div>
           <div className="text-[10px] text-muted-foreground whitespace-nowrap shrink-0">
             {formatDistanceToNow(new Date(listing.createdAt), { addSuffix: true })}

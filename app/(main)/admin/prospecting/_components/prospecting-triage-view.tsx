@@ -6,13 +6,16 @@ import { type ScrapedListingRow } from '@/lib/leads/scraped-listing-repository';
 import { type ProspectInboxRow } from '@/lib/leads/prospect-repository';
 import {
   acceptScrapedListing, rejectScrapedListing, bulkAcceptListings, bulkRejectListings,
-  rejectProspectWithListings, acceptProspectWithListings
+  rejectProspectWithListings, acceptProspectWithListings,
+  type ProspectCompanyLinkApplyInput,
+  type ProspectCompanyLinkOptionsResponse,
 } from '../actions';
 import { toast } from 'sonner';
 import { ListingFeedCard } from './listing-feed-card';
 import { ContactFeedCard } from './contact-feed-card';
 import { ProspectDetailPanel } from './prospect-detail-panel';
 import { ContactDetailPanel } from './contact-detail-panel';
+import { CompanyLinkDialog } from './company-link-dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Search, Filter, Home, Users, Sparkles, CheckCircle2, XCircle } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -27,8 +30,19 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { type ProspectSellerTypeFilter } from '@/lib/leads/seller-type';
+import { resolveProspectingReviewState } from '@/lib/leads/prospecting-status';
 
 type FeedView = 'properties' | 'contacts';
+
+const SELLER_TYPE_FILTERS: Array<{ value: ProspectSellerTypeFilter; label: string }> = [
+  { value: 'all', label: 'All Types' },
+  { value: 'private', label: 'Private' },
+  { value: 'agency', label: 'Agency' },
+  { value: 'management', label: 'Management' },
+  { value: 'developer', label: 'Developer' },
+  { value: 'other', label: 'Other' },
+];
 
 interface ProspectingTriageViewProps {
   listings: ScrapedListingRow[];
@@ -53,6 +67,10 @@ export function ProspectingTriageView({
   const searchParams = useSearchParams();
   const [isPending, startTransition] = useTransition();
   const [selectedBulkIds, setSelectedBulkIds] = useState<string[]>([]);
+  const [companySelectionFlow, setCompanySelectionFlow] = useState<{
+    prospectId: string;
+    options: ProspectCompanyLinkOptionsResponse;
+  } | null>(null);
 
   // --- View mode from URL ---
   const currentView: FeedView = (searchParams.get('view') as FeedView) || initialView;
@@ -127,6 +145,12 @@ export function ProspectingTriageView({
       if (res.success) {
         toast.success(`Owner converted to Contact (${(res as any).propertiesImported || 1} properties imported)`);
         router.refresh();
+      } else if ((res as any).code === 'selection_required' && (res as any).prospectId && (res as any).companyLinkOptions) {
+        setCompanySelectionFlow({
+          prospectId: String((res as any).prospectId),
+          options: (res as any).companyLinkOptions as ProspectCompanyLinkOptionsResponse,
+        });
+        toast.message('Select company link details to continue acceptance.');
       } else {
         toast.error(res.message);
       }
@@ -152,6 +176,12 @@ export function ProspectingTriageView({
       if (res.success) {
         toast.success(`Contact accepted (${(res as any).propertiesImported || 1} properties imported)`);
         router.refresh();
+      } else if ((res as any).code === 'selection_required' && (res as any).prospectId && (res as any).companyLinkOptions) {
+        setCompanySelectionFlow({
+          prospectId: String((res as any).prospectId),
+          options: (res as any).companyLinkOptions as ProspectCompanyLinkOptionsResponse,
+        });
+        toast.message('Select company link details to continue acceptance.');
       } else {
         toast.error(res.message);
       }
@@ -169,6 +199,30 @@ export function ProspectingTriageView({
       }
     });
   }, [router]);
+
+  const handleConfirmCompanySelection = useCallback((selection: ProspectCompanyLinkApplyInput) => {
+    const flow = companySelectionFlow;
+    if (!flow) return;
+    startTransition(async () => {
+      const res = await acceptProspectWithListings(flow.prospectId, { companySelection: selection });
+      if (res.success) {
+        toast.success(`Contact accepted (${(res as any).propertiesImported || 1} properties imported)`);
+        setCompanySelectionFlow(null);
+        router.refresh();
+        return;
+      }
+
+      if ((res as any).code === 'selection_required' && (res as any).companyLinkOptions) {
+        setCompanySelectionFlow({
+          prospectId: flow.prospectId,
+          options: (res as any).companyLinkOptions as ProspectCompanyLinkOptionsResponse,
+        });
+        return;
+      }
+
+      toast.error(res.message);
+    });
+  }, [companySelectionFlow, router]);
 
   // --- Bulk Actions ---
   const handleBulkAccept = useCallback(() => {
@@ -231,9 +285,18 @@ export function ProspectingTriageView({
         case 'A':
           e.preventDefault();
           if (currentView === 'properties' && selectedListing) {
-            handleAcceptListing(selectedListing.id);
+            const reviewState = resolveProspectingReviewState({
+              listingStatus: selectedListing.status,
+              prospectStatus: selectedListing.prospectStatus,
+            });
+            if (reviewState !== 'accepted') {
+              handleAcceptListing(selectedListing.id);
+            }
           } else if (currentView === 'contacts' && selectedProspect) {
-            handleAcceptContact(selectedProspect.id);
+            const reviewState = resolveProspectingReviewState({ prospectStatus: selectedProspect.status });
+            if (reviewState !== 'accepted') {
+              handleAcceptContact(selectedProspect.id);
+            }
           }
           break;
         case 'r':
@@ -299,8 +362,21 @@ export function ProspectingTriageView({
     router.push(`?${params.toString()}`);
   };
 
+  const handleSellerTypeFilter = (value: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (!value || value === 'all') {
+      params.delete('sellerType');
+    } else {
+      params.set('sellerType', value);
+    }
+    params.delete('listingId');
+    params.delete('contactId');
+    router.push(`?${params.toString()}`);
+  };
+
   const currentScope = searchParams.get('scope') || 'new';
   const currentSearch = searchParams.get('q') || '';
+  const currentSellerType = (searchParams.get('sellerType') as ProspectSellerTypeFilter) || 'all';
 
   // Build seller options from prospects (for properties view filter)
   const sellerOptions = prospects
@@ -311,7 +387,18 @@ export function ProspectingTriageView({
   const feedTotal = currentView === 'properties' ? listingsTotal : prospectsTotal;
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <>
+      <CompanyLinkDialog
+        prospectId={companySelectionFlow?.prospectId || null}
+        open={Boolean(companySelectionFlow)}
+        onOpenChange={(open) => {
+          if (!open) setCompanySelectionFlow(null);
+        }}
+        optionsOverride={companySelectionFlow?.options || null}
+        onSubmitSelection={handleConfirmCompanySelection}
+        submitLabel="Continue Accept"
+      />
+      <div className="flex h-full overflow-hidden">
       {/* Left Pane — Feed */}
       <div className="w-[clamp(320px,24vw,360px)] shrink-0 flex flex-col h-full border-r bg-background">
 
@@ -371,20 +458,34 @@ export function ProspectingTriageView({
             </Select>
           </div>
 
-          {currentView === 'properties' && sellerOptions.length > 0 && (
-            <Select value={selectedProspectId || 'all'} onValueChange={handleSellerFilter}>
+          <div className={cn('grid gap-2', currentView === 'properties' ? 'grid-cols-2' : 'grid-cols-1')}>
+            <Select value={currentSellerType} onValueChange={handleSellerTypeFilter}>
               <SelectTrigger className="w-full h-8 text-xs">
                 <Filter className="w-3 h-3 mr-1.5 text-muted-foreground" />
-                <SelectValue placeholder="All Sellers" />
+                <SelectValue placeholder="All Types" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Sellers</SelectItem>
-                {sellerOptions.map(s => (
-                  <SelectItem key={s.id} value={s.id}>{s.name} ({s.count})</SelectItem>
+                {SELLER_TYPE_FILTERS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
-          )}
+
+            {currentView === 'properties' && (
+              <Select value={selectedProspectId || 'all'} onValueChange={handleSellerFilter}>
+                <SelectTrigger className="w-full h-8 text-xs">
+                  <Filter className="w-3 h-3 mr-1.5 text-muted-foreground" />
+                  <SelectValue placeholder="All Sellers" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Sellers</SelectItem>
+                  {sellerOptions.map(s => (
+                    <SelectItem key={s.id} value={s.id}>{s.name} ({s.count})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
         </div>
 
         {/* Feed Header or Bulk Actions */}
@@ -492,6 +593,7 @@ export function ProspectingTriageView({
           />
         )}
       </div>
-    </div>
+      </div>
+    </>
   );
 }
