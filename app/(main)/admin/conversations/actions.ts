@@ -91,6 +91,9 @@ const NOTE_IMPROVEMENT_MAX_OUTPUT_TOKENS = {
     viewing: 130,
 } as const;
 const NOTE_IMPROVEMENT_THINKING_BUDGET = 0;
+const LEAD_PARSE_MAX_INPUT_LENGTH = 8000;
+const LEAD_PARSE_MAX_OUTPUT_TOKENS = 350;
+const LEAD_PARSE_THINKING_BUDGET = 0;
 const WHATSAPP_TRANSCRIPT_BULK_DEFAULT_WINDOW_DAYS = 30;
 const MAX_TASK_SUGGESTIONS = 6;
 const MAX_TASK_SUGGESTION_TITLE_LENGTH = 180;
@@ -181,6 +184,40 @@ function trimSelectionText(text: string, maxLength: number = MAX_SELECTION_TEXT_
     if (!normalized) return "";
     if (normalized.length <= maxLength) return normalized;
     return normalized.slice(0, maxLength);
+}
+
+function normalizeLeadParseInput(text: string, maxLength: number = LEAD_PARSE_MAX_INPUT_LENGTH): string {
+    const normalized = String(text || "")
+        .replace(/\u00a0/g, " ")
+        .replace(/\r\n/g, "\n")
+        .trim();
+    if (!normalized) return "";
+    if (normalized.length <= maxLength) return normalized;
+    return normalized.slice(0, maxLength);
+}
+
+function parseJsonObjectFromModelOutput(rawText: string): any {
+    const cleanJson = String(rawText || "")
+        .replace(/```json/gi, "")
+        .replace(/```/g, "")
+        .trim();
+
+    try {
+        return JSON.parse(cleanJson);
+    } catch {
+        const firstBrace = cleanJson.indexOf("{");
+        const lastBrace = cleanJson.lastIndexOf("}");
+        if (firstBrace >= 0 && lastBrace > firstBrace) {
+            return JSON.parse(cleanJson.slice(firstBrace, lastBrace + 1));
+        }
+        throw new Error("Model did not return a valid JSON object");
+    }
+}
+
+function runDetachedTask(taskName: string, task: () => Promise<void>) {
+    void task().catch((error) => {
+        console.error(`[DetachedTask:${taskName}] Failed:`, error);
+    });
 }
 
 function normalizeSingleLine(text: string, fallback: string): string {
@@ -8192,7 +8229,7 @@ export async function syncAllEvolutionChats() {
  * Cross-references with existing DB conversations to mark "already synced".
  */
 export async function fetchEvolutionChats() {
-    const location = await getAuthenticatedLocation();
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     if (!location.evolutionInstanceId) {
         return { success: false, error: "WhatsApp not connected", chats: [] };
     }
@@ -8278,7 +8315,7 @@ export async function fetchEvolutionChats() {
  * Create a new conversation for a phone number, with history backfill from Evolution.
  */
 export async function startNewConversation(phone: string) {
-    const location = await getAuthenticatedLocation();
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const { userId: clerkUserId } = await auth();
     const currentUser = clerkUserId
         ? await db.user.findUnique({ where: { clerkId: clerkUserId }, select: { id: true } })
@@ -8335,12 +8372,14 @@ export async function startNewConversation(phone: string) {
         }
 
         if (isNewContact) {
-            await runGoogleAutoSyncForContact({
-                locationId: location.id,
-                contactId: contact.id,
-                source: 'LEAD_CAPTURE',
-                event: 'create',
-                preferredUserId
+            runDetachedTask(`new_conversation_google_autosync:${contact.id}`, async () => {
+                await runGoogleAutoSyncForContact({
+                    locationId: location.id,
+                    contactId: contact.id,
+                    source: 'LEAD_CAPTURE',
+                    event: 'create',
+                    preferredUserId
+                });
             });
         }
 
@@ -8807,6 +8846,8 @@ export interface LeadAnalysisTrace {
         prompt: string;
         options: {
             jsonMode: boolean;
+            maxOutputTokens?: number;
+            thinkingBudget?: number;
         };
     };
     llmResponse: {
@@ -8843,6 +8884,111 @@ export interface LeadAnalysisTrace {
     promptTokens: number;
     completionTokens: number;
     totalTokens: number;
+}
+
+type ResolvedLeadPropertyMatch = Awaited<ReturnType<typeof resolveLeadPropertyMatch>>;
+
+async function persistLeadAnalysisTraceRecord(args: {
+    conversationId: string;
+    locationId: string;
+    trace: LeadAnalysisTrace;
+    matchedProperty: ResolvedLeadPropertyMatch;
+}) {
+    const { conversationId, locationId, trace, matchedProperty } = args;
+    const estimatedCost = trace.estimatedCost || (() => {
+        const fallbackEstimate = calculateRunCostFromUsage(trace.model || 'default', {
+            promptTokens: trace.promptTokens || 0,
+            completionTokens: trace.completionTokens || 0,
+            totalTokens: trace.totalTokens || 0
+        });
+        return {
+            usd: fallbackEstimate.amount,
+            method: fallbackEstimate.method,
+            confidence: fallbackEstimate.confidence,
+            breakdown: fallbackEstimate.breakdown
+        };
+    })();
+
+    await db.agentExecution.create({
+        data: {
+            conversationId,
+            locationId,
+            traceId: trace.traceId,
+            spanId: trace.traceId,
+            taskTitle: "Analyze Lead Text",
+            status: "success",
+            taskStatus: "success",
+            skillName: "lead_parser",
+            intent: "analysis",
+            model: trace.model,
+            thoughtSummary: trace.thoughtSummary,
+            thoughtSteps: [
+                {
+                    step: 1,
+                    description: "LLM request payload",
+                    conclusion: "Captured full request sent to model",
+                    data: trace.llmRequest
+                },
+                {
+                    step: 2,
+                    description: "LLM response payload",
+                    conclusion: "Captured raw response and parsed JSON output",
+                    data: trace.llmResponse
+                },
+                {
+                    step: 3,
+                    description: "Usage & cost estimate",
+                    conclusion: `Estimated run cost (${estimatedCost.confidence} confidence)`,
+                    data: estimatedCost
+                },
+                {
+                    step: 4,
+                    description: "Import enrichment",
+                    conclusion: matchedProperty
+                        ? `Resolved property link: ${matchedProperty.reference || matchedProperty.slug}`
+                        : "No deterministic property reference match found during import",
+                    data: matchedProperty
+                        ? {
+                            propertyId: matchedProperty.id,
+                            reference: matchedProperty.reference,
+                            slug: matchedProperty.slug,
+                            goal: matchedProperty.goal
+                        }
+                        : null
+                }
+            ],
+            toolCalls: [
+                {
+                    tool: "gemini.generateContent",
+                    arguments: trace.llmRequest,
+                    result: trace.llmResponse,
+                    error: null
+                },
+                {
+                    tool: "lead_import.resolve_property",
+                    arguments: {
+                        source: "paste_lead",
+                        locationId
+                    },
+                    result: matchedProperty
+                        ? {
+                            id: matchedProperty.id,
+                            reference: matchedProperty.reference,
+                            slug: matchedProperty.slug,
+                            goal: matchedProperty.goal
+                        }
+                        : null,
+                    error: null
+                }
+            ],
+            promptTokens: trace.promptTokens,
+            completionTokens: trace.completionTokens,
+            totalTokens: trace.totalTokens,
+            cost: estimatedCost.usd,
+            latencyMs: trace.end - trace.start,
+            createdAt: new Date(trace.start)
+        }
+    });
 }
 
 const DEFAULT_LEGACY_CRM_LEAD_SUBJECT_PATTERNS = [
@@ -10179,42 +10325,45 @@ export async function saveCustomSelectionToCrmLog(conversationId: string, output
 }
 
 export async function parseLeadFromText(text: string, modelOverride?: string) {
-    const location = await getAuthenticatedLocation();
-
-    if (!text || text.length < 5) {
+    await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const normalizedInput = normalizeLeadParseInput(text);
+    if (!normalizedInput || normalizedInput.length < 5) {
         return { success: false, error: "Text is too short" };
     }
 
     try {
-        const prompt = `You are an expert real estate lead parser. 
-Analyze the following text and extract structured lead information.
-Distinguish between the "Lead's actual message" (messageContent) and "Context/Notes" (internalNotes).
-
-Input Text:
-"""
-${text}
-"""
-
-Return JSON matching this schema:
-{
-  "contact": { "name": string|null, "phone": string|null, "email": string|null },
-  "requirements": { "budget": string|null, "location": string|null, "type": string|null, "bedrooms": string|null },
-  "messageContent": string|null,
-  "internalNotes": string|null,
-  "source": string|null
-}
-`;
+        const prompt = [
+            "You are an expert real estate lead parser.",
+            "Extract structured lead data from the input text.",
+            "Return a JSON object only (no markdown, no prose).",
+            "Separate direct lead message content from operator/internal notes.",
+            "",
+            "JSON schema:",
+            "{",
+            '  "contact": { "name": string|null, "phone": string|null, "email": string|null },',
+            '  "requirements": { "budget": string|null, "location": string|null, "type": string|null, "bedrooms": string|null },',
+            '  "messageContent": string|null,',
+            '  "internalNotes": string|null,',
+            '  "source": string|null',
+            "}",
+            "",
+            "Input text:",
+            '"""',
+            normalizedInput,
+            '"""',
+        ].join("\n");
 
         const modelId = typeof modelOverride === "string" && modelOverride.trim()
             ? modelOverride.trim()
             : getModelForTask("lead_parsing");
 
         const start = Date.now();
-        // Pass jsonMode: true to force JSON output if supported, or rely on prompt instruction
-        // callLLM supports options.jsonMode
-        // Use callLLMWithMetadata to get token usage
-        const { callLLMWithMetadata } = await import("@/lib/ai/llm");
-        const { text: jsonStr, usage } = await callLLMWithMetadata(modelId, prompt, undefined, { jsonMode: true });
+        const { text: jsonStr, usage } = await callLLMWithMetadata(modelId, prompt, undefined, {
+            jsonMode: true,
+            temperature: 0,
+            maxOutputTokens: LEAD_PARSE_MAX_OUTPUT_TOKENS,
+            thinkingBudget: LEAD_PARSE_THINKING_BUDGET,
+        });
         const end = Date.now();
         const costEstimate = calculateRunCostFromUsage(modelId, {
             promptTokens: usage.promptTokens,
@@ -10224,10 +10373,8 @@ Return JSON matching this schema:
             toolUsePromptTokens: usage.toolUsePromptTokens
         });
 
-        // Clean markdown code blocks if present (Gemini sometimes adds ```json ... ```)
-        const cleanJson = jsonStr.replace(/```json/g, "").replace(/```/g, "").trim();
-
-        const parsed = JSON.parse(cleanJson);
+        const cleanJson = jsonStr.replace(/```json/gi, "").replace(/```/g, "").trim();
+        const parsed = parseJsonObjectFromModelOutput(jsonStr);
         const result = LeadParsingSchema.parse(parsed);
 
         const trace: LeadAnalysisTrace = {
@@ -10235,12 +10382,14 @@ Return JSON matching this schema:
             start,
             end,
             model: modelId,
-            thoughtSummary: `Lead Analysis (Gemini Flash):\n- Extracted structured data from raw text.\n- Identified Source: ${result.source || 'Unknown'}\n- Message Status: ${result.messageContent ? 'Has Message' : 'Notes Only'}`,
+            thoughtSummary: `Lead Analysis (${modelId}):\n- Extracted structured data from normalized text.\n- Identified Source: ${result.source || 'Unknown'}\n- Message Status: ${result.messageContent ? 'Has Message' : 'Notes Only'}`,
             llmRequest: {
                 model: modelId,
                 prompt,
                 options: {
-                    jsonMode: true
+                    jsonMode: true,
+                    maxOutputTokens: LEAD_PARSE_MAX_OUTPUT_TOKENS,
+                    thinkingBudget: LEAD_PARSE_THINKING_BUDGET,
                 }
             },
             llmResponse: {
@@ -10279,7 +10428,7 @@ export async function createParsedLead(
     trace?: LeadAnalysisTrace,
     options?: CreateParsedLeadOptions
 ) {
-    const location = options?.locationOverride || await getAuthenticatedLocation();
+    const location = options?.locationOverride || await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
 
     let preferredUserId: string | null = options?.preferredUserIdOverride ?? null;
     if (!options?.skipAuthUserLookup && preferredUserId == null) {
@@ -10523,12 +10672,14 @@ export async function createParsedLead(
         }
 
         if (contactId) {
-            await runGoogleAutoSyncForContact({
-                locationId: location.id,
-                contactId,
-                source: 'LEAD_CAPTURE',
-                event: isNewContact ? 'create' : 'update',
-                preferredUserId
+            runDetachedTask(`paste_lead_google_autosync:${contactId}`, async () => {
+                await runGoogleAutoSyncForContact({
+                    locationId: location.id,
+                    contactId,
+                    source: 'LEAD_CAPTURE',
+                    event: isNewContact ? 'create' : 'update',
+                    preferredUserId
+                });
             });
         }
 
@@ -10564,106 +10715,16 @@ export async function createParsedLead(
             });
         }
 
-        // 2.5 Save Analysis Trace if provided
+        // 2.5 Save analysis trace asynchronously; this should not block import UX.
         if (trace) {
-            try {
-                const estimatedCost = trace.estimatedCost || (() => {
-                    const fallbackEstimate = calculateRunCostFromUsage(trace.model || 'default', {
-                        promptTokens: trace.promptTokens || 0,
-                        completionTokens: trace.completionTokens || 0,
-                        totalTokens: trace.totalTokens || 0
-                    });
-                    return {
-                        usd: fallbackEstimate.amount,
-                        method: fallbackEstimate.method,
-                        confidence: fallbackEstimate.confidence,
-                        breakdown: fallbackEstimate.breakdown
-                    };
-                })();
-
-                await db.agentExecution.create({
-                    data: {
-                        conversationId: conversation.id,
-                        locationId: conversation.locationId,
-                        traceId: trace.traceId,
-                        spanId: trace.traceId,
-                        taskTitle: "Analyze Lead Text",
-                        status: "success",
-                        taskStatus: "success",
-                        skillName: "lead_parser",
-                        intent: "analysis",
-                        model: trace.model,
-                        thoughtSummary: trace.thoughtSummary,
-                        thoughtSteps: [
-                            {
-                                step: 1,
-                                description: "LLM request payload",
-                                conclusion: "Captured full request sent to model",
-                                data: trace.llmRequest
-                            },
-                            {
-                                step: 2,
-                                description: "LLM response payload",
-                                conclusion: "Captured raw response and parsed JSON output",
-                                data: trace.llmResponse
-                            },
-                            {
-                                step: 3,
-                                description: "Usage & cost estimate",
-                                conclusion: `Estimated run cost (${estimatedCost.confidence} confidence)`,
-                                data: estimatedCost
-                            },
-                            {
-                                step: 4,
-                                description: "Import enrichment",
-                                conclusion: matchedProperty
-                                    ? `Resolved property link: ${matchedProperty.reference || matchedProperty.slug}`
-                                    : "No deterministic property reference match found during import",
-                                data: matchedProperty
-                                    ? {
-                                        propertyId: matchedProperty.id,
-                                        reference: matchedProperty.reference,
-                                        slug: matchedProperty.slug,
-                                        goal: matchedProperty.goal
-                                    }
-                                    : null
-                            }
-                        ],
-                        toolCalls: [
-                            {
-                                tool: "gemini.generateContent",
-                                arguments: trace.llmRequest,
-                                result: trace.llmResponse,
-                                error: null
-                            },
-                            {
-                                tool: "lead_import.resolve_property",
-                                arguments: {
-                                    source: "paste_lead",
-                                    locationId: location.id
-                                },
-                                result: matchedProperty
-                                    ? {
-                                        id: matchedProperty.id,
-                                        reference: matchedProperty.reference,
-                                        slug: matchedProperty.slug,
-                                        goal: matchedProperty.goal
-                                    }
-                                    : null,
-                                error: null
-                            }
-                        ],
-                        promptTokens: trace.promptTokens,
-                        completionTokens: trace.completionTokens,
-                        totalTokens: trace.totalTokens,
-                        cost: estimatedCost.usd,
-                        latencyMs: trace.end - trace.start,
-                        createdAt: new Date(trace.start)
-                    }
+            runDetachedTask(`paste_lead_trace:${conversation.id}`, async () => {
+                await persistLeadAnalysisTraceRecord({
+                    conversationId: conversation.id,
+                    locationId: conversation.locationId,
+                    trace,
+                    matchedProperty,
                 });
-            } catch (err) {
-                console.warn("Failed to save analysis trace:", err);
-            }
+            });
         }
 
         // 3. Handle Message & Orchestration
@@ -10690,8 +10751,10 @@ export async function createParsedLead(
                 direction: 'inbound'
             });
 
-            // Trigger AI
-            await orchestrateAction(conversation.ghlConversationId, contactId!);
+            // Trigger AI in background so import/save returns immediately.
+            runDetachedTask(`paste_lead_orchestrate:${conversation.ghlConversationId}`, async () => {
+                await orchestrateAction(conversation.ghlConversationId, contactId!);
+            });
 
             return {
                 success: true,

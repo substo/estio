@@ -44,6 +44,7 @@ Main causes identified:
 | 2026-03-10 | `11420df` | Instant open via progressive hydration + no visible scroll jank. |
 | 2026-03-20 | `2e54c54` | Fire-and-forget outbound send with optimistic reconciliation. |
 | 2026-03-20 | `52e82e5` | Optimistic unread badge clearance override during list polling. |
+| 2026-03-24 | `working tree` | Paste Lead fast path: read-only auth on parse/import, bounded parse payload, and detached autosync/trace/orchestration side effects. |
 
 ## Current Architecture (As Implemented)
 
@@ -125,6 +126,24 @@ Implemented SSE channel: `/api/conversations/events`
 ### 7) Optimistic Unread Badge Clearance (Mar 2026)
 When an unread conversation is clicked, the UI clears the badge instantly locally. However, if a background poll or SSE fetch occurs before the server completes the `markConversationAsRead` background core action, the server may reply with a stale `unreadCount > 0`.
 To prevent the UI from flashing the unread badge back on, list merge functions (`applyConversationDeltaPayload`, `replaceConversationListFromResponse`, etc.) intercept the incoming server payload. If `readResetInFlightRef.current` tracks that a read reset was recently initiated for a conversation, the client actively overrides the incoming `unreadCount` to `0`, ensuring the badge remains seamlessly cleared.
+
+### 8) Paste Lead Fast Path (Mar 24, 2026)
+The paste-import path in `New Conversation` and selection toolbar now follows the same latency principles used by message send:
+
+1. **No token-refresh on parse/import auth path**:
+   - `parseLeadFromText(...)`, `createParsedLead(...)`, `startNewConversation(...)`, and `fetchEvolutionChats(...)` now use read-only location auth where GHL access tokens are not required.
+2. **Bounded parse request envelope**:
+   - parse input is normalized and capped to 8,000 chars.
+   - LLM parse call uses JSON mode + bounded output tokens (`350`) + `thinkingBudget=0` for deterministic low-latency extraction.
+3. **Non-blocking post-import side effects**:
+   - Google auto-sync is detached from the critical response path.
+   - `AgentExecution` trace persistence for `Analyze Lead Text` is detached.
+   - AI orchestration trigger after inbound paste import is detached.
+4. **Critical path kept synchronous only for correctness**:
+   - contact create/merge, conversation create/reuse, message insert, and `lastMessage` summary update remain blocking.
+
+Outcome goal:
+- faster `Confirm & Import` completion and reduced tail latency spikes caused by external integrations.
 
 ### 5) Data, Index, and Query-plan Safety
 Performance indexes and query-plan checks are in place for:

@@ -298,8 +298,12 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
 - **CRM Log Dedupe Guard**: Before writing `MANUAL_ENTRY` for `Summarize` or `Custom`, the system checks the latest 30 manual entries for likely duplicates (exact/contains/high token overlap). Duplicate entries are skipped and the existing entry is returned.
 - **Selection Observability**:
   - `Summarize` and `Custom` persist `AgentExecution` records (usage, model, cost estimate, request/response snapshots) and increment conversation token/cost totals.
-  - `Paste Lead` persists `Analyze Lead Text` trace metadata when the user confirms import.
+  - `Paste Lead` persists `Analyze Lead Text` trace metadata when the user confirms import (now queued off the switch-critical response path).
   - `Find Contact` is non-AI and does not produce AI usage/trace entries.
+- **Paste Lead Speed Fast Path (Mar 24, 2026)**:
+  - `parseLeadFromText` and `createParsedLead` use read-only location auth (no GHL token refresh on this path).
+  - parse input is normalized and capped, and parse output is token-bounded for lower latency.
+  - non-critical post-import side effects (Google auto-sync, trace persistence, orchestration trigger) run asynchronously after the import response is returned.
 
 ## Deal Mode Reply Routing
 This document is also the source of truth for reply-target behavior in `/admin/conversations?mode=deals`.
