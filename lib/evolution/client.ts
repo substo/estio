@@ -28,6 +28,70 @@ interface EvolutionWhatsAppNumberLookup {
     raw: any;
 }
 
+type EvolutionPresence = "composing" | "paused" | "recording";
+
+type EvolutionSendOptions = {
+    delayMs?: number;
+    presence?: EvolutionPresence | null;
+    timeoutMs?: number;
+    linkPreview?: boolean;
+};
+
+type EvolutionRequestErrorClassification = {
+    statusCode: number;
+    code: string;
+    retryable: boolean;
+    category: "http" | "network" | "timeout" | "unknown";
+};
+
+function clampTimeoutMs(value: number | undefined, fallback = 12000) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+    return Math.min(Math.max(Math.floor(parsed), 1000), 120000);
+}
+
+function normalizeSendOptions(options?: EvolutionSendOptions) {
+    const timeoutMs = clampTimeoutMs(
+        options?.timeoutMs,
+        Number(process.env.WHATSAPP_OUTBOUND_EVOLUTION_TIMEOUT_MS || 12000)
+    );
+    const normalizedPresence = options?.presence === null
+        ? null
+        : (options?.presence || "composing");
+    const delayMs = Math.max(Math.floor(Number(options?.delayMs || 0)), 0);
+    const linkPreview = options?.linkPreview === true;
+
+    return {
+        timeoutMs,
+        presence: normalizedPresence,
+        delayMs,
+        linkPreview,
+    };
+}
+
+function classifyEvolutionRequestError(error: any): EvolutionRequestErrorClassification {
+    const statusCode = Number(error?.response?.status || 0);
+    const code = String(error?.code || error?.cause?.code || "");
+    if (statusCode >= 500 || statusCode === 408 || statusCode === 409 || statusCode === 425 || statusCode === 429) {
+        return { statusCode, code, retryable: true, category: "http" };
+    }
+    if (statusCode >= 400 && statusCode < 500) {
+        return { statusCode, code, retryable: false, category: "http" };
+    }
+    if (code === "ECONNABORTED" || code === "ETIMEDOUT") {
+        return { statusCode, code, retryable: true, category: "timeout" };
+    }
+    if (["ECONNRESET", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"].includes(code)) {
+        return { statusCode, code, retryable: true, category: "network" };
+    }
+    return {
+        statusCode,
+        code,
+        retryable: statusCode <= 0,
+        category: statusCode > 0 ? "http" : "unknown",
+    };
+}
+
 function toBoolean(value: any): boolean | null {
     if (typeof value === 'boolean') return value;
     if (typeof value === 'number') return value !== 0;
@@ -350,11 +414,17 @@ export const evolutionClient = {
     /**
      * Send Text Message
      */
-    sendMessage: async (instanceName: string, to: string, text: string) => {
+    sendMessage: async (
+        instanceName: string,
+        to: string,
+        text: string,
+        options?: EvolutionSendOptions
+    ) => {
         try {
             // Evolution requires number in format 123456789 (no +, no whatsapp:) usually, or sometimes JID.
             // Clean the number
             const cleanNumber = to.replace(/\D/g, '');
+            const normalizedOptions = normalizeSendOptions(options);
 
             const response = await axios.post(
                 `${EVOLUTION_API_URL}/message/sendText/${instanceName}`,
@@ -362,23 +432,29 @@ export const evolutionClient = {
                     number: cleanNumber,
                     text: text,
                     options: {
-                        delay: 1200,
-                        presence: "composing",
-                        linkPreview: false
+                        delay: normalizedOptions.delayMs,
+                        ...(normalizedOptions.presence ? { presence: normalizedOptions.presence } : {}),
+                        linkPreview: normalizedOptions.linkPreview
                     }
                 },
                 {
                     headers: {
                         'apikey': EVOLUTION_GLOBAL_API_KEY
-                    }
+                    },
+                    timeout: normalizedOptions.timeoutMs,
                 }
             );
             return response.data;
         } catch (error: any) {
+            const classification = classifyEvolutionRequestError(error);
             console.error('Error sending evolution message:', {
-                status: error.response?.status,
-                data: JSON.stringify(error.response?.data, null, 2)
+                status: classification.statusCode,
+                code: classification.code,
+                retryable: classification.retryable,
+                category: classification.category,
+                data: JSON.stringify(error.response?.data, null, 2),
             });
+            (error as any).evolutionClassification = classification;
             throw error;
         }
     },
@@ -392,10 +468,18 @@ export const evolutionClient = {
         mimetype: string;
         fileName?: string;
         mediaType?: "image" | "document" | "video" | "audio";
+        delayMs?: number;
+        presence?: EvolutionPresence | null;
+        timeoutMs?: number;
     }) => {
         try {
             const cleanNumber = to.replace(/\D/g, '');
             const mediaType = input.mediaType || "image";
+            const normalizedOptions = normalizeSendOptions({
+                delayMs: input.delayMs,
+                presence: input.presence,
+                timeoutMs: input.timeoutMs,
+            });
 
             const response = await axios.post(
                 `${EVOLUTION_API_URL}/message/sendMedia/${instanceName}`,
@@ -407,23 +491,29 @@ export const evolutionClient = {
                     caption: input.caption || undefined,
                     fileName: input.fileName || undefined,
                     options: {
-                        delay: 1200,
-                        presence: "composing"
+                        delay: normalizedOptions.delayMs,
+                        ...(normalizedOptions.presence ? { presence: normalizedOptions.presence } : {}),
                     }
                 },
                 {
                     headers: {
                         'apikey': EVOLUTION_GLOBAL_API_KEY
-                    }
+                    },
+                    timeout: normalizedOptions.timeoutMs,
                 }
             );
 
             return response.data;
         } catch (error: any) {
+            const classification = classifyEvolutionRequestError(error);
             console.error('Error sending evolution media:', {
-                status: error.response?.status,
+                status: classification.statusCode,
+                code: classification.code,
+                retryable: classification.retryable,
+                category: classification.category,
                 data: JSON.stringify(error.response?.data, null, 2)
             });
+            (error as any).evolutionClassification = classification;
             throw error;
         }
     },

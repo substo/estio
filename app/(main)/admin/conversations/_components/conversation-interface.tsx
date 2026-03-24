@@ -57,6 +57,11 @@ import {
     computeInitialMessageLimitFromViewport,
     mergePrependMessagesDedupe,
 } from '@/lib/conversations/thread-hydration';
+import {
+    isPendingOutboundMessage,
+    matchesByCorrelation,
+    mergeSnapshotWithPendingMessages,
+} from '@/lib/conversations/outbound-reconciliation';
 import { buildTimelineCursorFromEvent } from '@/lib/conversations/timeline-events';
 import { UnifiedTimeline } from './unified-timeline';
 import { ConversationList } from './conversation-list';
@@ -527,6 +532,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const realtimeEventLastTsByConversationRef = useRef<Record<string, number>>({});
     const realtimeRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const readResetInFlightRef = useRef<Set<string>>(new Set());
+    const pendingOutboundByConversationRef = useRef<Map<string, Map<string, Message>>>(new Map());
 
     // Initialize Active ID from URL
     const initialActiveId = searchParams.get('id') || (initialConversations.length > 0 ? initialConversations[0].id : null);
@@ -774,8 +780,116 @@ export function ConversationInterface({ locationId, initialConversations, initia
         return getWorkspaceCoreCacheEntry(workspaceCoreCacheRef.current, conversationId);
     }, []);
 
+    const getPendingMessageKey = useCallback((message: Partial<Message> | null | undefined): string | null => {
+        if (!message) return null;
+        const clientMessageId = String((message as any).clientMessageId || "").trim();
+        if (clientMessageId) return `client:${clientMessageId}`;
+        const id = String(message.id || "").trim();
+        if (id) return `id:${id}`;
+        const wamId = String((message as any).wamId || "").trim();
+        if (wamId) return `wam:${wamId}`;
+        return null;
+    }, []);
+
+    const syncPendingMessagesForConversation = useCallback((conversationId: string, list: Message[]) => {
+        const normalizedConversationId = String(conversationId || "").trim();
+        if (!normalizedConversationId) return;
+
+        const nextMap = new Map<string, Message>();
+        for (const message of Array.isArray(list) ? list : []) {
+            if (!isPendingOutboundMessage(message as any)) continue;
+            const key = getPendingMessageKey(message);
+            if (!key) continue;
+            nextMap.set(key, message);
+        }
+
+        if (nextMap.size > 0) {
+            pendingOutboundByConversationRef.current.set(normalizedConversationId, nextMap);
+        } else {
+            pendingOutboundByConversationRef.current.delete(normalizedConversationId);
+        }
+    }, [getPendingMessageKey]);
+
+    const mergeSnapshotPreservingPending = useCallback((conversationId: string, snapshotMessages: Message[]) => {
+        const pendingMap = pendingOutboundByConversationRef.current.get(String(conversationId || "").trim());
+        const pendingMessages = pendingMap ? Array.from(pendingMap.values()) : [];
+        const mergedMessages = pendingMessages.length > 0
+            ? mergeSnapshotWithPendingMessages(snapshotMessages || [], pendingMessages)
+            : (Array.isArray(snapshotMessages) ? snapshotMessages : []);
+        syncPendingMessagesForConversation(conversationId, mergedMessages);
+        return mergedMessages;
+    }, [syncPendingMessagesForConversation]);
+
+    useEffect(() => {
+        if (!activeId) return;
+        syncPendingMessagesForConversation(activeId, messages);
+    }, [activeId, messages, syncPendingMessagesForConversation]);
+
+    const applyRealtimeMessagePatch = useCallback((
+        conversationId: string | null | undefined,
+        payload: Record<string, unknown>
+    ): boolean => {
+        const normalizedConversationId = String(conversationId || "").trim();
+        if (!normalizedConversationId || activeIdRef.current !== normalizedConversationId) return false;
+
+        const messageId = String(payload?.messageId || "").trim();
+        const clientMessageId = String(payload?.clientMessageId || "").trim();
+        const wamId = String(payload?.wamId || "").trim();
+        const nextStatus = String(payload?.status || "").trim();
+
+        let matched = false;
+        let nextMessagesSnapshot: Message[] | null = null;
+
+        setMessages((prev) => {
+            const next = prev.map((message) => {
+                const isMatch = matchesByCorrelation(message as any, {
+                    messageId: messageId || null,
+                    clientMessageId: clientMessageId || null,
+                    wamId: wamId || messageId || null,
+                });
+                if (!isMatch) return message;
+
+                matched = true;
+                return {
+                    ...message,
+                    ...(messageId ? { id: messageId } : {}),
+                    ...(clientMessageId ? { clientMessageId } : {}),
+                    ...(wamId ? { wamId } : {}),
+                    ...(nextStatus ? { status: nextStatus } : {}),
+                    ...(nextStatus ? {
+                        sendState: nextStatus === "sending"
+                            ? "sending"
+                            : nextStatus === "failed"
+                                ? "failed"
+                                : "sent"
+                    } : {}),
+                } as Message;
+            });
+            nextMessagesSnapshot = next;
+            return next;
+        });
+
+        if (!matched || !nextMessagesSnapshot) return false;
+
+        syncPendingMessagesForConversation(normalizedConversationId, nextMessagesSnapshot);
+        messageSignatureRef.current = getMessageSignature(nextMessagesSnapshot);
+
+        const cached = getCachedWorkspaceCoreSnapshot(normalizedConversationId);
+        if (cached) {
+            cacheWorkspaceCoreSnapshot(normalizedConversationId, {
+                ...cached,
+                messages: nextMessagesSnapshot,
+            });
+        }
+
+        return true;
+    }, [cacheWorkspaceCoreSnapshot, getCachedWorkspaceCoreSnapshot, syncPendingMessagesForConversation]);
+
     const applyWorkspaceCoreSnapshot = useCallback((conversationId: string, snapshot: WorkspaceCoreSnapshot) => {
-        const nextMessages = Array.isArray(snapshot.messages) ? snapshot.messages : [];
+        const nextMessages = mergeSnapshotPreservingPending(
+            conversationId,
+            Array.isArray(snapshot.messages) ? snapshot.messages : []
+        );
         const nextActivity = Array.isArray(snapshot.activityTimeline) ? snapshot.activityTimeline : [];
 
         setMessages(nextMessages);
@@ -794,7 +908,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         } else if (conversationId) {
             setConversations((prev) => prev.map((item) => item.id === conversationId ? { ...item, unreadCount: item.unreadCount || 0 } : item));
         }
-    }, []);
+    }, [mergeSnapshotPreservingPending]);
 
     const isDealWorkspaceHydrationBusy = useCallback((dealId?: string | null) => {
         const key = String(dealId || "");
@@ -2434,6 +2548,18 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     return;
                 }
 
+                if (viewMode === "chats" && conversationId && (eventType === "message.status" || eventType === "message.outbound")) {
+                    const payload = event?.payload && typeof event.payload === "object"
+                        ? event.payload as Record<string, unknown>
+                        : {};
+                    const patched = applyRealtimeMessagePatch(conversationId, payload);
+                    if (patched) return;
+
+                    // Fallback consistency repair for unknown message ids.
+                    runRealtimeRefresh(conversationId);
+                    return;
+                }
+
                 runRealtimeRefresh(conversationId);
             } catch (error) {
                 console.error("Failed to parse realtime conversation event:", error);
@@ -2481,6 +2607,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         };
     }, [
         activeDealId,
+        applyRealtimeMessagePatch,
         debouncedSearchQuery,
         featureFlags.realtimeSse,
         isDealWorkspaceHydrationBusy,
@@ -2887,22 +3014,34 @@ export function ConversationInterface({ locationId, initialConversations, initia
         if (!conversationTarget) return;
 
         // Optimistic UI update — message appears instantly with 'sending' status
-        const optimisticMessageId = `opt-${Date.now()}`;
+        const optimisticClientMessageId = (
+            typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+                ? `cmid_${crypto.randomUUID()}`
+                : `cmid_${Date.now()}_${Math.random().toString(36).slice(2)}`
+        );
+        const optimisticMessageId = `opt-${optimisticClientMessageId}`;
         const optimisticMessage: any = {
             id: optimisticMessageId,
+            clientMessageId: optimisticClientMessageId,
             conversationId: conversationTarget.id,
             contactId: conversationTarget.contactId,
             body: text,
             type,
             direction: 'outbound',
             status: 'sending',
+            sendState: 'queued',
+            outboxState: { id: null, status: 'pending' },
             dateAdded: new Date().toISOString(),
             createdAt: new Date(),
             updatedAt: new Date(),
         };
 
         if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
-            setMessages((prev) => [...prev, optimisticMessage]);
+            setMessages((prev) => {
+                const next = [...prev, optimisticMessage];
+                syncPendingMessagesForConversation(conversationTarget.id, next);
+                return next;
+            });
         }
 
         // Fire-and-forget: do NOT await the server action.
@@ -2911,16 +3050,22 @@ export function ConversationInterface({ locationId, initialConversations, initia
         const capturedConversationId = conversationTarget.id;
         const capturedContactId = conversationTarget.contactId;
 
-        sendReply(capturedConversationId, capturedContactId, text, type)
+        sendReply(capturedConversationId, capturedContactId, text, type, {
+            clientMessageId: optimisticClientMessageId,
+        })
             .then(async (res) => {
                 if (!res.success) {
                     // Mark optimistic message as failed (if still viewing this conversation)
                     if (viewMode === 'chats' && activeIdRef.current === capturedConversationId) {
-                        setMessages((prev) =>
-                            prev.map((m) =>
-                                m.id === optimisticMessageId ? { ...m, status: 'failed' } : m
-                            )
-                        );
+                        setMessages((prev) => {
+                            const next = prev.map((m) =>
+                                m.id === optimisticMessageId
+                                    ? { ...m, status: 'failed', sendState: 'failed', outboxState: { ...(m as any).outboxState, status: 'dead' } }
+                                    : m
+                            );
+                            syncPendingMessagesForConversation(capturedConversationId, next);
+                            return next;
+                        });
                     }
                     toast({
                         title: 'Failed to send message',
@@ -2938,70 +3083,49 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     });
                 }
 
-                // Reconcile: swap the optimistic stub with the real DB message.
-                // Fetch only the latest few messages to find the real one —
-                // much lighter than refetching the entire thread.
                 if (viewMode === 'chats' && activeIdRef.current === capturedConversationId) {
-                    try {
-                        const latestMessages = await fetchMessages(capturedConversationId, { take: 5 });
-                        if (activeIdRef.current !== capturedConversationId) return; // switched away
+                    const ackMessageId = String((res as any).messageId || "").trim();
+                    const ackClientMessageId = String((res as any).clientMessageId || optimisticClientMessageId).trim();
+                    const outboxJobId = String((res as any).outboxJobId || "").trim();
+                    const queued = !!(res as any).queued;
 
-                        setMessages((prev) => {
-                            // Find the real message: matches body + direction + is recent
-                            const realMessage = latestMessages.find((m: Message) =>
-                                m.body === text
-                                && m.direction === 'outbound'
-                                && !String(m.id).startsWith('opt-')
-                            );
+                    setMessages((prev) => {
+                        const next = prev.map((message) => {
+                            const isTarget = matchesByCorrelation(message as any, {
+                                messageId: optimisticMessageId,
+                                clientMessageId: optimisticClientMessageId,
+                            });
+                            if (!isTarget) return message;
 
-                            if (realMessage) {
-                                // Replace optimistic with real, deduplicating any messages
-                                // that may have arrived via SSE realtime in the meantime
-                                const seen = new Set<string>();
-                                const merged: Message[] = [];
-                                for (const m of prev) {
-                                    if (m.id === optimisticMessageId) {
-                                        // Swap optimistic for real
-                                        if (!seen.has(realMessage.id)) {
-                                            seen.add(realMessage.id);
-                                            merged.push(realMessage);
-                                        }
-                                    } else {
-                                        const mid = String(m.id);
-                                        if (!seen.has(mid)) {
-                                            seen.add(mid);
-                                            merged.push(m);
-                                        }
-                                    }
-                                }
-                                return merged;
-                            }
-
-                            // Real message not found in latest batch — just mark as sent.
-                            // The next realtime/poll cycle will bring in the real message.
-                            return prev.map((m) =>
-                                m.id === optimisticMessageId ? { ...m, status: 'sent' } : m
-                            );
+                            return {
+                                ...message,
+                                ...(ackMessageId ? { id: ackMessageId } : {}),
+                                clientMessageId: ackClientMessageId,
+                                status: queued ? 'sending' : 'sent',
+                                sendState: queued ? 'queued' : 'sent',
+                                outboxState: {
+                                    id: outboxJobId || (message as any)?.outboxState?.id || null,
+                                    status: queued ? 'pending' : 'completed',
+                                },
+                            } as Message;
                         });
-                    } catch {
-                        // Reconcile fetch failed — just mark as sent since server confirmed success
-                        if (activeIdRef.current === capturedConversationId) {
-                            setMessages((prev) =>
-                                prev.map((m) =>
-                                    m.id === optimisticMessageId ? { ...m, status: 'sent' } : m
-                                )
-                            );
-                        }
-                    }
+
+                        syncPendingMessagesForConversation(capturedConversationId, next);
+                        return next;
+                    });
                 }
             })
             .catch((e: any) => {
                 if (viewMode === 'chats' && activeIdRef.current === capturedConversationId) {
-                    setMessages((prev) =>
-                        prev.map((m) =>
-                            m.id === optimisticMessageId ? { ...m, status: 'failed' } : m
-                        )
-                    );
+                    setMessages((prev) => {
+                        const next = prev.map((m) =>
+                            m.id === optimisticMessageId
+                                ? { ...m, status: 'failed', sendState: 'failed', outboxState: { ...(m as any).outboxState, status: 'dead' } }
+                                : m
+                        );
+                        syncPendingMessagesForConversation(capturedConversationId, next);
+                        return next;
+                    });
                 }
                 toast({
                     title: 'Failed to send message',
@@ -3173,16 +3297,24 @@ export function ConversationInterface({ locationId, initialConversations, initia
         if (!conversationTarget) return;
 
         // Optimistic UI update for media
-        const optimisticMessageId = `opt-media-${Date.now()}`;
+        const optimisticClientMessageId = (
+            typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+                ? `cmid_${crypto.randomUUID()}`
+                : `cmid_${Date.now()}_${Math.random().toString(36).slice(2)}`
+        );
+        const optimisticMessageId = `opt-media-${optimisticClientMessageId}`;
         const objectUrl = URL.createObjectURL(file);
         const optimisticMessage: any = {
             id: optimisticMessageId,
+            clientMessageId: optimisticClientMessageId,
             conversationId: conversationTarget.id,
             contactId: conversationTarget.contactId,
             body: caption,
             type: 'WhatsApp',
             direction: 'outbound',
             status: 'sending',
+            sendState: 'queued',
+            outboxState: { id: null, status: 'pending' },
             dateAdded: new Date().toISOString(),
             createdAt: new Date(),
             updatedAt: new Date(),
@@ -3197,7 +3329,11 @@ export function ConversationInterface({ locationId, initialConversations, initia
         };
 
         if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
-            setMessages((prev) => [...prev, optimisticMessage]);
+            setMessages((prev) => {
+                const next = [...prev, optimisticMessage];
+                syncPendingMessagesForConversation(conversationTarget.id, next);
+                return next;
+            });
         }
 
         try {
@@ -3209,11 +3345,15 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
             if (!prep.success) {
                 if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
-                    setMessages((prev) =>
-                        prev.map((m) =>
-                            m.id === optimisticMessageId ? { ...m, status: 'failed' } : m
-                        )
-                    );
+                    setMessages((prev) => {
+                        const next = prev.map((m) =>
+                            m.id === optimisticMessageId
+                                ? { ...m, status: 'failed', sendState: 'failed', outboxState: { ...(m as any).outboxState, status: 'dead' } }
+                                : m
+                        );
+                        syncPendingMessagesForConversation(conversationTarget.id, next);
+                        return next;
+                    });
                 }
                 toast({
                     title: 'Failed to prepare media upload',
@@ -3225,11 +3365,15 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
             if (!prep.uploadUrl || !prep.upload) {
                 if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
-                    setMessages((prev) =>
-                        prev.map((m) =>
-                            m.id === optimisticMessageId ? { ...m, status: 'failed' } : m
-                        )
-                    );
+                    setMessages((prev) => {
+                        const next = prev.map((m) =>
+                            m.id === optimisticMessageId
+                                ? { ...m, status: 'failed', sendState: 'failed', outboxState: { ...(m as any).outboxState, status: 'dead' } }
+                                : m
+                        );
+                        syncPendingMessagesForConversation(conversationTarget.id, next);
+                        return next;
+                    });
                 }
                 toast({
                     title: 'Missing upload details',
@@ -3252,11 +3396,15 @@ export function ConversationInterface({ locationId, initialConversations, initia
             if (!uploadRes.ok) {
                 const errText = await uploadRes.text().catch(() => '');
                 if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
-                    setMessages((prev) =>
-                        prev.map((m) =>
-                            m.id === optimisticMessageId ? { ...m, status: 'failed' } : m
-                        )
-                    );
+                    setMessages((prev) => {
+                        const next = prev.map((m) =>
+                            m.id === optimisticMessageId
+                                ? { ...m, status: 'failed', sendState: 'failed', outboxState: { ...(m as any).outboxState, status: 'dead' } }
+                                : m
+                        );
+                        syncPendingMessagesForConversation(conversationTarget.id, next);
+                        return next;
+                    });
                 }
                 toast({
                     title: `R2 upload failed (${uploadRes.status})`,
@@ -3270,7 +3418,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 conversationTarget.id,
                 conversationTarget.contactId,
                 uploadRef,
-                { caption }
+                { caption, clientMessageId: optimisticClientMessageId }
             );
 
             if (sendRes.success) {
@@ -3281,16 +3429,46 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     });
                 }
                 if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
-                    const newMsgs = await fetchMessages(conversationTarget.id);
-                    setMessages(newMsgs);
+                    const ackMessageId = String((sendRes as any).messageId || "").trim();
+                    const ackClientMessageId = String((sendRes as any).clientMessageId || optimisticClientMessageId).trim();
+                    const outboxJobId = String((sendRes as any).outboxJobId || "").trim();
+
+                    setMessages((prev) => {
+                        const next = prev.map((message) => {
+                            const isTarget = matchesByCorrelation(message as any, {
+                                messageId: optimisticMessageId,
+                                clientMessageId: optimisticClientMessageId,
+                            });
+                            if (!isTarget) return message;
+
+                            return {
+                                ...message,
+                                ...(ackMessageId ? { id: ackMessageId } : {}),
+                                clientMessageId: ackClientMessageId,
+                                status: 'sending',
+                                sendState: 'queued',
+                                outboxState: {
+                                    id: outboxJobId || (message as any)?.outboxState?.id || null,
+                                    status: 'pending',
+                                },
+                            } as Message;
+                        });
+
+                        syncPendingMessagesForConversation(conversationTarget.id, next);
+                        return next;
+                    });
                 }
             } else {
                 if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
-                    setMessages((prev) =>
-                        prev.map((m) =>
-                            m.id === optimisticMessageId ? { ...m, status: 'failed' } : m
-                        )
-                    );
+                    setMessages((prev) => {
+                        const next = prev.map((m) =>
+                            m.id === optimisticMessageId
+                                ? { ...m, status: 'failed', sendState: 'failed', outboxState: { ...(m as any).outboxState, status: 'dead' } }
+                                : m
+                        );
+                        syncPendingMessagesForConversation(conversationTarget.id, next);
+                        return next;
+                    });
                 }
                 toast({
                     title: 'Failed to send media',
@@ -3300,11 +3478,15 @@ export function ConversationInterface({ locationId, initialConversations, initia
             }
         } catch (e: any) {
             if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
-                setMessages((prev) =>
-                    prev.map((m) =>
-                        m.id === optimisticMessageId ? { ...m, status: 'failed' } : m
-                    )
-                );
+                setMessages((prev) => {
+                    const next = prev.map((m) =>
+                        m.id === optimisticMessageId
+                            ? { ...m, status: 'failed', sendState: 'failed', outboxState: { ...(m as any).outboxState, status: 'dead' } }
+                            : m
+                    );
+                    syncPendingMessagesForConversation(conversationTarget.id, next);
+                    return next;
+                });
             }
             toast({
                 title: 'Failed to send media',
@@ -3330,20 +3512,39 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
         // Transition back to sending optimism
         if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
-            setMessages((prev) => prev.map((m) => m.id === messageId ? { ...m, status: 'sending' } : m));
+            setMessages((prev) => {
+                const next = prev.map((m) => m.id === messageId ? { ...m, status: 'sending', sendState: 'queued' } : m);
+                syncPendingMessagesForConversation(conversationTarget.id, next);
+                return next;
+            });
         }
 
         try {
+            const resendClientMessageId = (
+                typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+                    ? `cmid_${crypto.randomUUID()}`
+                    : `cmid_${Date.now()}_${Math.random().toString(36).slice(2)}`
+            );
             const hasAttachments = originalMsg.attachments && originalMsg.attachments.length > 0;
             const res = hasAttachments 
               // Basic retry for text for now, media retry requires original file which we don't store on client.
               // We'll fallback to alerting for media if we can't reconstruct.
               ? { success: false, error: "Retrying media messages is not supported without re-uploading the file" }
-              : await sendReply(conversationTarget.id, conversationTarget.contactId, originalMsg.body, originalMsg.type as 'SMS'|'Email'|'WhatsApp');
+              : await sendReply(
+                  conversationTarget.id,
+                  conversationTarget.contactId,
+                  originalMsg.body,
+                  originalMsg.type as 'SMS'|'Email'|'WhatsApp',
+                  { clientMessageId: resendClientMessageId }
+              );
 
             if (!res.success) {
                 if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
-                    setMessages((prev) => prev.map((m) => m.id === messageId ? { ...m, status: 'failed' } : m));
+                    setMessages((prev) => {
+                        const next = prev.map((m) => m.id === messageId ? { ...m, status: 'failed', sendState: 'failed' } : m);
+                        syncPendingMessagesForConversation(conversationTarget.id, next);
+                        return next;
+                    });
                 }
                 toast({
                     title: 'Failed to resend message',
@@ -3361,12 +3562,36 @@ export function ConversationInterface({ locationId, initialConversations, initia
             }
 
             if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
-                const newMsgs = await fetchMessages(conversationTarget.id);
-                setMessages(newMsgs);
+                const ackMessageId = String((res as any).messageId || "").trim();
+                const ackClientMessageId = String((res as any).clientMessageId || resendClientMessageId).trim();
+                const outboxJobId = String((res as any).outboxJobId || "").trim();
+                const queued = !!(res as any).queued;
+
+                setMessages((prev) => {
+                    const next = prev.map((m) => {
+                        if (m.id !== messageId) return m;
+                        return {
+                            ...m,
+                            ...(ackMessageId ? { id: ackMessageId } : {}),
+                            clientMessageId: ackClientMessageId,
+                            status: queued ? 'sending' : 'sent',
+                            sendState: queued ? 'queued' : 'sent',
+                            outboxState: queued
+                                ? { id: outboxJobId || null, status: 'pending' }
+                                : { id: outboxJobId || null, status: 'completed' },
+                        } as Message;
+                    });
+                    syncPendingMessagesForConversation(conversationTarget.id, next);
+                    return next;
+                });
             }
         } catch (e: any) {
             if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
-                setMessages((prev) => prev.map((m) => m.id === messageId ? { ...m, status: 'failed' } : m));
+                setMessages((prev) => {
+                    const next = prev.map((m) => m.id === messageId ? { ...m, status: 'failed', sendState: 'failed' } : m);
+                    syncPendingMessagesForConversation(conversationTarget.id, next);
+                    return next;
+                });
             }
             toast({
                 title: 'Failed to resend message',

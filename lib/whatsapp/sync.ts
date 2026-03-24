@@ -240,19 +240,125 @@ function enqueueInMemoryDeferredLidMessage(msg: NormalizedMessage, lidJid: strin
     scheduleDeferredLidRetry(key);
 }
 
+async function tryReconcileOutboundWebhookToPendingMessage(args: {
+    locationId: string;
+    conversationId: string;
+    conversationGhlId: string;
+    wamId: string;
+    timestamp: Date;
+}) {
+    const candidateWindowStart = new Date(args.timestamp.getTime() - (20 * 60 * 1000));
+    const candidates = await (db as any).message.findMany({
+        where: {
+            conversationId: args.conversationId,
+            direction: "outbound",
+            source: "app_user",
+            wamId: null,
+            clientMessageId: { not: null },
+            createdAt: { gte: candidateWindowStart },
+        },
+        select: {
+            id: true,
+            clientMessageId: true,
+            createdAt: true,
+        },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: 12,
+    });
+
+    if (!Array.isArray(candidates) || candidates.length === 0) {
+        return null;
+    }
+
+    const ranked = candidates
+        .map((row: any) => ({
+            ...row,
+            diffMs: Math.abs(new Date(row.createdAt).getTime() - args.timestamp.getTime()),
+        }))
+        .sort((left: any, right: any) => left.diffMs - right.diffMs);
+
+    const best = ranked[0];
+    if (!best || !Number.isFinite(best.diffMs) || best.diffMs > 20 * 60 * 1000) {
+        return null;
+    }
+
+    const second = ranked[1];
+    const ambiguous = !!second && Math.abs(Number(second.diffMs) - Number(best.diffMs)) < 1500;
+    if (ambiguous) {
+        console.warn(`[WhatsApp Sync] Outbound webhook reconcile ambiguous for wamId=${args.wamId}; skipping heuristic adopt.`);
+        return null;
+    }
+
+    try {
+        await (db as any).message.update({
+            where: { id: best.id },
+            data: {
+                wamId: args.wamId,
+                ghlMessageId: args.wamId,
+                status: "sent",
+                updatedAt: new Date(),
+            },
+        });
+    } catch (error: any) {
+        if (error?.code !== "P2002") throw error;
+        const existing = await db.message.findUnique({
+            where: { wamId: args.wamId },
+            select: { id: true },
+        });
+        if (!existing?.id) throw error;
+    }
+
+    await (db as any).whatsAppOutboundOutbox.updateMany({
+        where: {
+            messageId: best.id,
+            status: { in: ["pending", "processing", "failed"] },
+        },
+        data: {
+            status: "completed",
+            processedAt: new Date(),
+            lockedAt: null,
+            lockedBy: null,
+            lastError: null,
+        },
+    }).catch(() => undefined);
+
+    void publishConversationRealtimeEvent({
+        locationId: args.locationId,
+        conversationId: args.conversationGhlId,
+        type: "message.outbound",
+        payload: {
+            channel: "whatsapp",
+            mode: "text",
+            messageId: best.id,
+            clientMessageId: best.clientMessageId || null,
+            wamId: args.wamId,
+            status: "sent",
+        },
+    });
+    void publishConversationRealtimeEvent({
+        locationId: args.locationId,
+        conversationId: args.conversationGhlId,
+        type: "message.status",
+        payload: {
+            messageId: best.id,
+            clientMessageId: best.clientMessageId || null,
+            wamId: args.wamId,
+            status: "sent",
+            rawStatus: "SERVER_ACK",
+        },
+    });
+
+    console.log(`[WhatsApp Sync] Reconciled outbound webhook to pending app message ${best.id} for wamId=${args.wamId}`);
+    return {
+        id: String(best.id),
+        clientMessageId: best.clientMessageId ? String(best.clientMessageId) : null,
+    };
+}
+
 export async function processNormalizedMessage(msg: NormalizedMessage) {
     console.log(`[WhatsApp Sync] processNormalizedMessage Called for ${msg.wamId} (${msg.direction})`);
     const { locationId, from, to, body, type, wamId, timestamp, contactName, source, isGroup, participant } = msg;
     const direction = msg.direction || "inbound";
-
-    // --- RACE CONDITION FIX ---
-    // For outbound messages (sent from App/Phone), we delay processing by 1s.
-    // This gives the Application (actions.ts) enough time to create the Message and Contact record first.
-    // If the record exists, we skip processing and avoid creating a duplicate "LID Contact".
-    if (direction === 'outbound') {
-        const delayMs = 1500; // 1.5s delay to be safe
-        await new Promise(resolve => setTimeout(resolve, delayMs));
-    }
 
     const existing = await db.message.findUnique({
         where: { wamId },
@@ -741,6 +847,19 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         console.log(`[WhatsApp Sync] Created conversation ${conversation.id} for contact ${contact.id}`);
     }
 
+    if (direction === "outbound") {
+        const reconciled = await tryReconcileOutboundWebhookToPendingMessage({
+            locationId,
+            conversationId: conversation.id,
+            conversationGhlId: conversation.ghlConversationId,
+            wamId,
+            timestamp,
+        });
+        if (reconciled?.id) {
+            return { status: "processed", id: reconciled.id };
+        }
+    }
+
     // 5. Group Participant Sync (New Architecture)
     if (isGroup && participant && conversation && pContact) { // Ensure pContact is resolved
         try {
@@ -768,20 +887,34 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     }
 
     // 6. Create Message
-    const newMessage = await db.message.create({
-        data: {
-            conversationId: conversation.id,
-            ghlMessageId: `wa_${wamId}`,
-            wamId: wamId,
-            type: "WhatsApp",
-            direction: direction,
-            status: direction === "inbound" ? "received" : "sent",
-            body: body,
-            source: source,
-            createdAt: timestamp,
-            updatedAt: new Date(),
+    let newMessage: any;
+    try {
+        newMessage = await db.message.create({
+            data: {
+                conversationId: conversation.id,
+                ghlMessageId: `wa_${wamId}`,
+                wamId: wamId,
+                type: "WhatsApp",
+                direction: direction,
+                status: direction === "inbound" ? "received" : "sent",
+                body: body,
+                source: source,
+                createdAt: timestamp,
+                updatedAt: new Date(),
+            }
+        });
+    } catch (error: any) {
+        if (error?.code !== "P2002") throw error;
+        const existingByWam = await db.message.findUnique({
+            where: { wamId },
+            select: { id: true },
+        });
+        if (existingByWam?.id) {
+            console.log(`[WhatsApp Sync] Duplicate webhook ack detected for ${wamId}; treating as success.`);
+            return { status: "processed", id: existingByWam.id };
         }
-    });
+        throw error;
+    }
 
     console.log(`[WhatsApp Sync] Created message ${wamId} for conversation ${conversation.id}`);
 
@@ -805,7 +938,10 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         payload: {
             direction,
             messageType: "whatsapp",
-            messageId: wamId,
+            messageId: newMessage.id,
+            wamId,
+            clientMessageId: (newMessage as any)?.clientMessageId || null,
+            status: direction === "inbound" ? "received" : "sent",
         },
     });
 
@@ -933,9 +1069,12 @@ export async function processStatusUpdate(wamId: string, rawStatus: string) {
     });
 
     if (updateResult.count > 0) {
-        const messageWithConversation = await db.message.findFirst({
+        const messageWithConversation = await (db as any).message.findFirst({
             where: { wamId },
             select: {
+                id: true,
+                wamId: true,
+                clientMessageId: true,
                 conversation: {
                     select: {
                         ghlConversationId: true,
@@ -945,15 +1084,17 @@ export async function processStatusUpdate(wamId: string, rawStatus: string) {
             },
         });
 
-        const conversationId = messageWithConversation?.conversation?.ghlConversationId;
-        const locationId = messageWithConversation?.conversation?.locationId;
+        const conversationId = (messageWithConversation as any)?.conversation?.ghlConversationId;
+        const locationId = (messageWithConversation as any)?.conversation?.locationId;
         if (conversationId && locationId) {
             void publishConversationRealtimeEvent({
                 locationId,
                 conversationId,
                 type: "message.status",
                 payload: {
-                    messageId: wamId,
+                    messageId: (messageWithConversation as any).id,
+                    wamId: (messageWithConversation as any).wamId || wamId,
+                    clientMessageId: (messageWithConversation as any).clientMessageId || null,
                     status,
                     rawStatus,
                 },

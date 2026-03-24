@@ -55,6 +55,7 @@ model Location {
   deepScrapeRuns                DeepScrapeRun[]
   deepScrapeRunStages           DeepScrapeRunStage[]
   agentExecutions               AgentExecution[]
+  whatsappOutboundOutboxJobs    WhatsAppOutboundOutbox[]
 
   // WhatsApp Integration (Native)
   whatsappBusinessAccountId String?
@@ -512,6 +513,7 @@ model Contact {
   aiAutomationJobs     AiAutomationJob[]
   aiDecisions          AiDecision[]
   aiSuggestedResponses AiSuggestedResponse[]
+  whatsappOutboundOutboxJobs WhatsAppOutboundOutbox[]
 
   @@unique([locationId, email])
   @@unique([locationId, phone])
@@ -1108,6 +1110,7 @@ model Conversation {
   aiAutomationJobs     AiAutomationJob[]
   aiDecisions          AiDecision[]
   aiSuggestedResponses AiSuggestedResponse[]
+  whatsappOutboundOutboxJobs WhatsAppOutboundOutbox[]
 
   @@unique([locationId, contactId])
   @@index([locationId])
@@ -1585,6 +1588,7 @@ model Message {
   id             String  @id @default(cuid())
   conversationId String
   ghlMessageId   String? @unique
+  clientMessageId String? @unique
 
   type      String // SMS, Email, WhatsApp
   direction String // inbound, outbound
@@ -1613,6 +1617,7 @@ model Message {
   attachments                  MessageAttachment[]
   transcripts                  MessageTranscript[]
   legacyCrmLeadEmailProcessing LegacyCrmLeadEmailProcessing?
+  outboundWhatsAppOutbox       WhatsAppOutboundOutbox?
 
   // WhatsApp Integration
   wamId String? @unique // WhatsApp Message ID (for dedup)
@@ -1621,6 +1626,40 @@ model Message {
   @@index([createdAt])
   @@index([conversationId, updatedAt(sort: Desc)])
   @@index([emailThreadId])
+}
+
+model WhatsAppOutboundOutbox {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messageId      String @unique
+  conversationId String
+  contactId      String
+  locationId     String
+
+  transport String // evolution
+  kind      String // text | image | audio | document
+  payload   Json
+
+  status       String   @default("pending") // pending | processing | completed | failed | dead
+  scheduledAt  DateTime @default(now())
+  lockedAt     DateTime?
+  lockedBy     String?
+  processedAt  DateTime?
+  attemptCount Int      @default(0)
+  lastError    String?  @db.Text
+
+  idempotencyKey String @unique
+
+  message      Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  contact      Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  location     Location     @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@index([status, scheduledAt])
+  @@index([locationId, status, scheduledAt])
+  @@index([conversationId, status, scheduledAt])
 }
 
 model LegacyCrmLeadEmailProcessing {

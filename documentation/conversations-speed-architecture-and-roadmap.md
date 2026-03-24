@@ -1,5 +1,5 @@
 # Conversations Performance Architecture, Change History, and Enterprise Roadmap
-**Last Updated:** 2026-03-20
+**Last Updated:** 2026-03-24
 
 ## Purpose
 This document captures the full performance-improvement thread for `/admin/conversations`:
@@ -9,7 +9,9 @@ This document captures the full performance-improvement thread for `/admin/conve
 - enterprise best practices to keep the experience fast and reliable at scale
 
 Use this doc as the performance-focused source of truth.  
-For full functional behavior and API details, see `documentation/conversation-management.md`.
+For full functional behavior and API details, see:
+- `documentation/conversation-management.md`
+- `documentation/whatsapp-integration.md` (source of truth for WhatsApp/Evolution outbound send architecture)
 
 ## Target Outcomes (SLO / UX)
 - Thread switch latency:
@@ -42,8 +44,9 @@ Main causes identified:
 | 2026-03-10 | `df84407` | Faster read-state reset path. |
 | 2026-03-10 | `c7b410a` | Faster Gemini draft experience (adjacent UX perf). |
 | 2026-03-10 | `11420df` | Instant open via progressive hydration + no visible scroll jank. |
-| 2026-03-20 | `2e54c54` | Fire-and-forget outbound send with optimistic reconciliation. |
+| 2026-03-20 | `2e54c54` | Initial fire-and-forget outbound send with optimistic reconciliation. |
 | 2026-03-20 | `52e82e5` | Optimistic unread badge clearance override during list polling. |
+| 2026-03-24 | `working tree` | Durable WhatsApp outbound outbox (queue-first ack, retry/backoff/dead-letter, stale-lock recovery) + deterministic `clientMessageId`/`wamId` reconciliation to prevent disappearing optimistic rows. |
 | 2026-03-24 | `working tree` | WhatsApp realtime fast path: emit message events earlier in sync flow + publish realtime status updates (`message.status`) on delivery/read transitions. |
 | 2026-03-24 | `working tree` | Paste Lead fast path: read-only auth on parse/import, bounded parse payload, and detached autosync/trace/orchestration side effects. |
 
@@ -71,7 +74,7 @@ Other implemented client speedups:
 - active-thread polling starts after grace delay (`ACTIVE_POLL_GRACE_MS = 2500`)
 - realtime/poll refresh is skipped while hydration/backfill is in-flight to avoid duplicate work
 - shallow URL sync via `history.replaceState` when enabled, with `popstate` state restoration
-- fire-and-forget outbound message send with optimistic UI + targeted reconciliation (see §6 below)
+- queue-first WhatsApp outbound ack with durable outbox + deterministic optimistic reconciliation (see §6 below)
 - optimistic unread badge clearance protected against stale background polling via `readResetInFlightRef` (see §7 below)
 
 ### 2) No-Scroll-Jank Opening Behavior
@@ -116,14 +119,15 @@ Implemented SSE channel: `/api/conversations/events`
 - WhatsApp delivery lifecycle updates now emit realtime `message.status` events after local status persistence, so sent/delivered/read indicators update without waiting for polling.
 
 ### 6) Outbound Message Send Pipeline (Mar 2026)
-`handleSendMessage` uses **fire-and-forget + optimistic reconciliation**:
+`handleSendMessage` now uses **optimistic UI + queue-first durable ack** for WhatsApp:
 
-1. **Optimistic insert**: A local message with `status: 'sending'` is appended immediately. The input box clears and the UI is free.
-2. **Non-blocking server call**: `sendReply(...)` runs as a detached `.then()/.catch()` — the main thread is never blocked.
-3. **Server fast-ack**: `sendReply` returns as soon as the Evolution API confirms and the DB message row is created. Conversation metadata update (`updateConversationLastMessage`) and GHL sync both run fire-and-forget on the server.
-4. **Targeted reconciliation**: On success, the client fetches only the latest 5 messages (`fetchMessages(id, { take: 5 })`) and swaps the optimistic stub for the real DB message with deduplication.
-5. **Failure handling**: If the server action fails, the optimistic message is marked `status: 'failed'` with a red badge + toast notification.
-6. **SSE safety net**: If the SSE realtime event (`message.outbound`) arrives before reconciliation, the existing realtime merge guards prevent duplicates.
+1. **Optimistic insert**: local outbound row appears immediately (`status: sending`, stable `clientMessageId`).
+2. **Fast queue ACK**: `sendReply(...)` / `sendWhatsAppMediaReply(...)` persist `Message + WhatsAppOutboundOutbox` in one transaction and return `{ queued, messageId, clientMessageId, outboxJobId }` without waiting for Evolution network send.
+3. **Durable dispatch**: BullMQ worker handles Evolution send, retries, dead-letter, and stale-lock recovery outside the request path.
+4. **Deterministic reconciliation**: client and realtime patch by `messageId` / `clientMessageId` / `wamId`; no body-text matching and no "fetch latest 5" replacement race.
+5. **Incremental status updates**: realtime `message.outbound` / `message.status` events patch active thread in-memory; full refresh remains fallback-only for unknown IDs.
+
+Implementation source of truth for this pipeline: `documentation/whatsapp-integration.md`.
 
 ### 7) Optimistic Unread Badge Clearance (Mar 2026)
 When an unread conversation is clicked, the UI clears the badge instantly locally. However, if a background poll or SSE fetch occurs before the server completes the `markConversationAsRead` background core action, the server may reply with a stale `unreadCount > 0`.
@@ -170,7 +174,7 @@ Validation tooling:
 - Realtime dedupe and out-of-order guards.
 - Dedicated tests for hydration helpers, cache behavior, realtime merge/replay.
 - Perf scripts with pass/fail thresholds for DB and UI benchmarks.
-- Fire-and-forget outbound send with optimistic reconciliation (no UI freeze on message send).
+- Queue-first WhatsApp outbound send with durable outbox + deterministic optimistic reconciliation (no UI freeze, no disappearing pending rows under poll/realtime refresh).
 
 ### Partially Implemented / Gaps
 - UI benchmark currently detects active thread activation (`data-chat-active-conversation-id`) and is a useful proxy, but should be extended to exact first-message-paint instrumentation for stricter UX SLO enforcement.

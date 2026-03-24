@@ -26,6 +26,8 @@ export interface Conversation {
 export interface Message {
     id: string;
     ghlMessageId?: string;
+    clientMessageId?: string;
+    wamId?: string;
     conversationId: string;
     contactId: string;
     contactName?: string;
@@ -35,6 +37,16 @@ export interface Message {
     type: string; // "TYPE_SMS", "TYPE_EMAIL", etc.
     direction: 'inbound' | 'outbound';
     status: string;
+    sendState?: string;
+    outboxState?: {
+        id: string;
+        status: string;
+        scheduledAt?: string | null;
+        attemptCount?: number;
+        lastError?: string | null;
+        processedAt?: string | null;
+        lockedAt?: string | null;
+    };
     dateAdded: string; // ISO or timestamp
     attachments?: Array<string | {
         id?: string;

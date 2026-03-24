@@ -44,14 +44,13 @@ import {
 } from "@/lib/ai/runtime/engine";
 import {
     buildWhatsAppOutboundUploadKey,
-    createWhatsAppMediaReadUrl,
     createWhatsAppMediaUploadUrl as createWhatsAppMediaUploadSignedUrl,
     deleteWhatsAppMediaObject,
     headWhatsAppMediaObject,
     parseR2Uri,
-    toR2Uri,
 } from "@/lib/whatsapp/media-r2";
 import { ingestEvolutionMediaAttachment, parseEvolutionMessageContent } from "@/lib/whatsapp/evolution-media";
+import { enqueueWhatsAppOutbound } from "@/lib/whatsapp/outbound-enqueue";
 import {
     enqueueWhatsAppAudioTranscription,
     initWhatsAppAudioTranscriptionWorker,
@@ -1447,6 +1446,22 @@ function decodeMessagePaginationCursor(cursor?: string | null): MessagePaginatio
     };
 }
 
+function resolveWhatsAppSendState(status: string | null | undefined, outboxStatus: string | null | undefined): string | undefined {
+    const normalizedStatus = String(status || "").toLowerCase();
+    const normalizedOutbox = String(outboxStatus || "").toLowerCase();
+
+    if (normalizedOutbox === "pending") return "queued";
+    if (normalizedOutbox === "processing") return "sending";
+    if (normalizedOutbox === "failed") return "retrying";
+    if (normalizedOutbox === "dead") return "failed";
+    if (normalizedOutbox === "completed") return "sent";
+
+    if (normalizedStatus === "sending") return "sending";
+    if (normalizedStatus === "failed") return "failed";
+    if (["sent", "delivered", "read", "played"].includes(normalizedStatus)) return "sent";
+    return undefined;
+}
+
 export async function fetchMessages(
     conversationId: string,
     options?: {
@@ -1498,7 +1513,7 @@ export async function fetchMessages(
     }
 
     const readDescending = !!boundedTake || !!paginationCursor;
-    const messageRows = await db.message.findMany({
+    const messageRows = await (db as any).message.findMany({
         where: messageWhere,
         orderBy: readDescending
             ? [{ createdAt: "desc" }, { id: "desc" }]
@@ -1515,6 +1530,17 @@ export async function fetchMessages(
                             },
                         },
                     },
+                },
+            },
+            outboundWhatsAppOutbox: {
+                select: {
+                    id: true,
+                    status: true,
+                    scheduledAt: true,
+                    attemptCount: true,
+                    lastError: true,
+                    processedAt: true,
+                    lockedAt: true,
                 },
             },
             ...(includeLegacyEmailMeta ? {
@@ -1615,12 +1641,32 @@ export async function fetchMessages(
         })(),
         id: m.id, // Use internal CUID
         ghlMessageId: m.ghlMessageId, // Optional
+        clientMessageId: (m as any).clientMessageId || undefined,
+        wamId: m.wamId || undefined,
         conversationId: m.conversationId,
         contactId: conversation.contact.ghlContactId || '',
         body: m.body || '',
         type: m.type,
         direction: m.direction as 'inbound' | 'outbound',
         status: m.status,
+        sendState: resolveWhatsAppSendState(m.status, (m as any).outboundWhatsAppOutbox?.status),
+        outboxState: (m as any).outboundWhatsAppOutbox
+            ? {
+                id: String((m as any).outboundWhatsAppOutbox.id),
+                status: String((m as any).outboundWhatsAppOutbox.status || ""),
+                scheduledAt: (m as any).outboundWhatsAppOutbox.scheduledAt
+                    ? new Date((m as any).outboundWhatsAppOutbox.scheduledAt).toISOString()
+                    : null,
+                attemptCount: Number((m as any).outboundWhatsAppOutbox.attemptCount || 0),
+                lastError: (m as any).outboundWhatsAppOutbox.lastError || null,
+                processedAt: (m as any).outboundWhatsAppOutbox.processedAt
+                    ? new Date((m as any).outboundWhatsAppOutbox.processedAt).toISOString()
+                    : null,
+                lockedAt: (m as any).outboundWhatsAppOutbox.lockedAt
+                    ? new Date((m as any).outboundWhatsAppOutbox.lockedAt).toISOString()
+                    : null,
+            }
+            : undefined,
         dateAdded: m.createdAt.toISOString(),
         subject: m.subject || undefined,
         emailFrom: m.emailFrom || undefined,
@@ -5018,7 +5064,7 @@ export async function createWhatsAppMediaUploadUrl(
     contactId: string,
     file: { fileName: string; contentType: string; size: number }
 ) {
-    const location = await getAuthenticatedLocation();
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
 
     if (!location?.evolutionInstanceId) {
         return { success: false, error: "WhatsApp (Evolution) is not connected." };
@@ -5118,18 +5164,15 @@ export async function sendWhatsAppMediaReply(
     options?: {
         caption?: string;
         kind?: WhatsAppMediaKind;
+        clientMessageId?: string;
     }
 ) {
-    const location = await getAuthenticatedLocation();
-    if (!location?.ghlAccessToken) {
-        throw new Error("Unauthorized");
-    }
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
 
     const cleanCaption = String(options?.caption || "").trim();
 
     try {
-        const hasEvolution = !!location.evolutionInstanceId;
-        if (!hasEvolution) {
+        if (!location?.evolutionInstanceId) {
             return { success: false, error: "WhatsApp (Evolution) is not connected." };
         }
 
@@ -5214,130 +5257,48 @@ export async function sendWhatsAppMediaReply(
             };
         }
 
-        const { evolutionClient } = await import("@/lib/evolution/client");
-
-        const signedMediaUrl = await createWhatsAppMediaReadUrl({
-            key: objectKey,
-            contentType,
-            fileName,
-            expiresInSeconds: 300,
-        });
-
-        const res = await evolutionClient.sendMedia(
-            location.evolutionInstanceId!,
-            normalizedPhone,
-            {
-                mediaType: mediaKind,
-                mediaUrl: signedMediaUrl,
-                caption: mediaKind === "image" ? (cleanCaption || undefined) : undefined,
-                mimetype: contentType,
+        const enqueueResult = await enqueueWhatsAppOutbound({
+            locationId: location.id,
+            conversationInternalId: conversation.id,
+            conversationGhlId: conversationId,
+            contactId: contact.id,
+            body: previewBody,
+            kind: mediaKind,
+            source: "app_user",
+            clientMessageId: options?.clientMessageId || null,
+            caption: cleanCaption || null,
+            attachment: {
+                objectKey,
+                contentType,
                 fileName,
-            }
-        );
-
-        if (!res?.key?.id) {
-            return { success: false, error: "Media sent but no confirmation received." };
-        }
-
-        const created = await db.message.create({
-            data: {
-                ghlMessageId: res.key.id,
-                wamId: res.key.id,
-                conversation: { connect: { ghlConversationId: conversationId } },
-                body: previewBody,
-                type: 'TYPE_WHATSAPP',
-                direction: 'outbound',
-                status: 'sent',
-                createdAt: new Date(),
-                updatedAt: new Date(),
-                source: 'app_user',
-                attachments: {
-                    create: [{
-                        fileName,
-                        contentType,
-                        size,
-                        url: toR2Uri(objectKey),
-                    }]
-                }
+                size,
             },
-            include: { attachments: true }
         });
-
-        const { updateConversationLastMessage } = await import('@/lib/conversations/update');
-        const internalConv = await db.conversation.findUnique({
-            where: { ghlConversationId: conversationId },
-            select: { id: true }
-        });
-
-        if (internalConv) {
-            await updateConversationLastMessage({
-                conversationId: internalConv.id,
-                messageBody: previewBody,
-                messageType: 'TYPE_WHATSAPP',
-                messageDate: new Date(),
-                direction: 'outbound',
-            });
-        }
-
-        if (mediaKind === "audio" && created.attachments?.[0]?.id) {
-            void (async () => {
-                try {
-                    try {
-                        await initWhatsAppAudioTranscriptionWorker();
-                    } catch (workerErr) {
-                        console.warn('[sendWhatsAppMediaReply] Worker init failed, continuing with enqueue fallback:', workerErr);
-                    }
-
-                    await enqueueWhatsAppAudioTranscription({
-                        locationId: location.id,
-                        messageId: created.id,
-                        attachmentId: created.attachments[0].id,
-                    });
-                } catch (transcriptionErr) {
-                    console.error('[sendWhatsAppMediaReply] Failed to enqueue audio transcription:', transcriptionErr);
-                }
-            })();
-        }
-
-        const accessToken = location.ghlAccessToken;
-        if (accessToken) {
-            (async () => {
-                try {
-                    let targetGhlId = contact.ghlContactId;
-
-                    if (!targetGhlId && location.ghlLocationId) {
-                        const { ensureRemoteContact } = await import("@/lib/crm/contact-sync");
-                        const newId = await ensureRemoteContact(contact.id, location.ghlLocationId, accessToken);
-                        if (newId) targetGhlId = newId;
-                    }
-
-                    if (targetGhlId) {
-                        const customProviderId = process.env.GHL_CUSTOM_PROVIDER_ID;
-                        const ghlPayload: any = {
-                            contactId: targetGhlId,
-                            type: customProviderId ? 'Custom' : 'WhatsApp',
-                            message: previewBody
-                        };
-                        if (customProviderId) ghlPayload.conversationProviderId = customProviderId;
-                        await sendMessage(accessToken, ghlPayload);
-                    }
-                } catch (ghlErr) {
-                    console.error('[sendWhatsAppMediaReply] GHL sync failed:', ghlErr);
-                }
-            })();
-        }
 
         invalidateConversationReadCaches(conversationId);
         emitConversationRealtimeEvent({
             locationId: location.id,
             conversationId,
             type: "message.outbound",
-            payload: { channel: "whatsapp", mode: "media" },
+            payload: {
+                channel: "whatsapp",
+                mode: "media",
+                queued: true,
+                messageId: enqueueResult.messageId,
+                clientMessageId: enqueueResult.clientMessageId,
+                outboxJobId: enqueueResult.outboxJobId,
+            },
         });
-        return { success: true, messageId: created.id };
+        return {
+            success: true as const,
+            queued: true as const,
+            messageId: enqueueResult.messageId,
+            clientMessageId: enqueueResult.clientMessageId,
+            outboxJobId: enqueueResult.outboxJobId,
+        };
     } catch (err: any) {
-        console.error("Evolution API media send failed:", err);
-        return { success: false, error: `WhatsApp media send failed: ${err.message || 'Unknown error'}` };
+        console.error("WhatsApp media enqueue failed:", err);
+        return { success: false, error: `WhatsApp media queue failed: ${err.message || 'Unknown error'}` };
     }
 }
 
@@ -5353,14 +5314,110 @@ export async function sendWhatsAppImageReply(
     }, { caption, kind: "image" });
 }
 
-export async function sendReply(conversationId: string, contactId: string, messageBody: string, type: 'SMS' | 'Email' | 'WhatsApp') {
-    const location = await getAuthenticatedLocation();
-    if (!location?.ghlAccessToken) {
-        throw new Error("Unauthorized");
-    }
-
+export async function sendReply(
+    conversationId: string,
+    contactId: string,
+    messageBody: string,
+    type: 'SMS' | 'Email' | 'WhatsApp',
+    options?: { clientMessageId?: string }
+) {
     try {
-        if (type === 'SMS') {
+        if (type === "WhatsApp") {
+            const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+            if (!location?.evolutionInstanceId) {
+                return { success: false, error: "WhatsApp (Evolution) is not connected." };
+            }
+
+            const normalizedBody = String(messageBody || "").trim();
+            if (!normalizedBody) {
+                return { success: false, error: "Message body cannot be empty." };
+            }
+
+            const conversation = await db.conversation.findUnique({
+                where: { ghlConversationId: conversationId },
+                select: { id: true, locationId: true, contactId: true },
+            });
+            if (!conversation || conversation.locationId !== location.id) {
+                return { success: false, error: "Conversation not found." };
+            }
+
+            const contact = await db.contact.findFirst({
+                where: {
+                    OR: [
+                        { ghlContactId: contactId },
+                        { id: contactId },
+                    ],
+                    locationId: location.id,
+                },
+                select: { id: true, phone: true, name: true },
+            });
+            if (!contact) {
+                return { success: false, error: "Contact not found in database." };
+            }
+            if (conversation.contactId !== contact.id) {
+                return { success: false, error: "Conversation/contact mismatch." };
+            }
+            if (!contact.phone) {
+                return { success: false, error: "Contact does not have a phone number. Please add a phone number to this contact." };
+            }
+            if (contact.phone.includes("*")) {
+                const contactName = contact.name || "This contact";
+                return {
+                    success: false,
+                    error: `${contactName}'s phone number "${contact.phone}" is masked (contains ***). You cannot send WhatsApp messages to masked numbers.`,
+                };
+            }
+
+            const normalizedPhone = contact.phone.replace(/\D/g, "");
+            if (normalizedPhone.length < 10) {
+                const contactName = contact.name || "This contact";
+                return {
+                    success: false,
+                    error: `${contactName}'s phone number "${contact.phone}" appears to be missing a country code. Please update the contact with the full international number.`,
+                };
+            }
+
+            const enqueueResult = await enqueueWhatsAppOutbound({
+                locationId: location.id,
+                conversationInternalId: conversation.id,
+                conversationGhlId: conversationId,
+                contactId: contact.id,
+                body: normalizedBody,
+                kind: "text",
+                source: "app_user",
+                clientMessageId: options?.clientMessageId || null,
+            });
+
+            invalidateConversationReadCaches(conversationId);
+            emitConversationRealtimeEvent({
+                locationId: location.id,
+                conversationId,
+                type: "message.outbound",
+                payload: {
+                    channel: "whatsapp",
+                    mode: "text",
+                    queued: true,
+                    messageId: enqueueResult.messageId,
+                    clientMessageId: enqueueResult.clientMessageId,
+                    outboxJobId: enqueueResult.outboxJobId,
+                },
+            });
+
+            return {
+                success: true as const,
+                queued: true as const,
+                messageId: enqueueResult.messageId,
+                clientMessageId: enqueueResult.clientMessageId,
+                outboxJobId: enqueueResult.outboxJobId,
+            };
+        }
+
+        const location = await getAuthenticatedLocation();
+        if (!location?.ghlAccessToken) {
+            throw new Error("Unauthorized");
+        }
+
+        if (type === "SMS") {
             const contact = await db.contact.findFirst({
                 where: {
                     OR: [
@@ -5388,323 +5445,44 @@ export async function sendReply(conversationId: string, contactId: string, messa
                 }
             );
 
-            if (smsEligibility.status === 'ineligible') {
-                return { success: false, error: smsEligibility.reason || 'SMS is not configured for this location.' };
+            if (smsEligibility.status === "ineligible") {
+                return { success: false, error: smsEligibility.reason || "SMS is not configured for this location." };
             }
         }
 
-        // Direct WhatsApp Integration Logic
-        if (type === 'WhatsApp') {
-            const hasTwilio = location.twilioAccountSid && location.twilioAuthToken && location.twilioWhatsAppFrom;
-            const hasMeta = location.whatsappPhoneNumberId && location.whatsappAccessToken;
-            // Relaxed check: Trust existence of ID. If status is mismatched in DB, we still try.
-            // If it fails, the try/catch will handle it.
-            const hasEvolution = !!location.evolutionInstanceId;
-
-            console.log('[sendReply] WhatsApp send check:', {
-                type,
-                hasEvolution,
-                evolutionInstanceId: location.evolutionInstanceId,
-                evolutionConnectionStatus: location.evolutionConnectionStatus,
-                hasTwilio,
-                hasMeta
-            });
-
-            // Try Evolution API First (Shadow WhatsApp)
-            if (hasEvolution) {
-                const contact = await db.contact.findFirst({
-                    where: {
-                        OR: [
-                            { ghlContactId: contactId },
-                            { id: contactId }
-                        ],
-                        locationId: location.id
-                    },
-                    select: { id: true, phone: true, ghlContactId: true, name: true, contactType: true }
-                });
-
-                console.log('[sendReply] Evolution contact lookup:', { contactId, found: !!contact, phone: contact?.phone });
-
-                if (!contact) {
-                    return { success: false, error: "Contact not found in database." };
-                }
-
-                if (!contact.phone) {
-                    return { success: false, error: "Contact does not have a phone number. Please add a phone number to this contact." };
-                }
-
-                // Check for masked phone numbers (agencies use *** to protect client data)
-                if (contact.phone.includes('*')) {
-                    const contactName = contact.name || 'This contact';
-                    return {
-                        success: false,
-                        error: `${contactName}'s phone number "${contact.phone}" is masked (contains ***). Masked numbers are used by agencies to protect client data. You cannot send WhatsApp messages to masked numbers.`
-                    };
-                }
-
-                // Normalize phone: strip non-digits but preserve for validation
-                const normalizedPhone = contact.phone.replace(/\D/g, '');
-
-                // WhatsApp requires full international format (country code + number)
-                // Most international numbers are 10+ digits with country code
-                if (normalizedPhone.length < 10) {
-                    const contactName = contact.name || 'This contact';
-                    return {
-                        success: false,
-                        error: `${contactName}'s phone number "${contact.phone}" appears to be missing a country code. Please update the contact with the full international number (e.g., +357${contact.phone}).`
-                    };
-                }
-
-                try {
-                    const { evolutionClient } = await import("@/lib/evolution/client");
-
-                    console.log('[sendReply] Calling Evolution API sendMessage:', {
-                        instanceId: location.evolutionInstanceId,
-                        phone: normalizedPhone,
-                        messageLength: messageBody.length
-                    });
-
-                    const res = await evolutionClient.sendMessage(
-                        location.evolutionInstanceId!,
-                        normalizedPhone,
-                        messageBody
-                    );
-
-                    console.log('[sendReply] Evolution API response:', res);
-
-                    if (res?.key?.id) {
-                        // Direct DB Save (More robust than re-using webhook sync)
-                        // This ensures we link to the EXACT conversation ID we are viewing
-                        await db.message.create({
-                            data: {
-                                ghlMessageId: res.key.id,
-                                wamId: res.key.id, // CRITICAL: Store wamId so sync.ts dedup check works
-                                conversation: { connect: { ghlConversationId: conversationId } },
-                                body: messageBody,
-                                type: 'TYPE_WHATSAPP',
-                                direction: 'outbound',
-                                status: 'sent',
-                                createdAt: new Date(),
-                                updatedAt: new Date(),
-                                source: 'app_user'
-                            }
-                        });
-
-                        // Fire-and-forget: conversation summary update is bookkeeping
-                        // and should not block the server action response to the client.
-                        void (async () => {
-                            try {
-                                const { updateConversationLastMessage } = await import('@/lib/conversations/update');
-                                const internalConv = await db.conversation.findUnique({
-                                    where: { ghlConversationId: conversationId },
-                                    select: { id: true }
-                                });
-                                if (internalConv) {
-                                    await updateConversationLastMessage({
-                                        conversationId: internalConv.id,
-                                        messageBody: messageBody,
-                                        messageType: 'TYPE_WHATSAPP',
-                                        messageDate: new Date(),
-                                        direction: 'outbound',
-                                    });
-                                }
-                            } catch (convUpdateErr) {
-                                console.error('[sendReply] Background conversation update failed:', convUpdateErr);
-                            }
-                        })();
-
-                        // [GHL Sync] Fire-and-forget sync to GHL
-                        // We now use JIT contact creation to ensure GHL ID exists
-                        const accessToken = location.ghlAccessToken;
-                        if (accessToken) {
-                            (async () => {
-                                try {
-                                    console.log('[sendReply] Starting GHL Sync process...');
-                                    let targetGhlId = contact.ghlContactId;
-
-                                    // JIT: Create remote contact if missing
-                                    if (!targetGhlId) {
-                                        console.log('[sendReply] Contact has no GHL ID. Importing ensureRemoteContact...');
-                                        const { ensureRemoteContact } = await import("@/lib/crm/contact-sync");
-                                        console.log('[sendReply] Attempting JIT creation for contact:', contact.id);
-
-                                        if (location.ghlLocationId) {
-                                            const newId = await ensureRemoteContact(contact.id, location.ghlLocationId, accessToken);
-                                            if (newId) {
-                                                targetGhlId = newId;
-                                                console.log('[sendReply] JIT Creation successful. New GHL ID:', targetGhlId);
-                                            } else {
-                                                console.warn('[sendReply] JIT Creation failed or returned null.');
-                                            }
-                                        } else {
-                                            console.warn('[sendReply] Cannot JIT Create: Missing ghlLocationId on Location.');
-                                        }
-                                    } else {
-                                        console.log('[sendReply] Contact already has GHL ID:', targetGhlId);
-                                    }
-
-                                    if (targetGhlId) {
-                                        console.log('[sendReply] Syncing sent message to GHL...');
-
-                                        // Use Custom Channel if configured (Shadow WhatsApp)
-                                        // This prevents "Unsuccessful" errors due to missing strictly native WhatsApp subscription
-                                        const customProviderId = process.env.GHL_CUSTOM_PROVIDER_ID;
-
-                                        const ghlPayload: any = {
-                                            contactId: targetGhlId,
-                                            type: customProviderId ? 'Custom' : 'WhatsApp',
-                                            message: messageBody
-                                        };
-
-                                        if (customProviderId) {
-                                            ghlPayload.conversationProviderId = customProviderId;
-                                        }
-
-                                        await sendMessage(accessToken, ghlPayload);
-                                        console.log('[sendReply] Synced to GHL successfully.');
-                                    } else {
-                                        console.warn('[sendReply] Skipping GHL sync: Could not resolve GHL Contact ID.');
-                                    }
-                                } catch (ghlErr) {
-                                    console.error('[sendReply] CRITICAL FAILURE in GHL Sync:', ghlErr);
-                                }
-                            })();
-                        } else {
-                            console.warn('[sendReply] No access token available for GHL sync.');
-                        }
-
-                        invalidateConversationReadCaches(conversationId);
-                        emitConversationRealtimeEvent({
-                            locationId: location.id,
-                            conversationId,
-                            type: "message.outbound",
-                            payload: { channel: "whatsapp", mode: "text" },
-                        });
-                        return { success: true };
-                    } else {
-                        return { success: false, error: "Message sent but no confirmation received." };
-                    }
-                } catch (err: any) {
-                    console.error("Evolution API send failed:", err);
-                    return { success: false, error: `WhatsApp send failed: ${err.message || 'Unknown error'}` };
-                }
-            }
-
-            // Try Twilio or Meta Cloud API
-            if (hasTwilio || hasMeta) {
-                // 1. Resolve Contact Phone
-                const contact = await db.contact.findFirst({
-                    where: {
-                        OR: [
-                            { ghlContactId: contactId },
-                            { id: contactId }
-                        ],
-                        locationId: location.id
-                    },
-                    select: { id: true, phone: true, ghlContactId: true }
-                });
-
-                if (contact?.phone) {
-                    let externalMessageId: string | undefined;
-
-                    try {
-                        if (hasTwilio) {
-                            const { sendTwilioMessage } = await import("@/lib/twilio/client");
-                            const res = await sendTwilioMessage(location.id, contact.phone, { body: messageBody });
-                            externalMessageId = res.sid;
-                        } else {
-                            const { sendWhatsAppMessage } = await import("@/lib/whatsapp/client");
-                            const res = await sendWhatsAppMessage(location.id, contact.phone, { type: "text", body: messageBody });
-                            externalMessageId = res.messages?.[0]?.id;
-                        }
-                    } catch (err) {
-                        console.error("Direct WhatsApp send failed, falling back to GHL:", err);
-                        // Fallthrough to GHL logic below
-                    }
-
-                    // If successful, save to DB and return (skipping GHL)
-                    if (externalMessageId) {
-                        const msgData = {
-                            messageId: externalMessageId,
-                            ghlMessageId: externalMessageId, // Use external ID as GHL ID placeholder
-                            id: externalMessageId,
-                            conversationId: conversationId,
-                            contactId: contact.ghlContactId || contact.id, // Prefer GHL ID if available for consistency
-                            body: messageBody,
-                            type: 'TYPE_WHATSAPP',
-                            direction: 'outbound',
-                            status: 'sent',
-                            dateAdded: new Date(),
-                            locationId: location.ghlLocationId || location.id
-                        };
-
-                        await syncMessageFromWebhook(msgData);
-                        invalidateConversationReadCaches(conversationId);
-                        emitConversationRealtimeEvent({
-                            locationId: location.id,
-                            conversationId,
-                            type: "message.outbound",
-                            payload: { channel: hasTwilio ? "twilio_whatsapp" : "meta_whatsapp" },
-                        });
-                        return { success: true };
-                    }
-                }
-            }
-
-            // If we have Evolution but no phone found, or Evolution failed, don't fall through to GHL
-            // GHL doesn't support WhatsApp messaging in this setup
-            if (hasEvolution) {
-                return { success: false, error: "Could not send WhatsApp message. Contact may not have a phone number." };
-            }
-        }
-
-        // Default GHL Logic (Legacy / Fallback)
         const payload: any = {
             contactId,
             type,
         };
 
-        if (type === 'Email') {
-            // GHL Email requires 'html' field, not 'message'
-            payload.html = messageBody.replace(/\n/g, '<br/>'); // Convert line breaks to HTML
-            payload.subject = 'Re: Your Inquiry'; // TODO: Extract from conversation context
-
-            // Set custom sender for professional appearance
-            // NOTE: This only works if the emailFrom domain is verified in GHL Email Services
-            // or if the user has configured a custom SMTP provider
+        if (type === "Email") {
+            payload.html = messageBody.replace(/\n/g, "<br/>");
+            payload.subject = "Re: Your Inquiry";
             const locationEmail = (location as any).email || (location as any).ghlEmail;
             const locationName = location.name || location.domain;
-            if (locationEmail) {
-                payload.emailFrom = locationEmail;
-            }
-            if (locationName) {
-                payload.emailFromName = locationName;
-            }
+            if (locationEmail) payload.emailFrom = locationEmail;
+            if (locationName) payload.emailFromName = locationName;
         } else {
-            // SMS and WhatsApp use 'message'
             payload.message = messageBody;
         }
 
         const res = await sendMessage(location.ghlAccessToken, payload);
 
-        // Optimistic Sync: Save to DB immediately
         if (res?.messageId) {
             const messageId = res.messageId;
-            // Construct message object
             const msgData = {
-                messageId: messageId,
+                messageId,
                 ghlMessageId: messageId,
                 id: messageId,
-                conversationId: conversationId,
-                contactId: contactId,
-                body: type === 'Email' ? payload.html : payload.message,
-                type: type === 'Email' ? 'TYPE_EMAIL' : 'TYPE_SMS', // TODO: Map type
-                direction: 'outbound',
-                status: 'sent', // Assume sent
+                conversationId,
+                contactId,
+                body: type === "Email" ? payload.html : payload.message,
+                type: type === "Email" ? "TYPE_EMAIL" : "TYPE_SMS",
+                direction: "outbound",
+                status: "sent",
                 dateAdded: new Date(),
-                locationId: location.ghlLocationId
+                locationId: location.ghlLocationId,
             };
-            // Call sync
             await syncMessageFromWebhook(msgData);
         }
 
@@ -5715,10 +5493,10 @@ export async function sendReply(conversationId: string, contactId: string, messa
             type: "message.outbound",
             payload: { channel: type.toLowerCase() },
         });
-        return { success: true };
+        return { success: true as const };
     } catch (error) {
         console.error("sendMessage error:", error);
-        return { success: false, error };
+        return { success: false as const, error };
     }
 }
 

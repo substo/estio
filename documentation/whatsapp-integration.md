@@ -1,10 +1,10 @@
 # WhatsApp Integration: Custom Channel ("Linked Device")
-**Last Updated:** 2026-03-01
+**Last Updated:** 2026-03-24
 **Related:** [Legacy Integration](whatsapp-integration-legacy.md)
 
 ## Overview
 
-We use a **Custom Messaging Channel** (shadowed by Evolution API) to solve "Unsuccessful Message" errors and provide full 2-way sync with GoHighLevel (GHL).
+We use a **Custom Messaging Channel** (shadowed by Evolution API) to solve "Unsuccessful Message" errors and provide full 2-way sync with GoHighLevel (GHL), now with a durable outbound outbox for reliable queue-first delivery.
 
 > [!NOTE]
 > **Evolution-only media support (images, audio & documents)** is implemented in this integration. Media is stored in a **private Cloudflare R2 bucket** (`whatsapp-media`) and served to the UI through an app-authenticated attachment route. The Twilio/Meta WhatsApp implementations were not changed.
@@ -20,6 +20,7 @@ We use a **Hybrid Approach**:
 2.  **2-Way Sync**: Messages sent from the GHL UI are relayed to WhatsApp; messages received on WhatsApp are pushed to GHL.
 3.  **Correct Type**: Messages appear as "WhatsApp Linked" (or Custom SMS) rather than generic "SMS".
 4.  **Private Media Storage**: WhatsApp media received/sent through the App UI (Evolution path) is stored privately in Cloudflare R2 and exposed only via short-lived signed URLs.
+5.  **Durable Delivery Path**: App outbound sends are persisted first (`Message` + `WhatsAppOutboundOutbox`) and dispatched asynchronously, so UI ack is immediate and retries are resilient.
 
 ### Message Flow
 
@@ -35,22 +36,44 @@ We use a **Hybrid Approach**:
 1.  **User Action**: User sends a message in the App's custom UI.
     -   **Text**: `sendReply(...)`
     -   **Media (Evolution-only)**: paperclip upload flow (images/audio/documents) + voice recorder in the chat window
-2.  **Client Pattern (fire-and-forget + optimistic reconciliation)**:
-    -   An optimistic message (`status: 'sending'`) is appended to the chat UI immediately.
-    -   The `sendReply(...)` server action is called **non-blocking** (`.then()/.catch()`). The UI is free instantly.
-    -   On success, the client fetches only the latest 5 messages to swap the optimistic stub for the real DB message.
-    -   On failure, the optimistic message is marked `status: 'failed'` with a red badge.
-3.  **Text Path**: Server calls `evolutionClient.sendMessage(...)`.
-4.  **Media Path (Evolution-only)**:
+2.  **Queue-First Server ACK (non-blocking)**:
+    -   WhatsApp send actions use read-only auth (`requireGhlToken: false`) on the send-critical path.
+    -   `sendReply(...)` / `sendWhatsAppMediaReply(...)` create one local `Message` row (`status: 'sending'`, stable `clientMessageId`) and one `WhatsAppOutboundOutbox` row in the same DB transaction.
+    -   The action returns immediately with:
+        -   `success: true`
+        -   `queued: true`
+        -   `messageId`
+        -   `clientMessageId`
+        -   `outboxJobId`
+3.  **Typing-Aware Scheduling at Enqueue Time**:
+    -   `scheduledAt = messageCreatedAt + computedTypingDelay`.
+    -   If last inbound activity is older than `WHATSAPP_TYPING_IDLE_BYPASS_MS` (default `120000`), delay is bypassed (`0`).
+    -   Otherwise delay is length-based (word/char + punctuation pause + deterministic jitter), clamped by:
+        -   `WHATSAPP_TYPING_MIN_DELAY_MS` (default `250`)
+        -   `WHATSAPP_TYPING_MAX_DELAY_MS` (default `4500`)
+    -   Retry attempts bypass typing delay (`0`) to prioritize delivery.
+4.  **Dispatch Worker Path (BullMQ + durable outbox)**:
+    -   Worker reads due rows (`pending` / `failed`) where `scheduledAt <= now`.
+    -   Worker sends via Evolution:
+        -   Text: `evolutionClient.sendMessage(...)`
+        -   Media: `evolutionClient.sendMedia(...)` (with short-lived signed R2 `GET`)
+    -   On success:
+        -   message updated with `wamId`, `status: 'sent'`
+        -   outbox row marked `completed`
+        -   realtime `message.outbound` + `message.status` published
+        -   conversation last-message summary updated
+        -   GHL sync runs async best-effort **after** Evolution success
+5.  **Media Path (Evolution-only)**:
     -   App calls `createWhatsAppMediaUploadUrl(...)` to get a short-lived presigned **R2 `PUT` URL**.
     -   Browser uploads the file directly to the private `whatsapp-media` bucket.
     -   App calls `sendWhatsAppMediaReply(...)`.
-    -   Server validates the upload, signs a short-lived **R2 `GET` URL**, then calls `evolutionClient.sendMedia(...)`.
-    -   Server creates the local `Message` plus `MessageAttachment` row (stored as `r2://bucket/key`).
-5.  **Server Deferred Work (fire-and-forget)**:
-    -   `updateConversationLastMessage(...)` runs in background (does not block response).
-    -   GHL sync: Server calls GHL API `POST /conversations/messages` with `type: 'Custom'` and `conversationProviderId` (also fire-and-forget).
-    -   For media sends, GHL currently receives placeholder/caption text (`[Image]`, `[Audio]`, `[Document]`, or caption text for images/documents); the binary attachment remains in our app/R2 storage.
+    -   Server validates upload metadata/object ownership, then enqueues outbox payload (object key + mime + filename + caption).
+    -   Local `MessageAttachment` row is persisted immediately as `r2://...` so UI bubble remains stable while queued.
+6.  **Retry/Recovery Path**:
+    -   Retryable failures move row to `failed` with exponential backoff + jitter (up to `WHATSAPP_OUTBOX_MAX_ATTEMPTS`, default `6`).
+    -   Terminal failures move row to `dead` and message status to `failed`.
+    -   Stale `processing` locks are recovered (`WHATSAPP_OUTBOX_STALE_LOCK_MS`, default `300000`).
+    -   Cron fallback (`GET /api/cron/whatsapp-outbound`) re-enqueues due rows if worker init/queue push failed during request handling.
 
 #### C. Inbound (WhatsApp -> GHL)
 1.  **Webhook**: Evolution API sends `MESSAGES_UPSERT` to `POST /api/webhooks/evolution`.
@@ -64,13 +87,13 @@ We use a **Hybrid Approach**:
 5.  **JIT Sync**: Server ensures the contact exists in GHL (`ensureRemoteContact`).
 6.  **GHL Push**: Server pushes the inbound message to GHL using `type: 'Custom'` and `conversationProviderId` (caption or placeholder text for media).
 
-## Architecture V2 (Jan-Feb 2026 Updates)
+## Architecture V2 (Jan-Mar 2026 Updates)
 
 To handle high-volume sync and rate limits, we introduced a **Queue-Based Architecture**:
 
 ### 1. BullMQ & Redis Queues
-- **Purpose**: Use persistent background queues for both GHL rate-limiting and unresolved LID retries.
-- **Reuse**: `whatsapp-lid-resolve` reuses the same BullMQ + Redis infrastructure already used by `ghl-sync`.
+- **Purpose**: Use persistent background queues for GHL rate-limiting, unresolved LID retries, and durable outbound WhatsApp dispatch.
+- **Reuse**: `whatsapp-lid-resolve` and `whatsapp-outbound` reuse the same BullMQ + Redis infrastructure already used by `ghl-sync`.
 - **`ghl-sync` Queue**:
   - Outbound sync to GHL runs through BullMQ to avoid `429 Too Many Requests`.
   - Worker rate is limited to **5 jobs per second**.
@@ -78,9 +101,13 @@ To handle high-volume sync and rate limits, we introduced a **Queue-Based Archit
   - Inbound 1:1 messages with unresolved `@lid` are deferred instead of immediately creating placeholder contacts.
   - Retries run on a fixed delay until mapping is available.
   - Jobs survive process restarts because payload is in Redis.
+- **`whatsapp-outbound` Queue**:
+  - Dispatches durable outbox rows created by `sendReply(...)` / `sendWhatsAppMediaReply(...)`.
+  - Queue job IDs are deterministic (`outbox:{outboxId}`) to avoid duplicate enqueues.
+  - Worker concurrency is configurable (`WHATSAPP_OUTBOUND_WORKER_CONCURRENCY`, default `2`).
 - **Infrastructure**: Redis is required (`REDIS_HOST`, `REDIS_PORT`, default `127.0.0.1:6379`).
 - **Worker Bootstrap**:
-  - `instrumentation.ts` initializes the LID worker at app startup.
+  - `instrumentation.ts` initializes both LID + outbound workers at app startup.
   - `app/api/webhooks/evolution/route.ts` also calls init as a safety net per runtime.
 
 ### 2. Full History Sync
@@ -227,21 +254,48 @@ To improve operational responsiveness during active WhatsApp handling in `/admin
 - **Live Active Thread Refresh**: If the selected conversation summary changes (`lastMessageDate`/`lastMessageBody`), the message timeline is re-fetched silently.
 - **Auto-scroll to Latest**: `ChatWindow` already auto-scrolls to bottom on message updates, so live inbound messages remain visible in the active thread.
 
-### 10. Realtime Delivery/Read Status Fast Path (Mar 24, 2026)
+### 10. Outbound Reconciliation + Realtime Status Fast Path (Mar 24, 2026)
 
-To make WhatsApp delivery lifecycle updates (`sent` -> `delivered` -> `read`) appear immediately in `/admin/conversations`, the Evolution status-update flow now emits realtime conversation events after status persistence.
+This rollout removed "queued then disappears" races and made outbound status updates deterministic for WhatsApp via Evolution.
 
-- **Webhook source**: `MESSAGES_UPDATE` / `MESSAGES.UPDATE` in `POST /api/webhooks/evolution`
-- **Status persistence**: `processStatusUpdate(wamId, status)` updates local `Message.status`
-- **Realtime emit**: after successful update, publish `message.status` to the conversations SSE channel with payload:
-  - `messageId` (WAM ID)
-  - normalized `status`
-  - `rawStatus`
-- **Client behavior**: existing conversations realtime consumer handles this envelope and triggers a fast refresh path for the active thread, so delivery/read checkmarks update without waiting for polling.
+#### 10.1 Deterministic Correlation Keys
+- Message payloads now include:
+  - `messageId` (internal `Message.id`)
+  - `clientMessageId` (stable client-generated correlation ID)
+  - `wamId` (Evolution/WhatsApp message ID when available)
+- UI and server reconciliation both key on `messageId` / `clientMessageId` / `wamId`, not body-text matching.
 
-Related hardening included in the same rollout:
-- **Earlier realtime publish for inbound/outbound message writes**: `processNormalizedMessage(...)` now emits realtime right after local DB message+conversation update, before slower downstream side-effects (e.g., CRM sync), reducing perceived latency.
-- **Verbose webhook payload logs are now gated** behind `WHATSAPP_WEBHOOK_VERBOSE_LOGGING=true` to avoid expensive JSON logging on every webhook by default.
+#### 10.2 Non-Disappearing Optimistic UI
+- The conversations UI keeps a per-conversation pending map for unresolved outbound messages.
+- Incoming workspace snapshots are merged with pending locals (not full-overwritten), so active poll/realtime refresh cannot remove optimistic bubbles.
+- Pending detection uses outbox/send states (`pending|processing|failed` outbox; `queued|sending|retrying` sendState).
+
+#### 10.3 Incremental Realtime Patching (No forced full refresh)
+- SSE `message.status` and `message.outbound` events are applied as in-memory targeted patches when correlation keys match.
+- Full-thread refresh is now fallback-only for unknown IDs / consistency repair cases.
+- Delivery lifecycle (`sent -> delivered -> read`) appears immediately without waiting for polling.
+
+#### 10.4 Webhook/Outbox Idempotency Hardening
+- For outbound webhooks (`fromMe`), sync attempts to reconcile to an existing pending app-originated message before creating a new row.
+- Heuristic adopt path updates existing local message (`wamId`, `status`) and marks its outbox row `completed`.
+- Duplicate unique-key conflicts (`P2002`) on `wamId` are treated as success paths (no user-visible failure).
+
+Related hardening in same rollout:
+- Earlier realtime publish for inbound/outbound local writes (`processNormalizedMessage(...)`) before slower downstream side effects.
+- Verbose webhook payload logs are now gated behind `WHATSAPP_WEBHOOK_VERBOSE_LOGGING=true`.
+
+#### 10.5 Key Files (Outbound Durability + Reconciliation)
+
+| File | Role |
+|------|------|
+| `lib/whatsapp/outbound-enqueue.ts` | Enqueue-first transaction (`Message` + `WhatsAppOutboundOutbox`), typing delay scheduling, queue push fallback logic |
+| `lib/whatsapp/outbound-outbox.ts` | Outbox processor, retry/dead-letter policy, stale-lock recovery, post-success realtime + best-effort GHL sync |
+| `lib/queue/whatsapp-outbound.ts` | BullMQ queue/worker bootstrap and due-job enqueue helpers |
+| `app/api/cron/whatsapp-outbound/route.ts` | Cron sweeper fallback to recover due/pending rows and stale locks |
+| `lib/whatsapp/outbound-typing.ts` | Dynamic typing simulation policy used at enqueue time |
+| `app/(main)/admin/conversations/actions.ts` | Queue-first send actions + outbound state hydration in `fetchMessages(...)` |
+| `app/(main)/admin/conversations/_components/conversation-interface.tsx` | Pending-map merge, deterministic message reconciliation, incremental realtime status patching |
+| `lib/whatsapp/sync.ts` | Outbound webhook idempotent adopt path and realtime status emission |
 
 ## Setup Guide
 
@@ -266,6 +320,20 @@ REDIS_HOST=127.0.0.1
 REDIS_PORT=6379
 WHATSAPP_LID_RETRY_INTERVAL_MS=30000
 WHATSAPP_LID_MAX_ATTEMPTS=240
+WHATSAPP_OUTBOUND_WORKER_CONCURRENCY=2
+WHATSAPP_OUTBOX_MAX_ATTEMPTS=6
+WHATSAPP_OUTBOX_STALE_LOCK_MS=300000
+WHATSAPP_OUTBOUND_EVOLUTION_TIMEOUT_MS=12000
+
+# Typing simulation (dynamic enqueue scheduling)
+WHATSAPP_TYPING_SIMULATION_ENABLED=true
+WHATSAPP_TYPING_IDLE_BYPASS_MS=120000
+WHATSAPP_TYPING_MIN_DELAY_MS=250
+WHATSAPP_TYPING_MAX_DELAY_MS=4500
+WHATSAPP_TYPING_PER_WORD_MS=180
+WHATSAPP_TYPING_PER_CHAR_MS=22
+WHATSAPP_TYPING_PUNCTUATION_PAUSE_MS=120
+WHATSAPP_TYPING_JITTER_PCT=0.15
 
 # Cloudflare R2 (private WhatsApp media storage)
 R2_ACCOUNT_ID=...
@@ -278,6 +346,8 @@ APP_ENV=production
 ```
 
 `WHATSAPP_LID_RETRY_INTERVAL_MS` and `WHATSAPP_LID_MAX_ATTEMPTS` control deferred LID retry behavior.
+`WHATSAPP_OUTBOX_*` and `WHATSAPP_OUTBOUND_*` control outbound queue delivery/retry behavior.
+`WHATSAPP_TYPING_*` controls enqueue-time typing simulation and idle bypass policy.
 The code also accepts `CLOUDFLARE_R2_*` aliases (and optional `R2_ENDPOINT` / `CLOUDFLARE_R2_ENDPOINT` overrides).
 
 #### 2a. Cloudflare R2 CORS (Required for Browser Uploads)
@@ -304,9 +374,17 @@ Example CORS policy (adjust origins for local/staging/prod):
 > Keep the bucket **private**. The app serves attachments via `GET /api/media/attachments/{attachmentId}`, which validates the current location session and then redirects to a short-lived signed R2 URL.
 
 ### 3. Status Tracking & Resend Logic
-We track message delivery status (`sent`, `delivered`, `read`, `failed`) by listening to Evolution API's `messages.update` webhook event.
-- **Mapping**: Evolution statuses (SERVER_ACK, DELIVERY_ACK, READ) map to our DB status enum.
-- **Resend**: A server action `resendMessage(messageId)` allows retrying failed messages. It re-uses the existing DB record but generates a new `wamId`.
+We track outbound lifecycle through both `Message.status` and `WhatsAppOutboundOutbox.status`.
+
+- **Outbox states**: `pending -> processing -> completed` (success path), with `failed` (retryable) and `dead` (terminal).
+- **Send-state mapping exposed to UI**:
+  - outbox `pending` -> `queued`
+  - outbox `processing` -> `sending`
+  - outbox `failed` -> `retrying`
+  - outbox `completed` -> `sent`
+  - outbox `dead` -> `failed`
+- **Delivery/read mapping**: Evolution status updates (`SERVER_ACK`, `DELIVERY_ACK`, `READ`, `PLAYED`, `FAILED`) are normalized into local `Message.status` and emitted as realtime `message.status`.
+- **Idempotent duplicate handling**: duplicate webhook/outbox acks are treated as success if `wamId` already exists locally.
 
 ## Troubleshooting & Fixes
 
@@ -314,6 +392,9 @@ We track message delivery status (`sent`, `delivered`, `read`, `failed`) by list
 |-------|-----|
 | **"Unsuccessful" Message** | Ensure you are using the Custom Channel ID and not `type: 'WhatsApp'`. Verify `GHL_CUSTOM_PROVIDER_ID` in `.env`. |
 | **Duplicates in GHL** | Check loop prevention logic in `custom-provider/route.ts`. Ensure `wamId` is stored before generic sync runs. |
+| **Queued bubble appears then disappears from thread** | Verify client reconciliation is using correlation keys (`messageId` / `clientMessageId` / `wamId`) and pending-map merge path. Also verify `fetchMessages(...)` payload includes `clientMessageId`, `sendState`, and `outboxState`. |
+| **Outbound sends feel delayed before dispatch** | Check typing policy envs (`WHATSAPP_TYPING_*`) and idle-bypass behavior (`WHATSAPP_TYPING_IDLE_BYPASS_MS`). For urgent rollout disable simulation with `WHATSAPP_TYPING_SIMULATION_ENABLED=false`. |
+| **Queued messages never dispatch** | Check Redis + worker health (`whatsapp-outbound`), then run cron fallback (`/api/cron/whatsapp-outbound`) and inspect outbox lock recovery (`WHATSAPP_OUTBOX_STALE_LOCK_MS`). |
 | **QR Code Persists after Scan** | This is usually a sync delay. **Fix**: Refresh the page. The new "Self-Healing" logic will detect the connection and remove the QR code. |
 | **Evolution API Crash Loop** | **Error P2000**: "Value too long". Occurs if a Contact name or Profile Pic URL exceeds 191 chars. **Fix**: Manually altered the Postgres `Contact` table columns (`pushName`, `profilePicUrl`) to `TEXT` (unlimited length). |
 | **Duplicate Conversations (Same Contact)** | **Issue**: Race conditions can create multiple conversations for one contact. **Fix**: Run `scripts/merge-same-contact-conversations.ts` to merge them. **Prevention**: Logic updated to search last 2 digits for robust matching (`sync.ts`). |
@@ -466,12 +547,21 @@ WhatsApp APIs never include the `+` prefix. We follow **E.164** as the standard 
 
 ## Data Model (Prisma)
 
+Latest outbound architecture requires Prisma migration:
+- `prisma/migrations/20260324210000_whatsapp_outbound_outbox/migration.sql`
 
-No Prisma migration was required for the Evolution image/R2 feature, but we now rely on:
+Core fields/models used by WhatsApp Evolution flow:
 -   `Location.evolutionInstanceId`
 -   `Contact.ghlContactId`
 -   `Contact.lid` — WhatsApp Lightweight ID for LID-to-phone mapping.
+-   `Message.clientMessageId` (unique optimistic/reconcile key)
 -   `Message.ghlMessageId` / `Message.wamId` mapping.
+-   `Message.outboundWhatsAppOutbox` (1:1 relation to durable outbound row)
+-   `WhatsAppOutboundOutbox`:
+    - `status`: `pending | processing | completed | failed | dead`
+    - `scheduledAt`, `lockedAt`, `lockedBy`, `processedAt`
+    - `attemptCount`, `lastError`, `idempotencyKey`
+    - `payload` snapshot (typing policy + outbound metadata)
 -   `Message.attachments` / `MessageAttachment` for WhatsApp media files (image/audio/document).
     -   For R2-backed attachments, `MessageAttachment.url` stores an internal `r2://bucket/key` URI.
     -   The UI receives `/api/media/attachments/{attachmentId}` URLs (signed at request time).

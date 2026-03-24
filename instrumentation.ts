@@ -18,6 +18,13 @@ export async function register() {
             } catch (err) {
                 console.error('[QueueBootstrap] Failed to initialize WhatsApp LID worker:', err);
             }
+
+            try {
+                const { initWhatsAppOutboundWorker } = await import('@/lib/queue/whatsapp-outbound');
+                await initWhatsAppOutboundWorker();
+            } catch (err) {
+                console.error('[QueueBootstrap] Failed to initialize WhatsApp outbound worker:', err);
+            }
         }
 
         if (processRole === 'scrape-worker' || processRole === 'all') {
