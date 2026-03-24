@@ -227,6 +227,22 @@ To improve operational responsiveness during active WhatsApp handling in `/admin
 - **Live Active Thread Refresh**: If the selected conversation summary changes (`lastMessageDate`/`lastMessageBody`), the message timeline is re-fetched silently.
 - **Auto-scroll to Latest**: `ChatWindow` already auto-scrolls to bottom on message updates, so live inbound messages remain visible in the active thread.
 
+### 10. Realtime Delivery/Read Status Fast Path (Mar 24, 2026)
+
+To make WhatsApp delivery lifecycle updates (`sent` -> `delivered` -> `read`) appear immediately in `/admin/conversations`, the Evolution status-update flow now emits realtime conversation events after status persistence.
+
+- **Webhook source**: `MESSAGES_UPDATE` / `MESSAGES.UPDATE` in `POST /api/webhooks/evolution`
+- **Status persistence**: `processStatusUpdate(wamId, status)` updates local `Message.status`
+- **Realtime emit**: after successful update, publish `message.status` to the conversations SSE channel with payload:
+  - `messageId` (WAM ID)
+  - normalized `status`
+  - `rawStatus`
+- **Client behavior**: existing conversations realtime consumer handles this envelope and triggers a fast refresh path for the active thread, so delivery/read checkmarks update without waiting for polling.
+
+Related hardening included in the same rollout:
+- **Earlier realtime publish for inbound/outbound message writes**: `processNormalizedMessage(...)` now emits realtime right after local DB message+conversation update, before slower downstream side-effects (e.g., CRM sync), reducing perceived latency.
+- **Verbose webhook payload logs are now gated** behind `WHATSAPP_WEBHOOK_VERBOSE_LOGGING=true` to avoid expensive JSON logging on every webhook by default.
+
 ## Setup Guide
 
 ### 1. Create GHL Marketplace App (Once per Agency)

@@ -796,6 +796,19 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         // Helper handles inbound unread increment
     });
 
+    // Emit realtime event immediately after local write path completes.
+    // External sync (GHL, AI side effects) can continue without blocking UI freshness.
+    void publishConversationRealtimeEvent({
+        locationId,
+        conversationId: conversation.ghlConversationId,
+        type: direction === "inbound" ? "message.inbound" : "message.outbound",
+        payload: {
+            direction,
+            messageType: "whatsapp",
+            messageId: wamId,
+        },
+    });
+
     // --- GHL 2-Way Sync ---
     try {
         // Location already fetched as locationDef
@@ -884,17 +897,6 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         }).catch(e => console.error("[Semi-Auto] Event bus import error:", e));
     }
 
-    void publishConversationRealtimeEvent({
-        locationId,
-        conversationId: conversation.ghlConversationId,
-        type: direction === "inbound" ? "message.inbound" : "message.outbound",
-        payload: {
-            direction,
-            messageType: "whatsapp",
-            messageId: wamId,
-        },
-    });
-
     return { status: 'processed' };
 }
 
@@ -925,10 +927,39 @@ export async function processStatusUpdate(wamId: string, rawStatus: string) {
 
     console.log(`[WhatsApp Sync] Updating status for ${wamId}: ${rawStatus} -> ${status}`);
 
-    await db.message.updateMany({
+    const updateResult = await db.message.updateMany({
         where: { wamId },
         data: { status: status }
     });
+
+    if (updateResult.count > 0) {
+        const messageWithConversation = await db.message.findFirst({
+            where: { wamId },
+            select: {
+                conversation: {
+                    select: {
+                        ghlConversationId: true,
+                        locationId: true,
+                    },
+                },
+            },
+        });
+
+        const conversationId = messageWithConversation?.conversation?.ghlConversationId;
+        const locationId = messageWithConversation?.conversation?.locationId;
+        if (conversationId && locationId) {
+            void publishConversationRealtimeEvent({
+                locationId,
+                conversationId,
+                type: "message.status",
+                payload: {
+                    messageId: wamId,
+                    status,
+                    rawStatus,
+                },
+            });
+        }
+    }
 
     // TODO: Sync Status to GHL if supported
     // GHL API might not support updating status of injected messages easily.

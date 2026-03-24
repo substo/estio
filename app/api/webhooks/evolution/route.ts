@@ -10,12 +10,16 @@ export async function POST(req: NextRequest) {
         const body = await req.json();
 
         const eventType = (body.event || '').toUpperCase();
+        const verboseWebhookLogs = process.env.WHATSAPP_WEBHOOK_VERBOSE_LOGGING === 'true';
 
         // Log payload to file if enabled (for debugging)
         logWebhookPayload(eventType, body);
 
-        console.log("Evolution Webhook Payload:", JSON.stringify(body, null, 2));
-        if (body.data) console.log("Evolution Webhook Data:", JSON.stringify(body.data, null, 2));
+        console.log(`[Evolution Webhook] Event=${eventType || 'unknown'} Instance=${body.instance || 'unknown'}`);
+        if (verboseWebhookLogs) {
+            console.log("Evolution Webhook Payload:", JSON.stringify(body, null, 2));
+            if (body.data) console.log("Evolution Webhook Data:", JSON.stringify(body.data, null, 2));
+        }
 
         const instanceName = body.instance;
 
@@ -85,7 +89,9 @@ export async function POST(req: NextRequest) {
 
             // --- LID Handling ---
             if (isGroup) {
-                console.log("[Evolution Debug] Group Message Payload:", JSON.stringify(msg, null, 2));
+                if (verboseWebhookLogs) {
+                    console.log("[Evolution Debug] Group Message Payload:", JSON.stringify(msg, null, 2));
+                }
 
                 // Group Name Handling
                 // We leave contactName undefined if we don't know the Group Name yet.

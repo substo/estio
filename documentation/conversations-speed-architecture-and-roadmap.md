@@ -44,6 +44,7 @@ Main causes identified:
 | 2026-03-10 | `11420df` | Instant open via progressive hydration + no visible scroll jank. |
 | 2026-03-20 | `2e54c54` | Fire-and-forget outbound send with optimistic reconciliation. |
 | 2026-03-20 | `52e82e5` | Optimistic unread badge clearance override during list polling. |
+| 2026-03-24 | `working tree` | WhatsApp realtime fast path: emit message events earlier in sync flow + publish realtime status updates (`message.status`) on delivery/read transitions. |
 | 2026-03-24 | `working tree` | Paste Lead fast path: read-only auth on parse/import, bounded parse payload, and detached autosync/trace/orchestration side effects. |
 
 ## Current Architecture (As Implemented)
@@ -112,6 +113,7 @@ Implemented SSE channel: `/api/conversations/events`
   - reject older timestamp for same conversation
 - automatic fallback to polling if SSE remains unhealthy/disconnected (>10s)
 - reconnect triggers a single delta resync
+- WhatsApp delivery lifecycle updates now emit realtime `message.status` events after local status persistence, so sent/delivered/read indicators update without waiting for polling.
 
 ### 6) Outbound Message Send Pipeline (Mar 2026)
 `handleSendMessage` uses **fire-and-forget + optimistic reconciliation**:
