@@ -68,6 +68,51 @@ The Prospecting stack was updated to remove non-deterministic triage behavior an
   - `All`, `Private`, `Agency`, `Management`, `Developer`, `Other`
 - Filter is query-param driven and server-side in repositories/loaders for deterministic refresh behavior.
 
+### 7) Action/UI contract updates completed
+
+- `acceptProspectWithListings` / listing accept now returns typed responses:
+  - success payload includes imported/skipped counts and optional `companyId`
+  - non-success payload includes structured `code`, `message`, optional `companyLinkOptions`
+- Company link dialog was generalized for reuse in fallback acceptance flows:
+  - supports externally supplied options
+  - supports custom submit callback/label
+- Contacts detail panel seller classification control upgraded from boolean toggle to full typed override (`auto/private/agency/management/developer/other`).
+
+### 8) Repositories and status normalization finalized
+
+- Prospect/listing repositories now project all link fields needed by deterministic UI:
+  - `createdContactId`, `importedPropertyId`, effective seller type, staged/linked company metadata
+- New shared status helper (`prospecting-status`) centralizes normalized decision state:
+  - prevents case/format drift (`NEW/new/REVIEWING/IMPORTED/REJECTED`)
+  - ensures accepted/rejected prospect context overrides stale listing-level statuses
+
+### 9) Verification performed for this rollout
+
+- Local checks completed:
+  - Type check: `npx tsc --noEmit` (with expanded memory)
+  - Build: `npm run build`
+  - Unit tests: seller type + prospecting status helper tests
+- Deployment checks completed:
+  - commit + push
+  - blue/green deploy via `deploy-local-build.sh`
+  - health checks for root, conversations route (auth redirect), and tenant domain
+
+### 10) Production incident + remediation recorded
+
+After initial deploy, `/admin/prospecting` crashed with a Server Components error due database/schema drift:
+
+- Root cause:
+  - Prisma `P2022`: missing `ProspectLead.sellerType` column in production DB
+  - surfaced as global app error with digest in production UI
+- Why:
+  - app deployed with new code paths before DB schema in production included new fields
+- Remediation:
+  - production schema synchronized using Prisma db push with project-compatible Prisma version (`6.19.x`)
+  - route rechecked and no new `P2022` sellerType errors appeared in fresh PM2 logs
+
+> [!IMPORTANT]
+> For future releases that add required fields used in render paths, schema rollout must complete before or atomically with traffic cutover.
+
 ---
 
 ## 2.1 Scraping Connection & Task Configuration
