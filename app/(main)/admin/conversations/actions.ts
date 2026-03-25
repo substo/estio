@@ -3398,6 +3398,7 @@ async function fetchEvolutionMessagesForContactHistory(params: {
     messages: any[];
     remoteJid: string | null;
     candidates: string[];
+    fetchedFrom: string[];
     isGroup: boolean;
     phoneDigits: string;
 }> {
@@ -3409,20 +3410,63 @@ async function fetchEvolutionMessagesForContactHistory(params: {
     );
 
     if (candidates.length === 0) {
-        return { messages: [], remoteJid: null, candidates, isGroup, phoneDigits };
+        return { messages: [], remoteJid: null, candidates, fetchedFrom: [], isGroup, phoneDigits };
     }
 
+    const aggregated: any[] = [];
+    const fetchedFrom: string[] = [];
     let lastTried: string | null = null;
+
     for (const candidate of candidates) {
         lastTried = candidate;
         console.log(`${logPrefix} Fetching messages for ${candidate} (Limit: ${limit}, Offset: ${offset})...`);
         const messages = await evolutionClient.fetchMessages(evolutionInstanceId, candidate, limit, offset);
-        if ((messages || []).length > 0) {
-            return { messages, remoteJid: candidate, candidates, isGroup, phoneDigits };
+        if (Array.isArray(messages) && messages.length > 0) {
+            fetchedFrom.push(candidate);
+            aggregated.push(...messages);
         }
     }
 
-    return { messages: [], remoteJid: lastTried, candidates, isGroup, phoneDigits };
+    if (aggregated.length === 0) {
+        return { messages: [], remoteJid: lastTried, candidates, fetchedFrom: [], isGroup, phoneDigits };
+    }
+
+    const seen = new Set<string>();
+    const deduped: any[] = [];
+
+    for (const message of aggregated) {
+        const keyId = String(message?.key?.id || message?.keyId || message?.messageId || "").trim();
+        const remoteJid = String(message?.key?.remoteJid || "").trim();
+        const timestamp = Number(message?.messageTimestamp || message?.timestamp || 0);
+        const fallback = String(
+            message?.message?.conversation ||
+            message?.message?.extendedTextMessage?.text ||
+            message?.body ||
+            ""
+        ).trim();
+        const dedupeKey = keyId
+            ? `id:${keyId}`
+            : `fallback:${remoteJid}:${timestamp}:${fallback}`;
+
+        if (seen.has(dedupeKey)) continue;
+        seen.add(dedupeKey);
+        deduped.push(message);
+    }
+
+    deduped.sort((a, b) => {
+        const ta = Number(a?.messageTimestamp || a?.timestamp || 0);
+        const tb = Number(b?.messageTimestamp || b?.timestamp || 0);
+        return tb - ta;
+    });
+
+    return {
+        messages: deduped,
+        remoteJid: fetchedFrom[0] || lastTried,
+        candidates,
+        fetchedFrom,
+        isGroup,
+        phoneDigits
+    };
 }
 
 const WHATSAPP_MEDIA_REFETCH_BATCH_SIZE = 50;
@@ -4690,6 +4734,7 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
             messages: evolutionMessages,
             remoteJid,
             candidates: remoteJidCandidates,
+            fetchedFrom: fetchedRemoteJids,
             phoneDigits: phone,
         } = await fetchEvolutionMessagesForContactHistory({
             evolutionClient,
@@ -4705,7 +4750,7 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
         });
 
         console.log(
-            `[Sync] History fetch candidates for ${conversationId}: ${remoteJidCandidates.join(", ") || "(none)"}; selected=${remoteJid || "none"}; found=${evolutionMessages.length}; ignoreDupes=${ignoreDuplicates}`
+            `[Sync] History fetch candidates for ${conversationId}: ${remoteJidCandidates.join(", ") || "(none)"}; fetchedFrom=${fetchedRemoteJids.join(", ") || "none"}; primary=${remoteJid || "none"}; found=${evolutionMessages.length}; ignoreDupes=${ignoreDuplicates}`
         );
 
         // --- Auto-resolve LID placeholder contacts ---
@@ -8179,7 +8224,7 @@ export async function startNewConversation(phone: string) {
                     const { processNormalizedMessage } = await import("@/lib/whatsapp/sync");
 
                     const whatsappPhone = rawDigits;
-                    const { messages, remoteJid, candidates } = await fetchEvolutionMessagesForContactHistory({
+                    const { messages, remoteJid, candidates, fetchedFrom } = await fetchEvolutionMessagesForContactHistory({
                         evolutionClient,
                         evolutionInstanceId: location.evolutionInstanceId,
                         contact: {
@@ -8192,7 +8237,7 @@ export async function startNewConversation(phone: string) {
                         logPrefix: `[NewConversation][existing:${existingConv.ghlConversationId}]`,
                     });
                     console.log(
-                        `[NewConversation] Existing convo history candidates: ${candidates.join(", ") || "(none)"}; selected=${remoteJid || "none"}; found=${messages.length}`
+                        `[NewConversation] Existing convo history candidates: ${candidates.join(", ") || "(none)"}; fetchedFrom=${fetchedFrom.join(", ") || "none"}; primary=${remoteJid || "none"}; found=${messages.length}`
                     );
 
                     let imported = 0;
@@ -8292,7 +8337,7 @@ export async function startNewConversation(phone: string) {
                 const { processNormalizedMessage } = await import("@/lib/whatsapp/sync");
 
                 const whatsappPhone = rawDigits;
-                const { messages, remoteJid, candidates } = await fetchEvolutionMessagesForContactHistory({
+                const { messages, remoteJid, candidates, fetchedFrom } = await fetchEvolutionMessagesForContactHistory({
                     evolutionClient,
                     evolutionInstanceId: location.evolutionInstanceId,
                     contact: {
@@ -8305,7 +8350,7 @@ export async function startNewConversation(phone: string) {
                     logPrefix: `[NewConversation][new:${conversation.ghlConversationId}]`,
                 });
                 console.log(
-                    `[NewConversation] New convo history candidates: ${candidates.join(", ") || "(none)"}; selected=${remoteJid || "none"}; found=${messages.length}`
+                    `[NewConversation] New convo history candidates: ${candidates.join(", ") || "(none)"}; fetchedFrom=${fetchedFrom.join(", ") || "none"}; primary=${remoteJid || "none"}; found=${messages.length}`
                 );
 
                 for (const msg of (messages || [])) {
