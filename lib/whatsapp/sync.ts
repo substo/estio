@@ -247,7 +247,10 @@ async function tryReconcileOutboundWebhookToPendingMessage(args: {
     wamId: string;
     timestamp: Date;
 }) {
-    const candidateWindowStart = new Date(args.timestamp.getTime() - (20 * 60 * 1000));
+    // Narrowed window from 20min to 5min — legitimate sends complete in seconds
+    const RECONCILE_WINDOW_MS = 5 * 60 * 1000;
+    const AMBIGUITY_GAP_MS = 5000;
+    const candidateWindowStart = new Date(args.timestamp.getTime() - RECONCILE_WINDOW_MS);
     const candidates = await (db as any).message.findMany({
         where: {
             conversationId: args.conversationId,
@@ -278,12 +281,12 @@ async function tryReconcileOutboundWebhookToPendingMessage(args: {
         .sort((left: any, right: any) => left.diffMs - right.diffMs);
 
     const best = ranked[0];
-    if (!best || !Number.isFinite(best.diffMs) || best.diffMs > 20 * 60 * 1000) {
+    if (!best || !Number.isFinite(best.diffMs) || best.diffMs > RECONCILE_WINDOW_MS) {
         return null;
     }
 
     const second = ranked[1];
-    const ambiguous = !!second && Math.abs(Number(second.diffMs) - Number(best.diffMs)) < 1500;
+    const ambiguous = !!second && Math.abs(Number(second.diffMs) - Number(best.diffMs)) < AMBIGUITY_GAP_MS;
     if (ambiguous) {
         console.warn(`[WhatsApp Sync] Outbound webhook reconcile ambiguous for wamId=${args.wamId}; skipping heuristic adopt.`);
         return null;
@@ -407,37 +410,54 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
                 });
 
                 if (placeholder) {
-                    console.log(`[LID Capture] Found placeholder contact to merge: ${placeholder.name} (${placeholder.id})`);
+                    // --- SAFETY GUARD: Verify placeholder is truly a placeholder ---
+                    const isPlaceholder = !placeholder.phone && (placeholder.name || '').startsWith('WhatsApp User');
+                    if (!isPlaceholder) {
+                        console.warn(`[LID Merge Guard] Skipping merge: contact ${placeholder.id} ("${placeholder.name}", phone=${placeholder.phone}) is not a placeholder. LID=${lidRaw}`);
+                    } else {
+                        console.log(`[LID Capture] Found placeholder contact to merge: ${placeholder.name} (${placeholder.id})`);
 
-                    // Move conversations
-                    const placeholderConvos = await db.conversation.findMany({ where: { contactId: placeholder.id } });
+                        // --- SAFETY GUARD: Message count check ---
+                        const placeholderConvos = await db.conversation.findMany({ where: { contactId: placeholder.id } });
+                        let totalPlaceholderMessages = 0;
+                        for (const convo of placeholderConvos) {
+                            const count = await db.message.count({ where: { conversationId: convo.id } });
+                            totalPlaceholderMessages += count;
+                        }
 
-                    for (const convo of placeholderConvos) {
-                        const targetConvo = await db.conversation.findUnique({
-                            where: { locationId_contactId: { locationId, contactId: realContact.id } }
-                        });
-
-                        if (targetConvo) {
-                            // Move messages & delete old convo
-                            await db.message.updateMany({
-                                where: { conversationId: convo.id },
-                                data: { conversationId: targetConvo.id }
-                            });
-                            await db.conversation.delete({ where: { id: convo.id } });
-                            console.log(`[LID Capture] Merged conversation ${convo.id} -> ${targetConvo.id}`);
+                        if (totalPlaceholderMessages > 50) {
+                            console.warn(`[LID Merge Guard] Blocking merge: placeholder ${placeholder.id} has ${totalPlaceholderMessages} messages (threshold: 50). Manual review required. LID=${lidRaw}, realContact=${realContact.id}`);
                         } else {
-                            // Reassign
-                            await db.conversation.update({
-                                where: { id: convo.id },
-                                data: { contactId: realContact.id }
-                            });
-                            console.log(`[LID Capture] Reassigned conversation ${convo.id} to ${realContact.id}`);
+                            console.log(`[LID Merge Guard] Proceeding with merge: placeholder ${placeholder.id} has ${totalPlaceholderMessages} messages. Target: ${realContact.id} (${realContact.phone})`);
+
+                            for (const convo of placeholderConvos) {
+                                const targetConvo = await db.conversation.findUnique({
+                                    where: { locationId_contactId: { locationId, contactId: realContact.id } }
+                                });
+
+                                if (targetConvo) {
+                                    // Move messages & delete old convo
+                                    await db.message.updateMany({
+                                        where: { conversationId: convo.id },
+                                        data: { conversationId: targetConvo.id }
+                                    });
+                                    await db.conversation.delete({ where: { id: convo.id } });
+                                    console.log(`[LID Capture] Merged conversation ${convo.id} -> ${targetConvo.id}`);
+                                } else {
+                                    // Reassign
+                                    await db.conversation.update({
+                                        where: { id: convo.id },
+                                        data: { contactId: realContact.id }
+                                    });
+                                    console.log(`[LID Capture] Reassigned conversation ${convo.id} to ${realContact.id}`);
+                                }
+                            }
+
+                            // Delete placeholder
+                            await db.contact.delete({ where: { id: placeholder.id } });
+                            console.log(`[LID Capture] Deleted placeholder contact ${placeholder.id}`);
                         }
                     }
-
-                    // Delete placeholder
-                    await db.contact.delete({ where: { id: placeholder.id } });
-                    console.log(`[LID Capture] Deleted placeholder contact ${placeholder.id}`);
                 }
             }
         }
@@ -517,7 +537,8 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     // --- Enhanced Contact Lookup ---
     // 1. Clean the input phone to raw digits
     const rawInputPhone = contactPhone.replace(/\D/g, '');
-    const searchSuffix = rawInputPhone.length > 2 ? rawInputPhone.slice(-2) : rawInputPhone;
+    // Use last 7 digits for DB filter (was 2, which caused cross-contact false matches)
+    const searchSuffix = rawInputPhone.length > 7 ? rawInputPhone.slice(-7) : rawInputPhone;
 
     // --- Group Chat Handling ---
     let contactType = "Lead";
@@ -554,11 +575,12 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     const phoneMatchCandidate = candidates.find(c => {
         if (!c.phone) return false;
         const rawDbPhone = c.phone.replace(/\D/g, '');
-        return (
-            rawDbPhone === rawInputPhone ||
-            (rawDbPhone.endsWith(rawInputPhone) && rawInputPhone.length >= 7) ||
-            (rawInputPhone.endsWith(rawDbPhone) && rawDbPhone.length >= 7)
-        );
+        // Require exact match or at least 9-digit overlap to prevent cross-contact false positives
+        const exactMatch = rawDbPhone === rawInputPhone;
+        const minOverlap = 9;
+        const dbEndsWithInput = rawDbPhone.endsWith(rawInputPhone) && rawInputPhone.length >= minOverlap;
+        const inputEndsWithDb = rawInputPhone.endsWith(rawDbPhone) && rawDbPhone.length >= minOverlap;
+        return exactMatch || dbEndsWithInput || inputEndsWithDb;
     });
 
     let matchedByLid = false;
@@ -595,46 +617,64 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
             if (!targetPhoneContact) {
                 console.error(`[WhatsApp Sync] Failed to backfill phone on LID contact ${contact.id}:`, err?.message || err);
             } else {
-                console.log(`[WhatsApp Sync] Merging LID placeholder ${contact.id} into phone contact ${targetPhoneContact.id}`);
+                // --- SAFETY GUARD: Verify source contact is truly a placeholder ---
+                const isSourcePlaceholder = !contact.phone && (contact.name || '').startsWith('WhatsApp User');
+                if (!isSourcePlaceholder) {
+                    console.warn(`[LID Merge Guard] Skipping backfill merge: source contact ${contact.id} ("${contact.name}", phone=${contact.phone}) is not a placeholder`);
+                } else {
+                    console.log(`[WhatsApp Sync] Merging LID placeholder ${contact.id} into phone contact ${targetPhoneContact.id}`);
 
-                const sourceConvos = await db.conversation.findMany({
-                    where: { locationId, contactId: contact.id }
-                });
-
-                for (const sourceConvo of sourceConvos) {
-                    const targetConvo = await db.conversation.findUnique({
-                        where: {
-                            locationId_contactId: {
-                                locationId,
-                                contactId: targetPhoneContact.id
-                            }
-                        }
+                    const sourceConvos = await db.conversation.findMany({
+                        where: { locationId, contactId: contact.id }
                     });
 
-                    if (targetConvo) {
-                        await db.message.updateMany({
-                            where: { conversationId: sourceConvo.id },
-                            data: { conversationId: targetConvo.id }
-                        });
-                        await db.conversation.delete({ where: { id: sourceConvo.id } });
+                    // --- SAFETY GUARD: Message count check ---
+                    let sourceMsgCount = 0;
+                    for (const sourceConvo of sourceConvos) {
+                        sourceMsgCount += await db.message.count({ where: { conversationId: sourceConvo.id } });
+                    }
+
+                    if (sourceMsgCount > 50) {
+                        console.warn(`[LID Merge Guard] Blocking backfill merge: placeholder ${contact.id} has ${sourceMsgCount} messages (threshold: 50). Manual review required.`);
                     } else {
-                        await db.conversation.update({
-                            where: { id: sourceConvo.id },
-                            data: { contactId: targetPhoneContact.id }
+                        console.log(`[LID Merge Guard] Proceeding with backfill merge: ${sourceMsgCount} messages from ${contact.id} -> ${targetPhoneContact.id}`);
+
+                        for (const sourceConvo of sourceConvos) {
+                            const targetConvo = await db.conversation.findUnique({
+                                where: {
+                                    locationId_contactId: {
+                                        locationId,
+                                        contactId: targetPhoneContact.id
+                                    }
+                                }
+                            });
+
+                            if (targetConvo) {
+                                await db.message.updateMany({
+                                    where: { conversationId: sourceConvo.id },
+                                    data: { conversationId: targetConvo.id }
+                                });
+                                await db.conversation.delete({ where: { id: sourceConvo.id } });
+                            } else {
+                                await db.conversation.update({
+                                    where: { id: sourceConvo.id },
+                                    data: { contactId: targetPhoneContact.id }
+                                });
+                            }
+                        }
+
+                        await db.contact.delete({ where: { id: contact.id } });
+
+                        contact = await db.contact.update({
+                            where: { id: targetPhoneContact.id },
+                            data: {
+                                ...(msg.lid ? { lid: msg.lid } : {}),
+                                ...(shouldRename ? { name: nameToUse } : {})
+                            } as any
                         });
+                        console.log(`[WhatsApp Sync] Merged placeholder and linked LID ${msg.lid || '(none)'} to ${contact.id}`);
                     }
                 }
-
-                await db.contact.delete({ where: { id: contact.id } });
-
-                contact = await db.contact.update({
-                    where: { id: targetPhoneContact.id },
-                    data: {
-                        ...(msg.lid ? { lid: msg.lid } : {}),
-                        ...(shouldRename ? { name: nameToUse } : {})
-                    } as any
-                });
-                console.log(`[WhatsApp Sync] Merged placeholder and linked LID ${msg.lid || '(none)'} to ${contact.id}`);
             }
         }
     }

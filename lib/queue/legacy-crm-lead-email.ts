@@ -1,4 +1,5 @@
 import db from '@/lib/db';
+import { buildQueueJobId, isDuplicateQueueJobError } from '@/lib/queue/job-id';
 
 const REDIS_CONNECTION = {
     host: process.env.REDIS_HOST || '127.0.0.1',
@@ -35,7 +36,13 @@ async function getQueueInstance() {
             });
         })();
     }
-    return _queuePromise;
+
+    try {
+        return await _queuePromise;
+    } catch (error) {
+        _queuePromise = null;
+        throw error;
+    }
 }
 
 export async function initLegacyCrmLeadEmailWorker() {
@@ -80,22 +87,34 @@ export async function initLegacyCrmLeadEmailWorker() {
         return worker;
     })();
 
-    return _workerPromise;
+    try {
+        return await _workerPromise;
+    } catch (error) {
+        _workerPromise = null;
+        throw error;
+    }
 }
 
 export async function enqueueLegacyCrmLeadEmailProcessing(data: LegacyCrmLeadEmailJobData) {
+    const jobId = buildQueueJobId("legacy_crm_email", data.locationId, data.messageId);
+
     try {
         await initLegacyCrmLeadEmailWorker();
         const queue = await getQueueInstance();
-        const jobId = `${data.locationId}:${data.messageId}`;
-
-        return await queue.add(
-            'process-legacy-crm-lead-email',
-            data,
-            {
-                jobId,
+        try {
+            return await queue.add(
+                'process-legacy-crm-lead-email',
+                data,
+                {
+                    jobId,
+                }
+            );
+        } catch (queueAddError) {
+            if (isDuplicateQueueJobError(queueAddError)) {
+                return { alreadyQueued: true, jobId };
             }
-        );
+            throw queueAddError;
+        }
     } catch (queueError) {
         console.warn('[Queue] Failed to enqueue legacy CRM lead email job, falling back to inline processing:', queueError);
 

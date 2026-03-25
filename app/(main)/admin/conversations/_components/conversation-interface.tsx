@@ -3088,6 +3088,11 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     const ackClientMessageId = String((res as any).clientMessageId || optimisticClientMessageId).trim();
                     const outboxJobId = String((res as any).outboxJobId || "").trim();
                     const queued = !!(res as any).queued;
+                    const queueAccepted = (res as any).queueAccepted !== false;
+                    const dispatchMode = String((res as any).dispatchMode || "queued").trim();
+                    const fallbackSent = dispatchMode === "inline_fallback_sent";
+                    const degradedDelivery = !queueAccepted && queued && !fallbackSent;
+                    const warning = String((res as any).warning || "").trim();
 
                     setMessages((prev) => {
                         const next = prev.map((message) => {
@@ -3101,11 +3106,11 @@ export function ConversationInterface({ locationId, initialConversations, initia
                                 ...message,
                                 ...(ackMessageId ? { id: ackMessageId } : {}),
                                 clientMessageId: ackClientMessageId,
-                                status: queued ? 'sending' : 'sent',
-                                sendState: queued ? 'queued' : 'sent',
+                                status: fallbackSent ? 'sent' : (queued ? 'sending' : 'sent'),
+                                sendState: fallbackSent ? 'sent' : (degradedDelivery ? 'retrying' : (queued ? 'queued' : 'sent')),
                                 outboxState: {
                                     id: outboxJobId || (message as any)?.outboxState?.id || null,
-                                    status: queued ? 'pending' : 'completed',
+                                    status: fallbackSent ? 'completed' : (degradedDelivery ? 'failed' : (queued ? 'pending' : 'completed')),
                                 },
                             } as Message;
                         });
@@ -3113,6 +3118,18 @@ export function ConversationInterface({ locationId, initialConversations, initia
                         syncPendingMessagesForConversation(capturedConversationId, next);
                         return next;
                     });
+
+                    if (warning) {
+                        toast({
+                            title: 'WhatsApp delivery degraded',
+                            description: warning,
+                        });
+                    } else if (degradedDelivery) {
+                        toast({
+                            title: 'WhatsApp delivery degraded',
+                            description: 'Queue enqueue failed. Durable auto-recovery is active for this message.',
+                        });
+                    }
                 }
             })
             .catch((e: any) => {
@@ -3432,6 +3449,11 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     const ackMessageId = String((sendRes as any).messageId || "").trim();
                     const ackClientMessageId = String((sendRes as any).clientMessageId || optimisticClientMessageId).trim();
                     const outboxJobId = String((sendRes as any).outboxJobId || "").trim();
+                    const queueAccepted = (sendRes as any).queueAccepted !== false;
+                    const dispatchMode = String((sendRes as any).dispatchMode || "queued").trim();
+                    const fallbackSent = dispatchMode === "inline_fallback_sent";
+                    const degradedDelivery = !queueAccepted && !fallbackSent;
+                    const warning = String((sendRes as any).warning || "").trim();
 
                     setMessages((prev) => {
                         const next = prev.map((message) => {
@@ -3445,11 +3467,11 @@ export function ConversationInterface({ locationId, initialConversations, initia
                                 ...message,
                                 ...(ackMessageId ? { id: ackMessageId } : {}),
                                 clientMessageId: ackClientMessageId,
-                                status: 'sending',
-                                sendState: 'queued',
+                                status: fallbackSent ? 'sent' : 'sending',
+                                sendState: fallbackSent ? 'sent' : (degradedDelivery ? 'retrying' : 'queued'),
                                 outboxState: {
                                     id: outboxJobId || (message as any)?.outboxState?.id || null,
-                                    status: 'pending',
+                                    status: fallbackSent ? 'completed' : (degradedDelivery ? 'failed' : 'pending'),
                                 },
                             } as Message;
                         });
@@ -3457,6 +3479,18 @@ export function ConversationInterface({ locationId, initialConversations, initia
                         syncPendingMessagesForConversation(conversationTarget.id, next);
                         return next;
                     });
+
+                    if (warning) {
+                        toast({
+                            title: 'WhatsApp delivery degraded',
+                            description: warning,
+                        });
+                    } else if (degradedDelivery) {
+                        toast({
+                            title: 'WhatsApp delivery degraded',
+                            description: 'Queue enqueue failed. Durable auto-recovery is active for this media message.',
+                        });
+                    }
                 }
             } else {
                 if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
@@ -3566,6 +3600,11 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 const ackClientMessageId = String((res as any).clientMessageId || resendClientMessageId).trim();
                 const outboxJobId = String((res as any).outboxJobId || "").trim();
                 const queued = !!(res as any).queued;
+                const queueAccepted = (res as any).queueAccepted !== false;
+                const dispatchMode = String((res as any).dispatchMode || "queued").trim();
+                const fallbackSent = dispatchMode === "inline_fallback_sent";
+                const degradedDelivery = !queueAccepted && queued && !fallbackSent;
+                const warning = String((res as any).warning || "").trim();
 
                 setMessages((prev) => {
                     const next = prev.map((m) => {
@@ -3574,16 +3613,32 @@ export function ConversationInterface({ locationId, initialConversations, initia
                             ...m,
                             ...(ackMessageId ? { id: ackMessageId } : {}),
                             clientMessageId: ackClientMessageId,
-                            status: queued ? 'sending' : 'sent',
-                            sendState: queued ? 'queued' : 'sent',
-                            outboxState: queued
-                                ? { id: outboxJobId || null, status: 'pending' }
-                                : { id: outboxJobId || null, status: 'completed' },
+                            status: fallbackSent ? 'sent' : (queued ? 'sending' : 'sent'),
+                            sendState: fallbackSent ? 'sent' : (degradedDelivery ? 'retrying' : (queued ? 'queued' : 'sent')),
+                            outboxState: fallbackSent
+                                ? { id: outboxJobId || null, status: 'completed' }
+                                : degradedDelivery
+                                    ? { id: outboxJobId || null, status: 'failed' }
+                                    : queued
+                                        ? { id: outboxJobId || null, status: 'pending' }
+                                        : { id: outboxJobId || null, status: 'completed' },
                         } as Message;
                     });
                     syncPendingMessagesForConversation(conversationTarget.id, next);
                     return next;
                 });
+
+                if (warning) {
+                    toast({
+                        title: 'WhatsApp delivery degraded',
+                        description: warning,
+                    });
+                } else if (degradedDelivery) {
+                    toast({
+                        title: 'WhatsApp delivery degraded',
+                        description: 'Queue enqueue failed. Durable auto-recovery is active for this resend.',
+                    });
+                }
             }
         } catch (e: any) {
             if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {

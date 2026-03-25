@@ -1,5 +1,5 @@
 # Conversations Performance Architecture, Change History, and Enterprise Roadmap
-**Last Updated:** 2026-03-24
+**Last Updated:** 2026-03-25
 
 ## Purpose
 This document captures the full performance-improvement thread for `/admin/conversations`:
@@ -49,6 +49,7 @@ Main causes identified:
 | 2026-03-24 | `working tree` | Durable WhatsApp outbound outbox (queue-first ack, retry/backoff/dead-letter, stale-lock recovery) + deterministic `clientMessageId`/`wamId` reconciliation to prevent disappearing optimistic rows. |
 | 2026-03-24 | `working tree` | WhatsApp realtime fast path: emit message events earlier in sync flow + publish realtime status updates (`message.status`) on delivery/read transitions. |
 | 2026-03-24 | `working tree` | Paste Lead fast path: read-only auth on parse/import, bounded parse payload, and detached autosync/trace/orchestration side effects. |
+| 2026-03-25 | `4d2d41d` | WhatsApp history recovery hardening: fetch/merge across all candidate JIDs (`@lid` + phone JID) instead of stopping at first non-empty candidate, closing missed-message recovery gaps after webhook outages. |
 
 ## Current Architecture (As Implemented)
 

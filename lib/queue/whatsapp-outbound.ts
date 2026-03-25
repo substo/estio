@@ -4,6 +4,7 @@ import {
     processWhatsAppOutboundOutboxJob,
     recoverStaleWhatsAppOutboundOutboxLocks,
 } from "@/lib/whatsapp/outbound-outbox";
+import { buildQueueJobId, isDuplicateQueueJobError } from "@/lib/queue/job-id";
 
 const REDIS_CONNECTION = {
     host: process.env.REDIS_HOST || "127.0.0.1",
@@ -33,7 +34,17 @@ async function getQueueInstance() {
             });
         })();
     }
-    return _queuePromise;
+
+    try {
+        return await _queuePromise;
+    } catch (error) {
+        _queuePromise = null;
+        throw error;
+    }
+}
+
+function getOutboxQueueJobId(outboxId: string): string {
+    return buildQueueJobId("outbox", outboxId);
 }
 
 export async function enqueueWhatsAppOutboundOutboxJob(args: {
@@ -47,21 +58,29 @@ export async function enqueueWhatsAppOutboundOutboxJob(args: {
 
     const queue = await getQueueInstance();
     const delayMs = Math.max(Number(args.delayMs || 0), 0);
+    const jobId = getOutboxQueueJobId(outboxId);
 
-    await queue.add(
-        "dispatch-whatsapp-outbound",
-        {
-            outboxId,
-            queuedAt: new Date().toISOString(),
-        },
-        {
-            jobId: `outbox:${outboxId}`,
-            delay: delayMs,
-            attempts: 1,
+    try {
+        await queue.add(
+            "dispatch-whatsapp-outbound",
+            {
+                outboxId,
+                queuedAt: new Date().toISOString(),
+            },
+            {
+                jobId,
+                delay: delayMs,
+                attempts: 1,
+            }
+        );
+    } catch (error) {
+        if (isDuplicateQueueJobError(error)) {
+            return { accepted: true as const, jobId };
         }
-    );
+        throw error;
+    }
 
-    return { accepted: true as const, jobId: `outbox:${outboxId}` };
+    return { accepted: true as const, jobId };
 }
 
 export async function initWhatsAppOutboundWorker() {
@@ -106,7 +125,12 @@ export async function initWhatsAppOutboundWorker() {
         return worker;
     })();
 
-    return _workerPromise;
+    try {
+        return await _workerPromise;
+    } catch (error) {
+        _workerPromise = null;
+        throw error;
+    }
 }
 
 export async function enqueueDueWhatsAppOutboundOutboxJobs(args?: { limit?: number }) {

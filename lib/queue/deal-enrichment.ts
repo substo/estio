@@ -7,6 +7,7 @@ import {
     getDealEnrichmentJobId,
     mergeDealEnrichmentMetadata,
 } from "@/lib/deals/enrichment";
+import { buildQueueJobId, isDuplicateQueueJobError } from "@/lib/queue/job-id";
 
 const REDIS_CONNECTION = {
     host: process.env.REDIS_HOST || "127.0.0.1",
@@ -29,11 +30,6 @@ export type EnqueueDealEnrichmentResult = {
 
 let _queuePromise: Promise<any> | null = null;
 let _workerPromise: Promise<any> | null = null;
-
-function isDuplicateQueueJobError(error: unknown): boolean {
-    const message = String((error as any)?.message || "").toLowerCase();
-    return message.includes("job") && message.includes("already") && message.includes("exist");
-}
 
 async function getQueueInstance() {
     if (!_queuePromise) {
@@ -239,7 +235,7 @@ export async function enqueueDealEnrichment(args: {
 }): Promise<EnqueueDealEnrichmentResult> {
     const dealId = String(args.dealId || "").trim();
     const allowInlineFallback = args.allowInlineFallback !== false;
-    const jobId = getDealEnrichmentJobId(dealId);
+    const jobId = buildQueueJobId(getDealEnrichmentJobId(dealId));
 
     try {
         const queue = await getQueueInstance();
@@ -332,5 +328,10 @@ export async function initDealEnrichmentWorker() {
         return worker;
     })();
 
-    return _workerPromise;
+    try {
+        return await _workerPromise;
+    } catch (error) {
+        _workerPromise = null;
+        throw error;
+    }
 }

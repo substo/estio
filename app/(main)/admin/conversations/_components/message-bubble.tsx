@@ -55,6 +55,16 @@ export interface MessageBubbleProps {
         type: string;
         direction: 'inbound' | 'outbound';
         status?: string;
+        sendState?: string;
+        outboxState?: {
+            id?: string | null;
+            status?: string | null;
+            scheduledAt?: string | null;
+            attemptCount?: number;
+            lastError?: string | null;
+            processedAt?: string | null;
+            lockedAt?: string | null;
+        } | null;
         dateAdded: string | Date; // Accept both for compatibility
         subject?: string;
         attachments?: MessageAttachment[];
@@ -814,7 +824,17 @@ export function MessageBubble({
                 {isOutbound && (isSMS || isWhatsApp) && (
                     <span className="flex items-center gap-1 shrink-0 ml-2">
                         {message.status === 'sending' && (
+                            (String(message.sendState || "").toLowerCase() === "retrying"
+                                || String(message.outboxState?.status || "").toLowerCase() === "failed")
+                                ? (
+                                    <span className="flex items-center gap-1 text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded text-[10px] border border-amber-100 font-medium">
+                                        <AlertTriangle className="h-3 w-3" />
+                                        Retrying
+                                    </span>
+                                )
+                                : (
                             <Clock className="h-3 w-3 text-gray-400" aria-label="Sending" />
+                                )
                         )}
                         {message.status === 'sent' && (
                             <Check className="h-3 w-3 text-gray-400" aria-label="Sent" />

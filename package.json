@@ -19,7 +19,8 @@
         "test:tasks:reminders": "node --test lib/tasks/reminder-config.test.mjs lib/tasks/reminder-links.test.mjs lib/tasks/datetime-local.test.mjs",
         "test:scraping:deep": "node --test lib/scraping/deep-scrape-types.test.mjs",
         "test:scraping:relevance": "tsx --test lib/scraping/listing-relevance-classifier.test.ts lib/scraping/listing-scraper.relevance.test.ts",
-        "prospecting:reclassify": "tsx scripts/reclassify-scraped-listings.ts"
+        "prospecting:reclassify": "tsx scripts/reclassify-scraped-listings.ts",
+        "ops:wa-outbox:mark-stale": "tsx scripts/mark-stale-whatsapp-outbox.ts"
     },
     "dependencies": {
         "@aws-sdk/client-s3": "^3.995.0",

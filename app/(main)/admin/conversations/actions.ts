@@ -5332,6 +5332,8 @@ export async function sendWhatsAppMediaReply(
                 messageId: enqueueResult.messageId,
                 clientMessageId: enqueueResult.clientMessageId,
                 outboxJobId: enqueueResult.outboxJobId,
+                queueAccepted: enqueueResult.queueAccepted,
+                dispatchMode: enqueueResult.dispatchMode,
             },
         });
         return {
@@ -5340,6 +5342,10 @@ export async function sendWhatsAppMediaReply(
             messageId: enqueueResult.messageId,
             clientMessageId: enqueueResult.clientMessageId,
             outboxJobId: enqueueResult.outboxJobId,
+            queueAccepted: enqueueResult.queueAccepted,
+            dispatchMode: enqueueResult.dispatchMode,
+            warning: enqueueResult.warning,
+            errorCode: enqueueResult.errorCode,
         };
     } catch (err: any) {
         console.error("WhatsApp media enqueue failed:", err);
@@ -5445,6 +5451,8 @@ export async function sendReply(
                     messageId: enqueueResult.messageId,
                     clientMessageId: enqueueResult.clientMessageId,
                     outboxJobId: enqueueResult.outboxJobId,
+                    queueAccepted: enqueueResult.queueAccepted,
+                    dispatchMode: enqueueResult.dispatchMode,
                 },
             });
 
@@ -5454,6 +5462,10 @@ export async function sendReply(
                 messageId: enqueueResult.messageId,
                 clientMessageId: enqueueResult.clientMessageId,
                 outboxJobId: enqueueResult.outboxJobId,
+                queueAccepted: enqueueResult.queueAccepted,
+                dispatchMode: enqueueResult.dispatchMode,
+                warning: enqueueResult.warning,
+                errorCode: enqueueResult.errorCode,
             };
         }
 

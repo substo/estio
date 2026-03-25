@@ -1,5 +1,5 @@
 # WhatsApp Integration: Custom Channel ("Linked Device")
-**Last Updated:** 2026-03-24
+**Last Updated:** 2026-03-25
 **Related:** [Legacy Integration](whatsapp-integration-legacy.md)
 
 ## Overview
@@ -135,15 +135,18 @@ To handle high-volume sync and rate limits, we introduced a **Queue-Based Archit
    - Fetches a small batch (default: 20 messages).
    - **Consecutive Duplicate Detection**: The sync loop counts how many existing messages it encounters. If it finds **5 consecutive duplicates**, it assumes the history is up-to-date and **stops early**. This prevents re-scanning thousands of old messages.
 3. **Manual Override**: A "Sync History" button (refresh icon) is available in the Chat Window header. This allows the user to force a deeper history fetch if they suspect missing messages (e.g., after a long phone disconnection).
-4. **Identity-Aware Manual Fetch (Feb 26, 2026)**:
-   - Manual history sync and new-conversation backfill now resolve multiple candidate chat JIDs instead of assuming only `phone@s.whatsapp.net`.
+4. **Identity-Aware Manual Fetch (Feb 26, 2026, hardened Mar 25, 2026)**:
+   - Manual history sync and new-conversation backfill resolve multiple candidate chat JIDs instead of assuming only `phone@s.whatsapp.net`.
    - Candidate order (deduplicated): `Contact.lid` (`@lid`) -> explicit stored chat JID (if any) -> Evolution `checkWhatsAppNumber(...)` result JID -> `phone@s.whatsapp.net` fallback.
-   - This fixes cases where manually-created leads (including international numbers) have WhatsApp history stored under an LID-backed chat identity.
+   - Fetch behavior is now **aggregate-first**: we fetch from **all** candidate JIDs, merge records, de-duplicate (`key.id` / fallback key), then sort by timestamp before processing.
+   - This closes a recovery gap where some messages existed under phone JID while other history existed under LID JID (or vice versa), especially after transient webhook/database outages.
+   - Logs now include `fetchedFrom=...` and `primary=...` to show exactly which JIDs returned data.
 
 #### Key Files
 - **`app/(main)/admin/conversations/actions.ts`**: 
-    - `syncWhatsAppHistory(conversationId, limit, ignoreDuplicates, offset)`: Core manual/background history sync action with duplicate-stop logic, optional paging, and LID-aware multi-candidate JID fetch.
+    - `syncWhatsAppHistory(conversationId, limit, ignoreDuplicates, offset)`: Core manual/background history sync action with duplicate-stop logic, optional paging, and LID-aware multi-candidate JID aggregation/merge.
     - `startNewConversation(phone)`: Initial Evolution backfill now reuses the same JID resolution strategy used by manual sync.
+    - `fetchEvolutionMessagesForContactHistory(...)`: Resolves candidate JIDs, fetches all candidate histories, de-duplicates, and returns merged results for downstream normalization.
 - **`lib/whatsapp/sync.ts`**: 
     - `processNormalizedMessage`: Updated to return a status (`{ status: 'skipped' | 'processed' }`) to enable the duplicate detection logic.
 - **`app/(main)/admin/conversations/_components/conversation-interface.tsx`**: 
@@ -399,7 +402,8 @@ We track outbound lifecycle through both `Message.status` and `WhatsAppOutboundO
 | **Evolution API Crash Loop** | **Error P2000**: "Value too long". Occurs if a Contact name or Profile Pic URL exceeds 191 chars. **Fix**: Manually altered the Postgres `Contact` table columns (`pushName`, `profilePicUrl`) to `TEXT` (unlimited length). |
 | **Duplicate Conversations (Same Contact)** | **Issue**: Race conditions can create multiple conversations for one contact. **Fix**: Run `scripts/merge-same-contact-conversations.ts` to merge them. **Prevention**: Logic updated to search last 2 digits for robust matching (`sync.ts`). |
 | **Lead gets split into two contacts/conversations after reply** | **Issue**: Outbound uses phone identity, reply arrives as unresolved `@lid`. **Fix**: Inbound unresolved LID is now deferred (`whatsapp-lid-resolve` queue) until resolved to phone; verify Redis is up and worker logs show retries/resolution. |
-| **Manual "Sync WhatsApp History" finds no past messages for a manually-created lead (often international numbers)** | **Issue**: Evolution may store the chat under an LID (`@lid`) while older history sync queried only `phone@s.whatsapp.net`. **Fix**: Manual sync/new-conversation backfill now try multiple JIDs (`Contact.lid`, Evolution lookup JID, phone fallback). Check logs for `History fetch candidates ... selected=... found=...`. |
+| **Manual "Sync WhatsApp History" still misses some messages even though candidate JIDs are detected** | **Issue**: A subset of messages can exist under a different JID identity (`@lid` vs `@s.whatsapp.net`) than the first non-empty candidate. **Fix**: History sync now fetches and merges all candidate JIDs (`Contact.lid`, explicit chat JID, Evolution lookup JID, phone fallback) with de-duplication. Check logs for `History fetch candidates ... fetchedFrom=... primary=... found=...`. |
+| **Evolution webhook payload exists (`MESSAGES_UPSERT`) but message is missing in UI/DB** | **Issue**: Ingestion can fail during schema drift/runtime DB mismatch windows (for example Prisma `P2022` on missing columns), and retries may not fully backfill if recovery path is narrowed. **Fix**: Ensure deploy-time Prisma schema sync guard is active (`PRISMA_SCHEMA_SYNC_MODE`, default `migrate-then-push`; see [`deployment-scripts.md`](deployment-scripts.md)), then rerun history sync. If a specific `wamId` is still missing, perform a one-off operator backfill by `conversation + wamId` from Evolution history. |
 | **Media message exists but no attachment appears (especially `@lid` contacts)** | Older builds could ingest media before the deferred LID message row existed (`message_not_found`). **Fix**: Attachment ingest now waits for deferred LID resolution/processing, then retries automatically. Re-sync history to backfill previously missed attachments. |
 | **Media row exists but playback/download fails (missing/corrupted object in R2)** | Use `Re-fetch Media` in the message bubble. It re-downloads by `wamId` from Evolution, restores DB rows on failure, and replaces storage only after successful ingest. |
 | **WhatsApp media upload fails before send** | Check R2 env vars (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`) and bucket CORS for browser `PUT`. The upload action is `createWhatsAppMediaUploadUrl(...)`. |
@@ -656,6 +660,7 @@ The critical issue was split identity: outbound lead creation used phone, but in
 
 | Date | Bug | Root Cause | Fix |
 |------|-----|-----------|-----|
+| Mar 25, 2026 | Inbound message existed in Evolution logs but not in local conversation | Webhook writes failed during `Message.clientMessageId` schema drift window; later recovery sync selected one JID and missed records on alternate JID identity | Added deploy-time Prisma schema sync guard (`migrate-then-push`) and hardened history recovery to aggregate all candidate JIDs (`@lid` + phone JID) with de-duplication |
 | Feb 20, 2026 | Outbound lead + inbound reply created split contacts/conversations | Inbound unresolved `@lid` was being processed before mapping existed | Added persistent deferred LID queue; retry resolution before contact creation |
 | Feb 17, 2026 | Outbound messages skipped | Startled by LID, logic skipped message | Implemented flow-through & Layer 2 capture |
 | Feb 9, 2026 | Contacts saved as `WhatsApp User ...@lid` | Code read `msg.senderPn` instead of `key.senderPn` | Changed to `key.senderPn || msg.senderPn` |

@@ -3,6 +3,7 @@ import {
     extractViewingNotesWithGoogle,
     type WhatsAppViewingNotesExtractionInput,
 } from "@/lib/ai/audio/viewing-notes-extraction-google";
+import { buildQueueJobId, isDuplicateQueueJobError } from "@/lib/queue/job-id";
 
 const REDIS_CONNECTION = {
     host: process.env.REDIS_HOST || "127.0.0.1",
@@ -48,17 +49,17 @@ async function getQueueInstance() {
             });
         })();
     }
-    return _queuePromise;
+
+    try {
+        return await _queuePromise;
+    } catch (error) {
+        _queuePromise = null;
+        throw error;
+    }
 }
 
 function resolveQueuePriority(priority?: WhatsAppAudioExtractionPriority): number {
     return priority === "high" ? 1 : 5;
-}
-
-function isDuplicateQueueJobError(error: unknown): boolean {
-    const message = String((error as any)?.message || "").toLowerCase();
-    if (!message) return false;
-    return message.includes("job") && message.includes("already") && message.includes("exist");
 }
 
 export async function enqueueWhatsAppAudioExtraction(
@@ -73,7 +74,7 @@ export async function enqueueWhatsAppAudioExtraction(
                 reason: "already_in_progress" as const,
                 extractionId: prepared.extractionId,
                 transcriptId: prepared.transcriptId,
-                jobId: `extract:${prepared.extractionId}`,
+                jobId: buildQueueJobId("extract", prepared.extractionId),
             };
         }
 
@@ -83,11 +84,11 @@ export async function enqueueWhatsAppAudioExtraction(
             reason: "already_completed" as const,
             extractionId: prepared.extractionId,
             transcriptId: prepared.transcriptId,
-            jobId: `extract:${prepared.extractionId}`,
+            jobId: buildQueueJobId("extract", prepared.extractionId),
         };
     }
 
-    const jobId = `extract:${prepared.extractionId}`;
+    const jobId = buildQueueJobId("extract", prepared.extractionId);
     const allowInlineFallback = input.allowInlineFallback !== false;
 
     try {
@@ -214,5 +215,10 @@ export async function initWhatsAppAudioExtractionWorker() {
         return worker;
     })();
 
-    return _workerPromise;
+    try {
+        return await _workerPromise;
+    } catch (error) {
+        _workerPromise = null;
+        throw error;
+    }
 }

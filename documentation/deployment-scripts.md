@@ -1,6 +1,6 @@
 # Deployment Scripts Guide
 
-**Last Updated:** 2026-03-22
+**Last Updated:** 2026-03-25
 
 This project uses a Blue/Green deployment layout on the production server:
 
@@ -25,11 +25,25 @@ What it does:
 5. Uploads `.env.prod` to target slot as runtime `.env`.
 6. Ensures PM2 log rotation is configured via `scripts/setup-log-rotation.sh`.
 7. Runs `npm ci --omit=dev --legacy-peer-deps` and `npx prisma@6.19.0 generate` on target.
-8. Starts the target PM2 process and health-checks `http://127.0.0.1:<target-port>/api/health`.
-9. Updates Caddy upstream to target port and reloads Caddy.
-10. Starts dedicated scrape worker via `npm run start:scrape-worker` (headless runtime).
-11. Verifies scrape worker readiness (`pm2 online` + fresh Redis heartbeat) before completing deploy.
-12. Keeps old slot running for a drain window, then deletes it.
+8. Applies Prisma schema sync guard before runtime cutover (`PRISMA_SCHEMA_SYNC_MODE`).
+9. Starts the target PM2 process and health-checks `http://127.0.0.1:<target-port>/api/health`.
+10. Updates Caddy upstream to target port and reloads Caddy.
+11. Starts dedicated scrape worker via `npm run start:scrape-worker` (headless runtime).
+12. Verifies scrape worker readiness (`pm2 online` + fresh Redis heartbeat) before completing deploy.
+13. Keeps old slot running for a drain window, then deletes it.
+
+### Prisma Schema Sync Guard (Mar 2026)
+
+`deploy-local-build.sh` now enforces database/schema compatibility **before** switching live traffic.
+
+- Env knob: `PRISMA_SCHEMA_SYNC_MODE`
+- Default: `migrate-then-push`
+- Supported modes:
+  - `migrate-only`: run `prisma migrate deploy`, fail hard on migration errors.
+  - `db-push`: run `prisma db push --skip-generate --accept-data-loss`.
+  - `migrate-then-push`: try migrate first, then automatically fall back to db push if migration history drift blocks deploy.
+
+This guard prevents runtime crashes caused by app/schema mismatch (for example Prisma `P2022` missing-column errors after cutover).
 
 ### Runtime Start Behavior (Important)
 

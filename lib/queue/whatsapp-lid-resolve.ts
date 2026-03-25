@@ -1,4 +1,5 @@
 import type { NormalizedMessage } from "@/lib/whatsapp/sync";
+import { buildQueueJobId, isDuplicateQueueJobError } from "@/lib/queue/job-id";
 
 const REDIS_CONNECTION = {
     host: process.env.REDIS_HOST || '127.0.0.1',
@@ -59,29 +60,40 @@ async function getQueueInstance() {
             });
         })();
     }
-    return _queuePromise;
+
+    try {
+        return await _queuePromise;
+    } catch (error) {
+        _queuePromise = null;
+        throw error;
+    }
 }
 
 export async function enqueueDeferredLidMessage(msg: NormalizedMessage, lidJid: string) {
     const queue = await getQueueInstance();
-    const jobId = `${msg.locationId}:${msg.wamId}`;
+    const jobId = buildQueueJobId(msg.locationId, msg.wamId || "no_wam");
 
-    await queue.add(
-        'resolve-lid-message',
-        {
-            lidJid,
-            msg: toPayload(msg, lidJid),
-        },
-        {
-            jobId,
-            delay: LID_RETRY_INTERVAL_MS,
-            attempts: LID_RETRY_MAX_ATTEMPTS,
-            backoff: {
-                type: 'fixed',
-                delay: LID_RETRY_INTERVAL_MS,
+    try {
+        await queue.add(
+            'resolve-lid-message',
+            {
+                lidJid,
+                msg: toPayload(msg, lidJid),
             },
-        }
-    );
+            {
+                jobId,
+                delay: LID_RETRY_INTERVAL_MS,
+                attempts: LID_RETRY_MAX_ATTEMPTS,
+                backoff: {
+                    type: 'fixed',
+                    delay: LID_RETRY_INTERVAL_MS,
+                },
+            }
+        );
+    } catch (error) {
+        if (isDuplicateQueueJobError(error)) return;
+        throw error;
+    }
 }
 
 export async function initWhatsAppLidResolveWorker() {
@@ -137,5 +149,10 @@ export async function initWhatsAppLidResolveWorker() {
         return worker;
     })();
 
-    return _workerPromise;
+    try {
+        return await _workerPromise;
+    } catch (error) {
+        _workerPromise = null;
+        throw error;
+    }
 }

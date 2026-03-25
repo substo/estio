@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import db from "@/lib/db";
 import { enqueueWhatsAppOutboundOutboxJob, initWhatsAppOutboundWorker } from "@/lib/queue/whatsapp-outbound";
 import { computeWhatsAppTypingDelay, type WhatsAppTypingDelayResult } from "@/lib/whatsapp/outbound-typing";
+import { processWhatsAppOutboundOutboxJob } from "@/lib/whatsapp/outbound-outbox";
 
 type WhatsAppOutboundKind = "text" | "image" | "audio" | "document";
 
@@ -33,6 +34,9 @@ export type EnqueueWhatsAppOutboundResult = {
     scheduledAt: string;
     typing: WhatsAppTypingDelayResult;
     queueAccepted: boolean;
+    dispatchMode: "queued" | "inline_fallback_sent" | "inline_fallback_deferred";
+    warning?: string;
+    errorCode?: "queue_enqueue_failed" | "inline_dispatch_failed";
 };
 
 function normalizeClientMessageId(value?: string | null): string {
@@ -49,6 +53,38 @@ function extractUniqueErrorColumns(error: any): string {
     const target = (error as any)?.meta?.target;
     if (Array.isArray(target)) return target.join(",");
     return String(target || "");
+}
+
+function normalizeErrorMessage(error: unknown): string {
+    if (error instanceof Error) return error.message;
+    try {
+        return JSON.stringify(error);
+    } catch {
+        return String(error);
+    }
+}
+
+async function markOutboxQueueDegraded(outboxId: string, message: string) {
+    const normalizedOutboxId = String(outboxId || "").trim();
+    if (!normalizedOutboxId) return;
+
+    const normalizedMessage = String(message || "").trim();
+    if (!normalizedMessage) return;
+
+    const safeMessage = normalizedMessage.slice(0, 2000);
+    try {
+        await (db as any).whatsAppOutboundOutbox.updateMany({
+            where: {
+                id: normalizedOutboxId,
+                status: { in: ["pending", "failed"] },
+            },
+            data: {
+                lastError: safeMessage,
+            },
+        });
+    } catch (error) {
+        console.warn("[WhatsApp Outbox] Failed to persist enqueue degradation metadata:", error);
+    }
 }
 
 async function tryResolveExistingByClientMessageId(clientMessageId: string): Promise<EnqueueWhatsAppOutboundResult | null> {
@@ -81,6 +117,7 @@ async function tryResolveExistingByClientMessageId(clientMessageId: string): Pro
             snapshot: (existing.outboundWhatsAppOutbox.payload || {})?.typingPolicySnapshot || {},
         },
         queueAccepted: true,
+        dispatchMode: "queued",
     };
 }
 
@@ -214,6 +251,10 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
 
     const enqueueDelayMs = Math.max(txResult.scheduledAt.getTime() - Date.now(), 0);
     let queueAccepted = false;
+    let dispatchMode: EnqueueWhatsAppOutboundResult["dispatchMode"] = "queued";
+    let warning: string | undefined;
+    let errorCode: EnqueueWhatsAppOutboundResult["errorCode"] | undefined;
+    let queueDegradedMessage: string | null = null;
 
     try {
         await initWhatsAppOutboundWorker();
@@ -227,8 +268,59 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
             delayMs: enqueueDelayMs,
         });
         queueAccepted = !!queueRes.accepted;
+        if (!queueAccepted) {
+            queueDegradedMessage = `Queue rejected enqueue request (${String((queueRes as any)?.reason || "unknown_reason")}).`;
+        }
     } catch (queueError) {
         console.warn("[WhatsApp Outbox] Queue add failed during enqueue; cron sweeper will recover:", queueError);
+        queueDegradedMessage = normalizeErrorMessage(queueError);
+    }
+
+    if (!queueAccepted) {
+        dispatchMode = "inline_fallback_deferred";
+        errorCode = "queue_enqueue_failed";
+
+        const queueErrorDetail = queueDegradedMessage || "Queue did not accept outbound enqueue.";
+        await markOutboxQueueDegraded(
+            txResult.outboxId,
+            `[enqueue_degraded] Queue enqueue failed: ${queueErrorDetail}`
+        );
+
+        if (enqueueDelayMs <= 0) {
+            try {
+                const inlineResult = await processWhatsAppOutboundOutboxJob({
+                    outboxId: txResult.outboxId,
+                    workerId: `wa_outbound_inline_${randomUUID()}`,
+                });
+
+                if (inlineResult.outcome === "success") {
+                    dispatchMode = "inline_fallback_sent";
+                    warning = "Queue enqueue degraded; dispatched immediately via inline fallback.";
+                } else {
+                    dispatchMode = "inline_fallback_deferred";
+                    warning = "Queue enqueue degraded; inline fallback did not complete send. Durable retry remains active.";
+                    if (inlineResult.outcome === "dead") {
+                        errorCode = "inline_dispatch_failed";
+                    }
+
+                    if (inlineResult.error) {
+                        await markOutboxQueueDegraded(
+                            txResult.outboxId,
+                            `[enqueue_degraded] Inline fallback outcome=${inlineResult.outcome}: ${inlineResult.error}`
+                        );
+                    }
+                }
+            } catch (inlineError) {
+                errorCode = "inline_dispatch_failed";
+                warning = "Queue enqueue degraded; inline fallback errored. Durable retry remains active.";
+                await markOutboxQueueDegraded(
+                    txResult.outboxId,
+                    `[enqueue_degraded] Inline fallback error: ${normalizeErrorMessage(inlineError)}`
+                );
+            }
+        } else {
+            warning = "Queue enqueue degraded; message kept durable and will auto-recover at scheduled dispatch time.";
+        }
     }
 
     return {
@@ -239,5 +331,8 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
         scheduledAt: txResult.scheduledAt.toISOString(),
         typing: txResult.typing,
         queueAccepted,
+        dispatchMode,
+        ...(warning ? { warning } : {}),
+        ...(errorCode ? { errorCode } : {}),
     };
 }
