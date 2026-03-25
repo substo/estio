@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { Conversation } from "@/lib/ghl/conversations";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
-import { Mail, MessageSquare, MessageCircle, Layers, Link as LinkIcon, Trash2, X, CheckSquare, Inbox, Archive, Plus, CloudDownload, Loader2, Search, MoreHorizontal } from "lucide-react";
+import { Mail, MessageSquare, MessageCircle, Layers, Link as LinkIcon, Trash2, X, CheckSquare, Inbox, Archive, Plus, CloudDownload, Loader2, Search, MoreHorizontal, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card";
@@ -44,6 +44,8 @@ interface ConversationListProps {
     onArchive?: (ids: string[]) => void;
     onNewConversationClick?: () => void;
     onSyncAllClick?: () => void;
+    onRestore?: (ids: string[]) => void;
+    onEmptyTrash?: () => void;
     selectedTaskId?: string | null;
     onSelectTask?: (taskId: string | null, conversationId?: string | null) => void;
     searchQuery?: string;
@@ -98,6 +100,8 @@ export function ConversationList({
     onImportClick,
     onBind,
     onArchive,
+    onRestore,
+    onEmptyTrash,
     onNewConversationClick,
     onSyncAllClick,
     selectedTaskId = null,
@@ -213,6 +217,24 @@ export function ConversationList({
                                     </TooltipProvider>
                                 )}
 
+                                {viewFilter === 'trash' && onRestore && (
+                                    <TooltipProvider delayDuration={200}>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
+                                                    onClick={() => onRestore(selectedIdsList)}
+                                                >
+                                                    <RotateCcw className="w-4 h-4" />
+                                                </Button>
+                                            </TooltipTrigger>
+                                            <TooltipContent>Restore Selected</TooltipContent>
+                                        </Tooltip>
+                                    </TooltipProvider>
+                                )}
+
                                 <TooltipProvider delayDuration={200}>
                                     <Tooltip>
                                         <TooltipTrigger asChild>
@@ -247,6 +269,12 @@ export function ConversationList({
                                         <DropdownMenuItem onClick={() => onArchive(selectedIdsList)} className="gap-2">
                                             <Archive className="w-4 h-4" />
                                             Archive Selected
+                                        </DropdownMenuItem>
+                                    )}
+                                    {viewFilter === 'trash' && onRestore && (
+                                        <DropdownMenuItem onClick={() => onRestore(selectedIdsList)} className="gap-2">
+                                            <RotateCcw className="w-4 h-4" />
+                                            Restore Selected
                                         </DropdownMenuItem>
                                     )}
                                     <DropdownMenuItem onClick={() => onDelete?.(selectedIdsList)} className="gap-2 text-red-600 focus:text-red-600">
@@ -356,6 +384,21 @@ export function ConversationList({
                     {effectiveViewMode === 'chats' && onToggleSelectionMode && (
                         <TooltipProvider delayDuration={200}>
                             <div className="flex items-center gap-0.5 shrink-0">
+                                {viewFilter === 'trash' && onEmptyTrash && conversations.length > 0 && (
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-7 text-xs text-red-600 shrink-0 border-red-200 hover:bg-red-50"
+                                                onClick={onEmptyTrash}
+                                            >
+                                                Empty Trash
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="bottom">Permanently delete all items in trash</TooltipContent>
+                                    </Tooltip>
+                                )}
                                 {showActiveInboxActions && (
                                     <>
                                         <div className="hidden sm:flex items-center gap-0.5">

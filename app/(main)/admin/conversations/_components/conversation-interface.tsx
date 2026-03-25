@@ -22,6 +22,7 @@ import {
     archiveConversations,
     unarchiveConversations,
     permanentlyDeleteConversations,
+    emptyTrash,
     syncWhatsAppHistory,
     refreshConversation,
     markConversationAsRead,
@@ -1745,6 +1746,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
     const [permanentDeleteDialogOpen, setPermanentDeleteDialogOpen] = useState(false);
+    const [emptyTrashDialogOpen, setEmptyTrashDialogOpen] = useState(false);
     const [idsToDelete, setIdsToDelete] = useState<string[]>([]);
 
     // Undo Toast State
@@ -3004,6 +3006,59 @@ export function ConversationInterface({ locationId, initialConversations, initia
         }
     };
 
+    const handleRestore = async (ids: string[]) => {
+        if (ids.length === 0) return;
+
+        try {
+            const res = await restoreConversations(ids);
+            if (res.success) {
+                toast({ title: "Restored", description: `Restored ${res.count} conversation(s).` });
+
+                // Remove from local state
+                const idSet = new Set(ids);
+                setConversations(prev => prev.filter(c => !idSet.has(c.id)));
+
+                // Clear selection
+                setSelectedIds(new Set());
+                if (ids.length === conversations.length) {
+                    setIsSelectionMode(false);
+                }
+
+                // If active ID was restored, deselect
+                if (activeId && idSet.has(activeId)) {
+                    setActiveId(null);
+                }
+            } else {
+                toast({ title: "Restore Failed", description: String(res.error), variant: "destructive" });
+            }
+        } catch (e: any) {
+            toast({ title: "Error", description: e.message, variant: "destructive" });
+        }
+    };
+
+    const handleEmptyTrash = () => {
+        setEmptyTrashDialogOpen(true);
+    };
+
+    const executeEmptyTrash = async () => {
+        try {
+            const res = await emptyTrash();
+            if (res.success) {
+                toast({ title: "Trash Emptied", description: `Permanently deleted ${res.count} conversation(s).` });
+                setConversations([]);
+                setSelectedIds(new Set());
+                setIsSelectionMode(false);
+                setActiveId(null);
+            } else {
+                toast({ title: "Failed to Empty Trash", description: String(res.error), variant: "destructive" });
+            }
+        } catch (e: any) {
+            toast({ title: "Error", description: e.message, variant: "destructive" });
+        } finally {
+            setEmptyTrashDialogOpen(false);
+        }
+    };
+
 
     const handleSendMessage = async (
         text: string,
@@ -4228,6 +4283,8 @@ export function ConversationInterface({ locationId, initialConversations, initia
             onImportClick={() => setImportModalOpen(true)}
             onBind={handleBindClick}
             onArchive={viewFilter === 'active' ? handleArchive : undefined}
+            onRestore={viewFilter === 'trash' ? handleRestore : undefined}
+            onEmptyTrash={viewFilter === 'trash' ? handleEmptyTrash : undefined}
             onNewConversationClick={() => setNewConversationOpen(true)}
             onSyncAllClick={() => setSyncAllOpen(true)}
             disablePreviewCard={isMobileViewport}

@@ -222,8 +222,9 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
 
 ## UI Implementation
 - **View Filters**: `ConversationList` header uses icon buttons/dropdown states for Inbox, Tasks, Archive, and Trash with quick switching from the same control surface.
-- **Selection Mode**: Allows bulk actions (Archive, Delete, Restore) with a "Cancel" button aligned next to actions.
-- **Safety**: "Delete Forever" dialog only appears when deleting items from the Trash view.
+- **Trash Specific Actions**: When in the Trash view, an "Empty Trash" button is prominently displayed to allow clearing the entire bin at once.
+- **Selection Mode**: Allows bulk actions (Archive, Delete). When in the Trash view, it also provides a "Restore Selected" bulk action.
+- **Safety**: "Delete Forever" and "Empty Trash" actions trigger explicit confirmation dialogs to prevent accidental data loss.
 - **URL Synchronization**: View state (`active`, `tasks`, `archived`, `trash`) is synced to the URL (`?view=...`), allowing for bookmarking and sharing of specific lists.
 - **Shallow URL Sync**: When `shallowUrlSync` is enabled, the client updates `id` / `task` / `view` / `mode` / `dealId` using `history.replaceState(...)` and restores them via `popstate`, avoiding unnecessary App Router churn during thread switches.
 - **Task Workspace Deep Links**:
