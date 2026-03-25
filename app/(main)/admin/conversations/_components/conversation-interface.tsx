@@ -625,6 +625,12 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const [activeDealId, setActiveDealId] = useState<string | null>(initialDealId);
     const [transcriptOnDemandEnabled, setTranscriptOnDemandEnabled] = useState(false);
 
+    const [loadedDealId, setLoadedDealId] = useState<string | null>(null);
+    const [loadedChatId, setLoadedChatId] = useState<string | null>(null);
+
+    const isDealLoading = loadingDealContext || (!!activeDealId && activeDealId !== loadedDealId);
+    const isChatLoading = loadingMessages || (!!activeId && activeId !== loadedChatId);
+
     useEffect(() => {
         activeDealIdRef.current = activeDealId;
     }, [activeDealId]);
@@ -915,6 +921,8 @@ export function ConversationInterface({ locationId, initialConversations, initia
         } else if (conversationId) {
             setConversations((prev) => prev.map((item) => item.id === conversationId ? { ...item, unreadCount: item.unreadCount || 0 } : item));
         }
+
+        setLoadedChatId(conversationId);
     }, [mergeSnapshotPreservingPending]);
 
     const isDealWorkspaceHydrationBusy = useCallback((dealId?: string | null) => {
@@ -977,6 +985,8 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 }
                 : deal
         )));
+
+        setLoadedDealId(dealId);
     }, [applyDealParticipants]);
 
     const prefetchWorkspaceCore = useCallback(async (conversationId: string) => {
@@ -4404,7 +4414,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 conversation={activeConversation}
                 messages={messages}
                 activityLog={activityLog}
-                loading={loadingMessages}
+                loading={isChatLoading}
                 onBack={isMobileViewport ? handleBackToList : undefined}
                 onOpenMissionControl={isMobileViewport ? handleOpenMissionControl : undefined}
                 onSendMessage={handleSendMessage}
@@ -4517,7 +4527,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 dealId={activeDealId}
                 title={activeDealTitle}
                 timelineEvents={dealTimelineEvents}
-                loading={loadingDealContext}
+                loading={isDealLoading}
                 hydrationStatus={dealTimelineHydrationStatus}
                 composerConversation={selectedDealConversation}
                 onBack={isMobileViewport ? handleBackToList : undefined}
