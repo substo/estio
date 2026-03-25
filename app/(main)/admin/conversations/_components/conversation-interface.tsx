@@ -616,6 +616,12 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const initialDealId = searchParams.get('dealId');
     const initialUrlConversationId = searchParams.get('id');
     const [urlConversationId, setUrlConversationId] = useState<string | null>(initialUrlConversationId);
+    const urlConversationIdRef = useRef<string | null>(urlConversationId);
+    
+    useEffect(() => {
+        urlConversationIdRef.current = urlConversationId;
+    }, [urlConversationId]);
+
     const [activeDealId, setActiveDealId] = useState<string | null>(initialDealId);
     const [transcriptOnDemandEnabled, setTranscriptOnDemandEnabled] = useState(false);
 
@@ -945,15 +951,16 @@ export function ConversationInterface({ locationId, initialConversations, initia
             if (preferredId && availableIds.has(preferredId)) {
                 return preferredId;
             }
-            if (urlConversationId && availableIds.has(urlConversationId)) {
-                return urlConversationId;
+            const currentUrlId = urlConversationIdRef.current;
+            if (currentUrlId && availableIds.has(currentUrlId)) {
+                return currentUrlId;
             }
             if (prev && availableIds.has(prev)) {
                 return prev;
             }
             return contacts[0]?.conversationId || normalizedParticipants[0]?.id || null;
         });
-    }, [urlConversationId]);
+    }, []);
 
     const applyDealWorkspaceCoreSnapshot = useCallback((dealId: string, snapshot: DealWorkspaceCoreSnapshot, preferredConversationId?: string | null) => {
         applyDealParticipants(snapshot.participants, preferredConversationId);
