@@ -36,9 +36,10 @@ interface MergeContactDialogProps {
     trigger?: React.ReactNode;
     open?: boolean;
     onOpenChange?: (open: boolean) => void;
+    onMergeSuccess?: (targetContactId: string) => void;
 }
 
-export function MergeContactDialog({ sourceContactId, sourceName, trigger, open, onOpenChange }: MergeContactDialogProps) {
+export function MergeContactDialog({ sourceContactId, sourceName, trigger, open, onOpenChange, onMergeSuccess }: MergeContactDialogProps) {
     const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
     const isControlled = typeof open === 'boolean';
     const resolvedOpen = isControlled ? open : uncontrolledOpen;
@@ -86,9 +87,13 @@ export function MergeContactDialog({ sourceContactId, sourceName, trigger, open,
             if (result.success) {
                 toast.success("Contacts merged successfully!");
                 setOpen(false);
-                // Force hard refresh to update UI and redirect
-                // Use window.location.assign to avoid issues with space injection
-                window.location.assign(`/admin/contacts/${targetContactId}/view`);
+                if (onMergeSuccess) {
+                    onMergeSuccess(targetContactId);
+                } else {
+                    // Force hard refresh to update UI and redirect
+                    // Use window.location.assign to avoid issues with space injection
+                    window.location.assign(`/admin/contacts/${targetContactId}/view`);
+                }
             } else if (result.message?.startsWith("already_merged:")) {
                 const mergedIntoId = result.message.split(":")[1];
                 toast.info("This contact was already merged automatically. Redirecting...");

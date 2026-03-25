@@ -39,7 +39,7 @@ import { MergeContactDialog } from './merge-contact-dialog';
 import { ContactTaskManager } from '@/components/tasks/contact-task-manager';
 import { ContactViewingManager } from '@/components/tasks/contact-viewing-manager';
 
-export function EditContactForm({ contact, onSuccess, onDelete, onContactSaved, leadSources, initialMode = 'edit', isOutlookConnected = false, isGoogleConnected = false, isGhlConnected = false, skipRouterRefresh = false }: { contact: ContactData; onSuccess?: () => void; onDelete?: () => void; onContactSaved?: (patch: ContactIdentityPatch) => void; leadSources: string[]; initialMode?: 'view' | 'edit' | 'create'; isOutlookConnected?: boolean; isGoogleConnected?: boolean; isGhlConnected?: boolean; skipRouterRefresh?: boolean }) {
+export function EditContactForm({ contact, onSuccess, onDelete, onContactSaved, onMergeSuccess, leadSources, initialMode = 'edit', isOutlookConnected = false, isGoogleConnected = false, isGhlConnected = false, skipRouterRefresh = false }: { contact: ContactData; onSuccess?: () => void; onDelete?: () => void; onContactSaved?: (patch: ContactIdentityPatch) => void; onMergeSuccess?: (targetContactId: string) => void; leadSources: string[]; initialMode?: 'view' | 'edit' | 'create'; isOutlookConnected?: boolean; isGoogleConnected?: boolean; isGhlConnected?: boolean; skipRouterRefresh?: boolean }) {
     const { toast } = useToast();
     const [isDeleting, setIsDeleting] = useState(false);
 
@@ -234,6 +234,7 @@ export function EditContactForm({ contact, onSuccess, onDelete, onContactSaved, 
                 sourceName={contact.name || contact.phone || 'Unknown'}
                 open={mergeContactDialogOpen}
                 onOpenChange={setMergeContactDialogOpen}
+                onMergeSuccess={onMergeSuccess}
             />
 
             <DeleteContactDialog
@@ -263,7 +264,7 @@ export function EditContactForm({ contact, onSuccess, onDelete, onContactSaved, 
     );
 }
 
-export function EditContactDialog({ contact, leadSources = [], trigger, isOutlookConnected = false, isGoogleConnected = false, isGhlConnected = false, onContactSaved, skipRouterRefresh = false }: { contact: ContactData; leadSources?: string[]; trigger?: React.ReactNode; isOutlookConnected?: boolean; isGoogleConnected?: boolean; isGhlConnected?: boolean; onContactSaved?: (patch: ContactIdentityPatch) => void; skipRouterRefresh?: boolean }) {
+export function EditContactDialog({ contact, leadSources = [], trigger, isOutlookConnected = false, isGoogleConnected = false, isGhlConnected = false, onContactSaved, onMergeSuccess, skipRouterRefresh = false }: { contact: ContactData; leadSources?: string[]; trigger?: React.ReactNode; isOutlookConnected?: boolean; isGoogleConnected?: boolean; isGhlConnected?: boolean; onContactSaved?: (patch: ContactIdentityPatch) => void; onMergeSuccess?: (targetContactId: string) => void; skipRouterRefresh?: boolean }) {
     const [open, setOpen] = useState(false);
     const normalizedContact: ContactData = {
         ...contact,
@@ -291,6 +292,7 @@ export function EditContactDialog({ contact, leadSources = [], trigger, isOutloo
                     contact={normalizedContact}
                     onSuccess={() => setOpen(false)}
                     onContactSaved={onContactSaved}
+                    onMergeSuccess={onMergeSuccess}
                     leadSources={leadSources || []}
                     isOutlookConnected={isOutlookConnected}
                     isGoogleConnected={isGoogleConnected}

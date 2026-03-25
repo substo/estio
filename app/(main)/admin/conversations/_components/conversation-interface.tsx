@@ -3221,6 +3221,28 @@ export function ConversationInterface({ locationId, initialConversations, initia
         ));
     }, []);
 
+    const handleContactMerged = useCallback(async (conversationId: string, targetContactId: string) => {
+        const normalizedConversationId = String(conversationId || "").trim();
+        if (!normalizedConversationId || !targetContactId) return;
+
+        setConversations(prev => prev.map(c =>
+            c.id === normalizedConversationId ? { ...c, contactId: targetContactId } : c
+        ));
+
+        workspaceCoreCacheRef.current.delete(normalizedConversationId);
+
+        try {
+            const sidebar = await getConversationWorkspaceSidebar(normalizedConversationId);
+            if (sidebar?.success) {
+                setWorkspaceContactContext(sidebar.contactContext);
+                setWorkspaceTaskSummary(sidebar.taskSummary);
+                setWorkspaceViewingSummary(sidebar.viewingSummary);
+            }
+        } catch (e) {
+            console.error("Failed to refresh sidebar after merge", e);
+        }
+    }, []);
+
     const handleConversationContactSaved = useCallback(async (conversationId: string, patch: ContactIdentityPatch) => {
         const normalizedConversationId = String(conversationId || "").trim();
         const patchedContactId = String(patch?.id || "").trim();
@@ -4516,6 +4538,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 onDeselect={(id) => handleToggleSelect(id, false)}
                 onSuggestionsGenerated={handleMissionSuggestionsGenerated}
                 onContactSaved={(patch) => handleConversationContactSaved(activeConversation.id, patch)}
+                onContactMerged={(targetId) => handleContactMerged(activeConversation.id, targetId)}
             />
         ) : <div className="h-full bg-slate-50" />
     ) : (
@@ -4536,6 +4559,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 onDeselect={() => undefined} // No deselect in deal mode
                 onSuggestionsGenerated={handleMissionSuggestionsGenerated}
                 onContactSaved={(patch) => handleConversationContactSaved(dealMissionConversation.id, patch)}
+                onContactMerged={(targetId) => handleContactMerged(dealMissionConversation.id, targetId)}
                 dealContacts={dealContacts}
                 selectedDealConversationId={dealMissionConversation.id}
                 onSelectDealConversation={(conversationId) => setActiveId(conversationId)}

@@ -41,6 +41,7 @@ interface CoordinatorPanelProps {
     onDeselect?: (id: string) => void;
     onSuggestionsGenerated?: (suggestions: string[]) => void;
     onContactSaved?: (patch: ContactIdentityPatch) => void;
+    onContactMerged?: (targetContactId: string) => void;
 }
 
 interface DealContactOption {
@@ -149,7 +150,8 @@ export function CoordinatorPanel({
     onDraftApproved: _onDraftApproved,
     onDeselect,
     onSuggestionsGenerated,
-    onContactSaved
+    onContactSaved,
+    onContactMerged
 }: CoordinatorPanelProps) {
     const [reasoning, setReasoning] = useState("");
     const [generating, setGenerating] = useState(false);
@@ -674,6 +676,7 @@ export function CoordinatorPanel({
                                     contact={contactContext.contact}
                                     leadSources={contactContext.leadSources || []}
                                     onContactSaved={handleContactSaved}
+                                    onMergeSuccess={onContactMerged}
                                     skipRouterRefresh
                                 />
                             )}
@@ -689,6 +692,7 @@ export function CoordinatorPanel({
                                             leadSources={contactContext.leadSources || []}
                                             trigger={<span>{contactContext.contact.name || "Unnamed Contact"}</span>}
                                             onContactSaved={handleContactSaved}
+                                            onMergeSuccess={onContactMerged}
                                             skipRouterRefresh
                                         />
                                     </div>
