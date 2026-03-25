@@ -2562,6 +2562,80 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     return;
                 }
 
+                // ── Optimistic inbound message insertion ──
+                // When the SSE carries an enriched message.inbound event we can
+                // render the bubble immediately without a server round-trip.
+                if (viewMode === "chats" && conversationId && eventType === "message.inbound") {
+                    const payload = event?.payload && typeof event.payload === "object"
+                        ? event.payload as Record<string, unknown>
+                        : {};
+                    const messageId = String(payload?.messageId || "").trim();
+                    const body = String(payload?.body ?? "");
+                    const createdAt = String(payload?.createdAt || new Date().toISOString());
+                    const wamId = String(payload?.wamId || "");
+
+                    if (conversationId === activeIdRef.current && messageId) {
+                        // Active conversation → optimistic append
+                        const optimisticMessage: Message = {
+                            id: messageId,
+                            wamId: wamId || undefined,
+                            clientMessageId: String(payload?.clientMessageId || "") || undefined,
+                            conversationId: "",   // not used by UI rendering
+                            contactId: "",        // not used by UI rendering
+                            body,
+                            type: "WhatsApp",
+                            direction: "inbound" as const,
+                            status: "received",
+                            sendState: "sent",
+                            dateAdded: createdAt,
+                            attachments: [],
+                        } as Message;
+
+                        setMessages((prev) => {
+                            // Guard against duplicate
+                            if (prev.some((m) => m.id === messageId || (wamId && (m as any).wamId === wamId))) {
+                                return prev;
+                            }
+                            return [...prev, optimisticMessage];
+                        });
+
+                        // Also update the cached snapshot so switching away and back
+                        // still shows the message instantly.
+                        const cached = getCachedWorkspaceCoreSnapshot(conversationId);
+                        if (cached) {
+                            const cachedMessages = Array.isArray(cached.messages) ? cached.messages : [];
+                            const alreadyInCache = cachedMessages.some(
+                                (m) => m.id === messageId || (wamId && (m as any).wamId === wamId)
+                            );
+                            if (!alreadyInCache) {
+                                cacheWorkspaceCoreSnapshot(conversationId, {
+                                    ...cached,
+                                    messages: [...cachedMessages, optimisticMessage],
+                                });
+                            }
+                        }
+
+                        // Still trigger a background refresh to reconcile optimistic
+                        // data with the real server state (attachments, transcript, etc.)
+                        runRealtimeRefresh(conversationId);
+                        return;
+                    }
+
+                    // Non-active conversation → eagerly invalidate cache + prefetch
+                    // so the workspace is ready by the time the user clicks.
+                    const existingCache = getCachedWorkspaceCoreSnapshot(conversationId);
+                    if (existingCache) {
+                        // Invalidate stale cache so next open triggers a fresh fetch
+                        // but keep it around for instant partial render.
+                        workspaceCoreInFlightRef.current.delete(conversationId);
+                    }
+                    void prefetchWorkspaceCore(conversationId);
+
+                    // Still run the list-level delta to update sidebar badge/preview.
+                    runRealtimeRefresh(conversationId);
+                    return;
+                }
+
                 runRealtimeRefresh(conversationId);
             } catch (error) {
                 console.error("Failed to parse realtime conversation event:", error);
@@ -2610,10 +2684,13 @@ export function ConversationInterface({ locationId, initialConversations, initia
     }, [
         activeDealId,
         applyRealtimeMessagePatch,
+        cacheWorkspaceCoreSnapshot,
         debouncedSearchQuery,
         featureFlags.realtimeSse,
+        getCachedWorkspaceCoreSnapshot,
         isDealWorkspaceHydrationBusy,
         isTabVisible,
+        prefetchWorkspaceCore,
         refreshActiveDealWorkspace,
         runRealtimeRefresh,
         trackClientRequest,

@@ -971,6 +971,8 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
 
     // Emit realtime event immediately after local write path completes.
     // External sync (GHL, AI side effects) can continue without blocking UI freshness.
+    // For inbound messages we include the full message body and timestamp so the
+    // frontend can optimistically render the bubble without a server round-trip.
     void publishConversationRealtimeEvent({
         locationId,
         conversationId: conversation.ghlConversationId,
@@ -982,6 +984,12 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
             wamId,
             clientMessageId: (newMessage as any)?.clientMessageId || null,
             status: direction === "inbound" ? "received" : "sent",
+            // Optimistic rendering fields – only meaningful for inbound
+            ...(direction === "inbound" ? {
+                body: body || "",
+                createdAt: timestamp instanceof Date ? timestamp.toISOString() : new Date(timestamp).toISOString(),
+                contactName: contact?.name || null,
+            } : {}),
         },
     });
 
