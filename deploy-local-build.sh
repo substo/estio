@@ -16,6 +16,12 @@ GREEN_PORT=3002
 APP_NAME_PREFIX="estio-app"
 SCRAPE_WORKER_APP_NAME="estio-scrape-worker"
 LEGACY_SCRAPE_WORKER_PORT=3010
+PRISMA_CLI_VERSION="${PRISMA_CLI_VERSION:-6.19.0}"
+# Schema sync modes:
+# - migrate-only: strict migration deploy, fail on any migration error.
+# - db-push: force schema sync with db push.
+# - migrate-then-push: try migrate deploy first, fall back to db push on drift/errors.
+PRISMA_SCHEMA_SYNC_MODE="${PRISMA_SCHEMA_SYNC_MODE:-migrate-then-push}"
 
 # Keep previous color process alive briefly after traffic switch to reduce abrupt cutovers.
 # Override with DRAIN_SECONDS=0 for immediate cleanup.
@@ -186,9 +192,42 @@ ssh $SSH_OPTS $SERVER "mkdir -p $TARGET_DIR/scripts"
 rsync -avz -e "ssh $SSH_OPTS" ./scripts/setup-log-rotation.sh $SERVER:$TARGET_DIR/scripts/setup-log-rotation.sh
 ssh $SSH_OPTS $SERVER "chmod +x $TARGET_DIR/scripts/setup-log-rotation.sh && $TARGET_DIR/scripts/setup-log-rotation.sh"
 
-# Step 5: Install Production Deps & Finalize
+# Step 5: Install Production Deps & Schema Sync
 echo "📦 Installing Production Dependencies on Server..."
-ssh $SSH_OPTS $SERVER "cd $TARGET_DIR && npm ci --omit=dev --legacy-peer-deps && npx prisma@6.19.0 generate"
+echo "🗄️  Applying Prisma schema sync mode: $PRISMA_SCHEMA_SYNC_MODE (CLI $PRISMA_CLI_VERSION)"
+ssh $SSH_OPTS $SERVER bash << ENDSSH
+    set -euo pipefail
+    TARGET_DIR="$TARGET_DIR"
+    PRISMA_CLI_VERSION="$PRISMA_CLI_VERSION"
+    PRISMA_SCHEMA_SYNC_MODE="$PRISMA_SCHEMA_SYNC_MODE"
+
+    cd "\$TARGET_DIR"
+    npm ci --omit=dev --legacy-peer-deps
+    npx prisma@"\$PRISMA_CLI_VERSION" generate
+
+    case "\$PRISMA_SCHEMA_SYNC_MODE" in
+        migrate-only)
+            npx prisma@"\$PRISMA_CLI_VERSION" migrate deploy
+            ;;
+        db-push)
+            npx prisma@"\$PRISMA_CLI_VERSION" db push --skip-generate --accept-data-loss
+            ;;
+        migrate-then-push)
+            if npx prisma@"\$PRISMA_CLI_VERSION" migrate deploy; then
+                echo "✅ Prisma migrate deploy succeeded."
+            else
+                echo "⚠️ Prisma migrate deploy failed (likely migration history drift). Falling back to db push..."
+                npx prisma@"\$PRISMA_CLI_VERSION" db push --skip-generate --accept-data-loss
+                echo "✅ Prisma db push fallback completed."
+            fi
+            ;;
+        *)
+            echo "❌ Unknown PRISMA_SCHEMA_SYNC_MODE='\$PRISMA_SCHEMA_SYNC_MODE'."
+            echo "   Allowed: migrate-only | db-push | migrate-then-push"
+            exit 1
+            ;;
+    esac
+ENDSSH
 
 # Step 6: Evolution Containers (Optional)
 if [[ "$RESTART_EVOLUTION_CONTAINERS" == "true" ]]; then
