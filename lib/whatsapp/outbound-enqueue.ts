@@ -286,40 +286,36 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
             `[enqueue_degraded] Queue enqueue failed: ${queueErrorDetail}`
         );
 
-        if (enqueueDelayMs <= 0) {
-            try {
-                const inlineResult = await processWhatsAppOutboundOutboxJob({
-                    outboxId: txResult.outboxId,
-                    workerId: `wa_outbound_inline_${randomUUID()}`,
-                });
+        try {
+            const inlineResult = await processWhatsAppOutboundOutboxJob({
+                outboxId: txResult.outboxId,
+                workerId: `wa_outbound_inline_${randomUUID()}`,
+            });
 
-                if (inlineResult.outcome === "success") {
-                    dispatchMode = "inline_fallback_sent";
-                    warning = "Queue enqueue degraded; dispatched immediately via inline fallback.";
-                } else {
-                    dispatchMode = "inline_fallback_deferred";
-                    warning = "Queue enqueue degraded; inline fallback did not complete send. Durable retry remains active.";
-                    if (inlineResult.outcome === "dead") {
-                        errorCode = "inline_dispatch_failed";
-                    }
-
-                    if (inlineResult.error) {
-                        await markOutboxQueueDegraded(
-                            txResult.outboxId,
-                            `[enqueue_degraded] Inline fallback outcome=${inlineResult.outcome}: ${inlineResult.error}`
-                        );
-                    }
+            if (inlineResult.outcome === "success") {
+                dispatchMode = "inline_fallback_sent";
+                warning = "Queue enqueue degraded; bypassed typing delay and dispatched immediately via inline fallback.";
+            } else {
+                dispatchMode = "inline_fallback_deferred";
+                warning = "Queue enqueue degraded; inline fallback did not complete send. Durable retry remains active.";
+                if (inlineResult.outcome === "dead") {
+                    errorCode = "inline_dispatch_failed";
                 }
-            } catch (inlineError) {
-                errorCode = "inline_dispatch_failed";
-                warning = "Queue enqueue degraded; inline fallback errored. Durable retry remains active.";
-                await markOutboxQueueDegraded(
-                    txResult.outboxId,
-                    `[enqueue_degraded] Inline fallback error: ${normalizeErrorMessage(inlineError)}`
-                );
+
+                if (inlineResult.error) {
+                    await markOutboxQueueDegraded(
+                        txResult.outboxId,
+                        `[enqueue_degraded] Inline fallback outcome=${inlineResult.outcome}: ${inlineResult.error}`
+                    );
+                }
             }
-        } else {
-            warning = "Queue enqueue degraded; message kept durable and will auto-recover at scheduled dispatch time.";
+        } catch (inlineError) {
+            errorCode = "inline_dispatch_failed";
+            warning = "Queue enqueue degraded; inline fallback errored. Durable retry remains active.";
+            await markOutboxQueueDegraded(
+                txResult.outboxId,
+                `[enqueue_degraded] Inline fallback error: ${normalizeErrorMessage(inlineError)}`
+            );
         }
     }
 

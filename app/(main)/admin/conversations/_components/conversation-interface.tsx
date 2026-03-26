@@ -812,6 +812,12 @@ export function ConversationInterface({ locationId, initialConversations, initia
         const nextMap = new Map<string, Message>();
         for (const message of Array.isArray(list) ? list : []) {
             if (!isPendingOutboundMessage(message as any)) continue;
+            
+            // Prevent optimistic leaking during rapid activeId changes before messages settle
+            if ((message as any).conversationId && (message as any).conversationId !== normalizedConversationId) {
+                continue;
+            }
+
             const key = getPendingMessageKey(message);
             if (!key) continue;
             nextMap.set(key, message);
