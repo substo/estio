@@ -242,12 +242,12 @@ export const getPublicProperties = cache(async (
 });
 
 
-export const getPublicPropertyBySlug = cache(async (locationId: string, slug: string) => {
+export const getPublicPropertyBySlug = cache(async (locationId: string, slug: string, preview: boolean = false) => {
     const property = await db.property.findFirst({
         where: {
             locationId, // STRICT TENANT ISOLATION
             slug,
-            publicationStatus: 'PUBLISHED',
+            ...(preview ? {} : { publicationStatus: 'PUBLISHED' }),
         },
         include: {
             media: {

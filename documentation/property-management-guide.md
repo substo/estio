@@ -66,6 +66,9 @@ The Property Form is the primary interface for creating and editing properties. 
 *   **Draft**: Work in progress, not visible.
 *   **Unlisted**: Manually hidden/archived.
 
+> [!NOTE]  
+> Authorized administrators can securely preview unpublished properties on the public site by using the "View on Public Site" link from the admin dashboard, which appends a `?preview=true` parameter and verifies their active session.
+
 ---
 
 ## GHL Synchronization

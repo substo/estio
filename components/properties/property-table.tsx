@@ -238,7 +238,7 @@ export function PropertyTable({
                                                     title="View on Public Site"
                                                     onClick={(e) => {
                                                         e.stopPropagation();
-                                                        window.open(`http://${domain}/properties/${item.properties.property_reference}`, '_blank');
+                                                        window.open(`http://${domain}/properties/${item.properties.property_reference}?preview=true`, '_blank');
                                                     }}
                                                 >
                                                     <Trash2 className="h-4 w-4 hidden" /> {/* Hack to keep layout same if needed or just use icon */}

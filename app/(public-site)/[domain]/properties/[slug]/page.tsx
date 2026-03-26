@@ -20,6 +20,7 @@ import { isFavorited } from "@/app/actions/public-user";
 
 interface Props {
     params: Promise<{ domain: string; slug: string }>;
+    searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }
 
 // Helper to generate Schema
@@ -102,10 +103,21 @@ export async function generateMetadata(props: Props): Promise<Metadata> {
 
 export default async function PropertyDetailPage(props: Props) {
     const params = await props.params;
+    const searchParams = await props.searchParams;
     const config = await getSiteConfig(params.domain);
     if (!config) notFound();
 
-    const property = await getPublicPropertyBySlug(config.locationId, params.slug);
+    const isPreviewParam = searchParams?.preview === 'true';
+    let hasAccessToPreview = false;
+
+    if (isPreviewParam) {
+        const { userId } = await auth();
+        if (userId) {
+            hasAccessToPreview = true;
+        }
+    }
+
+    const property = await getPublicPropertyBySlug(config.locationId, params.slug, hasAccessToPreview);
     if (!property) notFound();
 
     const price = new Intl.NumberFormat("en-US", { style: "currency", currency: property.currency || "EUR", maximumFractionDigits: 0 }).format(property.price || 0);
