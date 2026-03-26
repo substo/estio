@@ -68,9 +68,25 @@ function generateJsonLd(property: any, domain: string) {
 
 export async function generateMetadata(props: Props): Promise<Metadata> {
     const params = await props.params;
+    const searchParams = await props.searchParams;
     const config = await getSiteConfig(params.domain);
     if (!config) return {};
-    const property = await getPublicPropertyBySlug(config.locationId, params.slug);
+
+    const previewTokenParam = searchParams?.previewToken as string | undefined;
+    let hasAccessToPreview = false;
+
+    if (previewTokenParam) {
+        try {
+            const payload = verifyPreviewToken(previewTokenParam);
+            if (payload.locationId === config.locationId) {
+                hasAccessToPreview = true;
+            }
+        } catch (e) {
+            console.error("Invalid preview token metadata", e);
+        }
+    }
+
+    const property = await getPublicPropertyBySlug(config.locationId, params.slug, hasAccessToPreview);
     if (!property) return { title: "Property Not Found" };
 
     let ogImage = "/placeholder-house.png";
