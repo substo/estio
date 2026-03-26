@@ -20,7 +20,7 @@ The architecture rewrites incoming requests based on the `Host` header to map th
     *   *Note*: The middleware rewrite targets `/[domain]` which Next.js resolves to `app/(public-site)/[domain]` due to the route group.
 *   **Data Isolation:** All data fetching (`getSiteConfig`, `getPublicProperties`) allows queries to be scoped strictly to the `locationId` associated with that domain.
     *   **Filtering:** `getPublicProperties` and related functions strictly filter by `publicationStatus: 'PUBLISHED'` by default. 
-    *   **Preview Bypass:** Authorized tenant administrators can bypass the `PUBLISHED` requirement to preview properties by appending `?preview=true` to the URL. The system verifies their active Clerk session before allowing access.
+    *   **Preview Bypass:** Authorized tenant administrators can bypass the `PUBLISHED` requirement to preview properties by appending `?previewToken=...` to the URL. The system generates a short-lived secure JWT on the admin app to circumvent cross-domain session limitations.
 *   **Independent Layout:** The public site uses its own `layout.tsx` which handles:
     *   **Theming:** Dynamically injects `--primary-brand` CSS variable from `SiteConfig`.
     *   **Typography:** Loads `Montserrat` (Headings) and `Inter` (Body) via `next/font/google`, independent of the main app.

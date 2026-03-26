@@ -1,6 +1,7 @@
 import db from "@/lib/db";
 import { getLocationContext } from "@/lib/auth/location-context";
 import PropertyView from "../../_components/property-view";
+import { generatePreviewToken } from "@/lib/jwt-utils";
 
 
 
@@ -74,6 +75,8 @@ export default async function PropertyViewPage({ params, searchParams }: { param
     const developersData = companiesData;
     const managementCompaniesData = companiesData;
 
+    const previewToken = generatePreviewToken(locationId);
+
     return (
         <div className="p-6 max-w-6xl mx-auto">
             <PropertyView
@@ -84,6 +87,7 @@ export default async function PropertyViewPage({ params, searchParams }: { param
                 developersData={developersData}
                 managementCompaniesData={managementCompaniesData}
                 projectsData={projectsData}
+                previewToken={previewToken}
             />
         </div>
     );

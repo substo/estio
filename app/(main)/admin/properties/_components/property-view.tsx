@@ -57,6 +57,7 @@ interface PropertyViewProps {
     developersData?: { id: string; name: string }[];
     managementCompaniesData?: { id: string; name: string }[];
     projectsData?: any[]; // Project[] but avoiding cyclic import for now or simplify
+    previewToken?: string;
 }
 
 export default function PropertyView({
@@ -66,7 +67,8 @@ export default function PropertyView({
     contactsData,
     developersData,
     managementCompaniesData,
-    projectsData
+    projectsData,
+    previewToken
 }: PropertyViewProps) {
     const [isEditOpen, setIsEditOpen] = useState(false);
 
@@ -100,7 +102,7 @@ export default function PropertyView({
                 <div className="flex gap-2">
                     {domain && (
                         <Button variant="outline" asChild>
-                            <a href={`http://${domain}/properties/${property.slug}?preview=true`} target="_blank" rel="noopener noreferrer">
+                            <a href={`http://${domain}/properties/${property.slug}${previewToken ? `?previewToken=${previewToken}` : ''}`} target="_blank" rel="noopener noreferrer">
                                 <ExternalLink className="mr-2 h-4 w-4" />
                                 View on Public Site
                             </a>

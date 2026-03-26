@@ -51,3 +51,42 @@ export function verifySSOToken(token: string): SSOTokenPayload {
         algorithms: ['HS256'],
     }) as SSOTokenPayload;
 }
+
+export interface PreviewTokenPayload {
+    locationId: string;
+    purpose: 'property_preview';
+    iat: number;
+    exp: number;
+}
+
+export function generatePreviewToken(locationId: string): string {
+    if (!JWT_SECRET) {
+        throw new Error('JWT_SECRET environment variable is not set');
+    }
+
+    const payload: Omit<PreviewTokenPayload, 'iat' | 'exp'> = {
+        locationId,
+        purpose: 'property_preview',
+    };
+
+    return jwt.sign(payload, JWT_SECRET, {
+        algorithm: 'HS256',
+        expiresIn: `1h`,
+    });
+}
+
+export function verifyPreviewToken(token: string): PreviewTokenPayload {
+    if (!JWT_SECRET) {
+        throw new Error('JWT_SECRET environment variable is not set');
+    }
+
+    const payload = jwt.verify(token, JWT_SECRET, {
+        algorithms: ['HS256'],
+    }) as PreviewTokenPayload;
+
+    if (payload.purpose !== 'property_preview') {
+        throw new Error('Invalid token purpose');
+    }
+
+    return payload;
+}

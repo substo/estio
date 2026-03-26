@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { FEATURE_CATEGORIES, PUBLIC_FEATURES_LIST } from "@/lib/properties/filter-constants";
 import { PropertyGallery } from "./property-gallery";
-import { auth } from "@clerk/nextjs/server";
+import { verifyPreviewToken } from "@/lib/jwt-utils";
 import { Edit } from "lucide-react";
 import { FavoriteButton } from "../../_components/favorite-button";
 import { isFavorited } from "@/app/actions/public-user";
@@ -107,13 +107,17 @@ export default async function PropertyDetailPage(props: Props) {
     const config = await getSiteConfig(params.domain);
     if (!config) notFound();
 
-    const isPreviewParam = searchParams?.preview === 'true';
+    const previewTokenParam = searchParams?.previewToken as string | undefined;
     let hasAccessToPreview = false;
 
-    if (isPreviewParam) {
-        const { userId } = await auth();
-        if (userId) {
-            hasAccessToPreview = true;
+    if (previewTokenParam) {
+        try {
+            const payload = verifyPreviewToken(previewTokenParam);
+            if (payload.locationId === config.locationId) {
+                hasAccessToPreview = true;
+            }
+        } catch (e) {
+            console.error("Invalid preview token", e);
         }
     }
 
@@ -471,7 +475,7 @@ export default async function PropertyDetailPage(props: Props) {
             </main>
 
             {/* Admin Quick Link */}
-            {((await auth()).userId || process.env.NODE_ENV === 'development') && (
+            {hasAccessToPreview && (
                 <div className="fixed bottom-4 left-4 z-50">
                     <Button asChild variant="default" size="sm" className="shadow-lg gap-2 bg-slate-900 text-white hover:bg-slate-800">
                         <a

@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Plus } from 'lucide-react';
 // Import fetch helpers
 import Link from 'next/link';
+import { generatePreviewToken } from '@/lib/jwt-utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,6 +42,8 @@ export default async function PropertiesPage(props: PageProps) {
             </div>
         );
     }
+
+    const previewToken = generatePreviewToken(location.id);
 
     // Parse search params
     const limit = 10;
@@ -243,6 +246,7 @@ export default async function PropertiesPage(props: PageProps) {
                         developersData={developersData}
                         managementCompaniesData={managementCompaniesData}
                         projectsData={projectsData}
+                        previewToken={previewToken}
                     />
                 </Suspense>
             )}
