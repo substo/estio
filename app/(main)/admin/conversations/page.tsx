@@ -1,6 +1,7 @@
 import { Suspense } from 'react';
 import { getLocationContext } from '@/lib/auth/location-context';
 import { fetchConversations } from './actions';
+import { getDealContexts } from '../deals/actions';
 import { ConversationInterface } from './_components/conversation-interface';
 import { getConversationFeatureFlags } from '@/lib/feature-flags';
 import { hasScopesForFeature, getMissingScopes, describeMissingScopes } from '@/lib/ghl/scope-validator';
@@ -79,10 +80,13 @@ export default async function ConversationsPage({ searchParams }: { searchParams
         : 'active';
 
     // Initial Fetch on Server (include deep-linked conversation even if not in the top-50 window)
-    const initialConversationsData = await fetchConversations(
-        initialConversationStatus === 'tasks' ? 'active' : initialConversationStatus,
-        selectedConversationId
-    );
+    const [initialConversationsData, initialDealsData] = await Promise.all([
+        fetchConversations(
+            initialConversationStatus === 'tasks' ? 'active' : initialConversationStatus,
+            selectedConversationId
+        ),
+        getDealContexts()
+    ]);
     const featureFlags = getConversationFeatureFlags(location.id);
 
     return (
@@ -99,6 +103,7 @@ export default async function ConversationsPage({ searchParams }: { searchParams
                             nextCursor: initialConversationsData.nextCursor || null,
                             deltaCursor: initialConversationsData.deltaCursor || null,
                         }}
+                        initialDeals={initialDealsData}
                         featureFlags={featureFlags}
                     />
                 </Suspense>

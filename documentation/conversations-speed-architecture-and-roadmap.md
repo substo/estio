@@ -50,6 +50,7 @@ Main causes identified:
 | 2026-03-24 | `working tree` | WhatsApp realtime fast path: emit message events earlier in sync flow + publish realtime status updates (`message.status`) on delivery/read transitions. |
 | 2026-03-24 | `working tree` | Paste Lead fast path: read-only auth on parse/import, bounded parse payload, and detached autosync/trace/orchestration side effects. |
 | 2026-03-25 | `4d2d41d` | WhatsApp history recovery hardening: fetch/merge across all candidate JIDs (`@lid` + phone JID) instead of stopping at first non-empty candidate, closing missed-message recovery gaps after webhook outages. |
+| 2026-03-26 | `current` | Server-preloaded Deal Context: eliminating client-side polling waterfall when switching to Deal view by leveraging `Promise.all` in `page.tsx`. |
 
 ## Current Architecture (As Implemented)
 
@@ -151,6 +152,9 @@ The paste-import path in `New Conversation` and selection toolbar now follows th
 
 Outcome goal:
 - faster `Confirm & Import` completion and reduced tail latency spikes caused by external integrations.
+
+### 9) Instant Deal Mode Tab Switch (Mar 26, 2026)
+To eliminate the network waterfall delay when shifting from `chats` to `deals` mode, the server-side `page.tsx` now concurrently fetches and passes `initialDeals` into `<ConversationInterface>`. This forces the active deals payload to be in memory before the first React render, allowing tab switching with zero measurable network latency.
 
 ### 5) Data, Index, and Query-plan Safety
 Performance indexes and query-plan checks are in place for:

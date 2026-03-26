@@ -96,6 +96,7 @@ interface ConversationInterfaceProps {
         nextCursor: string | null;
         deltaCursor?: string | null;
     };
+    initialDeals?: any[];
     featureFlags: ConversationFeatureFlags;
 }
 
@@ -450,7 +451,7 @@ function buildDealContactOptions(participants: Conversation[]): DealContactOptio
     return Array.from(byContact.values()).sort((a, b) => b.lastMessageDate - a.lastMessageDate);
 }
 
-export function ConversationInterface({ locationId, initialConversations, initialConversationListPageInfo, featureFlags }: ConversationInterfaceProps) {
+export function ConversationInterface({ locationId, initialConversations, initialConversationListPageInfo, initialDeals, featureFlags }: ConversationInterfaceProps) {
     const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();
@@ -554,7 +555,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const [isSearching, setIsSearching] = useState(false);
     const [searchResults, setSearchResults] = useState<Conversation[]>([]);
 
-    const [deals, setDeals] = useState<any[]>([]);
+    const [deals, setDeals] = useState<any[]>(initialDeals || []);
     const [activeDealParticipants, setActiveDealParticipants] = useState<Conversation[]>([]);
     const [dealContacts, setDealContacts] = useState<DealContactOption[]>([]);
     const [loadingDealContext, setLoadingDealContext] = useState(false);

@@ -312,6 +312,7 @@ This document is also the source of truth for reply-target behavior in `/admin/c
 For the reply-language resolution contract itself, see [AI Communication Policy](./ai-communication-policy.md).
 
 ### Participant Hydration
+- Deal mode now preloads the active deals concurrently with the active inbox list from the server (`page.tsx`), eliminating the client-side network waterfall when switching to the deals tab. `conversation-interface.tsx` receives `initialDeals` and renders the list instantaneously.
 - Deal mode no longer relies on the paginated left chat list to infer participants.
 - `getDealContext(id)` returns deal conversation summaries in the same client shape used by the messaging UI:
   - `id`
