@@ -55,6 +55,11 @@ const nextConfig = {
       hostname: 'www.downtowncyprus.com',
       port: '',
       pathname: '/**'
+    }, {
+      protocol: 'https',
+      hostname: '*.bazaraki.com',
+      port: '',
+      pathname: '/**'
     }],
     dangerouslyAllowSVG: true,
     contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
