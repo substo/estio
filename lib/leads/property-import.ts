@@ -1,11 +1,13 @@
 import db from '@/lib/db';
+import { uploadUrlToCloudflare } from '@/lib/cloudflareImages';
+import { getImageDeliveryUrl } from '@/lib/cloudflareImages';
 
 /**
  * Property Import Service
  *
  * Converts scraped listings into proper Property records when a prospect contact
  * is accepted. Links the imported property back to the contact via ContactPropertyRole
- * and creates PropertyMedia from scraped images.
+ * and creates PropertyMedia from scraped images (uploaded to Cloudflare).
  */
 
 interface ImportResult {
@@ -34,6 +36,21 @@ function generateSlug(title: string | null, externalId: string): string {
 function mapListingGoal(listingType: string | null | undefined): 'SALE' | 'RENT' {
   if (listingType?.toLowerCase() === 'rent') return 'RENT';
   return 'SALE';
+}
+
+/**
+ * Upload a single image URL to Cloudflare. Returns cloudflareImageId + delivery URL,
+ * or null if the upload fails (caller should fall back to the raw URL).
+ */
+async function tryUploadImageToCloudflare(url: string): Promise<{ cloudflareImageId: string; deliveryUrl: string } | null> {
+  try {
+    const result = await uploadUrlToCloudflare(url);
+    const deliveryUrl = getImageDeliveryUrl(result.imageId, 'public');
+    return { cloudflareImageId: result.imageId, deliveryUrl };
+  } catch (error: any) {
+    console.warn(`[property-import] Failed to upload image to Cloudflare: ${url} — ${error.message}`);
+    return null;
+  }
 }
 
 /**
@@ -91,6 +108,22 @@ export async function importScrapedListingAsProperty(
     }
   }
 
+  // Upload images to Cloudflare BEFORE the transaction (network I/O outside tx)
+  const mediaEntries: { url: string; cloudflareImageId: string | null; sortOrder: number }[] = [];
+  for (let i = 0; i < listing.images.length; i++) {
+    const externalUrl = listing.images[i];
+    const uploaded = await tryUploadImageToCloudflare(externalUrl);
+    mediaEntries.push({
+      url: uploaded ? uploaded.deliveryUrl : externalUrl,
+      cloudflareImageId: uploaded ? uploaded.cloudflareImageId : null,
+      sortOrder: i,
+    });
+    // Small delay between uploads to avoid Cloudflare rate limits
+    if (i < listing.images.length - 1) {
+      await new Promise(r => setTimeout(r, 200));
+    }
+  }
+
   // Create Property + PropertyMedia + ContactPropertyRole + update ScrapedListing in a transaction
   const result = await db.$transaction(async (tx) => {
     // 1. Create the Property
@@ -121,14 +154,15 @@ export async function importScrapedListingAsProperty(
       },
     });
 
-    // 2. Create PropertyMedia from images
-    if (listing.images.length > 0) {
+    // 2. Create PropertyMedia from uploaded images
+    if (mediaEntries.length > 0) {
       await tx.propertyMedia.createMany({
-        data: listing.images.map((url, index) => ({
+        data: mediaEntries.map((entry) => ({
           propertyId: property.id,
-          url,
+          url: entry.url,
+          cloudflareImageId: entry.cloudflareImageId,
           kind: 'IMAGE' as const,
-          sortOrder: index,
+          sortOrder: entry.sortOrder,
         })),
       });
     }
