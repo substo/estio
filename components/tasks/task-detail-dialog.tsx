@@ -61,7 +61,9 @@ export function TaskDetailDialog({
   const [loading, setLoading] = useState(false);
   const [task, setTask] = useState<any | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [completing, setCompleting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const busy = completing || deleting;
   const [editorOpen, setEditorOpen] = useState(false);
 
   useEffect(() => {
@@ -107,7 +109,7 @@ export function TaskDetailDialog({
 
   async function handleToggleComplete() {
     if (!task?.id) return;
-    setBusy(true);
+    setCompleting(true);
     try {
       const result = await setContactTaskCompletion(task.id, String(task.status || '').toLowerCase() !== 'completed');
       if (!result?.success) {
@@ -120,13 +122,13 @@ export function TaskDetailDialog({
       console.error('Failed to toggle task completion:', nextError);
       toast.error(nextError?.message || 'Failed to update task');
     } finally {
-      setBusy(false);
+      setCompleting(false);
     }
   }
 
   async function handleDelete() {
     if (!task?.id) return;
-    setBusy(true);
+    setDeleting(true);
     try {
       const result = await deleteContactTask(task.id);
       if (!result?.success) {
@@ -139,7 +141,7 @@ export function TaskDetailDialog({
       console.error('Failed to delete task:', nextError);
       toast.error(nextError?.message || 'Failed to delete task');
     } finally {
-      setBusy(false);
+      setDeleting(false);
     }
   }
 
@@ -323,7 +325,7 @@ export function TaskDetailDialog({
                 onClick={handleToggleComplete}
                 disabled={!task?.id || busy || loading}
               >
-                {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                {completing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
                 {String(task?.status || '').toLowerCase() === 'completed' ? 'Reopen' : 'Mark done'}
               </Button>
             </div>
@@ -334,7 +336,7 @@ export function TaskDetailDialog({
               onClick={handleDelete}
               disabled={!task?.id || busy || loading}
             >
-              {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+              {deleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
               Delete
             </Button>
           </DialogFooter>

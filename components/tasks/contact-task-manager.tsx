@@ -379,12 +379,17 @@ export function ContactTaskManager({
   useEffect(() => {
     void loadTasks();
 
+    const debounceRef = { timer: null as ReturnType<typeof setTimeout> | null };
     const handleMutated = () => {
-      void loadTasks({ silent: true });
+      if (debounceRef.timer) clearTimeout(debounceRef.timer);
+      debounceRef.timer = setTimeout(() => void loadTasks({ silent: true }), 300);
     };
 
     window.addEventListener('estio-tasks-mutated', handleMutated);
-    return () => window.removeEventListener('estio-tasks-mutated', handleMutated);
+    return () => {
+      window.removeEventListener('estio-tasks-mutated', handleMutated);
+      if (debounceRef.timer) clearTimeout(debounceRef.timer);
+    };
   }, [loadTasks]);
 
   const openAddTaskModal = useCallback(() => {
@@ -440,7 +445,7 @@ export function ContactTaskManager({
 
       const updatedTask = normalizeTask(res.task);
       setTasks((prev) => prev.map((task) => (task.id === taskId ? updatedTask : task)));
-      void loadTasks({ silent: true });
+      window.dispatchEvent(new Event('estio-tasks-mutated'));
     } catch (e: any) {
       setTasks(previousTasks);
       setCounts(previousCounts);
@@ -469,7 +474,7 @@ export function ContactTaskManager({
         return;
       }
 
-      void loadTasks({ silent: true });
+      window.dispatchEvent(new Event('estio-tasks-mutated'));
     } catch (e: any) {
       setTasks(previousTasks);
       setCounts(previousCounts);

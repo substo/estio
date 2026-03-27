@@ -540,18 +540,13 @@ export async function createContactTask(input: z.input<typeof createTaskSchema>)
     },
   });
 
-  const queue = await enqueueTaskSyncJobs({
-    taskId: task.id,
-    operation: 'create',
-  });
-  const reminders = await rebuildTaskReminderJobs(task.id);
+  // Fire-and-forget: sync + reminders run in the background
+  void Promise.allSettled([
+    enqueueTaskSyncJobs({ taskId: task.id, operation: 'create' }),
+    rebuildTaskReminderJobs(task.id),
+  ]).catch((err) => console.error('[task-sync] background enqueue error (create):', err));
 
-  return {
-    success: true,
-    task,
-    queue,
-    reminders,
-  };
+  return { success: true, task };
 }
 
 export async function updateContactTask(input: z.input<typeof updateTaskSchema>) {
@@ -617,18 +612,13 @@ export async function updateContactTask(input: z.input<typeof updateTaskSchema>)
     },
   });
 
-  const queue = await enqueueTaskSyncJobs({
-    taskId: task.id,
-    operation: 'update',
-  });
-  const reminders = await rebuildTaskReminderJobs(task.id);
+  // Fire-and-forget: sync + reminders run in the background
+  void Promise.allSettled([
+    enqueueTaskSyncJobs({ taskId: task.id, operation: 'update' }),
+    rebuildTaskReminderJobs(task.id),
+  ]).catch((err) => console.error('[task-sync] background enqueue error (update):', err));
 
-  return {
-    success: true,
-    task,
-    queue,
-    reminders,
-  };
+  return { success: true, task };
 }
 
 export async function setContactTaskCompletion(taskId: string, completed: boolean) {
@@ -660,18 +650,13 @@ export async function setContactTaskCompletion(taskId: string, completed: boolea
     },
   });
 
-  const queue = await enqueueTaskSyncJobs({
-    taskId: task.id,
-    operation: completed ? 'complete' : 'uncomplete',
-  });
-  const reminders = await rebuildTaskReminderJobs(task.id);
+  // Fire-and-forget: sync + reminders run in the background
+  void Promise.allSettled([
+    enqueueTaskSyncJobs({ taskId: task.id, operation: completed ? 'complete' : 'uncomplete' }),
+    rebuildTaskReminderJobs(task.id),
+  ]).catch((err) => console.error('[task-sync] background enqueue error (completion):', err));
 
-  return {
-    success: true,
-    task,
-    queue,
-    reminders,
-  };
+  return { success: true, task };
 }
 
 export async function deleteContactTask(taskId: string) {
@@ -700,16 +685,11 @@ export async function deleteContactTask(taskId: string) {
     },
   });
 
-  const queue = await enqueueTaskSyncJobs({
-    taskId: task.id,
-    operation: 'delete',
-  });
-  const reminders = await rebuildTaskReminderJobs(task.id);
+  // Fire-and-forget: sync + reminders run in the background
+  void Promise.allSettled([
+    enqueueTaskSyncJobs({ taskId: task.id, operation: 'delete' }),
+    rebuildTaskReminderJobs(task.id),
+  ]).catch((err) => console.error('[task-sync] background enqueue error (delete):', err));
 
-  return {
-    success: true,
-    task,
-    queue,
-    reminders,
-  };
+  return { success: true, task };
 }

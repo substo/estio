@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import { Loader2, Circle, Clock3, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -79,31 +79,45 @@ export function GlobalTaskList({
   useEffect(() => {
     void loadTasks();
 
+    const debounceRef = { timer: null as ReturnType<typeof setTimeout> | null };
     const handleMutated = () => {
-      void loadTasks();
+      if (debounceRef.timer) clearTimeout(debounceRef.timer);
+      debounceRef.timer = setTimeout(() => void loadTasks(), 300);
     };
 
     window.addEventListener('estio-tasks-mutated', handleMutated);
-    return () => window.removeEventListener('estio-tasks-mutated', handleMutated);
+    return () => {
+      window.removeEventListener('estio-tasks-mutated', handleMutated);
+      if (debounceRef.timer) clearTimeout(debounceRef.timer);
+    };
   }, [loadTasks]);
 
   const handleToggleComplete = async (event: React.MouseEvent, taskId: string, completed: boolean) => {
     event.stopPropagation();
+
+    // Optimistic: remove from list immediately
+    const previousTasks = tasks;
+    if (completed) {
+      setTasks((prev) => prev.filter((task) => task.id !== taskId));
+      if (selectedTaskId === taskId) {
+        onSelectTask?.(null);
+      }
+    }
+
     setBusyTaskIds((prev) => ({ ...prev, [taskId]: true }));
 
     try {
       const res = await setContactTaskCompletion(taskId, completed);
-      if (res.success) {
-        if (completed) {
-          setTasks((prev) => prev.filter((task) => task.id !== taskId));
-          if (selectedTaskId === taskId) {
-            onSelectTask?.(null);
-          }
-        }
-        window.dispatchEvent(new Event('estio-tasks-mutated'));
+      if (!res.success) {
+        // Roll back on failure
+        setTasks(previousTasks);
+        return;
       }
+      window.dispatchEvent(new Event('estio-tasks-mutated'));
     } catch (error) {
       console.error(error);
+      // Roll back on error
+      setTasks(previousTasks);
     } finally {
       setBusyTaskIds((prev) => {
         const next = { ...prev };
@@ -115,18 +129,27 @@ export function GlobalTaskList({
 
   const handleDelete = async (event: React.MouseEvent, taskId: string) => {
     event.stopPropagation();
+
+    // Optimistic: remove from list immediately
+    const previousTasks = tasks;
+    setTasks((prev) => prev.filter((task) => task.id !== taskId));
+    if (selectedTaskId === taskId) {
+      onSelectTask?.(null);
+    }
+
     setBusyTaskIds((prev) => ({ ...prev, [taskId]: true }));
     try {
       const res = await deleteContactTask(taskId);
-      if (res.success) {
-        setTasks((prev) => prev.filter((task) => task.id !== taskId));
-        if (selectedTaskId === taskId) {
-          onSelectTask?.(null);
-        }
-        window.dispatchEvent(new Event('estio-tasks-mutated'));
+      if (!res.success) {
+        // Roll back on failure
+        setTasks(previousTasks);
+        return;
       }
+      window.dispatchEvent(new Event('estio-tasks-mutated'));
     } catch (error) {
       console.error(error);
+      // Roll back on error
+      setTasks(previousTasks);
     } finally {
       setBusyTaskIds((prev) => {
         const next = { ...prev };
@@ -288,7 +311,6 @@ export function GlobalTaskList({
           if (selectedTaskId === taskId) {
             onSelectTask?.(null, selectedConversationId || null);
           }
-          void loadTasks();
         }}
         onOpenConversation={(conversationId) => {
           onSelectConversation(conversationId);

@@ -1,5 +1,5 @@
 # Tasks Implementation Reference
-**Last Updated:** 2026-03-13
+**Last Updated:** 2026-03-27
 
 ## Purpose
 This document is the current implementation reference for contact tasks in Estio. It covers:
@@ -16,7 +16,7 @@ This document is the current implementation reference for contact tasks in Estio
 ## Scope Summary
 
 - `ContactTask` remains the local source of truth.
-- Every task mutation still enqueues provider sync jobs through the outbox pattern.
+- Every task mutation still enqueues provider sync jobs through the outbox pattern (fire-and-forget; see [Server Actions](#server-actions)).
 - Task reminders are now also local-first:
   - reminder jobs are generated from the local task record
   - delivery fan-out is handled from the local database only
@@ -119,13 +119,16 @@ Primary file: [`app/(main)/admin/tasks/actions.ts`](/Users/martingreen/Projects/
   - requires `contactId` or `conversationId`
   - keeps `dueAt` nullable when no due date is provided
   - persists `assignedUserId`, `reminderMode`, and optional `reminderOffsets`
-  - creates the local task, enqueues sync jobs, then rebuilds reminder jobs
+  - creates the local task, then fires sync enqueue and reminder rebuild as **fire-and-forget** background work
 - `updateContactTask(input)`
-  - updates editable fields, increments `syncVersion`, enqueues provider sync, then rebuilds reminder jobs
+  - updates editable fields, increments `syncVersion`, then fires sync enqueue and reminder rebuild as **fire-and-forget**
 - `setContactTaskCompletion(taskId, completed)`
-  - sets status/completed state, increments `syncVersion`, enqueues `complete` or `uncomplete`, then rebuilds reminder jobs
+  - sets status/completed state, increments `syncVersion`, then fires `complete` or `uncomplete` sync enqueue and reminder rebuild as **fire-and-forget**
 - `deleteContactTask(taskId)`
-  - soft deletes, marks `canceled`, increments `syncVersion`, enqueues `delete`, then rebuilds reminder jobs
+  - soft deletes, marks `canceled`, increments `syncVersion`, then fires `delete` sync enqueue and reminder rebuild as **fire-and-forget**
+
+> [!NOTE]
+> **Fire-and-forget pattern (added 2026-03-27):** All four mutation actions return the response to the client immediately after the DB write completes. The `enqueueTaskSyncJobs()` and `rebuildTaskReminderJobs()` calls run as non-blocking `Promise.allSettled()` — errors are caught and logged but never block the HTTP response. The existing cron pollers (`/api/cron/task-sync`, `/api/cron/task-reminders`) pick up the enqueued rows on their next tick. This eliminates 300-700ms of per-operation latency.
 
 ## Provider Sync-Out
 
@@ -217,6 +220,7 @@ File: [`components/tasks/task-detail-dialog.tsx`](/Users/martingreen/Projects/ID
   - provider sync status
   - contact and conversation shortcuts
   - quick actions for edit/complete/delete
+- uses **per-action loading states** (`completing` / `deleting`) so only the active button shows a spinner
 
 ### Mission Control global tasks workspace
 
@@ -231,6 +235,8 @@ Files:
   - `task=<taskId>`
   - optional `id=<ghlConversationId>`
 - selecting a task highlights the row and opens `TaskDetailDialog`
+- uses **optimistic UI**: tasks are removed from the list instantly on complete/delete before the server responds; rolled back on failure
+- the `estio-tasks-mutated` event listener is **debounced** (300ms) to batch rapid successive events and avoid redundant full refetches
 
 ### Admin notification bell
 
