@@ -5,6 +5,7 @@ import { FeedFormat } from "@prisma/client";
 import { FeedParser } from "./parsers/base-parser";
 import { FeedMappingConfig } from "./ai-mapper";
 import { createHash } from "crypto";
+import { uploadUrlToCloudflare, getImageDeliveryUrl } from "@/lib/cloudflareImages";
 
 export class FeedService {
     private static buildFeedSyncMetadata(
@@ -133,6 +134,34 @@ export class FeedService {
                     .replace(/[^a-z0-9]+/g, '-')
                     .replace(/(^-|-$)/g, '');
 
+                // Persist images to Cloudflare
+                const mediaItems = [];
+                for (let i = 0; i < (item.images || []).length; i++) {
+                    const rawUrl = item.images[i];
+                    try {
+                        if (rawUrl.includes("imagedelivery.net")) {
+                            mediaItems.push({ url: rawUrl, kind: 'IMAGE' as const, sortOrder: i });
+                            continue;
+                        }
+                        const result = await uploadUrlToCloudflare(rawUrl);
+                        const cdnUrl = getImageDeliveryUrl(result.imageId, "public");
+                        mediaItems.push({
+                            url: cdnUrl,
+                            cloudflareImageId: result.imageId,
+                            kind: 'IMAGE' as const,
+                            sortOrder: i
+                        });
+                    } catch (error: any) {
+                        console.warn(`[FeedService] Failed to upload image to CF for feed ${feed.id}: ${rawUrl} - ${error.message}`);
+                        // Graceful fallback to raw hotlink if Cloudflare ingestion fails
+                        mediaItems.push({
+                            url: rawUrl,
+                            kind: 'IMAGE' as const,
+                            sortOrder: i
+                        });
+                    }
+                }
+
                 await db.property.create({
                     data: {
                         locationId,
@@ -148,13 +177,8 @@ export class FeedService {
                         feedReferenceId: externalId,
                         feedHash: currentHash,
                         metadata: this.buildFeedSyncMetadata(undefined, 'CREATED', syncTimestamp),
-                        // Map images
                         media: {
-                            create: item.images.map((url, index) => ({
-                                url,
-                                kind: 'IMAGE',
-                                sortOrder: index
-                            }))
+                            create: mediaItems
                         },
                         // Link Company
                         companyRoles: {

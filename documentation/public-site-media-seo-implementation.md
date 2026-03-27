@@ -16,6 +16,8 @@ We replaced the legacy "Image URL string" approach with a direct-upload integrat
     *   When a `ScrapedListing` from the prospecting pipeline is accepted and imported as a `Property`, its external image URLs (e.g., from Bazaraki) are automatically fetched and uploaded to Cloudflare Images via `tryUploadImageToCloudflare()`.
     *   This prevents hotlinking external CDNs, secures the media within our tenant infrastructure, and enables optimization for all imported properties.
     *   A one-time backfill script was executed to migrate historic orphaned records.
+*   **XML Feed Ingestion:**
+    *   Properties imported via external bulk XML Feeds natively intercept and ingest standard image URLs into Cloudflare Images (`lib/feed/feed-service.ts`).
 *   **Schema Update:**
     *   Added `cloudflareImageId` to the `PropertyMedia` model.
 *   **Optimization:**
