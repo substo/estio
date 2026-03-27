@@ -12,6 +12,10 @@ We replaced the legacy "Image URL string" approach with a direct-upload integrat
 *   **Direct Uploads:**
     *   Implemented `CloudflareImageUploader` component that requests a secure one-time upload URL (`/api/images/direct-upload`).
     *   Files upload directly from the browser to Cloudflare (bypassing our server).
+*   **Scraped Listing Ingestion:**
+    *   When a `ScrapedListing` from the prospecting pipeline is accepted and imported as a `Property`, its external image URLs (e.g., from Bazaraki) are automatically fetched and uploaded to Cloudflare Images via `tryUploadImageToCloudflare()`.
+    *   This prevents hotlinking external CDNs, secures the media within our tenant infrastructure, and enables optimization for all imported properties.
+    *   A one-time backfill script was executed to migrate historic orphaned records.
 *   **Schema Update:**
     *   Added `cloudflareImageId` to the `PropertyMedia` model.
 *   **Optimization:**

@@ -42,6 +42,7 @@ The Prospecting stack was updated to remove non-deterministic triage behavior an
   - selected company is applied before import.
 - Accept response contract now supports structured non-success codes (`selection_required`, `not_linkable`, `invalid_selection`, etc.).
 - Property import receives linked `companyId` so imported properties can get the correct company role linkage.
+- **Media Ingestion:** Scraped image URLs (e.g., from Bazaraki) are automatically fetched and ingested into Cloudflare Images (`tryUploadImageToCloudflare`) during import, replacing hotlinked external URLs with optimized, internal `imagedelivery.net` URLs.
 
 ### 4) UI determinism for accepted/rejected state
 
