@@ -699,6 +699,7 @@ model SettingsSecret {
   authTag     String            @map("auth_tag")
   alg         String            @default("AES-256-GCM")
   keyId       String            @map("key_id")
+  encryptedDek String?          @db.Text @map("encrypted_dek")
   encryptedAt DateTime          @default(now()) @map("encrypted_at")
   rotatedAt   DateTime?         @map("rotated_at")
   createdAt   DateTime          @default(now()) @map("created_at")

@@ -237,7 +237,7 @@ export class SettingsService {
 
     async setSecret(input: SecretInput & { plaintext: string }) {
         return withOptionalTransaction(input.tx, async (tx) => {
-            const encrypted = encryptSettingsSecretValue({
+            const encrypted = await encryptSettingsSecretValue({
                 scopeType: input.scopeType,
                 scopeId: input.scopeId,
                 domain: input.domain,
@@ -275,6 +275,7 @@ export class SettingsService {
                     authTag: encrypted.authTag,
                     alg: encrypted.alg,
                     keyId: encrypted.keyId,
+                    encryptedDek: encrypted.encryptedDek ?? null,
                     encryptedAt: encrypted.encryptedAt,
                 },
                 update: {
@@ -283,6 +284,7 @@ export class SettingsService {
                     authTag: encrypted.authTag,
                     alg: encrypted.alg,
                     keyId: encrypted.keyId,
+                    encryptedDek: encrypted.encryptedDek ?? null,
                     encryptedAt: encrypted.encryptedAt,
                 },
             });
@@ -355,7 +357,7 @@ export class SettingsService {
         });
         if (!secret) return null;
 
-        return decryptSettingsSecretValue({
+        return await decryptSettingsSecretValue({
             scopeType: input.scopeType,
             scopeId: input.scopeId,
             domain: input.domain,
@@ -364,6 +366,7 @@ export class SettingsService {
             iv: secret.iv,
             authTag: secret.authTag,
             keyId: secret.keyId,
+            encryptedDek: secret.encryptedDek,
         });
     }
 
@@ -400,7 +403,7 @@ export class SettingsService {
 
             await db.$transaction(async (tx) => {
                 for (const row of rows) {
-                    const reEncrypted = reEncryptSettingsSecretValue({
+                    const reEncrypted = await reEncryptSettingsSecretValue({
                         scopeType: row.scopeType as SettingsScope,
                         scopeId: row.scopeId,
                         domain: row.domain as SettingsDomain,
@@ -409,6 +412,7 @@ export class SettingsService {
                         iv: row.iv,
                         authTag: row.authTag,
                         keyId: row.keyId,
+                        encryptedDek: row.encryptedDek,
                     });
 
                     await tx.settingsSecret.update({
@@ -418,6 +422,7 @@ export class SettingsService {
                             iv: reEncrypted.iv,
                             authTag: reEncrypted.authTag,
                             keyId: reEncrypted.keyId,
+                            encryptedDek: reEncrypted.encryptedDek ?? null,
                             encryptedAt: reEncrypted.encryptedAt,
                             rotatedAt: new Date(),
                         },

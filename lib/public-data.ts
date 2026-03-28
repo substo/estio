@@ -15,6 +15,15 @@ export const getSiteConfig = cache(async (domain: string) => {
             location: true, // We might need location details (address, etc) later
         },
     });
+
+    // SECURITY COMPLIANCE: Strip sensitive keys before sending SiteConfig to the client.
+    // Next.js RSC payload will serialize the entire object when passed to a Client Component.
+    if (config) {
+        config.googleAiApiKey = null;
+        config.brandVoice = null;
+        config.outreachConfig = null;
+    }
+
     return config;
 });
 
