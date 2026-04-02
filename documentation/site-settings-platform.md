@@ -35,7 +35,7 @@ The platform introduces three core tables and two enums in Prisma.
 ### `settings_secrets` (encrypted secret values)
 
 - Key: (`scope_type`, `scope_id`, `domain`, `secret_key`) unique
-- Value: `ciphertext`, `iv`, `auth_tag`, `alg`, `key_id`, `encrypted_at`, `rotated_at`, timestamps
+- Value: `ciphertext`, `iv`, `auth_tag`, `alg`, `key_id`, `encrypted_dek`, `encrypted_at`, `rotated_at`, timestamps
 - Prisma model: `SettingsSecret`
 
 ### `settings_audit_log` (change/audit stream)
@@ -86,25 +86,25 @@ Main capabilities:
 
 ## 5. Encryption Design
 
-Secrets use application-level envelope-style encryption primitives:
+Secrets use an **Enterprise Envelope Encryption** architecture powered by Google Cloud KMS (`@google-cloud/kms`), falling back to application-level AES logic for legacy unrotated keys.
 
-- Algorithm: AES-256-GCM
-- IV: random 12-byte IV per secret write
-- AAD binding: `${scope_type}:${scope_id}:${domain}:${secret_key}`
-- Stored metadata: `key_id`, `alg`, `encrypted_at`, optional `rotated_at`
+- Architecture: the app generates a 32-byte DEK via local CSPRNG (`crypto.randomBytes`), then KMS wraps (encrypts) that DEK with the configured master CryptoKey. The plaintext DEK encrypts the secret via AES-256-GCM, and the wrapped DEK is stored alongside the ciphertext.
+- Memory handling: The plaintext DEK is zeroed out via `Buffer.fill(0)` immediately after use to prevent V8 garbage collection leaks.
+- IV: random 12-byte IV per secret write.
+- AAD binding: `${scope_type}:${scope_id}:${domain}:${secret_key}`. AAD prevents ciphertext swapping across tenants/domains/keys.
+- Stored metadata: `key_id`, `alg`, `encrypted_dek`, `encrypted_at`, optional `rotated_at`.
 
-AAD prevents ciphertext swapping across tenants/domains/keys.
+### Production KMS Environment Variables
 
-### Keyring env vars
+- `GOOGLE_APPLICATION_CREDENTIALS`: Path to the service account JSON file.
+- `GCP_KMS_KEY_PATH`: Full resource name of the master CryptoKey.
+  - Required format: `projects/<project>/locations/<location>/keyRings/<ring>/cryptoKeys/<key>`
 
+### Legacy Keyring Fallback (AES-Only)
+
+For local development or backward compatibility with rows lacking an `encrypted_dek`:
 - `SETTINGS_ENCRYPTION_KEYS`: JSON map of `key_id -> base64(32-byte key)`
-- `SETTINGS_ENCRYPTION_PRIMARY_KEY_ID`: active key for new writes
-
-Validation is strict:
-
-- keyring JSON must parse
-- each key must decode to exactly 32 bytes
-- primary key id must exist in keyring
+- `SETTINGS_ENCRYPTION_PRIMARY_KEY_ID`: active key for legacy dual-mode writes
 
 ## 6. Rollout Flags
 
@@ -243,4 +243,3 @@ Integration/auth consumers:
 - `lib/google/auth.ts`, `lib/google/people.ts`
 - `lib/microsoft/auth.ts`, `lib/microsoft/graph-client.ts`
 - `lib/twilio/client.ts`
-

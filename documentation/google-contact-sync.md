@@ -217,6 +217,19 @@ This error occurs during the OAuth callback when exchanging the authorization co
     -   Example: `https://your-ngrok-url.ngrok-free.app/api/google/callback`
 3.  **`.env` vs `.env.local` Conflict**: `.env.local` overrides `.env`. Ensure credentials are consistent in both files.
 
+### `INVALID_ARGUMENT: Resource name '' does not match pattern 'projects/.../locations/...'`
+This happens when token storage reaches settings encryption and KMS receives an invalid/empty resource path.
+
+**Common Causes:**
+1. `GCP_KMS_KEY_PATH` is missing, malformed, or wrapped incorrectly in quotes at runtime.
+2. The KMS key path does not follow the required format:
+   `projects/<project>/locations/<location>/keyRings/<ring>/cryptoKeys/<key>`
+
+**Fix:**
+1. Verify `GCP_KMS_KEY_PATH` exactly matches the key resource path in Google Cloud KMS.
+2. Redeploy with the corrected environment variable.
+3. Retry Google Connect from `/admin/settings/integrations/google`.
+
 ### `URL is malformed "undefined/..."` Error
 This occurs if `NEXT_PUBLIC_APP_URL` or `APP_BASE_URL` is not set.
 
