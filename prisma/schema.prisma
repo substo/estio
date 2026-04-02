@@ -916,7 +916,7 @@ model ViewingSession {
 
   mode   String @default("assistant_live_tool_heavy") // assistant_live_tool_heavy | assistant_live_voice_premium
   status String @default("scheduled") // scheduled | active | paused | completed | expired
-  transportStatus String @default("disconnected") // connecting | connected | degraded | reconnecting | disconnected | chained
+  transportStatus String @default("disconnected") // connecting | connected | degraded | reconnecting | disconnected | chained | failed
   liveProvider String @default("google_gemini_live")
   consentStatus String @default("required") // required | accepted | declined | not_required
   appliedRetentionDays Int @default(90)
@@ -949,6 +949,7 @@ model ViewingSession {
   estimatedCostUsd  Float     @default(0)
   actualCostUsd     Float     @default(0)
   lastTransportEventAt DateTime?
+  sessionThreadId   String    @default(cuid())
   contextVersion    Int              @default(1)
   chainIndex        Int              @default(1)
   previousSessionId String?
@@ -969,6 +970,7 @@ model ViewingSession {
   @@index([agentId, status, createdAt(sort: Desc)])
   @@index([transportStatus, createdAt(sort: Desc)])
   @@index([liveProvider, createdAt(sort: Desc)])
+  @@index([sessionThreadId, createdAt(sort: Desc)])
   @@index([tokenExpiresAt])
   @@index([joinLockUntil])
 }
@@ -985,6 +987,13 @@ model ViewingSessionMessage {
   sequence Int
   sourceMessageId String?
   messageKind String @default("utterance") // utterance | system_note | tool_result
+  origin String @default("manual_text") // manual_text | browser_stt | relay_live_transcript | relay_tool_result | human | system
+  provider String?
+  model String?
+  modelVersion String?
+  transcriptStatus String @default("final") // provisional | final
+  translationStatus String @default("pending") // pending | processing | completed | failed | skipped
+  insightStatus String @default("pending") // pending | processing | completed | failed | skipped
   persistedAt DateTime @default(now())
   supersedesMessageId String?
   supersedesMessage ViewingSessionMessage? @relation("ViewingSessionMessageSupersedes", fields: [supersedesMessageId], references: [id], onDelete: SetNull)
@@ -999,7 +1008,7 @@ model ViewingSessionMessage {
   confidence    Float?
   audioChunkRef String?
 
-  analysisStatus String    @default("pending") // pending | processing | completed | failed
+  analysisStatus String    @default("pending") // backward-compatible derived field from translationStatus + insightStatus
   translatedAt   DateTime?
   metadata       Json?
 
@@ -1008,6 +1017,8 @@ model ViewingSessionMessage {
   @@index([sessionId, timestamp])
   @@index([sessionId, createdAt(sort: Desc)])
   @@index([analysisStatus, createdAt(sort: Asc)])
+  @@index([translationStatus, createdAt(sort: Asc)])
+  @@index([insightStatus, createdAt(sort: Asc)])
   @@index([sessionId, sequence(sort: Asc)])
   @@index([sessionId, sourceMessageId])
   @@index([supersedesMessageId])
@@ -1034,7 +1045,10 @@ model ViewingSessionInsight {
   confidence Float?
 
   state  String @default("active") // active | pinned | dismissed | resolved
-  source String @default("model") // model | static_library | manual
+  source String @default("analysis_model") // analysis_model | static_library | heuristic_fallback | manual
+  provider String?
+  model String?
+  modelVersion String?
 
   metadata Json?
 
@@ -1071,8 +1085,12 @@ model ViewingSessionSummary {
   buyingSignals          Json?
 
   generatedAt DateTime?
+  source String @default("analysis_model") // analysis_model | heuristic_fallback | manual
   provider    String?   @default("google")
   model       String?
+  modelVersion String?
+  usedFallback Boolean @default(false)
+  generatedByUserId String?
 
   promptTokens     Int?
   completionTokens Int?

@@ -8,12 +8,16 @@ import { appendViewingSessionEvent } from "@/lib/viewings/sessions/events";
 import { generateViewingSessionAccessToken } from "@/lib/viewings/sessions/security";
 import { resolveViewingSessionRequestContext } from "@/lib/viewings/sessions/auth";
 import {
+    deriveViewingSessionAnalysisStatus,
     DEFAULT_VIEWING_SESSION_ACCESS_TOKEN_TTL_SECONDS,
-    VIEWING_SESSION_ANALYSIS_STATUSES,
     VIEWING_SESSION_EVENT_TYPES,
+    VIEWING_SESSION_INSIGHT_PIPELINE_STATUSES,
     VIEWING_SESSION_MESSAGE_KINDS,
+    VIEWING_SESSION_MESSAGE_ORIGINS,
     VIEWING_SESSION_SPEAKERS,
     VIEWING_SESSION_STATUSES,
+    VIEWING_SESSION_TRANSCRIPT_STATUSES,
+    VIEWING_SESSION_TRANSLATION_STATUSES,
 } from "@/lib/viewings/sessions/types";
 
 export const runtime = "nodejs";
@@ -35,6 +39,19 @@ const messageSchema = z.object({
         VIEWING_SESSION_MESSAGE_KINDS.toolResult,
     ]).optional(),
     supersedesMessageId: z.string().trim().min(1).max(120).optional(),
+    origin: z.enum([
+        VIEWING_SESSION_MESSAGE_ORIGINS.manualText,
+        VIEWING_SESSION_MESSAGE_ORIGINS.browserStt,
+        VIEWING_SESSION_MESSAGE_ORIGINS.human,
+        VIEWING_SESSION_MESSAGE_ORIGINS.system,
+    ]).optional(),
+    provider: z.string().trim().max(120).optional(),
+    model: z.string().trim().max(120).optional(),
+    modelVersion: z.string().trim().max(120).optional(),
+    transcriptStatus: z.enum([
+        VIEWING_SESSION_TRANSCRIPT_STATUSES.provisional,
+        VIEWING_SESSION_TRANSCRIPT_STATUSES.final,
+    ]).optional(),
 });
 
 function resolveSpeakerByContext(role: "client" | "agent" | "admin", requested?: string) {
@@ -115,6 +132,11 @@ export async function POST(
     const messageKind = data.messageKind || VIEWING_SESSION_MESSAGE_KINDS.utterance;
     const sourceMessageId = String(data.sourceMessageId || "").trim() || null;
     const supersedesMessageId = String(data.supersedesMessageId || "").trim() || null;
+    const origin = data.origin || VIEWING_SESSION_MESSAGE_ORIGINS.manualText;
+    const provider = String(data.provider || "").trim() || null;
+    const model = String(data.model || "").trim() || null;
+    const modelVersion = String(data.modelVersion || "").trim() || null;
+    const transcriptStatus = data.transcriptStatus || VIEWING_SESSION_TRANSCRIPT_STATUSES.final;
 
     let writeResult: {
         message: any;
@@ -166,6 +188,14 @@ export async function POST(
             });
             const nextSequence = Number(latest?.sequence || 0) + 1;
             const persistedAt = new Date();
+            const translationStatus = data.translatedText
+                ? VIEWING_SESSION_TRANSLATION_STATUSES.completed
+                : VIEWING_SESSION_TRANSLATION_STATUSES.pending;
+            const insightStatus = VIEWING_SESSION_INSIGHT_PIPELINE_STATUSES.pending;
+            const analysisStatus = deriveViewingSessionAnalysisStatus({
+                translationStatus,
+                insightStatus,
+            });
 
             const created = await tx.viewingSessionMessage.create({
                 data: {
@@ -173,6 +203,13 @@ export async function POST(
                     sequence: nextSequence,
                     sourceMessageId,
                     messageKind,
+                    origin,
+                    provider,
+                    model,
+                    modelVersion,
+                    transcriptStatus,
+                    translationStatus,
+                    insightStatus,
                     persistedAt,
                     supersedesMessageId,
                     speaker,
@@ -183,9 +220,7 @@ export async function POST(
                     timestamp,
                     confidence: typeof data.confidence === "number" ? data.confidence : null,
                     audioChunkRef: data.audioChunkRef || null,
-                    analysisStatus: data.translatedText
-                        ? VIEWING_SESSION_ANALYSIS_STATUSES.completed
-                        : VIEWING_SESSION_ANALYSIS_STATUSES.pending,
+                    analysisStatus,
                 },
             });
 
@@ -218,6 +253,11 @@ export async function POST(
                     sequence: created.sequence,
                     sourceMessageId: created.sourceMessageId,
                     messageKind: created.messageKind,
+                    origin: created.origin,
+                    provider: created.provider,
+                    model: created.model,
+                    modelVersion: created.modelVersion,
+                    transcriptStatus: created.transcriptStatus,
                     persistedAt: created.persistedAt.toISOString(),
                     supersedesMessageId: created.supersedesMessageId,
                     speaker: created.speaker,
@@ -227,6 +267,8 @@ export async function POST(
                     targetLanguage: created.targetLanguage,
                     confidence: created.confidence,
                     audioChunkRef: created.audioChunkRef,
+                    translationStatus: created.translationStatus,
+                    insightStatus: created.insightStatus,
                     analysisStatus: created.analysisStatus,
                     timestamp: created.timestamp.toISOString(),
                     createdAt: created.createdAt.toISOString(),
@@ -246,7 +288,8 @@ export async function POST(
                 messageKind: created.messageKind,
                 sourceMessageId: created.sourceMessageId,
                 supersedesMessageId: created.supersedesMessageId,
-            },
+                origin: created.origin,
+                },
         });
     } else {
         await appendViewingSessionEvent({
@@ -264,7 +307,10 @@ export async function POST(
     }
 
     let analysisQueueResult: unknown = null;
-    if (!created.translatedText || created.analysisStatus !== VIEWING_SESSION_ANALYSIS_STATUSES.completed) {
+    if (
+        created.translationStatus !== VIEWING_SESSION_TRANSLATION_STATUSES.completed ||
+        created.insightStatus !== VIEWING_SESSION_INSIGHT_PIPELINE_STATUSES.completed
+    ) {
         try {
             await initViewingSessionAnalysisWorker();
         } catch (error) {
@@ -312,6 +358,11 @@ export async function POST(
             sequence: created.sequence,
             sourceMessageId: created.sourceMessageId,
             messageKind: created.messageKind,
+            origin: created.origin,
+            provider: created.provider,
+            model: created.model,
+            modelVersion: created.modelVersion,
+            transcriptStatus: created.transcriptStatus,
             persistedAt: created.persistedAt.toISOString(),
             supersedesMessageId: created.supersedesMessageId,
             speaker: created.speaker,
@@ -320,6 +371,8 @@ export async function POST(
             translatedText: created.translatedText,
             targetLanguage: created.targetLanguage,
             confidence: created.confidence,
+            translationStatus: created.translationStatus,
+            insightStatus: created.insightStatus,
             analysisStatus: created.analysisStatus,
             timestamp: created.timestamp.toISOString(),
             createdAt: created.createdAt.toISOString(),

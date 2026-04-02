@@ -278,10 +278,12 @@ export async function POST(req: NextRequest) {
         expiresAt: new Date(now.getTime() + ttlSeconds * 1000).toISOString(),
         session: {
             id: session.id,
+            sessionThreadId: session.sessionThreadId,
             mode: session.mode,
             status: session.status,
             transportStatus: session.transportStatus,
             liveProvider: session.liveProvider,
+            consentStatus: disclosureRequired ? "accepted" : "not_required",
             clientName: session.clientName,
             clientLanguage: parsed.data.preferredLanguage || session.clientLanguage || null,
             agentLanguage: session.agentLanguage || null,

@@ -20,6 +20,44 @@ Related existing doc:
 
 This implementation slice is now layered on top of the original text-first foundation.
 
+## 2026-04-03 Next Wave Update (Truth + Pipeline + Relay + Retention)
+
+This slice implements the next-wave foundation from the live-copilot plan:
+
+- thread identity and provenance hardening:
+  - `ViewingSession.sessionThreadId` (with backfill migration for chained sessions)
+  - message provenance/status fields (`origin`, `provider`, `model`, `modelVersion`, `transcriptStatus`, `translationStatus`, `insightStatus`)
+  - insight provenance expansion (`source`, `provider`, `model`, `modelVersion`)
+  - summary provenance expansion (`source`, `modelVersion`, `usedFallback`, `generatedByUserId`)
+- pipeline split:
+  - Stage 2a translation queue (`viewing-session-translation`)
+  - Stage 2b insight queue (`viewing-session-insights`)
+  - backward-compatible `analysisStatus` stays derived from translation/insight status
+- transcript canonicalization and revision UX:
+  - append-only corrections via `supersedesMessageId`
+  - effective transcript rendering in client/admin UIs hides superseded rows by default
+  - revision history remains available on demand
+- consent gating hardening:
+  - explicit client disclosure checkbox in join UX
+  - `live-auth` and relay reject client transport when consent is missing
+  - admin cockpit surfaces consent status
+- transport state machine enforcement:
+  - invalid transitions rejected with API 409 errors
+  - events now include both `previousTransportStatus` and `nextTransportStatus`
+- backend relay handoff expansion:
+  - live-auth now returns relay websocket URL + relay session token + thread metadata
+  - relay endpoint metadata reflects dedicated backend relay transport
+  - dedicated process entrypoint added: `scripts/start-viewing-live-relay.ts`
+- policy hardening:
+  - v1 live tool policy is read-only (`resolve_viewing_property_context`, `search_related_properties`, `fetch_company_playbook`)
+  - model-input redaction for emails/phones/id-like tokens/internal notes before analysis/summary prompting
+- retention artifact split:
+  - new retention cleanup module removes conversation artifacts (messages/insights and non-final summaries)
+  - preserves `ViewingSessionEvent`, `ViewingSessionUsage`, and final summary business records
+  - cleanup available via:
+    - cron route: `GET /api/cron/viewing-session-retention`
+    - script: `npm run ops:viewings:retention`
+
 ### Newly delivered in this slice
 
 - Session hardening fields and policy snapshotting:
@@ -78,8 +116,8 @@ This implementation slice is now layered on top of the original text-first found
   - handles authenticated relay event ingestion for transport, transcript/tool messages, and usage
   - persists events/messages/usage and emits SSE updates
 - `GET /api/viewings/sessions/[id]/relay` currently reports:
-  - `websocketUpgradeSupported: false`
-  - relay is currently HTTP event ingestion while infra WebSocket upgrade support is pending
+  - `websocketUpgradeSupported: true`
+  - relay metadata now points clients at the dedicated backend relay process while this route remains the persisted ingestion boundary
 
 ---
 
@@ -192,15 +230,14 @@ That remains the north star.
 
 ### Not Delivered Yet
 
-- true WebSocket Gemini Live relay runtime
 - browser microphone PCM capture and backend media forwarding to Gemini Live
 - actual audio output playback pipeline from vendor audio responses
 - ephemeral Google Live auth tokens for direct browser Live sessions
 - a dedicated session list/index page for admins
 - automatic related-property ranking/search engine
 - rich company knowledge-base retrieval
-- comprehensive automated tests for join/message/realtime/relay flows
-- production relay process ownership/bootstrap documentation
+- route-level automated tests for join/message/realtime/relay flows
+- production process documentation for relay/worker bootstrap and scheduling
 
 ---
 
@@ -211,6 +248,7 @@ That remains the north star.
 - `prisma/schema.prisma`
 - `prisma/migrations/20260402182000_viewing_session_live_copilot/migration.sql`
 - `prisma/migrations/20260402223000_viewing_session_hardening_native_audio/migration.sql`
+- `prisma/migrations/20260403003000_viewing_session_next_wave/migration.sql`
 
 ## Session backend
 
@@ -245,14 +283,31 @@ That remains the north star.
 - `lib/viewings/sessions/summary.ts`
 - `lib/viewings/sessions/live-models.ts`
 - `lib/viewings/sessions/gemini-live.ts`
+- `lib/viewings/sessions/redaction.ts`
+- `lib/viewings/sessions/retention.ts`
+- `lib/viewings/sessions/tool-policy.ts`
+- `lib/viewings/sessions/transcript.ts`
 - `lib/realtime/viewing-session-events.ts`
 - `lib/queue/viewing-session-analysis.ts`
+- `lib/queue/viewing-session-insights.ts`
 - `lib/queue/viewing-session-synthesis.ts`
 - `lib/ai/location-google-key.ts`
 
 ## Session tests
 
 - `lib/viewings/sessions/feature-flags.test.ts`
+- `lib/viewings/sessions/redaction.test.ts`
+- `lib/viewings/sessions/retention.test.ts`
+- `lib/viewings/sessions/runtime.test.ts`
+- `lib/viewings/sessions/tool-policy.test.ts`
+- `lib/viewings/sessions/transcript.test.ts`
+- `lib/viewings/sessions/types.test.ts`
+
+## Session scripts and ops entrypoints
+
+- `scripts/start-viewing-live-relay.ts`
+- `scripts/cleanup-viewing-session-retention.ts`
+- `app/api/cron/viewing-session-retention/route.ts`
 
 ## Related settings surface
 
@@ -502,19 +557,20 @@ Important reality check:
 Current relay path:
 1. `POST /api/viewings/sessions/[id]/live-auth` returns session transport metadata plus relay auth material.
 2. A backend relay token is issued from the existing session token flow.
-3. `POST /api/viewings/sessions/[id]/relay` accepts authenticated relay events for:
+3. `scripts/start-viewing-live-relay.ts` owns the long-lived backend WebSocket process and vendor Gemini Live session lifecycle.
+4. `POST /api/viewings/sessions/[id]/relay` accepts authenticated persisted relay events for:
    - `connect`
    - `disconnect`
    - `transcript`
    - `tool_result`
    - `usage`
-4. Relay transcript/tool events are persisted into `ViewingSessionMessage`, then SSE/analysis/synthesis continue from the same persisted pipeline.
-5. Relay usage events are stored in `ViewingSessionUsage` and rolled into session aggregate cost.
+5. Relay transcript/tool events are persisted into `ViewingSessionMessage`, then SSE/analysis/synthesis continue from the same persisted pipeline.
+6. Relay usage events are stored in `ViewingSessionUsage` and rolled into session aggregate cost.
 
 Current reality check:
-- relay support exists as authenticated backend event ingestion
-- a true WebSocket upgrade endpoint for Gemini Live media transport is still not implemented
-- `GET /api/viewings/sessions/[id]/relay` explicitly reports `websocketUpgradeSupported: false`
+- relay support now includes a dedicated backend WebSocket process with Gemini Live session ownership, reconnect handling, tool-call responses, transcript persistence, and usage fanout
+- persisted DB rows plus Redis/SSE fanout remain the source of truth for UI updates
+- browser-native audio wiring is still incomplete on the public client, so the backend relay is ahead of the current browser transport UI
 
 ## 5. Realtime transport
 
@@ -828,11 +884,10 @@ There is no:
 
 ## Infra/operational gaps
 
-- No comprehensive feature-specific tests yet
+- Coverage is still partial; route-level integration tests are still pending
 - No cost/usage dashboard yet for viewing sessions
-- No automated retention cleanup job for viewing-session data yet
 - No worker bootstrap strategy documented for production process roles
-- No WebSocket relay runtime for live media transport yet
+- Dedicated WS relay process exists, but end-to-end vendor live-media orchestration is still maturing
 
 ## Browser/runtime caveats
 
@@ -848,6 +903,21 @@ Completed during implementation:
 - `npx prisma generate`
 - `NODE_OPTIONS='--max-old-space-size=8192' npx tsc --noEmit`
 - `npm run test:viewings:sessions`
+
+## Concise live test steps with a test user
+
+1. In admin, open a real or test contact that already has a scheduled viewing.
+2. In the viewing manager, click `Live` on that viewing.
+3. In `Live Session Ready`, copy the tenant session link and PIN, then open the agent cockpit.
+4. Send the session link and PIN to the test user and have them open the public join page.
+5. Have the test user enter the PIN, accept the AI disclosure if shown, and join the session.
+6. Confirm the client page shows the session as connected/joined and the admin cockpit opens the live transcript view.
+7. Ask the test user to send a few messages or use the browser mic if speech recognition is available.
+8. Verify each client utterance appears in the admin `Live Transcript`, then check that translated text and insights appear shortly after.
+9. From the cockpit, send an agent note/utterance and confirm it appears on the client side.
+10. In the cockpit, pin or dismiss an insight and verify the state updates immediately.
+11. Complete the session in admin and confirm a draft/final session summary is generated.
+12. Sanity-check that transport status, transcript, insights, and summary all persisted after a page refresh.
 
 Not completed:
 - automated join/message/realtime/relay coverage
@@ -894,7 +964,7 @@ This is the recommended next planning split.
   - summary generation
   - session chaining
 - add relay connect/disconnect/reconnect coverage
-- add retention cleanup for viewing session content
+- expand retention cleanup coverage (scheduled runs, metrics, and alerting)
 - add cost and usage dashboards for session runtime
 - add admin list/search/replay views for sessions
 

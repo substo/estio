@@ -8,6 +8,7 @@ import { resolveLiveModelForMode } from "@/lib/viewings/sessions/live-models";
 import {
     ensureViewingSessionWithinLiveWindow,
     setViewingSessionTransportStatus,
+    ViewingSessionTransportTransitionError,
     VIEWING_SESSION_LIVE_LIMIT_MINUTES,
 } from "@/lib/viewings/sessions/runtime";
 import { generateViewingSessionAccessToken } from "@/lib/viewings/sessions/security";
@@ -33,6 +34,11 @@ function normalizeMode(mode: string | null | undefined): ViewingSessionMode {
         return VIEWING_SESSION_MODES.assistantLiveVoicePremium;
     }
     return VIEWING_SESSION_MODES.assistantLiveToolHeavy;
+}
+
+function isClientConsentMissing(consentStatus: string | null | undefined): boolean {
+    const normalized = String(consentStatus || "").trim().toLowerCase();
+    return normalized === "required" || normalized === "declined";
 }
 
 export async function POST(
@@ -70,8 +76,10 @@ export async function POST(
         select: {
             id: true,
             locationId: true,
+            sessionThreadId: true,
             mode: true,
             status: true,
+            consentStatus: true,
             startedAt: true,
             audioPlaybackClientEnabled: true,
             audioPlaybackAgentEnabled: true,
@@ -92,8 +100,10 @@ export async function POST(
             select: {
                 id: true,
                 locationId: true,
+                sessionThreadId: true,
                 mode: true,
                 status: true,
+                consentStatus: true,
                 startedAt: true,
                 audioPlaybackClientEnabled: true,
                 audioPlaybackAgentEnabled: true,
@@ -110,6 +120,17 @@ export async function POST(
 
     if (session.status === VIEWING_SESSION_STATUSES.completed || session.status === VIEWING_SESSION_STATUSES.expired) {
         return NextResponse.json({ success: false, error: "Session is not active." }, { status: 409 });
+    }
+    if (context.role === "client" && isClientConsentMissing(session.consentStatus)) {
+        return NextResponse.json(
+            {
+                success: false,
+                error: "AI disclosure must be accepted before live mode can be activated.",
+                code: "AI_DISCLOSURE_REQUIRED",
+                consentStatus: session.consentStatus,
+            },
+            { status: 403 }
+        );
     }
 
     const desiredMode = normalizeMode(parsed.data.mode || session.mode);
@@ -145,8 +166,10 @@ export async function POST(
         select: {
             id: true,
             locationId: true,
+            sessionThreadId: true,
             mode: true,
             status: true,
+            consentStatus: true,
             startedAt: true,
             liveModel: true,
             transportStatus: true,
@@ -186,14 +209,29 @@ export async function POST(
     });
 
     if (sessionUpdate.status === VIEWING_SESSION_STATUSES.active && sessionUpdate.transportStatus !== "connected") {
-        await setViewingSessionTransportStatus({
-            sessionId: sessionUpdate.id,
-            status: "connecting",
-            source: "api.live-auth",
-            payload: {
-                role: context.role,
-            },
-        });
+        try {
+            await setViewingSessionTransportStatus({
+                sessionId: sessionUpdate.id,
+                status: "connecting",
+                source: "api.live-auth",
+                payload: {
+                    role: context.role,
+                },
+            });
+        } catch (error: any) {
+            if (error instanceof ViewingSessionTransportTransitionError) {
+                return NextResponse.json(
+                    {
+                        success: false,
+                        error: error.message,
+                        previousStatus: error.previousStatus,
+                        requestedStatus: error.requestedStatus,
+                    },
+                    { status: 409 }
+                );
+            }
+            throw error;
+        }
     }
     await appendViewingSessionEvent({
         sessionId: sessionUpdate.id,
@@ -207,18 +245,22 @@ export async function POST(
             model: sessionUpdate.liveModel,
             voicePremiumEnabled,
             wasChained: chained.chained,
+            sessionThreadId: sessionUpdate.sessionThreadId,
         },
     });
 
     const latestTransportStatus = sessionUpdate.status === VIEWING_SESSION_STATUSES.active && sessionUpdate.transportStatus !== "connected"
         ? "connecting"
         : sessionUpdate.transportStatus;
+    const relayWebsocketUrl = `${liveConfig.relay.websocketUrl.replace(/\/$/, "")}?sessionId=${encodeURIComponent(sessionUpdate.id)}`;
 
     return NextResponse.json({
         success: true,
         session: {
             id: sessionUpdate.id,
+            sessionThreadId: sessionUpdate.sessionThreadId,
             status: sessionUpdate.status,
+            consentStatus: sessionUpdate.consentStatus,
             mode: sessionUpdate.mode,
             model: sessionUpdate.liveModel,
             transportStatus: latestTransportStatus,
@@ -241,8 +283,14 @@ export async function POST(
             ...liveConfig,
             relay: {
                 ...liveConfig.relay,
+                websocketUrl: relayWebsocketUrl,
                 relaySessionToken,
                 relaySessionTokenExpiresInSeconds: ttlSeconds,
+                sessionThreadId: sessionUpdate.sessionThreadId,
+                required: true,
+                protocol: "websocket",
+                connectionOwner: "backend_relay_process",
+                vendorCredentialsExposed: false,
             },
         },
     });

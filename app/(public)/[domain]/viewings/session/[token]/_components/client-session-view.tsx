@@ -7,6 +7,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import {
+    createSupersededMessageIdSet,
+    selectEffectiveViewingTranscriptMessages,
+    sortViewingTranscriptMessages,
+} from "@/lib/viewings/sessions/transcript";
 import { cn } from "@/lib/utils";
 
 type SessionPreview = {
@@ -30,6 +35,11 @@ type SessionPreview = {
 type SessionMessage = {
     id: string;
     speaker: string;
+    origin?: string | null;
+    transcriptStatus?: string | null;
+    translationStatus?: string | null;
+    insightStatus?: string | null;
+    supersedesMessageId?: string | null;
     originalText: string;
     translatedText: string | null;
     timestamp: string;
@@ -67,23 +77,34 @@ function formatSpeaker(speaker: string) {
 export function ClientSessionView({ token, preview }: Props) {
     const [pin, setPin] = useState("");
     const [preferredLanguage, setPreferredLanguage] = useState(preview.clientLanguage || "en");
+    const [aiDisclosureAccepted, setAiDisclosureAccepted] = useState(false);
     const [joinPending, setJoinPending] = useState(false);
     const [joinError, setJoinError] = useState<string | null>(null);
     const [accessToken, setAccessToken] = useState<string | null>(null);
     const [sessionId, setSessionId] = useState<string | null>(null);
     const [messages, setMessages] = useState<SessionMessage[]>([]);
     const [draft, setDraft] = useState("");
+    const [draftOrigin, setDraftOrigin] = useState<"manual_text" | "browser_stt">("manual_text");
     const [sending, setSending] = useState(false);
     const [speechOn, setSpeechOn] = useState(false);
     const [audioPlaybackEnabled, setAudioPlaybackEnabled] = useState(false);
     const [liveModeLabel, setLiveModeLabel] = useState<string | null>(null);
     const [transportStatus, setTransportStatus] = useState<string>(preview.transportStatus || "disconnected");
     const [liveProvider, setLiveProvider] = useState<string | null>(preview.liveProvider || null);
+    const [showTranscriptRevisions, setShowTranscriptRevisions] = useState(false);
     const recognizerRef = useRef<SpeechRecognizerLike | null>(null);
 
     const orderedMessages = useMemo(
-        () => [...messages].sort((a, b) => +new Date(a.timestamp) - +new Date(b.timestamp)),
+        () => sortViewingTranscriptMessages(messages),
         [messages]
+    );
+    const supersededIds = useMemo(
+        () => createSupersededMessageIdSet(orderedMessages),
+        [orderedMessages]
+    );
+    const renderedMessages = useMemo(
+        () => showTranscriptRevisions ? orderedMessages : selectEffectiveViewingTranscriptMessages(orderedMessages),
+        [orderedMessages, showTranscriptRevisions]
     );
     const transportConnected = transportStatus === "connected";
 
@@ -153,7 +174,7 @@ export function ClientSessionView({ token, preview }: Props) {
                     token,
                     pin: pin.trim(),
                     preferredLanguage: preferredLanguage || undefined,
-                    aiDisclosureAccepted: true,
+                    aiDisclosureAccepted,
                 }),
             });
             const payload = await response.json().catch(() => null);
@@ -187,6 +208,8 @@ export function ClientSessionView({ token, preview }: Props) {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         speaker: "client",
+                        origin: draftOrigin,
+                        transcriptStatus: "final",
                         originalText: text,
                         originalLanguage: preferredLanguage || preview.clientLanguage || "auto",
                     }),
@@ -204,6 +227,7 @@ export function ClientSessionView({ token, preview }: Props) {
                 setAccessToken(payload.sessionAccessToken);
             }
             setDraft("");
+            setDraftOrigin("manual_text");
         } catch (error: any) {
             setJoinError(error?.message || "Failed to send message.");
         } finally {
@@ -231,6 +255,7 @@ export function ClientSessionView({ token, preview }: Props) {
             const transcript = String(last?.[0]?.transcript || "").trim();
             if (!transcript) return;
             setDraft((current) => (current ? `${current} ${transcript}` : transcript));
+            setDraftOrigin("browser_stt");
         };
         recognizer.onerror = () => {
             setSpeechOn(false);
@@ -307,7 +332,24 @@ export function ClientSessionView({ token, preview }: Props) {
                                     onChange={(event) => setPreferredLanguage(event.target.value)}
                                 />
                             </div>
-                            <Button type="button" onClick={joinSession} disabled={joinPending || !pin.trim()} className="w-full">
+                            <div className="rounded-md border bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
+                                AI copilot may assist during this viewing session by processing transcript and language translation.
+                            </div>
+                            <label className="flex items-start gap-2 text-xs text-foreground">
+                                <input
+                                    type="checkbox"
+                                    checked={aiDisclosureAccepted}
+                                    onChange={(event) => setAiDisclosureAccepted(event.target.checked)}
+                                    className="mt-0.5"
+                                />
+                                <span>I understand and accept AI assistance for this session.</span>
+                            </label>
+                            <Button
+                                type="button"
+                                onClick={joinSession}
+                                disabled={joinPending || !pin.trim() || !aiDisclosureAccepted}
+                                className="w-full"
+                            >
                                 {joinPending ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
                                 Join Session
                             </Button>
@@ -340,9 +382,12 @@ export function ClientSessionView({ token, preview }: Props) {
                                     </Button>
                                 </div>
                                 <Input
-                                    placeholder="Say something or type here…"
+                                    placeholder="Say something or type here..."
                                     value={draft}
-                                    onChange={(event) => setDraft(event.target.value)}
+                                    onChange={(event) => {
+                                        setDraft(event.target.value);
+                                        setDraftOrigin("manual_text");
+                                    }}
                                     onKeyDown={(event) => {
                                         if (event.key === "Enter") {
                                             event.preventDefault();
@@ -378,15 +423,27 @@ export function ClientSessionView({ token, preview }: Props) {
                     <CardDescription>Your text and translated updates appear here.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2">
-                    {orderedMessages.length === 0 && (
+                    <div className="flex items-center justify-end">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-[11px]"
+                            onClick={() => setShowTranscriptRevisions((current) => !current)}
+                        >
+                            {showTranscriptRevisions ? "Hide revisions" : "Show revisions"}
+                        </Button>
+                    </div>
+                    {renderedMessages.length === 0 && (
                         <div className="text-xs text-muted-foreground">No messages yet.</div>
                     )}
-                    {orderedMessages.map((message) => (
+                    {renderedMessages.map((message) => (
                         <div
                             key={message.id}
                             className={cn(
                                 "rounded-md border px-3 py-2 text-xs",
-                                message.speaker === "client" && "border-blue-200 bg-blue-50/60"
+                                message.speaker === "client" && "border-blue-200 bg-blue-50/60",
+                                message.supersedesMessageId && "border-dashed"
                             )}
                         >
                             <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
@@ -395,6 +452,14 @@ export function ClientSessionView({ token, preview }: Props) {
                             <div>{message.originalText}</div>
                             {message.translatedText && message.translatedText !== message.originalText && (
                                 <div className="mt-1 text-muted-foreground">{message.translatedText}</div>
+                            )}
+                            <div className="mt-1 text-[10px] text-muted-foreground">
+                                {message.transcriptStatus || "final"} • {message.translationStatus || "pending"} • {message.insightStatus || "pending"}
+                            </div>
+                            {showTranscriptRevisions && supersededIds.has(message.id) && (
+                                <div className="mt-1 text-[10px] text-amber-700">
+                                    Superseded by a newer correction
+                                </div>
                             )}
                         </div>
                     ))}

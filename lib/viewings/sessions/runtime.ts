@@ -16,6 +16,71 @@ export const VIEWING_SESSION_JOIN_LOCK_MINUTES = 10;
 export const VIEWING_SESSION_CHAIN_THRESHOLD_MINUTES = 14;
 export const VIEWING_SESSION_LIVE_LIMIT_MINUTES = 15;
 
+const TRANSPORT_TRANSITIONS: Record<ViewingSessionTransportStatus, Set<ViewingSessionTransportStatus>> = {
+    [VIEWING_SESSION_TRANSPORT_STATUSES.disconnected]: new Set([
+        VIEWING_SESSION_TRANSPORT_STATUSES.connecting,
+    ]),
+    [VIEWING_SESSION_TRANSPORT_STATUSES.connecting]: new Set([
+        VIEWING_SESSION_TRANSPORT_STATUSES.connected,
+        VIEWING_SESSION_TRANSPORT_STATUSES.degraded,
+        VIEWING_SESSION_TRANSPORT_STATUSES.disconnected,
+        VIEWING_SESSION_TRANSPORT_STATUSES.failed,
+    ]),
+    [VIEWING_SESSION_TRANSPORT_STATUSES.connected]: new Set([
+        VIEWING_SESSION_TRANSPORT_STATUSES.reconnecting,
+        VIEWING_SESSION_TRANSPORT_STATUSES.degraded,
+        VIEWING_SESSION_TRANSPORT_STATUSES.disconnected,
+        VIEWING_SESSION_TRANSPORT_STATUSES.chained,
+        VIEWING_SESSION_TRANSPORT_STATUSES.failed,
+    ]),
+    [VIEWING_SESSION_TRANSPORT_STATUSES.reconnecting]: new Set([
+        VIEWING_SESSION_TRANSPORT_STATUSES.connected,
+        VIEWING_SESSION_TRANSPORT_STATUSES.degraded,
+        VIEWING_SESSION_TRANSPORT_STATUSES.disconnected,
+        VIEWING_SESSION_TRANSPORT_STATUSES.chained,
+        VIEWING_SESSION_TRANSPORT_STATUSES.failed,
+    ]),
+    [VIEWING_SESSION_TRANSPORT_STATUSES.degraded]: new Set([
+        VIEWING_SESSION_TRANSPORT_STATUSES.reconnecting,
+        VIEWING_SESSION_TRANSPORT_STATUSES.connected,
+        VIEWING_SESSION_TRANSPORT_STATUSES.disconnected,
+        VIEWING_SESSION_TRANSPORT_STATUSES.chained,
+        VIEWING_SESSION_TRANSPORT_STATUSES.failed,
+    ]),
+    [VIEWING_SESSION_TRANSPORT_STATUSES.chained]: new Set([
+        VIEWING_SESSION_TRANSPORT_STATUSES.disconnected,
+    ]),
+    [VIEWING_SESSION_TRANSPORT_STATUSES.failed]: new Set([
+        VIEWING_SESSION_TRANSPORT_STATUSES.connecting,
+        VIEWING_SESSION_TRANSPORT_STATUSES.disconnected,
+    ]),
+};
+
+export class ViewingSessionTransportTransitionError extends Error {
+    readonly previousStatus: ViewingSessionTransportStatus;
+    readonly requestedStatus: ViewingSessionTransportStatus;
+
+    constructor(args: {
+        previousStatus: ViewingSessionTransportStatus;
+        requestedStatus: ViewingSessionTransportStatus;
+    }) {
+        super(`Invalid transport transition: ${args.previousStatus} -> ${args.requestedStatus}`);
+        this.name = "ViewingSessionTransportTransitionError";
+        this.previousStatus = args.previousStatus;
+        this.requestedStatus = args.requestedStatus;
+    }
+}
+
+export function canTransitionViewingSessionTransportStatus(
+    previousStatus: ViewingSessionTransportStatus,
+    requestedStatus: ViewingSessionTransportStatus
+): boolean {
+    if (previousStatus === requestedStatus) return true;
+    const allowed = TRANSPORT_TRANSITIONS[previousStatus];
+    if (!allowed) return false;
+    return allowed.has(requestedStatus);
+}
+
 export function appendJoinAuditEntry(
     existingAudit: unknown,
     entry: Record<string, unknown>,
@@ -147,6 +212,7 @@ export async function ensureViewingSessionWithinLiveWindow(sessionId: string): P
                 estimatedCostUsd: 0,
                 actualCostUsd: 0,
                 lastTransportEventAt: null,
+                sessionThreadId: session.sessionThreadId || session.id,
                 contextVersion: session.contextVersion,
                 chainIndex: session.chainIndex + 1,
                 previousSessionId: session.id,
@@ -241,10 +307,29 @@ export async function setViewingSessionTransportStatus(args: {
     if (!allowedStatuses.includes(status as ViewingSessionTransportStatus)) return null;
     const at = new Date();
 
-    const updated = await db.viewingSession.update({
+    const existing = await db.viewingSession.findUnique({
         where: { id: sessionId },
+        select: {
+            id: true,
+            locationId: true,
+            transportStatus: true,
+        },
+    }).catch(() => null);
+    if (!existing) return null;
+
+    const previousStatus = existing.transportStatus as ViewingSessionTransportStatus;
+    const requestedStatus = status as ViewingSessionTransportStatus;
+    if (!canTransitionViewingSessionTransportStatus(previousStatus, requestedStatus)) {
+        throw new ViewingSessionTransportTransitionError({
+            previousStatus,
+            requestedStatus,
+        });
+    }
+
+    const updated = await db.viewingSession.update({
+        where: { id: existing.id },
         data: {
-            transportStatus: status as ViewingSessionTransportStatus,
+            transportStatus: requestedStatus,
             lastTransportEventAt: at,
         },
         select: {
@@ -263,6 +348,8 @@ export async function setViewingSessionTransportStatus(args: {
             type: VIEWING_SESSION_EVENT_TYPES.transportStatusChanged,
             payload: {
                 sessionId: updated.id,
+                previousTransportStatus: previousStatus,
+                nextTransportStatus: updated.transportStatus,
                 transportStatus: updated.transportStatus,
                 at: at.toISOString(),
                 ...(args.payload || {}),
@@ -274,6 +361,8 @@ export async function setViewingSessionTransportStatus(args: {
             type: "viewing_session.transport.status",
             source: String(args.source || "system").trim() || "system",
             payload: {
+                previousTransportStatus: previousStatus,
+                nextTransportStatus: updated.transportStatus,
                 transportStatus: updated.transportStatus,
                 at: at.toISOString(),
                 ...(args.payload || {}),

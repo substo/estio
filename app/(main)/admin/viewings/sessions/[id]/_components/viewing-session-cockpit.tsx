@@ -9,6 +9,11 @@ import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import {
+    createSupersededMessageIdSet,
+    selectEffectiveViewingTranscriptMessages,
+    sortViewingTranscriptMessages,
+} from "@/lib/viewings/sessions/transcript";
 import { cn } from "@/lib/utils";
 import { completeViewingSession, pauseViewingSession, startViewingSession } from "@/app/(main)/admin/viewings/sessions/actions";
 
@@ -18,6 +23,11 @@ type SessionMessage = {
     sequence?: number | null;
     sourceMessageId?: string | null;
     messageKind?: string | null;
+    origin?: string | null;
+    provider?: string | null;
+    model?: string | null;
+    modelVersion?: string | null;
+    transcriptStatus?: string | null;
     persistedAt?: string | null;
     supersedesMessageId?: string | null;
     speaker: string;
@@ -26,6 +36,8 @@ type SessionMessage = {
     translatedText: string | null;
     targetLanguage: string | null;
     confidence: number | null;
+    translationStatus?: string | null;
+    insightStatus?: string | null;
     analysisStatus: string;
     timestamp: string;
     createdAt: string;
@@ -39,6 +51,9 @@ type SessionInsight = {
     longText: string | null;
     state: string;
     source: string;
+    provider: string | null;
+    model: string | null;
+    modelVersion: string | null;
     confidence: number | null;
     metadata: Record<string, unknown> | null;
     createdAt: string;
@@ -58,12 +73,20 @@ type SessionSummary = {
     objections: string[];
     buyingSignals: string[];
     generatedAt: string | null;
+    source?: string | null;
+    provider?: string | null;
+    model?: string | null;
+    modelVersion?: string | null;
+    usedFallback?: boolean | null;
+    generatedByUserId?: string | null;
 };
 
 type SessionState = {
     id: string;
+    sessionThreadId: string;
     locationId: string;
     status: string;
+    consentStatus: string;
     transportStatus: string;
     liveProvider: string | null;
     mode: string;
@@ -113,6 +136,7 @@ function formatTransportStatus(status: string) {
     if (normalized === "degraded") return "Degraded";
     if (normalized === "reconnecting") return "Reconnecting";
     if (normalized === "chained") return "Chained";
+    if (normalized === "failed") return "Failed";
     return "Disconnected";
 }
 
@@ -137,11 +161,20 @@ export function ViewingSessionCockpit(props: Props) {
     const [statusPending, startStatusTransition] = useTransition();
     const [messagePending, setMessagePending] = useState(false);
     const [livePending, setLivePending] = useState(false);
+    const [showTranscriptRevisions, setShowTranscriptRevisions] = useState(false);
 
     const activeSessionId = session.id;
     const orderedMessages = useMemo(
-        () => [...messages].sort((a, b) => +new Date(a.timestamp) - +new Date(b.timestamp)),
+        () => sortViewingTranscriptMessages(messages),
         [messages]
+    );
+    const supersededMessageIds = useMemo(
+        () => createSupersededMessageIdSet(orderedMessages),
+        [orderedMessages]
+    );
+    const renderedMessages = useMemo(
+        () => showTranscriptRevisions ? orderedMessages : selectEffectiveViewingTranscriptMessages(orderedMessages),
+        [orderedMessages, showTranscriptRevisions]
     );
     const activeInsights = useMemo(
         () => insights.filter((item) => item.state !== "dismissed"),
@@ -343,7 +376,9 @@ export function ViewingSessionCockpit(props: Props) {
                 setSession((current) => ({
                     ...current,
                     id: payload.session.id,
+                    sessionThreadId: payload.session.sessionThreadId || current.sessionThreadId,
                     status: payload.session.status || current.status,
+                    consentStatus: payload.session.consentStatus || current.consentStatus,
                     mode: payload.session.mode || current.mode,
                     liveModel: payload.session.model || current.liveModel,
                     transportStatus: payload.session.transportStatus || current.transportStatus,
@@ -376,6 +411,9 @@ export function ViewingSessionCockpit(props: Props) {
                     </p>
                     <p className="text-[11px] text-muted-foreground">
                         Transport: {formatTransportStatus(session.transportStatus)}{session.liveProvider ? ` • ${session.liveProvider}` : ""}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                        Consent: {session.consentStatus}
                     </p>
                 </div>
 
@@ -410,18 +448,30 @@ export function ViewingSessionCockpit(props: Props) {
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-3">
+                        <div className="flex items-center justify-end">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-[11px]"
+                                onClick={() => setShowTranscriptRevisions((current) => !current)}
+                            >
+                                {showTranscriptRevisions ? "Hide revisions" : "Show revisions"}
+                            </Button>
+                        </div>
                         <ScrollArea className="h-[420px] rounded-md border p-3">
                             <div className="space-y-2.5">
-                                {orderedMessages.length === 0 && (
+                                {renderedMessages.length === 0 && (
                                     <div className="text-xs text-muted-foreground">No utterances yet.</div>
                                 )}
-                                {orderedMessages.map((message) => (
+                                {renderedMessages.map((message) => (
                                     <div
                                         key={message.id}
                                         className={cn(
                                             "rounded-md border px-2.5 py-2 text-xs",
                                             message.speaker === "client" && "border-blue-200 bg-blue-50/50",
-                                            message.speaker === "agent" && "border-emerald-200 bg-emerald-50/50"
+                                            message.speaker === "agent" && "border-emerald-200 bg-emerald-50/50",
+                                            message.supersedesMessageId && "border-dashed"
                                         )}
                                     >
                                         <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-wide text-muted-foreground">
@@ -432,6 +482,14 @@ export function ViewingSessionCockpit(props: Props) {
                                         {message.translatedText && message.translatedText !== message.originalText && (
                                             <div className="mt-1 text-muted-foreground">
                                                 {message.translatedText}
+                                            </div>
+                                        )}
+                                        <div className="mt-1 text-[10px] text-muted-foreground">
+                                            {message.transcriptStatus || "final"} • {message.translationStatus || "pending"} • {message.insightStatus || "pending"}
+                                        </div>
+                                        {showTranscriptRevisions && supersededMessageIds.has(message.id) && (
+                                            <div className="mt-1 text-[10px] text-amber-700">
+                                                Superseded by a newer correction
                                             </div>
                                         )}
                                     </div>
@@ -507,6 +565,8 @@ export function ViewingSessionCockpit(props: Props) {
                                 <div className="rounded-md border bg-muted/30 p-2 text-[11px] text-muted-foreground">
                                     <div>Model: {liveInfo.model}</div>
                                     <div>Mode: {session.mode}</div>
+                                    <div>Thread: {session.sessionThreadId}</div>
+                                    <div>Consent: {session.consentStatus}</div>
                                     <div>Chain Index: {session.chainIndex}</div>
                                     <div>Transport: {formatTransportStatus(session.transportStatus)}</div>
                                 </div>
@@ -576,6 +636,12 @@ export function ViewingSessionCockpit(props: Props) {
                                             </div>
                                         ))}
                                     </div>
+                                </div>
+                            )}
+
+                            {summary && (
+                                <div className="text-[10px] text-muted-foreground">
+                                    Source: {summary.source || "analysis_model"}{summary.model ? ` • ${summary.model}` : ""}{summary.usedFallback ? " • fallback" : ""}
                                 </div>
                             )}
                         </CardContent>

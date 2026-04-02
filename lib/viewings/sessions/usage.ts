@@ -132,3 +132,42 @@ export async function recordViewingSessionUsage(input: RecordViewingSessionUsage
 
     return usage;
 }
+
+export async function getViewingSessionThreadUsageSummary(sessionThreadId: string) {
+    const normalizedThreadId = asString(sessionThreadId);
+    if (!normalizedThreadId) {
+        return null;
+    }
+
+    const sessions = await db.viewingSession.findMany({
+        where: { sessionThreadId: normalizedThreadId },
+        select: { id: true },
+    });
+    if (sessions.length === 0) {
+        return {
+            sessionThreadId: normalizedThreadId,
+            totalEstimatedCostUsd: 0,
+            totalActualCostUsd: 0,
+            usageCount: 0,
+        };
+    }
+
+    const sessionIds = sessions.map((item) => item.id);
+    const aggregate = await db.viewingSessionUsage.aggregate({
+        where: { sessionId: { in: sessionIds } },
+        _sum: {
+            estimatedCostUsd: true,
+            actualCostUsd: true,
+        },
+        _count: {
+            _all: true,
+        },
+    });
+
+    return {
+        sessionThreadId: normalizedThreadId,
+        totalEstimatedCostUsd: Number(aggregate._sum.estimatedCostUsd || 0),
+        totalActualCostUsd: Number(aggregate._sum.actualCostUsd || 0),
+        usageCount: Number(aggregate._count._all || 0),
+    };
+}

@@ -18,6 +18,11 @@ export type ViewingLiveAuthPayload = {
     };
     relay: {
         useBackendRelay: boolean;
+        websocketUrl: string;
+        connectionMode: "dedicated_process";
+        requiresSessionToken: boolean;
+        connectionOwner: "backend_relay_process";
+        vendorCredentialsExposed: false;
     };
 };
 
@@ -25,6 +30,7 @@ export async function buildViewingLiveAuthPayload(args: {
     locationId: string;
     mode: ViewingSessionMode;
 }): Promise<ViewingLiveAuthPayload> {
+    const relayWebsocketUrl = String(process.env.VIEWING_SESSION_BACKEND_RELAY_WS_URL || "ws://127.0.0.1:8788/ws").trim();
     const model = resolveLiveModelForMode(args.mode);
     const capabilities = getLiveModeCapabilities(args.mode);
 
@@ -43,6 +49,11 @@ export async function buildViewingLiveAuthPayload(args: {
         },
         relay: {
             useBackendRelay: true,
+            websocketUrl: relayWebsocketUrl,
+            connectionMode: "dedicated_process",
+            requiresSessionToken: true,
+            connectionOwner: "backend_relay_process",
+            vendorCredentialsExposed: false,
         },
     };
 }

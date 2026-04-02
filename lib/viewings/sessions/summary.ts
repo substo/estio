@@ -3,8 +3,10 @@ import db from "@/lib/db";
 import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import { publishViewingSessionRealtimeEvent } from "@/lib/realtime/viewing-session-events";
 import { appendViewingSessionEvent } from "@/lib/viewings/sessions/events";
+import { sanitizeModelInputValue } from "@/lib/viewings/sessions/redaction";
+import { createSupersededMessageIdSet } from "@/lib/viewings/sessions/transcript";
 import { recordViewingSessionUsage } from "@/lib/viewings/sessions/usage";
-import { VIEWING_SESSION_EVENT_TYPES } from "@/lib/viewings/sessions/types";
+import { VIEWING_SESSION_EVENT_TYPES, VIEWING_SESSION_SUMMARY_SOURCES } from "@/lib/viewings/sessions/types";
 
 type BuildSummaryArgs = {
     sessionId: string;
@@ -310,7 +312,7 @@ async function maybeBuildLlmSummary(args: {
             .slice(-16)
             .map((item) => {
                 const text = asString(item.translatedText) || asString(item.originalText);
-                return `${item.speaker.toUpperCase()}: ${text}`;
+                return `${item.speaker.toUpperCase()}: ${sanitizeModelInputValue(text)}`;
             })
             .filter(Boolean);
 
@@ -323,14 +325,14 @@ async function maybeBuildLlmSummary(args: {
             "- Keep statements factual from supplied context only.",
             "- Keep suggestions concise and actionable.",
             "- Keep follow-up drafts ready to send.",
-            `Client: ${args.clientName}`,
-            `Property: ${args.propertyTitle}`,
-            `Key points: ${JSON.stringify(args.keyPoints)}`,
-            `Objections: ${JSON.stringify(args.objections)}`,
-            `Buying signals: ${JSON.stringify(args.buyingSignals)}`,
-            `Pivot hints: ${JSON.stringify(args.pivots)}`,
+            `Client: ${sanitizeModelInputValue(args.clientName)}`,
+            `Property: ${sanitizeModelInputValue(args.propertyTitle)}`,
+            `Key points: ${JSON.stringify(sanitizeModelInputValue(args.keyPoints))}`,
+            `Objections: ${JSON.stringify(sanitizeModelInputValue(args.objections))}`,
+            `Buying signals: ${JSON.stringify(sanitizeModelInputValue(args.buyingSignals))}`,
+            `Pivot hints: ${JSON.stringify(sanitizeModelInputValue(args.pivots))}`,
             `Recent transcript preview: ${JSON.stringify(transcriptPreview)}`,
-            `Fallback baseline: ${JSON.stringify(args.fallbackArtifacts)}`,
+            `Fallback baseline: ${JSON.stringify(sanitizeModelInputValue(args.fallbackArtifacts))}`,
         ].join("\n");
 
         const result = await model.generateContent([{ text: prompt }] as any);
@@ -411,6 +413,8 @@ export async function upsertViewingSessionSummaryFromInsights(args: BuildSummary
                 orderBy: [{ timestamp: "asc" }, { createdAt: "asc" }],
                 take: 80,
                 select: {
+                    id: true,
+                    supersedesMessageId: true,
                     speaker: true,
                     originalText: true,
                     translatedText: true,
@@ -446,6 +450,13 @@ export async function upsertViewingSessionSummaryFromInsights(args: BuildSummary
 
     const clientName = asString(session.clientName) || asString(session.contact?.name) || asString(session.contact?.firstName) || "Client";
     const propertyTitle = asString(session.primaryProperty?.title) || asString(session.primaryProperty?.reference) || "Property";
+    const supersededMessageIds = createSupersededMessageIdSet(
+        session.messages.map((item) => ({
+            id: item.id,
+            supersedesMessageId: item.supersedesMessageId || null,
+        }))
+    );
+    const effectiveMessages = session.messages.filter((item) => !supersededMessageIds.has(item.id));
     const fallbackArtifacts = buildSummaryArtifacts({
         clientName,
         propertyTitle,
@@ -481,12 +492,15 @@ export async function upsertViewingSessionSummaryFromInsights(args: BuildSummary
         objections,
         buyingSignals,
         pivots,
-        recentMessages: session.messages,
+        recentMessages: effectiveMessages,
         fallbackArtifacts,
     });
 
     const artifacts = llm.artifacts;
     const persistedStatus = asString(artifacts.sessionSummary) ? summaryStatusTarget : "failed";
+    const summarySource = llm.usage.usedFallback
+        ? VIEWING_SESSION_SUMMARY_SOURCES.heuristicFallback
+        : VIEWING_SESSION_SUMMARY_SOURCES.analysisModel;
     const now = new Date();
 
     const summary = await db.$transaction(async (tx) => {
@@ -505,8 +519,12 @@ export async function upsertViewingSessionSummaryFromInsights(args: BuildSummary
                 objections: artifacts.objections as any,
                 buyingSignals: artifacts.buyingSignals as any,
                 generatedAt: now,
+                source: summarySource,
                 provider: llm.usage.provider || "google",
                 model: llm.usage.model || session.liveModel || null,
+                modelVersion: llm.usage.model || session.liveModel || null,
+                usedFallback: llm.usage.usedFallback,
+                generatedByUserId: args.actorUserId || null,
                 promptTokens: llm.usage.promptTokens,
                 completionTokens: llm.usage.completionTokens,
                 totalTokens: llm.usage.totalTokens,
@@ -524,8 +542,12 @@ export async function upsertViewingSessionSummaryFromInsights(args: BuildSummary
                 objections: artifacts.objections as any,
                 buyingSignals: artifacts.buyingSignals as any,
                 generatedAt: now,
+                source: summarySource,
                 provider: llm.usage.provider || "google",
                 model: llm.usage.model || session.liveModel || null,
+                modelVersion: llm.usage.model || session.liveModel || null,
+                usedFallback: llm.usage.usedFallback,
+                generatedByUserId: args.actorUserId || null,
                 promptTokens: llm.usage.promptTokens,
                 completionTokens: llm.usage.completionTokens,
                 totalTokens: llm.usage.totalTokens,
@@ -623,6 +645,12 @@ export async function upsertViewingSessionSummaryFromInsights(args: BuildSummary
                 objections: summary.objections || [],
                 buyingSignals: summary.buyingSignals || [],
                 generatedAt: summary.generatedAt ? summary.generatedAt.toISOString() : null,
+                source: summary.source,
+                provider: summary.provider,
+                model: summary.model,
+                modelVersion: summary.modelVersion,
+                usedFallback: summary.usedFallback,
+                generatedByUserId: summary.generatedByUserId,
             },
         },
     });

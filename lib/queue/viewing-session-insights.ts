@@ -1,16 +1,15 @@
 import db from "@/lib/db";
 import { buildQueueJobId, isDuplicateQueueJobError } from "@/lib/queue/job-id";
-import { enqueueViewingSessionInsights, initViewingSessionInsightsWorker } from "@/lib/queue/viewing-session-insights";
-import { runViewingSessionMessageTranslation } from "@/lib/viewings/sessions/analysis";
+import { runViewingSessionMessageInsights } from "@/lib/viewings/sessions/analysis";
 
 const REDIS_CONNECTION = {
     host: process.env.REDIS_HOST || "127.0.0.1",
     port: Number(process.env.REDIS_PORT || 6379),
 };
 
-const QUEUE_NAME = "viewing-session-translation";
+const QUEUE_NAME = "viewing-session-insights";
 
-export type EnqueueViewingSessionAnalysisInput = {
+export type EnqueueViewingSessionInsightsInput = {
     sessionId: string;
     messageId: string;
     force?: boolean;
@@ -18,7 +17,7 @@ export type EnqueueViewingSessionAnalysisInput = {
     allowInlineFallback?: boolean;
 };
 
-export type EnqueueViewingSessionAnalysisResult = {
+export type EnqueueViewingSessionInsightsResult = {
     accepted: boolean;
     mode: "queued" | "already-queued" | "inline-fallback" | "skipped" | "queue-unavailable";
     reason?: "already_completed" | "enqueue_failed";
@@ -26,7 +25,7 @@ export type EnqueueViewingSessionAnalysisResult = {
     error?: string;
 };
 
-type ViewingSessionTranslationJobData = {
+type ViewingSessionInsightsJobData = {
     sessionId: string;
     messageId: string;
     force: boolean;
@@ -40,7 +39,7 @@ async function getQueueInstance() {
     if (!_queuePromise) {
         _queuePromise = (async () => {
             const { Queue } = await import("bullmq");
-            return new Queue<ViewingSessionTranslationJobData>(QUEUE_NAME, {
+            return new Queue<ViewingSessionInsightsJobData>(QUEUE_NAME, {
                 connection: REDIS_CONNECTION,
                 defaultJobOptions: {
                     removeOnComplete: true,
@@ -61,28 +60,9 @@ function resolveQueuePriority(priority?: "normal" | "high"): number {
     return priority === "high" ? 1 : 5;
 }
 
-async function enqueueInsightsAfterTranslation(args: {
-    sessionId: string;
-    messageId: string;
-    priority?: "normal" | "high";
-    allowInlineFallback?: boolean;
-}) {
-    try {
-        await initViewingSessionInsightsWorker();
-    } catch (workerError) {
-        console.warn("[Queue] Failed to init viewing session insights worker:", workerError);
-    }
-    await enqueueViewingSessionInsights({
-        sessionId: args.sessionId,
-        messageId: args.messageId,
-        priority: args.priority || "normal",
-        allowInlineFallback: args.allowInlineFallback !== false,
-    });
-}
-
-export async function enqueueViewingSessionAnalysis(
-    input: EnqueueViewingSessionAnalysisInput
-): Promise<EnqueueViewingSessionAnalysisResult> {
+export async function enqueueViewingSessionInsights(
+    input: EnqueueViewingSessionInsightsInput
+): Promise<EnqueueViewingSessionInsightsResult> {
     const sessionId = String(input.sessionId || "").trim();
     const messageId = String(input.messageId || "").trim();
     if (!sessionId || !messageId) {
@@ -101,8 +81,7 @@ export async function enqueueViewingSessionAnalysis(
         },
         select: {
             id: true,
-            translationStatus: true,
-            translatedText: true,
+            insightStatus: true,
         },
     });
     if (!message) {
@@ -114,13 +93,7 @@ export async function enqueueViewingSessionAnalysis(
         };
     }
 
-    if (!input.force && message.translationStatus === "completed" && message.translatedText) {
-        await enqueueInsightsAfterTranslation({
-            sessionId,
-            messageId,
-            priority: input.priority,
-            allowInlineFallback: input.allowInlineFallback,
-        });
+    if (!input.force && message.insightStatus === "completed") {
         return {
             accepted: false,
             mode: "skipped",
@@ -129,7 +102,7 @@ export async function enqueueViewingSessionAnalysis(
     }
 
     const allowInlineFallback = input.allowInlineFallback !== false;
-    const jobId = buildQueueJobId("viewing-session-translation", messageId);
+    const jobId = buildQueueJobId("viewing-session-insights", messageId);
 
     try {
         const queue = await getQueueInstance();
@@ -143,7 +116,7 @@ export async function enqueueViewingSessionAnalysis(
         }
 
         await queue.add(
-            "translate-viewing-session-message",
+            "analyze-viewing-session-message-insights",
             {
                 sessionId,
                 messageId,
@@ -181,21 +154,14 @@ export async function enqueueViewingSessionAnalysis(
                 mode: "queue-unavailable",
                 reason: "enqueue_failed",
                 jobId,
-                error: String(queueError?.message || "Failed to enqueue viewing session translation."),
+                error: String(queueError?.message || "Failed to enqueue viewing session insights."),
             };
         }
 
-        console.warn("[Queue] Failed to enqueue viewing session translation. Falling back to inline processing:", queueError);
-        void runViewingSessionMessageTranslation({ sessionId, messageId })
-            .then(() => enqueueInsightsAfterTranslation({
-                sessionId,
-                messageId,
-                priority: input.priority,
-                allowInlineFallback: true,
-            }))
-            .catch((inlineErr) => {
-                console.error("[Queue] Inline viewing session translation fallback failed:", inlineErr);
-            });
+        console.warn("[Queue] Failed to enqueue viewing session insights. Falling back to inline processing:", queueError);
+        void runViewingSessionMessageInsights({ sessionId, messageId }).catch((inlineErr) => {
+            console.error("[Queue] Inline viewing session insights fallback failed:", inlineErr);
+        });
 
         return {
             accepted: true,
@@ -205,22 +171,17 @@ export async function enqueueViewingSessionAnalysis(
     }
 }
 
-export async function initViewingSessionAnalysisWorker() {
+export async function initViewingSessionInsightsWorker() {
     if (_workerPromise) return _workerPromise;
 
     _workerPromise = (async () => {
         const { Worker } = await import("bullmq");
-        const worker = new Worker<ViewingSessionTranslationJobData>(
+        const worker = new Worker<ViewingSessionInsightsJobData>(
             QUEUE_NAME,
             async (job: any) => {
-                await runViewingSessionMessageTranslation({
+                await runViewingSessionMessageInsights({
                     sessionId: job.data.sessionId,
                     messageId: job.data.messageId,
-                });
-                await enqueueInsightsAfterTranslation({
-                    sessionId: job.data.sessionId,
-                    messageId: job.data.messageId,
-                    allowInlineFallback: true,
                 });
             },
             {
@@ -230,11 +191,11 @@ export async function initViewingSessionAnalysisWorker() {
         );
 
         worker.on("ready", () => {
-            console.log("[Queue] Viewing session translation worker is ready.");
+            console.log("[Queue] Viewing session insights worker is ready.");
         });
 
         worker.on("failed", (job: any, err: Error) => {
-            console.error(`[Queue] Viewing session translation job failed (${job?.id || "unknown"}): ${err.message}`);
+            console.error(`[Queue] Viewing session insights job failed (${job?.id || "unknown"}): ${err.message}`);
         });
 
         return worker;
