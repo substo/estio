@@ -14,6 +14,8 @@ type SessionPreview = {
     clientName: string | null;
     mode: string;
     status: string;
+    transportStatus: string;
+    liveProvider: string | null;
     clientLanguage: string | null;
     agentLanguage: string | null;
     property: {
@@ -75,12 +77,15 @@ export function ClientSessionView({ token, preview }: Props) {
     const [speechOn, setSpeechOn] = useState(false);
     const [audioPlaybackEnabled, setAudioPlaybackEnabled] = useState(false);
     const [liveModeLabel, setLiveModeLabel] = useState<string | null>(null);
+    const [transportStatus, setTransportStatus] = useState<string>(preview.transportStatus || "disconnected");
+    const [liveProvider, setLiveProvider] = useState<string | null>(preview.liveProvider || null);
     const recognizerRef = useRef<SpeechRecognizerLike | null>(null);
 
     const orderedMessages = useMemo(
         () => [...messages].sort((a, b) => +new Date(a.timestamp) - +new Date(b.timestamp)),
         [messages]
     );
+    const transportConnected = transportStatus === "connected";
 
     useEffect(() => {
         recognizerRef.current = createSpeechRecognizer();
@@ -117,6 +122,12 @@ export function ClientSessionView({ token, preview }: Props) {
                 }
                 if (type === "viewing_session.status.changed" && payload?.sessionId) {
                     setSessionId(String(payload.sessionId));
+                    setTransportStatus((current) => String(payload?.transportStatus || current));
+                    return;
+                }
+                if (type === "viewing_session.transport.status.changed") {
+                    setSessionId(String(payload?.sessionId || sessionId));
+                    setTransportStatus((current) => String(payload?.transportStatus || current));
                 }
             } catch (error) {
                 console.error("Failed to parse client session SSE payload:", error);
@@ -142,6 +153,7 @@ export function ClientSessionView({ token, preview }: Props) {
                     token,
                     pin: pin.trim(),
                     preferredLanguage: preferredLanguage || undefined,
+                    aiDisclosureAccepted: true,
                 }),
             });
             const payload = await response.json().catch(() => null);
@@ -153,6 +165,8 @@ export function ClientSessionView({ token, preview }: Props) {
             setSessionId(payload.sessionId);
             setPreferredLanguage(payload?.session?.clientLanguage || preferredLanguage);
             setLiveModeLabel(payload?.session?.mode || preview.mode);
+            setTransportStatus(payload?.session?.transportStatus || transportStatus);
+            setLiveProvider(payload?.session?.liveProvider || liveProvider);
         } catch (error: any) {
             setJoinError(error?.message || "Unable to join this session.");
         } finally {
@@ -249,6 +263,8 @@ export function ClientSessionView({ token, preview }: Props) {
                 return;
             }
             setLiveModeLabel(payload?.session?.mode || liveModeLabel);
+            setTransportStatus(payload?.session?.transportStatus || transportStatus);
+            setLiveProvider(payload?.session?.liveProvider || liveProvider);
             if (payload?.session?.id && payload.session.id !== sessionId) {
                 setSessionId(payload.session.id);
             }
@@ -307,8 +323,13 @@ export function ClientSessionView({ token, preview }: Props) {
                                         Toggle AI voice playback (text stays visible always)
                                     </div>
                                 </div>
-                                <Switch checked={audioPlaybackEnabled} onCheckedChange={syncAudioToggle} />
+                                <Switch checked={audioPlaybackEnabled} onCheckedChange={syncAudioToggle} disabled={!transportConnected} />
                             </div>
+                            {!transportConnected && (
+                                <div className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800">
+                                    Audio playback becomes available once live transport is connected. Text chat remains active.
+                                </div>
+                            )}
 
                             <div className="rounded-md border p-2.5">
                                 <div className="mb-2 flex items-center justify-between">
@@ -345,7 +366,7 @@ export function ClientSessionView({ token, preview }: Props) {
 
                     {liveModeLabel && (
                         <div className="text-[11px] text-muted-foreground">
-                            Live mode: {liveModeLabel}
+                            Live mode: {liveModeLabel} • Transport: {transportStatus}{liveProvider ? ` • ${liveProvider}` : ""}
                         </div>
                     )}
                 </CardContent>

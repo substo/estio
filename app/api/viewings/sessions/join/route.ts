@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { isSystemDomain } from "@/lib/app-config";
 import db from "@/lib/db";
+import { appendViewingSessionEvent } from "@/lib/viewings/sessions/events";
 import { appendJoinAuditEntry, VIEWING_SESSION_JOIN_LOCK_MINUTES, VIEWING_SESSION_JOIN_MAX_ATTEMPTS } from "@/lib/viewings/sessions/runtime";
 import {
     DEFAULT_VIEWING_SESSION_ACCESS_TOKEN_TTL_SECONDS,
@@ -20,6 +21,7 @@ const joinSchema = z.object({
     token: z.string().trim().min(10),
     pin: z.string().trim().min(4).max(8),
     preferredLanguage: z.string().trim().max(24).optional(),
+    aiDisclosureAccepted: z.boolean().optional(),
 });
 
 function normalizeHost(input: string | null): string {
@@ -51,7 +53,10 @@ export async function POST(req: NextRequest) {
                     id: true,
                     domain: true,
                     siteConfig: {
-                        select: { domain: true },
+                        select: {
+                            domain: true,
+                            viewingSessionAiDisclosureRequired: true,
+                        },
                     },
                 },
             },
@@ -87,6 +92,17 @@ export async function POST(req: NextRequest) {
     }
 
     if (!isValidSessionStatus(session.status)) {
+        await appendViewingSessionEvent({
+            sessionId: session.id,
+            locationId: session.locationId,
+            type: "viewing_session.join.rejected",
+            actorRole: "client",
+            source: "api",
+            payload: {
+                reason: "invalid_status",
+                status: session.status,
+            },
+        });
         return NextResponse.json({ success: false, error: "This session is no longer available." }, { status: 410 });
     }
 
@@ -97,10 +113,31 @@ export async function POST(req: NextRequest) {
                 status: VIEWING_SESSION_STATUSES.expired,
             },
         });
+        await appendViewingSessionEvent({
+            sessionId: session.id,
+            locationId: session.locationId,
+            type: "viewing_session.join.rejected",
+            actorRole: "client",
+            source: "api",
+            payload: {
+                reason: "expired",
+            },
+        });
         return NextResponse.json({ success: false, error: "Session link has expired." }, { status: 410 });
     }
 
     if (session.joinLockUntil && session.joinLockUntil.getTime() > now.getTime()) {
+        await appendViewingSessionEvent({
+            sessionId: session.id,
+            locationId: session.locationId,
+            type: "viewing_session.join.rejected",
+            actorRole: "client",
+            source: "api",
+            payload: {
+                reason: "locked",
+                lockedUntil: session.joinLockUntil.toISOString(),
+            },
+        });
         return NextResponse.json(
             {
                 success: false,
@@ -133,6 +170,18 @@ export async function POST(req: NextRequest) {
                 }) as any,
             },
         });
+        await appendViewingSessionEvent({
+            sessionId: session.id,
+            locationId: session.locationId,
+            type: "viewing_session.join.failed",
+            actorRole: "client",
+            source: "api",
+            payload: {
+                reason: "invalid_pin",
+                failedJoinAttempts: nextAttemptCount,
+                lockedUntil: lockUntil ? lockUntil.toISOString() : null,
+            },
+        });
 
         return NextResponse.json(
             {
@@ -144,6 +193,40 @@ export async function POST(req: NextRequest) {
                 lockedUntil: lockUntil ? lockUntil.toISOString() : null,
             },
             { status: shouldLock ? 429 : 401 }
+        );
+    }
+
+    const disclosureRequired = session.location.siteConfig?.viewingSessionAiDisclosureRequired !== false;
+    if (disclosureRequired && parsed.data.aiDisclosureAccepted !== true) {
+        await db.viewingSession.update({
+            where: { id: session.id },
+            data: {
+                consentStatus: "declined",
+                joinAudit: appendJoinAuditEntry(session.joinAudit, {
+                    at: now.toISOString(),
+                    success: false,
+                    reason: "ai_disclosure_not_accepted",
+                    ip: req.headers.get("x-forwarded-for") || null,
+                }) as any,
+            },
+        });
+        await appendViewingSessionEvent({
+            sessionId: session.id,
+            locationId: session.locationId,
+            type: "viewing_session.join.rejected",
+            actorRole: "client",
+            source: "api",
+            payload: {
+                reason: "ai_disclosure_not_accepted",
+            },
+        });
+        return NextResponse.json(
+            {
+                success: false,
+                error: "AI assistance disclosure must be accepted before joining this session.",
+                code: "AI_DISCLOSURE_REQUIRED",
+            },
+            { status: 400 }
         );
     }
 
@@ -163,6 +246,7 @@ export async function POST(req: NextRequest) {
             joinLockUntil: null,
             lastJoinAttemptAt: now,
             lastJoinedAt: now,
+            consentStatus: disclosureRequired ? "accepted" : "not_required",
             clientLanguage: parsed.data.preferredLanguage || session.clientLanguage || undefined,
             joinAudit: appendJoinAuditEntry(session.joinAudit, {
                 at: now.toISOString(),
@@ -170,6 +254,17 @@ export async function POST(req: NextRequest) {
                 role,
                 ip: req.headers.get("x-forwarded-for") || null,
             }) as any,
+        },
+    });
+    await appendViewingSessionEvent({
+        sessionId: session.id,
+        locationId: session.locationId,
+        type: "viewing_session.join.succeeded",
+        actorRole: "client",
+        source: "api",
+        payload: {
+            role,
+            disclosureRequired,
         },
     });
 
@@ -185,6 +280,8 @@ export async function POST(req: NextRequest) {
             id: session.id,
             mode: session.mode,
             status: session.status,
+            transportStatus: session.transportStatus,
+            liveProvider: session.liveProvider,
             clientName: session.clientName,
             clientLanguage: parsed.data.preferredLanguage || session.clientLanguage || null,
             agentLanguage: session.agentLanguage || null,

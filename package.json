@@ -17,6 +17,7 @@
         "perf:conversations:ui-playwright": "node scripts/perf/conversations-ui-benchmark-playwright.js",
         "test:conversations:realtime": "node --test lib/conversations/realtime-merge.test.mjs lib/conversations/workspace-core-cache.test.mjs lib/conversations/thread-hydration.test.mjs lib/conversations/timeline-events.test.mjs lib/deals/enrichment.test.mjs lib/realtime/conversation-events.test.mjs",
         "test:tasks:reminders": "node --test lib/tasks/reminder-config.test.mjs lib/tasks/reminder-links.test.mjs lib/tasks/datetime-local.test.mjs",
+        "test:viewings:sessions": "tsx --test lib/viewings/sessions/feature-flags.test.ts",
         "test:scraping:deep": "node --test lib/scraping/deep-scrape-types.test.mjs",
         "test:scraping:relevance": "tsx --test lib/scraping/listing-relevance-classifier.test.ts lib/scraping/listing-scraper.relevance.test.ts",
         "prospecting:reclassify": "tsx scripts/reclassify-scraped-listings.ts",

@@ -5,10 +5,12 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
 import db from "@/lib/db";
+import { runViewingSessionSynthesis } from "@/lib/queue/viewing-session-synthesis";
 import { publishViewingSessionRealtimeEvent } from "@/lib/realtime/viewing-session-events";
+import { appendViewingSessionEvent } from "@/lib/viewings/sessions/events";
+import { isViewingSessionVoicePremiumEnabled } from "@/lib/viewings/sessions/feature-flags";
 import { resolveLiveModelForMode } from "@/lib/viewings/sessions/live-models";
 import { generateViewingSessionJoinSecrets } from "@/lib/viewings/sessions/security";
-import { upsertViewingSessionSummaryFromInsights } from "@/lib/viewings/sessions/summary";
 import {
     VIEWING_SESSION_EVENT_TYPES,
     VIEWING_SESSION_MODES,
@@ -162,13 +164,28 @@ export async function createViewingSession(
 
     const siteConfig = await db.siteConfig.findUnique({
         where: { locationId: access.viewing.contact.locationId },
-        select: { domain: true },
+        select: {
+            domain: true,
+            viewingSessionRetentionDays: true,
+            viewingSessionTranscriptVisibility: true,
+            viewingSessionAiDisclosureRequired: true,
+        },
     });
     const resolvedDomain = asString(siteConfig?.domain) || asString(access.viewing.contact.location?.domain) || null;
+    const voicePremiumEnabled = isViewingSessionVoicePremiumEnabled(access.viewing.contact.locationId);
+    if (mode === VIEWING_SESSION_MODES.assistantLiveVoicePremium && !voicePremiumEnabled) {
+        return {
+            success: false,
+            message: "Premium voice mode is not enabled for this location.",
+        };
+    }
 
     const clientName = asString(data.clientName) || asString(access.viewing.contact.name) || asString(access.viewing.contact.firstName) || null;
     const clientLanguage = asString(data.clientLanguage) || asString(access.viewing.contact.preferredLang) || "en";
     const agentLanguage = asString(data.agentLanguage) || "en";
+    const appliedRetentionDays = Math.min(365, Math.max(30, Number(siteConfig?.viewingSessionRetentionDays || 90)));
+    const transcriptVisibility = asString(siteConfig?.viewingSessionTranscriptVisibility) || "team";
+    const consentStatus = siteConfig?.viewingSessionAiDisclosureRequired === false ? "not_required" : "required";
     const relatedPropertyIds = Array.isArray(data.relatedPropertyIds)
         ? Array.from(new Set(data.relatedPropertyIds.map(asString).filter((id) => id && id !== access.viewing.propertyId))).slice(0, 12)
         : [];
@@ -187,6 +204,11 @@ export async function createViewingSession(
             agentLanguage,
             mode,
             status: VIEWING_SESSION_STATUSES.scheduled,
+            transportStatus: "disconnected",
+            liveProvider: "google_gemini_live",
+            consentStatus,
+            appliedRetentionDays,
+            transcriptVisibility,
             sessionLinkTokenHash: secrets.tokenHash,
             pinCodeHash: secrets.pinCodeHash,
             pinCodeSalt: secrets.pinCodeSalt,
@@ -213,6 +235,22 @@ export async function createViewingSession(
             status: session.status,
             mode: session.mode,
             createdAt: session.createdAt.toISOString(),
+        },
+    });
+    await appendViewingSessionEvent({
+        sessionId: session.id,
+        locationId: session.locationId,
+        type: "viewing_session.created",
+        actorRole: "admin",
+        actorUserId: access.clerkUserId,
+        source: "api",
+        payload: {
+            viewingId: access.viewing.id,
+            mode: session.mode,
+            consentStatus,
+            appliedRetentionDays,
+            transcriptVisibility,
+            voicePremiumEnabled,
         },
     });
 
@@ -267,6 +305,17 @@ export async function startViewingSession(sessionId: string) {
             startedAt: updated.startedAt ? updated.startedAt.toISOString() : null,
         },
     });
+    await appendViewingSessionEvent({
+        sessionId: updated.id,
+        locationId: updated.locationId,
+        type: "viewing_session.started",
+        actorRole: "admin",
+        actorUserId: access.clerkUserId,
+        source: "api",
+        payload: {
+            startedAt: updated.startedAt ? updated.startedAt.toISOString() : null,
+        },
+    });
 
     revalidatePath(`/admin/viewings/sessions/${updated.id}`);
     return { success: true, status: updated.status };
@@ -298,6 +347,14 @@ export async function pauseViewingSession(sessionId: string) {
             status: updated.status,
         },
     });
+    await appendViewingSessionEvent({
+        sessionId: updated.id,
+        locationId: updated.locationId,
+        type: "viewing_session.paused",
+        actorRole: "admin",
+        actorUserId: access.clerkUserId,
+        source: "api",
+    });
 
     revalidatePath(`/admin/viewings/sessions/${updated.id}`);
     return { success: true, status: updated.status };
@@ -325,10 +382,11 @@ export async function completeViewingSession(sessionId: string) {
         },
     });
 
-    const summary = await upsertViewingSessionSummaryFromInsights({
+    const summary = await runViewingSessionSynthesis({
         sessionId: updated.id,
         actorUserId: access.actorUserId,
         status: "final",
+        trigger: "completion",
     });
 
     await publishViewingSessionRealtimeEvent({
@@ -338,6 +396,18 @@ export async function completeViewingSession(sessionId: string) {
         payload: {
             sessionId: updated.id,
             status: updated.status,
+            endedAt: updated.endedAt ? updated.endedAt.toISOString() : null,
+            summaryId: summary.id,
+        },
+    });
+    await appendViewingSessionEvent({
+        sessionId: updated.id,
+        locationId: updated.locationId,
+        type: "viewing_session.completed",
+        actorRole: "admin",
+        actorUserId: access.clerkUserId,
+        source: "api",
+        payload: {
             endedAt: updated.endedAt ? updated.endedAt.toISOString() : null,
             summaryId: summary.id,
         },

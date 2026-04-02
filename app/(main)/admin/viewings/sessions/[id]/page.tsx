@@ -48,6 +48,8 @@ export default async function ViewingSessionPage(
                 id: session.id,
                 locationId: session.locationId,
                 status: session.status,
+                transportStatus: session.transportStatus,
+                liveProvider: session.liveProvider || null,
                 mode: session.mode,
                 liveModel: session.liveModel || null,
                 chainIndex: session.chainIndex,
@@ -78,6 +80,12 @@ export default async function ViewingSessionPage(
             }}
             initialMessages={session.messages.map((message) => ({
                 id: message.id,
+                sessionId: message.sessionId,
+                sequence: message.sequence,
+                sourceMessageId: message.sourceMessageId || null,
+                messageKind: message.messageKind || null,
+                persistedAt: message.persistedAt ? message.persistedAt.toISOString() : null,
+                supersedesMessageId: message.supersedesMessageId || null,
                 speaker: message.speaker,
                 originalText: message.originalText,
                 originalLanguage: message.originalLanguage || null,

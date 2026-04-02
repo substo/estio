@@ -2,13 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import db from "@/lib/db";
 import { initViewingSessionAnalysisWorker, enqueueViewingSessionAnalysis } from "@/lib/queue/viewing-session-analysis";
+import { enqueueViewingSessionSynthesis, initViewingSessionSynthesisWorker } from "@/lib/queue/viewing-session-synthesis";
 import { publishViewingSessionRealtimeEvent } from "@/lib/realtime/viewing-session-events";
+import { appendViewingSessionEvent } from "@/lib/viewings/sessions/events";
 import { generateViewingSessionAccessToken } from "@/lib/viewings/sessions/security";
 import { resolveViewingSessionRequestContext } from "@/lib/viewings/sessions/auth";
 import {
     DEFAULT_VIEWING_SESSION_ACCESS_TOKEN_TTL_SECONDS,
     VIEWING_SESSION_ANALYSIS_STATUSES,
     VIEWING_SESSION_EVENT_TYPES,
+    VIEWING_SESSION_MESSAGE_KINDS,
     VIEWING_SESSION_SPEAKERS,
     VIEWING_SESSION_STATUSES,
 } from "@/lib/viewings/sessions/types";
@@ -25,6 +28,13 @@ const messageSchema = z.object({
     confidence: z.number().min(0).max(1).optional(),
     audioChunkRef: z.string().trim().max(1_000).optional(),
     timestamp: z.string().datetime().optional(),
+    sourceMessageId: z.string().trim().min(1).max(140).optional(),
+    messageKind: z.enum([
+        VIEWING_SESSION_MESSAGE_KINDS.utterance,
+        VIEWING_SESSION_MESSAGE_KINDS.systemNote,
+        VIEWING_SESSION_MESSAGE_KINDS.toolResult,
+    ]).optional(),
+    supersedesMessageId: z.string().trim().min(1).max(120).optional(),
 });
 
 function resolveSpeakerByContext(role: "client" | "agent" | "admin", requested?: string) {
@@ -102,45 +112,156 @@ export async function POST(
     const data = parsed.data;
     const speaker = resolveSpeakerByContext(context.role, data.speaker);
     const timestamp = data.timestamp ? new Date(data.timestamp) : new Date();
+    const messageKind = data.messageKind || VIEWING_SESSION_MESSAGE_KINDS.utterance;
+    const sourceMessageId = String(data.sourceMessageId || "").trim() || null;
+    const supersedesMessageId = String(data.supersedesMessageId || "").trim() || null;
 
-    const created = await db.viewingSessionMessage.create({
-        data: {
-            sessionId: writableSession.id,
-            speaker,
-            originalText: data.originalText,
-            originalLanguage: data.originalLanguage || null,
-            translatedText: data.translatedText || null,
-            targetLanguage: data.targetLanguage || null,
-            timestamp,
-            confidence: typeof data.confidence === "number" ? data.confidence : null,
-            audioChunkRef: data.audioChunkRef || null,
-            analysisStatus: data.translatedText
-                ? VIEWING_SESSION_ANALYSIS_STATUSES.completed
-                : VIEWING_SESSION_ANALYSIS_STATUSES.pending,
-        },
-    });
+    let writeResult: {
+        message: any;
+        idempotent: boolean;
+        created: boolean;
+    };
+    try {
+        writeResult = await db.$transaction(async (tx) => {
+            if (sourceMessageId) {
+                const existing = await tx.viewingSessionMessage.findFirst({
+                    where: {
+                        sessionId: writableSession.id,
+                        sourceMessageId,
+                    },
+                });
+                if (existing) {
+                    return {
+                        message: existing,
+                        idempotent: true,
+                        created: false,
+                    };
+                }
+            }
 
-    await publishViewingSessionRealtimeEvent({
-        sessionId: writableSession.id,
-        locationId: writableSession.locationId,
-        type: VIEWING_SESSION_EVENT_TYPES.messageCreated,
-        payload: {
-            message: {
-                id: created.id,
-                sessionId: writableSession.id,
-                speaker: created.speaker,
-                originalText: created.originalText,
-                originalLanguage: created.originalLanguage,
-                translatedText: created.translatedText,
-                targetLanguage: created.targetLanguage,
-                confidence: created.confidence,
-                audioChunkRef: created.audioChunkRef,
-                analysisStatus: created.analysisStatus,
-                timestamp: created.timestamp.toISOString(),
-                createdAt: created.createdAt.toISOString(),
+            if (supersedesMessageId) {
+                const supersedes = await tx.viewingSessionMessage.findFirst({
+                    where: {
+                        id: supersedesMessageId,
+                        sessionId: writableSession.id,
+                    },
+                    select: { id: true },
+                });
+                if (!supersedes) {
+                    throw new Error("Superseded message not found in this session.");
+                }
+            }
+
+            // Lock the session row to ensure sequence assignment is serialized per session.
+            await tx.viewingSession.update({
+                where: { id: writableSession.id },
+                data: { updatedAt: new Date() },
+                select: { id: true },
+            });
+
+            const latest = await tx.viewingSessionMessage.findFirst({
+                where: { sessionId: writableSession.id },
+                orderBy: [{ sequence: "desc" }],
+                select: { sequence: true },
+            });
+            const nextSequence = Number(latest?.sequence || 0) + 1;
+            const persistedAt = new Date();
+
+            const created = await tx.viewingSessionMessage.create({
+                data: {
+                    sessionId: writableSession.id,
+                    sequence: nextSequence,
+                    sourceMessageId,
+                    messageKind,
+                    persistedAt,
+                    supersedesMessageId,
+                    speaker,
+                    originalText: data.originalText,
+                    originalLanguage: data.originalLanguage || null,
+                    translatedText: data.translatedText || null,
+                    targetLanguage: data.targetLanguage || null,
+                    timestamp,
+                    confidence: typeof data.confidence === "number" ? data.confidence : null,
+                    audioChunkRef: data.audioChunkRef || null,
+                    analysisStatus: data.translatedText
+                        ? VIEWING_SESSION_ANALYSIS_STATUSES.completed
+                        : VIEWING_SESSION_ANALYSIS_STATUSES.pending,
+                },
+            });
+
+            return {
+                message: created,
+                idempotent: false,
+                created: true,
+            };
+        });
+    } catch (error: any) {
+        return NextResponse.json(
+            {
+                success: false,
+                error: String(error?.message || "Failed to persist message."),
             },
-        },
-    });
+            { status: 400 }
+        );
+    }
+    const created = writeResult.message;
+
+    if (writeResult.created) {
+        await publishViewingSessionRealtimeEvent({
+            sessionId: writableSession.id,
+            locationId: writableSession.locationId,
+            type: VIEWING_SESSION_EVENT_TYPES.messageCreated,
+            payload: {
+                message: {
+                    id: created.id,
+                    sessionId: writableSession.id,
+                    sequence: created.sequence,
+                    sourceMessageId: created.sourceMessageId,
+                    messageKind: created.messageKind,
+                    persistedAt: created.persistedAt.toISOString(),
+                    supersedesMessageId: created.supersedesMessageId,
+                    speaker: created.speaker,
+                    originalText: created.originalText,
+                    originalLanguage: created.originalLanguage,
+                    translatedText: created.translatedText,
+                    targetLanguage: created.targetLanguage,
+                    confidence: created.confidence,
+                    audioChunkRef: created.audioChunkRef,
+                    analysisStatus: created.analysisStatus,
+                    timestamp: created.timestamp.toISOString(),
+                    createdAt: created.createdAt.toISOString(),
+                },
+            },
+        });
+        await appendViewingSessionEvent({
+            sessionId: writableSession.id,
+            locationId: writableSession.locationId,
+            type: "viewing_session.message.created",
+            actorRole: context.role,
+            actorUserId: context.clerkUserId,
+            source: "api",
+            payload: {
+                messageId: created.id,
+                sequence: created.sequence,
+                messageKind: created.messageKind,
+                sourceMessageId: created.sourceMessageId,
+                supersedesMessageId: created.supersedesMessageId,
+            },
+        });
+    } else {
+        await appendViewingSessionEvent({
+            sessionId: writableSession.id,
+            locationId: writableSession.locationId,
+            type: "viewing_session.message.idempotent_hit",
+            actorRole: context.role,
+            actorUserId: context.clerkUserId,
+            source: "api",
+            payload: {
+                messageId: created.id,
+                sourceMessageId: created.sourceMessageId,
+            },
+        });
+    }
 
     let analysisQueueResult: unknown = null;
     if (!created.translatedText || created.analysisStatus !== VIEWING_SESSION_ANALYSIS_STATUSES.completed) {
@@ -156,6 +277,18 @@ export async function POST(
             allowInlineFallback: true,
         });
     }
+    let synthesisQueueResult: unknown = null;
+    try {
+        await initViewingSessionSynthesisWorker();
+    } catch (error) {
+        console.warn("[viewing-session] Failed to init synthesis worker, continuing with enqueue fallback:", error);
+    }
+    synthesisQueueResult = await enqueueViewingSessionSynthesis({
+        sessionId: writableSession.id,
+        status: "draft",
+        trigger: "debounced_worker",
+        allowInlineFallback: true,
+    });
 
     const roleForToken = context.role === "client" ? "client" : "agent";
     const sessionAccessToken = writableSession.id === session.id
@@ -175,6 +308,12 @@ export async function POST(
         sessionAccessTokenExpiresInSeconds: sessionAccessToken ? DEFAULT_VIEWING_SESSION_ACCESS_TOKEN_TTL_SECONDS : null,
         message: {
             id: created.id,
+            sessionId: writableSession.id,
+            sequence: created.sequence,
+            sourceMessageId: created.sourceMessageId,
+            messageKind: created.messageKind,
+            persistedAt: created.persistedAt.toISOString(),
+            supersedesMessageId: created.supersedesMessageId,
             speaker: created.speaker,
             originalText: created.originalText,
             originalLanguage: created.originalLanguage,
@@ -185,6 +324,8 @@ export async function POST(
             timestamp: created.timestamp.toISOString(),
             createdAt: created.createdAt.toISOString(),
         },
+        idempotent: writeResult.idempotent,
         analysisQueue: analysisQueueResult,
+        synthesisQueue: synthesisQueueResult,
     });
 }

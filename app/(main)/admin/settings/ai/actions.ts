@@ -103,6 +103,10 @@ export async function updateAiSettings(
         const transcriptOnDemandEnabled = formData.get("whatsappTranscriptOnDemandEnabled") === "on";
         const transcriptRetentionDays = normalizeTranscriptRetentionDays(formData.get("whatsappTranscriptRetentionDays"));
         const transcriptVisibility = normalizeTranscriptVisibility(formData.get("whatsappTranscriptVisibility"));
+        const viewingSessionRetentionDays = normalizeTranscriptRetentionDays(formData.get("viewingSessionRetentionDays"));
+        const viewingSessionTranscriptVisibility = normalizeTranscriptVisibility(formData.get("viewingSessionTranscriptVisibility"));
+        const viewingSessionAiDisclosureRequired = formData.get("viewingSessionAiDisclosureRequired") === "on";
+        const viewingSessionRawAudioStorageEnabled = formData.get("viewingSessionRawAudioStorageEnabled") === "on";
         const payload = {
             ...existingPayload,
             googleAiModel: formData.get("googleAiModel") as string || GEMINI_FLASH_LATEST_ALIAS,
@@ -112,6 +116,10 @@ export async function updateAiSettings(
             whatsappTranscriptOnDemandEnabled: transcriptOnDemandEnabled,
             whatsappTranscriptRetentionDays: transcriptRetentionDays,
             whatsappTranscriptVisibility: transcriptVisibility,
+            viewingSessionRetentionDays,
+            viewingSessionTranscriptVisibility,
+            viewingSessionAiDisclosureRequired,
+            viewingSessionRawAudioStorageEnabled,
             brandVoice: formData.get("brandVoice") as string,
             outreachConfig: {
                 enabled: formData.get("outreachEnabled") === "on",
@@ -170,6 +178,10 @@ export async function updateAiSettings(
                     whatsappTranscriptOnDemandEnabled: payload.whatsappTranscriptOnDemandEnabled,
                     whatsappTranscriptRetentionDays: payload.whatsappTranscriptRetentionDays,
                     whatsappTranscriptVisibility: payload.whatsappTranscriptVisibility,
+                    viewingSessionRetentionDays: payload.viewingSessionRetentionDays,
+                    viewingSessionTranscriptVisibility: payload.viewingSessionTranscriptVisibility,
+                    viewingSessionAiDisclosureRequired: payload.viewingSessionAiDisclosureRequired,
+                    viewingSessionRawAudioStorageEnabled: payload.viewingSessionRawAudioStorageEnabled,
                     brandVoice: payload.brandVoice,
                     outreachConfig: payload.outreachConfig,
                 },
@@ -183,6 +195,10 @@ export async function updateAiSettings(
                     whatsappTranscriptOnDemandEnabled: payload.whatsappTranscriptOnDemandEnabled,
                     whatsappTranscriptRetentionDays: payload.whatsappTranscriptRetentionDays,
                     whatsappTranscriptVisibility: payload.whatsappTranscriptVisibility,
+                    viewingSessionRetentionDays: payload.viewingSessionRetentionDays,
+                    viewingSessionTranscriptVisibility: payload.viewingSessionTranscriptVisibility,
+                    viewingSessionAiDisclosureRequired: payload.viewingSessionAiDisclosureRequired,
+                    viewingSessionRawAudioStorageEnabled: payload.viewingSessionRawAudioStorageEnabled,
                     brandVoice: payload.brandVoice,
                     outreachConfig: payload.outreachConfig,
                 },

@@ -1,8 +1,15 @@
 import db from "@/lib/db";
 import { publishViewingSessionRealtimeEvent } from "@/lib/realtime/viewing-session-events";
+import { appendViewingSessionEvent } from "@/lib/viewings/sessions/events";
 import { resolveLiveModelForMode } from "@/lib/viewings/sessions/live-models";
 import { generateViewingSessionJoinSecrets } from "@/lib/viewings/sessions/security";
-import { VIEWING_SESSION_EVENT_TYPES, VIEWING_SESSION_MODES, VIEWING_SESSION_STATUSES } from "@/lib/viewings/sessions/types";
+import {
+    VIEWING_SESSION_EVENT_TYPES,
+    VIEWING_SESSION_MODES,
+    VIEWING_SESSION_STATUSES,
+    VIEWING_SESSION_TRANSPORT_STATUSES,
+    type ViewingSessionTransportStatus,
+} from "@/lib/viewings/sessions/types";
 
 export const VIEWING_SESSION_JOIN_MAX_ATTEMPTS = 5;
 export const VIEWING_SESSION_JOIN_LOCK_MINUTES = 10;
@@ -132,6 +139,14 @@ export async function ensureViewingSessionWithinLiveWindow(sessionId: string): P
                 audioPlaybackClientEnabled: session.audioPlaybackClientEnabled,
                 audioPlaybackAgentEnabled: session.audioPlaybackAgentEnabled,
                 liveModel: session.liveModel || resolveLiveModelForMode(mode),
+                liveProvider: session.liveProvider || "google_gemini_live",
+                transportStatus: VIEWING_SESSION_TRANSPORT_STATUSES.disconnected,
+                consentStatus: session.consentStatus || "required",
+                appliedRetentionDays: session.appliedRetentionDays || 90,
+                transcriptVisibility: session.transcriptVisibility || "team",
+                estimatedCostUsd: 0,
+                actualCostUsd: 0,
+                lastTransportEventAt: null,
                 contextVersion: session.contextVersion,
                 chainIndex: session.chainIndex + 1,
                 previousSessionId: session.id,
@@ -147,7 +162,9 @@ export async function ensureViewingSessionWithinLiveWindow(sessionId: string): P
             where: { id: session.id },
             data: {
                 status: VIEWING_SESSION_STATUSES.expired,
+                transportStatus: VIEWING_SESSION_TRANSPORT_STATUSES.chained,
                 endedAt: now,
+                lastTransportEventAt: now,
             },
         });
 
@@ -162,8 +179,19 @@ export async function ensureViewingSessionWithinLiveWindow(sessionId: string): P
             payload: {
                 sessionId: session.id,
                 status: VIEWING_SESSION_STATUSES.expired,
+                transportStatus: VIEWING_SESSION_TRANSPORT_STATUSES.chained,
                 chainedToSessionId: chainedSession.id,
                 endedAt: now.toISOString(),
+            },
+        }),
+        publishViewingSessionRealtimeEvent({
+            sessionId: session.id,
+            locationId: session.locationId,
+            type: VIEWING_SESSION_EVENT_TYPES.transportStatusChanged,
+            payload: {
+                sessionId: session.id,
+                transportStatus: VIEWING_SESSION_TRANSPORT_STATUSES.chained,
+                at: now.toISOString(),
             },
         }),
         publishViewingSessionRealtimeEvent({
@@ -173,8 +201,19 @@ export async function ensureViewingSessionWithinLiveWindow(sessionId: string): P
             payload: {
                 sessionId: chainedSession.id,
                 status: VIEWING_SESSION_STATUSES.active,
+                transportStatus: VIEWING_SESSION_TRANSPORT_STATUSES.disconnected,
                 chainedFromSessionId: session.id,
                 startedAt: now.toISOString(),
+            },
+        }),
+        appendViewingSessionEvent({
+            sessionId: session.id,
+            locationId: session.locationId,
+            type: "viewing_session.chained",
+            source: "system",
+            payload: {
+                previousSessionId: session.id,
+                nextSessionId: chainedSession.id,
             },
         }),
     ]);
@@ -185,4 +224,62 @@ export async function ensureViewingSessionWithinLiveWindow(sessionId: string): P
         previousSessionId: session.id,
         chainIndex: chainedSession.chainIndex,
     };
+}
+
+export async function setViewingSessionTransportStatus(args: {
+    sessionId: string;
+    status: ViewingSessionTransportStatus;
+    source?: string | null;
+    payload?: Record<string, unknown> | null;
+}) {
+    const sessionId = String(args.sessionId || "").trim();
+    if (!sessionId) return null;
+
+    const status = String(args.status || "").trim();
+    if (!status) return null;
+    const allowedStatuses = Object.values(VIEWING_SESSION_TRANSPORT_STATUSES);
+    if (!allowedStatuses.includes(status as ViewingSessionTransportStatus)) return null;
+    const at = new Date();
+
+    const updated = await db.viewingSession.update({
+        where: { id: sessionId },
+        data: {
+            transportStatus: status as ViewingSessionTransportStatus,
+            lastTransportEventAt: at,
+        },
+        select: {
+            id: true,
+            locationId: true,
+            transportStatus: true,
+        },
+    }).catch(() => null);
+
+    if (!updated) return null;
+
+    await Promise.all([
+        publishViewingSessionRealtimeEvent({
+            sessionId: updated.id,
+            locationId: updated.locationId,
+            type: VIEWING_SESSION_EVENT_TYPES.transportStatusChanged,
+            payload: {
+                sessionId: updated.id,
+                transportStatus: updated.transportStatus,
+                at: at.toISOString(),
+                ...(args.payload || {}),
+            },
+        }),
+        appendViewingSessionEvent({
+            sessionId: updated.id,
+            locationId: updated.locationId,
+            type: "viewing_session.transport.status",
+            source: String(args.source || "system").trim() || "system",
+            payload: {
+                transportStatus: updated.transportStatus,
+                at: at.toISOString(),
+                ...(args.payload || {}),
+            },
+        }),
+    ]);
+
+    return updated;
 }

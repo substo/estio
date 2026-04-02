@@ -215,6 +215,10 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
             whatsappTranscriptOnDemandEnabled: aiDoc.payload?.whatsappTranscriptOnDemandEnabled ?? siteConfig?.whatsappTranscriptOnDemandEnabled,
             whatsappTranscriptRetentionDays: aiDoc.payload?.whatsappTranscriptRetentionDays ?? siteConfig?.whatsappTranscriptRetentionDays,
             whatsappTranscriptVisibility: aiDoc.payload?.whatsappTranscriptVisibility ?? siteConfig?.whatsappTranscriptVisibility,
+            viewingSessionRetentionDays: aiDoc.payload?.viewingSessionRetentionDays ?? siteConfig?.viewingSessionRetentionDays,
+            viewingSessionTranscriptVisibility: aiDoc.payload?.viewingSessionTranscriptVisibility ?? siteConfig?.viewingSessionTranscriptVisibility,
+            viewingSessionAiDisclosureRequired: aiDoc.payload?.viewingSessionAiDisclosureRequired ?? siteConfig?.viewingSessionAiDisclosureRequired,
+            viewingSessionRawAudioStorageEnabled: aiDoc.payload?.viewingSessionRawAudioStorageEnabled ?? siteConfig?.viewingSessionRawAudioStorageEnabled,
         }
         : siteConfig;
 

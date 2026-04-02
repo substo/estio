@@ -49,6 +49,8 @@ export const VIEWING_SESSION_EVENT_TYPES = {
     insightUpserted: "viewing_session.insight.upserted",
     summaryUpdated: "viewing_session.summary.updated",
     statusChanged: "viewing_session.status.changed",
+    transportStatusChanged: "viewing_session.transport.status.changed",
+    usageUpdated: "viewing_session.usage.updated",
 } as const;
 
 export type ViewingSessionEventType = typeof VIEWING_SESSION_EVENT_TYPES[keyof typeof VIEWING_SESSION_EVENT_TYPES];
@@ -61,6 +63,34 @@ export const VIEWING_SESSION_ANALYSIS_STATUSES = {
 } as const;
 
 export type ViewingSessionAnalysisStatus = typeof VIEWING_SESSION_ANALYSIS_STATUSES[keyof typeof VIEWING_SESSION_ANALYSIS_STATUSES];
+
+export const VIEWING_SESSION_TRANSPORT_STATUSES = {
+    connecting: "connecting",
+    connected: "connected",
+    degraded: "degraded",
+    reconnecting: "reconnecting",
+    disconnected: "disconnected",
+    chained: "chained",
+} as const;
+
+export type ViewingSessionTransportStatus = typeof VIEWING_SESSION_TRANSPORT_STATUSES[keyof typeof VIEWING_SESSION_TRANSPORT_STATUSES];
+
+export const VIEWING_SESSION_MESSAGE_KINDS = {
+    utterance: "utterance",
+    systemNote: "system_note",
+    toolResult: "tool_result",
+} as const;
+
+export type ViewingSessionMessageKind = typeof VIEWING_SESSION_MESSAGE_KINDS[keyof typeof VIEWING_SESSION_MESSAGE_KINDS];
+
+export const VIEWING_SESSION_SUMMARY_STATUSES = {
+    draft: "draft",
+    generating: "generating",
+    final: "final",
+    failed: "failed",
+} as const;
+
+export type ViewingSessionSummaryStatus = typeof VIEWING_SESSION_SUMMARY_STATUSES[keyof typeof VIEWING_SESSION_SUMMARY_STATUSES];
 
 export const DEFAULT_VIEWING_SESSION_PIN_LENGTH = 6;
 export const DEFAULT_VIEWING_SESSION_TOKEN_TTL_HOURS = 24;

@@ -356,6 +356,84 @@ export function AiSettingsForm({
                                 </p>
                             </div>
                         </div>
+
+                        <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
+                            <div className="space-y-0.5">
+                                <Label className="text-xs text-slate-500 uppercase tracking-wider">
+                                    Viewing Sessions: Policy
+                                </Label>
+                                <p className="text-[10px] text-muted-foreground">
+                                    Applies to live viewing-session transcripts and client join requirements.
+                                </p>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                <div className="grid gap-2">
+                                    <Label htmlFor="viewingSessionRetentionDays" className="text-xs text-slate-500 uppercase tracking-wider">
+                                        Viewing Transcript Retention
+                                    </Label>
+                                    <select
+                                        id="viewingSessionRetentionDays"
+                                        name="viewingSessionRetentionDays"
+                                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                                        defaultValue={String(initialData?.viewingSessionRetentionDays || 90)}
+                                    >
+                                        <option value="30">30 days</option>
+                                        <option value="90">90 days</option>
+                                        <option value="365">365 days</option>
+                                    </select>
+                                </div>
+
+                                <div className="grid gap-2">
+                                    <Label htmlFor="viewingSessionTranscriptVisibility" className="text-xs text-slate-500 uppercase tracking-wider">
+                                        Viewing Transcript Visibility
+                                    </Label>
+                                    <select
+                                        id="viewingSessionTranscriptVisibility"
+                                        name="viewingSessionTranscriptVisibility"
+                                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                                        defaultValue={String(initialData?.viewingSessionTranscriptVisibility || "team")}
+                                    >
+                                        <option value="team">Team members</option>
+                                        <option value="admin_only">Admins only</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                                <label className="flex items-start gap-2 rounded-md border border-slate-200 px-3 py-2">
+                                    <input
+                                        id="viewingSessionAiDisclosureRequired"
+                                        name="viewingSessionAiDisclosureRequired"
+                                        type="checkbox"
+                                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                                        defaultChecked={initialData?.viewingSessionAiDisclosureRequired !== false}
+                                    />
+                                    <span className="space-y-0.5">
+                                        <span className="block text-xs font-medium text-slate-700">Require AI disclosure acceptance</span>
+                                        <span className="block text-[10px] text-muted-foreground">
+                                            Clients must acknowledge AI assistance before joining.
+                                        </span>
+                                    </span>
+                                </label>
+
+                                <label className="flex items-start gap-2 rounded-md border border-slate-200 px-3 py-2">
+                                    <input
+                                        id="viewingSessionRawAudioStorageEnabled"
+                                        name="viewingSessionRawAudioStorageEnabled"
+                                        type="checkbox"
+                                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                                        defaultChecked={initialData?.viewingSessionRawAudioStorageEnabled === true}
+                                    />
+                                    <span className="space-y-0.5">
+                                        <span className="block text-xs font-medium text-slate-700">Allow raw audio storage</span>
+                                        <span className="block text-[10px] text-muted-foreground">
+                                            Keep disabled for v1 unless your retention policy explicitly requires raw audio.
+                                        </span>
+                                    </span>
+                                </label>
+                            </div>
+                        </div>
                     </div>
                 </div>
 

@@ -14,6 +14,12 @@ import { completeViewingSession, pauseViewingSession, startViewingSession } from
 
 type SessionMessage = {
     id: string;
+    sessionId?: string;
+    sequence?: number | null;
+    sourceMessageId?: string | null;
+    messageKind?: string | null;
+    persistedAt?: string | null;
+    supersedesMessageId?: string | null;
     speaker: string;
     originalText: string;
     originalLanguage: string | null;
@@ -58,6 +64,8 @@ type SessionState = {
     id: string;
     locationId: string;
     status: string;
+    transportStatus: string;
+    liveProvider: string | null;
     mode: string;
     liveModel: string | null;
     chainIndex: number;
@@ -98,6 +106,16 @@ function formatSessionStatus(status: string) {
     return "Scheduled";
 }
 
+function formatTransportStatus(status: string) {
+    const normalized = String(status || "").trim().toLowerCase();
+    if (normalized === "connecting") return "Connecting";
+    if (normalized === "connected") return "Connected";
+    if (normalized === "degraded") return "Degraded";
+    if (normalized === "reconnecting") return "Reconnecting";
+    if (normalized === "chained") return "Chained";
+    return "Disconnected";
+}
+
 function mergeInsightById(current: SessionInsight[], incoming: SessionInsight) {
     const idx = current.findIndex((item) => item.id === incoming.id);
     if (idx < 0) {
@@ -129,6 +147,7 @@ export function ViewingSessionCockpit(props: Props) {
         () => insights.filter((item) => item.state !== "dismissed"),
         [insights]
     );
+    const transportConnected = session.transportStatus === "connected";
 
     useEffect(() => {
         const source = new EventSource(`/api/viewings/sessions/events?sessionId=${encodeURIComponent(activeSessionId)}`);
@@ -176,8 +195,18 @@ export function ViewingSessionCockpit(props: Props) {
                     setSession((current) => ({
                         ...current,
                         status: String(payload?.status || current.status),
+                        transportStatus: String(payload?.transportStatus || current.transportStatus),
                         startedAt: payload?.startedAt || current.startedAt,
                         endedAt: payload?.endedAt || current.endedAt,
+                        id: payload?.sessionId || current.id,
+                    }));
+                    return;
+                }
+
+                if (type === "viewing_session.transport.status.changed") {
+                    setSession((current) => ({
+                        ...current,
+                        transportStatus: String(payload?.transportStatus || current.transportStatus),
                         id: payload?.sessionId || current.id,
                     }));
                 }
@@ -317,6 +346,8 @@ export function ViewingSessionCockpit(props: Props) {
                     status: payload.session.status || current.status,
                     mode: payload.session.mode || current.mode,
                     liveModel: payload.session.model || current.liveModel,
+                    transportStatus: payload.session.transportStatus || current.transportStatus,
+                    liveProvider: payload.session.liveProvider || current.liveProvider,
                     chainIndex: payload.session.chainIndex || current.chainIndex,
                     startedAt: payload.session.startedAt || current.startedAt,
                     audioPlaybackClientEnabled: !!payload.session.audioPlaybackClientEnabled,
@@ -342,6 +373,9 @@ export function ViewingSessionCockpit(props: Props) {
                     <h1 className="text-xl font-semibold">Viewing Session Copilot</h1>
                     <p className="text-xs text-muted-foreground">
                         {session.viewing.property.title} • {session.clientName || session.viewing.contact.name || "Client"} • {formatSessionStatus(session.status)}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                        Transport: {formatTransportStatus(session.transportStatus)}{session.liveProvider ? ` • ${session.liveProvider}` : ""}
                     </p>
                 </div>
 
@@ -436,6 +470,7 @@ export function ViewingSessionCockpit(props: Props) {
                                 </div>
                                 <Switch
                                     checked={session.audioPlaybackClientEnabled}
+                                    disabled={!transportConnected || livePending}
                                     onCheckedChange={(checked) => {
                                         setSession((current) => ({ ...current, audioPlaybackClientEnabled: checked }));
                                         void refreshLiveConfig({ audioPlaybackClientEnabled: checked });
@@ -449,12 +484,19 @@ export function ViewingSessionCockpit(props: Props) {
                                 </div>
                                 <Switch
                                     checked={session.audioPlaybackAgentEnabled}
+                                    disabled={!transportConnected || livePending}
                                     onCheckedChange={(checked) => {
                                         setSession((current) => ({ ...current, audioPlaybackAgentEnabled: checked }));
                                         void refreshLiveConfig({ audioPlaybackAgentEnabled: checked });
                                     }}
                                 />
                             </div>
+
+                            {!transportConnected && (
+                                <div className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800">
+                                    Audio toggles are inactive until live transport is connected. Text flow remains fully active.
+                                </div>
+                            )}
 
                             <Button type="button" variant="outline" size="sm" onClick={() => refreshLiveConfig()} disabled={livePending} className="w-full">
                                 {livePending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
@@ -466,6 +508,7 @@ export function ViewingSessionCockpit(props: Props) {
                                     <div>Model: {liveInfo.model}</div>
                                     <div>Mode: {session.mode}</div>
                                     <div>Chain Index: {session.chainIndex}</div>
+                                    <div>Transport: {formatTransportStatus(session.transportStatus)}</div>
                                 </div>
                             )}
                         </CardContent>

@@ -77,6 +77,10 @@ const aiSchema = z.object({
     whatsappTranscriptOnDemandEnabled: z.boolean().default(false),
     whatsappTranscriptRetentionDays: z.union([z.literal(30), z.literal(90), z.literal(365)]),
     whatsappTranscriptVisibility: z.union([z.literal("team"), z.literal("admin_only")]).default("team"),
+    viewingSessionRetentionDays: z.union([z.literal(30), z.literal(90), z.literal(365)]).default(90),
+    viewingSessionTranscriptVisibility: z.union([z.literal("team"), z.literal("admin_only")]).default("team"),
+    viewingSessionAiDisclosureRequired: z.boolean().default(true),
+    viewingSessionRawAudioStorageEnabled: z.boolean().default(false),
 }).passthrough();
 
 const navigationSchema = z.object({

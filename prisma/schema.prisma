@@ -57,6 +57,8 @@ model Location {
   agentExecutions               AgentExecution[]
   whatsappOutboundOutboxJobs    WhatsAppOutboundOutbox[]
   viewingSessions               ViewingSession[]
+  viewingSessionEvents          ViewingSessionEvent[]
+  viewingSessionUsages          ViewingSessionUsage[]
 
   // WhatsApp Integration (Native)
   whatsappBusinessAccountId String?
@@ -389,6 +391,10 @@ model SiteConfig {
   whatsappTranscriptOnDemandEnabled Boolean @default(false) // Phase 2A: Manual transcript/backfill controls
   whatsappTranscriptRetentionDays   Int     @default(90) // Phase 2C: retention policy (30/90/365)
   whatsappTranscriptVisibility      String  @default("team") // Phase 2C: transcript visibility (team|admin_only)
+  viewingSessionRetentionDays       Int     @default(90) // Viewing transcript retention policy (30/90/365)
+  viewingSessionTranscriptVisibility String @default("team") // Viewing transcript visibility (team|admin_only)
+  viewingSessionAiDisclosureRequired Boolean @default(true) // Require client AI disclosure acknowledgment
+  viewingSessionRawAudioStorageEnabled Boolean @default(false) // V1 default keeps raw audio persistence disabled
 
   // Existing Fields
   primaryColor   String?
@@ -910,6 +916,11 @@ model ViewingSession {
 
   mode   String @default("assistant_live_tool_heavy") // assistant_live_tool_heavy | assistant_live_voice_premium
   status String @default("scheduled") // scheduled | active | paused | completed | expired
+  transportStatus String @default("disconnected") // connecting | connected | degraded | reconnecting | disconnected | chained
+  liveProvider String @default("google_gemini_live")
+  consentStatus String @default("required") // required | accepted | declined | not_required
+  appliedRetentionDays Int @default(90)
+  transcriptVisibility String @default("team") // team | admin_only
 
   sessionLinkTokenHash String   @unique
   pinCodeHash          String
@@ -935,6 +946,9 @@ model ViewingSession {
   audioPlaybackAgentEnabled  Boolean @default(false)
 
   liveModel         String?
+  estimatedCostUsd  Float     @default(0)
+  actualCostUsd     Float     @default(0)
+  lastTransportEventAt DateTime?
   contextVersion    Int              @default(1)
   chainIndex        Int              @default(1)
   previousSessionId String?
@@ -946,11 +960,15 @@ model ViewingSession {
   messages ViewingSessionMessage[]
   insights ViewingSessionInsight[]
   summary  ViewingSessionSummary?
+  events   ViewingSessionEvent[]
+  usages   ViewingSessionUsage[]
 
   @@index([locationId, status, createdAt(sort: Desc)])
   @@index([viewingId, createdAt(sort: Desc)])
   @@index([contactId, createdAt(sort: Desc)])
   @@index([agentId, status, createdAt(sort: Desc)])
+  @@index([transportStatus, createdAt(sort: Desc)])
+  @@index([liveProvider, createdAt(sort: Desc)])
   @@index([tokenExpiresAt])
   @@index([joinLockUntil])
 }
@@ -964,6 +982,13 @@ model ViewingSessionMessage {
   session   ViewingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   speaker String // client | agent | system
+  sequence Int
+  sourceMessageId String?
+  messageKind String @default("utterance") // utterance | system_note | tool_result
+  persistedAt DateTime @default(now())
+  supersedesMessageId String?
+  supersedesMessage ViewingSessionMessage? @relation("ViewingSessionMessageSupersedes", fields: [supersedesMessageId], references: [id], onDelete: SetNull)
+  supersededByMessages ViewingSessionMessage[] @relation("ViewingSessionMessageSupersedes")
 
   originalText     String  @db.Text
   originalLanguage String?
@@ -983,6 +1008,11 @@ model ViewingSessionMessage {
   @@index([sessionId, timestamp])
   @@index([sessionId, createdAt(sort: Desc)])
   @@index([analysisStatus, createdAt(sort: Asc)])
+  @@index([sessionId, sequence(sort: Asc)])
+  @@index([sessionId, sourceMessageId])
+  @@index([supersedesMessageId])
+  @@unique([sessionId, sequence])
+  @@unique([sessionId, sourceMessageId])
 }
 
 model ViewingSessionInsight {
@@ -1025,7 +1055,7 @@ model ViewingSessionSummary {
   sessionId String         @unique
   session   ViewingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
-  status String @default("draft") // draft | final
+  status String @default("draft") // draft | generating | final | failed
 
   sessionSummary          String? @db.Text
   crmNote                 String? @db.Text
@@ -1050,6 +1080,58 @@ model ViewingSessionSummary {
   estimatedCostUsd Float?
 
   @@index([status, updatedAt(sort: Desc)])
+}
+
+model ViewingSessionEvent {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  sessionId String
+  session   ViewingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  type String
+  actorRole String?
+  actorUserId String?
+  source String? // system | api | relay | worker | user
+  payload Json?
+
+  @@index([sessionId, createdAt(sort: Desc)])
+  @@index([locationId, createdAt(sort: Desc)])
+  @@index([type, createdAt(sort: Desc)])
+}
+
+model ViewingSessionUsage {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  recordedAt DateTime @default(now())
+
+  sessionId String
+  session   ViewingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  phase String // analysis | summary | live_audio | tooling
+  provider String?
+  model String?
+  transportStatus String?
+
+  inputAudioSeconds Float? @default(0)
+  outputAudioSeconds Float? @default(0)
+  inputTokens Int? @default(0)
+  outputTokens Int? @default(0)
+  totalTokens Int? @default(0)
+  toolCalls Int? @default(0)
+  estimatedCostUsd Float? @default(0)
+  actualCostUsd Float? @default(0)
+  metadata Json?
+
+  @@index([sessionId, recordedAt(sort: Desc)])
+  @@index([locationId, recordedAt(sort: Desc)])
+  @@index([phase, recordedAt(sort: Desc)])
 }
 
 model ViewingSync {

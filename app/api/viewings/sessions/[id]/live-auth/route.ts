@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import db from "@/lib/db";
+import { appendViewingSessionEvent } from "@/lib/viewings/sessions/events";
+import { isViewingSessionVoicePremiumEnabled } from "@/lib/viewings/sessions/feature-flags";
 import { buildViewingLiveAuthPayload, validateGeminiLiveCredentialsForLocation } from "@/lib/viewings/sessions/gemini-live";
 import { resolveLiveModelForMode } from "@/lib/viewings/sessions/live-models";
-import { ensureViewingSessionWithinLiveWindow, VIEWING_SESSION_LIVE_LIMIT_MINUTES } from "@/lib/viewings/sessions/runtime";
+import {
+    ensureViewingSessionWithinLiveWindow,
+    setViewingSessionTransportStatus,
+    VIEWING_SESSION_LIVE_LIMIT_MINUTES,
+} from "@/lib/viewings/sessions/runtime";
 import { generateViewingSessionAccessToken } from "@/lib/viewings/sessions/security";
 import { resolveViewingSessionRequestContext } from "@/lib/viewings/sessions/auth";
 import {
@@ -70,6 +76,8 @@ export async function POST(
             audioPlaybackClientEnabled: true,
             audioPlaybackAgentEnabled: true,
             liveModel: true,
+            transportStatus: true,
+            liveProvider: true,
             chainIndex: true,
         },
     });
@@ -90,6 +98,8 @@ export async function POST(
                 audioPlaybackClientEnabled: true,
                 audioPlaybackAgentEnabled: true,
                 liveModel: true,
+                transportStatus: true,
+                liveProvider: true,
                 chainIndex: true,
             },
         });
@@ -103,6 +113,17 @@ export async function POST(
     }
 
     const desiredMode = normalizeMode(parsed.data.mode || session.mode);
+    const voicePremiumEnabled = isViewingSessionVoicePremiumEnabled(session.locationId);
+    if (desiredMode === VIEWING_SESSION_MODES.assistantLiveVoicePremium && !voicePremiumEnabled) {
+        return NextResponse.json(
+            {
+                success: false,
+                error: "Premium voice mode is not enabled for this location.",
+                voicePremiumEnabled,
+            },
+            { status: 403 }
+        );
+    }
     const nextAudioPlaybackClientEnabled = typeof parsed.data.audioPlaybackClientEnabled === "boolean"
         ? parsed.data.audioPlaybackClientEnabled
         : session.audioPlaybackClientEnabled;
@@ -128,6 +149,8 @@ export async function POST(
             status: true,
             startedAt: true,
             liveModel: true,
+            transportStatus: true,
+            liveProvider: true,
             audioPlaybackClientEnabled: true,
             audioPlaybackAgentEnabled: true,
             chainIndex: true,
@@ -162,6 +185,35 @@ export async function POST(
         ttlSeconds: DEFAULT_VIEWING_SESSION_ACCESS_TOKEN_TTL_SECONDS,
     });
 
+    if (sessionUpdate.status === VIEWING_SESSION_STATUSES.active && sessionUpdate.transportStatus !== "connected") {
+        await setViewingSessionTransportStatus({
+            sessionId: sessionUpdate.id,
+            status: "connecting",
+            source: "api.live-auth",
+            payload: {
+                role: context.role,
+            },
+        });
+    }
+    await appendViewingSessionEvent({
+        sessionId: sessionUpdate.id,
+        locationId: sessionUpdate.locationId,
+        type: "viewing_session.live_auth.issued",
+        actorRole: context.role,
+        actorUserId: context.clerkUserId,
+        source: "api",
+        payload: {
+            mode: sessionUpdate.mode,
+            model: sessionUpdate.liveModel,
+            voicePremiumEnabled,
+            wasChained: chained.chained,
+        },
+    });
+
+    const latestTransportStatus = sessionUpdate.status === VIEWING_SESSION_STATUSES.active && sessionUpdate.transportStatus !== "connected"
+        ? "connecting"
+        : sessionUpdate.transportStatus;
+
     return NextResponse.json({
         success: true,
         session: {
@@ -169,6 +221,8 @@ export async function POST(
             status: sessionUpdate.status,
             mode: sessionUpdate.mode,
             model: sessionUpdate.liveModel,
+            transportStatus: latestTransportStatus,
+            liveProvider: sessionUpdate.liveProvider || liveConfig.provider,
             chainIndex: sessionUpdate.chainIndex,
             startedAt: sessionUpdate.startedAt ? sessionUpdate.startedAt.toISOString() : null,
             audioPlaybackClientEnabled: sessionUpdate.audioPlaybackClientEnabled,
@@ -180,6 +234,7 @@ export async function POST(
             activeSessionId: sessionUpdate.id,
             maxAudioWindowMinutes: VIEWING_SESSION_LIVE_LIMIT_MINUTES,
         },
+        voicePremiumEnabled,
         sessionAccessToken,
         sessionAccessTokenExpiresInSeconds: DEFAULT_VIEWING_SESSION_ACCESS_TOKEN_TTL_SECONDS,
         liveAuth: {

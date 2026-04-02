@@ -2,7 +2,9 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
 import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import { assembleViewingSessionContext } from "@/lib/viewings/sessions/context-assembler";
+import { appendViewingSessionEvent } from "@/lib/viewings/sessions/events";
 import { VIEWING_OBJECTION_LIBRARY } from "@/lib/viewings/sessions/objection-library";
+import { recordViewingSessionUsage } from "@/lib/viewings/sessions/usage";
 import { publishViewingSessionRealtimeEvent } from "@/lib/realtime/viewing-session-events";
 import {
     VIEWING_SESSION_ANALYSIS_STATUSES,
@@ -147,6 +149,22 @@ function parseJsonMaybe(rawText: string): any | null {
     }
 }
 
+function extractUsageCounts(usageMetadata: any) {
+    const promptTokens = Number(usageMetadata?.promptTokenCount || 0);
+    const completionTokens = Number(usageMetadata?.candidatesTokenCount || 0);
+    const totalTokens = Number(usageMetadata?.totalTokenCount || (promptTokens + completionTokens));
+    return {
+        promptTokens: Number.isFinite(promptTokens) ? Math.max(0, Math.floor(promptTokens)) : 0,
+        completionTokens: Number.isFinite(completionTokens) ? Math.max(0, Math.floor(completionTokens)) : 0,
+        totalTokens: Number.isFinite(totalTokens) ? Math.max(0, Math.floor(totalTokens)) : 0,
+    };
+}
+
+function estimateAnalysisCostUsd(totalTokens: number): number {
+    const tokens = Math.max(0, Number(totalTokens || 0));
+    return Number((tokens * 0.0000012).toFixed(6));
+}
+
 async function createInsightIfUnique(args: {
     sessionId: string;
     messageId: string;
@@ -255,10 +273,18 @@ export async function runViewingSessionMessageAnalysis(input: {
             },
             originalText
         );
+        let usagePromptTokens = 0;
+        let usageCompletionTokens = 0;
+        let usageTotalTokens = 0;
+        let usageEstimatedCostUsd = 0;
+        let analysisProvider: string | null = null;
+        let analysisModel: string | null = null;
 
         if (apiKey && originalText) {
             const genAI = new GoogleGenerativeAI(apiKey);
             const modelName = safeString(message.session.liveModel) || "gemini-2.5-flash";
+            analysisProvider = "google";
+            analysisModel = modelName;
             const model = genAI.getGenerativeModel({
                 model: modelName,
                 generationConfig: {
@@ -295,6 +321,11 @@ export async function runViewingSessionMessageAnalysis(input: {
             if (parsed) {
                 normalized = normalizeAnalysisOutput(parsed, originalText);
             }
+            const usageCounts = extractUsageCounts((result as any)?.response?.usageMetadata);
+            usagePromptTokens = usageCounts.promptTokens;
+            usageCompletionTokens = usageCounts.completionTokens;
+            usageTotalTokens = usageCounts.totalTokens;
+            usageEstimatedCostUsd = estimateAnalysisCostUsd(usageCounts.totalTokens);
         } else {
             const fallback = applyStaticFallbackAnalysis(originalText);
             normalized = normalizeAnalysisOutput(
@@ -444,6 +475,37 @@ export async function runViewingSessionMessageAnalysis(input: {
             });
         }
 
+        if (usageTotalTokens > 0 || usageEstimatedCostUsd > 0) {
+            await recordViewingSessionUsage({
+                sessionId,
+                locationId: message.session.locationId,
+                phase: "analysis",
+                provider: analysisProvider,
+                model: analysisModel,
+                inputTokens: usagePromptTokens,
+                outputTokens: usageCompletionTokens,
+                totalTokens: usageTotalTokens,
+                estimatedCostUsd: usageEstimatedCostUsd,
+                actualCostUsd: usageEstimatedCostUsd,
+                metadata: {
+                    messageId: message.id,
+                    speaker: message.speaker,
+                },
+            });
+        }
+        await appendViewingSessionEvent({
+            sessionId,
+            locationId: message.session.locationId,
+            type: "viewing_session.analysis.completed",
+            source: "worker",
+            payload: {
+                messageId: message.id,
+                insightsCreated: createdInsights.length,
+                totalTokens: usageTotalTokens,
+                estimatedCostUsd: usageEstimatedCostUsd,
+            },
+        });
+
         return {
             ok: true,
             messageId: message.id,
@@ -461,6 +523,16 @@ export async function runViewingSessionMessageAnalysis(input: {
                 } as any,
             },
         }).catch(() => undefined);
+        await appendViewingSessionEvent({
+            sessionId,
+            locationId: message.session.locationId,
+            type: "viewing_session.analysis.failed",
+            source: "worker",
+            payload: {
+                messageId: message.id,
+                error: String(error?.message || "Failed to analyze message."),
+            },
+        });
         throw error;
     }
 }

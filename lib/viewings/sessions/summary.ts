@@ -1,11 +1,16 @@
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
+import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import { publishViewingSessionRealtimeEvent } from "@/lib/realtime/viewing-session-events";
+import { appendViewingSessionEvent } from "@/lib/viewings/sessions/events";
+import { recordViewingSessionUsage } from "@/lib/viewings/sessions/usage";
 import { VIEWING_SESSION_EVENT_TYPES } from "@/lib/viewings/sessions/types";
 
 type BuildSummaryArgs = {
     sessionId: string;
     actorUserId?: string | null;
     status?: "draft" | "final";
+    trigger?: "manual" | "debounced_worker" | "completion";
 };
 
 type SummaryArtifacts = {
@@ -18,6 +23,17 @@ type SummaryArtifacts = {
     dislikes: string[];
     objections: string[];
     buyingSignals: string[];
+};
+
+type SummaryUsage = {
+    provider: string | null;
+    model: string | null;
+    promptTokens: number | null;
+    completionTokens: number | null;
+    totalTokens: number | null;
+    estimatedCostUsd: number | null;
+    usedFallback: boolean;
+    errorMessage: string | null;
 };
 
 function asString(input: unknown): string {
@@ -136,7 +152,7 @@ function buildSummaryArtifacts(input: {
     const followUpWhatsApp = [
         `Hi ${input.clientName || ""}, thanks again for today's viewing.`,
         likes.length ? `I noted you liked: ${sliceForPreview(likes, 2).join(" and ")}.` : null,
-        dislikes.length ? `I’ll also clarify: ${sliceForPreview(dislikes, 2).join(" and ")}.` : null,
+        dislikes.length ? `I will also clarify: ${sliceForPreview(dislikes, 2).join(" and ")}.` : null,
         `Would you like me to send the next options today?`,
     ].filter(Boolean).join(" ");
 
@@ -167,6 +183,76 @@ function buildSummaryArtifacts(input: {
     };
 }
 
+function parseJsonMaybe(rawText: string): any | null {
+    const text = asString(rawText);
+    if (!text) return null;
+
+    const stripped = text
+        .replace(/^```json/i, "")
+        .replace(/^```/i, "")
+        .replace(/```$/i, "")
+        .trim();
+
+    try {
+        return JSON.parse(stripped);
+    } catch {
+        const first = stripped.indexOf("{");
+        const last = stripped.lastIndexOf("}");
+        if (first >= 0 && last > first) {
+            try {
+                return JSON.parse(stripped.slice(first, last + 1));
+            } catch {
+                return null;
+            }
+        }
+        return null;
+    }
+}
+
+function normalizeSummaryArtifacts(raw: any, fallback: SummaryArtifacts): SummaryArtifacts {
+    const sessionSummary = asString(raw?.sessionSummary) || fallback.sessionSummary;
+    const crmNote = asString(raw?.crmNote) || fallback.crmNote;
+    const followUpWhatsApp = asString(raw?.followUpWhatsApp) || fallback.followUpWhatsApp;
+    const followUpEmail = asString(raw?.followUpEmail) || fallback.followUpEmail;
+
+    const recommendedNextActions = dedupeStrings(
+        Array.isArray(raw?.recommendedNextActions) ? raw.recommendedNextActions : fallback.recommendedNextActions
+    );
+    const likes = dedupeStrings(Array.isArray(raw?.likes) ? raw.likes : fallback.likes);
+    const dislikes = dedupeStrings(Array.isArray(raw?.dislikes) ? raw.dislikes : fallback.dislikes);
+    const objections = dedupeStrings(Array.isArray(raw?.objections) ? raw.objections : fallback.objections);
+    const buyingSignals = dedupeStrings(Array.isArray(raw?.buyingSignals) ? raw.buyingSignals : fallback.buyingSignals);
+
+    return {
+        sessionSummary,
+        crmNote,
+        followUpWhatsApp,
+        followUpEmail,
+        recommendedNextActions: recommendedNextActions.length > 0 ? recommendedNextActions : fallback.recommendedNextActions,
+        likes,
+        dislikes,
+        objections,
+        buyingSignals,
+    };
+}
+
+function estimateSummaryCostUsd(totalTokens: number): number {
+    const tokens = Math.max(0, Number(totalTokens || 0));
+    // Conservative planning estimate for summary-style text generation.
+    return Number((tokens * 0.0000015).toFixed(6));
+}
+
+function extractUsageCounts(usageMetadata: any) {
+    const promptTokens = Number(usageMetadata?.promptTokenCount || 0);
+    const completionTokens = Number(usageMetadata?.candidatesTokenCount || 0);
+    const totalTokens = Number(usageMetadata?.totalTokenCount || (promptTokens + completionTokens));
+    return {
+        promptTokens: Number.isFinite(promptTokens) ? Math.max(0, Math.floor(promptTokens)) : 0,
+        completionTokens: Number.isFinite(completionTokens) ? Math.max(0, Math.floor(completionTokens)) : 0,
+        totalTokens: Number.isFinite(totalTokens) ? Math.max(0, Math.floor(totalTokens)) : 0,
+    };
+}
+
 function buildLeadPreferencePatch(existing: string | null | undefined, keyPoints: string[]): string | null {
     const keyPointPreview = sliceForPreview(keyPoints, 4);
     if (keyPointPreview.length === 0) return asString(existing) || null;
@@ -177,11 +263,122 @@ function buildLeadPreferencePatch(existing: string | null | undefined, keyPoints
     return next.slice(0, 2000);
 }
 
+async function maybeBuildLlmSummary(args: {
+    apiKey: string | null;
+    modelName: string;
+    clientName: string;
+    propertyTitle: string;
+    keyPoints: string[];
+    objections: string[];
+    buyingSignals: string[];
+    pivots: string[];
+    recentMessages: Array<{
+        speaker: string;
+        originalText: string;
+        translatedText: string | null;
+        timestamp: Date;
+    }>;
+    fallbackArtifacts: SummaryArtifacts;
+}): Promise<{ artifacts: SummaryArtifacts; usage: SummaryUsage }> {
+    if (!args.apiKey) {
+        return {
+            artifacts: args.fallbackArtifacts,
+            usage: {
+                provider: null,
+                model: null,
+                promptTokens: null,
+                completionTokens: null,
+                totalTokens: null,
+                estimatedCostUsd: null,
+                usedFallback: true,
+                errorMessage: "No Google AI API key configured for this location.",
+            },
+        };
+    }
+
+    try {
+        const genAI = new GoogleGenerativeAI(args.apiKey);
+        const model = genAI.getGenerativeModel({
+            model: args.modelName,
+            generationConfig: {
+                temperature: 0.2,
+                responseMimeType: "application/json",
+            },
+        });
+
+        const transcriptPreview = args.recentMessages
+            .slice(-16)
+            .map((item) => {
+                const text = asString(item.translatedText) || asString(item.originalText);
+                return `${item.speaker.toUpperCase()}: ${text}`;
+            })
+            .filter(Boolean);
+
+        const prompt = [
+            "You are a real-estate viewing sales copilot.",
+            "Generate concise post-session artifacts from provided viewing data.",
+            "Return strict JSON with keys:",
+            "sessionSummary, crmNote, followUpWhatsApp, followUpEmail, recommendedNextActions, likes, dislikes, objections, buyingSignals",
+            "Rules:",
+            "- Keep statements factual from supplied context only.",
+            "- Keep suggestions concise and actionable.",
+            "- Keep follow-up drafts ready to send.",
+            `Client: ${args.clientName}`,
+            `Property: ${args.propertyTitle}`,
+            `Key points: ${JSON.stringify(args.keyPoints)}`,
+            `Objections: ${JSON.stringify(args.objections)}`,
+            `Buying signals: ${JSON.stringify(args.buyingSignals)}`,
+            `Pivot hints: ${JSON.stringify(args.pivots)}`,
+            `Recent transcript preview: ${JSON.stringify(transcriptPreview)}`,
+            `Fallback baseline: ${JSON.stringify(args.fallbackArtifacts)}`,
+        ].join("\n");
+
+        const result = await model.generateContent([{ text: prompt }] as any);
+        const parsed = parseJsonMaybe(result.response.text());
+        const artifacts = parsed
+            ? normalizeSummaryArtifacts(parsed, args.fallbackArtifacts)
+            : args.fallbackArtifacts;
+        const usageCounts = extractUsageCounts((result as any)?.response?.usageMetadata);
+        const estimatedCostUsd = estimateSummaryCostUsd(usageCounts.totalTokens);
+
+        return {
+            artifacts,
+            usage: {
+                provider: "google",
+                model: args.modelName,
+                promptTokens: usageCounts.promptTokens,
+                completionTokens: usageCounts.completionTokens,
+                totalTokens: usageCounts.totalTokens,
+                estimatedCostUsd,
+                usedFallback: !parsed,
+                errorMessage: parsed ? null : "Model response was not valid JSON. Fallback applied.",
+            },
+        };
+    } catch (error: any) {
+        return {
+            artifacts: args.fallbackArtifacts,
+            usage: {
+                provider: "google",
+                model: args.modelName,
+                promptTokens: null,
+                completionTokens: null,
+                totalTokens: null,
+                estimatedCostUsd: null,
+                usedFallback: true,
+                errorMessage: String(error?.message || "LLM summary generation failed."),
+            },
+        };
+    }
+}
+
 export async function upsertViewingSessionSummaryFromInsights(args: BuildSummaryArgs) {
     const sessionId = asString(args.sessionId);
     if (!sessionId) {
         throw new Error("Missing sessionId.");
     }
+
+    const summaryStatusTarget = args.status === "final" ? "final" : "draft";
+    const trigger = args.trigger || (summaryStatusTarget === "final" ? "completion" : "manual");
 
     const session = await db.viewingSession.findUnique({
         where: { id: sessionId },
@@ -208,6 +405,16 @@ export async function upsertViewingSessionSummaryFromInsights(args: BuildSummary
                     id: true,
                     type: true,
                     shortText: true,
+                },
+            },
+            messages: {
+                orderBy: [{ timestamp: "asc" }, { createdAt: "asc" }],
+                take: 80,
+                select: {
+                    speaker: true,
+                    originalText: true,
+                    translatedText: true,
+                    timestamp: true,
                 },
             },
         },
@@ -239,8 +446,7 @@ export async function upsertViewingSessionSummaryFromInsights(args: BuildSummary
 
     const clientName = asString(session.clientName) || asString(session.contact?.name) || asString(session.contact?.firstName) || "Client";
     const propertyTitle = asString(session.primaryProperty?.title) || asString(session.primaryProperty?.reference) || "Property";
-
-    const artifacts = buildSummaryArtifacts({
+    const fallbackArtifacts = buildSummaryArtifacts({
         clientName,
         propertyTitle,
         keyPoints,
@@ -249,7 +455,38 @@ export async function upsertViewingSessionSummaryFromInsights(args: BuildSummary
         pivotSuggestions: pivots,
     });
 
-    const summaryStatus = args.status === "final" ? "final" : "draft";
+    await db.viewingSessionSummary.upsert({
+        where: { sessionId: session.id },
+        create: {
+            sessionId: session.id,
+            status: "generating",
+            provider: "google",
+            model: session.liveModel || null,
+        },
+        update: {
+            status: "generating",
+            provider: "google",
+            model: session.liveModel || null,
+        },
+    });
+
+    const apiKey = await resolveLocationGoogleAiApiKey(session.locationId);
+    const modelName = asString(session.liveModel) || "gemini-2.5-flash";
+    const llm = await maybeBuildLlmSummary({
+        apiKey,
+        modelName,
+        clientName,
+        propertyTitle,
+        keyPoints,
+        objections,
+        buyingSignals,
+        pivots,
+        recentMessages: session.messages,
+        fallbackArtifacts,
+    });
+
+    const artifacts = llm.artifacts;
+    const persistedStatus = asString(artifacts.sessionSummary) ? summaryStatusTarget : "failed";
     const now = new Date();
 
     const summary = await db.$transaction(async (tx) => {
@@ -257,7 +494,7 @@ export async function upsertViewingSessionSummaryFromInsights(args: BuildSummary
             where: { sessionId: session.id },
             create: {
                 sessionId: session.id,
-                status: summaryStatus,
+                status: persistedStatus,
                 sessionSummary: artifacts.sessionSummary,
                 crmNote: artifacts.crmNote,
                 followUpWhatsApp: artifacts.followUpWhatsApp,
@@ -268,11 +505,15 @@ export async function upsertViewingSessionSummaryFromInsights(args: BuildSummary
                 objections: artifacts.objections as any,
                 buyingSignals: artifacts.buyingSignals as any,
                 generatedAt: now,
-                provider: "google",
-                model: session.liveModel || null,
+                provider: llm.usage.provider || "google",
+                model: llm.usage.model || session.liveModel || null,
+                promptTokens: llm.usage.promptTokens,
+                completionTokens: llm.usage.completionTokens,
+                totalTokens: llm.usage.totalTokens,
+                estimatedCostUsd: llm.usage.estimatedCostUsd,
             },
             update: {
-                status: summaryStatus,
+                status: persistedStatus,
                 sessionSummary: artifacts.sessionSummary,
                 crmNote: artifacts.crmNote,
                 followUpWhatsApp: artifacts.followUpWhatsApp,
@@ -283,8 +524,12 @@ export async function upsertViewingSessionSummaryFromInsights(args: BuildSummary
                 objections: artifacts.objections as any,
                 buyingSignals: artifacts.buyingSignals as any,
                 generatedAt: now,
-                provider: "google",
-                model: session.liveModel || null,
+                provider: llm.usage.provider || "google",
+                model: llm.usage.model || session.liveModel || null,
+                promptTokens: llm.usage.promptTokens,
+                completionTokens: llm.usage.completionTokens,
+                totalTokens: llm.usage.totalTokens,
+                estimatedCostUsd: llm.usage.estimatedCostUsd,
             },
         });
 
@@ -305,7 +550,7 @@ export async function upsertViewingSessionSummaryFromInsights(args: BuildSummary
             },
         });
 
-        if (summaryStatus === "final") {
+        if (persistedStatus === "final") {
             await tx.contactHistory.create({
                 data: {
                     contactId: session.contactId,
@@ -315,12 +560,48 @@ export async function upsertViewingSessionSummaryFromInsights(args: BuildSummary
                         sessionId: session.id,
                         sessionSummary: artifacts.sessionSummary,
                         nextActions: artifacts.recommendedNextActions,
+                        trigger,
+                        usedFallback: llm.usage.usedFallback,
                     } as any,
                 },
             });
         }
 
         return summaryRow;
+    });
+
+    if (llm.usage.totalTokens || llm.usage.estimatedCostUsd) {
+        await recordViewingSessionUsage({
+            sessionId: session.id,
+            locationId: session.locationId,
+            phase: "summary",
+            provider: llm.usage.provider,
+            model: llm.usage.model,
+            inputTokens: llm.usage.promptTokens || 0,
+            outputTokens: llm.usage.completionTokens || 0,
+            totalTokens: llm.usage.totalTokens || 0,
+            estimatedCostUsd: llm.usage.estimatedCostUsd || 0,
+            actualCostUsd: llm.usage.estimatedCostUsd || 0,
+            metadata: {
+                trigger,
+                status: persistedStatus,
+                usedFallback: llm.usage.usedFallback,
+            },
+        });
+    }
+
+    await appendViewingSessionEvent({
+        sessionId: session.id,
+        locationId: session.locationId,
+        type: persistedStatus === "failed" ? "viewing_session.summary.failed" : "viewing_session.summary.generated",
+        source: "worker",
+        payload: {
+            summaryId: summary.id,
+            status: persistedStatus,
+            trigger,
+            usedFallback: llm.usage.usedFallback,
+            errorMessage: llm.usage.errorMessage,
+        },
     });
 
     await publishViewingSessionRealtimeEvent({
