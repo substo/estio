@@ -11,6 +11,8 @@ When invoked, execute this workflow end-to-end.
 - Run `git status --short`.
 - Review recent chat context to understand intent.
 - Inspect the actual changed files before writing the commit message.
+- Identify any local-only/untracked files in the repo root (credential JSON, debug dumps, temp exports).
+- Before deploy, make sure those local-only files are ignored or moved out of the repo so `scripts/backup.sh` does not block deployment.
 
 ## 2. Create a Conventional Commit Message
 
@@ -51,6 +53,7 @@ Notes:
 - Uses local build artifacts and uploads to idle blue/green slot.
 - Default behavior skips Evolution container restart.
 - Runtime cutover is health-checked before Caddy switch.
+- If deploy stops because the workspace is dirty, do not blindly deploy local-only files. Clean that state first, then rerun deploy.
 
 ## 5. Validate Production After Deploy
 

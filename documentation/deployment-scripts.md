@@ -32,6 +32,36 @@ What it does:
 12. Verifies scrape worker readiness (`pm2 online` + fresh Redis heartbeat) before completing deploy.
 13. Keeps old slot running for a drain window, then deletes it.
 
+### Pre-Deploy Workspace Hygiene
+
+`deploy-local-build.sh` begins with `scripts/backup.sh`, which checks `git status --porcelain`.
+
+That means deploy will stop or prompt if the local workspace is dirty, including:
+
+- tracked files with unstaged/staged changes
+- untracked files sitting inside the repo root
+
+To avoid deploy interruptions:
+
+- keep local-only credentials outside the repo root whenever possible
+- if a local-only file must live in the repo workspace, add it to `.gitignore`
+- do not leave ad-hoc debug files, credential JSON blobs, or temporary exports unignored in the project root before deploy
+
+Example of a file that should be ignored locally:
+
+```text
+gcp-kms-credentials.json
+```
+
+Recommended operator flow before deploy:
+
+1. Run `git status --short`.
+2. If the tree is dirty, decide whether each file is:
+   - intended app code/docs to commit
+   - local-only material to ignore or move out of the repo
+3. Re-run `git status --short` and make sure only intended deploy content remains.
+4. Then run `./deploy-local-build.sh`.
+
 ### Prisma Schema Sync Guard (Mar 2026)
 
 `deploy-local-build.sh` now enforces database/schema compatibility **before** switching live traffic.
@@ -159,6 +189,7 @@ ssh root@138.199.214.117 "pm2 logs estio-scrape-worker --lines 120 --nostream"
 - Every deploy overwrites target slot `.env` from local `.env.prod`.
 - `documentation/` is intentionally excluded from deploy artifact sync.
 - Legacy single-process `estio-app` is removed by deploy-local-build when present.
+- Local-only credentials should not live as unignored files in the repo root, because `scripts/backup.sh` will treat them as deployable workspace changes.
 
 ## Recovery
 
