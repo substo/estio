@@ -464,7 +464,7 @@ export async function retrieveRebuttal(
 - [x] Agent never argues or immediately offers discount
 
 ### 2.8 Implementation Notes (Refactor)
-- **Multi-Tenant API Keys**: The system now fetches `googleAiApiKey` from `SiteConfig` per location.
+- **Multi-Tenant API Keys**: The system now fetches the Gemini API key securely via `SettingsService` (encrypted in `settings_secrets`) per location.
 - **Embedding Model**: Switched to `gemini-embedding-001` (3072 dimensions) due to API availability. Verify DB schema uses `vector(3072)`.
 
 ---

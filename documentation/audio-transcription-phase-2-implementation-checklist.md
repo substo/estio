@@ -11,7 +11,7 @@ Use this as an execution sheet:
 
 ## 0) Pre-Flight (Environment + Data)
 
-- [ ] Confirm `GOOGLE_API_KEY` or location `SiteConfig.googleAiApiKey` is available.
+- [ ] Confirm `GOOGLE_API_KEY` or the location's encrypted `google_ai_api_key` secret is available.
 - [ ] Confirm Redis is reachable for BullMQ workers.
 - [ ] Confirm `CRON_SECRET` is set for cron route protection.
 - [ ] Confirm Prisma client is generated.

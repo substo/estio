@@ -1,6 +1,6 @@
 # Site Settings Platform (Supabase Postgres + Encrypted Secrets)
 
-**Last Updated:** 2026-03-08  
+**Last Updated:** 2026-04-02  
 **Status:** Implemented and deployed
 
 > [!IMPORTANT]
@@ -99,6 +99,13 @@ Secrets use an **Enterprise Envelope Encryption** architecture powered by Google
 - `GOOGLE_APPLICATION_CREDENTIALS`: Path to the service account JSON file.
 - `GCP_KMS_KEY_PATH`: Full resource name of the master CryptoKey.
   - Required format: `projects/<project>/locations/<location>/keyRings/<ring>/cryptoKeys/<key>`
+
+### Runtime Guardrails
+
+- `lib/crypto/kms-client.ts` validates `GCP_KMS_KEY_PATH` at runtime before any KMS call is attempted.
+- The DEK is generated locally with `crypto.randomBytes(32)` and only the wrapping/unwrapping step is delegated to Google Cloud KMS.
+- If the key path is missing, secret writes fall back to the legacy keyring path when configured.
+- If the key path is malformed, the application fails fast with a clear configuration error instead of sending an invalid resource name to KMS.
 
 ### Legacy Keyring Fallback (AES-Only)
 

@@ -96,8 +96,8 @@ File:
 
 ### Behavior
 - Validates attachment/message/location ownership.
-- Resolves API key:
-  - `SiteConfig.googleAiApiKey`
+- Resolves API key securely:
+  - `SettingsService.getSecret('google_ai_api_key')`
   - fallback `process.env.GOOGLE_API_KEY`
 - Model fallback order:
   1. `googleAiModelTranscription`

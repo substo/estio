@@ -198,6 +198,41 @@ try {
 
 ---
 
+## 4. Securing Next.js Server-to-Client Payloads
+
+When passing props from a Server Component to a Client Component (`"use client"`), Next.js serializes the **entire object** into the HTML source code (the RSC payload). Passing raw Prisma model results directly to client components will leak sensitive columns globally.
+
+### Required Pattern
+
+1. **Never pass raw Prisma records** directly to Client Components if they contain sensitive columns (e.g., API keys, auth tokens).
+2. **Explicitly strip or select** fields on the server before passing the data down.
+
+### Example: Leaking Data (Bad)
+
+```typescript
+// Server Component
+const config = await db.siteConfig.findUnique({ where: { domain } });
+// LEAK: `config.googleAiApiKey` is now serialized in the page HTML
+return <PublicFooter siteConfig={config} /> 
+```
+
+### Example: Stripping Data (Good)
+
+```typescript
+// Server Component
+const config = await db.siteConfig.findUnique({ where: { domain } });
+
+if (config) {
+   // Explicitly remove sensitive keys before crossing the boundary
+   config.googleAiApiKey = null;
+   config.outreachConfig = null;
+}
+
+return <PublicFooter siteConfig={config} /> 
+```
+
+---
+
 ## Troubleshooting
 
 ### Common Pitfalls

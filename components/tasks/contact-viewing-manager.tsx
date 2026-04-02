@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { format } from 'date-fns';
-import { Loader2, Plus, Trash2, CheckCircle2, Clock3, AlertCircle, Ban, Pencil, Minus, Wand2 } from 'lucide-react';
+import { Loader2, Plus, Trash2, CheckCircle2, Clock3, AlertCircle, Ban, Pencil, Minus, Wand2, Radio } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -37,6 +37,7 @@ import {
     updateViewing,
     deleteViewing,
 } from '@/app/(main)/admin/contacts/actions';
+import { createViewingSession } from '@/app/(main)/admin/viewings/sessions/actions';
 import { improveInternalNoteText } from '@/app/(main)/admin/conversations/actions';
 import { useAiModelCatalog } from '@/components/ai/use-ai-model-catalog';
 import { getContactViewings, getPropertiesForSelect, getUsersForSelect } from '@/app/(main)/admin/contacts/fetch-helpers';
@@ -249,6 +250,14 @@ export function ContactViewingManager({
 
     // Deletion Modal
     const [viewingToDeleteId, setViewingToDeleteId] = useState<string | null>(null);
+    const [startingLiveViewingId, setStartingLiveViewingId] = useState<string | null>(null);
+    const [newSessionShare, setNewSessionShare] = useState<null | {
+        sessionId: string;
+        mode: string;
+        joinUrl: string | null;
+        pinCode: string | null;
+        expiresAt: string | null;
+    }>(null);
 
     // Initial Defaults
     const [defaultUserId, setDefaultUserId] = useState('');
@@ -450,6 +459,43 @@ export function ContactViewingManager({
         }
     };
 
+    const handleStartLiveSession = async (viewingId: string) => {
+        if (!viewingId || startingLiveViewingId) return;
+        setStartingLiveViewingId(viewingId);
+        setError(null);
+        try {
+            const result = await createViewingSession(viewingId, {});
+            if (!result?.success || !result?.sessionId) {
+                setError(result?.message || "Failed to create live viewing session.");
+                return;
+            }
+
+            setNewSessionShare({
+                sessionId: result.sessionId,
+                mode: result.mode || "assistant_live_tool_heavy",
+                joinUrl: result.join?.url || null,
+                pinCode: result.join?.pinCode || null,
+                expiresAt: result.join?.expiresAt || null,
+            });
+            toast.success("Live viewing session created");
+        } catch (sessionError: any) {
+            setError(sessionError?.message || "Failed to create live viewing session.");
+        } finally {
+            setStartingLiveViewingId(null);
+        }
+    };
+
+    const copySessionInvite = async () => {
+        if (!newSessionShare?.joinUrl || !newSessionShare?.pinCode) return;
+        const payload = `Viewing session link: ${newSessionShare.joinUrl}\nPIN: ${newSessionShare.pinCode}`;
+        try {
+            await navigator.clipboard.writeText(payload);
+            toast.success("Session link and PIN copied");
+        } catch {
+            toast.error("Could not copy to clipboard");
+        }
+    };
+
     const resetForm = () => {
         setViewingDate('');
         setViewingTitle('');
@@ -525,6 +571,21 @@ export function ContactViewingManager({
 
                                     {isEditing && (
                                         <div className="flex items-center gap-1">
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-6 px-2 text-[10px]"
+                                                onClick={() => handleStartLiveSession(viewing.id)}
+                                                disabled={startingLiveViewingId === viewing.id}
+                                            >
+                                                {startingLiveViewingId === viewing.id ? (
+                                                    <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                                ) : (
+                                                    <Radio className="mr-1 h-3 w-3" />
+                                                )}
+                                                Live
+                                            </Button>
                                             <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={() => handleEdit(viewing)}>
                                                 <Pencil className="h-3.5 w-3.5" />
                                             </Button>
@@ -699,6 +760,53 @@ export function ContactViewingManager({
                         <Button type="button" onClick={handleSubmit} disabled={!canSubmit}>
                             {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             {editingViewingId ? 'Update Viewing' : 'Save Viewing'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={!!newSessionShare} onOpenChange={(open) => !open && setNewSessionShare(null)}>
+                <DialogContent className="sm:max-w-[520px]">
+                    <DialogHeader>
+                        <DialogTitle>Live Session Ready</DialogTitle>
+                        <DialogDescription>
+                            Share this tenant-branded link and PIN with the client, then open the agent cockpit.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                        <div className="space-y-1.5">
+                            <Label>Session Link</Label>
+                            <Input readOnly value={newSessionShare?.joinUrl || "No domain configured for this location."} />
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1.5">
+                                <Label>PIN</Label>
+                                <Input readOnly value={newSessionShare?.pinCode || "N/A"} />
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label>Expires</Label>
+                                <Input
+                                    readOnly
+                                    value={newSessionShare?.expiresAt ? new Date(newSessionShare.expiresAt).toLocaleString() : "N/A"}
+                                />
+                            </div>
+                        </div>
+                        <div className="rounded-md border bg-slate-50 p-2 text-[11px] text-slate-600">
+                            Mode: {newSessionShare?.mode || "assistant_live_tool_heavy"}
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button type="button" variant="outline" onClick={copySessionInvite} disabled={!newSessionShare?.joinUrl || !newSessionShare?.pinCode}>
+                            Copy Invite
+                        </Button>
+                        <Button
+                            type="button"
+                            onClick={() => {
+                                if (!newSessionShare?.sessionId) return;
+                                window.open(`/admin/viewings/sessions/${newSessionShare.sessionId}`, "_blank");
+                            }}
+                        >
+                            Open Agent Cockpit
                         </Button>
                     </DialogFooter>
                 </DialogContent>

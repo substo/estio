@@ -56,6 +56,7 @@ model Location {
   deepScrapeRunStages           DeepScrapeRunStage[]
   agentExecutions               AgentExecution[]
   whatsappOutboundOutboxJobs    WhatsAppOutboundOutbox[]
+  viewingSessions               ViewingSession[]
 
   // WhatsApp Integration (Native)
   whatsappBusinessAccountId String?
@@ -178,6 +179,7 @@ model User {
   createdProperties            Property[]                  @relation("PropertyCreator")
   updatedProperties            Property[]                  @relation("PropertyUpdater")
   viewings                     Viewing[]
+  viewingSessions              ViewingSession[]
   contactHistory               ContactHistory[]
   assignedContactTasks         ContactTask[]               @relation("ContactTaskAssignedUser")
   createdContactTasks          ContactTask[]               @relation("ContactTaskCreatedByUser")
@@ -310,11 +312,13 @@ model Property {
   ghlPropertyObjectId String?               @unique
   companyRoles        CompanyPropertyRole[]
 
-  contactRoles ContactPropertyRole[]
-  location     Location              @relation(fields: [locationId], references: [id])
-  media        PropertyMedia[]
-  swipes       PropertySwipe[]
-  viewings     Viewing[]
+  contactRoles           ContactPropertyRole[]
+  location               Location              @relation(fields: [locationId], references: [id])
+  media                  PropertyMedia[]
+  swipes                 PropertySwipe[]
+  viewings               Viewing[]
+  primaryViewingSessions ViewingSession[]      @relation("ViewingSessionPrimaryProperty")
+  activeViewingSessions  ViewingSession[]      @relation("ViewingSessionCurrentProperty")
 
   createdById String?
   creator     User?   @relation("PropertyCreator", fields: [createdById], references: [id])
@@ -484,6 +488,7 @@ model Contact {
   propertyWonReference String?
   propertyWonDate      DateTime?
   viewings             Viewing[]
+  viewingSessions      ViewingSession[]
   history              ContactHistory[]
   conversations        Conversation[]
 
@@ -507,12 +512,12 @@ model Contact {
   qualificationStage String? @default("unqualified")
   buyerProfile       Json?
 
-  insights             Insight[]
-  tasks                ContactTask[]
-  userNotifications    UserNotification[]
-  aiAutomationJobs     AiAutomationJob[]
-  aiDecisions          AiDecision[]
-  aiSuggestedResponses AiSuggestedResponse[]
+  insights                   Insight[]
+  tasks                      ContactTask[]
+  userNotifications          UserNotification[]
+  aiAutomationJobs           AiAutomationJob[]
+  aiDecisions                AiDecision[]
+  aiSuggestedResponses       AiSuggestedResponse[]
   whatsappOutboundOutboxJobs WhatsAppOutboundOutbox[]
 
   @@unique([locationId, email])
@@ -689,21 +694,21 @@ model SettingsDocument {
 }
 
 model SettingsSecret {
-  id          String            @id @default(cuid())
-  scopeType   SettingsScopeType @map("scope_type")
-  scopeId     String            @map("scope_id")
-  domain      String
-  secretKey   String            @map("secret_key")
-  ciphertext  String            @db.Text
-  iv          String
-  authTag     String            @map("auth_tag")
-  alg         String            @default("AES-256-GCM")
-  keyId       String            @map("key_id")
-  encryptedDek String?          @db.Text @map("encrypted_dek")
-  encryptedAt DateTime          @default(now()) @map("encrypted_at")
-  rotatedAt   DateTime?         @map("rotated_at")
-  createdAt   DateTime          @default(now()) @map("created_at")
-  updatedAt   DateTime          @updatedAt @map("updated_at")
+  id           String            @id @default(cuid())
+  scopeType    SettingsScopeType @map("scope_type")
+  scopeId      String            @map("scope_id")
+  domain       String
+  secretKey    String            @map("secret_key")
+  ciphertext   String            @db.Text
+  iv           String
+  authTag      String            @map("auth_tag")
+  alg          String            @default("AES-256-GCM")
+  keyId        String            @map("key_id")
+  encryptedDek String?           @map("encrypted_dek") @db.Text
+  encryptedAt  DateTime          @default(now()) @map("encrypted_at")
+  rotatedAt    DateTime?         @map("rotated_at")
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
 
   @@unique([scopeType, scopeId, domain, secretKey], map: "settings_secrets_scope_domain_secret_key")
   @@index([scopeType, scopeId], map: "settings_secrets_scope_idx")
@@ -788,19 +793,19 @@ model ProspectLead {
   sourceUrl String? @db.Text
 
   // Scraped Platform Listings  (1 Person -> N Properties)
-  isAgency           Boolean          @default(false)
-  agencyConfidence   Int?             // 0-100 AI confidence score
-  agencyReasoning    String?          // AI reasoning text for auditability
-  isAgencyManual     Boolean?         // null = AI-decided, true/false = human override
-  sellerType         String           @default("private") // private, agency, management, developer, other
-  sellerTypeManual   String?          // null = AI-decided, typed manual override
-  scrapedListings ScrapedListing[]
+  isAgency         Boolean          @default(false)
+  agencyConfidence Int? // 0-100 AI confidence score
+  agencyReasoning  String? // AI reasoning text for auditability
+  isAgencyManual   Boolean? // null = AI-decided, true/false = human override
+  sellerType       String           @default("private") // private, agency, management, developer, other
+  sellerTypeManual String? // null = AI-decided, typed manual override
+  scrapedListings  ScrapedListing[]
 
   // Seller Platform Intelligence
-  platformUserId     String?  // Seller's platform ID (e.g. Bazaraki user ID "9431239")
-  platformRegistered String?  // "Posting since sep, 2024"
-  profileUrl         String?  // Seller's profile / other listings page (e.g. "https://www.bazaraki.com/items/author/40951")
-  listingCount       Int?     // Total active listings this seller has
+  platformUserId     String? // Seller's platform ID (e.g. Bazaraki user ID "9431239")
+  platformRegistered String? // "Posting since sep, 2024"
+  profileUrl         String? // Seller's profile / other listings page (e.g. "https://www.bazaraki.com/items/author/40951")
+  listingCount       Int? // Total active listings this seller has
 
   // AI Scoring
   aiScore          Float? @default(0)
@@ -863,14 +868,188 @@ model Viewing {
   reminders        Json? // Track sent reminders [{type, sentAt}]
 
   // Sync engine fields
-  syncVersion Int             @default(1)
+  syncVersion Int              @default(1)
   syncRecords ViewingSync[]
   outboxJobs  ViewingOutbox[]
+  sessions    ViewingSession[]
 
   @@index([contactId])
   @@index([contactId, date(sort: Asc)])
   @@index([propertyId])
   @@index([userId])
+}
+
+model ViewingSession {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  viewingId String
+  viewing   Viewing @relation(fields: [viewingId], references: [id], onDelete: Cascade)
+
+  contactId String
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  primaryPropertyId String
+  primaryProperty   Property @relation("ViewingSessionPrimaryProperty", fields: [primaryPropertyId], references: [id], onDelete: Cascade)
+
+  currentActivePropertyId String?
+  currentActiveProperty   Property? @relation("ViewingSessionCurrentProperty", fields: [currentActivePropertyId], references: [id], onDelete: SetNull)
+
+  relatedPropertyIds String[] @default([])
+
+  agentId String
+  agent   User   @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  clientName     String?
+  clientLanguage String?
+  agentLanguage  String?
+
+  mode   String @default("assistant_live_tool_heavy") // assistant_live_tool_heavy | assistant_live_voice_premium
+  status String @default("scheduled") // scheduled | active | paused | completed | expired
+
+  sessionLinkTokenHash String   @unique
+  pinCodeHash          String
+  pinCodeSalt          String
+  tokenExpiresAt       DateTime
+
+  failedJoinAttempts Int       @default(0)
+  joinLockUntil      DateTime?
+  lastJoinAttemptAt  DateTime?
+  lastJoinedAt       DateTime?
+  joinAudit          Json?
+
+  startedAt DateTime?
+  endedAt   DateTime?
+
+  notes                  String? @db.Text
+  aiSummary              String? @db.Text
+  objections             Json?
+  keyPoints              Json?
+  recommendedNextActions Json?
+
+  audioPlaybackClientEnabled Boolean @default(false)
+  audioPlaybackAgentEnabled  Boolean @default(false)
+
+  liveModel         String?
+  contextVersion    Int              @default(1)
+  chainIndex        Int              @default(1)
+  previousSessionId String?
+  previousSession   ViewingSession?  @relation("ViewingSessionChain", fields: [previousSessionId], references: [id], onDelete: SetNull)
+  nextSessions      ViewingSession[] @relation("ViewingSessionChain")
+
+  contextSnapshot Json?
+
+  messages ViewingSessionMessage[]
+  insights ViewingSessionInsight[]
+  summary  ViewingSessionSummary?
+
+  @@index([locationId, status, createdAt(sort: Desc)])
+  @@index([viewingId, createdAt(sort: Desc)])
+  @@index([contactId, createdAt(sort: Desc)])
+  @@index([agentId, status, createdAt(sort: Desc)])
+  @@index([tokenExpiresAt])
+  @@index([joinLockUntil])
+}
+
+model ViewingSessionMessage {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessionId String
+  session   ViewingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  speaker String // client | agent | system
+
+  originalText     String  @db.Text
+  originalLanguage String?
+  translatedText   String? @db.Text
+  targetLanguage   String?
+
+  timestamp     DateTime @default(now())
+  confidence    Float?
+  audioChunkRef String?
+
+  analysisStatus String    @default("pending") // pending | processing | completed | failed
+  translatedAt   DateTime?
+  metadata       Json?
+
+  insights ViewingSessionInsight[]
+
+  @@index([sessionId, timestamp])
+  @@index([sessionId, createdAt(sort: Desc)])
+  @@index([analysisStatus, createdAt(sort: Asc)])
+}
+
+model ViewingSessionInsight {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessionId String
+  session   ViewingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  messageId String?
+  message   ViewingSessionMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  type       String // key_point | objection | buying_signal | sentiment | reply | pivot
+  category   String?
+  title      String?
+  shortText  String  @db.Text
+  longText   String? @db.Text
+  confidence Float?
+
+  state  String @default("active") // active | pinned | dismissed | resolved
+  source String @default("model") // model | static_library | manual
+
+  metadata Json?
+
+  pinnedAt    DateTime?
+  dismissedAt DateTime?
+  resolvedAt  DateTime?
+
+  @@index([sessionId, state, createdAt(sort: Desc)])
+  @@index([sessionId, type, createdAt(sort: Desc)])
+  @@index([messageId, type])
+}
+
+model ViewingSessionSummary {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessionId String         @unique
+  session   ViewingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  status String @default("draft") // draft | final
+
+  sessionSummary          String? @db.Text
+  crmNote                 String? @db.Text
+  followUpWhatsApp        String? @db.Text
+  followUpEmail           String? @db.Text
+  translatedFollowUp      Json?
+  propertyComparisonDraft String? @db.Text
+
+  recommendedNextActions Json?
+  likes                  Json?
+  dislikes               Json?
+  objections             Json?
+  buyingSignals          Json?
+
+  generatedAt DateTime?
+  provider    String?   @default("google")
+  model       String?
+
+  promptTokens     Int?
+  completionTokens Int?
+  totalTokens      Int?
+  estimatedCostUsd Float?
+
+  @@index([status, updatedAt(sort: Desc)])
 }
 
 model ViewingSync {
@@ -1100,17 +1279,17 @@ model Conversation {
   lastSummarizedAt      DateTime? // When context was last compacted
 
   // Relations
-  location             Location                  @relation(fields: [locationId], references: [id], onDelete: Cascade)
-  contact              Contact                   @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  messages             Message[]
-  executions           AgentExecution[]
-  participants         ConversationParticipant[]
-  insights             Insight[]
-  contactTasks         ContactTask[]
-  userNotifications    UserNotification[]
-  aiAutomationJobs     AiAutomationJob[]
-  aiDecisions          AiDecision[]
-  aiSuggestedResponses AiSuggestedResponse[]
+  location                   Location                  @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  contact                    Contact                   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  messages                   Message[]
+  executions                 AgentExecution[]
+  participants               ConversationParticipant[]
+  insights                   Insight[]
+  contactTasks               ContactTask[]
+  userNotifications          UserNotification[]
+  aiAutomationJobs           AiAutomationJob[]
+  aiDecisions                AiDecision[]
+  aiSuggestedResponses       AiSuggestedResponse[]
   whatsappOutboundOutboxJobs WhatsAppOutboundOutbox[]
 
   @@unique([locationId, contactId])
@@ -1586,9 +1765,9 @@ model AiSuggestedResponse {
 }
 
 model Message {
-  id             String  @id @default(cuid())
-  conversationId String
-  ghlMessageId   String? @unique
+  id              String  @id @default(cuid())
+  conversationId  String
+  ghlMessageId    String? @unique
   clientMessageId String? @unique
 
   type      String // SMS, Email, WhatsApp
@@ -1643,13 +1822,13 @@ model WhatsAppOutboundOutbox {
   kind      String // text | image | audio | document
   payload   Json
 
-  status       String   @default("pending") // pending | processing | completed | failed | dead
-  scheduledAt  DateTime @default(now())
+  status       String    @default("pending") // pending | processing | completed | failed | dead
+  scheduledAt  DateTime  @default(now())
   lockedAt     DateTime?
   lockedBy     String?
   processedAt  DateTime?
-  attemptCount Int      @default(0)
-  lastError    String?  @db.Text
+  attemptCount Int       @default(0)
+  lastError    String?   @db.Text
 
   idempotencyKey String @unique
 
@@ -1994,9 +2173,9 @@ model ScrapingTask {
   lastSyncError  String?   @db.Text
   lastSyncStats  Json? // { discovered: 15, new: 8, duplicates: 7, errors: 0 }
 
-  location   Location           @relation(fields: [locationId], references: [id], onDelete: Cascade)
-  connection ScrapingConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-  runs       ScrapingRun[]
+  location         Location             @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  connection       ScrapingConnection   @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  runs             ScrapingRun[]
   deepScrapeStages DeepScrapeRunStage[]
 
   @@index([locationId, enabled])
@@ -2024,53 +2203,53 @@ model ScrapingRun {
 }
 
 model DeepScrapeRun {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(cuid())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
   locationId String
 
-  status          String    @default("running") // running, completed, partial, failed
-  triggeredBy     String?
+  status            String    @default("running") // running, completed, partial, failed
+  triggeredBy       String?
   triggeredByUserId String?
-  queueJobId      String?
-  queuedAt        DateTime?
-  startedAt       DateTime?
-  completedAt     DateTime?
-  errorLog        String?   @db.Text
-  configSnapshot  Json?
-  metadata        Json?
+  queueJobId        String?
+  queuedAt          DateTime?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  errorLog          String?   @db.Text
+  configSnapshot    Json?
+  metadata          Json?
 
-  tasksScanned    Int       @default(0)
-  tasksStarted    Int       @default(0)
-  tasksCompleted  Int       @default(0)
-  tasksSkipped    Int       @default(0)
+  tasksScanned   Int @default(0)
+  tasksStarted   Int @default(0)
+  tasksCompleted Int @default(0)
+  tasksSkipped   Int @default(0)
 
-  rootUrlsProcessed          Int @default(0)
-  indexPagesScraped          Int @default(0)
-  seedListingsFound          Int @default(0)
-  seedListingsNew            Int @default(0)
-  seedListingsDuplicate      Int @default(0)
-  prospectsCreated           Int @default(0)
-  prospectsMatched           Int @default(0)
-  contactsWithPhone          Int @default(0)
-  contactsWithoutPhone       Int @default(0)
-  sellerPortfoliosDiscovered Int @default(0)
+  rootUrlsProcessed            Int @default(0)
+  indexPagesScraped            Int @default(0)
+  seedListingsFound            Int @default(0)
+  seedListingsNew              Int @default(0)
+  seedListingsDuplicate        Int @default(0)
+  prospectsCreated             Int @default(0)
+  prospectsMatched             Int @default(0)
+  contactsWithPhone            Int @default(0)
+  contactsWithoutPhone         Int @default(0)
+  sellerPortfoliosDiscovered   Int @default(0)
   portfolioListingsDeepScraped Int @default(0)
 
-  omittedAgency           Int @default(0)
-  omittedUncertain        Int @default(0)
-  omittedMissingPhone     Int @default(0)
-  omittedNonRealEstate    Int @default(0)
-  omittedDuplicate        Int @default(0)
-  omittedBudgetExhausted  Int @default(0)
+  omittedAgency          Int @default(0)
+  omittedUncertain       Int @default(0)
+  omittedMissingPhone    Int @default(0)
+  omittedNonRealEstate   Int @default(0)
+  omittedDuplicate       Int @default(0)
+  omittedBudgetExhausted Int @default(0)
 
-  errorsAuth        Int @default(0)
-  errorsNetwork     Int @default(0)
-  errorsExtraction  Int @default(0)
-  errorsUnknown     Int @default(0)
-  errorsTotal       Int @default(0)
+  errorsAuth       Int @default(0)
+  errorsNetwork    Int @default(0)
+  errorsExtraction Int @default(0)
+  errorsUnknown    Int @default(0)
+  errorsTotal      Int @default(0)
 
-  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  location Location             @relation(fields: [locationId], references: [id], onDelete: Cascade)
   stages   DeepScrapeRunStage[]
 
   @@index([locationId, createdAt(sort: Desc)])
@@ -2078,16 +2257,16 @@ model DeepScrapeRun {
 }
 
 model DeepScrapeRunStage {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  runId     String
+  id         String   @id @default(cuid())
+  createdAt  DateTime @default(now())
+  runId      String
   locationId String
-  taskId    String?
+  taskId     String?
 
   stage      String
-  status     String   @default("info") // info, success, warning, error, skipped
+  status     String  @default("info") // info, success, warning, error, skipped
   reasonCode String?
-  message    String?  @db.Text
+  message    String? @db.Text
   counters   Json?
   metadata   Json?
 
@@ -2115,7 +2294,7 @@ model ScrapedListing {
   price        Int?
   currency     String?  @default("EUR")
   propertyType String?
-  listingType  String?  // "rent" | "sale"
+  listingType  String? // "rent" | "sale"
   locationText String?
   images       String[]
   thumbnails   String[] @default([])
@@ -2123,8 +2302,8 @@ model ScrapedListing {
   // Property Details
   bedrooms         Int?
   bathrooms        Int?
-  propertyArea     Int?     // m²
-  plotArea         Int?     // m²
+  propertyArea     Int? // m²
+  plotArea         Int? // m²
   constructionYear Int?
 
   // Geo
@@ -2132,18 +2311,18 @@ model ScrapedListing {
   longitude Float?
 
   // Seller Intelligence
-  sellerExternalId   String?   // Bazaraki user ID (e.g. "9431239")
-  sellerRegisteredAt String?   // "Posting since sep, 2024"
-  otherListingsUrl   String?   // Link to seller's other ads
-  otherListingsCount Int?      // Number of other listings
-  contactChannels    String[]  @default([]) // ["whatsapp","chat","email"]
-  whatsappPhone      String?   // Parsed from WhatsApp button href
+  sellerExternalId   String? // Bazaraki user ID (e.g. "9431239")
+  sellerRegisteredAt String? // "Posting since sep, 2024"
+  otherListingsUrl   String? // Link to seller's other ads
+  otherListingsCount Int? // Number of other listings
+  contactChannels    String[] @default([]) // ["whatsapp","chat","email"]
+  whatsappPhone      String? // Parsed from WhatsApp button href
 
   // Flexible catch-all for all listing attributes
-  rawAttributes Json?    // All key-value pairs from chars-column
+  rawAttributes Json? // All key-value pairs from chars-column
 
   isExpired Boolean @default(false)
-  status String @default("NEW") // NEW, REVIEWING, IMPORTED, REJECTED, SKIPPED
+  status    String  @default("NEW") // NEW, REVIEWING, IMPORTED, REJECTED, SKIPPED
 
   // Link to imported Property (set when contact is accepted and property is imported)
   importedPropertyId String?

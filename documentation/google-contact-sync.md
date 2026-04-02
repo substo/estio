@@ -40,6 +40,9 @@ This guarantees that on iOS/Android, the incoming call screen shows the Name (bi
 
 ## Technical Architecture
 
+> [!TIP]
+> This document is the source of truth for the Google integration flow and user-facing behavior. For the underlying secret-encryption model and KMS envelope design, see [Site Settings Platform](./site-settings-platform.md).
+
 ### 1. Data Model Changes
 -   **User Model**:
     -   `googleAccessToken`, `googleRefreshToken`: Stores OAuth credentials.
@@ -199,7 +202,8 @@ If you plan to open this to the public (any Google user), you will need to submi
 1.  Go to `/admin/settings/integrations/google`.
 2.  Click "Connect Account".
 3.  Grant permissions.
-4.  You will be redirected back to the integrations page with `?google_connected=true`.
+4.  Estio validates the OAuth `state` value to protect against CSRF and stale callback requests.
+5.  On success, you will be redirected back to the integrations page with `?google_connected=true`.
 
 Once connected, contact sync remains manual by default. Optional per-flow automation can be enabled in **Settings > Integrations > Google > Contact Automation**.
 
@@ -230,6 +234,9 @@ This happens when token storage reaches settings encryption and KMS receives an 
 2. Redeploy with the corrected environment variable.
 3. Retry Google Connect from `/admin/settings/integrations/google`.
 
+> [!NOTE]
+> The full KMS storage model is documented in [Site Settings Platform](./site-settings-platform.md). This troubleshooting section only covers the Google-facing symptom and recovery path.
+
 ### `URL is malformed "undefined/..."` Error
 This occurs if `NEXT_PUBLIC_APP_URL` or `APP_BASE_URL` is not set.
 
@@ -241,8 +248,15 @@ This is expected for apps in **Testing** mode. Click **Advanced > Go to [App Nam
 ### Session Expired (Re-Authentication)
 If your Google OAuth token expires (e.g., after 6 months or password change) or is revoked:
 -   **Old Behavior**: Sync would silently fail or show "No results found".
--   **New Behavior**: The Google Sync Manager displays a **Red Alert** ("Google Session Expired").
+-   **New Behavior**: The Google integrations page displays a reconnect/error banner and the Google Sync Manager displays a **Red Alert** ("Google Session Expired") where applicable.
 -   **Fix**: Click the **Reconnect Account** link in the alert to re-authorize the application.
+
+### OAuth Callback Failure Handling
+The Google callback is hardened so OAuth failures do not surface as a raw 500 page to end users.
+
+-   **CSRF Protection**: `/api/google/auth` issues a secure OAuth `state` token and `/api/google/callback` verifies it before exchanging the authorization code.
+-   **Graceful Redirects**: Callback failures redirect the user back to `/admin/settings/integrations/google` with a typed error code instead of rendering an internal error response.
+-   **Supportability**: Unexpected callback failures include a short error reference ID in the redirect so server logs can be correlated quickly.
 
 ---
 

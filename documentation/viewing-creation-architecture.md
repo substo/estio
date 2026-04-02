@@ -6,6 +6,25 @@ The Viewings system in Estio allows agents and administrators to schedule proper
 
 This document is the source of truth for viewing scheduling, timezone handling, and provider sync behavior.
 
+For the newer live translation and copilot layer built on top of scheduled viewings, use [`documentation/viewing-intelligence-live-copilot-implementation-tracking.md`](/Users/martingreen/Projects/IDX/documentation/viewing-intelligence-live-copilot-implementation-tracking.md) as the source of truth. This document intentionally stays focused on `Viewing` creation, editing, timezone semantics, and external provider sync.
+
+## Relationship To Viewing Sessions
+
+The platform now has two distinct but connected layers:
+
+1. **`Viewing`**
+   - The scheduling and sync entity.
+   - Owns appointment timing, timezone intent, contact/property linkage, and external calendar/provider synchronization.
+2. **`ViewingSession`**
+   - The live copilot entity layered on top of a scheduled viewing.
+   - Owns secure join access, live transcript messages, AI insights, objections, pivots, summaries, and post-viewing intelligence artifacts.
+
+Practical boundary:
+
+1. Continue using `Viewing` and the outbox/sync engine for appointment lifecycle and provider integrations.
+2. Use `ViewingSession` for live-session runtime, realtime updates, translation/copilot intelligence, and session outputs.
+3. A viewing may exist without a live session. A live session should anchor to an existing viewing rather than replacing it.
+
 ## Data Models
 
 The feature uses a durable outbox architecture so local DB writes finish first and external provider mutations run safely afterward.

@@ -150,13 +150,13 @@ Response must be valid JSON with structured reasoning:
 
 | Variable            | Description                                                     |
 |---------------------|-----------------------------------------------------------------|
-| `GOOGLE_API_KEY`    | Fallback API key if not set in Site Config.                     |
+| `GOOGLE_API_KEY`    | Fallback API key if not set in encrypted DB settings.           |
 
 ### Site Config (Per-Location)
 
 | Field               | Description                                                     |
 |---------------------|-----------------------------------------------------------------|
-| `googleAiApiKey`    | Location-specific Gemini API Key.                               |
+| `googleAiApiKey`    | Location-specific Gemini API Key (stored in `settings_secrets`).|
 | `outreachConfig`    | JSON object for enabling/disabling agent and storing prompts.   |
 
 ### AI Settings Page
