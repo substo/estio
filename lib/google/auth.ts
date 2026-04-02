@@ -13,6 +13,10 @@ const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const DEFAULT_BASE_URL = process.env.APP_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://estio.co';
 
 export const createOAuth2Client = (baseUrl?: string) => {
+    if (!CLIENT_ID || !CLIENT_SECRET) {
+        throw new Error("Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET.");
+    }
+
     const root = baseUrl || DEFAULT_BASE_URL;
     // Ensure no double slash if root ends with /
     const cleanRoot = root.replace(/\/$/, "");
@@ -23,7 +27,7 @@ export const createOAuth2Client = (baseUrl?: string) => {
     );
 };
 
-export function getGoogleAuthUrl(baseUrl?: string) {
+export function getGoogleAuthUrl(baseUrl?: string, state?: string) {
     const scopes = [
         'https://www.googleapis.com/auth/contacts',
         'https://www.googleapis.com/auth/userinfo.email',
@@ -41,7 +45,8 @@ export function getGoogleAuthUrl(baseUrl?: string) {
     return client.generateAuthUrl({
         access_type: 'offline', // Crucial for refresh token
         scope: scopes,
-        prompt: 'consent' // Force consent to ensure we get a refresh token
+        prompt: 'consent', // Force consent to ensure we get a refresh token
+        state,
     });
 }
 

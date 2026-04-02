@@ -2,6 +2,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getGoogleAuthUrl } from '@/lib/google/auth';
 import { auth } from '@clerk/nextjs/server';
+import {
+    GOOGLE_OAUTH_STATE_COOKIE,
+    GOOGLE_OAUTH_STATE_TTL_SECONDS,
+    createGoogleOAuthState,
+} from '@/lib/google/oauth-state';
 
 export async function GET(req: NextRequest) {
     try {
@@ -18,9 +23,20 @@ export async function GET(req: NextRequest) {
 
         console.log('[Google Auth] Using base URL:', baseUrl);
 
-        const url = getGoogleAuthUrl(baseUrl);
+        const state = createGoogleOAuthState();
+        const url = getGoogleAuthUrl(baseUrl, state);
+        const response = NextResponse.redirect(url);
+        response.cookies.set({
+            name: GOOGLE_OAUTH_STATE_COOKIE,
+            value: state,
+            maxAge: GOOGLE_OAUTH_STATE_TTL_SECONDS,
+            path: '/api/google',
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+        });
 
-        return NextResponse.redirect(url);
+        return response;
     } catch (error) {
         console.error('Google Auth Error:', error);
         return new NextResponse('Internal Error', { status: 500 });

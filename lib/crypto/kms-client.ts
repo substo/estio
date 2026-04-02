@@ -1,9 +1,28 @@
+import crypto from "crypto";
 import { KeyManagementServiceClient } from "@google-cloud/kms";
 
 type GenerateDekResponse = {
     plaintextDek: Buffer;
     encryptedDek: string;
 };
+
+const KMS_KEY_PATH_PATTERN =
+    /^projects\/([^/]{1,100})\/locations\/([a-zA-Z0-9_-]{1,63})\/keyRings\/([^/]{1,100})\/cryptoKeys\/([^/]{1,100})$/;
+
+export function normalizeAndValidateKmsKeyPath(rawValue: string | undefined): string | null {
+    const trimmed = rawValue?.trim();
+    if (!trimmed) return null;
+
+    // Guard against quoted env var values.
+    const unquoted = trimmed.replace(/^"(.*)"$/, "$1").replace(/^'(.*)'$/, "$1");
+    if (!KMS_KEY_PATH_PATTERN.test(unquoted)) {
+        throw new Error(
+            "Invalid GCP_KMS_KEY_PATH. Expected format: projects/<project>/locations/<location>/keyRings/<ring>/cryptoKeys/<key>."
+        );
+    }
+
+    return unquoted;
+}
 
 class KmsClient {
     private client: KeyManagementServiceClient;
@@ -14,7 +33,8 @@ class KmsClient {
 
     private get keyPath(): string | undefined {
         // e.g., projects/my-project/locations/global/keyRings/my-keyring/cryptoKeys/my-key
-        return process.env.GCP_KMS_KEY_PATH;
+        const normalized = normalizeAndValidateKmsKeyPath(process.env.GCP_KMS_KEY_PATH);
+        return normalized ?? undefined;
     }
 
     /**
@@ -25,23 +45,27 @@ class KmsClient {
         const keyName = this.keyPath;
         if (!keyName) return null;
 
-        const [result] = await this.client.generateRandomBytes({
-            lengthBytes: 32, // AES-256 uses 32 bytes (256 bits)
-            protectionLevel: "SOFTWARE",
-        });
+        // Generate DEK from local CSPRNG, then wrap it with KMS master key.
+        const plaintextDek = crypto.randomBytes(32);
+        try {
+            const [encryptResponse] = await this.client.encrypt({
+                name: keyName,
+                plaintext: plaintextDek,
+            });
 
-        const plaintextDek = Buffer.from(result.data!);
+            if (!encryptResponse.ciphertext) {
+                throw new Error("Google KMS encrypt response did not include ciphertext.");
+            }
 
-        // Wrap the new raw DEK using the Master Key in KMS
-        const [encryptResponse] = await this.client.encrypt({
-            name: keyName,
-            plaintext: plaintextDek,
-        });
-
-        return {
-            plaintextDek,
-            encryptedDek: Buffer.from(encryptResponse.ciphertext!).toString("base64"),
-        };
+            // Return a copy and immediately wipe temporary source buffer.
+            const dekForCaller = Buffer.from(plaintextDek);
+            return {
+                plaintextDek: dekForCaller,
+                encryptedDek: Buffer.from(encryptResponse.ciphertext).toString("base64"),
+            };
+        } finally {
+            plaintextDek.fill(0);
+        }
     }
 
     /**
@@ -56,7 +80,11 @@ class KmsClient {
             ciphertext: Buffer.from(encryptedDek, "base64"),
         });
 
-        return Buffer.from(decryptResponse.plaintext!);
+        if (!decryptResponse.plaintext) {
+            throw new Error("Google KMS decrypt response did not include plaintext.");
+        }
+
+        return Buffer.from(decryptResponse.plaintext);
     }
 }
 

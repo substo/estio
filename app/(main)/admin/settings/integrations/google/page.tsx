@@ -3,7 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import db from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { CheckCircle2, XCircle } from "lucide-react";
+import { AlertCircle, CheckCircle2, XCircle } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { SyncDirectionSettings } from "./sync-direction-settings";
@@ -93,6 +93,21 @@ export default async function GoogleIntegrationPage({
     const isConnected = !!user.googleAccessToken;
     const resolvedParams = await searchParams;
     const isNewConnection = resolvedParams?.google_connected === 'true';
+    const googleErrorCode = typeof resolvedParams?.google_error === "string"
+        ? resolvedParams.google_error
+        : null;
+    const googleErrorId = typeof resolvedParams?.google_error_id === "string"
+        ? resolvedParams.google_error_id
+        : null;
+    const googleErrorMessageByCode: Record<string, string> = {
+        invalid_state: "Connection check failed (invalid OAuth state). Please try connecting again.",
+        oauth_denied: "Google authorization was denied or canceled. Please try again and approve permissions.",
+        missing_code: "Google did not return an authorization code. Please retry the connection flow.",
+        internal_error: "We could not complete Google connection due to a server-side issue. Please retry shortly.",
+    };
+    const googleErrorMessage = googleErrorCode
+        ? (googleErrorMessageByCode[googleErrorCode] || "Google connection failed. Please reconnect.")
+        : null;
     let tasklistLoadError: string | null = null;
     let googleTasklists: Array<{ id: string; title: string; isDefault: boolean }> = [];
 
@@ -149,6 +164,14 @@ export default async function GoogleIntegrationPage({
                     <div className="flex items-center">
                         <CheckCircle2 className="mr-2 h-5 w-5" />
                         <p>Successfully connected to Google!</p>
+                    </div>
+                </div>
+            )}
+            {googleErrorMessage && (
+                <div className="rounded-md bg-red-50 p-4 text-red-700 dark:bg-red-900/10 dark:text-red-400">
+                    <div className="flex items-center">
+                        <AlertCircle className="mr-2 h-5 w-5" />
+                        <p>{googleErrorMessage}{googleErrorId ? ` (Ref: ${googleErrorId})` : ""}</p>
                     </div>
                 </div>
             )}
