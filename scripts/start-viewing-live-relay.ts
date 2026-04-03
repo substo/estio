@@ -936,9 +936,6 @@ function maybeSendRealtimeAudioToVendor(context: RelayContext, payload: Record<s
 
     const eventType = asString(payload.eventType);
     if (eventType !== "realtime_audio" && eventType !== "audio_input") return;
-    if (context.role !== "client") {
-        throw new Error("Agent microphone streaming is out of scope for this rollout.");
-    }
 
     const mimeType = asString(payload.mimeType) || "audio/pcm;rate=16000";
     const base64 = asString(payload.data || payload.base64 || "");

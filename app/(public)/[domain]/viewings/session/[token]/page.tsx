@@ -26,6 +26,8 @@ export default async function PublicViewingSessionPage(
             id: true,
             status: true,
             mode: true,
+            sessionKind: true,
+            participantMode: true,
             transportStatus: true,
             liveProvider: true,
             clientName: true,
@@ -56,14 +58,16 @@ export default async function PublicViewingSessionPage(
                 clientName: session.clientName || null,
                 status: session.status,
                 mode: session.mode,
+                sessionKind: session.sessionKind,
+                participantMode: session.participantMode,
                 transportStatus: session.transportStatus,
                 liveProvider: session.liveProvider || null,
                 clientLanguage: session.clientLanguage || null,
                 agentLanguage: session.agentLanguage || null,
-                property: {
+                property: session.primaryProperty ? {
                     title: session.primaryProperty.title,
                     reference: session.primaryProperty.reference || null,
-                },
+                } : null,
                 agent: {
                     name: session.agent.name || [session.agent.firstName, session.agent.lastName].filter(Boolean).join(" ") || "Agent",
                 },

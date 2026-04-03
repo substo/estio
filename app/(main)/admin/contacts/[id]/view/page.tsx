@@ -2,6 +2,8 @@
 import db from "@/lib/db";
 import { getLocationContext } from "@/lib/auth/location-context";
 import { EditContactForm } from "../../_components/edit-contact-dialog";
+import { QuickAssistStartButton } from "@/app/(main)/admin/viewings/sessions/_components/quick-assist-start-button";
+import { VIEWING_SESSION_QUICK_START_SOURCES } from "@/lib/viewings/sessions/types";
 
 export const dynamic = "force-dynamic";
 
@@ -80,6 +82,14 @@ export default async function ContactViewPage({ params, searchParams }: { params
 
     return (
         <div className="p-6 max-w-6xl mx-auto">
+            <div className="mb-4 flex justify-end">
+                <QuickAssistStartButton
+                    label="Start Quick Assist"
+                    locationId={locationId}
+                    contactId={contact.id}
+                    quickStartSource={VIEWING_SESSION_QUICK_START_SOURCES.contact}
+                />
+            </div>
             <EditContactForm
                 contact={contact}
                 leadSources={leadSources}

@@ -9,7 +9,8 @@ import {
   LayoutTemplate,
   Building,
   MessageSquare,
-  Layers
+  Layers,
+  Languages
 } from "lucide-react"
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
@@ -32,6 +33,12 @@ export default function DashboardSideBar({ logoUrl, lightUrl }: { logoUrl?: stri
       label: "Conversations",
       icon: <MessageSquare className="h-3 w-3" />,
       activePath: (pathname: string) => pathname.includes(`/admin/conversations`)
+    },
+    {
+      href: `/admin/viewings/sessions`,
+      label: "Quick Assist",
+      icon: <Languages className="h-3 w-3" />,
+      activePath: (pathname: string) => pathname.includes(`/admin/viewings/sessions`)
     },
     {
       href: `/admin/properties`,

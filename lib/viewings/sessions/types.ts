@@ -5,6 +5,58 @@ export const VIEWING_SESSION_MODES = {
 
 export type ViewingSessionMode = typeof VIEWING_SESSION_MODES[keyof typeof VIEWING_SESSION_MODES];
 
+export const VIEWING_SESSION_KINDS = {
+    structuredViewing: "structured_viewing",
+    quickTranslate: "quick_translate",
+    listenOnly: "listen_only",
+    twoWayInterpreter: "two_way_interpreter",
+} as const;
+
+export type ViewingSessionKind = typeof VIEWING_SESSION_KINDS[keyof typeof VIEWING_SESSION_KINDS];
+
+export const VIEWING_SESSION_PARTICIPANT_MODES = {
+    agentOnly: "agent_only",
+    sharedClient: "shared_client",
+} as const;
+
+export type ViewingSessionParticipantMode =
+    typeof VIEWING_SESSION_PARTICIPANT_MODES[keyof typeof VIEWING_SESSION_PARTICIPANT_MODES];
+
+export const VIEWING_SESSION_SPEECH_MODES = {
+    pushToTalk: "push_to_talk",
+    continuous: "continuous",
+    listenOnly: "listen_only",
+} as const;
+
+export type ViewingSessionSpeechMode = typeof VIEWING_SESSION_SPEECH_MODES[keyof typeof VIEWING_SESSION_SPEECH_MODES];
+
+export const VIEWING_SESSION_SAVE_POLICIES = {
+    discardOnClose: "discard_on_close",
+    saveTranscript: "save_transcript",
+    saveSummaryOnly: "save_summary_only",
+    fullSession: "full_session",
+} as const;
+
+export type ViewingSessionSavePolicy = typeof VIEWING_SESSION_SAVE_POLICIES[keyof typeof VIEWING_SESSION_SAVE_POLICIES];
+
+export const VIEWING_SESSION_QUICK_START_SOURCES = {
+    global: "global",
+    property: "property",
+    contact: "contact",
+    viewing: "viewing",
+} as const;
+
+export type ViewingSessionQuickStartSource =
+    typeof VIEWING_SESSION_QUICK_START_SOURCES[keyof typeof VIEWING_SESSION_QUICK_START_SOURCES];
+
+export const VIEWING_SESSION_ASSIGNMENT_STATUSES = {
+    assigned: "assigned",
+    unassigned: "unassigned",
+} as const;
+
+export type ViewingSessionAssignmentStatus =
+    typeof VIEWING_SESSION_ASSIGNMENT_STATUSES[keyof typeof VIEWING_SESSION_ASSIGNMENT_STATUSES];
+
 export const VIEWING_SESSION_STATUSES = {
     scheduled: "scheduled",
     active: "active",
@@ -48,6 +100,7 @@ export const VIEWING_SESSION_EVENT_TYPES = {
     messageUpdated: "viewing_session.message.updated",
     insightUpserted: "viewing_session.insight.upserted",
     summaryUpdated: "viewing_session.summary.updated",
+    contextUpdated: "viewing_session.context.updated",
     statusChanged: "viewing_session.status.changed",
     transportStatusChanged: "viewing_session.transport.status.changed",
     usageUpdated: "viewing_session.usage.updated",

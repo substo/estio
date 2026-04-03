@@ -18,6 +18,8 @@ type SessionPreview = {
     id: string;
     clientName: string | null;
     mode: string;
+    sessionKind: string | null;
+    participantMode: string | null;
     status: string;
     transportStatus: string;
     liveProvider: string | null;
@@ -26,7 +28,7 @@ type SessionPreview = {
     property: {
         title: string;
         reference: string | null;
-    };
+    } | null;
     agent: {
         name: string;
     };
@@ -72,6 +74,13 @@ function formatSpeaker(speaker: string) {
     if (speaker === "client") return "You";
     if (speaker === "agent") return "Agent";
     return "Assistant";
+}
+
+function formatSessionKindLabel(sessionKind: string | null) {
+    if (sessionKind === "listen_only") return "Listening session";
+    if (sessionKind === "two_way_interpreter") return "Two-way interpreter";
+    if (sessionKind === "quick_translate") return "Quick translation";
+    return "Viewing session";
 }
 
 export function ClientSessionView({ token, preview }: Props) {
@@ -305,9 +314,9 @@ export function ClientSessionView({ token, preview }: Props) {
         <div className="mx-auto w-full max-w-xl space-y-4 px-4 py-6 sm:py-8">
             <Card>
                 <CardHeader className="pb-3">
-                    <CardTitle className="text-lg">{preview.property.title}</CardTitle>
+                    <CardTitle className="text-lg">{preview.property?.title || "Live translation session"}</CardTitle>
                     <CardDescription>
-                        Agent: {preview.agent.name} • {preview.property.reference ? `Ref ${preview.property.reference}` : "Live viewing session"}
+                        Agent: {preview.agent.name} • {preview.property?.reference ? `Ref ${preview.property.reference}` : formatSessionKindLabel(preview.sessionKind)}
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">

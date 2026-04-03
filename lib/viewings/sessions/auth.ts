@@ -48,7 +48,7 @@ async function resolveContextFromSessionToken(args: {
         });
         if (!session) return null;
         if (session.locationId !== payload.locationId) return null;
-        if (session.tokenExpiresAt.getTime() <= Date.now()) return null;
+        if (session.tokenExpiresAt && session.tokenExpiresAt.getTime() <= Date.now()) return null;
 
         return {
             sessionId: session.id,

@@ -48,6 +48,8 @@ import {
     getTimeZoneShortLabel,
 } from '@/lib/viewings/datetime';
 import { toast } from 'sonner';
+import { QuickAssistStartButton } from '@/app/(main)/admin/viewings/sessions/_components/quick-assist-start-button';
+import { VIEWING_SESSION_QUICK_START_SOURCES } from '@/lib/viewings/sessions/types';
 
 // Reuse the badge logic from Tasks, adapting it for viewings
 const VIEWING_SYNC_MAX_ATTEMPTS = 6;
@@ -586,6 +588,16 @@ export function ContactViewingManager({
                                                 )}
                                                 Live
                                             </Button>
+                                            <QuickAssistStartButton
+                                                label="Quick Assist"
+                                                locationId={locationId}
+                                                viewingId={viewing.id}
+                                                quickStartSource={VIEWING_SESSION_QUICK_START_SOURCES.viewing}
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-6 px-2 text-[10px]"
+                                                icon="mic"
+                                            />
                                             <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={() => handleEdit(viewing)}>
                                                 <Pencil className="h-3.5 w-3.5" />
                                             </Button>

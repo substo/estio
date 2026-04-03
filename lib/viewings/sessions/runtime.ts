@@ -3,6 +3,7 @@ import { publishViewingSessionRealtimeEvent } from "@/lib/realtime/viewing-sessi
 import { appendViewingSessionEvent } from "@/lib/viewings/sessions/events";
 import { resolveViewingSessionStageModelsFromSession } from "@/lib/viewings/sessions/live-models";
 import { generateViewingSessionJoinSecrets } from "@/lib/viewings/sessions/security";
+import { shouldRequireViewingSessionJoinCredentials } from "@/lib/viewings/sessions/session-config";
 import {
     VIEWING_SESSION_EVENT_TYPES,
     VIEWING_SESSION_MODES,
@@ -184,7 +185,9 @@ export async function ensureViewingSessionWithinLiveWindow(sessionId: string): P
         insightsModel: (session as any).insightsModel,
         summaryModel: (session as any).summaryModel,
     });
-    const secrets = generateViewingSessionJoinSecrets();
+    const secrets = shouldRequireViewingSessionJoinCredentials((session as any).participantMode)
+        ? generateViewingSessionJoinSecrets()
+        : null;
     const now = new Date();
 
     const chainedSession = await db.$transaction(async (tx) => {
@@ -200,12 +203,23 @@ export async function ensureViewingSessionWithinLiveWindow(sessionId: string): P
                 clientName: session.clientName || null,
                 clientLanguage: session.clientLanguage || null,
                 agentLanguage: session.agentLanguage || null,
+                sessionKind: (session as any).sessionKind || "structured_viewing",
+                participantMode: (session as any).participantMode || "shared_client",
+                speechMode: (session as any).speechMode || "push_to_talk",
+                savePolicy: (session as any).savePolicy || "full_session",
+                entryPoint: (session as any).entryPoint || null,
+                quickStartSource: (session as any).quickStartSource || null,
+                assignmentStatus: (session as any).assignmentStatus || (session.contactId ? "assigned" : "unassigned"),
+                assignedAt: (session as any).assignedAt || null,
+                assignedByUserId: (session as any).assignedByUserId || null,
+                contextAttachedAt: (session as any).contextAttachedAt || null,
+                convertedFromSessionKind: (session as any).convertedFromSessionKind || null,
                 mode,
                 status: VIEWING_SESSION_STATUSES.active,
-                sessionLinkTokenHash: secrets.tokenHash,
-                pinCodeHash: secrets.pinCodeHash,
-                pinCodeSalt: secrets.pinCodeSalt,
-                tokenExpiresAt: secrets.expiresAt,
+                sessionLinkTokenHash: secrets?.tokenHash || null,
+                pinCodeHash: secrets?.pinCodeHash || null,
+                pinCodeSalt: secrets?.pinCodeSalt || null,
+                tokenExpiresAt: secrets?.expiresAt || null,
                 startedAt: now,
                 notes: session.notes || null,
                 audioPlaybackClientEnabled: session.audioPlaybackClientEnabled,

@@ -6,6 +6,7 @@ import { initViewingSessionAnalysisWorker, enqueueViewingSessionAnalysis } from 
 import { enqueueViewingSessionSynthesis, initViewingSessionSynthesisWorker } from "@/lib/queue/viewing-session-synthesis";
 import { publishViewingSessionRealtimeEvent } from "@/lib/realtime/viewing-session-events";
 import { appendViewingSessionEvent } from "@/lib/viewings/sessions/events";
+import { resolveViewingSessionPipelinePolicy } from "@/lib/viewings/sessions/pipeline-policy";
 import { generateViewingSessionAccessToken } from "@/lib/viewings/sessions/security";
 import { resolveViewingSessionRequestContext } from "@/lib/viewings/sessions/auth";
 import {
@@ -126,6 +127,7 @@ export async function POST(
     ) {
         return NextResponse.json({ success: false, error: "Session is not writable." }, { status: 409 });
     }
+    const pipelinePolicy = resolveViewingSessionPipelinePolicy({ sessionKind: (writableSession as any).sessionKind });
 
     const data = parsed.data;
     const speaker = resolveSpeakerByContext(context.role, data.speaker);
@@ -191,7 +193,9 @@ export async function POST(
                 const translationStatus = data.translatedText
                     ? VIEWING_SESSION_TRANSLATION_STATUSES.completed
                     : VIEWING_SESSION_TRANSLATION_STATUSES.pending;
-                const insightStatus = VIEWING_SESSION_INSIGHT_PIPELINE_STATUSES.pending;
+                const insightStatus = pipelinePolicy.autoInsights
+                    ? VIEWING_SESSION_INSIGHT_PIPELINE_STATUSES.pending
+                    : VIEWING_SESSION_INSIGHT_PIPELINE_STATUSES.skipped;
                 const analysisStatus = deriveViewingSessionAnalysisStatus({
                     translationStatus,
                     insightStatus,
@@ -251,7 +255,9 @@ export async function POST(
             const translationStatus = data.translatedText
                 ? VIEWING_SESSION_TRANSLATION_STATUSES.completed
                 : VIEWING_SESSION_TRANSLATION_STATUSES.pending;
-            const insightStatus = VIEWING_SESSION_INSIGHT_PIPELINE_STATUSES.pending;
+            const insightStatus = pipelinePolicy.autoInsights
+                ? VIEWING_SESSION_INSIGHT_PIPELINE_STATUSES.pending
+                : VIEWING_SESSION_INSIGHT_PIPELINE_STATUSES.skipped;
             const analysisStatus = deriveViewingSessionAnalysisStatus({
                 translationStatus,
                 insightStatus,
@@ -388,17 +394,19 @@ export async function POST(
         });
     }
     let synthesisQueueResult: unknown = null;
-    try {
-        await initViewingSessionSynthesisWorker();
-    } catch (error) {
-        console.warn("[viewing-session] Failed to init synthesis worker, continuing with enqueue fallback:", error);
+    if (pipelinePolicy.autoSummary) {
+        try {
+            await initViewingSessionSynthesisWorker();
+        } catch (error) {
+            console.warn("[viewing-session] Failed to init synthesis worker, continuing with enqueue fallback:", error);
+        }
+        synthesisQueueResult = await enqueueViewingSessionSynthesis({
+            sessionId: writableSession.id,
+            status: "draft",
+            trigger: "debounced_worker",
+            allowInlineFallback: true,
+        });
     }
-    synthesisQueueResult = await enqueueViewingSessionSynthesis({
-        sessionId: writableSession.id,
-        status: "draft",
-        trigger: "debounced_worker",
-        allowInlineFallback: true,
-    });
 
     const roleForToken = context.role === "client" ? "client" : "agent";
     const sessionAccessToken = writableSession.id === session.id

@@ -9,10 +9,11 @@ import { UserProfile } from '@/components/user-profile'
 import { AICostBadge } from '@/components/ai-cost-badge'
 import config from '@/config'
 import { HamburgerMenuIcon } from '@radix-ui/react-icons'
-import { Home, Settings, List, FileText, MessageSquare, Building, LayoutTemplate, Layers } from 'lucide-react'
+import { Home, Settings, List, FileText, MessageSquare, Building, LayoutTemplate, Layers, Languages } from 'lucide-react'
 import Link from 'next/link'
 import { ReactNode } from 'react'
 import { APP_NAME } from "@/components/app-logo"
+import { QuickAssistStartButton } from "@/app/(main)/admin/viewings/sessions/_components/quick-assist-start-button"
 
 export default function DashboardTopNav({ children }: { children: ReactNode }) {
   return (
@@ -32,6 +33,9 @@ export default function DashboardTopNav({ children }: { children: ReactNode }) {
               </Link>
             </SheetHeader>
             <div className="flex flex-col space-y-3 mt-[1rem]">
+              <div className="px-1">
+                <QuickAssistStartButton label="Quick Assist" variant="outline" size="sm" className="w-full" />
+              </div>
               <SheetClose asChild>
                 <Link href="/admin">
                   <Button variant="outline" className="w-full">
@@ -45,6 +49,14 @@ export default function DashboardTopNav({ children }: { children: ReactNode }) {
                   <Button variant="outline" className="w-full">
                     <MessageSquare className="mr-2 h-4 w-4" />
                     Conversations
+                  </Button>
+                </Link>
+              </SheetClose>
+              <SheetClose asChild>
+                <Link href="/admin/viewings/sessions">
+                  <Button variant="outline" className="w-full">
+                    <Languages className="mr-2 h-4 w-4" />
+                    Quick Assist
                   </Button>
                 </Link>
               </SheetClose>
@@ -133,6 +145,9 @@ export default function DashboardTopNav({ children }: { children: ReactNode }) {
           </SheetContent>
         </Sheet>
         <div className="flex justify-center items-center gap-2 ml-auto">
+          <div className="hidden sm:flex">
+            <QuickAssistStartButton label="Quick Assist" variant="outline" size="sm" />
+          </div>
           <AdminNotificationBell />
           <AICostBadge />
           {config?.auth?.enabled && <UserProfile />}

@@ -185,6 +185,55 @@ Delivered in this wave:
   - stage-model routing defaults and overrides
   - usage authority/cost authority defaults
 
+## 2026-04-03 Quick Field Assist Update (Instant Entry + Progressive Context)
+
+This slice adds the missing field-operations product layer without replacing the existing `ViewingSession` backbone.
+
+Delivered in this wave:
+
+- `ViewingSession` now supports quick-operational modes and progressive enrichment:
+  - `sessionKind` (`structured_viewing | quick_translate | listen_only | two_way_interpreter`)
+  - `participantMode` (`agent_only | shared_client`)
+  - `speechMode`
+  - `savePolicy`
+  - `entryPoint`
+  - `quickStartSource` (`global | property | contact | viewing`)
+  - `assignmentStatus`
+  - `assignedAt`
+  - `assignedByUserId`
+  - `contextAttachedAt`
+  - `convertedFromSessionKind`
+- `viewingId`, `contactId`, `primaryPropertyId`, and join credentials are now nullable for instant-start sessions.
+- Fast-start APIs were added:
+  - `POST /api/viewings/sessions/quick-start`
+  - `PATCH /api/viewings/sessions/[id]/context`
+  - `POST /api/viewings/sessions/[id]/convert`
+  - `POST /api/viewings/sessions/[id]/close`
+  - `GET /api/viewings/sessions/thread/[threadId]/preview`
+  - `POST /api/viewings/sessions/[id]/audio-transcribe` (fallback clip transcription)
+- Runtime policy is now session-kind aware through `resolveViewingSessionPipelinePolicy(...)`:
+  - structured sessions keep full pipeline behavior
+  - quick/listen/interpreter sessions default to transcript + translation fast path
+  - quick modes disable automatic insights/summary/tool invocation by default
+- Internal field UI is now split:
+  - structured sessions continue to use the cockpit
+  - non-structured sessions now render a mobile-first quick assist surface with:
+    - `Speak`, `Listen`, `Share` controls
+    - live translation-first transcript presentation
+    - attach-context dialog
+    - save/discard controls
+    - relay mic capture + audio-clip + browser-STT fallback path
+- Admin navigation and entrypoints now support one-tap quick assist:
+  - dedicated sessions index/assignment queue page
+  - top-nav and sidebar quick entry
+  - contextual quick-start from contact, property, and viewing workflows
+- Contact timeline support now includes:
+  - `VIEWING_SESSION_SAVED`
+  - `VIEWING_SESSION_ATTACHED`
+  - preview modal fetch via `sessionThreadId`
+- Shared mode conversion now lazily issues join credentials and returns domain-aware join URL.
+- Relay now accepts agent-side microphone streaming events in quick internal mode.
+
 ---
 
 ## Executive Summary
@@ -207,9 +256,9 @@ The new implementation adds:
 - post-session summary generation
 
 Important reality check:
-- the feature is currently a text-first live copilot, not a full Gemini Live streaming voice product
-- there is scaffolding for Gemini Live mode selection and configuration, but the browser-to-Gemini native audio streaming path is not implemented yet
-- current "live" behavior is driven by persisted messages, SSE updates, browser speech recognition, and backend text analysis
+- the feature now supports internal quick-start field operations, including admin/browser mic capture through the backend relay plus clip/STT fallback
+- the public shared client path is still mostly text-first and does not yet provide a full browser-native Gemini Live media session
+- current "live" behavior still depends on persisted messages, SSE updates, relay events, and backend staged analysis/synthesis
 
 ---
 
@@ -264,6 +313,12 @@ That remains the north star.
   - live-auth
   - relay
   - insight state override
+  - quick-start
+  - context attach
+  - session convert
+  - session close
+  - session-thread preview
+  - audio-transcribe fallback
 - Realtime SSE channel with replay support
 - Queue-backed multi-stage processing:
   - Stage 2 message analysis
@@ -286,8 +341,21 @@ That remains the north star.
 - Admin cockpit UI for a single session
 - Tenant-facing join page with minimal session UI
 - "Start Live Session" entrypoint from the existing viewing manager
+- One-tap quick assist start from:
+  - global launcher
+  - contact context
+  - property context
+  - viewing context
 - Session chaining logic for 15-minute live-window rollover
 - Gemini model/mode resolver and live config scaffolding
+- Session-kind fast-path policy routing for quick/listen/interpreter modes
+- Internal quick assist UI with:
+  - `Speak` / `Listen` / `Share` controls
+  - progressive context attachment
+  - save/discard flow with assignment semantics
+  - relay mic + clip + browser-STT fallback capture modes
+- Dedicated admin sessions index page with assignment queue
+- Contact timeline preview actions for saved/attached session threads
 - Location-level viewing-session policy settings in admin AI settings:
   - retention
   - transcript visibility
@@ -296,10 +364,9 @@ That remains the north star.
 
 ### Not Delivered Yet
 
-- browser microphone PCM capture and backend media forwarding to Gemini Live
-- actual audio output playback pipeline from vendor audio responses
-- ephemeral Google Live auth tokens for direct browser Live sessions
-- a dedicated session list/index page for admins
+- full public-client browser microphone PCM capture and push-to-talk relay parity
+- fully validated production-grade vendor audio playback path on public shared sessions
+- ephemeral Google Live auth tokens for direct browser-to-Google Live sessions
 - automatic related-property ranking/search engine
 - rich company knowledge-base retrieval
 - route-level automated tests for join/message/realtime/relay flows
@@ -316,6 +383,7 @@ That remains the north star.
 - `prisma/migrations/20260402223000_viewing_session_hardening_native_audio/migration.sql`
 - `prisma/migrations/20260403003000_viewing_session_next_wave/migration.sql`
 - `prisma/migrations/20260403120000_viewing_session_hardening_wave_two/migration.sql`
+- `prisma/migrations/20260403153000_viewing_session_quick_field_assist/migration.sql`
 
 ## Session backend
 
@@ -327,11 +395,20 @@ That remains the north star.
 - `app/api/viewings/sessions/[id]/relay/route.ts`
 - `app/api/viewings/sessions/[id]/reprocess/route.ts`
 - `app/api/viewings/sessions/[id]/insights/[insightId]/state/route.ts`
+- `app/api/viewings/sessions/quick-start/route.ts`
+- `app/api/viewings/sessions/[id]/context/route.ts`
+- `app/api/viewings/sessions/[id]/convert/route.ts`
+- `app/api/viewings/sessions/[id]/close/route.ts`
+- `app/api/viewings/sessions/thread/[threadId]/preview/route.ts`
+- `app/api/viewings/sessions/[id]/audio-transcribe/route.ts`
 
 ## Session UI
 
 - `app/(main)/admin/viewings/sessions/[id]/page.tsx`
 - `app/(main)/admin/viewings/sessions/[id]/_components/viewing-session-cockpit.tsx`
+- `app/(main)/admin/viewings/sessions/[id]/_components/quick-field-assist.tsx`
+- `app/(main)/admin/viewings/sessions/page.tsx`
+- `app/(main)/admin/viewings/sessions/_components/quick-assist-start-button.tsx`
 - `app/(public)/[domain]/viewings/session/[token]/page.tsx`
 - `app/(public)/[domain]/viewings/session/[token]/_components/client-session-view.tsx`
 - `components/tasks/contact-viewing-manager.tsx`
@@ -355,6 +432,9 @@ That remains the north star.
 - `lib/viewings/sessions/retention.ts`
 - `lib/viewings/sessions/tool-policy.ts`
 - `lib/viewings/sessions/transcript.ts`
+- `lib/viewings/sessions/session-config.ts`
+- `lib/viewings/sessions/pipeline-policy.ts`
+- `lib/viewings/sessions/session-service.ts`
 - `lib/realtime/viewing-session-events.ts`
 - `lib/queue/viewing-session-analysis.ts`
 - `lib/queue/viewing-session-insights.ts`
@@ -369,6 +449,8 @@ That remains the north star.
 - `lib/viewings/sessions/retention.test.ts`
 - `lib/viewings/sessions/runtime.test.ts`
 - `lib/viewings/sessions/tool-policy.test.ts`
+- `lib/viewings/sessions/session-config.test.ts`
+- `lib/viewings/sessions/pipeline-policy.test.ts`
 - `lib/viewings/sessions/transcript.test.ts`
 - `lib/viewings/sessions/types.test.ts`
 - `lib/viewings/sessions/usage.test.ts`
@@ -404,13 +486,26 @@ Purpose:
 - link between live analysis and the scheduled viewing
 
 Current shape includes:
-- links to `Location`, `Viewing`, `Contact`, primary `Property`, current active `Property`, and `User`
+- links to `Location`, optional `Viewing`, optional `Contact`, optional primary `Property`, current active `Property`, and `User`
 - `mode` and `status`
+- quick-mode identity and participation fields:
+  - `sessionKind`
+  - `participantMode`
+  - `speechMode`
+  - `savePolicy`
+  - `entryPoint`
+  - `quickStartSource`
+  - `convertedFromSessionKind`
+- progressive assignment/context fields:
+  - `assignmentStatus`
+  - `assignedAt`
+  - `assignedByUserId`
+  - `contextAttachedAt`
 - transport/runtime fields:
   - `transportStatus`
   - `liveProvider`
   - `lastTransportEventAt`
-- secure join fields:
+- secure join fields (nullable for `agent_only` quick sessions):
   - `sessionLinkTokenHash`
   - `pinCodeHash`
   - `pinCodeSalt`
@@ -566,7 +661,7 @@ Current shape includes:
 
 ## 1. Session creation
 
-The agent creates a live session from an existing viewing.
+Two creation paths now exist.
 
 Current flow:
 1. Existing viewing is created and synced through the current `Viewing` pipeline.
@@ -585,6 +680,22 @@ Current implementation notes:
 - public join URL generation depends on the location/site domain
 - location-level retention/visibility/disclosure policy is snapshotted onto the session at creation time
 - premium voice mode is rejected unless enabled by env/canary feature flags for that location
+
+## 1b. Quick field start and progressive enrichment
+
+Quick assist can now start without requiring a pre-existing viewing/contact/property.
+
+Current flow:
+1. User triggers quick start from global, contact, property, or viewing context.
+2. `POST /api/viewings/sessions/quick-start` creates an active `ViewingSession` with:
+   - quick `sessionKind` (default `quick_translate`)
+   - `participantMode` default `agent_only`
+   - no required viewing/contact/property
+3. Quick UI opens immediately on the created session id.
+4. Context can be attached later using `PATCH /api/viewings/sessions/[id]/context`.
+5. Session can be upgraded using `POST /api/viewings/sessions/[id]/convert`.
+6. Session can be closed with explicit retention behavior using `POST /api/viewings/sessions/[id]/close`.
+7. Saved quick sessions without contact context can be worked from the assignment queue page.
 
 ## 2. Client join flow
 
@@ -637,10 +748,16 @@ Current flow:
    - updates session key point/objection caches from unsuperseded rows only
    - publishes `message.updated` and `insight.upserted`
    - records derived/estimated usage rows when model usage data is available
+11. Pipeline behavior is now session-kind aware:
+   - `structured_viewing` keeps translation + insights + summary + tools behavior
+   - `quick_translate` defaults to transcript + translation fast path
+   - `listen_only` defaults to translated subtitle fast path
+   - `two_way_interpreter` defaults to bidirectional translation with optional speech-back
+   - quick modes do not auto-run insights/summary/tools unless explicitly upgraded/converted
 
 Important reality check:
-- this is not native audio streaming
-- the current live loop is "persist text -> analyze -> push SSE updates"
+- quick modes now support fast translation loops, but full voice-native Gemini Live behavior is still incomplete
+- the core persisted loop remains "persist message/event -> stage processing -> SSE updates"
 
 ## 4. Relay and transport runtime
 
@@ -663,7 +780,7 @@ Current reality check:
 - relay support now includes a dedicated backend WebSocket process with Gemini Live session ownership, reconnect handling, tool-call responses, transcript persistence, and usage fanout
 - reconnect semantics are now budgeted by both attempt count and elapsed reconnect time, with explicit failure transitions
 - persisted DB rows plus Redis/SSE fanout remain the source of truth for UI updates
-- browser-native audio wiring is still incomplete on the public client, so the backend relay is ahead of the current browser transport UI
+- internal quick-assist now allows agent microphone relay input, while public shared-client browser media transport is still incomplete
 
 ## 5. Realtime transport
 
@@ -774,14 +891,13 @@ Implemented today:
 ## What is not implemented yet
 
 Not implemented yet:
-- actual WebSocket Live session relay
-- native PCM 16kHz browser audio streaming to Gemini Live
-- Gemini Live tool-call roundtrip loop
-- direct audio output playback from Gemini
-- ephemeral Google Live auth token issuance
+- direct browser-to-Google Live session mode with ephemeral Google auth tokens
+- full public-client PCM capture/stream path parity with internal quick-assist
+- production-hardened bi-directional audio playback UX across both client and agent surfaces
 
 Important reality check:
-- `lib/viewings/sessions/gemini-live.ts` is currently configuration scaffolding
+- backend relay runtime exists and accepts persisted relay events; media transport maturity is uneven by surface
+- `lib/viewings/sessions/gemini-live.ts` is still mostly configuration/auth scaffolding
 - current message analysis uses `@google/generative-ai`
 - the dependency `@google/genai` is present for future live runtime work, but the live media transport is still future work
 
@@ -802,8 +918,9 @@ Current additions:
   - PIN
   - expiry
   - open cockpit action
+- each viewing row now also has a `Quick Assist` action for quick-mode starts pre-attached to the viewing context
 
-## 2. Admin cockpit
+## 2. Admin cockpit (structured flow)
 
 Files:
 - `app/(main)/admin/viewings/sessions/[id]/page.tsx`
@@ -832,10 +949,28 @@ Current UI capabilities:
 - audit/usage panel showing consent metadata, stage models, and recent usage authorities
 
 Important reality check:
-- there is no admin microphone capture UI yet
-- the cockpit is currently text-first
+- cockpit remains structured-viewing-first and primarily text-driven
 
-## 3. Client join page
+## 3. Quick field assist surface (internal/mobile-first flow)
+
+Files:
+- `app/(main)/admin/viewings/sessions/[id]/_components/quick-field-assist.tsx`
+- `app/(main)/admin/viewings/sessions/page.tsx`
+- `app/(main)/admin/viewings/sessions/_components/quick-assist-start-button.tsx`
+
+Current quick UI capabilities:
+- one-screen `Speak`, `Listen`, `Share` mode controls
+- translation-forward transcript layout
+- context attach modal (`contact`, `property`, `viewing`, notes) without restarting the session
+- explicit save behavior (`save_transcript`, `save_summary_only`, `discard_on_close`)
+- share-mode upgrade path that lazily issues join link + PIN
+- internal compliance banner in `agent_only` mode
+- browser mic relay input when available
+- fallback capture:
+  - short clip upload -> `audio-transcribe`
+  - browser speech recognition text capture
+
+## 4. Client join page (shared mode)
 
 Files:
 - `app/(public)/[domain]/viewings/session/[token]/page.tsx`
@@ -849,11 +984,23 @@ Current client UI capabilities:
 - browser speech-recognition assisted text capture
 - client playback toggle
 - visible transport status and live provider state
+- session-kind-aware fallback labeling when property context is absent
 - text-first fallback behavior when live transport is unavailable
 
 Important reality check:
 - this is not streaming browser microphone audio into Gemini Live
 - it currently relies on browser speech recognition where available, then posts text into the session
+
+## 5. Launcher and assignment surfaces
+
+Current additions:
+- dedicated admin sessions index at `app/(main)/admin/viewings/sessions/page.tsx`
+- location-scoped assignment queue for saved quick sessions without attached contact context
+- quick launcher entrypoints in:
+  - top nav
+  - sidebar
+  - contact detail view
+  - property detail view
 
 ## Route-group note
 
@@ -875,6 +1022,13 @@ This keeps the client page outside the normal `app/(public-site)` header/footer 
 | Secure token + PIN join flow | Yes | Delivered | Hashed token/PIN, lockout, JWT |
 | Tenant-branded client route | Yes | Delivered | Implemented via `app/(public)/[domain]/...` |
 | Admin cockpit page | Yes | Delivered | Session-specific cockpit exists |
+| One-tap quick start with no required context | Yes | Delivered | `quick-start` route + launcher entrypoints across global/contact/property/viewing contexts |
+| Agent-only mode split from shared-client mode | Yes | Delivered | `participantMode` drives join credentials and consent behavior |
+| Progressive context attach after session start | Yes | Delivered | `PATCH /context` updates context snapshot and assignment state mid-session |
+| Session conversion between quick/shared/structured | Yes | Delivered | `POST /convert` supports share upgrade and structured-mode guardrails |
+| Explicit quick-session close/save policy flow | Yes | Delivered | `POST /close` supports transcript/summary/discard retention behavior |
+| Admin assignment queue for unassigned quick sessions | Yes | Delivered | Dedicated `/admin/viewings/sessions` index surface |
+| Timeline preview for saved/attached quick threads | Yes | Delivered | `VIEWING_SESSION_SAVED/ATTACHED` + thread preview modal |
 | SSE realtime session events | Yes | Delivered | Session-scoped SSE with replay |
 | Persist original + translated utterances | Yes | Delivered | Both fields stored on `ViewingSessionMessage` |
 | Stable utterance lineage and correction rendering | Yes | Delivered | `utteranceId` plus supersession rules now define effective transcript rendering |
@@ -892,9 +1046,9 @@ This keeps the client page outside the normal `app/(public-site)` header/footer 
 | Lead preference enrichment | Yes | Partial | Lightweight patch to `requirementOtherDetails` |
 | Human override over AI suggestions | Yes | Delivered | Pin/dismiss/resolve state changes |
 | Dual live modes | Yes | Delivered with gating | Premium voice is feature-flagged per location |
-| Backend relay surface | Yes | Partial | HTTP relay event ingestion exists; WS upgrade still pending |
-| Gemini Live native audio session | Yes | Not delivered | Still scaffolding only |
-| Per-side audio playback toggles | Yes | Partial | UI/state gating exists, but vendor audio playback path not built |
+| Backend relay surface | Yes | Partial/Delivered | Dedicated relay runtime + ingestion path exists; public media parity still pending |
+| Gemini Live native audio session | Yes | Partial | Internal quick-assist supports relay mic path; full direct browser live mode is not delivered |
+| Per-side audio playback toggles | Yes | Partial | Internal quick surface can play relay chunks; full production parity across surfaces is pending |
 | Session chaining past 15 minutes | Yes | Partial/Delivered | Chaining logic exists, but true media continuity is future work |
 | Calendar-linked session workflow | Yes | Partial | Session links to `Viewing`; no deeper calendar/session UI yet |
 | Retention policy for viewing sessions | Yes | Delivered | Location policy is configurable and snapshotted to session |
@@ -909,21 +1063,21 @@ This keeps the client page outside the normal `app/(public-site)` header/footer 
 
 These are the most important places where the current implementation differs from the original spec.
 
-## 1. "Live" currently means text-first, not audio-stream-first
+## 1. "Live" behavior is split by surface
 
 The planned system assumed:
 - microphone audio capture
 - direct Live API streaming
 - transcript events from the model
 
-The current system does not do that yet.
+The current system now does this partially, not universally.
 
 Current behavior:
-- client can type
-- client can use browser speech recognition to produce text
-- agent can type utterances
-- backend persists messages and analyzes them
-- UI updates via SSE
+- internal quick-assist: browser mic relay input is supported, with clip/STT fallback
+- public shared-client flow: still primarily text + browser speech recognition
+- agent can still type utterances in structured cockpit
+- backend persists all messages/events and analyzes through staged queues
+- UI updates via SSE remain the source-of-truth display path
 
 ## 2. Live auth is configuration, not full Live transport
 
@@ -970,12 +1124,11 @@ There is no:
 
 ## Product/UX gaps
 
-- No admin session index page
-- No session replay UI
+- No full transcript replay workspace beyond the current thread preview modal
 - No session timeline / utterance cluster view
-- No rich context panel showing structured property/contact/company context to the agent
+- No rich side-by-side context panel showing structured property/contact/company context to the agent in quick mode
 - No explicit related-properties panel fed by a search/ranking subsystem
-- No polished branded share/activation workflow beyond the share modal
+- Share/activation flow is functional but still minimally branded
 
 ## AI/runtime gaps
 
@@ -994,7 +1147,8 @@ There is no:
 
 ## Browser/runtime caveats
 
-- client speech capture depends on browser speech recognition availability
+- internal quick-assist capture prefers relay mic stream, then clip transcription, then browser speech recognition
+- public shared-client capture still depends on browser speech recognition availability
 - session chaining can rotate the active session id
 - current client and admin pages refresh session JWTs when chaining happens, but true media continuity is still future work
 
@@ -1007,6 +1161,11 @@ Completed during implementation:
 - `NODE_OPTIONS='--max-old-space-size=8192' npx tsc --noEmit`
 - `npm run test:viewings:sessions`
 
+Latest observed outcomes (2026-04-03 quick-assist wave):
+- TypeScript: pass (`tsc --noEmit`)
+- Viewing-session test suite: pass (`31/31` tests)
+- Prisma client generation: pass
+
 Focused automated coverage now includes:
 - transport transition rules
 - transcript supersession and utterance-lineage selection
@@ -1014,8 +1173,12 @@ Focused automated coverage now includes:
 - stage-model routing defaults and overrides
 - usage authority and cost authority defaults
 - feature-flag, retention, tool policy, and analysis-status helpers
+- quick-session config defaults (`session-config.test.ts`)
+- quick/session-kind pipeline gating behavior (`pipeline-policy.test.ts`)
 
 ## Concise live test steps with a test user
+
+### A. Structured live session path
 
 1. In admin, open a real or test contact that already has a scheduled viewing.
 2. In the viewing manager, click `Live` on that viewing.
@@ -1029,6 +1192,21 @@ Focused automated coverage now includes:
 10. In the cockpit, pin or dismiss an insight and verify the state updates immediately.
 11. Complete the session in admin and confirm a draft/final session summary is generated.
 12. Sanity-check that transport status, transcript, insights, and summary all persisted after a page refresh.
+
+### B. Quick field assist path
+
+1. In admin, open `/admin/viewings/sessions` and click `Start Quick Translate` (or launch quick assist from contact/property/viewing entrypoints).
+2. Confirm the quick-assist screen opens immediately without requiring contact/property/viewing context.
+3. Use `Start Mic` and verify one of the capture paths works:
+   - relay mic stream
+   - clip upload transcription fallback
+   - browser speech recognition fallback
+4. Confirm translated text appears quickly in the quick transcript view.
+5. Attach context mid-session from `Attach Context` and verify assignment status updates.
+6. Click `Share` and confirm a join URL + PIN are produced for shared-client mode.
+7. Close with each save policy on test sessions (`save_transcript`, `save_summary_only`, `discard_on_close`) and verify expected retention behavior.
+8. For saved quick sessions without contact attachment, verify they appear in the assignment queue and can be reopened.
+9. After attachment/saving, open the contact timeline and confirm `VIEWING_SESSION_SAVED` / `VIEWING_SESSION_ATTACHED` entries can open thread preview.
 
 Not completed:
 - automated join/message/realtime/relay coverage
@@ -1047,11 +1225,10 @@ This is the recommended next planning split.
 
 ## Phase A: Make live transport real
 
-- build the actual Gemini Live WebSocket relay runtime
-- stream PCM audio from browser to backend/live service
+- extend relay media transport parity across public shared-client surfaces
+- harden PCM streaming reliability and reconnect semantics for long field sessions
 - support ordered input/output transcription events
-- implement real audio playback on both client and agent sides
-- add admin microphone capture UI
+- harden audio playback UX on both client and agent sides
 
 ## Phase B: Upgrade intelligence quality
 
@@ -1082,7 +1259,7 @@ This is the recommended next planning split.
 
 ## Phase D: Improve the UX
 
-- add a session inbox/index page
+- expand session inbox/assignment queue filtering and bulk triage controls
 - improve cockpit density and glanceability
 - add collapsible context and related-property panels
 - improve mobile client join flow with clearer trust/identity framing
@@ -1122,4 +1299,4 @@ But we do not yet have the full voice-native Gemini Live copilot described in th
 
 The current implementation is best understood as:
 
-> a working session-based live copilot foundation with text-first realtime collaboration, staged AI insighting, hybrid summary generation, policy-aware session hardening, and backend relay preparation, ready for a second phase focused on true native audio transport, richer context retrieval, stronger recommendations, and production hardening.
+> a working session-based live copilot foundation with structured and quick field-assist modes, progressive context attachment, staged AI insighting, hybrid summary generation, policy-aware hardening, and backend relay readiness, now positioned for a second phase focused on full public media transport parity, richer retrieval/recommendation depth, and production hardening.

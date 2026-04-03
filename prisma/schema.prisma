@@ -182,6 +182,7 @@ model User {
   updatedProperties            Property[]                  @relation("PropertyUpdater")
   viewings                     Viewing[]
   viewingSessions              ViewingSession[]
+  assignedViewingSessions      ViewingSession[]            @relation("ViewingSessionAssignedBy")
   contactHistory               ContactHistory[]
   assignedContactTasks         ContactTask[]               @relation("ContactTaskAssignedUser")
   createdContactTasks          ContactTask[]               @relation("ContactTaskCreatedByUser")
@@ -897,14 +898,14 @@ model ViewingSession {
   locationId String
   location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
 
-  viewingId String
-  viewing   Viewing @relation(fields: [viewingId], references: [id], onDelete: Cascade)
+  viewingId String?
+  viewing   Viewing? @relation(fields: [viewingId], references: [id], onDelete: Cascade)
 
-  contactId String
-  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: Cascade)
 
-  primaryPropertyId String
-  primaryProperty   Property @relation("ViewingSessionPrimaryProperty", fields: [primaryPropertyId], references: [id], onDelete: Cascade)
+  primaryPropertyId String?
+  primaryProperty   Property? @relation("ViewingSessionPrimaryProperty", fields: [primaryPropertyId], references: [id], onDelete: Cascade)
 
   currentActivePropertyId String?
   currentActiveProperty   Property? @relation("ViewingSessionCurrentProperty", fields: [currentActivePropertyId], references: [id], onDelete: SetNull)
@@ -917,6 +918,18 @@ model ViewingSession {
   clientName     String?
   clientLanguage String?
   agentLanguage  String?
+  sessionKind    String   @default("structured_viewing") // structured_viewing | quick_translate | listen_only | two_way_interpreter
+  participantMode String  @default("shared_client") // agent_only | shared_client
+  speechMode      String? @default("push_to_talk") // push_to_talk | continuous | listen_only
+  savePolicy      String  @default("full_session") // discard_on_close | save_transcript | save_summary_only | full_session
+  entryPoint      String?
+  quickStartSource String? // global | property | contact | viewing
+  assignmentStatus String @default("assigned") // assigned | unassigned
+  assignedAt       DateTime?
+  assignedByUserId String?
+  assignedByUser   User?   @relation("ViewingSessionAssignedBy", fields: [assignedByUserId], references: [id], onDelete: SetNull)
+  contextAttachedAt DateTime?
+  convertedFromSessionKind String?
 
   mode   String @default("assistant_live_tool_heavy") // assistant_live_tool_heavy | assistant_live_voice_premium
   status String @default("scheduled") // scheduled | active | paused | completed | expired
@@ -930,10 +943,10 @@ model ViewingSession {
   appliedRetentionDays Int @default(90)
   transcriptVisibility String @default("team") // team | admin_only
 
-  sessionLinkTokenHash String   @unique
-  pinCodeHash          String
-  pinCodeSalt          String
-  tokenExpiresAt       DateTime
+  sessionLinkTokenHash String?   @unique
+  pinCodeHash          String?
+  pinCodeSalt          String?
+  tokenExpiresAt       DateTime?
 
   failedJoinAttempts Int       @default(0)
   joinLockUntil      DateTime?
@@ -976,6 +989,9 @@ model ViewingSession {
   usages   ViewingSessionUsage[]
 
   @@index([locationId, status, createdAt(sort: Desc)])
+  @@index([locationId, assignmentStatus, createdAt(sort: Desc)])
+  @@index([locationId, sessionKind, createdAt(sort: Desc)])
+  @@index([locationId, participantMode, createdAt(sort: Desc)])
   @@index([viewingId, createdAt(sort: Desc)])
   @@index([contactId, createdAt(sort: Desc)])
   @@index([agentId, status, createdAt(sort: Desc)])

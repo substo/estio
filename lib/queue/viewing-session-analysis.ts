@@ -1,6 +1,7 @@
 import db from "@/lib/db";
 import { buildQueueJobId, isDuplicateQueueJobError } from "@/lib/queue/job-id";
 import { enqueueViewingSessionInsights, initViewingSessionInsightsWorker } from "@/lib/queue/viewing-session-insights";
+import { resolveViewingSessionPipelinePolicy } from "@/lib/viewings/sessions/pipeline-policy";
 import { runViewingSessionMessageTranslation } from "@/lib/viewings/sessions/analysis";
 
 const REDIS_CONNECTION = {
@@ -67,6 +68,13 @@ async function enqueueInsightsAfterTranslation(args: {
     priority?: "normal" | "high";
     allowInlineFallback?: boolean;
 }) {
+    const session = await db.viewingSession.findUnique({
+        where: { id: args.sessionId },
+        select: { sessionKind: true },
+    });
+    const policy = resolveViewingSessionPipelinePolicy({ sessionKind: session?.sessionKind });
+    if (!policy.autoInsights) return;
+
     try {
         await initViewingSessionInsightsWorker();
     } catch (workerError) {

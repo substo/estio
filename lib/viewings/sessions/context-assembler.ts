@@ -4,6 +4,8 @@ export type ViewingSessionContextPayload = {
     session: {
         id: string;
         mode: string;
+        sessionKind: string | null;
+        participantMode: string | null;
         status: string;
         clientLanguage: string | null;
         agentLanguage: string | null;
@@ -105,6 +107,8 @@ export async function assembleViewingSessionContext(sessionId: string): Promise<
         session: {
             id: session.id,
             mode: session.mode,
+            sessionKind: session.sessionKind || null,
+            participantMode: session.participantMode || null,
             status: session.status,
             clientLanguage: session.clientLanguage || null,
             agentLanguage: session.agentLanguage || null,

@@ -7,11 +7,12 @@ import { enqueueViewingSessionSynthesis, initViewingSessionSynthesisWorker } fro
 import { publishViewingSessionRealtimeEvent } from "@/lib/realtime/viewing-session-events";
 import { resolveViewingSessionRequestContext } from "@/lib/viewings/sessions/auth";
 import { appendViewingSessionEvent } from "@/lib/viewings/sessions/events";
+import { resolveViewingSessionPipelinePolicy } from "@/lib/viewings/sessions/pipeline-policy";
 import {
     setViewingSessionTransportStatus,
     ViewingSessionTransportTransitionError,
 } from "@/lib/viewings/sessions/runtime";
-import { isViewingLiveToolAllowed } from "@/lib/viewings/sessions/tool-policy";
+import { isViewingLiveToolAllowedForSession } from "@/lib/viewings/sessions/tool-policy";
 import { recordViewingSessionUsage } from "@/lib/viewings/sessions/usage";
 import {
     deriveViewingSessionAnalysisStatus,
@@ -113,6 +114,7 @@ function resolveSpeaker(role: "client" | "agent" | "admin", requested?: ViewingS
 async function createRelayMessage(args: {
     sessionId: string;
     locationId: string;
+    sessionKind?: string | null;
     role: "client" | "agent" | "admin";
     speaker?: ViewingSessionSpeaker;
     sourceMessageId?: string | null;
@@ -144,6 +146,7 @@ async function createRelayMessage(args: {
     const model = String(args.model || "").trim() || null;
     const modelVersion = String(args.modelVersion || "").trim() || null;
     const transcriptStatus = args.transcriptStatus || VIEWING_SESSION_TRANSCRIPT_STATUSES.final;
+    const pipelinePolicy = resolveViewingSessionPipelinePolicy({ sessionKind: args.sessionKind });
 
     const writeResult = await db.$transaction(async (tx) => {
         if (sourceMessageId) {
@@ -193,7 +196,9 @@ async function createRelayMessage(args: {
                 : (args.translatedText ? VIEWING_SESSION_TRANSLATION_STATUSES.completed : VIEWING_SESSION_TRANSLATION_STATUSES.pending);
             const insightStatus = isToolResult
                 ? VIEWING_SESSION_INSIGHT_PIPELINE_STATUSES.skipped
-                : VIEWING_SESSION_INSIGHT_PIPELINE_STATUSES.pending;
+                : (pipelinePolicy.autoInsights
+                    ? VIEWING_SESSION_INSIGHT_PIPELINE_STATUSES.pending
+                    : VIEWING_SESSION_INSIGHT_PIPELINE_STATUSES.skipped);
             const analysisStatus = deriveViewingSessionAnalysisStatus({
                 translationStatus,
                 insightStatus,
@@ -254,7 +259,9 @@ async function createRelayMessage(args: {
             : (args.translatedText ? VIEWING_SESSION_TRANSLATION_STATUSES.completed : VIEWING_SESSION_TRANSLATION_STATUSES.pending);
         const insightStatus = isToolResult
             ? VIEWING_SESSION_INSIGHT_PIPELINE_STATUSES.skipped
-            : VIEWING_SESSION_INSIGHT_PIPELINE_STATUSES.pending;
+            : (pipelinePolicy.autoInsights
+                ? VIEWING_SESSION_INSIGHT_PIPELINE_STATUSES.pending
+                : VIEWING_SESSION_INSIGHT_PIPELINE_STATUSES.skipped);
         const analysisStatus = deriveViewingSessionAnalysisStatus({
             translationStatus,
             insightStatus,
@@ -397,6 +404,7 @@ export async function POST(
         select: {
             id: true,
             consentStatus: true,
+            sessionKind: true,
         },
     });
     if (!session) {
@@ -528,7 +536,7 @@ export async function POST(
             (parsed.data.metadata as any)?.tool?.name ||
             ""
         ).trim();
-        if (!isViewingLiveToolAllowed(toolName)) {
+        if (!isViewingLiveToolAllowedForSession({ toolName, sessionKind: session.sessionKind })) {
             await appendViewingSessionEvent({
                 sessionId: context.sessionId,
                 locationId: context.locationId,
@@ -551,6 +559,7 @@ export async function POST(
     const relayMessage = await createRelayMessage({
         sessionId: context.sessionId,
         locationId: context.locationId,
+        sessionKind: session.sessionKind,
         role: context.role,
         speaker: parsed.data.eventType === "transcript" ? parsed.data.speaker : VIEWING_SESSION_SPEAKERS.system,
         sourceMessageId: parsed.data.sourceMessageId || null,
@@ -609,17 +618,20 @@ export async function POST(
         });
     }
 
-    try {
-        await initViewingSessionSynthesisWorker();
-    } catch (error) {
-        console.warn("[viewing-session-relay] Failed to init synthesis worker:", error);
+    const pipelinePolicy = resolveViewingSessionPipelinePolicy({ sessionKind: session.sessionKind });
+    if (pipelinePolicy.autoSummary) {
+        try {
+            await initViewingSessionSynthesisWorker();
+        } catch (error) {
+            console.warn("[viewing-session-relay] Failed to init synthesis worker:", error);
+        }
+        await enqueueViewingSessionSynthesis({
+            sessionId: context.sessionId,
+            status: "draft",
+            trigger: "debounced_worker",
+            allowInlineFallback: true,
+        });
     }
-    await enqueueViewingSessionSynthesis({
-        sessionId: context.sessionId,
-        status: "draft",
-        trigger: "debounced_worker",
-        allowInlineFallback: true,
-    });
 
     return NextResponse.json({
         success: true,

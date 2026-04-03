@@ -2,6 +2,8 @@ import db from "@/lib/db";
 import { getLocationContext } from "@/lib/auth/location-context";
 import PropertyView from "../../_components/property-view";
 import { generatePreviewToken } from "@/lib/jwt-utils";
+import { QuickAssistStartButton } from "@/app/(main)/admin/viewings/sessions/_components/quick-assist-start-button";
+import { VIEWING_SESSION_QUICK_START_SOURCES } from "@/lib/viewings/sessions/types";
 
 
 
@@ -79,6 +81,14 @@ export default async function PropertyViewPage({ params, searchParams }: { param
 
     return (
         <div className="p-6 max-w-6xl mx-auto">
+            <div className="mb-4 flex justify-end">
+                <QuickAssistStartButton
+                    label="Start Quick Assist"
+                    locationId={locationId}
+                    primaryPropertyId={property.id}
+                    quickStartSource={VIEWING_SESSION_QUICK_START_SOURCES.property}
+                />
+            </div>
             <PropertyView
                 property={property}
                 domain={locationCtx?.domain}

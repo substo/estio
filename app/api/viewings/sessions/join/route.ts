@@ -107,7 +107,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: false, error: "This session is no longer available." }, { status: 410 });
     }
 
-    if (session.tokenExpiresAt.getTime() <= now.getTime()) {
+    if (!session.tokenExpiresAt || session.tokenExpiresAt.getTime() <= now.getTime()) {
         await db.viewingSession.update({
             where: { id: session.id },
             data: {
@@ -146,6 +146,16 @@ export async function POST(req: NextRequest) {
                 lockedUntil: session.joinLockUntil.toISOString(),
             },
             { status: 429 }
+        );
+    }
+
+    if (!session.pinCodeHash || !session.pinCodeSalt) {
+        return NextResponse.json(
+            {
+                success: false,
+                error: "This session is not configured for client join.",
+            },
+            { status: 409 }
         );
     }
 
@@ -290,6 +300,8 @@ export async function POST(req: NextRequest) {
         session: {
             id: session.id,
             sessionThreadId: session.sessionThreadId,
+            sessionKind: session.sessionKind,
+            participantMode: session.participantMode,
             mode: session.mode,
             status: session.status,
             transportStatus: session.transportStatus,
@@ -303,9 +315,9 @@ export async function POST(req: NextRequest) {
             clientLanguage: parsed.data.preferredLanguage || session.clientLanguage || null,
             agentLanguage: session.agentLanguage || null,
             property: {
-                id: session.primaryProperty.id,
-                title: session.primaryProperty.title,
-                reference: session.primaryProperty.reference,
+                id: session.primaryProperty?.id || null,
+                title: session.primaryProperty?.title || null,
+                reference: session.primaryProperty?.reference || null,
             },
             agent: {
                 id: session.agent.id,

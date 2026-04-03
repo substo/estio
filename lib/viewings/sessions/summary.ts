@@ -585,14 +585,16 @@ export async function upsertViewingSessionSummaryFromInsights(args: BuildSummary
             },
         });
 
-        await tx.contact.update({
-            where: { id: session.contactId },
-            data: {
-                requirementOtherDetails: buildLeadPreferencePatch(session.contact?.requirementOtherDetails, keyPoints),
-            },
-        });
+        if (session.contactId) {
+            await tx.contact.update({
+                where: { id: session.contactId },
+                data: {
+                    requirementOtherDetails: buildLeadPreferencePatch(session.contact?.requirementOtherDetails, keyPoints),
+                },
+            });
+        }
 
-        if (persistedStatus === "final") {
+        if (persistedStatus === "final" && session.contactId) {
             await tx.contactHistory.create({
                 data: {
                     contactId: session.contactId,

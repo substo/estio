@@ -2,9 +2,11 @@
 
 import { format } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
-import { Pencil, UserPlus, Home, Merge, Import, NotebookPen, HelpCircle } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Pencil, UserPlus, Home, Merge, Import, NotebookPen, HelpCircle, Languages } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { formatViewingDateTimeWithTimeZoneLabel } from '@/lib/viewings/datetime';
 
 interface ActivityLogEntryProps {
@@ -46,8 +48,19 @@ function formatViewingWhen(changes: Array<{ field?: string; new?: unknown }>): s
     }
 }
 
+function formatQuickSessionKind(sessionKind: string | null | undefined) {
+    if (sessionKind === "listen_only") return "Listen";
+    if (sessionKind === "two_way_interpreter") return "Two-way interpreter";
+    if (sessionKind === "quick_translate") return "Quick translate";
+    return "Viewing";
+}
+
 export function ActivityLogEntry({ item, contactName }: ActivityLogEntryProps) {
     const [expanded, setExpanded] = useState(false);
+    const [previewOpen, setPreviewOpen] = useState(false);
+    const [previewPending, setPreviewPending] = useState(false);
+    const [previewError, setPreviewError] = useState<string | null>(null);
+    const [preview, setPreview] = useState<any | null>(null);
     
     // Parse changes safely
     let changes: any[] = [];
@@ -67,6 +80,10 @@ export function ActivityLogEntry({ item, contactName }: ActivityLogEntryProps) {
             changes = Object.entries(item.changes).map(([k, v]) => ({ field: k, old: null, new: v }));
         }
     }
+    const changeMap = useMemo(
+        () => Object.fromEntries(changes.map((change) => [String(change.field || ''), change.new])),
+        [changes]
+    );
 
     // Determine config based on action
     let Icon = HelpCircle;
@@ -75,6 +92,11 @@ export function ActivityLogEntry({ item, contactName }: ActivityLogEntryProps) {
     let description = "";
 
     const userLabel = item.user?.name || item.user?.email || 'System';
+    const sessionThreadId = typeof changeMap.sessionThreadId === "string" ? changeMap.sessionThreadId : null;
+    const hasSessionPreview = (
+        (item.action === 'VIEWING_SESSION_SAVED' || item.action === 'VIEWING_SESSION_ATTACHED')
+        && !!sessionThreadId
+    );
 
     switch (item.action) {
         case 'MANUAL_ENTRY':
@@ -156,6 +178,20 @@ export function ActivityLogEntry({ item, contactName }: ActivityLogEntryProps) {
             description = String(changes.find(c => c.field === 'property')?.new || '');
             break;
 
+        case 'VIEWING_SESSION_SAVED':
+            Icon = Languages;
+            iconColor = "text-cyan-700 bg-cyan-100";
+            actionLabel = "Quick Session Saved";
+            description = `${formatQuickSessionKind(String(changeMap.sessionKind || ""))} transcript saved`;
+            break;
+
+        case 'VIEWING_SESSION_ATTACHED':
+            Icon = Languages;
+            iconColor = "text-indigo-700 bg-indigo-100";
+            actionLabel = "Quick Session Attached";
+            description = `${formatQuickSessionKind(String(changeMap.sessionKind || ""))} linked back into CRM context`;
+            break;
+
         case 'TASK_OPEN':
             Icon = NotebookPen;
             iconColor = "text-amber-700 bg-amber-100";
@@ -182,6 +218,39 @@ export function ActivityLogEntry({ item, contactName }: ActivityLogEntryProps) {
 
     const hasChanges = changes.length > 0 && item.action !== 'MANUAL_ENTRY';
     const isManualEntry = item.action === 'MANUAL_ENTRY';
+
+    useEffect(() => {
+        if (!previewOpen || !sessionThreadId || preview || previewPending) return;
+
+        let cancelled = false;
+        setPreviewPending(true);
+        setPreviewError(null);
+
+        fetch(`/api/viewings/sessions/thread/${encodeURIComponent(sessionThreadId)}/preview`)
+            .then(async (response) => {
+                const payload = await response.json().catch(() => null);
+                if (!response.ok || !payload?.success) {
+                    throw new Error(payload?.error || "Failed to load viewing session preview.");
+                }
+                if (!cancelled) {
+                    setPreview(payload.preview || null);
+                }
+            })
+            .catch((error: any) => {
+                if (!cancelled) {
+                    setPreviewError(error?.message || "Failed to load viewing session preview.");
+                }
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    setPreviewPending(false);
+                }
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [previewOpen, preview, previewPending, sessionThreadId]);
 
     return (
         <div className="flex flex-col items-center justify-center my-6 group">
@@ -213,7 +282,7 @@ export function ActivityLogEntry({ item, contactName }: ActivityLogEntryProps) {
             </div>
 
             {/* Content Payload (If any) */}
-            {(description || expanded) && (
+            {(description || expanded || hasSessionPreview) && (
                 <div className="mt-2 max-w-[80%] mx-auto relative z-10 w-full animate-in fade-in slide-in-from-top-2 duration-200 text-sm bg-white border border-slate-200 shadow-sm rounded-lg px-3 py-2">
                     {description && isManualEntry && (
                         <div className="text-slate-700 text-xs whitespace-pre-wrap leading-relaxed py-0.5">
@@ -224,6 +293,14 @@ export function ActivityLogEntry({ item, contactName }: ActivityLogEntryProps) {
                     {description && !isManualEntry && !expanded && (
                          <div className="text-slate-500 text-xs text-center cursor-pointer" onClick={() => setExpanded(true)}>
                             {description}
+                        </div>
+                    )}
+
+                    {hasSessionPreview && (
+                        <div className="mt-2 flex justify-center">
+                            <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => setPreviewOpen(true)}>
+                                View Session Preview
+                            </Button>
                         </div>
                     )}
 
@@ -252,6 +329,81 @@ export function ActivityLogEntry({ item, contactName }: ActivityLogEntryProps) {
                     )}
                 </div>
             )}
+
+            <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+                <DialogContent className="sm:max-w-2xl">
+                    <DialogHeader>
+                        <DialogTitle>Viewing Session Preview</DialogTitle>
+                        <DialogDescription>
+                            Thread {sessionThreadId || "preview"} • {preview?.sessionCount || 1} chained session{preview?.sessionCount === 1 ? "" : "s"}
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    {previewPending && (
+                        <div className="text-sm text-muted-foreground">Loading preview…</div>
+                    )}
+
+                    {previewError && (
+                        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                            {previewError}
+                        </div>
+                    )}
+
+                    {preview && (
+                        <div className="max-h-[70vh] space-y-4 overflow-y-auto pr-1">
+                            <div className="flex flex-wrap gap-2">
+                                <Badge variant="secondary">{formatQuickSessionKind(preview.sessionKind)}</Badge>
+                                <Badge variant="outline">{preview.participantMode === "agent_only" ? "Private" : "Shared"}</Badge>
+                                <Badge variant="outline">{preview.savePolicy}</Badge>
+                            </div>
+
+                            {preview.contextSnapshot?.primaryProperty && (
+                                <div className="rounded-md border px-3 py-2 text-sm">
+                                    <div className="font-medium">{String(preview.contextSnapshot.primaryProperty.title || "Property")}</div>
+                                    <div className="text-muted-foreground">
+                                        {String(
+                                            preview.contextSnapshot.leadProfile?.name
+                                            || preview.contextSnapshot.leadProfile?.firstName
+                                            || "No contact attached"
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {preview.summary?.sessionSummary && (
+                                <div className="space-y-1">
+                                    <div className="text-sm font-medium">Summary</div>
+                                    <div className="rounded-md border bg-muted/20 px-3 py-2 text-sm">
+                                        {preview.summary.sessionSummary}
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="space-y-2">
+                                <div className="text-sm font-medium">Transcript</div>
+                                <div className="space-y-2">
+                                    {Array.isArray(preview.messages) && preview.messages.length > 0 ? preview.messages.map((message: any) => (
+                                        <div key={message.id} className="rounded-md border px-3 py-2 text-sm">
+                                            <div className="mb-1 flex items-center justify-between text-[11px] uppercase tracking-wide text-muted-foreground">
+                                                <span>{message.speaker}</span>
+                                                <span>{message.timestamp ? format(new Date(message.timestamp), 'MMM d, h:mm a') : ''}</span>
+                                            </div>
+                                            <div>{message.translatedText || message.originalText}</div>
+                                            {message.translatedText && message.translatedText !== message.originalText && (
+                                                <div className="mt-1 text-muted-foreground">{message.originalText}</div>
+                                            )}
+                                        </div>
+                                    )) : (
+                                        <div className="rounded-md border border-dashed px-3 py-6 text-sm text-muted-foreground">
+                                            No transcript saved for this session.
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

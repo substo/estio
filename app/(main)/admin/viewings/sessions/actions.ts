@@ -11,9 +11,13 @@ import { appendViewingSessionEvent } from "@/lib/viewings/sessions/events";
 import { isViewingSessionVoicePremiumEnabled } from "@/lib/viewings/sessions/feature-flags";
 import { resolveViewingSessionStageModelsFromSiteConfig } from "@/lib/viewings/sessions/live-models";
 import { generateViewingSessionJoinSecrets } from "@/lib/viewings/sessions/security";
+import { refreshViewingSessionContextSnapshot, closeViewingSession } from "@/lib/viewings/sessions/session-service";
 import {
     VIEWING_SESSION_EVENT_TYPES,
+    VIEWING_SESSION_KINDS,
     VIEWING_SESSION_MODES,
+    VIEWING_SESSION_PARTICIPANT_MODES,
+    VIEWING_SESSION_SAVE_POLICIES,
     VIEWING_SESSION_STATUSES,
     type ViewingSessionMode,
 } from "@/lib/viewings/sessions/types";
@@ -212,6 +216,16 @@ export async function createViewingSession(
             clientName,
             clientLanguage,
             agentLanguage,
+            sessionKind: VIEWING_SESSION_KINDS.structuredViewing,
+            participantMode: VIEWING_SESSION_PARTICIPANT_MODES.sharedClient,
+            speechMode: "push_to_talk",
+            savePolicy: VIEWING_SESSION_SAVE_POLICIES.fullSession,
+            entryPoint: "viewing",
+            quickStartSource: "viewing",
+            assignmentStatus: "assigned",
+            assignedAt: new Date(),
+            assignedByUserId: access.viewing.user.id,
+            contextAttachedAt: new Date(),
             mode,
             status: VIEWING_SESSION_STATUSES.scheduled,
             transportStatus: "disconnected",
@@ -238,6 +252,7 @@ export async function createViewingSession(
             createdAt: true,
         },
     });
+    await refreshViewingSessionContextSnapshot(session.id);
 
     await publishViewingSessionRealtimeEvent({
         sessionId: session.id,
@@ -282,7 +297,7 @@ export async function createViewingSession(
             token: secrets.token,
             pinCode: secrets.pinCode,
             url: normalizeJoinUrl({ domain: resolvedDomain, token: secrets.token }),
-            expiresAt: session.tokenExpiresAt.toISOString(),
+            expiresAt: secrets.expiresAt.toISOString(),
             domain: resolvedDomain,
         },
     };
@@ -382,58 +397,18 @@ export async function completeViewingSession(sessionId: string) {
     const access = await requireAccessToSession(normalizedSessionId);
     if (!access.ok) return { success: false, message: access.error };
 
-    const now = new Date();
-    const updated = await db.viewingSession.update({
-        where: { id: access.session.id },
-        data: {
-            status: VIEWING_SESSION_STATUSES.completed,
-            endedAt: now,
-        },
-        select: {
-            id: true,
-            locationId: true,
-            status: true,
-            endedAt: true,
-        },
-    });
-
-    const summary = await runViewingSessionSynthesis({
-        sessionId: updated.id,
+    const result = await closeViewingSession({
+        sessionId: access.session.id,
         actorUserId: access.actorUserId,
-        status: "final",
-        trigger: "completion",
-    });
-
-    await publishViewingSessionRealtimeEvent({
-        sessionId: updated.id,
-        locationId: updated.locationId,
-        type: VIEWING_SESSION_EVENT_TYPES.statusChanged,
-        payload: {
-            sessionId: updated.id,
-            status: updated.status,
-            endedAt: updated.endedAt ? updated.endedAt.toISOString() : null,
-            summaryId: summary.id,
-        },
-    });
-    await appendViewingSessionEvent({
-        sessionId: updated.id,
-        locationId: updated.locationId,
-        type: "viewing_session.completed",
-        actorRole: "admin",
-        actorUserId: access.clerkUserId,
-        source: "api",
-        payload: {
-            endedAt: updated.endedAt ? updated.endedAt.toISOString() : null,
-            summaryId: summary.id,
-        },
+        savePolicy: VIEWING_SESSION_SAVE_POLICIES.fullSession,
     });
 
     revalidatePath("/admin/contacts");
-    revalidatePath(`/admin/viewings/sessions/${updated.id}`);
+    revalidatePath(`/admin/viewings/sessions/${access.session.id}`);
 
     return {
         success: true,
-        status: updated.status,
-        summaryId: summary.id,
+        status: result.session.status,
+        summaryId: result.summaryId,
     };
 }

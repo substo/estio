@@ -115,6 +115,10 @@ type SessionState = {
     transportStatus: string;
     liveProvider: string | null;
     mode: string;
+    sessionKind?: string | null;
+    participantMode?: string | null;
+    speechMode?: string | null;
+    savePolicy?: string | null;
     liveModel: string | null;
     translationModel: string | null;
     insightsModel: string | null;
@@ -133,7 +137,9 @@ type SessionState = {
         property: { id: string; title: string; reference: string | null };
         contact: { id: string; name: string | null };
         user: { id: string; name: string | null };
-    };
+    } | null;
+    contact?: { id: string; name: string | null } | null;
+    primaryProperty?: { id: string; title: string; reference: string | null } | null;
 };
 
 type Props = {
@@ -217,6 +223,8 @@ export function ViewingSessionCockpit(props: Props) {
         () => [...usages].sort((a, b) => new Date(b.recordedAt).getTime() - new Date(a.recordedAt).getTime()).slice(0, 8),
         [usages]
     );
+    const sessionTitle = session.viewing?.property.title || session.primaryProperty?.title || "Viewing Session";
+    const sessionParticipant = session.clientName || session.viewing?.contact.name || session.contact?.name || "Client";
 
     useEffect(() => {
         const source = new EventSource(`/api/viewings/sessions/events?sessionId=${encodeURIComponent(activeSessionId)}`);
@@ -510,7 +518,7 @@ export function ViewingSessionCockpit(props: Props) {
                     </Link>
                     <h1 className="text-xl font-semibold">Viewing Session Copilot</h1>
                     <p className="text-xs text-muted-foreground">
-                        {session.viewing.property.title} • {session.clientName || session.viewing.contact.name || "Client"} • {formatSessionStatus(session.status)}
+                        {sessionTitle} • {sessionParticipant} • {formatSessionStatus(session.status)}
                     </p>
                     <p className="text-[11px] text-muted-foreground">
                         Transport: {formatTransportStatus(session.transportStatus)}{session.liveProvider ? ` • ${session.liveProvider}` : ""}
