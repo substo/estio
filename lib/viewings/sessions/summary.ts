@@ -3,7 +3,8 @@ import db from "@/lib/db";
 import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import { publishViewingSessionRealtimeEvent } from "@/lib/realtime/viewing-session-events";
 import { appendViewingSessionEvent } from "@/lib/viewings/sessions/events";
-import { sanitizeModelInputValue } from "@/lib/viewings/sessions/redaction";
+import { VIEWING_SESSION_STAGE_MODELS } from "@/lib/viewings/sessions/live-models";
+import { sanitizeAnalysisModelInputValue } from "@/lib/viewings/sessions/redaction";
 import { createSupersededMessageIdSet } from "@/lib/viewings/sessions/transcript";
 import { recordViewingSessionUsage } from "@/lib/viewings/sessions/usage";
 import { VIEWING_SESSION_EVENT_TYPES, VIEWING_SESSION_SUMMARY_SOURCES } from "@/lib/viewings/sessions/types";
@@ -268,6 +269,7 @@ function buildLeadPreferencePatch(existing: string | null | undefined, keyPoints
 async function maybeBuildLlmSummary(args: {
     apiKey: string | null;
     modelName: string;
+    fallbackModelName: string;
     clientName: string;
     propertyTitle: string;
     keyPoints: string[];
@@ -300,19 +302,12 @@ async function maybeBuildLlmSummary(args: {
 
     try {
         const genAI = new GoogleGenerativeAI(args.apiKey);
-        const model = genAI.getGenerativeModel({
-            model: args.modelName,
-            generationConfig: {
-                temperature: 0.2,
-                responseMimeType: "application/json",
-            },
-        });
 
         const transcriptPreview = args.recentMessages
             .slice(-16)
             .map((item) => {
                 const text = asString(item.translatedText) || asString(item.originalText);
-                return `${item.speaker.toUpperCase()}: ${sanitizeModelInputValue(text)}`;
+                return `${item.speaker.toUpperCase()}: ${sanitizeAnalysisModelInputValue(text)}`;
             })
             .filter(Boolean);
 
@@ -325,43 +320,66 @@ async function maybeBuildLlmSummary(args: {
             "- Keep statements factual from supplied context only.",
             "- Keep suggestions concise and actionable.",
             "- Keep follow-up drafts ready to send.",
-            `Client: ${sanitizeModelInputValue(args.clientName)}`,
-            `Property: ${sanitizeModelInputValue(args.propertyTitle)}`,
-            `Key points: ${JSON.stringify(sanitizeModelInputValue(args.keyPoints))}`,
-            `Objections: ${JSON.stringify(sanitizeModelInputValue(args.objections))}`,
-            `Buying signals: ${JSON.stringify(sanitizeModelInputValue(args.buyingSignals))}`,
-            `Pivot hints: ${JSON.stringify(sanitizeModelInputValue(args.pivots))}`,
+            `Client: ${sanitizeAnalysisModelInputValue(args.clientName)}`,
+            `Property: ${sanitizeAnalysisModelInputValue(args.propertyTitle)}`,
+            `Key points: ${JSON.stringify(sanitizeAnalysisModelInputValue(args.keyPoints))}`,
+            `Objections: ${JSON.stringify(sanitizeAnalysisModelInputValue(args.objections))}`,
+            `Buying signals: ${JSON.stringify(sanitizeAnalysisModelInputValue(args.buyingSignals))}`,
+            `Pivot hints: ${JSON.stringify(sanitizeAnalysisModelInputValue(args.pivots))}`,
             `Recent transcript preview: ${JSON.stringify(transcriptPreview)}`,
-            `Fallback baseline: ${JSON.stringify(sanitizeModelInputValue(args.fallbackArtifacts))}`,
+            `Fallback baseline: ${JSON.stringify(sanitizeAnalysisModelInputValue(args.fallbackArtifacts))}`,
         ].join("\n");
 
-        const result = await model.generateContent([{ text: prompt }] as any);
-        const parsed = parseJsonMaybe(result.response.text());
-        const artifacts = parsed
-            ? normalizeSummaryArtifacts(parsed, args.fallbackArtifacts)
-            : args.fallbackArtifacts;
-        const usageCounts = extractUsageCounts((result as any)?.response?.usageMetadata);
-        const estimatedCostUsd = estimateSummaryCostUsd(usageCounts.totalTokens);
+        const trySummaryWithModel = async (modelName: string) => {
+            const model = genAI.getGenerativeModel({
+                model: modelName,
+                generationConfig: {
+                    temperature: 0.2,
+                    responseMimeType: "application/json",
+                },
+            });
 
-        return {
-            artifacts,
-            usage: {
-                provider: "google",
-                model: args.modelName,
-                promptTokens: usageCounts.promptTokens,
-                completionTokens: usageCounts.completionTokens,
-                totalTokens: usageCounts.totalTokens,
-                estimatedCostUsd,
-                usedFallback: !parsed,
-                errorMessage: parsed ? null : "Model response was not valid JSON. Fallback applied.",
-            },
+            const result = await model.generateContent([{ text: prompt }] as any);
+            const parsed = parseJsonMaybe(result.response.text());
+            const artifacts = parsed
+                ? normalizeSummaryArtifacts(parsed, args.fallbackArtifacts)
+                : args.fallbackArtifacts;
+            const usageCounts = extractUsageCounts((result as any)?.response?.usageMetadata);
+            const estimatedCostUsd = estimateSummaryCostUsd(usageCounts.totalTokens);
+
+            return {
+                artifacts,
+                usage: {
+                    provider: "google",
+                    model: modelName,
+                    promptTokens: usageCounts.promptTokens,
+                    completionTokens: usageCounts.completionTokens,
+                    totalTokens: usageCounts.totalTokens,
+                    estimatedCostUsd,
+                    usedFallback: !parsed,
+                    errorMessage: parsed ? null : "Model response was not valid JSON. Fallback applied.",
+                },
+            };
         };
+
+        try {
+            return await trySummaryWithModel(args.modelName);
+        } catch (primaryError) {
+            if (args.fallbackModelName !== args.modelName) {
+                try {
+                    return await trySummaryWithModel(args.fallbackModelName);
+                } catch {
+                    // fall through to heuristic fallback below
+                }
+            }
+            throw primaryError;
+        }
     } catch (error: any) {
         return {
             artifacts: args.fallbackArtifacts,
             usage: {
                 provider: "google",
-                model: args.modelName,
+                model: args.modelName || args.fallbackModelName,
                 promptTokens: null,
                 completionTokens: null,
                 totalTokens: null,
@@ -398,6 +416,7 @@ export async function upsertViewingSessionSummaryFromInsights(args: BuildSummary
             },
             insights: {
                 where: {
+                    supersededAt: null,
                     state: {
                         not: "dismissed",
                     },
@@ -472,20 +491,21 @@ export async function upsertViewingSessionSummaryFromInsights(args: BuildSummary
             sessionId: session.id,
             status: "generating",
             provider: "google",
-            model: session.liveModel || null,
+            model: session.summaryModel || session.liveModel || null,
         },
         update: {
             status: "generating",
             provider: "google",
-            model: session.liveModel || null,
+            model: session.summaryModel || session.liveModel || null,
         },
     });
 
     const apiKey = await resolveLocationGoogleAiApiKey(session.locationId);
-    const modelName = asString(session.liveModel) || "gemini-2.5-flash";
+    const modelName = asString(session.summaryModel) || VIEWING_SESSION_STAGE_MODELS.summaryDefault;
     const llm = await maybeBuildLlmSummary({
         apiKey,
         modelName,
+        fallbackModelName: VIEWING_SESSION_STAGE_MODELS.summaryDefault,
         clientName,
         propertyTitle,
         keyPoints,
@@ -521,8 +541,8 @@ export async function upsertViewingSessionSummaryFromInsights(args: BuildSummary
                 generatedAt: now,
                 source: summarySource,
                 provider: llm.usage.provider || "google",
-                model: llm.usage.model || session.liveModel || null,
-                modelVersion: llm.usage.model || session.liveModel || null,
+                model: llm.usage.model || session.summaryModel || session.liveModel || null,
+                modelVersion: llm.usage.model || session.summaryModel || session.liveModel || null,
                 usedFallback: llm.usage.usedFallback,
                 generatedByUserId: args.actorUserId || null,
                 promptTokens: llm.usage.promptTokens,
@@ -544,8 +564,8 @@ export async function upsertViewingSessionSummaryFromInsights(args: BuildSummary
                 generatedAt: now,
                 source: summarySource,
                 provider: llm.usage.provider || "google",
-                model: llm.usage.model || session.liveModel || null,
-                modelVersion: llm.usage.model || session.liveModel || null,
+                model: llm.usage.model || session.summaryModel || session.liveModel || null,
+                modelVersion: llm.usage.model || session.summaryModel || session.liveModel || null,
                 usedFallback: llm.usage.usedFallback,
                 generatedByUserId: args.actorUserId || null,
                 promptTokens: llm.usage.promptTokens,
@@ -599,6 +619,8 @@ export async function upsertViewingSessionSummaryFromInsights(args: BuildSummary
             phase: "summary",
             provider: llm.usage.provider,
             model: llm.usage.model,
+            usageAuthority: "derived",
+            costAuthority: "estimated",
             inputTokens: llm.usage.promptTokens || 0,
             outputTokens: llm.usage.completionTokens || 0,
             totalTokens: llm.usage.totalTokens || 0,

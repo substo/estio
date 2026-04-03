@@ -1,7 +1,7 @@
 import db from "@/lib/db";
 import { publishViewingSessionRealtimeEvent } from "@/lib/realtime/viewing-session-events";
 import { appendViewingSessionEvent } from "@/lib/viewings/sessions/events";
-import { resolveLiveModelForMode } from "@/lib/viewings/sessions/live-models";
+import { resolveViewingSessionStageModelsFromSession } from "@/lib/viewings/sessions/live-models";
 import { generateViewingSessionJoinSecrets } from "@/lib/viewings/sessions/security";
 import {
     VIEWING_SESSION_EVENT_TYPES,
@@ -177,6 +177,13 @@ export async function ensureViewingSessionWithinLiveWindow(sessionId: string): P
     }
 
     const mode = normalizeMode(session.mode);
+    const stageModels = resolveViewingSessionStageModelsFromSession({
+        mode,
+        liveModel: session.liveModel,
+        translationModel: (session as any).translationModel,
+        insightsModel: (session as any).insightsModel,
+        summaryModel: (session as any).summaryModel,
+    });
     const secrets = generateViewingSessionJoinSecrets();
     const now = new Date();
 
@@ -203,10 +210,17 @@ export async function ensureViewingSessionWithinLiveWindow(sessionId: string): P
                 notes: session.notes || null,
                 audioPlaybackClientEnabled: session.audioPlaybackClientEnabled,
                 audioPlaybackAgentEnabled: session.audioPlaybackAgentEnabled,
-                liveModel: session.liveModel || resolveLiveModelForMode(mode),
+                liveModel: stageModels.live,
+                translationModel: stageModels.translation,
+                insightsModel: stageModels.insights,
+                summaryModel: stageModels.summary,
                 liveProvider: session.liveProvider || "google_gemini_live",
                 transportStatus: VIEWING_SESSION_TRANSPORT_STATUSES.disconnected,
                 consentStatus: session.consentStatus || "required",
+                consentAcceptedAt: (session as any).consentAcceptedAt || null,
+                consentVersion: (session as any).consentVersion || null,
+                consentLocale: (session as any).consentLocale || null,
+                consentSource: (session as any).consentSource || null,
                 appliedRetentionDays: session.appliedRetentionDays || 90,
                 transcriptVisibility: session.transcriptVisibility || "team",
                 estimatedCostUsd: 0,

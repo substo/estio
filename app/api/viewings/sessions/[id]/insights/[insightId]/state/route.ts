@@ -64,6 +64,7 @@ export async function POST(
         where: {
             id: normalizedInsightId,
             sessionId: context.sessionId,
+            supersededAt: null,
         },
         select: {
             id: true,
@@ -77,6 +78,8 @@ export async function POST(
             provider: true,
             model: true,
             modelVersion: true,
+            generationKey: true,
+            supersededAt: true,
             confidence: true,
             metadata: true,
             createdAt: true,
@@ -122,6 +125,8 @@ export async function POST(
                     provider: updated.provider || null,
                     model: updated.model || null,
                     modelVersion: updated.modelVersion || null,
+                    generationKey: updated.generationKey || null,
+                    supersededAt: updated.supersededAt ? updated.supersededAt.toISOString() : null,
                     confidence: updated.confidence,
                     metadata: updated.metadata || null,
                     createdAt: updated.createdAt.toISOString(),

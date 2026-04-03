@@ -6,6 +6,7 @@ import { GoogleGenAI, Modality } from "@google/genai";
 import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import db from "@/lib/db";
 import { assembleViewingSessionContext } from "@/lib/viewings/sessions/context-assembler";
+import { sanitizeLiveToolOutputValue } from "@/lib/viewings/sessions/redaction";
 import { verifyViewingSessionAccessToken } from "@/lib/viewings/sessions/security";
 import { isViewingLiveToolAllowed } from "@/lib/viewings/sessions/tool-policy";
 
@@ -41,6 +42,10 @@ type RelayContext = {
     inputDraft: RelayDraftPointer | null;
     outputDraft: RelayDraftPointer | null;
     sessionResumptionHandle: string | null;
+    reconnectCycleStartedAt: number | null;
+    toolCallTimestamps: number[];
+    activeToolCalls: number;
+    toolCache: Map<string, { expiresAt: number; result: Record<string, unknown> }>;
     queue: Promise<void>;
 };
 
@@ -59,7 +64,17 @@ const HEARTBEAT_INTERVAL_MS = 20_000;
 const HEARTBEAT_TIMEOUT_MS = 45_000;
 const RECONNECT_BASE_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 15_000;
+const RECONNECT_MAX_ATTEMPTS = 5;
+const RECONNECT_MAX_TOTAL_MS = 60_000;
 const IDLE_CLOSE_DELAY_MS = 30_000;
+const TOOL_CALLS_PER_MINUTE = 6;
+const TOOL_MAX_CONCURRENCY = 2;
+const TOOL_TIMEOUT_MS = 4_000;
+const TOOL_CACHE_TTL_MS = {
+    resolve_viewing_property_context: 60_000,
+    fetch_company_playbook: 60_000,
+    search_related_properties: 30_000,
+} as const;
 
 function asString(value: unknown): string {
     return String(value || "").trim();
@@ -91,6 +106,34 @@ function normalizeEventPayload(raw: unknown) {
         };
     }
     return null;
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> {
+    let timer: NodeJS.Timeout | null = null;
+    return new Promise<T>((resolve, reject) => {
+        timer = setTimeout(() => {
+            timer = null;
+            reject(new Error(errorMessage));
+        }, timeoutMs);
+
+        promise
+            .then((value) => {
+                if (timer) clearTimeout(timer);
+                resolve(value);
+            })
+            .catch((error) => {
+                if (timer) clearTimeout(timer);
+                reject(error);
+            });
+    });
+}
+
+function pruneToolCallWindow(context: RelayContext, now: number) {
+    context.toolCallTimestamps = context.toolCallTimestamps.filter((ts) => now - ts < 60_000);
+}
+
+function getToolCacheKey(toolName: string, args: Record<string, unknown>): string {
+    return `${toolName}:${JSON.stringify(args || {})}`;
 }
 
 async function forwardRelayEvent(args: {
@@ -422,6 +465,46 @@ async function executeReadOnlyTool(context: RelayContext, toolName: string, rawA
     throw new Error("unsupported_tool");
 }
 
+async function executeBoundedReadOnlyTool(context: RelayContext, toolName: string, rawArgs: Record<string, unknown>) {
+    const now = Date.now();
+    pruneToolCallWindow(context, now);
+
+    if (context.toolCallTimestamps.length >= TOOL_CALLS_PER_MINUTE) {
+        throw new Error("tool_rate_limit_exceeded");
+    }
+    if (context.activeToolCalls >= TOOL_MAX_CONCURRENCY) {
+        throw new Error("tool_concurrency_limit_exceeded");
+    }
+
+    const cacheTtl = TOOL_CACHE_TTL_MS[toolName as keyof typeof TOOL_CACHE_TTL_MS] || 0;
+    const cacheKey = cacheTtl > 0 ? getToolCacheKey(toolName, rawArgs) : "";
+    if (cacheKey) {
+        const cached = context.toolCache.get(cacheKey);
+        if (cached && cached.expiresAt > now) {
+            return cached.result;
+        }
+    }
+
+    context.toolCallTimestamps.push(now);
+    context.activeToolCalls += 1;
+    try {
+        const result = await withTimeout(
+            executeReadOnlyTool(context, toolName, rawArgs),
+            TOOL_TIMEOUT_MS,
+            "tool_timeout"
+        );
+        if (cacheKey && cacheTtl > 0) {
+            context.toolCache.set(cacheKey, {
+                expiresAt: Date.now() + cacheTtl,
+                result,
+            });
+        }
+        return result;
+    } finally {
+        context.activeToolCalls = Math.max(0, context.activeToolCalls - 1);
+    }
+}
+
 async function handleToolCalls(context: RelayContext, functionCalls: any[]) {
     if (!context.vendorSession || functionCalls.length === 0) return;
 
@@ -434,10 +517,11 @@ async function handleToolCalls(context: RelayContext, functionCalls: any[]) {
         let output: Record<string, unknown> = {};
         let toolError: string | null = null;
         try {
-            const result = await executeReadOnlyTool(context, toolName, args);
+            const result = await executeBoundedReadOnlyTool(context, toolName, args);
+            const sanitizedResult = sanitizeLiveToolOutputValue(result);
             output = {
                 ok: true,
-                result,
+                result: sanitizedResult,
             };
         } catch (error: any) {
             toolError = asString(error?.message) || "tool_execution_failed";
@@ -445,6 +529,14 @@ async function handleToolCalls(context: RelayContext, functionCalls: any[]) {
                 ok: false,
                 error: toolError,
             };
+
+            if (toolError === "tool_timeout") {
+                context.vendorState = "degraded";
+                void forwardTransportStatus(context, "degraded", {
+                    reason: "tool_timeout",
+                    toolName: toolName || "unknown_tool",
+                });
+            }
         }
 
         await persistToolResult({
@@ -514,7 +606,30 @@ function scheduleReconnect(context: RelayContext) {
     if (context.reconnectTimer) return;
     if (context.sockets.size === 0) return;
 
+    const now = Date.now();
+    if (!context.reconnectCycleStartedAt) {
+        context.reconnectCycleStartedAt = now;
+    }
+
     const attempt = context.reconnectAttempts + 1;
+    const reconnectElapsedMs = now - context.reconnectCycleStartedAt;
+    if (attempt > RECONNECT_MAX_ATTEMPTS || reconnectElapsedMs > RECONNECT_MAX_TOTAL_MS) {
+        context.vendorState = "failed";
+        void forwardTransportStatus(context, "failed", {
+            reason: attempt > RECONNECT_MAX_ATTEMPTS ? "reconnect_attempt_budget_exceeded" : "reconnect_time_budget_exceeded",
+            reconnectAttempts: context.reconnectAttempts,
+            reconnectElapsedMs,
+        });
+        broadcast(context, {
+            type: "relay.vendor.failed",
+            reason: attempt > RECONNECT_MAX_ATTEMPTS ? "reconnect_attempt_budget_exceeded" : "reconnect_time_budget_exceeded",
+            reconnectAttempts: context.reconnectAttempts,
+            reconnectElapsedMs,
+            ts: new Date().toISOString(),
+        });
+        return;
+    }
+
     context.reconnectAttempts = attempt;
     const delay = clamp(RECONNECT_BASE_DELAY_MS * (2 ** (attempt - 1)), RECONNECT_BASE_DELAY_MS, RECONNECT_MAX_DELAY_MS);
 
@@ -552,6 +667,7 @@ function scheduleIdleClose(context: RelayContext) {
         }
 
         context.vendorState = "disconnected";
+        context.reconnectCycleStartedAt = null;
         void forwardTransportStatus(context, "disconnected", {
             reason: "no_active_clients",
         });
@@ -606,6 +722,7 @@ async function connectVendorSession(context: RelayContext, reconnecting: boolean
                 onopen: () => {
                     context.vendorState = "connected";
                     context.reconnectAttempts = 0;
+                    context.reconnectCycleStartedAt = null;
                     void forwardTransportStatus(context, "connected", {
                         reconnecting,
                         model: context.modelName,
@@ -731,6 +848,7 @@ async function connectVendorSession(context: RelayContext, reconnecting: boolean
                     }
 
                     context.vendorState = "disconnected";
+                    context.reconnectCycleStartedAt = null;
                     void forwardTransportStatus(context, "disconnected", {
                         reason: "vendor_socket_closed",
                     });
@@ -741,8 +859,11 @@ async function connectVendorSession(context: RelayContext, reconnecting: boolean
         context.vendorSession = session;
     } catch (error) {
         context.vendorSession = null;
-        context.vendorState = "failed";
-        await forwardTransportStatus(context, "failed", {
+        context.vendorState = "reconnecting";
+        if (!context.reconnectCycleStartedAt) {
+            context.reconnectCycleStartedAt = Date.now();
+        }
+        await forwardTransportStatus(context, "reconnecting", {
             reason: "vendor_connect_failed",
             error: asString((error as any)?.message || error),
         });
@@ -780,6 +901,10 @@ async function ensureRelayContext(connectionState: RelayConnectionState): Promis
         inputDraft: null,
         outputDraft: null,
         sessionResumptionHandle: null,
+        reconnectCycleStartedAt: null,
+        toolCallTimestamps: [],
+        activeToolCalls: 0,
+        toolCache: new Map(),
         queue: Promise.resolve(),
     };
 

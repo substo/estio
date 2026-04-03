@@ -1,5 +1,6 @@
 export type ViewingTranscriptMessageLike = {
     id: string;
+    utteranceId?: string | null;
     supersedesMessageId?: string | null;
     timestamp?: string | Date | null;
     createdAt?: string | Date | null;
@@ -60,4 +61,27 @@ export function selectViewingTranscriptRevisionHistory<T extends ViewingTranscri
     }
 
     return sortViewingTranscriptMessages(history);
+}
+
+export function selectViewingTranscriptUtteranceMessages<T extends ViewingTranscriptMessageLike>(
+    messages: T[],
+    utteranceId: string
+): T[] {
+    const normalizedUtteranceId = String(utteranceId || "").trim();
+    if (!normalizedUtteranceId) return [];
+    return sortViewingTranscriptMessages(
+        messages.filter((message) => String(message.utteranceId || "").trim() === normalizedUtteranceId)
+    );
+}
+
+export function selectEffectiveViewingTranscriptMessageForUtterance<T extends ViewingTranscriptMessageLike>(
+    messages: T[],
+    utteranceId: string
+): T | null {
+    const lineage = selectViewingTranscriptUtteranceMessages(messages, utteranceId);
+    if (lineage.length === 0) return null;
+
+    const supersededIds = createSupersededMessageIdSet(lineage);
+    const effective = lineage.filter((message) => !supersededIds.has(message.id));
+    return effective[effective.length - 1] || lineage[lineage.length - 1] || null;
 }

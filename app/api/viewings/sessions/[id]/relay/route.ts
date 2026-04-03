@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import db from "@/lib/db";
@@ -166,11 +167,71 @@ async function createRelayMessage(args: {
                     id: supersedesMessageId,
                     sessionId,
                 },
-                select: { id: true },
+                select: { id: true, utteranceId: true },
             });
             if (!supersedes) {
                 throw new Error("Superseded message not found in this session.");
             }
+
+            await tx.viewingSession.update({
+                where: { id: sessionId },
+                data: { updatedAt: new Date() },
+                select: { id: true },
+            });
+
+            const latest = await tx.viewingSessionMessage.findFirst({
+                where: { sessionId },
+                orderBy: [{ sequence: "desc" }],
+                select: { sequence: true },
+            });
+            const nextSequence = Number(latest?.sequence || 0) + 1;
+            const persistedAt = new Date();
+
+            const isToolResult = args.messageKind === VIEWING_SESSION_MESSAGE_KINDS.toolResult;
+            const translationStatus = isToolResult
+                ? VIEWING_SESSION_TRANSLATION_STATUSES.skipped
+                : (args.translatedText ? VIEWING_SESSION_TRANSLATION_STATUSES.completed : VIEWING_SESSION_TRANSLATION_STATUSES.pending);
+            const insightStatus = isToolResult
+                ? VIEWING_SESSION_INSIGHT_PIPELINE_STATUSES.skipped
+                : VIEWING_SESSION_INSIGHT_PIPELINE_STATUSES.pending;
+            const analysisStatus = deriveViewingSessionAnalysisStatus({
+                translationStatus,
+                insightStatus,
+            });
+            const nextId = randomUUID();
+
+            const created = await tx.viewingSessionMessage.create({
+                data: {
+                    id: nextId,
+                    sessionId,
+                    sequence: nextSequence,
+                    utteranceId: supersedes.utteranceId,
+                    sourceMessageId,
+                    messageKind: args.messageKind,
+                    origin,
+                    provider,
+                    model,
+                    modelVersion,
+                    transcriptStatus,
+                    translationStatus,
+                    insightStatus,
+                    persistedAt,
+                    supersedesMessageId,
+                    speaker,
+                    originalText: args.text,
+                    originalLanguage: args.originalLanguage || null,
+                    translatedText: args.translatedText || null,
+                    targetLanguage: args.targetLanguage || null,
+                    timestamp,
+                    analysisStatus,
+                    metadata: args.metadata ? (args.metadata as any) : undefined,
+                },
+            });
+
+            return {
+                message: created,
+                idempotent: false,
+            };
         }
 
         await tx.viewingSession.update({
@@ -198,11 +259,14 @@ async function createRelayMessage(args: {
             translationStatus,
             insightStatus,
         });
+        const nextId = randomUUID();
 
         const created = await tx.viewingSessionMessage.create({
             data: {
+                id: nextId,
                 sessionId,
                 sequence: nextSequence,
+                utteranceId: nextId,
                 sourceMessageId,
                 messageKind: args.messageKind,
                 origin,
@@ -241,6 +305,7 @@ async function createRelayMessage(args: {
                     id: writeResult.message.id,
                     sessionId,
                     sequence: writeResult.message.sequence,
+                    utteranceId: writeResult.message.utteranceId,
                     sourceMessageId: writeResult.message.sourceMessageId,
                     messageKind: writeResult.message.messageKind,
                     origin: writeResult.message.origin,
@@ -439,6 +504,8 @@ export async function POST(
             provider: parsed.data.provider || null,
             model: parsed.data.model || null,
             transportStatus: parsed.data.transportStatus || null,
+            usageAuthority: "provider_reported",
+            costAuthority: "estimated",
             inputAudioSeconds: parsed.data.inputAudioSeconds || 0,
             outputAudioSeconds: parsed.data.outputAudioSeconds || 0,
             inputTokens: parsed.data.inputTokens || 0,
@@ -561,6 +628,7 @@ export async function POST(
             id: message.id,
             sessionId: context.sessionId,
             sequence: message.sequence,
+            utteranceId: message.utteranceId,
             sourceMessageId: message.sourceMessageId,
             messageKind: message.messageKind,
             origin: message.origin,

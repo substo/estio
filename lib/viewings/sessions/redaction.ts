@@ -23,7 +23,7 @@ export function redactSensitiveText(input: string): string {
         .replace(PHONE_RE, REDACTED_PHONE);
 }
 
-export function sanitizeModelInputValue<T = unknown>(value: T): T {
+function sanitizeStructuredValue<T = unknown>(value: T): T {
     if (value == null) return value;
 
     if (typeof value === "string") {
@@ -45,7 +45,23 @@ export function sanitizeModelInputValue<T = unknown>(value: T): T {
             output[key] = REDACTED_NOTE;
             continue;
         }
-        output[key] = sanitizeModelInputValue(raw);
+        output[key] = sanitizeStructuredValue(raw);
     }
     return output as T;
+}
+
+export function sanitizeModelInputValue<T = unknown>(value: T): T {
+    return sanitizeStructuredValue(value);
+}
+
+export function sanitizeAnalysisModelInputValue<T = unknown>(value: T): T {
+    return sanitizeStructuredValue(value);
+}
+
+export function sanitizeLiveToolOutputValue<T = unknown>(value: T): T {
+    return sanitizeStructuredValue(value);
+}
+
+export function prepareTranslationModelText(input: string): string {
+    return String(input || "").trim();
 }

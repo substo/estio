@@ -65,6 +65,11 @@ function normalizeTranscriptVisibility(value: unknown): "team" | "admin_only" {
     return normalized === "admin_only" ? "admin_only" : "team";
 }
 
+function normalizeOptionalModelOverride(value: unknown): string | null {
+    const normalized = String(value || "").trim();
+    return normalized || null;
+}
+
 export async function updateAiSettings(
     prevState: AiSettingsState,
     formData: FormData
@@ -106,7 +111,11 @@ export async function updateAiSettings(
         const viewingSessionRetentionDays = normalizeTranscriptRetentionDays(formData.get("viewingSessionRetentionDays"));
         const viewingSessionTranscriptVisibility = normalizeTranscriptVisibility(formData.get("viewingSessionTranscriptVisibility"));
         const viewingSessionAiDisclosureRequired = formData.get("viewingSessionAiDisclosureRequired") === "on";
+        const viewingSessionAiDisclosureVersion = String(formData.get("viewingSessionAiDisclosureVersion") || "").trim() || "v1";
         const viewingSessionRawAudioStorageEnabled = formData.get("viewingSessionRawAudioStorageEnabled") === "on";
+        const viewingSessionTranslationModel = normalizeOptionalModelOverride(formData.get("viewingSessionTranslationModel"));
+        const viewingSessionInsightsModel = normalizeOptionalModelOverride(formData.get("viewingSessionInsightsModel"));
+        const viewingSessionSummaryModel = normalizeOptionalModelOverride(formData.get("viewingSessionSummaryModel"));
         const payload = {
             ...existingPayload,
             googleAiModel: formData.get("googleAiModel") as string || GEMINI_FLASH_LATEST_ALIAS,
@@ -119,7 +128,11 @@ export async function updateAiSettings(
             viewingSessionRetentionDays,
             viewingSessionTranscriptVisibility,
             viewingSessionAiDisclosureRequired,
+            viewingSessionAiDisclosureVersion,
             viewingSessionRawAudioStorageEnabled,
+            viewingSessionTranslationModel,
+            viewingSessionInsightsModel,
+            viewingSessionSummaryModel,
             brandVoice: formData.get("brandVoice") as string,
             outreachConfig: {
                 enabled: formData.get("outreachEnabled") === "on",
@@ -181,7 +194,11 @@ export async function updateAiSettings(
                     viewingSessionRetentionDays: payload.viewingSessionRetentionDays,
                     viewingSessionTranscriptVisibility: payload.viewingSessionTranscriptVisibility,
                     viewingSessionAiDisclosureRequired: payload.viewingSessionAiDisclosureRequired,
+                    viewingSessionAiDisclosureVersion: payload.viewingSessionAiDisclosureVersion,
                     viewingSessionRawAudioStorageEnabled: payload.viewingSessionRawAudioStorageEnabled,
+                    viewingSessionTranslationModel: payload.viewingSessionTranslationModel,
+                    viewingSessionInsightsModel: payload.viewingSessionInsightsModel,
+                    viewingSessionSummaryModel: payload.viewingSessionSummaryModel,
                     brandVoice: payload.brandVoice,
                     outreachConfig: payload.outreachConfig,
                 },
@@ -198,7 +215,11 @@ export async function updateAiSettings(
                     viewingSessionRetentionDays: payload.viewingSessionRetentionDays,
                     viewingSessionTranscriptVisibility: payload.viewingSessionTranscriptVisibility,
                     viewingSessionAiDisclosureRequired: payload.viewingSessionAiDisclosureRequired,
+                    viewingSessionAiDisclosureVersion: payload.viewingSessionAiDisclosureVersion,
                     viewingSessionRawAudioStorageEnabled: payload.viewingSessionRawAudioStorageEnabled,
+                    viewingSessionTranslationModel: payload.viewingSessionTranslationModel,
+                    viewingSessionInsightsModel: payload.viewingSessionInsightsModel,
+                    viewingSessionSummaryModel: payload.viewingSessionSummaryModel,
                     brandVoice: payload.brandVoice,
                     outreachConfig: payload.outreachConfig,
                 },

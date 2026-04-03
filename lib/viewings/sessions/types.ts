@@ -150,6 +150,31 @@ export const VIEWING_SESSION_SUMMARY_STATUSES = {
 
 export type ViewingSessionSummaryStatus = typeof VIEWING_SESSION_SUMMARY_STATUSES[keyof typeof VIEWING_SESSION_SUMMARY_STATUSES];
 
+export const VIEWING_SESSION_CONSENT_SOURCES = {
+    joinForm: "join_form",
+    liveAuth: "live_auth",
+    adminOverride: "admin_override",
+} as const;
+
+export type ViewingSessionConsentSource =
+    typeof VIEWING_SESSION_CONSENT_SOURCES[keyof typeof VIEWING_SESSION_CONSENT_SOURCES];
+
+export const VIEWING_SESSION_USAGE_AUTHORITIES = {
+    derived: "derived",
+    providerReported: "provider_reported",
+} as const;
+
+export type ViewingSessionUsageAuthority =
+    typeof VIEWING_SESSION_USAGE_AUTHORITIES[keyof typeof VIEWING_SESSION_USAGE_AUTHORITIES];
+
+export const VIEWING_SESSION_COST_AUTHORITIES = {
+    estimated: "estimated",
+    providerReported: "provider_reported",
+} as const;
+
+export type ViewingSessionCostAuthority =
+    typeof VIEWING_SESSION_COST_AUTHORITIES[keyof typeof VIEWING_SESSION_COST_AUTHORITIES];
+
 export const DEFAULT_VIEWING_SESSION_PIN_LENGTH = 6;
 export const DEFAULT_VIEWING_SESSION_TOKEN_TTL_HOURS = 24;
 export const DEFAULT_VIEWING_SESSION_ACCESS_TOKEN_TTL_SECONDS = 60 * 60 * 4;

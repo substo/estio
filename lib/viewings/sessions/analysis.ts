@@ -3,8 +3,12 @@ import db from "@/lib/db";
 import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import { assembleViewingSessionContext } from "@/lib/viewings/sessions/context-assembler";
 import { appendViewingSessionEvent } from "@/lib/viewings/sessions/events";
+import { VIEWING_SESSION_STAGE_MODELS } from "@/lib/viewings/sessions/live-models";
 import { VIEWING_OBJECTION_LIBRARY } from "@/lib/viewings/sessions/objection-library";
-import { sanitizeModelInputValue } from "@/lib/viewings/sessions/redaction";
+import {
+    prepareTranslationModelText,
+    sanitizeAnalysisModelInputValue,
+} from "@/lib/viewings/sessions/redaction";
 import { recordViewingSessionUsage } from "@/lib/viewings/sessions/usage";
 import { publishViewingSessionRealtimeEvent } from "@/lib/realtime/viewing-session-events";
 import {
@@ -181,6 +185,7 @@ async function createInsightIfUnique(args: {
     provider?: string | null;
     model?: string | null;
     modelVersion?: string | null;
+    generationKey?: string | null;
     metadata?: Record<string, unknown>;
 }) {
     const normalizedShort = safeString(args.shortText);
@@ -190,6 +195,7 @@ async function createInsightIfUnique(args: {
         where: {
             sessionId: args.sessionId,
             type: args.type,
+            supersededAt: null,
             state: {
                 in: [VIEWING_SESSION_INSIGHT_STATES.active, VIEWING_SESSION_INSIGHT_STATES.pinned],
             },
@@ -214,6 +220,7 @@ async function createInsightIfUnique(args: {
             provider: safeString(args.provider) || null,
             model: safeString(args.model) || null,
             modelVersion: safeString(args.modelVersion) || null,
+            generationKey: safeString(args.generationKey) || null,
             metadata: args.metadata ? (args.metadata as any) : undefined,
         },
     });
@@ -235,11 +242,72 @@ async function getMessageWithSession(sessionId: string, messageId: string) {
                     agentLanguage: true,
                     clientLanguage: true,
                     liveModel: true,
+                    translationModel: true,
+                    insightsModel: true,
+                    summaryModel: true,
                     keyPoints: true,
                     objections: true,
                     recommendedNextActions: true,
                 },
             },
+        },
+    });
+}
+
+function serializeRealtimeInsight(item: any) {
+    return {
+        id: item.id,
+        type: item.type,
+        category: item.category,
+        shortText: item.shortText,
+        longText: item.longText,
+        state: item.state,
+        source: item.source,
+        provider: item.provider || null,
+        model: item.model || null,
+        modelVersion: item.modelVersion || null,
+        confidence: item.confidence,
+        generationKey: item.generationKey || null,
+        supersededAt: item.supersededAt ? new Date(item.supersededAt).toISOString() : null,
+        metadata: item.metadata || null,
+        createdAt: item.createdAt ? new Date(item.createdAt).toISOString() : null,
+        updatedAt: item.updatedAt ? new Date(item.updatedAt).toISOString() : null,
+    };
+}
+
+async function syncViewingSessionInsightAggregates(sessionId: string) {
+    const rows = await db.viewingSessionInsight.findMany({
+        where: {
+            sessionId,
+            supersededAt: null,
+            state: {
+                not: VIEWING_SESSION_INSIGHT_STATES.dismissed,
+            },
+        },
+        select: {
+            type: true,
+            shortText: true,
+        },
+    });
+
+    const keyPoints = Array.from(new Set(
+        rows
+            .filter((item) => item.type === VIEWING_SESSION_INSIGHT_TYPES.keyPoint)
+            .map((item) => safeString(item.shortText))
+            .filter(Boolean)
+    ));
+    const objections = Array.from(new Set(
+        rows
+            .filter((item) => item.type === VIEWING_SESSION_INSIGHT_TYPES.objection)
+            .map((item) => safeString(item.shortText))
+            .filter(Boolean)
+    ));
+
+    await db.viewingSession.update({
+        where: { id: sessionId },
+        data: {
+            keyPoints: keyPoints as any,
+            objections: objections as any,
         },
     });
 }
@@ -268,13 +336,14 @@ async function runTranslationStep(message: Awaited<ReturnType<typeof getMessageW
         ? (message.session.agentLanguage || "en")
         : (message.session.clientLanguage || "en");
     const apiKey = await resolveLocationGoogleAiApiKey(message.session.locationId);
-    const modelName = safeString(message.session.liveModel) || "gemini-2.5-flash";
-    const sanitizedOriginalText = sanitizeModelInputValue(originalText);
+    const primaryModelName = safeString(message.session.translationModel) || VIEWING_SESSION_STAGE_MODELS.translationDefault;
+    const fallbackModelName = VIEWING_SESSION_STAGE_MODELS.translationDefault;
+    const translationPromptText = prepareTranslationModelText(originalText);
 
     if (!apiKey || !originalText) {
         return {
             provider: null,
-            model: null,
+            model: primaryModelName || null,
             modelVersion: null,
             promptTokens: 0,
             completionTokens: 0,
@@ -288,44 +357,73 @@ async function runTranslationStep(message: Awaited<ReturnType<typeof getMessageW
     }
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({
-        model: modelName,
-        generationConfig: {
-            temperature: 0.1,
-            responseMimeType: "application/json",
-        },
-    });
 
-    const prompt = [
-        "You are a translation assistant for real-estate live viewing sessions.",
-        "Translate only. Do not produce extra commentary.",
-        "Return strict JSON with keys: translatedText, originalLanguage, confidence.",
-        `Target language: ${targetLanguage}`,
-        `Source utterance: ${sanitizedOriginalText}`,
-    ].join("\n");
+    const tryTranslateWithModel = async (modelName: string): Promise<TranslationResult> => {
+        const model = genAI.getGenerativeModel({
+            model: modelName,
+            generationConfig: {
+                temperature: 0.1,
+                responseMimeType: "application/json",
+            },
+        });
 
-    const result = await model.generateContent([{ text: prompt }] as any);
-    const parsed = parseJsonMaybe(result.response.text());
-    const normalized = normalizeAnalysisOutput(parsed || {
-        translatedText: originalText,
-        originalLanguage: message.originalLanguage || null,
-        confidence: null,
-    }, originalText);
-    const usageCounts = extractUsageCounts((result as any)?.response?.usageMetadata);
+        const prompt = [
+            "You are a translation assistant for real-estate live viewing sessions.",
+            "Translate only. Do not produce extra commentary.",
+            "Return strict JSON with keys: translatedText, originalLanguage, confidence.",
+            `Target language: ${targetLanguage}`,
+            `Source utterance: ${translationPromptText}`,
+        ].join("\n");
 
-    return {
-        provider: "google",
-        model: modelName,
-        modelVersion: modelName,
-        promptTokens: usageCounts.promptTokens,
-        completionTokens: usageCounts.completionTokens,
-        totalTokens: usageCounts.totalTokens,
-        estimatedCostUsd: estimateAnalysisCostUsd(usageCounts.totalTokens),
-        translatedText: safeString(normalized.translatedText) || originalText,
-        targetLanguage,
-        originalLanguage: normalized.originalLanguage || message.originalLanguage || null,
-        confidence: normalized.confidence,
+        const result = await model.generateContent([{ text: prompt }] as any);
+        const parsed = parseJsonMaybe(result.response.text());
+        const normalized = normalizeAnalysisOutput(parsed || {
+            translatedText: originalText,
+            originalLanguage: message.originalLanguage || null,
+            confidence: null,
+        }, originalText);
+        const usageCounts = extractUsageCounts((result as any)?.response?.usageMetadata);
+
+        return {
+            provider: "google",
+            model: modelName,
+            modelVersion: modelName,
+            promptTokens: usageCounts.promptTokens,
+            completionTokens: usageCounts.completionTokens,
+            totalTokens: usageCounts.totalTokens,
+            estimatedCostUsd: estimateAnalysisCostUsd(usageCounts.totalTokens),
+            translatedText: safeString(normalized.translatedText) || originalText,
+            targetLanguage,
+            originalLanguage: normalized.originalLanguage || message.originalLanguage || null,
+            confidence: normalized.confidence,
+        };
     };
+
+    try {
+        return await tryTranslateWithModel(primaryModelName);
+    } catch {
+        if (fallbackModelName !== primaryModelName) {
+            try {
+                return await tryTranslateWithModel(fallbackModelName);
+            } catch {
+                // fall through to text-preserving fallback
+            }
+        }
+
+        return {
+            provider: null,
+            model: primaryModelName,
+            modelVersion: null,
+            promptTokens: 0,
+            completionTokens: 0,
+            totalTokens: 0,
+            estimatedCostUsd: 0,
+            translatedText: originalText,
+            targetLanguage,
+            originalLanguage: message.originalLanguage || null,
+            confidence: message.confidence || null,
+        };
+    }
 }
 
 type InsightResult = {
@@ -346,9 +444,10 @@ async function runInsightsStep(message: Awaited<ReturnType<typeof getMessageWith
     }
 
     const apiKey = await resolveLocationGoogleAiApiKey(message.session.locationId);
-    const modelName = safeString(message.session.liveModel) || "gemini-2.5-flash";
+    const primaryModelName = safeString(message.session.insightsModel) || VIEWING_SESSION_STAGE_MODELS.insightsDefault;
+    const fallbackModelName = VIEWING_SESSION_STAGE_MODELS.insightsDefault;
     const baseText = safeString(message.translatedText) || safeString(message.originalText);
-    const sanitizedText = sanitizeModelInputValue(baseText);
+    const sanitizedText = sanitizeAnalysisModelInputValue(baseText);
 
     if (!apiKey || !baseText) {
         const fallback = applyStaticFallbackAnalysis(baseText);
@@ -381,13 +480,6 @@ async function runInsightsStep(message: Awaited<ReturnType<typeof getMessageWith
     }
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({
-        model: modelName,
-        generationConfig: {
-            temperature: 0.2,
-            responseMimeType: "application/json",
-        },
-    });
 
     const objectionLibraryHint = VIEWING_OBJECTION_LIBRARY.map((entry) => ({
         category: entry.category,
@@ -406,37 +498,87 @@ async function runInsightsStep(message: Awaited<ReturnType<typeof getMessageWith
         "pivotSuggestions item: { reason, propertyId }",
         "Keep suggestions short and live-usable.",
         `Speaker: ${message.speaker}`,
-        `Session context JSON: ${JSON.stringify(sanitizeModelInputValue(context || {}))}`,
-        `Static objection library: ${JSON.stringify(sanitizeModelInputValue(objectionLibraryHint))}`,
+        `Session context JSON: ${JSON.stringify(sanitizeAnalysisModelInputValue(context || {}))}`,
+        `Static objection library: ${JSON.stringify(sanitizeAnalysisModelInputValue(objectionLibraryHint))}`,
         `Message text: ${sanitizedText}`,
     ].join("\n");
 
-    const result = await model.generateContent([{ text: prompt }] as any);
-    const parsed = parseJsonMaybe(result.response.text());
-    const normalized = normalizeAnalysisOutput(parsed || {
-        translatedText: baseText,
-        originalLanguage: message.originalLanguage || null,
-        confidence: message.confidence || null,
-        keyPoints: [],
-        objections: [],
-        buyingSignals: [],
-        sentimentCues: [],
-        suggestedReplies: [],
-        pivotSuggestions: [],
-    }, baseText);
-    const usageCounts = extractUsageCounts((result as any)?.response?.usageMetadata);
+    const tryInsightsWithModel = async (modelName: string): Promise<InsightResult> => {
+        const model = genAI.getGenerativeModel({
+            model: modelName,
+            generationConfig: {
+                temperature: 0.2,
+                responseMimeType: "application/json",
+            },
+        });
 
-    return {
-        provider: "google",
-        model: modelName,
-        modelVersion: modelName,
-        promptTokens: usageCounts.promptTokens,
-        completionTokens: usageCounts.completionTokens,
-        totalTokens: usageCounts.totalTokens,
-        estimatedCostUsd: estimateAnalysisCostUsd(usageCounts.totalTokens),
-        normalized,
-        source: VIEWING_SESSION_INSIGHT_SOURCES.analysisModel,
+        const result = await model.generateContent([{ text: prompt }] as any);
+        const parsed = parseJsonMaybe(result.response.text());
+        const normalized = normalizeAnalysisOutput(parsed || {
+            translatedText: baseText,
+            originalLanguage: message.originalLanguage || null,
+            confidence: message.confidence || null,
+            keyPoints: [],
+            objections: [],
+            buyingSignals: [],
+            sentimentCues: [],
+            suggestedReplies: [],
+            pivotSuggestions: [],
+        }, baseText);
+        const usageCounts = extractUsageCounts((result as any)?.response?.usageMetadata);
+
+        return {
+            provider: "google",
+            model: modelName,
+            modelVersion: modelName,
+            promptTokens: usageCounts.promptTokens,
+            completionTokens: usageCounts.completionTokens,
+            totalTokens: usageCounts.totalTokens,
+            estimatedCostUsd: estimateAnalysisCostUsd(usageCounts.totalTokens),
+            normalized,
+            source: VIEWING_SESSION_INSIGHT_SOURCES.analysisModel,
+        };
     };
+
+    try {
+        return await tryInsightsWithModel(primaryModelName);
+    } catch {
+        if (fallbackModelName !== primaryModelName) {
+            try {
+                return await tryInsightsWithModel(fallbackModelName);
+            } catch {
+                // fall through to static fallback
+            }
+        }
+
+        const fallback = applyStaticFallbackAnalysis(baseText);
+        return {
+            provider: null,
+            model: primaryModelName,
+            modelVersion: null,
+            promptTokens: 0,
+            completionTokens: 0,
+            totalTokens: 0,
+            estimatedCostUsd: 0,
+            source: fallback.objections.length > 0 || fallback.suggestedReplies.length > 0
+                ? VIEWING_SESSION_INSIGHT_SOURCES.staticLibrary
+                : VIEWING_SESSION_INSIGHT_SOURCES.heuristicFallback,
+            normalized: normalizeAnalysisOutput(
+                {
+                    translatedText: baseText,
+                    originalLanguage: message.originalLanguage || null,
+                    confidence: message.confidence || null,
+                    keyPoints: fallback.keyPoints,
+                    objections: fallback.objections,
+                    buyingSignals: [],
+                    sentimentCues: [],
+                    suggestedReplies: fallback.suggestedReplies,
+                    pivotSuggestions: [],
+                },
+                baseText
+            ),
+        };
+    }
 }
 
 export async function runViewingSessionMessageTranslation(input: {
@@ -511,6 +653,8 @@ export async function runViewingSessionMessageTranslation(input: {
                 phase: "analysis",
                 provider: translation.provider,
                 model: translation.model,
+                usageAuthority: "derived",
+                costAuthority: "estimated",
                 inputTokens: translation.promptTokens,
                 outputTokens: translation.completionTokens,
                 totalTokens: translation.totalTokens,
@@ -601,6 +745,26 @@ export async function runViewingSessionMessageInsights(input: {
     try {
         const context = await assembleViewingSessionContext(sessionId);
         const insight = await runInsightsStep(message, context);
+        const supersededAt = new Date();
+        const generationKey = `${message.id}:${supersededAt.toISOString()}`;
+        const currentGeneratedInsights = await db.viewingSessionInsight.findMany({
+            where: {
+                sessionId,
+                messageId: message.id,
+                supersededAt: null,
+                source: {
+                    not: "manual",
+                },
+            },
+        });
+        const supersededInsights = await Promise.all(
+            currentGeneratedInsights.map((item) =>
+                db.viewingSessionInsight.update({
+                    where: { id: item.id },
+                    data: { supersededAt },
+                })
+            )
+        );
 
         const createdInsights = (
             await Promise.all([
@@ -614,6 +778,7 @@ export async function runViewingSessionMessageInsights(input: {
                     provider: insight.provider,
                     model: insight.model,
                     modelVersion: insight.modelVersion,
+                    generationKey,
                 })),
                 ...insight.normalized.objections.map((item) => createInsightIfUnique({
                     sessionId,
@@ -628,6 +793,7 @@ export async function runViewingSessionMessageInsights(input: {
                     provider: insight.provider,
                     model: insight.model,
                     modelVersion: insight.modelVersion,
+                    generationKey,
                 })),
                 ...insight.normalized.buyingSignals.map((text) => createInsightIfUnique({
                     sessionId,
@@ -639,6 +805,7 @@ export async function runViewingSessionMessageInsights(input: {
                     provider: insight.provider,
                     model: insight.model,
                     modelVersion: insight.modelVersion,
+                    generationKey,
                 })),
                 ...insight.normalized.sentimentCues.map((text) => createInsightIfUnique({
                     sessionId,
@@ -650,6 +817,7 @@ export async function runViewingSessionMessageInsights(input: {
                     provider: insight.provider,
                     model: insight.model,
                     modelVersion: insight.modelVersion,
+                    generationKey,
                 })),
                 ...insight.normalized.suggestedReplies.map((item) => createInsightIfUnique({
                     sessionId,
@@ -664,6 +832,7 @@ export async function runViewingSessionMessageInsights(input: {
                     provider: insight.provider,
                     model: insight.model,
                     modelVersion: insight.modelVersion,
+                    generationKey,
                     metadata: {
                         followUpQuestion: item.followUpQuestion || null,
                     },
@@ -678,23 +847,13 @@ export async function runViewingSessionMessageInsights(input: {
                     provider: insight.provider,
                     model: insight.model,
                     modelVersion: insight.modelVersion,
+                    generationKey,
                     metadata: {
                         propertyId: item.propertyId || null,
                     },
                 })),
             ])
         ).filter(Boolean);
-
-        const existingKeyPoints = Array.isArray(message.session.keyPoints) ? message.session.keyPoints : [];
-        const existingObjections = Array.isArray(message.session.objections) ? message.session.objections : [];
-        const mergedKeyPoints = Array.from(new Set<string>([
-            ...existingKeyPoints.map((x) => safeString(x)).filter(Boolean),
-            ...insight.normalized.keyPoints,
-        ]));
-        const mergedObjections = Array.from(new Set<string>([
-            ...existingObjections.map((x) => safeString(x)).filter(Boolean),
-            ...insight.normalized.objections.map((x) => safeString(x.text)),
-        ]));
 
         const updated = await db.viewingSessionMessage.update({
             where: { id: message.id },
@@ -711,14 +870,7 @@ export async function runViewingSessionMessageInsights(input: {
                 } as any,
             },
         });
-
-        await db.viewingSession.update({
-            where: { id: sessionId },
-            data: {
-                keyPoints: mergedKeyPoints as any,
-                objections: mergedObjections as any,
-            },
-        });
+        await syncViewingSessionInsightAggregates(sessionId);
 
         await publishViewingSessionRealtimeEvent({
             sessionId,
@@ -734,28 +886,14 @@ export async function runViewingSessionMessageInsights(input: {
             },
         });
 
-        if (createdInsights.length > 0) {
+        if (createdInsights.length > 0 || supersededInsights.length > 0) {
             await publishViewingSessionRealtimeEvent({
                 sessionId,
                 locationId: message.session.locationId,
                 type: VIEWING_SESSION_EVENT_TYPES.insightUpserted,
                 payload: {
-                    count: createdInsights.length,
-                    insights: createdInsights.map((item: any) => ({
-                        id: item.id,
-                        type: item.type,
-                        category: item.category,
-                        shortText: item.shortText,
-                        longText: item.longText,
-                        state: item.state,
-                        source: item.source,
-                        provider: item.provider || null,
-                        model: item.model || null,
-                        modelVersion: item.modelVersion || null,
-                        confidence: item.confidence,
-                        metadata: item.metadata || null,
-                        createdAt: item.createdAt ? new Date(item.createdAt).toISOString() : null,
-                    })),
+                    count: createdInsights.length + supersededInsights.length,
+                    insights: [...supersededInsights, ...createdInsights].map((item: any) => serializeRealtimeInsight(item)),
                 },
             });
         }
@@ -767,6 +905,8 @@ export async function runViewingSessionMessageInsights(input: {
                 phase: "analysis",
                 provider: insight.provider,
                 model: insight.model,
+                usageAuthority: "derived",
+                costAuthority: "estimated",
                 inputTokens: insight.promptTokens,
                 outputTokens: insight.completionTokens,
                 totalTokens: insight.totalTokens,
@@ -788,6 +928,8 @@ export async function runViewingSessionMessageInsights(input: {
             payload: {
                 messageId: message.id,
                 insightsCreated: createdInsights.length,
+                insightsSuperseded: supersededInsights.length,
+                generationKey,
                 totalTokens: insight.totalTokens,
                 estimatedCostUsd: insight.estimatedCostUsd,
             },
@@ -797,6 +939,7 @@ export async function runViewingSessionMessageInsights(input: {
             ok: true,
             messageId: message.id,
             insightsCreated: createdInsights.length,
+            insightsSuperseded: supersededInsights.length,
         };
     } catch (error: any) {
         await db.viewingSessionMessage.update({

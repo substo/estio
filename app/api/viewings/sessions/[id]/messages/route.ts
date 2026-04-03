@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import db from "@/lib/db";
@@ -167,11 +168,70 @@ export async function POST(
                         id: supersedesMessageId,
                         sessionId: writableSession.id,
                     },
-                    select: { id: true },
+                    select: { id: true, utteranceId: true },
                 });
                 if (!supersedes) {
                     throw new Error("Superseded message not found in this session.");
                 }
+
+                // Lock the session row to ensure sequence assignment is serialized per session.
+                await tx.viewingSession.update({
+                    where: { id: writableSession.id },
+                    data: { updatedAt: new Date() },
+                    select: { id: true },
+                });
+
+                const latest = await tx.viewingSessionMessage.findFirst({
+                    where: { sessionId: writableSession.id },
+                    orderBy: [{ sequence: "desc" }],
+                    select: { sequence: true },
+                });
+                const nextSequence = Number(latest?.sequence || 0) + 1;
+                const persistedAt = new Date();
+                const translationStatus = data.translatedText
+                    ? VIEWING_SESSION_TRANSLATION_STATUSES.completed
+                    : VIEWING_SESSION_TRANSLATION_STATUSES.pending;
+                const insightStatus = VIEWING_SESSION_INSIGHT_PIPELINE_STATUSES.pending;
+                const analysisStatus = deriveViewingSessionAnalysisStatus({
+                    translationStatus,
+                    insightStatus,
+                });
+                const nextId = randomUUID();
+
+                const created = await tx.viewingSessionMessage.create({
+                    data: {
+                        id: nextId,
+                        sessionId: writableSession.id,
+                        sequence: nextSequence,
+                        utteranceId: supersedes.utteranceId,
+                        sourceMessageId,
+                        messageKind,
+                        origin,
+                        provider,
+                        model,
+                        modelVersion,
+                        transcriptStatus,
+                        translationStatus,
+                        insightStatus,
+                        persistedAt,
+                        supersedesMessageId,
+                        speaker,
+                        originalText: data.originalText,
+                        originalLanguage: data.originalLanguage || null,
+                        translatedText: data.translatedText || null,
+                        targetLanguage: data.targetLanguage || null,
+                        timestamp,
+                        confidence: typeof data.confidence === "number" ? data.confidence : null,
+                        audioChunkRef: data.audioChunkRef || null,
+                        analysisStatus,
+                    },
+                });
+
+                return {
+                    message: created,
+                    idempotent: false,
+                    created: true,
+                };
             }
 
             // Lock the session row to ensure sequence assignment is serialized per session.
@@ -196,11 +256,14 @@ export async function POST(
                 translationStatus,
                 insightStatus,
             });
+            const nextId = randomUUID();
 
             const created = await tx.viewingSessionMessage.create({
                 data: {
+                    id: nextId,
                     sessionId: writableSession.id,
                     sequence: nextSequence,
+                    utteranceId: nextId,
                     sourceMessageId,
                     messageKind,
                     origin,
@@ -251,6 +314,7 @@ export async function POST(
                     id: created.id,
                     sessionId: writableSession.id,
                     sequence: created.sequence,
+                    utteranceId: created.utteranceId,
                     sourceMessageId: created.sourceMessageId,
                     messageKind: created.messageKind,
                     origin: created.origin,
@@ -356,6 +420,7 @@ export async function POST(
             id: created.id,
             sessionId: writableSession.id,
             sequence: created.sequence,
+            utteranceId: created.utteranceId,
             sourceMessageId: created.sourceMessageId,
             messageKind: created.messageKind,
             origin: created.origin,

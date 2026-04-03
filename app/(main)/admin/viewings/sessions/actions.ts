@@ -9,7 +9,7 @@ import { runViewingSessionSynthesis } from "@/lib/queue/viewing-session-synthesi
 import { publishViewingSessionRealtimeEvent } from "@/lib/realtime/viewing-session-events";
 import { appendViewingSessionEvent } from "@/lib/viewings/sessions/events";
 import { isViewingSessionVoicePremiumEnabled } from "@/lib/viewings/sessions/feature-flags";
-import { resolveLiveModelForMode } from "@/lib/viewings/sessions/live-models";
+import { resolveViewingSessionStageModelsFromSiteConfig } from "@/lib/viewings/sessions/live-models";
 import { generateViewingSessionJoinSecrets } from "@/lib/viewings/sessions/security";
 import {
     VIEWING_SESSION_EVENT_TYPES,
@@ -169,6 +169,10 @@ export async function createViewingSession(
             viewingSessionRetentionDays: true,
             viewingSessionTranscriptVisibility: true,
             viewingSessionAiDisclosureRequired: true,
+            viewingSessionAiDisclosureVersion: true,
+            viewingSessionTranslationModel: true,
+            viewingSessionInsightsModel: true,
+            viewingSessionSummaryModel: true,
         },
     });
     const resolvedDomain = asString(siteConfig?.domain) || asString(access.viewing.contact.location?.domain) || null;
@@ -186,6 +190,12 @@ export async function createViewingSession(
     const appliedRetentionDays = Math.min(365, Math.max(30, Number(siteConfig?.viewingSessionRetentionDays || 90)));
     const transcriptVisibility = asString(siteConfig?.viewingSessionTranscriptVisibility) || "team";
     const consentStatus = siteConfig?.viewingSessionAiDisclosureRequired === false ? "not_required" : "required";
+    const stageModels = resolveViewingSessionStageModelsFromSiteConfig({
+        mode,
+        translationModel: siteConfig?.viewingSessionTranslationModel,
+        insightsModel: siteConfig?.viewingSessionInsightsModel,
+        summaryModel: siteConfig?.viewingSessionSummaryModel,
+    });
     const relatedPropertyIds = Array.isArray(data.relatedPropertyIds)
         ? Array.from(new Set(data.relatedPropertyIds.map(asString).filter((id) => id && id !== access.viewing.propertyId))).slice(0, 12)
         : [];
@@ -214,7 +224,10 @@ export async function createViewingSession(
             pinCodeSalt: secrets.pinCodeSalt,
             tokenExpiresAt: secrets.expiresAt,
             notes: asString(data.notes) || null,
-            liveModel: resolveLiveModelForMode(mode),
+            liveModel: stageModels.live,
+            translationModel: stageModels.translation,
+            insightsModel: stageModels.insights,
+            summaryModel: stageModels.summary,
         },
         select: {
             id: true,
@@ -250,6 +263,8 @@ export async function createViewingSession(
             consentStatus,
             appliedRetentionDays,
             transcriptVisibility,
+            disclosureVersion: asString(siteConfig?.viewingSessionAiDisclosureVersion) || "v1",
+            modelRouting: stageModels,
             voicePremiumEnabled,
         },
     });

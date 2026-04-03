@@ -394,7 +394,11 @@ model SiteConfig {
   viewingSessionRetentionDays       Int     @default(90) // Viewing transcript retention policy (30/90/365)
   viewingSessionTranscriptVisibility String @default("team") // Viewing transcript visibility (team|admin_only)
   viewingSessionAiDisclosureRequired Boolean @default(true) // Require client AI disclosure acknowledgment
+  viewingSessionAiDisclosureVersion String  @default("v1") // Disclosure copy/version identifier captured into session consent audit
   viewingSessionRawAudioStorageEnabled Boolean @default(false) // V1 default keeps raw audio persistence disabled
+  viewingSessionTranslationModel    String?
+  viewingSessionInsightsModel       String?
+  viewingSessionSummaryModel        String?
 
   // Existing Fields
   primaryColor   String?
@@ -919,6 +923,10 @@ model ViewingSession {
   transportStatus String @default("disconnected") // connecting | connected | degraded | reconnecting | disconnected | chained | failed
   liveProvider String @default("google_gemini_live")
   consentStatus String @default("required") // required | accepted | declined | not_required
+  consentAcceptedAt DateTime?
+  consentVersion String?
+  consentLocale  String?
+  consentSource  String?
   appliedRetentionDays Int @default(90)
   transcriptVisibility String @default("team") // team | admin_only
 
@@ -946,6 +954,9 @@ model ViewingSession {
   audioPlaybackAgentEnabled  Boolean @default(false)
 
   liveModel         String?
+  translationModel  String @default("gemini-2.5-flash")
+  insightsModel     String @default("gemini-2.5-flash")
+  summaryModel      String @default("gemini-2.5-flash")
   estimatedCostUsd  Float     @default(0)
   actualCostUsd     Float     @default(0)
   lastTransportEventAt DateTime?
@@ -985,6 +996,7 @@ model ViewingSessionMessage {
 
   speaker String // client | agent | system
   sequence Int
+  utteranceId String
   sourceMessageId String?
   messageKind String @default("utterance") // utterance | system_note | tool_result
   origin String @default("manual_text") // manual_text | browser_stt | relay_live_transcript | relay_tool_result | human | system
@@ -1019,6 +1031,7 @@ model ViewingSessionMessage {
   @@index([analysisStatus, createdAt(sort: Asc)])
   @@index([translationStatus, createdAt(sort: Asc)])
   @@index([insightStatus, createdAt(sort: Asc)])
+  @@index([sessionId, utteranceId, timestamp])
   @@index([sessionId, sequence(sort: Asc)])
   @@index([sessionId, sourceMessageId])
   @@index([supersedesMessageId])
@@ -1049,6 +1062,8 @@ model ViewingSessionInsight {
   provider String?
   model String?
   modelVersion String?
+  supersededAt DateTime?
+  generationKey String?
 
   metadata Json?
 
@@ -1057,8 +1072,10 @@ model ViewingSessionInsight {
   resolvedAt  DateTime?
 
   @@index([sessionId, state, createdAt(sort: Desc)])
+  @@index([sessionId, supersededAt, state, createdAt(sort: Desc)])
   @@index([sessionId, type, createdAt(sort: Desc)])
   @@index([messageId, type])
+  @@index([messageId, supersededAt, type])
 }
 
 model ViewingSessionSummary {
@@ -1136,6 +1153,8 @@ model ViewingSessionUsage {
   provider String?
   model String?
   transportStatus String?
+  usageAuthority String @default("derived") // derived | provider_reported
+  costAuthority String @default("estimated") // estimated | provider_reported
 
   inputAudioSeconds Float? @default(0)
   outputAudioSeconds Float? @default(0)

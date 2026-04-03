@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
     createSupersededMessageIdSet,
+    selectEffectiveViewingTranscriptMessageForUtterance,
     selectEffectiveViewingTranscriptMessages,
     selectViewingTranscriptRevisionHistory,
+    selectViewingTranscriptUtteranceMessages,
 } from "@/lib/viewings/sessions/transcript";
 
 test("effective transcript hides superseded rows by default", () => {
@@ -30,4 +32,28 @@ test("revision history returns the full correction chain", () => {
 
     const history = selectViewingTranscriptRevisionHistory(messages, "root");
     assert.deepEqual(history.map((item) => item.id), ["rev1", "rev2"]);
+});
+
+test("utterance lineage groups corrections under the same utterance id", () => {
+    const messages = [
+        { id: "root", utteranceId: "u1", timestamp: "2026-04-02T10:00:00.000Z", supersedesMessageId: null },
+        { id: "rev1", utteranceId: "u1", timestamp: "2026-04-02T10:00:02.000Z", supersedesMessageId: "root" },
+        { id: "other", utteranceId: "u2", timestamp: "2026-04-02T10:00:03.000Z", supersedesMessageId: null },
+        { id: "rev2", utteranceId: "u1", timestamp: "2026-04-02T10:00:05.000Z", supersedesMessageId: "rev1" },
+    ];
+
+    const lineage = selectViewingTranscriptUtteranceMessages(messages, "u1");
+    assert.deepEqual(lineage.map((item) => item.id), ["root", "rev1", "rev2"]);
+});
+
+test("effective utterance selection returns the terminal non-superseded revision", () => {
+    const messages = [
+        { id: "root", utteranceId: "u1", timestamp: "2026-04-02T10:00:00.000Z", supersedesMessageId: null },
+        { id: "rev1", utteranceId: "u1", timestamp: "2026-04-02T10:00:02.000Z", supersedesMessageId: "root" },
+        { id: "rev2", utteranceId: "u1", timestamp: "2026-04-02T10:00:05.000Z", supersedesMessageId: "rev1" },
+        { id: "other", utteranceId: "u2", timestamp: "2026-04-02T10:00:03.000Z", supersedesMessageId: null },
+    ];
+
+    const effective = selectEffectiveViewingTranscriptMessageForUtterance(messages, "u1");
+    assert.equal(effective?.id, "rev2");
 });

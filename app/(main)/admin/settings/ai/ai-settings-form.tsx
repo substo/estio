@@ -433,6 +433,58 @@ export function AiSettingsForm({
                                     </span>
                                 </label>
                             </div>
+
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                <div className="grid gap-2">
+                                    <Label htmlFor="viewingSessionAiDisclosureVersion" className="text-xs text-slate-500 uppercase tracking-wider">
+                                        Disclosure Version
+                                    </Label>
+                                    <Input
+                                        id="viewingSessionAiDisclosureVersion"
+                                        name="viewingSessionAiDisclosureVersion"
+                                        placeholder="v1"
+                                        defaultValue={String(initialData?.viewingSessionAiDisclosureVersion || "v1")}
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                                <div className="grid gap-2">
+                                    <Label htmlFor="viewingSessionTranslationModel" className="text-xs text-slate-500 uppercase tracking-wider">
+                                        Translation Model Override
+                                    </Label>
+                                    <Input
+                                        id="viewingSessionTranslationModel"
+                                        name="viewingSessionTranslationModel"
+                                        placeholder="gemini-2.5-flash"
+                                        defaultValue={String(initialData?.viewingSessionTranslationModel || "")}
+                                    />
+                                </div>
+
+                                <div className="grid gap-2">
+                                    <Label htmlFor="viewingSessionInsightsModel" className="text-xs text-slate-500 uppercase tracking-wider">
+                                        Insights Model Override
+                                    </Label>
+                                    <Input
+                                        id="viewingSessionInsightsModel"
+                                        name="viewingSessionInsightsModel"
+                                        placeholder="gemini-2.5-flash"
+                                        defaultValue={String(initialData?.viewingSessionInsightsModel || "")}
+                                    />
+                                </div>
+
+                                <div className="grid gap-2">
+                                    <Label htmlFor="viewingSessionSummaryModel" className="text-xs text-slate-500 uppercase tracking-wider">
+                                        Summary Model Override
+                                    </Label>
+                                    <Input
+                                        id="viewingSessionSummaryModel"
+                                        name="viewingSessionSummaryModel"
+                                        placeholder="gemini-2.5-flash"
+                                        defaultValue={String(initialData?.viewingSessionSummaryModel || "")}
+                                    />
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

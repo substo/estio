@@ -80,7 +80,11 @@ const aiSchema = z.object({
     viewingSessionRetentionDays: z.union([z.literal(30), z.literal(90), z.literal(365)]).default(90),
     viewingSessionTranscriptVisibility: z.union([z.literal("team"), z.literal("admin_only")]).default("team"),
     viewingSessionAiDisclosureRequired: z.boolean().default(true),
+    viewingSessionAiDisclosureVersion: z.string().trim().min(1).default("v1"),
     viewingSessionRawAudioStorageEnabled: z.boolean().default(false),
+    viewingSessionTranslationModel: nullableTrimmedString,
+    viewingSessionInsightsModel: nullableTrimmedString,
+    viewingSessionSummaryModel: nullableTrimmedString,
 }).passthrough();
 
 const navigationSchema = z.object({

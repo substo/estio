@@ -21,6 +21,7 @@ type SessionMessage = {
     id: string;
     sessionId?: string;
     sequence?: number | null;
+    utteranceId?: string | null;
     sourceMessageId?: string | null;
     messageKind?: string | null;
     origin?: string | null;
@@ -55,9 +56,29 @@ type SessionInsight = {
     model: string | null;
     modelVersion: string | null;
     confidence: number | null;
+    generationKey?: string | null;
+    supersededAt?: string | null;
     metadata: Record<string, unknown> | null;
     createdAt: string;
     updatedAt: string;
+};
+
+type SessionUsage = {
+    id: string;
+    phase: string;
+    provider: string | null;
+    model: string | null;
+    usageAuthority: string;
+    costAuthority: string;
+    inputAudioSeconds: number;
+    outputAudioSeconds: number;
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    toolCalls: number;
+    estimatedCostUsd: number;
+    actualCostUsd: number;
+    recordedAt: string;
 };
 
 type SessionSummary = {
@@ -87,10 +108,17 @@ type SessionState = {
     locationId: string;
     status: string;
     consentStatus: string;
+    consentAcceptedAt: string | null;
+    consentVersion: string | null;
+    consentLocale: string | null;
+    consentSource: string | null;
     transportStatus: string;
     liveProvider: string | null;
     mode: string;
     liveModel: string | null;
+    translationModel: string | null;
+    insightsModel: string | null;
+    summaryModel: string | null;
     chainIndex: number;
     startedAt: string | null;
     endedAt: string | null;
@@ -112,6 +140,7 @@ type Props = {
     initialSession: SessionState;
     initialMessages: SessionMessage[];
     initialInsights: SessionInsight[];
+    initialUsages: SessionUsage[];
     initialSummary: SessionSummary | null;
 };
 
@@ -154,6 +183,7 @@ export function ViewingSessionCockpit(props: Props) {
     const [session, setSession] = useState<SessionState>(props.initialSession);
     const [messages, setMessages] = useState<SessionMessage[]>(props.initialMessages);
     const [insights, setInsights] = useState<SessionInsight[]>(props.initialInsights);
+    const [usages, setUsages] = useState<SessionUsage[]>(props.initialUsages);
     const [summary, setSummary] = useState<SessionSummary | null>(props.initialSummary);
     const [agentDraft, setAgentDraft] = useState("");
     const [liveInfo, setLiveInfo] = useState<any>(null);
@@ -161,6 +191,8 @@ export function ViewingSessionCockpit(props: Props) {
     const [statusPending, startStatusTransition] = useTransition();
     const [messagePending, setMessagePending] = useState(false);
     const [livePending, setLivePending] = useState(false);
+    const [summaryReprocessPending, setSummaryReprocessPending] = useState(false);
+    const [messageReprocessKey, setMessageReprocessKey] = useState<string | null>(null);
     const [showTranscriptRevisions, setShowTranscriptRevisions] = useState(false);
 
     const activeSessionId = session.id;
@@ -177,10 +209,14 @@ export function ViewingSessionCockpit(props: Props) {
         [orderedMessages, showTranscriptRevisions]
     );
     const activeInsights = useMemo(
-        () => insights.filter((item) => item.state !== "dismissed"),
+        () => insights.filter((item) => item.state !== "dismissed" && !item.supersededAt),
         [insights]
     );
     const transportConnected = session.transportStatus === "connected";
+    const recentUsages = useMemo(
+        () => [...usages].sort((a, b) => new Date(b.recordedAt).getTime() - new Date(a.recordedAt).getTime()).slice(0, 8),
+        [usages]
+    );
 
     useEffect(() => {
         const source = new EventSource(`/api/viewings/sessions/events?sessionId=${encodeURIComponent(activeSessionId)}`);
@@ -214,6 +250,18 @@ export function ViewingSessionCockpit(props: Props) {
                         for (const insight of payload.insights as SessionInsight[]) {
                             next = mergeInsightById(next, insight);
                         }
+                        return next;
+                    });
+                    return;
+                }
+
+                if (type === "viewing_session.usage.updated" && payload?.usage?.id) {
+                    const usage = payload.usage as SessionUsage;
+                    setUsages((current) => {
+                        const idx = current.findIndex((item) => item.id === usage.id);
+                        if (idx < 0) return [usage, ...current];
+                        const next = [...current];
+                        next[idx] = { ...next[idx], ...usage };
                         return next;
                     });
                     return;
@@ -352,6 +400,54 @@ export function ViewingSessionCockpit(props: Props) {
         }
     };
 
+    const reprocessMessageAnalysis = async (messageId: string) => {
+        if (!messageId || messageReprocessKey) return;
+        setMessageReprocessKey(messageId);
+        setError(null);
+        try {
+            const response = await fetch(`/api/viewings/sessions/${encodeURIComponent(activeSessionId)}/reprocess`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    target: "message_analysis",
+                    messageId,
+                }),
+            });
+            const payload = await response.json().catch(() => null);
+            if (!response.ok || !payload?.success) {
+                setError(payload?.error || "Failed to reprocess message analysis.");
+            }
+        } catch (reprocessError: any) {
+            setError(reprocessError?.message || "Failed to reprocess message analysis.");
+        } finally {
+            setMessageReprocessKey(null);
+        }
+    };
+
+    const reprocessSummary = async () => {
+        if (summaryReprocessPending) return;
+        setSummaryReprocessPending(true);
+        setError(null);
+        try {
+            const response = await fetch(`/api/viewings/sessions/${encodeURIComponent(activeSessionId)}/reprocess`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    target: "summary",
+                    summaryStatus: summary?.status === "final" || session.status === "completed" ? "final" : "draft",
+                }),
+            });
+            const payload = await response.json().catch(() => null);
+            if (!response.ok || !payload?.success) {
+                setError(payload?.error || "Failed to regenerate summary.");
+            }
+        } catch (reprocessError: any) {
+            setError(reprocessError?.message || "Failed to regenerate summary.");
+        } finally {
+            setSummaryReprocessPending(false);
+        }
+    };
+
     const refreshLiveConfig = async (patch?: Partial<{ audioPlaybackClientEnabled: boolean; audioPlaybackAgentEnabled: boolean }>) => {
         if (livePending) return;
         setLivePending(true);
@@ -379,8 +475,15 @@ export function ViewingSessionCockpit(props: Props) {
                     sessionThreadId: payload.session.sessionThreadId || current.sessionThreadId,
                     status: payload.session.status || current.status,
                     consentStatus: payload.session.consentStatus || current.consentStatus,
+                    consentAcceptedAt: payload.session.consentAcceptedAt || current.consentAcceptedAt,
+                    consentVersion: payload.session.consentVersion || current.consentVersion,
+                    consentLocale: payload.session.consentLocale || current.consentLocale,
+                    consentSource: payload.session.consentSource || current.consentSource,
                     mode: payload.session.mode || current.mode,
                     liveModel: payload.session.model || current.liveModel,
+                    translationModel: payload.modelRouting?.translation || current.translationModel,
+                    insightsModel: payload.modelRouting?.insights || current.insightsModel,
+                    summaryModel: payload.modelRouting?.summary || current.summaryModel,
                     transportStatus: payload.session.transportStatus || current.transportStatus,
                     liveProvider: payload.session.liveProvider || current.liveProvider,
                     chainIndex: payload.session.chainIndex || current.chainIndex,
@@ -414,6 +517,9 @@ export function ViewingSessionCockpit(props: Props) {
                     </p>
                     <p className="text-[11px] text-muted-foreground">
                         Consent: {session.consentStatus}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                        Models: live {session.liveModel || "n/a"} • translation {session.translationModel || "n/a"} • insights {session.insightsModel || "n/a"} • summary {session.summaryModel || "n/a"}
                     </p>
                 </div>
 
@@ -486,6 +592,19 @@ export function ViewingSessionCockpit(props: Props) {
                                         )}
                                         <div className="mt-1 text-[10px] text-muted-foreground">
                                             {message.transcriptStatus || "final"} • {message.translationStatus || "pending"} • {message.insightStatus || "pending"}
+                                        </div>
+                                        <div className="mt-2 flex items-center justify-end">
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-6 px-2 text-[10px]"
+                                                onClick={() => reprocessMessageAnalysis(message.id)}
+                                                disabled={messageReprocessKey === message.id}
+                                            >
+                                                {messageReprocessKey === message.id ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Sparkles className="mr-1 h-3 w-3" />}
+                                                Reprocess
+                                            </Button>
                                         </div>
                                         {showTranscriptRevisions && supersededMessageIds.has(message.id) && (
                                             <div className="mt-1 text-[10px] text-amber-700">
@@ -625,6 +744,11 @@ export function ViewingSessionCockpit(props: Props) {
                                 <div className="rounded-md border bg-muted/20 p-2.5">{summary.sessionSummary}</div>
                             )}
 
+                            <Button type="button" variant="outline" size="sm" className="w-full" onClick={reprocessSummary} disabled={summaryReprocessPending}>
+                                {summaryReprocessPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
+                                Regenerate {summary?.status === "final" || session.status === "completed" ? "Final" : "Draft"} Summary
+                            </Button>
+
                             {Array.isArray(summary?.recommendedNextActions) && summary!.recommendedNextActions.length > 0 && (
                                 <div className="rounded-md border p-2.5">
                                     <div className="mb-1 text-[11px] font-semibold">Recommended next actions</div>
@@ -644,6 +768,45 @@ export function ViewingSessionCockpit(props: Props) {
                                     Source: {summary.source || "analysis_model"}{summary.model ? ` • ${summary.model}` : ""}{summary.usedFallback ? " • fallback" : ""}
                                 </div>
                             )}
+                        </CardContent>
+                    </Card>
+
+                    <Card>
+                        <CardHeader className="pb-2">
+                            <CardTitle className="text-base">Audit & Usage</CardTitle>
+                            <CardDescription>Consent snapshot, stage models, and recent usage authorities.</CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-2 text-xs">
+                            <div className="rounded-md border p-2">
+                                <div>Consent status: {session.consentStatus}</div>
+                                <div>Accepted at: {session.consentAcceptedAt ? new Date(session.consentAcceptedAt).toLocaleString() : "n/a"}</div>
+                                <div>Consent version: {session.consentVersion || "n/a"}</div>
+                                <div>Consent locale: {session.consentLocale || "n/a"}</div>
+                                <div>Consent source: {session.consentSource || "n/a"}</div>
+                            </div>
+                            <div className="rounded-md border p-2">
+                                <div>Live model: {session.liveModel || "n/a"}</div>
+                                <div>Translation model: {session.translationModel || "n/a"}</div>
+                                <div>Insights model: {session.insightsModel || "n/a"}</div>
+                                <div>Summary model: {session.summaryModel || "n/a"}</div>
+                            </div>
+                            <div className="space-y-1">
+                                {recentUsages.length === 0 && (
+                                    <div className="text-muted-foreground">No usage recorded yet.</div>
+                                )}
+                                {recentUsages.map((usage) => (
+                                    <div key={usage.id} className="rounded-md border p-2">
+                                        <div className="font-medium">{usage.phase.replace(/_/g, " ")}</div>
+                                        <div className="text-muted-foreground">
+                                            {usage.usageAuthority} usage • {usage.costAuthority} cost
+                                            {usage.model ? ` • ${usage.model}` : ""}
+                                        </div>
+                                        <div className="text-muted-foreground">
+                                            Tokens: {usage.totalTokens} • Cost: ${usage.actualCostUsd.toFixed(4)}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
                         </CardContent>
                     </Card>
                 </div>

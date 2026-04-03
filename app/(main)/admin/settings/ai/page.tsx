@@ -218,7 +218,11 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
             viewingSessionRetentionDays: aiDoc.payload?.viewingSessionRetentionDays ?? siteConfig?.viewingSessionRetentionDays,
             viewingSessionTranscriptVisibility: aiDoc.payload?.viewingSessionTranscriptVisibility ?? siteConfig?.viewingSessionTranscriptVisibility,
             viewingSessionAiDisclosureRequired: aiDoc.payload?.viewingSessionAiDisclosureRequired ?? siteConfig?.viewingSessionAiDisclosureRequired,
+            viewingSessionAiDisclosureVersion: aiDoc.payload?.viewingSessionAiDisclosureVersion ?? siteConfig?.viewingSessionAiDisclosureVersion,
             viewingSessionRawAudioStorageEnabled: aiDoc.payload?.viewingSessionRawAudioStorageEnabled ?? siteConfig?.viewingSessionRawAudioStorageEnabled,
+            viewingSessionTranslationModel: aiDoc.payload?.viewingSessionTranslationModel ?? siteConfig?.viewingSessionTranslationModel,
+            viewingSessionInsightsModel: aiDoc.payload?.viewingSessionInsightsModel ?? siteConfig?.viewingSessionInsightsModel,
+            viewingSessionSummaryModel: aiDoc.payload?.viewingSessionSummaryModel ?? siteConfig?.viewingSessionSummaryModel,
         }
         : siteConfig;
 

@@ -119,6 +119,72 @@ This slice implements the next-wave foundation from the live-copilot plan:
   - `websocketUpgradeSupported: true`
   - relay metadata now points clients at the dedicated backend relay process while this route remains the persisted ingestion boundary
 
+## 2026-04-03 Hardening Wave Two Update (Lineage + Consent Audit + Stage Routing + Reprocess)
+
+This slice closes the next operational gaps that remained after the truth/pipeline/relay pass.
+
+Delivered in this wave:
+
+- transcript lineage is now explicit:
+  - `ViewingSessionMessage.utteranceId`
+  - legacy rows backfilled to root lineage ids
+  - correction rows inherit the superseded row's `utteranceId`
+  - effective transcript rendering now means "latest non-superseded row for each utterance lineage"
+- consent audit is now first-class:
+  - `ViewingSession.consentAcceptedAt`
+  - `ViewingSession.consentVersion`
+  - `ViewingSession.consentLocale`
+  - `ViewingSession.consentSource`
+  - `SiteConfig.viewingSessionAiDisclosureVersion`
+- stage-level model routing is now snapshotted onto the session:
+  - `ViewingSession.translationModel`
+  - `ViewingSession.insightsModel`
+  - `ViewingSession.summaryModel`
+  - location/site settings can override each worker stage independently
+- sanitization is now path-specific:
+  - translation uses raw utterance text
+  - insights and summary prompts use sanitized context and transcript previews
+  - live tool outputs are sanitized before being sent back into the live model
+- relay read-only tools are now budgeted:
+  - 6 calls/minute/session
+  - 2 concurrent calls/session
+  - 4-second timeout
+  - TTL caching for property context, playbook, and related-property search
+- insight generation now has explicit current-generation semantics:
+  - `ViewingSessionInsight.supersededAt`
+  - `ViewingSessionInsight.generationKey`
+  - current insight queries filter `supersededAt IS NULL`
+- admin/agent reprocessing is now supported:
+  - `POST /api/viewings/sessions/[id]/reprocess`
+  - `target: "message_analysis"` reruns translation + insights for the effective utterance
+  - `target: "summary"` regenerates draft/final summary from effective transcript rows and current unsuperseded insights
+- usage authority is now explicit:
+  - `ViewingSessionUsage.usageAuthority`
+  - `ViewingSessionUsage.costAuthority`
+  - worker rows are written as `derived / estimated`
+  - relay rows are written as `provider_reported / estimated` unless the provider exposes billed cost
+
+### Newly delivered in this slice
+
+- schema and migration:
+  - `prisma/migrations/20260403120000_viewing_session_hardening_wave_two/migration.sql`
+- admin AI settings now expose:
+  - disclosure version
+  - translation model override
+  - insights model override
+  - summary model override
+- admin cockpit now surfaces:
+  - consent metadata
+  - stage model routing
+  - recent usage authority labels
+  - transcript reprocess actions
+  - summary regenerate actions
+- focused automated coverage now includes:
+  - utterance lineage selection
+  - path-specific redaction behavior
+  - stage-model routing defaults and overrides
+  - usage authority/cost authority defaults
+
 ---
 
 ## Executive Summary
@@ -249,6 +315,7 @@ That remains the north star.
 - `prisma/migrations/20260402182000_viewing_session_live_copilot/migration.sql`
 - `prisma/migrations/20260402223000_viewing_session_hardening_native_audio/migration.sql`
 - `prisma/migrations/20260403003000_viewing_session_next_wave/migration.sql`
+- `prisma/migrations/20260403120000_viewing_session_hardening_wave_two/migration.sql`
 
 ## Session backend
 
@@ -258,6 +325,7 @@ That remains the north star.
 - `app/api/viewings/sessions/[id]/messages/route.ts`
 - `app/api/viewings/sessions/[id]/live-auth/route.ts`
 - `app/api/viewings/sessions/[id]/relay/route.ts`
+- `app/api/viewings/sessions/[id]/reprocess/route.ts`
 - `app/api/viewings/sessions/[id]/insights/[insightId]/state/route.ts`
 
 ## Session UI
@@ -296,12 +364,14 @@ That remains the north star.
 ## Session tests
 
 - `lib/viewings/sessions/feature-flags.test.ts`
+- `lib/viewings/sessions/live-models.test.ts`
 - `lib/viewings/sessions/redaction.test.ts`
 - `lib/viewings/sessions/retention.test.ts`
 - `lib/viewings/sessions/runtime.test.ts`
 - `lib/viewings/sessions/tool-policy.test.ts`
 - `lib/viewings/sessions/transcript.test.ts`
 - `lib/viewings/sessions/types.test.ts`
+- `lib/viewings/sessions/usage.test.ts`
 
 ## Session scripts and ops entrypoints
 
@@ -353,6 +423,10 @@ Current shape includes:
   - `joinAudit`
 - consent/policy snapshot fields:
   - `consentStatus`
+  - `consentAcceptedAt`
+  - `consentVersion`
+  - `consentLocale`
+  - `consentSource`
   - `appliedRetentionDays`
   - `transcriptVisibility`
 - lifecycle fields:
@@ -362,6 +436,9 @@ Current shape includes:
   - `audioPlaybackClientEnabled`
   - `audioPlaybackAgentEnabled`
   - `liveModel`
+  - `translationModel`
+  - `insightsModel`
+  - `summaryModel`
 - usage rollup fields:
   - `estimatedCostUsd`
   - `actualCostUsd`
@@ -381,6 +458,7 @@ Purpose:
 
 Current shape includes:
 - `speaker`
+- `utteranceId`
 - `sequence`
 - `sourceMessageId`
 - `messageKind`
@@ -402,6 +480,8 @@ Important hardening details:
 - `(sessionId, sourceMessageId)` is unique when present
 - the API now returns canonical server ordering metadata
 - transcript correction/upsert flows can reference `supersedesMessageId`
+- correction chains now share a stable `utteranceId`
+- default transcript rendering shows the latest non-superseded row per `utteranceId`
 
 ## `ViewingSessionInsight`
 
@@ -425,6 +505,7 @@ Current state model:
 Important note:
 - there is no separate `ViewingRecommendation` table yet
 - recommendation/pivot output currently lives as `ViewingSessionInsight` rows of type `pivot`
+- current-generation insight queries must filter `supersededAt IS NULL`
 
 ## `ViewingSessionSummary`
 
@@ -471,6 +552,8 @@ Current shape includes:
 - `provider`
 - `model`
 - `transportStatus`
+- `usageAuthority`
+- `costAuthority`
 - audio seconds
 - token counts
 - tool call counts
@@ -524,6 +607,7 @@ Current security behavior:
 - each attempt is appended to `joinAudit`
 - join outcomes are also appended to `ViewingSessionEvent`
 - consent acceptance/decline is reflected in `ViewingSession.consentStatus`
+- consent audit metadata is also snapshotted with accepted timestamp, disclosure version, locale, and source
 
 ## 3. Message persistence and analysis
 
@@ -538,15 +622,21 @@ Current flow:
    - Stage 2 queue job is enqueued
    - inline fallback is used if queue enqueue fails
 7. Stage 3 synthesis is enqueued separately using the `viewing-session-synthesis` queue.
-8. `runViewingSessionMessageAnalysis(...)`:
-   - assembles session context
-   - resolves location Google AI key
-   - translates/analyzes the message
-   - creates insights
-   - updates message translation fields
-   - updates session key point/objection caches
+8. `runViewingSessionMessageAnalysis(...)` remains as a backward-compatible wrapper around:
+   - `runViewingSessionMessageTranslation(...)`
+   - `runViewingSessionMessageInsights(...)`
+9. Translation stage:
+   - uses `ViewingSession.translationModel` with fallback to stage defaults
+   - passes raw utterance text to the translation prompt
+   - updates translated fields and translation status
+10. Insights stage:
+   - uses `ViewingSession.insightsModel` with fallback to stage defaults
+   - sanitizes context/transcript inputs before prompting
+   - supersedes prior current non-manual insights for that message
+   - creates new insights with `generationKey`
+   - updates session key point/objection caches from unsuperseded rows only
    - publishes `message.updated` and `insight.upserted`
-   - records analysis usage/cost when model usage data is available
+   - records derived/estimated usage rows when model usage data is available
 
 Important reality check:
 - this is not native audio streaming
@@ -566,9 +656,12 @@ Current relay path:
    - `usage`
 5. Relay transcript/tool events are persisted into `ViewingSessionMessage`, then SSE/analysis/synthesis continue from the same persisted pipeline.
 6. Relay usage events are stored in `ViewingSessionUsage` and rolled into session aggregate cost.
+7. Relay read-only tools now run under per-session budgets, timeout enforcement, and TTL caching.
+8. Tool outputs are sanitized before they are returned to the live model.
 
 Current reality check:
 - relay support now includes a dedicated backend WebSocket process with Gemini Live session ownership, reconnect handling, tool-call responses, transcript persistence, and usage fanout
+- reconnect semantics are now budgeted by both attempt count and elapsed reconnect time, with explicit failure transitions
 - persisted DB rows plus Redis/SSE fanout remain the source of truth for UI updates
 - browser-native audio wiring is still incomplete on the public client, so the backend relay is ahead of the current browser transport UI
 
@@ -667,6 +760,7 @@ Availability strategy:
 Implemented today:
 - mode constants
 - mode-to-model resolution
+- per-stage worker model resolution and session snapshotting
 - capability metadata per mode
 - cost estimation helpers
 - backend live-auth response payload builder
@@ -675,6 +769,7 @@ Implemented today:
 - feature-flag evaluation for premium voice
 - relay/session token issuance for backend-mediated live transport
 - transport-status transitions and chained-session transport rollover
+- admin/agent reprocessing for message analysis and summary
 
 ## What is not implemented yet
 
@@ -716,6 +811,8 @@ Files:
 
 Current UI capabilities:
 - live transcript stream
+- transcript lineage hiding superseded rows by default
+- per-message reprocess action
 - agent text entry box
 - session status controls:
   - start
@@ -731,6 +828,8 @@ Current UI capabilities:
   - dismiss
   - resolve
 - session summary panel
+- summary regenerate action
+- audit/usage panel showing consent metadata, stage models, and recent usage authorities
 
 Important reality check:
 - there is no admin microphone capture UI yet
@@ -778,7 +877,10 @@ This keeps the client page outside the normal `app/(public-site)` header/footer 
 | Admin cockpit page | Yes | Delivered | Session-specific cockpit exists |
 | SSE realtime session events | Yes | Delivered | Session-scoped SSE with replay |
 | Persist original + translated utterances | Yes | Delivered | Both fields stored on `ViewingSessionMessage` |
+| Stable utterance lineage and correction rendering | Yes | Delivered | `utteranceId` plus supersession rules now define effective transcript rendering |
 | Canonical message sequencing + idempotent writes | Yes | Delivered | Server assigns `sequence`; `sourceMessageId` is idempotent |
+| Consent audit versioning | Yes | Delivered | Accepted timestamp, version, locale, and source are now persisted |
+| Per-stage model routing | Yes | Delivered | Translation/insights/summary models snapshot independently from live mode |
 | Continuous AI insight extraction | Yes | Delivered | Queue-backed per-message analysis |
 | Separate synthesis pipeline | Yes | Delivered | Debounced Stage 3 queue for draft/final summary refresh |
 | Objection detection | Yes | Delivered | Static library + model layer |
@@ -797,8 +899,9 @@ This keeps the client page outside the normal `app/(public-site)` header/footer 
 | Calendar-linked session workflow | Yes | Partial | Session links to `Viewing`; no deeper calendar/session UI yet |
 | Retention policy for viewing sessions | Yes | Delivered | Location policy is configurable and snapshotted to session |
 | Consent/disclosure handling | Yes | Delivered | Join flow enforces AI disclosure when configured |
+| Reprocessing semantics | Yes | Delivered | Message analysis and summary can now be regenerated explicitly |
 | Usage/cost accounting | Yes | Delivered | Evented usage rows plus session rollups |
-| Test coverage | Yes | Partial | Feature-flag test exists; broader flow coverage still missing |
+| Test coverage | Yes | Partial | Focused unit coverage expanded, but route/integration coverage still missing |
 
 ---
 
@@ -877,10 +980,10 @@ There is no:
 ## AI/runtime gaps
 
 - No true Gemini Live media session
-- No function-calling loop for live property lookup during active streaming
+- No route-level integration coverage for join/live-auth/relay/reprocess flows yet
 - No richer company knowledge-base retrieval
 - No confidence-calibrated reasoning or explanation display
-- No productionized relay media orchestration yet
+- No billed-cost provider reconciliation yet beyond authority flags
 
 ## Infra/operational gaps
 
@@ -904,6 +1007,14 @@ Completed during implementation:
 - `NODE_OPTIONS='--max-old-space-size=8192' npx tsc --noEmit`
 - `npm run test:viewings:sessions`
 
+Focused automated coverage now includes:
+- transport transition rules
+- transcript supersession and utterance-lineage selection
+- redaction and path-specific translation-vs-analysis sanitization behavior
+- stage-model routing defaults and overrides
+- usage authority and cost authority defaults
+- feature-flag, retention, tool policy, and analysis-status helpers
+
 ## Concise live test steps with a test user
 
 1. In admin, open a real or test contact that already has a scheduled viewing.
@@ -921,6 +1032,7 @@ Completed during implementation:
 
 Not completed:
 - automated join/message/realtime/relay coverage
+- automated reprocess route coverage
 - end-to-end browser QA
 - non-interactive lint pass
 

@@ -80,10 +80,18 @@ export async function POST(
             mode: true,
             status: true,
             consentStatus: true,
+            consentAcceptedAt: true,
+            consentVersion: true,
+            consentLocale: true,
+            consentSource: true,
             startedAt: true,
+            clientLanguage: true,
             audioPlaybackClientEnabled: true,
             audioPlaybackAgentEnabled: true,
             liveModel: true,
+            translationModel: true,
+            insightsModel: true,
+            summaryModel: true,
             transportStatus: true,
             liveProvider: true,
             chainIndex: true,
@@ -104,10 +112,18 @@ export async function POST(
                 mode: true,
                 status: true,
                 consentStatus: true,
+                consentAcceptedAt: true,
+                consentVersion: true,
+                consentLocale: true,
+                consentSource: true,
                 startedAt: true,
+                clientLanguage: true,
                 audioPlaybackClientEnabled: true,
                 audioPlaybackAgentEnabled: true,
                 liveModel: true,
+                translationModel: true,
+                insightsModel: true,
+                summaryModel: true,
                 transportStatus: true,
                 liveProvider: true,
                 chainIndex: true,
@@ -153,7 +169,7 @@ export async function POST(
         : session.audioPlaybackAgentEnabled;
 
     const canUpdateAgentPlayback = context.role === "admin" || context.role === "agent";
-    const sessionUpdate = await db.viewingSession.update({
+    let sessionUpdate = await db.viewingSession.update({
         where: { id: session.id },
         data: {
             mode: desiredMode,
@@ -170,8 +186,16 @@ export async function POST(
             mode: true,
             status: true,
             consentStatus: true,
+            consentAcceptedAt: true,
+            consentVersion: true,
+            consentLocale: true,
+            consentSource: true,
             startedAt: true,
+            clientLanguage: true,
             liveModel: true,
+            translationModel: true,
+            insightsModel: true,
+            summaryModel: true,
             transportStatus: true,
             liveProvider: true,
             audioPlaybackClientEnabled: true,
@@ -179,6 +203,55 @@ export async function POST(
             chainIndex: true,
         },
     });
+
+    if (
+        context.role === "client"
+        && sessionUpdate.consentStatus === "accepted"
+        && (
+            !sessionUpdate.consentAcceptedAt
+            || !sessionUpdate.consentVersion
+            || !sessionUpdate.consentLocale
+            || !sessionUpdate.consentSource
+        )
+    ) {
+        const siteConfig = await db.siteConfig.findUnique({
+            where: { locationId: sessionUpdate.locationId },
+            select: { viewingSessionAiDisclosureVersion: true },
+        });
+        const acceptLanguage = String(req.headers.get("accept-language") || "").split(",")[0]?.trim() || null;
+        sessionUpdate = await db.viewingSession.update({
+            where: { id: sessionUpdate.id },
+            data: {
+                consentAcceptedAt: sessionUpdate.consentAcceptedAt || new Date(),
+                consentVersion: sessionUpdate.consentVersion || String(siteConfig?.viewingSessionAiDisclosureVersion || "").trim() || "v1",
+                consentLocale: sessionUpdate.consentLocale || sessionUpdate.clientLanguage || acceptLanguage,
+                consentSource: sessionUpdate.consentSource || "live_auth",
+            },
+            select: {
+                id: true,
+                locationId: true,
+                sessionThreadId: true,
+                mode: true,
+                status: true,
+                consentStatus: true,
+                consentAcceptedAt: true,
+                consentVersion: true,
+                consentLocale: true,
+                consentSource: true,
+                startedAt: true,
+                clientLanguage: true,
+                liveModel: true,
+                translationModel: true,
+                insightsModel: true,
+                summaryModel: true,
+                transportStatus: true,
+                liveProvider: true,
+                audioPlaybackClientEnabled: true,
+                audioPlaybackAgentEnabled: true,
+                chainIndex: true,
+            },
+        });
+    }
 
     const credentialHealth = await validateGeminiLiveCredentialsForLocation(sessionUpdate.locationId);
     if (!credentialHealth.ok) {
@@ -263,6 +336,10 @@ export async function POST(
             consentStatus: sessionUpdate.consentStatus,
             mode: sessionUpdate.mode,
             model: sessionUpdate.liveModel,
+            consentAcceptedAt: sessionUpdate.consentAcceptedAt ? sessionUpdate.consentAcceptedAt.toISOString() : null,
+            consentVersion: sessionUpdate.consentVersion || null,
+            consentLocale: sessionUpdate.consentLocale || null,
+            consentSource: sessionUpdate.consentSource || null,
             transportStatus: latestTransportStatus,
             liveProvider: sessionUpdate.liveProvider || liveConfig.provider,
             chainIndex: sessionUpdate.chainIndex,
@@ -277,6 +354,12 @@ export async function POST(
             maxAudioWindowMinutes: VIEWING_SESSION_LIVE_LIMIT_MINUTES,
         },
         voicePremiumEnabled,
+        modelRouting: {
+            live: sessionUpdate.liveModel,
+            translation: sessionUpdate.translationModel,
+            insights: sessionUpdate.insightsModel,
+            summary: sessionUpdate.summaryModel,
+        },
         sessionAccessToken,
         sessionAccessTokenExpiresInSeconds: DEFAULT_VIEWING_SESSION_ACCESS_TOKEN_TTL_SECONDS,
         liveAuth: {

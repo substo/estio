@@ -10,6 +10,8 @@ type RecordViewingSessionUsageInput = {
     provider?: string | null;
     model?: string | null;
     transportStatus?: string | null;
+    usageAuthority?: "derived" | "provider_reported" | null;
+    costAuthority?: "estimated" | "provider_reported" | null;
     inputAudioSeconds?: number | null;
     outputAudioSeconds?: number | null;
     inputTokens?: number | null;
@@ -31,6 +33,24 @@ function asNumber(value: unknown, fallback: number = 0): number {
     return parsed;
 }
 
+export function resolveViewingSessionUsageAuthority(
+    phase: RecordViewingSessionUsageInput["phase"],
+    input?: RecordViewingSessionUsageInput["usageAuthority"]
+): "derived" | "provider_reported" {
+    const normalized = asString(input);
+    if (normalized === "provider_reported") return "provider_reported";
+    if (normalized === "derived") return "derived";
+    return phase === "live_audio" ? "provider_reported" : "derived";
+}
+
+export function resolveViewingSessionCostAuthority(
+    input?: RecordViewingSessionUsageInput["costAuthority"]
+): "estimated" | "provider_reported" {
+    const normalized = asString(input);
+    if (normalized === "provider_reported") return "provider_reported";
+    return "estimated";
+}
+
 export async function recordViewingSessionUsage(input: RecordViewingSessionUsageInput) {
     const sessionId = asString(input.sessionId);
     const locationId = asString(input.locationId);
@@ -49,6 +69,8 @@ export async function recordViewingSessionUsage(input: RecordViewingSessionUsage
     );
     const estimatedCostUsd = Math.max(0, asNumber(input.estimatedCostUsd, 0));
     const actualCostUsd = Math.max(0, asNumber(input.actualCostUsd, estimatedCostUsd));
+    const usageAuthority = resolveViewingSessionUsageAuthority(input.phase, input.usageAuthority);
+    const costAuthority = resolveViewingSessionCostAuthority(input.costAuthority);
 
     const usage = await db.viewingSessionUsage.create({
         data: {
@@ -58,6 +80,8 @@ export async function recordViewingSessionUsage(input: RecordViewingSessionUsage
             provider: asString(input.provider) || null,
             model: asString(input.model) || null,
             transportStatus: asString(input.transportStatus) || null,
+            usageAuthority,
+            costAuthority,
             inputAudioSeconds: Math.max(0, asNumber(input.inputAudioSeconds, 0)),
             outputAudioSeconds: Math.max(0, asNumber(input.outputAudioSeconds, 0)),
             inputTokens,
@@ -113,6 +137,8 @@ export async function recordViewingSessionUsage(input: RecordViewingSessionUsage
                 phase: usage.phase,
                 provider: usage.provider,
                 model: usage.model,
+                usageAuthority: usage.usageAuthority,
+                costAuthority: usage.costAuthority,
                 inputAudioSeconds: usage.inputAudioSeconds,
                 outputAudioSeconds: usage.outputAudioSeconds,
                 inputTokens: usage.inputTokens,

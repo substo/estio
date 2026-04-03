@@ -56,6 +56,7 @@ export async function POST(req: NextRequest) {
                         select: {
                             domain: true,
                             viewingSessionAiDisclosureRequired: true,
+                            viewingSessionAiDisclosureVersion: true,
                         },
                     },
                 },
@@ -197,11 +198,17 @@ export async function POST(req: NextRequest) {
     }
 
     const disclosureRequired = session.location.siteConfig?.viewingSessionAiDisclosureRequired !== false;
+    const disclosureVersion = String(session.location.siteConfig?.viewingSessionAiDisclosureVersion || "").trim() || "v1";
+    const consentLocale = parsed.data.preferredLanguage || session.clientLanguage || null;
     if (disclosureRequired && parsed.data.aiDisclosureAccepted !== true) {
         await db.viewingSession.update({
             where: { id: session.id },
             data: {
                 consentStatus: "declined",
+                consentAcceptedAt: null,
+                consentVersion: disclosureVersion,
+                consentLocale,
+                consentSource: "join_form",
                 joinAudit: appendJoinAuditEntry(session.joinAudit, {
                     at: now.toISOString(),
                     success: false,
@@ -247,6 +254,10 @@ export async function POST(req: NextRequest) {
             lastJoinAttemptAt: now,
             lastJoinedAt: now,
             consentStatus: disclosureRequired ? "accepted" : "not_required",
+            consentAcceptedAt: now,
+            consentVersion: disclosureVersion,
+            consentLocale,
+            consentSource: disclosureRequired ? "join_form" : "admin_override",
             clientLanguage: parsed.data.preferredLanguage || session.clientLanguage || undefined,
             joinAudit: appendJoinAuditEntry(session.joinAudit, {
                 at: now.toISOString(),
@@ -284,6 +295,10 @@ export async function POST(req: NextRequest) {
             transportStatus: session.transportStatus,
             liveProvider: session.liveProvider,
             consentStatus: disclosureRequired ? "accepted" : "not_required",
+            consentAcceptedAt: now.toISOString(),
+            consentVersion: disclosureVersion,
+            consentLocale,
+            consentSource: disclosureRequired ? "join_form" : "admin_override",
             clientName: session.clientName,
             clientLanguage: parsed.data.preferredLanguage || session.clientLanguage || null,
             agentLanguage: session.agentLanguage || null,
