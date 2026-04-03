@@ -1,12 +1,13 @@
 # Deployment Scripts Guide
 
-**Last Updated:** 2026-03-25
+**Last Updated:** 2026-04-03
 
 This project uses a Blue/Green deployment layout on the production server:
 
 - `estio-app-blue` on port `3001`
 - `estio-app-green` on port `3002`
 - `estio-scrape-worker` as a dedicated headless BullMQ consumer (no HTTP port binding)
+- `estio-viewing-live-relay` as a dedicated websocket relay runtime (default port `8788`)
 - Symlink `estio-app` points to the currently live slot
 - Caddy routes public traffic to the active slot
 
@@ -28,9 +29,12 @@ What it does:
 8. Applies Prisma schema sync guard before runtime cutover (`PRISMA_SCHEMA_SYNC_MODE`).
 9. Starts the target PM2 process and health-checks `http://127.0.0.1:<target-port>/api/health`.
 10. Updates Caddy upstream to target port and reloads Caddy.
-11. Starts dedicated scrape worker via `npm run start:scrape-worker` (headless runtime).
-12. Verifies scrape worker readiness (`pm2 online` + fresh Redis heartbeat) before completing deploy.
-13. Keeps old slot running for a drain window, then deletes it.
+11. Ensures Caddy includes websocket relay route `handle_path /viewings-live-relay/* -> 127.0.0.1:<relay-port>`.
+12. Starts dedicated scrape worker via `npm run start:scrape-worker` (headless runtime).
+13. Verifies scrape worker readiness (`pm2 online` + fresh Redis heartbeat) before completing deploy.
+14. Starts dedicated viewing live relay via `npm run start:viewing-live-relay`.
+15. Verifies relay readiness at `http://127.0.0.1:<relay-port>/health`.
+16. Keeps old slot running for a drain window, then deletes it.
 
 ### Pre-Deploy Workspace Hygiene
 
@@ -90,6 +94,14 @@ pm2 start npm --name estio-scrape-worker --cwd /home/martin/estio-app -- run sta
 ```
 
 This worker does not run `next start` and does not bind an HTTP port.
+
+It starts the dedicated viewing relay with:
+
+```bash
+pm2 start npm --name estio-viewing-live-relay --cwd /home/martin/estio-app -- run start:viewing-live-relay
+```
+
+This runtime owns websocket transport and Gemini Live relay lifecycle.
 
 ### Deploy Guardrails (Fail-Safe)
 
@@ -173,6 +185,8 @@ ssh root@138.199.214.117 "pm2 list"
 ssh root@138.199.214.117 "pm2 describe estio-app-blue"
 ssh root@138.199.214.117 "pm2 describe estio-app-green"
 ssh root@138.199.214.117 "pm2 describe estio-scrape-worker"
+ssh root@138.199.214.117 "pm2 describe estio-viewing-live-relay"
+ssh root@138.199.214.117 "curl -fsS http://127.0.0.1:8788/health"
 ```
 
 Tail logs (active slot):
@@ -181,6 +195,7 @@ Tail logs (active slot):
 ssh root@138.199.214.117 "pm2 logs estio-app-blue --lines 120 --nostream"
 ssh root@138.199.214.117 "pm2 logs estio-app-green --lines 120 --nostream"
 ssh root@138.199.214.117 "pm2 logs estio-scrape-worker --lines 120 --nostream"
+ssh root@138.199.214.117 "pm2 logs estio-viewing-live-relay --lines 120 --nostream"
 ```
 
 ## Operational Notes

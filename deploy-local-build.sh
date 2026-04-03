@@ -15,6 +15,8 @@ BLUE_PORT=3001
 GREEN_PORT=3002
 APP_NAME_PREFIX="estio-app"
 SCRAPE_WORKER_APP_NAME="estio-scrape-worker"
+VIEWING_RELAY_APP_NAME="estio-viewing-live-relay"
+VIEWING_RELAY_DEFAULT_PORT=8788
 LEGACY_SCRAPE_WORKER_PORT=3010
 PRISMA_CLI_VERSION="${PRISMA_CLI_VERSION:-6.19.0}"
 # Schema sync modes:
@@ -260,6 +262,8 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
     ACTIVE_DIR="$ACTIVE_DIR"
     ACTIVE_COLOR="$ACTIVE_COLOR"
     SCRAPE_WORKER_APP_NAME="$SCRAPE_WORKER_APP_NAME"
+    VIEWING_RELAY_APP_NAME="$VIEWING_RELAY_APP_NAME"
+    VIEWING_RELAY_DEFAULT_PORT="$VIEWING_RELAY_DEFAULT_PORT"
     BLUE_PORT="$BLUE_PORT"
     GREEN_PORT="$GREEN_PORT"
     LEGACY_SCRAPE_WORKER_PORT="$LEGACY_SCRAPE_WORKER_PORT"
@@ -271,10 +275,18 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
 
     mkdir -p "\$DEPLOY_STATE_DIR"
 
+    VIEWING_RELAY_PORT="\$VIEWING_RELAY_DEFAULT_PORT"
+    if [ -f "\$TARGET_DIR/.env" ]; then
+        RAW_VIEWING_RELAY_PORT=\$(grep -E '^VIEWING_SESSION_RELAY_PORT=' "\$TARGET_DIR/.env" | tail -n1 | sed -E 's/^[^=]+=//' | sed -E "s/^['\\\"]|['\\\"]\$//g" | tr -d '[:space:]')
+        if [[ "\$RAW_VIEWING_RELAY_PORT" =~ ^[0-9]+$ ]]; then
+            VIEWING_RELAY_PORT="\$RAW_VIEWING_RELAY_PORT"
+        fi
+    fi
+
     echo "🔎 Preflight: checking for unmanaged runtime process drift..."
     if ! ESTIO_MANAGED_BASE_DIR="/home/martin/estio-app" \
-        ESTIO_MANAGED_PORTS="\$BLUE_PORT,\$GREEN_PORT,\$LEGACY_SCRAPE_WORKER_PORT" \
-        ESTIO_MANAGED_PM2_NAMES="\$TARGET_APP_NAME,\$ACTIVE_APP_NAME,\$SCRAPE_WORKER_APP_NAME" \
+        ESTIO_MANAGED_PORTS="\$BLUE_PORT,\$GREEN_PORT,\$LEGACY_SCRAPE_WORKER_PORT,\$VIEWING_RELAY_PORT" \
+        ESTIO_MANAGED_PM2_NAMES="\$TARGET_APP_NAME,\$ACTIVE_APP_NAME,\$SCRAPE_WORKER_APP_NAME,\$VIEWING_RELAY_APP_NAME" \
         node <<'NODE'
 const { execSync } = require('child_process');
 const fs = require('fs');
@@ -457,9 +469,29 @@ NODE
 
     # Update Caddy upstream to point at target color port, then reload gracefully.
     if [ -f /etc/caddy/Caddyfile ]; then
-        PREVIOUS_CADDY_PORT=\$(grep -Eo 'reverse_proxy[[:space:]]+localhost:[0-9]+' /etc/caddy/Caddyfile | head -n1 | sed -E 's/.*:([0-9]+)/\\1/' || true)
+        PREVIOUS_CADDY_PORT=\$(grep -Eo 'reverse_proxy[[:space:]]+localhost:(3001|3002)' /etc/caddy/Caddyfile | head -n1 | sed -E 's/.*:([0-9]+)/\\1/' || true)
         cp /etc/caddy/Caddyfile "/etc/caddy/Caddyfile.bak.\$(date +%Y%m%d%H%M%S)"
-        sed -E -i "s#localhost:[0-9]+#localhost:\$TARGET_PORT#g" /etc/caddy/Caddyfile
+
+        if ! grep -q 'IDX_VIEWING_RELAY_BEGIN' /etc/caddy/Caddyfile; then
+            awk -v relay_port="\$VIEWING_RELAY_PORT" '
+                BEGIN { inserted = 0 }
+                {
+                    print $0
+                    if (!inserted && $0 ~ /^estio\.co[[:space:]]*\{[[:space:]]*$/) {
+                        print "    # IDX_VIEWING_RELAY_BEGIN"
+                        print "    handle_path /viewings-live-relay/* {"
+                        print "        reverse_proxy 127.0.0.1:" relay_port
+                        print "    }"
+                        print "    # IDX_VIEWING_RELAY_END"
+                        print ""
+                        inserted = 1
+                    }
+                }
+            ' /etc/caddy/Caddyfile > /etc/caddy/Caddyfile.tmp && mv /etc/caddy/Caddyfile.tmp /etc/caddy/Caddyfile
+            echo "🔌 Added viewing relay websocket route to Caddy (port \$VIEWING_RELAY_PORT)."
+        fi
+
+        sed -E -i "s#localhost:(3001|3002)#localhost:\$TARGET_PORT#g" /etc/caddy/Caddyfile
         sed -E -i "s#reverse_proxy[[:space:]]+localhost([[:space:]]|$)#reverse_proxy localhost:\$TARGET_PORT\\\\1#g" /etc/caddy/Caddyfile
 
         caddy validate --config /etc/caddy/Caddyfile
@@ -642,6 +674,31 @@ NODE
         echo "❌ Scrape worker failed readiness checks (PM2 online + heartbeat)."
         pm2 describe "\$SCRAPE_WORKER_APP_NAME" || true
         pm2 logs "\$SCRAPE_WORKER_APP_NAME" --lines 120 --nostream || true
+        exit 1
+    fi
+
+    echo "🔌 Ensuring viewing live relay process is running (\$VIEWING_RELAY_APP_NAME) on :\$VIEWING_RELAY_PORT..."
+    if pm2 describe "\$VIEWING_RELAY_APP_NAME" > /dev/null 2>&1; then
+        pm2 delete "\$VIEWING_RELAY_APP_NAME" || true
+    fi
+    NODE_ENV=production PROCESS_ROLE=viewing-live-relay \
+        pm2 start npm --name "\$VIEWING_RELAY_APP_NAME" --cwd "\$SYMLINK_PATH" -- run start:viewing-live-relay
+
+    echo "🩺 Waiting for viewing live relay readiness..."
+    RELAY_READY=0
+    for i in \$(seq 1 45); do
+        if curl -fsS "http://127.0.0.1:\$VIEWING_RELAY_PORT/health" > /dev/null 2>&1; then
+            RELAY_READY=1
+            echo "✅ Viewing live relay is healthy"
+            break
+        fi
+        sleep 1
+    done
+
+    if [ "\$RELAY_READY" -ne 1 ]; then
+        echo "❌ Viewing live relay failed readiness checks on :\$VIEWING_RELAY_PORT."
+        pm2 describe "\$VIEWING_RELAY_APP_NAME" || true
+        pm2 logs "\$VIEWING_RELAY_APP_NAME" --lines 120 --nostream || true
         exit 1
     fi
 

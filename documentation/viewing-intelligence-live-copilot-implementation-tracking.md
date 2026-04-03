@@ -234,6 +234,78 @@ Delivered in this wave:
 - Shared mode conversion now lazily issues join credentials and returns domain-aware join URL.
 - Relay now accepts agent-side microphone streaming events in quick internal mode.
 
+## 2026-04-03 Production Incident Analysis (Live Relay Connection Failed)
+
+Session analyzed:
+- `ViewingSession.id = cmnj8aogp000ca4ryk8nkfege`
+- Admin URL: `https://estio.co/admin/viewings/sessions/cmnj8aogp000ca4ryk8nkfege`
+
+Observed timeline (UTC and local Cyprus time):
+- `2026-04-03 18:21:00Z` (`2026-04-03 21:21:00` EEST): first `viewing_session.live_auth.issued` and transport moved to `connecting`
+- `2026-04-03 18:21:16Z`, `18:22:41Z`, `18:23:52Z`: additional `live-auth` attempts; transport remained `connecting`
+- no `connected`, `reconnecting`, or relay `disconnect` transition was persisted for this session
+
+Evidence captured:
+- `ViewingSession.transportStatus` remains `connecting`
+- repeated `viewing_session.live_auth.issued` + `viewing_session.transport.status` events from `api.live-auth`
+- no relay-origin transport transition events (`source: relay`) were persisted
+- no session-id hits in PM2 app logs for this session id
+- production host had no listener on `:8788` and no dedicated relay process running (`scripts/start-viewing-live-relay.ts`)
+- `VIEWING_SESSION_BACKEND_RELAY_WS_URL` was not set in deployed `.env`, so app fallback is `ws://127.0.0.1:8788/ws`
+- current `/etc/caddy/Caddyfile` does not expose a public websocket route for relay traffic
+
+Most likely failure chain:
+1. `live-auth` succeeds and returns relay metadata.
+2. Browser attempts websocket connection using fallback relay URL behavior.
+3. Dedicated relay process is not reachable/running, so websocket never opens.
+4. UI surfaces `Live relay connection failed.` while session remains stuck in `connecting`.
+
+Immediate operational remediation:
+1. Run relay process under process supervision (PM2/systemd), e.g. `npm run start:viewing-live-relay`.
+2. Set `VIEWING_SESSION_BACKEND_RELAY_WS_URL` to a browser-reachable `wss://` endpoint.
+3. Add Caddy websocket reverse-proxy route for relay path to relay port (`8788` by default).
+4. Add relay health checks/alerts (`/health`) and restart policy.
+5. Validate by confirming DB event sequence: `live_auth.issued -> transport connecting -> transport connected (source=relay)`.
+
+Recommended production-grade debugging/tracking baseline:
+- structured correlation ids in all logs: `sessionId`, `sessionThreadId`, `locationId`, `requestId`, `transportStatus`, `eventType`, `source`
+- funnel counters and rates:
+  - `live_auth_issued_total`
+  - `relay_ws_open_total`
+  - `relay_ws_open_failed_total` (with reason/category)
+  - `transport_connected_total`
+  - `transport_connecting_timeout_total` (no connected event within N seconds)
+- latency SLOs:
+  - P50/P95 time from `live_auth.issued` to first `connected`
+  - P50/P95 time from audio input to first transcript persist
+- synthetic canary checks every 5-10 minutes:
+  - obtain live-auth for a test session
+  - open relay websocket
+  - post a short transcript/audio payload
+  - assert persisted relay message + transport connected event exists
+- alerting thresholds:
+  - zero `transport_connected` events over rolling window
+  - abnormal spike in `relay_ws_open_failed_total`
+  - relay health endpoint down for >2 consecutive checks
+
+## 2026-04-03 Production Reliability Fix Applied (Relay Runtime + Gatekeeping)
+
+Implemented in codebase:
+- `live-auth` now performs relay health validation before issuing live transport credentials.
+- `live-auth` now rejects loopback-only relay websocket URLs for non-local/browser requests.
+- relay diagnostics are now returned with explicit failure codes:
+  - `LIVE_RELAY_UNAVAILABLE`
+  - `LIVE_RELAY_WS_URL_INVALID`
+- session events are now written for relay bootstrapping failures:
+  - `viewing_session.live_auth.relay_unavailable`
+  - `viewing_session.live_auth.relay_url_invalid`
+- relay websocket URL resolution is now environment/host aware and no longer defaults blindly to a browser-unreachable loopback URL in production.
+- deploy runtime now ensures:
+  - dedicated relay PM2 process is started (`estio-viewing-live-relay`)
+  - relay readiness check passes (`/health`)
+  - Caddy has a websocket route for `/viewings-live-relay/*`
+- relay process bind default is now localhost (`127.0.0.1`) and is intended to be exposed through Caddy only.
+
 ---
 
 ## Executive Summary

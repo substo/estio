@@ -51,7 +51,7 @@ type RelayContext = {
 
 const RELAY_CONTEXTS = new Map<string, RelayContext>();
 
-const RELAY_HOST = String(process.env.VIEWING_SESSION_RELAY_HOST || "0.0.0.0").trim();
+const RELAY_HOST = String(process.env.VIEWING_SESSION_RELAY_HOST || "127.0.0.1").trim();
 const RELAY_PORT = Math.max(1, Math.min(65535, Number(process.env.VIEWING_SESSION_RELAY_PORT || 8788)));
 const RELAY_PATH = String(process.env.VIEWING_SESSION_RELAY_WS_PATH || "/ws").trim() || "/ws";
 const APP_BASE_URL = String(

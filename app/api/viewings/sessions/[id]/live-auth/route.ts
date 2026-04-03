@@ -3,7 +3,12 @@ import { z } from "zod";
 import db from "@/lib/db";
 import { appendViewingSessionEvent } from "@/lib/viewings/sessions/events";
 import { isViewingSessionVoicePremiumEnabled } from "@/lib/viewings/sessions/feature-flags";
-import { buildViewingLiveAuthPayload, validateGeminiLiveCredentialsForLocation } from "@/lib/viewings/sessions/gemini-live";
+import {
+    buildViewingLiveAuthPayload,
+    relayWebsocketUrlTargetsLoopback,
+    validateGeminiLiveCredentialsForLocation,
+    validateViewingLiveRelayAvailability,
+} from "@/lib/viewings/sessions/gemini-live";
 import { resolveLiveModelForMode } from "@/lib/viewings/sessions/live-models";
 import {
     ensureViewingSessionWithinLiveWindow,
@@ -39,6 +44,31 @@ function normalizeMode(mode: string | null | undefined): ViewingSessionMode {
 function isClientConsentMissing(consentStatus: string | null | undefined): boolean {
     const normalized = String(consentStatus || "").trim().toLowerCase();
     return normalized === "required" || normalized === "declined";
+}
+
+function asString(value: unknown): string {
+    return String(value || "").trim();
+}
+
+function resolveRequestOrigin(req: NextRequest): string | null {
+    const forwardedHost = asString(req.headers.get("x-forwarded-host")).split(",")[0]?.trim();
+    const host = forwardedHost || asString(req.headers.get("host")) || asString(req.nextUrl.host);
+    if (!host) return null;
+
+    const forwardedProto = asString(req.headers.get("x-forwarded-proto")).split(",")[0]?.trim().toLowerCase();
+    const protocol = forwardedProto || asString(req.nextUrl.protocol).replace(/:$/, "") || "https";
+    return `${protocol}://${host}`;
+}
+
+function isLocalRequestOrigin(origin: string | null): boolean {
+    if (!origin) return false;
+    try {
+        const parsed = new URL(origin);
+        const host = asString(parsed.hostname).toLowerCase();
+        return host === "127.0.0.1" || host === "localhost" || host === "::1";
+    } catch {
+        return false;
+    }
 }
 
 export async function POST(
@@ -277,9 +307,65 @@ export async function POST(
         );
     }
 
+    const requestOrigin = resolveRequestOrigin(req);
+    const relayHealth = await validateViewingLiveRelayAvailability({
+        requestOrigin,
+    });
+    if (!relayHealth.ok) {
+        await appendViewingSessionEvent({
+            sessionId: sessionUpdate.id,
+            locationId: sessionUpdate.locationId,
+            type: "viewing_session.live_auth.relay_unavailable",
+            actorRole: context.role,
+            actorUserId: context.clerkUserId,
+            source: "api",
+            payload: {
+                reason: relayHealth.error || "relay_unavailable",
+                requestOrigin: requestOrigin || null,
+                relay: relayHealth.relay,
+            },
+        });
+        return NextResponse.json(
+            {
+                success: false,
+                error: relayHealth.error || "Live relay is unavailable.",
+                code: "LIVE_RELAY_UNAVAILABLE",
+                relay: relayHealth.relay,
+            },
+            { status: 503 }
+        );
+    }
+    if (
+        !isLocalRequestOrigin(requestOrigin)
+        && relayWebsocketUrlTargetsLoopback(relayHealth.relay.websocketUrl)
+    ) {
+        await appendViewingSessionEvent({
+            sessionId: sessionUpdate.id,
+            locationId: sessionUpdate.locationId,
+            type: "viewing_session.live_auth.relay_url_invalid",
+            actorRole: context.role,
+            actorUserId: context.clerkUserId,
+            source: "api",
+            payload: {
+                requestOrigin: requestOrigin || null,
+                relay: relayHealth.relay,
+            },
+        });
+        return NextResponse.json(
+            {
+                success: false,
+                error: "Live relay websocket URL points to a loopback host and is unreachable from browser clients.",
+                code: "LIVE_RELAY_WS_URL_INVALID",
+                relay: relayHealth.relay,
+            },
+            { status: 503 }
+        );
+    }
+
     const liveConfig = await buildViewingLiveAuthPayload({
         locationId: sessionUpdate.locationId,
         mode: normalizeMode(sessionUpdate.mode),
+        requestOrigin,
     });
 
     const relayRole = context.role === "client" ? "client" : "agent";
@@ -341,7 +427,10 @@ export async function POST(
     const latestTransportStatus = sessionUpdate.status === VIEWING_SESSION_STATUSES.active && sessionUpdate.transportStatus !== "connected"
         ? "connecting"
         : sessionUpdate.transportStatus;
-    const relayWebsocketUrl = `${liveConfig.relay.websocketUrl.replace(/\/$/, "")}?sessionId=${encodeURIComponent(sessionUpdate.id)}`;
+    const relayBaseWebsocketUrl = liveConfig.relay.websocketUrl.replace(/\/$/, "");
+    const relayWebsocketUrl = relayBaseWebsocketUrl.includes("?")
+        ? `${relayBaseWebsocketUrl}&sessionId=${encodeURIComponent(sessionUpdate.id)}`
+        : `${relayBaseWebsocketUrl}?sessionId=${encodeURIComponent(sessionUpdate.id)}`;
 
     return NextResponse.json({
         success: true,
