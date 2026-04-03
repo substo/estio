@@ -476,8 +476,8 @@ NODE
             awk -v relay_port="\$VIEWING_RELAY_PORT" '
                 BEGIN { inserted = 0 }
                 {
-                    print $0
-                    if (!inserted && $0 ~ /^estio\.co[[:space:]]*\{[[:space:]]*$/) {
+                    print \$0
+                    if (!inserted && \$0 ~ /^estio\.co[[:space:]]*\{[[:space:]]*$/) {
                         print "    # IDX_VIEWING_RELAY_BEGIN"
                         print "    handle_path /viewings-live-relay/* {"
                         print "        reverse_proxy 127.0.0.1:" relay_port
