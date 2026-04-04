@@ -10,7 +10,7 @@ The feature now has two editing modes inside the **Property Form -> Media** tab:
 
 1. **Polish**
    - Analyze the selected listing photo and return structured, selectable fixes.
-   - Generate a polished variant image based on selected fixes, aggression level, and model tier.
+   - Generate a polished variant image based on selected fixes, aggression level, and step-specific model selection.
 2. **Precision Remove**
    - Let the operator paint or box-mask an exact area.
    - Remove the masked object with Vertex AI Imagen inpainting, then blend the masked edit back over the original image.
@@ -34,8 +34,10 @@ The latest update focused on two practical issues discovered during real usage:
 3. **Prompt transparency**
    - The generation step now shows the **Final Prompt Used** so operators can understand how the image was instructed and debug unexpected output.
 
-4. **Model routing correction**
-   - `nano_banana_2` now resolves to `gemini-2.5-flash-image`, which is the current implementation default in code.
+4. **Step-specific model selection**
+   - The old hardcoded `Nano Banana / Pro` toggle has been removed from the polish flow.
+   - Analysis and generation now each use their own dropdown backed by the shared Google model catalog.
+   - The server validates those selections against capability-aware filters so analysis does not accidentally hit an image model that rejects JSON mode.
 
 5. **Precision Remove mode**
    - Added a separate admin-only mode for exact object removal using manual masks.
@@ -62,6 +64,10 @@ The latest update focused on two practical issues discovered during real usage:
    - `Polish`
    - `Precision Remove` when enabled for the current location
 5. In **Polish** mode:
+   - User adds optional shared guidance:
+     - freeform override instructions
+     - optional reuse of the last approved prompt context from the previous image in the current editing session
+   - User chooses an **Analysis Model** from a dropdown that only shows structured analysis candidates.
    - User runs **Analyze Photo**.
    - AI returns:
      - `sceneSummary`
@@ -72,9 +78,7 @@ The latest update focused on two practical issues discovered during real usage:
    - User chooses:
      - Fix chips (on/off)
      - Aggression: `conservative | balanced | aggressive` (default `balanced`)
-     - Model tier: `nano_banana_2` (default) or `nano_banana_pro`
-     - Optional freeform override instructions
-     - Optional reuse of the last approved prompt context from the previous image in the current editing session
+     - a **Generation Model** from a dropdown that only shows image-editing candidates
    - User runs **Generate Enhanced Image**.
 6. In **Precision Remove** mode:
    - User masks the object with `Brush` or `Box`.
@@ -96,6 +100,10 @@ The latest update focused on two practical issues discovered during real usage:
 - Generated output is added as a new image variant in the unsaved property form state, then persisted when the operator saves the property.
 - `Precision Remove` is intentionally a separate mode and does not auto-chain into `Polish` in the same run.
 - The review stage uses one consistent compare viewer for both modes to keep the modal smaller and easier to scan.
+- In `Polish`, the rail is progressive:
+  - Step 1 shows only the analysis-model selector.
+  - After analysis completes, Step 2 shows the generation-model selector.
+  - This keeps both model controls available without showing both at once.
 
 ## API Endpoints
 
@@ -134,7 +142,6 @@ Shared contracts live in:
 Key types:
 
 - `EnhancementAggression = "conservative" | "balanced" | "aggressive"`
-- `EnhancementModelTier = "nano_banana_2" | "nano_banana_pro"`
 - `EnhancementMode = "polish" | "precision_remove"`
 - `ImageEnhancementAnalysisRequest/Response`
 - `ImageEnhancementGenerateRequest/Response`
@@ -143,10 +150,17 @@ Key types:
 
 ## Model Routing
 
-Model routing is defined in `lib/ai/property-image-enhancement.ts`:
+Property image model options now come from the shared model catalog in `lib/ai/fetch-models.ts`.
 
-- `nano_banana_2` -> `gemini-2.5-flash-image`
-- `nano_banana_pro` -> `gemini-3-pro-image-preview`
+- The app fetches available Google models from `v1beta/models` and merges them with curated aliases in `lib/ai/models.ts`.
+- `buildPropertyImageModelCatalog()` in `lib/ai/model-capabilities.ts` derives two filtered lists:
+  - `analysisModels`
+  - `generationModels`
+- The modal consumes those filtered lists through a dedicated hook and lets the operator choose a model for each polish step.
+- The analyze and generate API routes validate the selected model against the same filtered server-side catalog before calling Gemini.
+- Default selections are derived from existing location AI settings:
+  - analysis prefers `googleAiModelExtraction`, then `googleAiModel`
+  - generation prefers `googleAiModelDesign`, then `googleAiModel`
 
 AI key resolution uses `resolveLocationGoogleAiApiKey(locationId)`.
 
@@ -208,6 +222,7 @@ This would build on the current Precision Remove foundation rather than replace 
 - `app/(main)/admin/properties/_components/property-image-enhance-dialog.tsx`
 - `app/(main)/admin/properties/_components/property-image-compare-viewer.tsx`
 - `app/(main)/admin/properties/_components/property-image-mask-editor.tsx`
+- `components/ai/use-property-image-enhancement-model-catalog.ts`
 
 The Enhance button appears only for persisted property images.
 
@@ -215,6 +230,7 @@ The Enhance button appears only for persisted property images.
 
 - `lib/ai/property-image-enhancement.ts`
 - `lib/ai/property-image-enhancement-types.ts`
+- `lib/ai/model-capabilities.ts`
 - `lib/ai/property-image-editor.ts`
 - `lib/ai/property-image-precision-remove-config.ts`
 - `lib/ai/property-image-precision-remove.ts`

@@ -2,12 +2,12 @@ import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
+import { getPropertyImageEnhancementModelCatalog } from "@/lib/ai/fetch-models";
 import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import {
     analyzeImageForEnhancement,
     fetchImageAsInlineData,
 } from "@/lib/ai/property-image-enhancement";
-import { ENHANCEMENT_MODEL_TIERS } from "@/lib/ai/property-image-enhancement-types";
 import { resolveOwnedPropertyImageSource } from "../_helpers";
 
 const analyzeRequestSchema = z.object({
@@ -15,7 +15,7 @@ const analyzeRequestSchema = z.object({
     propertyId: z.string().trim().min(1),
     cloudflareImageId: z.string().trim().min(1).optional(),
     sourceUrl: z.string().trim().url().optional(),
-    modelTier: z.enum(ENHANCEMENT_MODEL_TIERS).optional(),
+    analysisModel: z.string().trim().min(1).max(200).optional(),
     priorPrompt: z.string().trim().max(8000).optional(),
     userInstructions: z.string().trim().max(4000).optional(),
 }).superRefine((value, ctx) => {
@@ -64,12 +64,31 @@ export async function POST(req: Request) {
             );
         }
 
+        const modelCatalog = await getPropertyImageEnhancementModelCatalog(parsed.data.locationId);
+        const availableAnalysisModels = new Set(modelCatalog.analysisModels.map((model) => model.value));
+        const requestedAnalysisModel = String(parsed.data.analysisModel || "").trim();
+
+        if (requestedAnalysisModel && !availableAnalysisModels.has(requestedAnalysisModel)) {
+            return NextResponse.json(
+                { error: "The selected analysis model is unavailable or incompatible with structured image analysis." },
+                { status: 400 }
+            );
+        }
+
+        const analysisModel = requestedAnalysisModel || modelCatalog.defaults.analysis;
+        if (!analysisModel) {
+            return NextResponse.json(
+                { error: "No compatible analysis models are available for this location." },
+                { status: 400 }
+            );
+        }
+
         const sourceImage = await fetchImageAsInlineData(ownedMedia.sourceUrl);
         const result = await analyzeImageForEnhancement({
             apiKey,
+            model: analysisModel,
             sourceImageBase64: sourceImage.base64,
             sourceImageMimeType: sourceImage.mimeType,
-            modelTier: parsed.data.modelTier,
             priorPrompt: parsed.data.priorPrompt,
             userInstructions: parsed.data.userInstructions,
         });

@@ -1,16 +1,10 @@
 import { z } from "zod";
 import type {
     EnhancementAggression,
-    EnhancementModelTier,
     ImageEnhancementAnalysis,
     ImageEnhancementDetectedElement,
     ImageEnhancementSuggestedFix,
 } from "@/lib/ai/property-image-enhancement-types";
-
-export const PROPERTY_IMAGE_ENHANCEMENT_MODELS: Record<EnhancementModelTier, string> = {
-    nano_banana_2: "gemini-2.5-flash-image",
-    nano_banana_pro: "gemini-3-pro-image-preview",
-};
 
 const DEFAULT_IMAGE_MIME_TYPE = "image/jpeg";
 const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
@@ -85,21 +79,21 @@ type GeminiGenerateContentResponse = {
 
 type AnalyzeImageForEnhancementInput = {
     apiKey: string;
+    model: string;
     sourceImageBase64: string;
     sourceImageMimeType: string;
-    modelTier?: EnhancementModelTier;
     priorPrompt?: string;
     userInstructions?: string;
 };
 
 type GenerateEnhancedImageInput = {
     apiKey: string;
+    model: string;
     sourceImageBase64: string;
     sourceImageMimeType: string;
     analysis: ImageEnhancementAnalysis;
     selectedFixIds: string[];
     aggression: EnhancementAggression;
-    modelTier?: EnhancementModelTier;
     priorPrompt?: string;
     userInstructions?: string;
 };
@@ -162,11 +156,12 @@ function normalizeFix(
     };
 }
 
-export function resolveEnhancementModelForTier(tier?: EnhancementModelTier): string {
-    const target = tier && tier in PROPERTY_IMAGE_ENHANCEMENT_MODELS
-        ? tier
-        : "nano_banana_2";
-    return PROPERTY_IMAGE_ENHANCEMENT_MODELS[target];
+function requireSelectedModel(model: string, step: "analysis" | "generation"): string {
+    const normalized = String(model || "").trim();
+    if (!normalized) {
+        throw new Error(`A compatible ${step} model is required.`);
+    }
+    return normalized;
 }
 
 export function parseJsonObjectFromModelText(rawText: string): Record<string, unknown> | null {
@@ -473,7 +468,7 @@ export async function analyzeImageForEnhancement(input: AnalyzeImageForEnhanceme
     analysis: ImageEnhancementAnalysis;
     model: string;
 }> {
-    const model = resolveEnhancementModelForTier(input.modelTier);
+    const model = requireSelectedModel(input.model, "analysis");
     const prompt = buildAnalysisPrompt({
         priorPrompt: input.priorPrompt,
         userInstructions: input.userInstructions,
@@ -517,7 +512,7 @@ function normalizeActionLog(lines: string[]): string[] {
 }
 
 export async function generateEnhancedImage(input: GenerateEnhancedImageInput): Promise<GenerateEnhancedImageResult> {
-    const model = resolveEnhancementModelForTier(input.modelTier);
+    const model = requireSelectedModel(input.model, "generation");
     const prompt = buildGenerationPrompt({
         analysis: input.analysis,
         selectedFixIds: input.selectedFixIds,

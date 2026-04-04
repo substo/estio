@@ -5,6 +5,7 @@ import {
     GEMINI_FLASH_STABLE_FALLBACK,
     GOOGLE_AI_MODELS as FALLBACK_MODELS,
 } from "./models";
+import { buildPropertyImageModelCatalog } from "./model-capabilities";
 import { unstable_cache } from "next/cache";
 
 export interface ModelOption {
@@ -332,4 +333,9 @@ export async function getAiModelPickerDefaults(locationId?: string): Promise<{
         models: sortModels(models),
         defaults: { general, draft, extraction, design }
     };
+}
+
+export async function getPropertyImageEnhancementModelCatalog(locationId?: string) {
+    const { models, defaults } = await getAiModelPickerDefaults(locationId);
+    return buildPropertyImageModelCatalog(models, defaults);
 }

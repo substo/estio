@@ -6,8 +6,8 @@ import {
     buildReusablePromptContext,
     normalizeImageEnhancementAnalysis,
     parseJsonObjectFromModelText,
-    resolveEnhancementModelForTier,
 } from "@/lib/ai/property-image-enhancement";
+import { buildPropertyImageModelCatalog } from "@/lib/ai/model-capabilities";
 import type { ImageEnhancementAnalysis } from "@/lib/ai/property-image-enhancement-types";
 
 test("normalizeImageEnhancementAnalysis falls back safely for malformed model output", () => {
@@ -104,19 +104,42 @@ test("buildReusablePromptContext stays concise and excludes legacy nesting marke
     assert.doesNotMatch(prompt, /Legacy prompt reference:/);
 });
 
-test("resolveEnhancementModelForTier maps Nano Banana 2 and Pro correctly", () => {
-    assert.equal(
-        resolveEnhancementModelForTier("nano_banana_2"),
-        "gemini-2.5-flash-image"
+test("buildPropertyImageModelCatalog separates analysis and generation models", () => {
+    const catalog = buildPropertyImageModelCatalog([
+        { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+        { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+        { value: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image (Nano Banana)" },
+        { value: "gemini-3-pro-image-preview", label: "Gemini 3 Pro Image Preview (Nano Banana Pro)" },
+    ], {
+        general: "gemini-2.5-flash",
+        extraction: "gemini-2.5-pro",
+        design: "gemini-3-pro-image-preview",
+    });
+
+    assert.deepEqual(
+        catalog.analysisModels.map((model) => model.value),
+        ["gemini-2.5-flash", "gemini-2.5-pro"]
     );
-    assert.equal(
-        resolveEnhancementModelForTier("nano_banana_pro"),
-        "gemini-3-pro-image-preview"
+    assert.deepEqual(
+        catalog.generationModels.map((model) => model.value),
+        ["gemini-2.5-flash-image", "gemini-3-pro-image-preview"]
     );
-    assert.equal(
-        resolveEnhancementModelForTier(undefined),
-        "gemini-2.5-flash-image"
-    );
+    assert.equal(catalog.defaults.analysis, "gemini-2.5-pro");
+    assert.equal(catalog.defaults.generation, "gemini-3-pro-image-preview");
+});
+
+test("buildPropertyImageModelCatalog falls back when design default is not image-capable", () => {
+    const catalog = buildPropertyImageModelCatalog([
+        { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+        { value: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image (Nano Banana)" },
+    ], {
+        general: "gemini-2.5-flash",
+        extraction: "gemini-2.5-flash",
+        design: "gemini-2.5-flash",
+    });
+
+    assert.equal(catalog.defaults.analysis, "gemini-2.5-flash");
+    assert.equal(catalog.defaults.generation, "gemini-2.5-flash-image");
 });
 
 test("parseJsonObjectFromModelText extracts JSON from fenced output", () => {

@@ -13,13 +13,6 @@ export const ENHANCEMENT_MODES = [
 
 export type EnhancementMode = typeof ENHANCEMENT_MODES[number];
 
-export const ENHANCEMENT_MODEL_TIERS = [
-    "nano_banana_2",
-    "nano_banana_pro",
-] as const;
-
-export type EnhancementModelTier = typeof ENHANCEMENT_MODEL_TIERS[number];
-
 export interface ImageEnhancementBoundingBox {
     x: number;
     y: number;
@@ -59,7 +52,7 @@ export interface ImageEnhancementAnalysisRequest {
     propertyId: string;
     cloudflareImageId?: string;
     sourceUrl?: string;
-    modelTier?: EnhancementModelTier;
+    analysisModel?: string;
     priorPrompt?: string;
     userInstructions?: string;
 }
@@ -78,7 +71,7 @@ export interface ImageEnhancementGenerateRequest {
     analysis: ImageEnhancementAnalysis;
     selectedFixIds: string[];
     aggression: EnhancementAggression;
-    modelTier?: EnhancementModelTier;
+    generationModel?: string;
     priorPrompt?: string;
     userInstructions?: string;
 }

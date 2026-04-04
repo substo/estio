@@ -53,6 +53,12 @@ Important aliases/constants:
 - `gemini-flash-latest` (`GEMINI_FLASH_LATEST_ALIAS`)
 - `gemini-2.5-flash` (`GEMINI_FLASH_STABLE_FALLBACK`)
 
+For property image enhancement:
+
+- `Polish` analysis uses the shared model catalog filtered down to structured image-analysis candidates.
+- `Polish` generation uses the same shared catalog filtered down to image-editing/image-output candidates.
+- Those filtered lists are built in `lib/ai/model-capabilities.ts` and returned server-side from `getPropertyImageEnhancementModelCatalog()`.
+
 The UI list is deduped and sorted, and curated aliases remain available even if Google API omits them.
 
 ## Server-Resolved Default Logic
@@ -76,6 +82,7 @@ If not configured:
 
 - `/admin/settings/ai` loads picker defaults from `getAiModelPickerDefaultsAction()`.
 - The shared conversation composer (`conversation-composer.tsx`) uses `getAiDraftModelPickerStateAction()` for both chats mode and deal mode.
+- Property photo enhancement uses `getPropertyImageEnhancementModelCatalogAction()` so the modal can show one dropdown for analysis models and a separate dropdown for generation models.
 - Under `workspaceV2`, the selected thread still uses the same shared composer/model picker path, so the performance rollout does not introduce a second conversation-model source of truth.
 
 This keeps picker defaults consistent across screens.

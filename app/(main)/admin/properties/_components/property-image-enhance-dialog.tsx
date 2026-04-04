@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
+import { AiModelSelect } from "@/components/ai/ai-model-select";
+import { usePropertyImageEnhancementModelCatalog } from "@/components/ai/use-property-image-enhancement-model-catalog";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,7 +24,6 @@ import { CloudflareImage } from "@/components/media/CloudflareImage";
 import type {
     EnhancementAggression,
     EnhancementMode,
-    EnhancementModelTier,
     ImageEnhancementAnalysis,
     ImageEnhancementGeneratedResult,
 } from "@/lib/ai/property-image-enhancement-types";
@@ -100,10 +101,6 @@ const EMPTY_PRECISION_EDITOR_STATE: PrecisionMaskEditorState = {
     naturalHeight: 0,
 };
 
-function getModelTier(proEnabled: boolean): EnhancementModelTier {
-    return proEnabled ? "nano_banana_pro" : "nano_banana_2";
-}
-
 export function PropertyImageEnhanceDialog({
     open,
     onOpenChange,
@@ -116,13 +113,23 @@ export function PropertyImageEnhanceDialog({
     onApplyVariant,
 }: PropertyImageEnhanceDialogProps) {
     const precisionEditorRef = useRef<PrecisionMaskEditorHandle | null>(null);
+    const {
+        analysisModels,
+        generationModels,
+        defaults: modelDefaults,
+        loading: modelCatalogLoading,
+        getModelLabel,
+    } = usePropertyImageEnhancementModelCatalog();
     const [mode, setMode] = useState<EnhancementMode>("polish");
     const [analysis, setAnalysis] = useState<ImageEnhancementAnalysis | null>(null);
     const [selectedFixIds, setSelectedFixIds] = useState<string[]>([]);
     const [aggression, setAggression] = useState<EnhancementAggression>("balanced");
-    const [proEnabled, setProEnabled] = useState(false);
     const [reusePriorPrompt, setReusePriorPrompt] = useState(Boolean(String(priorPrompt || "").trim()));
     const [userInstructions, setUserInstructions] = useState("");
+    const [selectedAnalysisModel, setSelectedAnalysisModel] = useState("");
+    const [selectedGenerationModel, setSelectedGenerationModel] = useState("");
+    const [usedAnalysisModel, setUsedAnalysisModel] = useState<string | null>(null);
+    const [showAnalysisSettings, setShowAnalysisSettings] = useState(true);
     const [precisionTool, setPrecisionTool] = useState<PrecisionMaskTool>("brush");
     const [precisionBrushSize, setPrecisionBrushSize] = useState(36);
     const [precisionEraseMode, setPrecisionEraseMode] = useState(false);
@@ -134,7 +141,6 @@ export function PropertyImageEnhanceDialog({
     const [isGenerating, setIsGenerating] = useState(false);
     const [isRemoving, setIsRemoving] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [analysisModel, setAnalysisModel] = useState<string | null>(null);
     const [generated, setGenerated] = useState<ImageEnhancementGeneratedResult | null>(null);
 
     const canRun = useMemo(() => {
@@ -153,9 +159,12 @@ export function PropertyImageEnhanceDialog({
             setAnalysis(null);
             setSelectedFixIds([]);
             setAggression("balanced");
-            setProEnabled(false);
             setReusePriorPrompt(hasPriorPrompt);
             setUserInstructions("");
+            setSelectedAnalysisModel("");
+            setSelectedGenerationModel("");
+            setUsedAnalysisModel(null);
+            setShowAnalysisSettings(true);
             setPrecisionTool("brush");
             setPrecisionBrushSize(36);
             setPrecisionEraseMode(false);
@@ -167,10 +176,19 @@ export function PropertyImageEnhanceDialog({
             setIsGenerating(false);
             setIsRemoving(false);
             setError(null);
-            setAnalysisModel(null);
             setGenerated(null);
         }
     }, [open, hasPriorPrompt]);
+
+    useEffect(() => {
+        if (!open) return;
+        setSelectedAnalysisModel((current) => current || modelDefaults.analysis || analysisModels[0]?.value || "");
+    }, [open, modelDefaults.analysis, analysisModels]);
+
+    useEffect(() => {
+        if (!open) return;
+        setSelectedGenerationModel((current) => current || modelDefaults.generation || generationModels[0]?.value || "");
+    }, [open, modelDefaults.generation, generationModels]);
 
     const toggleFix = (fixId: string) => {
         setSelectedFixIds((prev) => (
@@ -188,13 +206,18 @@ export function PropertyImageEnhanceDialog({
 
     async function handleAnalyze() {
         if (!canRun || !image || !propertyId) return;
+        if (!selectedAnalysisModel.trim()) {
+            const message = "Choose an analysis model before running photo analysis.";
+            setError(message);
+            toast.error(message);
+            return;
+        }
 
         setError(null);
         setGenerated(null);
         setIsAnalyzing(true);
 
         try {
-            const modelTier = getModelTier(proEnabled);
             const response = await fetch("/api/images/enhance/analyze", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -203,7 +226,7 @@ export function PropertyImageEnhanceDialog({
                     propertyId,
                     cloudflareImageId: image.cloudflareImageId,
                     sourceUrl: image.url,
-                    modelTier,
+                    analysisModel: selectedAnalysisModel,
                     priorPrompt: effectivePriorPrompt,
                     userInstructions,
                 }),
@@ -221,7 +244,8 @@ export function PropertyImageEnhanceDialog({
 
             setAnalysis(payload.analysis);
             setSelectedFixIds(defaults);
-            setAnalysisModel(payload.model);
+            setUsedAnalysisModel(payload.model);
+            setShowAnalysisSettings(false);
         } catch (err) {
             console.error("[PropertyImageEnhanceDialog] analyze error:", err);
             const message = err instanceof Error ? err.message : "Failed to analyze image.";
@@ -234,12 +258,17 @@ export function PropertyImageEnhanceDialog({
 
     async function handleGenerate() {
         if (!canRun || !image || !propertyId || !analysis) return;
+        if (!selectedGenerationModel.trim()) {
+            const message = "Choose a generation model before creating the enhanced image.";
+            setError(message);
+            toast.error(message);
+            return;
+        }
 
         setError(null);
         setIsGenerating(true);
 
         try {
-            const modelTier = getModelTier(proEnabled);
             const response = await fetch("/api/images/enhance/generate", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -251,7 +280,7 @@ export function PropertyImageEnhanceDialog({
                     analysis,
                     selectedFixIds,
                     aggression,
-                    modelTier,
+                    generationModel: selectedGenerationModel,
                     priorPrompt: effectivePriorPrompt,
                     userInstructions,
                 }),
@@ -404,45 +433,6 @@ export function PropertyImageEnhanceDialog({
     function renderPolishControls() {
         return (
             <>
-                <div className="flex items-center justify-between">
-                    <div>
-                        <Label className="text-sm font-medium">Nano Banana Pro</Label>
-                        <p className="text-xs text-muted-foreground">
-                            Use higher-quality model for analysis and generation.
-                        </p>
-                    </div>
-                    <Switch checked={proEnabled} onCheckedChange={setProEnabled} />
-                </div>
-
-                <div className="space-y-2">
-                    <Label className="text-sm font-medium">Enhancement Aggression</Label>
-                    <RadioGroup
-                        value={aggression}
-                        onValueChange={(value) => setAggression(value as EnhancementAggression)}
-                        className="grid gap-3"
-                    >
-                        {[
-                            { value: "conservative", label: "Conservative", help: "Minimal correction, strict scene preservation." },
-                            { value: "balanced", label: "Balanced", help: "Moderate polish with realistic upgrades." },
-                            { value: "aggressive", label: "Aggressive", help: "Stronger cleanup and visual polish." },
-                        ].map((option) => (
-                            <label
-                                key={option.value}
-                                className={cn(
-                                    "flex items-start gap-2 rounded-md border px-3 py-2 text-sm",
-                                    aggression === option.value ? "border-primary bg-primary/5" : "border-border"
-                                )}
-                            >
-                                <RadioGroupItem value={option.value} className="mt-0.5" />
-                                <span>
-                                    <span className="font-medium">{option.label}</span>
-                                    <span className="block text-xs text-muted-foreground">{option.help}</span>
-                                </span>
-                            </label>
-                        ))}
-                    </RadioGroup>
-                </div>
-
                 {hasPriorPrompt ? (
                     <div className="flex items-center justify-between rounded-md border p-3">
                         <div>
@@ -468,30 +458,143 @@ export function PropertyImageEnhanceDialog({
                     </p>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
-                    <Button
-                        type="button"
-                        onClick={handleAnalyze}
-                        disabled={isBusy}
-                    >
-                        {isAnalyzing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                        {analysis ? "Re-analyze Photo" : "Analyze Photo"}
-                    </Button>
+                <div className="space-y-3 rounded-md border p-3">
+                    <div className="flex items-start justify-between gap-3">
+                        <div>
+                            <Label className="text-sm font-medium">Step 1. Analyze</Label>
+                            <p className="text-xs text-muted-foreground">
+                                Use a structured vision model to identify issues and prepare fix chips.
+                            </p>
+                        </div>
+                        {analysis ? <Badge variant="outline">Complete</Badge> : null}
+                    </div>
 
-                    <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={handleGenerate}
-                        disabled={!analysis || isBusy}
-                    >
-                        {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                        Generate Enhanced Image
-                    </Button>
+                    {analysis && !showAnalysisSettings ? (
+                        <div className="space-y-2">
+                            <p className="text-xs text-muted-foreground">
+                                Last analysis model: {getModelLabel(usedAnalysisModel || selectedAnalysisModel)}
+                            </p>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => setShowAnalysisSettings(true)}
+                                disabled={isBusy}
+                            >
+                                Change Analysis Model
+                            </Button>
+                        </div>
+                    ) : (
+                        <div className="space-y-3">
+                            <div className="space-y-2">
+                                <Label className="text-sm font-medium">Analysis Model</Label>
+                                <AiModelSelect
+                                    value={selectedAnalysisModel}
+                                    models={analysisModels}
+                                    onValueChange={setSelectedAnalysisModel}
+                                    disabled={isBusy || modelCatalogLoading}
+                                    placeholder={modelCatalogLoading ? "Loading models..." : "Select analysis model"}
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                    Only models compatible with structured image analysis are shown here.
+                                </p>
+                            </div>
+
+                            {analysisModels.length === 0 && !modelCatalogLoading ? (
+                                <p className="text-xs text-amber-700">
+                                    No compatible analysis models are available for this location&apos;s Google AI key.
+                                </p>
+                            ) : null}
+
+                            <Button
+                                type="button"
+                                onClick={handleAnalyze}
+                                disabled={isBusy || modelCatalogLoading || analysisModels.length === 0 || !selectedAnalysisModel}
+                            >
+                                {isAnalyzing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                                {analysis ? "Re-analyze Photo" : "Analyze Photo"}
+                            </Button>
+                        </div>
+                    )}
                 </div>
 
-                {analysisModel ? (
-                    <p className="text-xs text-muted-foreground">Analysis model: {analysisModel}</p>
-                ) : null}
+                <div className="space-y-3 rounded-md border p-3">
+                    <div className="flex items-start justify-between gap-3">
+                        <div>
+                            <Label className="text-sm font-medium">Step 2. Generate</Label>
+                            <p className="text-xs text-muted-foreground">
+                                Choose an image-editing model and create the listing-ready result.
+                            </p>
+                        </div>
+                        {analysis ? <Badge variant="secondary">Ready</Badge> : null}
+                    </div>
+
+                    {!analysis ? (
+                        <p className="text-xs text-muted-foreground">
+                            Run analysis first so the next step has fix chips and a polished prompt draft to work from.
+                        </p>
+                    ) : (
+                        <>
+                            <div className="space-y-2">
+                                <Label className="text-sm font-medium">Generation Model</Label>
+                                <AiModelSelect
+                                    value={selectedGenerationModel}
+                                    models={generationModels}
+                                    onValueChange={setSelectedGenerationModel}
+                                    disabled={isBusy || modelCatalogLoading}
+                                    placeholder={modelCatalogLoading ? "Loading models..." : "Select generation model"}
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                    Only models that look capable of returning edited images are shown here.
+                                </p>
+                            </div>
+
+                            {generationModels.length === 0 && !modelCatalogLoading ? (
+                                <p className="text-xs text-amber-700">
+                                    No compatible image-generation models are available for this location&apos;s Google AI key.
+                                </p>
+                            ) : null}
+
+                            <div className="space-y-2">
+                                <Label className="text-sm font-medium">Enhancement Aggression</Label>
+                                <RadioGroup
+                                    value={aggression}
+                                    onValueChange={(value) => setAggression(value as EnhancementAggression)}
+                                    className="grid gap-3"
+                                >
+                                    {[
+                                        { value: "conservative", label: "Conservative", help: "Minimal correction, strict scene preservation." },
+                                        { value: "balanced", label: "Balanced", help: "Moderate polish with realistic upgrades." },
+                                        { value: "aggressive", label: "Aggressive", help: "Stronger cleanup and visual polish." },
+                                    ].map((option) => (
+                                        <label
+                                            key={option.value}
+                                            className={cn(
+                                                "flex items-start gap-2 rounded-md border px-3 py-2 text-sm",
+                                                aggression === option.value ? "border-primary bg-primary/5" : "border-border"
+                                            )}
+                                        >
+                                            <RadioGroupItem value={option.value} className="mt-0.5" />
+                                            <span>
+                                                <span className="font-medium">{option.label}</span>
+                                                <span className="block text-xs text-muted-foreground">{option.help}</span>
+                                            </span>
+                                        </label>
+                                    ))}
+                                </RadioGroup>
+                            </div>
+
+                            <Button
+                                type="button"
+                                variant="secondary"
+                                onClick={handleGenerate}
+                                disabled={isBusy || modelCatalogLoading || generationModels.length === 0 || !selectedGenerationModel}
+                            >
+                                {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                                Generate Enhanced Image
+                            </Button>
+                        </>
+                    )}
+                </div>
             </>
         );
     }
@@ -635,7 +738,7 @@ export function PropertyImageEnhanceDialog({
                     </ul>
                 </div>
 
-                <p className="text-xs text-muted-foreground">Generation model: {generated.model}</p>
+                <p className="text-xs text-muted-foreground">Generation model: {getModelLabel(generated.model)}</p>
 
                 {generated.mode === "precision_remove" && generated.maskCoverage !== undefined ? (
                     <p className="text-xs text-muted-foreground">

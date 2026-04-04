@@ -6197,6 +6197,12 @@ export async function getAiModelPickerDefaultsAction() {
     return getAiModelPickerDefaults(location.id);
 }
 
+export async function getPropertyImageEnhancementModelCatalogAction() {
+    const location = await getBasicLocationContext();
+    const { getPropertyImageEnhancementModelCatalog } = await import("@/lib/ai/fetch-models");
+    return getPropertyImageEnhancementModelCatalog(location.id);
+}
+
 export async function getSmsChannelEligibility(conversationId: string) {
     try {
         const location = await getBasicLocationContext();
