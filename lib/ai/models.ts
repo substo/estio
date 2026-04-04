@@ -6,6 +6,7 @@ export const GOOGLE_AI_MODELS = [
     // --- Gemini 3.0 Series (SOTA) ---
     { value: "gemini-3-pro-preview", label: "Gemini 3.0 Pro Preview (SOTA Reasoning)" },
     { value: "gemini-3-flash-preview", label: "Gemini 3.0 Flash Preview (Fastest & Newest)" },
+    { value: "gemini-3.1-flash-image-preview", label: "Gemini 3.1 Flash Image Preview (Nano Banana 2)" },
     { value: "gemini-3-pro-image-preview", label: "Gemini 3.0 Pro Image Preview (Multimedia)" },
 
     // --- Gemini 2.5 Series (Advanced) ---

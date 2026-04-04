@@ -68,3 +68,7 @@ Implemented a "Zero-Touch" SEO infrastructure that updates automatically as prop
 *   `lib/cloudflareImages.ts` (Media)
 *   `components/media/CloudflareImageUploader.tsx` (Uploads)
 *   `prisma/schema.prisma` (Schema)
+
+## Related Docs
+
+*   `documentation/ai-property-image-enhancement-v1.md` (Admin-only AI image enhancement flow that reuses the same Cloudflare media pipeline)

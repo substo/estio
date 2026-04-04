@@ -8,19 +8,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { upsertProperty, pushToOldCrm, pullFromOldCrm, linkPropertyCreator } from "../actions";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Checkbox } from "@/components/ui/checkbox";
 import { PROPERTY_TYPES } from "@/lib/properties/constants";
 import { PROPERTY_LOCATIONS } from "@/lib/properties/locations";
 import { PROPERTY_CONDITIONS, FEATURE_CATEGORIES, PROPERTY_SOURCES } from "@/lib/properties/filter-constants";
 import { MediaUploader } from "@/components/ui/media-uploader";
-import { X, Plus, Pencil } from "lucide-react";
+import { X, Plus, Pencil, Sparkles } from "lucide-react";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { SearchableSelect } from "../../contacts/_components/searchable-select";
 import { MultiPropertySelect } from "../../contacts/_components/multi-property-select";
 // Fetch helpers removed as data is passed via props
-import { useEffect } from "react";
 import { AddCompanyDialog } from "./add-company-dialog";
 import { ContactDialog } from "./contact-dialog";
 import { ProjectDialog } from "../../projects/_components/project-dialog";
@@ -46,6 +45,7 @@ import {
 } from '@dnd-kit/sortable';
 import { toast } from "sonner";
 import { CSS } from '@dnd-kit/utilities';
+import { PropertyImageEnhanceDialog } from "./property-image-enhance-dialog";
 
 interface SortableImageProps {
     id: string;
@@ -197,6 +197,22 @@ export default function PropertyForm({
         property?.media?.filter((m: any) => m.kind === 'DOCUMENT').map((m: any) => m.url) ||
         (property?.documentUrls ? property.documentUrls.split('\n').map((s: string) => s.trim()).filter(Boolean) : [])
     );
+    const [enhanceDialogOpen, setEnhanceDialogOpen] = useState(false);
+    const [enhanceImageIndex, setEnhanceImageIndex] = useState<number | null>(null);
+
+    const persistedImageKeys = useMemo(() => {
+        const keys = new Set<string>();
+        const sourceMedia = Array.isArray(property?.media) ? property.media : [];
+        sourceMedia
+            .filter((m: any) => m?.kind === "IMAGE")
+            .forEach((m: any) => {
+                const key = String(m.cloudflareImageId || m.url || "").trim();
+                if (key) keys.add(key);
+            });
+        return keys;
+    }, [property?.media]);
+
+    const selectedEnhanceImage = enhanceImageIndex !== null ? images[enhanceImageIndex] || null : null;
 
     const sensors = useSensors(
         useSensor(PointerSensor, {
@@ -1036,6 +1052,11 @@ export default function PropertyForm({
                                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                                 {images.map((img, index) => {
                                                     const uniqueId = img.cloudflareImageId || img.url;
+                                                    const canEnhance = Boolean(
+                                                        property?.id
+                                                        && property.id !== "new"
+                                                        && persistedImageKeys.has(uniqueId)
+                                                    );
                                                     return (
                                                         <SortableImage
                                                             key={uniqueId}
@@ -1055,6 +1076,22 @@ export default function PropertyForm({
                                                             ) : (
                                                                 <img src={img.url} alt={`Property ${index + 1}`} className="w-full h-full object-cover" />
                                                             )}
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    if (!canEnhance) return;
+                                                                    setEnhanceImageIndex(index);
+                                                                    setEnhanceDialogOpen(true);
+                                                                }}
+                                                                onPointerDown={(e) => e.stopPropagation()}
+                                                                disabled={!canEnhance}
+                                                                className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-md bg-black/70 px-2 py-1 text-[11px] font-medium text-white transition hover:bg-black/80 disabled:cursor-not-allowed disabled:opacity-50"
+                                                                title={canEnhance ? "Enhance this image with AI" : "Save property first to enable AI enhancement for this image"}
+                                                            >
+                                                                <Sparkles className="h-3 w-3" />
+                                                                Enhance
+                                                            </button>
                                                         </SortableImage>
                                                     );
                                                 })}
@@ -1077,6 +1114,32 @@ export default function PropertyForm({
                                         }]);
                                     }}
                                     buttonLabel="Upload Image"
+                                />
+
+                                <PropertyImageEnhanceDialog
+                                    open={enhanceDialogOpen}
+                                    onOpenChange={setEnhanceDialogOpen}
+                                    locationId={locationId}
+                                    propertyId={property?.id}
+                                    image={selectedEnhanceImage}
+                                    imageIndex={enhanceImageIndex ?? 0}
+                                    onApplyVariant={({ url, cloudflareImageId, setAsPrimary }) => {
+                                        setImages((prev) => {
+                                            const nextImage = {
+                                                url,
+                                                cloudflareImageId,
+                                                kind: "IMAGE",
+                                                sortOrder: 0,
+                                            };
+                                            const reordered = setAsPrimary
+                                                ? [nextImage, ...prev]
+                                                : [...prev, nextImage];
+                                            return reordered.map((item, idx) => ({
+                                                ...item,
+                                                sortOrder: idx,
+                                            }));
+                                        });
+                                    }}
                                 />
                             </div>
 

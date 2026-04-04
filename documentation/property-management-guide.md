@@ -46,6 +46,7 @@ The Property Form is the primary interface for creating and editing properties. 
 
 6.  **Media**: Images, videos, and documents.
     *   **Images**: Direct upload to Cloudflare. Click "Upload Image" to select files. Optimization is automatic.
+    *   **AI Enhance (Admin, v1)**: Existing persisted images can be enhanced via a 2-step AI modal (analyze issues -> generate polished variant). Generated output is stored as a new image variant while preserving the original.
     *   **Videos**: One URL per line.
     *   **Documents**: One URL per line.
     *   **Notes**: Internal and administrative details.
@@ -94,6 +95,11 @@ The application maintains a two-way relationship with GoHighLevel (GHL) to ensur
 ---
 
 ## Developer Tools
+
+## Related Docs
+
+- `documentation/ai-property-image-enhancement-v1.md` (admin 2-step AI image enhancement flow)
+- `documentation/public-site-media-seo-implementation.md` (Cloudflare media infrastructure)
 
 ### Seeding Mock Data
 

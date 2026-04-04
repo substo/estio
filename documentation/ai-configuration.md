@@ -109,6 +109,7 @@ For user-facing pickers and chat defaults, the effective model is resolved throu
 
 - `lib/ai/models.ts`
 - `lib/ai/fetch-models.ts`
+- `lib/ai/property-image-enhancement.ts`
 - `app/(main)/admin/settings/ai/actions.ts`
 - `app/(main)/admin/settings/ai/ai-settings-form.tsx`
 - `app/(main)/admin/conversations/actions.ts`
@@ -121,5 +122,6 @@ For user-facing pickers and chat defaults, the effective model is resolved throu
 - `documentation/ai-draft-feature.md`
 - `documentation/ai-agentic-conversations-hub.md`
 - `documentation/conversation-management.md`
+- `documentation/ai-property-image-enhancement-v1.md`
 
 For exact conversations workspace/polling/search behavior, use `documentation/conversation-management.md` as the canonical reference.
