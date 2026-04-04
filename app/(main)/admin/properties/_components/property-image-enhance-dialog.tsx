@@ -29,6 +29,12 @@ import type {
 } from "@/lib/ai/property-image-enhancement-types";
 import { buildGenerationPrompt } from "@/lib/ai/property-image-enhancement-prompt";
 import {
+    readPropertyImageEnhancementModelPreference,
+    resolvePreferredPropertyImageEnhancementModel,
+    writePropertyImageEnhancementModelPreference,
+    type PropertyImageEnhancementModelPreference,
+} from "@/lib/ai/property-image-enhancement-model-preferences";
+import {
     PROPERTY_IMAGE_AI_APPLY_MODES,
     type PropertyImageAiApplyMode,
 } from "@/lib/properties/property-media-ai";
@@ -107,6 +113,11 @@ const EMPTY_PRECISION_EDITOR_STATE: PrecisionMaskEditorState = {
     naturalHeight: 0,
 };
 
+const EMPTY_MODEL_PREFERENCE: PropertyImageEnhancementModelPreference = {
+    analysis: "",
+    generation: "",
+};
+
 export function PropertyImageEnhanceDialog({
     open,
     onOpenChange,
@@ -119,6 +130,8 @@ export function PropertyImageEnhanceDialog({
     onApplyVariant,
 }: PropertyImageEnhanceDialogProps) {
     const precisionEditorRef = useRef<PrecisionMaskEditorHandle | null>(null);
+    const analysisModelTouchedRef = useRef(false);
+    const generationModelTouchedRef = useRef(false);
     const {
         analysisModels,
         generationModels,
@@ -135,6 +148,7 @@ export function PropertyImageEnhanceDialog({
     const [userInstructions, setUserInstructions] = useState("");
     const [selectedAnalysisModel, setSelectedAnalysisModel] = useState("");
     const [selectedGenerationModel, setSelectedGenerationModel] = useState("");
+    const [persistedModelPreference, setPersistedModelPreference] = useState<PropertyImageEnhancementModelPreference>(EMPTY_MODEL_PREFERENCE);
     const [usedAnalysisModel, setUsedAnalysisModel] = useState<string | null>(null);
     const [showAnalysisSettings, setShowAnalysisSettings] = useState(true);
     const [precisionTool, setPrecisionTool] = useState<PrecisionMaskTool>("brush");
@@ -180,8 +194,8 @@ export function PropertyImageEnhanceDialog({
             setAggression("balanced");
             setReusePriorPrompt(hasPriorPrompt);
             setUserInstructions("");
-            setSelectedAnalysisModel("");
-            setSelectedGenerationModel("");
+            analysisModelTouchedRef.current = false;
+            generationModelTouchedRef.current = false;
             setUsedAnalysisModel(null);
             setShowAnalysisSettings(true);
             setPrecisionTool("brush");
@@ -201,13 +215,69 @@ export function PropertyImageEnhanceDialog({
 
     useEffect(() => {
         if (!open) return;
-        setSelectedAnalysisModel((current) => current || modelDefaults.analysis || analysisModels[0]?.value || "");
-    }, [open, modelDefaults.analysis, analysisModels]);
+        setPersistedModelPreference(readPropertyImageEnhancementModelPreference(locationId));
+    }, [open, locationId]);
 
     useEffect(() => {
         if (!open) return;
-        setSelectedGenerationModel((current) => current || modelDefaults.generation || generationModels[0]?.value || "");
-    }, [open, modelDefaults.generation, generationModels]);
+        const next = resolvePreferredPropertyImageEnhancementModel({
+            allowedValues: analysisModels.map((model) => model.value),
+            currentValue: selectedAnalysisModel,
+            persistedValue: persistedModelPreference.analysis,
+            defaultValue: modelDefaults.analysis,
+            fallbackValue: analysisModels[0]?.value,
+        });
+        if (next !== selectedAnalysisModel) {
+            setSelectedAnalysisModel(next);
+        }
+    }, [
+        open,
+        analysisModels,
+        modelDefaults.analysis,
+        persistedModelPreference.analysis,
+        selectedAnalysisModel,
+    ]);
+
+    useEffect(() => {
+        if (!open) return;
+        const next = resolvePreferredPropertyImageEnhancementModel({
+            allowedValues: generationModels.map((model) => model.value),
+            currentValue: selectedGenerationModel,
+            persistedValue: persistedModelPreference.generation,
+            defaultValue: modelDefaults.generation,
+            fallbackValue: generationModels[0]?.value,
+        });
+        if (next !== selectedGenerationModel) {
+            setSelectedGenerationModel(next);
+        }
+    }, [
+        open,
+        generationModels,
+        modelDefaults.generation,
+        persistedModelPreference.generation,
+        selectedGenerationModel,
+    ]);
+
+    useEffect(() => {
+        if (!open) return;
+        if (!analysisModelTouchedRef.current && !generationModelTouchedRef.current) return;
+
+        const next = writePropertyImageEnhancementModelPreference(locationId, {
+            analysis: selectedAnalysisModel,
+            generation: selectedGenerationModel,
+        });
+        setPersistedModelPreference(next);
+    }, [open, locationId, selectedAnalysisModel, selectedGenerationModel]);
+
+    const handleAnalysisModelChange = (value: string) => {
+        analysisModelTouchedRef.current = true;
+        setSelectedAnalysisModel(value);
+    };
+
+    const handleGenerationModelChange = (value: string) => {
+        generationModelTouchedRef.current = true;
+        setSelectedGenerationModel(value);
+    };
 
     const toggleFix = (fixId: string) => {
         setSelectedFixIds((prev) => (
@@ -522,7 +592,7 @@ export function PropertyImageEnhanceDialog({
                                 <AiModelSelect
                                     value={selectedAnalysisModel}
                                     models={analysisModels}
-                                    onValueChange={setSelectedAnalysisModel}
+                                    onValueChange={handleAnalysisModelChange}
                                     disabled={isBusy || modelCatalogLoading}
                                     placeholder={modelCatalogLoading ? "Loading models..." : "Select analysis model"}
                                 />
@@ -571,7 +641,7 @@ export function PropertyImageEnhanceDialog({
                                 <AiModelSelect
                                     value={selectedGenerationModel}
                                     models={generationModels}
-                                    onValueChange={setSelectedGenerationModel}
+                                    onValueChange={handleGenerationModelChange}
                                     disabled={isBusy || modelCatalogLoading}
                                     placeholder={modelCatalogLoading ? "Loading models..." : "Select generation model"}
                                 />

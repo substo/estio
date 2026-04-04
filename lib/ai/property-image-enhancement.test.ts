@@ -8,6 +8,7 @@ import {
     parseJsonObjectFromModelText,
 } from "@/lib/ai/property-image-enhancement";
 import { resolveNeutralSceneContext } from "@/lib/ai/property-image-enhancement-prompt";
+import { resolvePreferredPropertyImageEnhancementModel } from "@/lib/ai/property-image-enhancement-model-preferences";
 import { buildPropertyImageModelCatalog } from "@/lib/ai/model-capabilities";
 import type { ImageEnhancementAnalysis } from "@/lib/ai/property-image-enhancement-types";
 
@@ -200,4 +201,28 @@ test("parseJsonObjectFromModelText extracts JSON from fenced output", () => {
     const parsed = parseJsonObjectFromModelText(raw);
     assert.ok(parsed);
     assert.equal(parsed?.sceneSummary, "ok");
+});
+
+test("resolvePreferredPropertyImageEnhancementModel prefers persisted model when current is invalid", () => {
+    const resolved = resolvePreferredPropertyImageEnhancementModel({
+        allowedValues: ["gemini-2.5-flash-image", "gemini-3-pro-image-preview"],
+        currentValue: "gemini-2.5-pro",
+        persistedValue: "gemini-2.5-flash-image",
+        defaultValue: "gemini-3-pro-image-preview",
+        fallbackValue: "gemini-3-pro-image-preview",
+    });
+
+    assert.equal(resolved, "gemini-2.5-flash-image");
+});
+
+test("resolvePreferredPropertyImageEnhancementModel falls back to first compatible when needed", () => {
+    const resolved = resolvePreferredPropertyImageEnhancementModel({
+        allowedValues: ["gemini-2.5-flash-image"],
+        currentValue: "gemini-2.5-pro",
+        persistedValue: "gemini-3-pro-image-preview",
+        defaultValue: "gemini-2.5-flash",
+        fallbackValue: "gemini-2.5-flash-image",
+    });
+
+    assert.equal(resolved, "gemini-2.5-flash-image");
 });
