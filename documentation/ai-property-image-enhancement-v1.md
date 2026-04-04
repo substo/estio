@@ -1,6 +1,6 @@
 # AI Property Image Enhancement (Admin)
 
-**Last Updated:** 2026-04-04
+**Last Updated:** 2026-04-05
 
 ## Overview
 
@@ -19,7 +19,7 @@ Outputs remain in **Cloudflare Images** and are added as a new `PropertyMedia` v
 
 ## Recent Fixes
 
-The latest update focused on two practical issues discovered during real usage:
+The latest updates in this implementation cycle focused on the following practical issues discovered during real usage:
 
 1. **Analyzer miss fallback**
    - Previously, if analysis returned no useful fixes, the operator had no good way to tell the model what to remove or improve.
@@ -38,6 +38,9 @@ The latest update focused on two practical issues discovered during real usage:
    - The old hardcoded `Nano Banana / Pro` toggle has been removed from the polish flow.
    - Analysis and generation now each use their own dropdown backed by the shared Google model catalog.
    - The server validates those selections against capability-aware filters so analysis does not accidentally hit an image model that rejects JSON mode.
+   - Defaults now come from the location AI settings already used elsewhere in the product:
+     - analysis prefers `googleAiModelExtraction`
+     - generation prefers `googleAiModelDesign`
 
 5. **Precision Remove mode**
    - Added a separate admin-only mode for exact object removal using manual masks.
@@ -71,14 +74,16 @@ The latest update focused on two practical issues discovered during real usage:
    - User runs **Analyze Photo**.
    - AI returns:
      - `sceneSummary`
+     - `sceneContext`
      - `detectedElements[]`
      - `suggestedFixes[]` (chip-style toggles)
-     - `promptPolish`
      - `actionLogDraft`
    - User chooses:
      - Fix chips (on/off)
+     - Detected elements to remove (on/off)
      - Aggression: `conservative | balanced | aggressive` (default `balanced`)
      - a **Generation Model** from a dropdown that only shows image-editing candidates
+     - review the **Live Final Prompt**, which updates whenever chips, removals, aggression, override instructions, or prompt reuse change
    - User runs **Generate Enhanced Image**.
 6. In **Precision Remove** mode:
    - User masks the object with `Brush` or `Box`.
@@ -88,8 +93,12 @@ The latest update focused on two practical issues discovered during real usage:
 7. Modal moves to the shared **Review** stage:
    - Compare viewer shows before/after in the main image area.
    - Action log is shown in the side rail.
+   - User chooses one gallery apply mode:
+     - `Replace original`
+     - `Add before original`
+     - `Add as primary`
    - User can go back to edit, regenerate, or keep the result.
-8. User clicks **Add Variant To Property** (optional "set as primary on save").
+8. User applies the result to the property gallery.
 9. User saves property form to persist.
 
 ## Current UX Behavior
@@ -97,13 +106,18 @@ The latest update focused on two practical issues discovered during real usage:
 - The modal can still generate even when `suggestedFixes[]` is empty, as long as analysis has completed.
 - Override instructions are intentionally operator-first and do not depend on the analyzer successfully detecting a target object.
 - Prompt reuse is **session-scoped in the property form UI**. It is not yet persisted in the database across browser refreshes or across users.
-- Generated output is added as a new image variant in the unsaved property form state, then persisted when the operator saves the property.
+- Generated output is first applied to unsaved property form state using an explicit gallery mode:
+  - `Replace original` hides the source image from the visible gallery and keeps a revert path.
+  - `Add before original` keeps both images visible.
+  - `Add as primary` prepends the AI result.
+- AI-generated images are marked in the admin gallery, and replace-mode results expose `Revert`.
 - `Precision Remove` is intentionally a separate mode and does not auto-chain into `Polish` in the same run.
 - The review stage uses one consistent compare viewer for both modes to keep the modal smaller and easier to scan.
 - In `Polish`, the rail is progressive:
   - Step 1 shows only the analysis-model selector.
   - After analysis completes, Step 2 shows the generation-model selector.
   - This keeps both model controls available without showing both at once.
+- The analyze route can now fail fast with a compatibility error when an incompatible model is submitted, rather than forwarding a bad request to Gemini and surfacing a lower-level provider error later.
 
 ## API Endpoints
 
@@ -111,7 +125,13 @@ The latest update focused on two practical issues discovered during real usage:
 
 Validates auth + location access + property media ownership, downloads source image, runs Gemini analysis, returns normalized structured JSON.
 
-Supports optional `userInstructions` and `priorPrompt` so operators can steer analysis toward missed issues and keep similar room shots aligned.
+Supports:
+
+- `analysisModel`
+- optional `userInstructions`
+- optional `priorPrompt`
+
+This route now also validates that the submitted model belongs to the server-derived `analysisModels` catalog for the location.
 
 ### `POST /api/images/enhance/generate`
 
@@ -122,6 +142,17 @@ Validates auth + access + ownership, runs generation with selected options, uplo
 - `actionLog`
 - `finalPrompt`
 - `reusablePrompt` (bounded context for the next similar image)
+
+Supports:
+
+- `generationModel`
+- `aggression`
+- `selectedFixIds`
+- `removedDetectedElementIds`
+- optional `userInstructions`
+- optional `priorPrompt`
+
+This route now also validates that the submitted model belongs to the server-derived `generationModels` catalog for the location.
 
 ### `POST /api/images/enhance/precision-remove`
 
@@ -148,6 +179,12 @@ Key types:
 - `ImagePrecisionRemoveRequest/Response`
 - `ImageEnhancementGeneratedResult`
 
+Notable request fields for `Polish`:
+
+- `analysisModel?: string`
+- `generationModel?: string`
+- `removedDetectedElementIds: string[]`
+
 ## Model Routing
 
 Property image model options now come from the shared model catalog in `lib/ai/fetch-models.ts`.
@@ -156,6 +193,10 @@ Property image model options now come from the shared model catalog in `lib/ai/f
 - `buildPropertyImageModelCatalog()` in `lib/ai/model-capabilities.ts` derives two filtered lists:
   - `analysisModels`
   - `generationModels`
+- Capability filtering is heuristic and centralized:
+  - image-preview / `-image` / `imagen` style ids are treated as generation candidates
+  - non-image Gemini content models are treated as structured analysis candidates
+  - utility families such as embeddings/robotics are excluded
 - The modal consumes those filtered lists through a dedicated hook and lets the operator choose a model for each polish step.
 - The analyze and generate API routes validate the selected model against the same filtered server-side catalog before calling Gemini.
 - Default selections are derived from existing location AI settings:
@@ -194,7 +235,14 @@ Generated output is uploaded using existing `uploadToCloudflare` helpers.
 
 No separate storage path is introduced.
 
-Resulting image is appended as `PropertyMedia` entry with `cloudflareImageId` and public delivery URL.
+Resulting image is stored as `PropertyMedia` with `cloudflareImageId`, public delivery URL, and AI lineage metadata.
+
+`PropertyMedia.metadata.aiEnhancement` now tracks:
+
+- whether the image is AI-generated
+- the source/original image reference
+- which apply mode was used
+- whether an original image is hidden from the visible gallery because it was replaced
 
 ## Known Limitations
 
@@ -202,8 +250,9 @@ Resulting image is appended as `PropertyMedia` entry with `cloudflareImageId` an
 - The editor does **not** yet support hover-highlight segmentation, semantic object detection, or click-to-select masks.
 - If the analyzer misses an object in `Polish`, the current fallback is text guidance through override instructions rather than automatic region selection.
 - Prompt reuse currently exists only in the active property-editing session; it is not yet stored per property, per room, or per scene cluster.
-- The UI shows detected elements as badges only; they are not yet interactive hotspots on the image.
+- Detected elements are removable through toggle chips, but they are not yet interactive hotspots on the image.
 - Precision Remove currently generates one result per request.
+- Capability classification for image enhancement models is still heuristic because the Google models list used here does not expose a clean, app-ready “supports structured image analysis” vs “supports image editing output” split.
 
 ## Recommended Next Phase
 
@@ -252,7 +301,8 @@ Covered scenarios:
 - generation prompt composition
 - operator override instructions
 - reusable prompt context generation
-- tier -> model resolver
+- property-image capability catalog separation (`analysisModels` vs `generationModels`)
+- default fallback when a configured design model is not image-capable
 - JSON extraction from model output
 - editor dimension resolution
 - empty-mask rejection

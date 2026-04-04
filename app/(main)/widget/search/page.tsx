@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import db from "@/lib/db";
 import { getLocationById } from "@/lib/location";
+import { getVisiblePropertyMedia } from "@/lib/properties/property-media-ai";
 import Link from "next/link";
 
 export default async function WidgetSearchPage({ searchParams: searchParamsPromise }: { searchParams: Promise<{ location?: string, q?: string, minPrice?: string, maxPrice?: string, type?: string }> }) {
@@ -56,12 +57,14 @@ export default async function WidgetSearchPage({ searchParams: searchParamsPromi
                 {properties.length === 0 ? (
                     <div className="col-span-full text-center py-10 text-gray-500">No properties found matching your criteria.</div>
                 ) : (
-                    properties.map((property) => (
+                    properties.map((property) => {
+                        const visibleMedia = getVisiblePropertyMedia(property.media as any);
+                        return (
                         <Link key={property.id} href={`/widget/property/${property.slug}?location=${locationId}`} className="block group">
                             <div className="bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow border">
                                 <div className="aspect-video bg-gray-200 relative overflow-hidden">
-                                    {property.media[0] ? (
-                                        <img src={property.media[0].url} alt={property.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                                    {visibleMedia[0] ? (
+                                        <img src={visibleMedia[0].url} alt={property.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                                     ) : (
                                         <div className="flex items-center justify-center h-full text-gray-400">No Image</div>
                                     )}
@@ -84,7 +87,8 @@ export default async function WidgetSearchPage({ searchParams: searchParamsPromi
                                 </div>
                             </div>
                         </Link>
-                    ))
+                    );
+                    })
                 )}
             </div>
         </div>

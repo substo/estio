@@ -41,9 +41,9 @@ export interface ImageEnhancementSuggestedFix {
 
 export interface ImageEnhancementAnalysis {
     sceneSummary: string;
+    sceneContext: string;
     detectedElements: ImageEnhancementDetectedElement[];
     suggestedFixes: ImageEnhancementSuggestedFix[];
-    promptPolish: string;
     actionLogDraft: string[];
 }
 
@@ -70,6 +70,7 @@ export interface ImageEnhancementGenerateRequest {
     sourceUrl?: string;
     analysis: ImageEnhancementAnalysis;
     selectedFixIds: string[];
+    removedDetectedElementIds: string[];
     aggression: EnhancementAggression;
     generationModel?: string;
     priorPrompt?: string;

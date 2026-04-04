@@ -1,5 +1,6 @@
 import db from "@/lib/db";
 import { getLocationById } from "@/lib/location";
+import { getVisiblePropertyMedia } from "@/lib/properties/property-media-ai";
 import Link from "next/link";
 import ContactForm from "../../_components/contact-form";
 
@@ -25,6 +26,8 @@ export default async function PropertyDetailPage({ params, searchParams }: { par
         return <div className="p-4 text-red-500">Property not found</div>;
     }
 
+    const visibleMedia = getVisiblePropertyMedia(property.media as any);
+
     const config = await db.siteConfig.findUnique({ where: { locationId } });
     const primaryColor = config?.primaryColor || "#000000";
 
@@ -45,16 +48,16 @@ export default async function PropertyDetailPage({ params, searchParams }: { par
                     {/* Media Gallery */}
                     <div className="bg-white rounded-lg overflow-hidden shadow-sm">
                         <div className="aspect-video bg-gray-200 relative">
-                            {property.media[0] ? (
-                                <img src={property.media[0].url} alt={property.title} className="w-full h-full object-cover" />
+                            {visibleMedia[0] ? (
+                                <img src={visibleMedia[0].url} alt={property.title} className="w-full h-full object-cover" />
                             ) : (
                                 <div className="flex items-center justify-center h-full text-gray-400">No Image</div>
                             )}
                         </div>
-                        {property.media.length > 1 && (
+                        {visibleMedia.length > 1 && (
                             <div className="p-2 flex gap-2 overflow-x-auto">
-                                {property.media.map((m) => (
-                                    <img key={m.id} src={m.url} alt="" className="w-20 h-20 object-cover rounded cursor-pointer border hover:border-blue-500" />
+                                {visibleMedia.map((m) => (
+                                    <img key={`${m.cloudflareImageId || m.url}-${m.sortOrder}`} src={m.url} alt="" className="w-20 h-20 object-cover rounded cursor-pointer border hover:border-blue-500" />
                                 ))}
                             </div>
                         )}

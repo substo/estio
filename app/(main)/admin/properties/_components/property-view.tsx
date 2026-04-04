@@ -48,6 +48,7 @@ const DisplaySection = ({ title, children }: { title: string, children: React.Re
 
 import { useState } from "react";
 import { PropertyEditDialog } from "@/components/properties/property-edit-dialog";
+import { getVisiblePropertyImageMedia } from "@/lib/properties/property-media-ai";
 
 interface PropertyViewProps {
     property: any;
@@ -85,7 +86,7 @@ export default function PropertyView({
 
 
     // Images
-    const images = property.media?.filter((m: any) => m.kind === 'IMAGE').sort((a: any, b: any) => (a.sortOrder || 0) - (b.sortOrder || 0)) || [];
+    const images = getVisiblePropertyImageMedia(property.media || []);
     const videos = property.media?.filter((m: any) => m.kind === 'VIDEO') || [];
     // Legacy support for video/doc urls if not in media relation could be added but skipping for cleaner view as per "no clutter"
 

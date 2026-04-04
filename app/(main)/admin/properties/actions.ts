@@ -410,6 +410,7 @@ export async function upsertProperty(formData: FormData) {
             metaKeywords: formData.get("metaKeywords"),
             metaDescription: formData.get("metaDescription"),
             mediaUrls: formData.get("mediaUrls"),
+            mediaJson: formData.get("mediaJson"),
             videoUrls: formData.get("videoUrls"),
             documentUrls: formData.get("documentUrls"),
             // Notes Tab Fields
@@ -480,7 +481,7 @@ export async function upsertProperty(formData: FormData) {
 
         const slug = validated.slug || validated.title.toLowerCase().replace(/ /g, "-") + "-" + Date.now();
 
-        const mediaItems: { url: string; kind: MediaKind; sortOrder: number; cloudflareImageId?: string }[] = [];
+        const mediaItems: { url: string; kind: MediaKind; sortOrder: number; cloudflareImageId?: string; metadata?: unknown }[] = [];
 
         // Process Images (New JSON flow preferred)
         let mediaJsonData: any[] = [];
@@ -500,7 +501,8 @@ export async function upsertProperty(formData: FormData) {
                     url: item.url,
                     kind: item.kind || MediaKind.IMAGE,
                     sortOrder: index,
-                    cloudflareImageId: item.cloudflareImageId
+                    cloudflareImageId: item.cloudflareImageId,
+                    metadata: item.metadata,
                 });
             });
         } else if (validated.mediaUrls) {
@@ -621,7 +623,8 @@ export async function upsertProperty(formData: FormData) {
                         url: item.url,
                         kind: item.kind,
                         sortOrder: item.sortOrder,
-                        cloudflareImageId: item.cloudflareImageId // ADDED
+                        cloudflareImageId: item.cloudflareImageId,
+                        metadata: item.metadata as any,
                     })),
                 });
             }
@@ -672,7 +675,8 @@ export async function upsertProperty(formData: FormData) {
                             url: item.url,
                             kind: item.kind,
                             sortOrder: item.sortOrder,
-                            cloudflareImageId: item.cloudflareImageId
+                            cloudflareImageId: item.cloudflareImageId,
+                            metadata: item.metadata as any,
                         })),
                     });
                 }
@@ -689,7 +693,8 @@ export async function upsertProperty(formData: FormData) {
                                 url: item.url,
                                 kind: item.kind,
                                 sortOrder: item.sortOrder,
-                                cloudflareImageId: item.cloudflareImageId
+                                cloudflareImageId: item.cloudflareImageId,
+                                metadata: item.metadata as any,
                             })),
                         },
                     },

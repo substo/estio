@@ -355,6 +355,7 @@ model PropertyMedia {
   sortOrder         Int       @default(0)
   title             String?
   cloudflareImageId String?
+  metadata          Json?
   property          Property  @relation(fields: [propertyId], references: [id])
 }
 

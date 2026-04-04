@@ -2,6 +2,7 @@
 
 import { auth } from "@clerk/nextjs/server";
 import db from "@/lib/db";
+import { getVisiblePropertyMedia } from "@/lib/properties/property-media-ai";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { MediaKind } from "@prisma/client";
@@ -103,12 +104,14 @@ export async function getFavorites() {
             include: {
                 media: {
                     orderBy: { sortOrder: 'asc' },
-                    take: 1
                 }
             }
         });
 
-        return properties;
+        return properties.map((property) => ({
+            ...property,
+            media: getVisiblePropertyMedia(property.media as any),
+        }));
     } catch (error) {
         console.error("[getFavorites] Error:", error);
         return [];
@@ -483,7 +486,6 @@ export async function getUserSubmissions() {
             include: {
                 media: {
                     orderBy: { sortOrder: 'asc' },
-                    take: 1
                 }
             },
             orderBy: { createdAt: 'desc' }
@@ -501,6 +503,7 @@ export async function getUserSubmissions() {
 
             return {
                 ...p,
+                media: getVisiblePropertyMedia(p.media as any),
                 status: displayStatus
             };
         });

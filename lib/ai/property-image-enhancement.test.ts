@@ -7,6 +7,7 @@ import {
     normalizeImageEnhancementAnalysis,
     parseJsonObjectFromModelText,
 } from "@/lib/ai/property-image-enhancement";
+import { resolveNeutralSceneContext } from "@/lib/ai/property-image-enhancement-prompt";
 import { buildPropertyImageModelCatalog } from "@/lib/ai/model-capabilities";
 import type { ImageEnhancementAnalysis } from "@/lib/ai/property-image-enhancement-types";
 
@@ -20,14 +21,16 @@ test("normalizeImageEnhancementAnalysis falls back safely for malformed model ou
     const normalized = normalizeImageEnhancementAnalysis(malformed);
 
     assert.equal(typeof normalized.sceneSummary, "string");
+    assert.equal(typeof normalized.sceneContext, "string");
     assert.ok(normalized.sceneSummary.length > 0);
     assert.deepEqual(normalized.detectedElements, []);
     assert.deepEqual(normalized.suggestedFixes, []);
 });
 
-test("buildGenerationPrompt includes selected fixes and aggression constraints", () => {
+test("buildGenerationPrompt includes selected fixes and aggression constraints without leaking deselected fixes", () => {
     const analysis: ImageEnhancementAnalysis = {
         sceneSummary: "Living room shot with mild clutter and flat lighting.",
+        sceneContext: "Balance exposure, remove structure clutter, and improve the room carefully.",
         detectedElements: [],
         suggestedFixes: [
             {
@@ -46,14 +49,22 @@ test("buildGenerationPrompt includes selected fixes and aggression constraints",
                 defaultSelected: true,
                 promptInstruction: "Balance exposure and recover highlights and shadows.",
             },
+            {
+                id: "remove_structure",
+                label: "Remove structure",
+                description: "Remove structural clutter.",
+                impact: "high",
+                defaultSelected: false,
+                promptInstruction: "Remove the visible structure near the window.",
+            },
         ],
-        promptPolish: "Create a polished listing-ready living room photo with realistic lighting.",
         actionLogDraft: [],
     };
 
     const prompt = buildGenerationPrompt({
         analysis,
         selectedFixIds: ["balance_exposure"],
+        removedDetectedElementIds: [],
         aggression: "balanced",
         userInstructions: "Remove the people reflected in the window if present.",
     });
@@ -61,6 +72,8 @@ test("buildGenerationPrompt includes selected fixes and aggression constraints",
     assert.match(prompt, /Balanced mode:/);
     assert.match(prompt, /Balance exposure and recover highlights and shadows\./);
     assert.doesNotMatch(prompt, /Remove loose clutter from the floor\./);
+    assert.doesNotMatch(prompt, /Remove the visible structure near the window\./);
+    assert.doesNotMatch(prompt, /remove structure/i);
     assert.match(prompt, /Remove the people reflected in the window if present\./);
     assert.match(prompt, /preserv.*scene identity/i);
 });
@@ -72,12 +85,22 @@ test("buildAnalysisPrompt includes operator override instructions when provided"
 
     assert.match(prompt, /operator-reported issues/i);
     assert.match(prompt, /Look for people near the pool and propose removing them\./);
+    assert.match(prompt, /sceneContext/);
 });
 
 test("buildReusablePromptContext stays concise and excludes legacy nesting markers", () => {
     const analysis: ImageEnhancementAnalysis = {
         sceneSummary: "Pool terrace photo with two loungers and some background clutter.",
-        detectedElements: [],
+        sceneContext: "Pool terrace scene with loungers, paving, and natural daylight.",
+        detectedElements: [
+            {
+                id: "person_poolside",
+                label: "Person near pool",
+                category: "person",
+                severity: "medium",
+                confidence: 0.91,
+            },
+        ],
         suggestedFixes: [
             {
                 id: "remove_people",
@@ -88,20 +111,50 @@ test("buildReusablePromptContext stays concise and excludes legacy nesting marke
                 promptInstruction: "Remove the people from the terrace and reconstruct the background naturally.",
             },
         ],
-        promptPolish: "Create a clean, premium listing photo with natural daylight and realistic surfaces.",
         actionLogDraft: [],
     };
 
     const prompt = buildReusablePromptContext({
         analysis,
         selectedFixIds: ["remove_people"],
+        removedDetectedElementIds: ["person_poolside"],
         aggression: "balanced",
         userInstructions: "Keep the loungers exactly where they are.",
     });
 
     assert.match(prompt, /Reusable enhancement context/i);
     assert.match(prompt, /Keep the loungers exactly where they are\./);
+    assert.match(prompt, /Person near pool/i);
     assert.doesNotMatch(prompt, /Legacy prompt reference:/);
+});
+
+test("resolveNeutralSceneContext falls back to scene summary when analyzer context embeds fix instructions", () => {
+    const analysis: ImageEnhancementAnalysis = {
+        sceneSummary: "Neutral room summary.",
+        sceneContext: "Balance exposure and remove the visible structure near the window.",
+        detectedElements: [],
+        suggestedFixes: [
+            {
+                id: "balance_exposure",
+                label: "Balance exposure",
+                description: "Improve exposure.",
+                impact: "high",
+                defaultSelected: true,
+                promptInstruction: "Balance exposure and recover highlights.",
+            },
+            {
+                id: "remove_structure",
+                label: "Remove structure",
+                description: "Remove structure.",
+                impact: "high",
+                defaultSelected: false,
+                promptInstruction: "Remove the visible structure near the window.",
+            },
+        ],
+        actionLogDraft: [],
+    };
+
+    assert.equal(resolveNeutralSceneContext(analysis), "Neutral room summary.");
 });
 
 test("buildPropertyImageModelCatalog separates analysis and generation models", () => {

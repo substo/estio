@@ -27,6 +27,11 @@ import type {
     ImageEnhancementAnalysis,
     ImageEnhancementGeneratedResult,
 } from "@/lib/ai/property-image-enhancement-types";
+import { buildGenerationPrompt } from "@/lib/ai/property-image-enhancement-prompt";
+import {
+    PROPERTY_IMAGE_AI_APPLY_MODES,
+    type PropertyImageAiApplyMode,
+} from "@/lib/properties/property-media-ai";
 import {
     PropertyImageCompareViewer,
 } from "./property-image-compare-viewer";
@@ -40,15 +45,16 @@ import {
 
 interface PropertyImageLike {
     url: string;
-    cloudflareImageId?: string;
+    cloudflareImageId?: string | null;
     kind: string;
     sortOrder: number;
+    metadata?: unknown;
 }
 
 interface GeneratedVariantPayload {
     url: string;
     cloudflareImageId: string;
-    setAsPrimary: boolean;
+    applyMode: PropertyImageAiApplyMode;
     reusablePrompt: string;
 }
 
@@ -123,6 +129,7 @@ export function PropertyImageEnhanceDialog({
     const [mode, setMode] = useState<EnhancementMode>("polish");
     const [analysis, setAnalysis] = useState<ImageEnhancementAnalysis | null>(null);
     const [selectedFixIds, setSelectedFixIds] = useState<string[]>([]);
+    const [removedDetectedElementIds, setRemovedDetectedElementIds] = useState<string[]>([]);
     const [aggression, setAggression] = useState<EnhancementAggression>("balanced");
     const [reusePriorPrompt, setReusePriorPrompt] = useState(Boolean(String(priorPrompt || "").trim()));
     const [userInstructions, setUserInstructions] = useState("");
@@ -136,7 +143,7 @@ export function PropertyImageEnhanceDialog({
     const [precisionGuidance, setPrecisionGuidance] = useState("");
     const [precisionEditorState, setPrecisionEditorState] = useState<PrecisionMaskEditorState>(EMPTY_PRECISION_EDITOR_STATE);
     const [lastPrecisionSnapshot, setLastPrecisionSnapshot] = useState<PrecisionMaskSnapshot | null>(null);
-    const [setAsPrimary, setSetAsPrimary] = useState(false);
+    const [selectedApplyMode, setSelectedApplyMode] = useState<PropertyImageAiApplyMode | null>(null);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [isGenerating, setIsGenerating] = useState(false);
     const [isRemoving, setIsRemoving] = useState(false);
@@ -152,12 +159,24 @@ export function PropertyImageEnhanceDialog({
     const effectivePriorPrompt = reusePriorPrompt ? priorPrompt : undefined;
     const stage = generated ? "review" : "edit";
     const isBusy = isAnalyzing || isGenerating || isRemoving;
+    const liveFinalPrompt = useMemo(() => {
+        if (!analysis) return "";
+        return buildGenerationPrompt({
+            analysis,
+            selectedFixIds,
+            removedDetectedElementIds,
+            aggression,
+            priorPrompt: effectivePriorPrompt,
+            userInstructions,
+        });
+    }, [analysis, selectedFixIds, removedDetectedElementIds, aggression, effectivePriorPrompt, userInstructions]);
 
     useEffect(() => {
         if (!open) {
             setMode("polish");
             setAnalysis(null);
             setSelectedFixIds([]);
+            setRemovedDetectedElementIds([]);
             setAggression("balanced");
             setReusePriorPrompt(hasPriorPrompt);
             setUserInstructions("");
@@ -171,7 +190,7 @@ export function PropertyImageEnhanceDialog({
             setPrecisionGuidance("");
             setPrecisionEditorState(EMPTY_PRECISION_EDITOR_STATE);
             setLastPrecisionSnapshot(null);
-            setSetAsPrimary(false);
+            setSelectedApplyMode(null);
             setIsAnalyzing(false);
             setIsGenerating(false);
             setIsRemoving(false);
@@ -195,6 +214,14 @@ export function PropertyImageEnhanceDialog({
             prev.includes(fixId)
                 ? prev.filter((id) => id !== fixId)
                 : [...prev, fixId]
+        ));
+    };
+
+    const toggleDetectedElementRemoval = (elementId: string) => {
+        setRemovedDetectedElementIds((prev) => (
+            prev.includes(elementId)
+                ? prev.filter((id) => id !== elementId)
+                : [...prev, elementId]
         ));
     };
 
@@ -244,6 +271,7 @@ export function PropertyImageEnhanceDialog({
 
             setAnalysis(payload.analysis);
             setSelectedFixIds(defaults);
+            setRemovedDetectedElementIds([]);
             setUsedAnalysisModel(payload.model);
             setShowAnalysisSettings(false);
         } catch (err) {
@@ -279,6 +307,7 @@ export function PropertyImageEnhanceDialog({
                     sourceUrl: image.url,
                     analysis,
                     selectedFixIds,
+                    removedDetectedElementIds,
                     aggression,
                     generationModel: selectedGenerationModel,
                     priorPrompt: effectivePriorPrompt,
@@ -292,6 +321,7 @@ export function PropertyImageEnhanceDialog({
             }
 
             const payload = json as GenerateApiResponse;
+            setSelectedApplyMode(null);
             setGenerated({
                 mode: "polish",
                 generatedImageId: payload.generatedImageId,
@@ -348,6 +378,7 @@ export function PropertyImageEnhanceDialog({
 
             const payload = json as PrecisionRemoveApiResponse;
             setLastPrecisionSnapshot(snapshot);
+            setSelectedApplyMode(null);
             setGenerated({
                 mode: "precision_remove",
                 generatedImageId: payload.generatedImageId,
@@ -380,15 +411,16 @@ export function PropertyImageEnhanceDialog({
 
     function handleBackToEdit() {
         setGenerated(null);
+        setSelectedApplyMode(null);
         setError(null);
     }
 
     function handleApplyVariant() {
-        if (!generated) return;
+        if (!generated || !selectedApplyMode) return;
         onApplyVariant({
             url: generated.generatedImageUrl,
             cloudflareImageId: generated.generatedImageId,
-            setAsPrimary,
+            applyMode: selectedApplyMode,
             reusablePrompt: generated.reusablePrompt || "",
         });
         toast.success("Enhanced image added. Click Save Property to persist.");
@@ -753,18 +785,54 @@ export function PropertyImageEnhanceDialog({
                     </div>
                 ) : null}
 
-                <div className="flex items-center justify-between rounded-md border p-3">
+                <div className="space-y-2 rounded-md border p-3">
                     <div>
-                        <Label className="text-sm font-medium">Set as primary on save</Label>
+                        <Label className="text-sm font-medium">Apply To Gallery</Label>
                         <p className="text-xs text-muted-foreground">
-                            Place this variant first in the media order.
+                            Choose how this result should appear in the property image gallery.
                         </p>
                     </div>
-                    <Switch checked={setAsPrimary} onCheckedChange={setSetAsPrimary} />
+                    <RadioGroup
+                        value={selectedApplyMode || ""}
+                        onValueChange={(value) => setSelectedApplyMode(value as PropertyImageAiApplyMode)}
+                        className="grid gap-3"
+                    >
+                        {[
+                            {
+                                value: PROPERTY_IMAGE_AI_APPLY_MODES[0],
+                                label: "Replace original",
+                                help: "Use this AI result in the current image slot and keep the original available for revert.",
+                            },
+                            {
+                                value: PROPERTY_IMAGE_AI_APPLY_MODES[1],
+                                label: "Add before original",
+                                help: "Insert this AI result right before the current source image and keep both visible.",
+                            },
+                            {
+                                value: PROPERTY_IMAGE_AI_APPLY_MODES[2],
+                                label: "Add as primary",
+                                help: "Add this AI result as the first gallery image while preserving the current source image.",
+                            },
+                        ].map((option) => (
+                            <label
+                                key={option.value}
+                                className={cn(
+                                    "flex items-start gap-2 rounded-md border px-3 py-2 text-sm",
+                                    selectedApplyMode === option.value ? "border-primary bg-primary/5" : "border-border"
+                                )}
+                            >
+                                <RadioGroupItem value={option.value} className="mt-0.5" />
+                                <span>
+                                    <span className="font-medium">{option.label}</span>
+                                    <span className="block text-xs text-muted-foreground">{option.help}</span>
+                                </span>
+                            </label>
+                        ))}
+                    </RadioGroup>
                 </div>
 
                 <div className="grid gap-2">
-                    <Button type="button" onClick={handleApplyVariant}>
+                    <Button type="button" onClick={handleApplyVariant} disabled={!selectedApplyMode || isBusy}>
                         Keep Result
                     </Button>
                     <Button type="button" variant="secondary" onClick={() => void handleRegenerate()} disabled={isBusy}>
@@ -889,19 +957,43 @@ export function PropertyImageEnhanceDialog({
                                                         <div className="space-y-2">
                                                             <Label className="text-sm font-medium">Detected Elements</Label>
                                                             <div className="flex flex-wrap gap-2">
-                                                                {analysis.detectedElements.slice(0, 12).map((item) => (
-                                                                    <Badge key={item.id} variant="outline" className="gap-1">
-                                                                        {item.label}
-                                                                        <span className="text-[10px] text-muted-foreground">({item.severity})</span>
-                                                                    </Badge>
-                                                                ))}
+                                                                {analysis.detectedElements.slice(0, 12).map((item) => {
+                                                                    const markedForRemoval = removedDetectedElementIds.includes(item.id);
+                                                                    return (
+                                                                        <button
+                                                                            key={item.id}
+                                                                            type="button"
+                                                                            onClick={() => toggleDetectedElementRemoval(item.id)}
+                                                                            className={cn(
+                                                                                "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs transition-colors",
+                                                                                markedForRemoval
+                                                                                    ? "border-destructive bg-destructive text-destructive-foreground"
+                                                                                    : "border-border bg-background text-foreground hover:bg-muted"
+                                                                            )}
+                                                                        >
+                                                                            <span>{item.label}</span>
+                                                                            <span className={cn(
+                                                                                "text-[10px]",
+                                                                                markedForRemoval ? "text-destructive-foreground/90" : "text-muted-foreground"
+                                                                            )}>
+                                                                                {markedForRemoval ? "Will remove" : `Remove (${item.severity})`}
+                                                                            </span>
+                                                                        </button>
+                                                                    );
+                                                                })}
                                                             </div>
+                                                            <p className="text-xs text-muted-foreground">
+                                                                Click a detected element to mark or unmark it for removal in the generated image prompt.
+                                                            </p>
                                                         </div>
                                                     ) : null}
 
                                                     <div className="space-y-2">
-                                                        <Label className="text-sm font-medium">Prompt Polish Preview</Label>
-                                                        <Textarea value={analysis.promptPolish} readOnly className="min-h-[90px] text-xs" />
+                                                        <Label className="text-sm font-medium">Live Final Prompt</Label>
+                                                        <Textarea value={liveFinalPrompt} readOnly className="min-h-[140px] text-xs" />
+                                                        <p className="text-xs text-muted-foreground">
+                                                            This prompt updates whenever you change fixes, removals, aggression, prompt reuse, or override instructions.
+                                                        </p>
                                                     </div>
                                                 </div>
                                             ) : null}

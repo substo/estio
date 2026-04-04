@@ -46,15 +46,24 @@ import {
 import { toast } from "sonner";
 import { CSS } from '@dnd-kit/utilities';
 import { PropertyImageEnhanceDialog } from "./property-image-enhance-dialog";
+import {
+    applyAiGeneratedImage,
+    canRevertAiGeneratedImage,
+    getPropertyMediaIdentity,
+    getVisiblePropertyImageMedia,
+    hasAiOriginalAvailable,
+    isAiGeneratedPropertyImage,
+    removePropertyImageByIdentity,
+    revertAiGeneratedReplacement,
+} from "@/lib/properties/property-media-ai";
 
 interface SortableImageProps {
     id: string;
-    index: number;
     children: React.ReactNode;
-    onRemove: (index: number) => void;
+    onRemove: () => void;
 }
 
-function SortableImage({ id, index, children, onRemove }: SortableImageProps) {
+function SortableImage({ id, children, onRemove }: SortableImageProps) {
     const {
         attributes,
         listeners,
@@ -78,7 +87,7 @@ function SortableImage({ id, index, children, onRemove }: SortableImageProps) {
                 type="button"
                 onClick={(e) => {
                     e.stopPropagation(); // Prevent affecting drag
-                    onRemove(index);
+                    onRemove();
                 }}
                 onPointerDown={(e) => e.stopPropagation()} // Prevent drag initiation on button
                 className="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10"
@@ -162,22 +171,25 @@ export default function PropertyForm({
 
     interface ImageItem {
         url: string;
-        cloudflareImageId?: string;
+        cloudflareImageId?: string | null;
         kind: string;
         sortOrder: number;
+        metadata?: unknown;
     }
 
     // ... inside component
     // Media State
     const [images, setImages] = useState<ImageItem[]>(() => {
         if (property?.media) {
-            return property.media
+            return [...property.media]
+                .sort((a: any, b: any) => (a.sortOrder || 0) - (b.sortOrder || 0))
                 .filter((m: any) => m.kind === 'IMAGE')
                 .map((m: any) => ({
                     url: m.url,
                     cloudflareImageId: m.cloudflareImageId,
                     kind: 'IMAGE',
-                    sortOrder: m.sortOrder || 0
+                    sortOrder: m.sortOrder || 0,
+                    metadata: m.metadata,
                 }));
         }
         // Fallback for legacy comma-separated string
@@ -186,7 +198,7 @@ export default function PropertyForm({
                 url: s.trim(),
                 kind: 'IMAGE',
                 sortOrder: i
-            })).filter((i: any) => i.url);
+                    })).filter((i: any) => i.url);
         }
         return [];
     });
@@ -215,7 +227,9 @@ export default function PropertyForm({
         return keys;
     }, [property?.media]);
 
-    const selectedEnhanceImage = enhanceImageIndex !== null ? images[enhanceImageIndex] || null : null;
+    const visibleImages = useMemo(() => getVisiblePropertyImageMedia(images), [images]);
+    const selectedEnhanceImage = enhanceImageIndex !== null ? visibleImages[enhanceImageIndex] || null : null;
+    const selectedEnhanceImageIdentity = selectedEnhanceImage ? getPropertyMediaIdentity(selectedEnhanceImage) : "";
 
     const sensors = useSensors(
         useSensor(PointerSensor, {
@@ -241,10 +255,16 @@ export default function PropertyForm({
         }
     }
 
-    const handleRemoveMedia = (type: 'image' | 'video' | 'document', index: number) => {
-        if (type === 'image') {
-            setImages(prev => prev.filter((_, i) => i !== index));
-        } else if (type === 'video') {
+    const handleRemoveImage = (imageIdentity: string) => {
+        setImages((prev) => removePropertyImageByIdentity(prev, imageIdentity));
+    };
+
+    const handleRevertAiImage = (imageIdentity: string) => {
+        setImages((prev) => revertAiGeneratedReplacement(prev, imageIdentity));
+    };
+
+    const handleRemoveMedia = (type: 'video' | 'document', index: number) => {
+        if (type === 'video') {
             setVideoUrls(prev => prev.filter((_, i) => i !== index));
         } else {
             setDocumentUrls(prev => prev.filter((_, i) => i !== index));
@@ -1049,23 +1069,25 @@ export default function PropertyForm({
                                         onDragEnd={handleDragEnd}
                                     >
                                         <SortableContext
-                                            items={images.map(img => img.cloudflareImageId || img.url)}
+                                            items={visibleImages.map((img) => getPropertyMediaIdentity(img))}
                                             strategy={rectSortingStrategy}
                                         >
                                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                                {images.map((img, index) => {
-                                                    const uniqueId = img.cloudflareImageId || img.url;
+                                                {visibleImages.map((img, index) => {
+                                                    const uniqueId = getPropertyMediaIdentity(img);
                                                     const canEnhance = Boolean(
                                                         property?.id
                                                         && property.id !== "new"
                                                         && persistedImageKeys.has(uniqueId)
                                                     );
+                                                    const isAiGenerated = isAiGeneratedPropertyImage(img);
+                                                    const originalAvailable = hasAiOriginalAvailable(img, images);
+                                                    const canRevert = canRevertAiGeneratedImage(img, images);
                                                     return (
                                                         <SortableImage
                                                             key={uniqueId}
                                                             id={uniqueId}
-                                                            index={index}
-                                                            onRemove={() => handleRemoveMedia('image', index)}
+                                                            onRemove={() => handleRemoveImage(uniqueId)}
                                                         >
                                                             {img.cloudflareImageId ? (
                                                                 <CloudflareImage
@@ -1079,6 +1101,20 @@ export default function PropertyForm({
                                                             ) : (
                                                                 <img src={img.url} alt={`Property ${index + 1}`} className="w-full h-full object-cover" />
                                                             )}
+                                                            {(isAiGenerated || originalAvailable) ? (
+                                                                <div className="absolute left-2 top-2 z-10 flex flex-col gap-1">
+                                                                    {isAiGenerated ? (
+                                                                        <span className="rounded-full bg-blue-600/90 px-2 py-1 text-[10px] font-medium text-white">
+                                                                            AI Generated
+                                                                        </span>
+                                                                    ) : null}
+                                                                    {isAiGenerated && originalAvailable ? (
+                                                                        <span className="rounded-full bg-black/70 px-2 py-1 text-[10px] font-medium text-white">
+                                                                            Original Available
+                                                                        </span>
+                                                                    ) : null}
+                                                                </div>
+                                                            ) : null}
                                                             <button
                                                                 type="button"
                                                                 onClick={(e) => {
@@ -1095,6 +1131,19 @@ export default function PropertyForm({
                                                                 <Sparkles className="h-3 w-3" />
                                                                 Enhance
                                                             </button>
+                                                            {canRevert ? (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        handleRevertAiImage(uniqueId);
+                                                                    }}
+                                                                    onPointerDown={(e) => e.stopPropagation()}
+                                                                    className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-md bg-white/90 px-2 py-1 text-[11px] font-medium text-foreground transition hover:bg-white"
+                                                                >
+                                                                    Revert
+                                                                </button>
+                                                            ) : null}
                                                         </SortableImage>
                                                     );
                                                 })}
@@ -1113,7 +1162,8 @@ export default function PropertyForm({
                                             url,
                                             cloudflareImageId: imageId,
                                             kind: 'IMAGE',
-                                            sortOrder: prev.length
+                                            sortOrder: prev.length,
+                                            metadata: undefined,
                                         }]);
                                     }}
                                     buttonLabel="Upload Image"
@@ -1128,24 +1178,23 @@ export default function PropertyForm({
                                     imageIndex={enhanceImageIndex ?? 0}
                                     priorPrompt={lastEnhancementPrompt || undefined}
                                     precisionRemoveEnabled={precisionRemoveEnabled}
-                                    onApplyVariant={({ url, cloudflareImageId, setAsPrimary, reusablePrompt }) => {
+                                    onApplyVariant={({ url, cloudflareImageId, applyMode, reusablePrompt }) => {
                                         if (reusablePrompt) {
                                             setLastEnhancementPrompt(reusablePrompt);
                                         }
                                         setImages((prev) => {
-                                            const nextImage = {
-                                                url,
-                                                cloudflareImageId,
-                                                kind: "IMAGE",
-                                                sortOrder: 0,
-                                            };
-                                            const reordered = setAsPrimary
-                                                ? [nextImage, ...prev]
-                                                : [...prev, nextImage];
-                                            return reordered.map((item, idx) => ({
-                                                ...item,
-                                                sortOrder: idx,
-                                            }));
+                                            if (!selectedEnhanceImageIdentity) {
+                                                return prev;
+                                            }
+                                            return applyAiGeneratedImage({
+                                                images: prev,
+                                                sourceImageIdentity: selectedEnhanceImageIdentity,
+                                                generatedImage: {
+                                                    url,
+                                                    cloudflareImageId,
+                                                },
+                                                applyMode,
+                                            });
                                         });
                                     }}
                                 />

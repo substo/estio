@@ -1,4 +1,5 @@
 import db from "@/lib/db";
+import { getVisiblePropertyImageMedia, getVisiblePropertyMedia } from "@/lib/properties/property-media-ai";
 import { cache } from "react";
 
 // Use React 'cache' to deduplicate requests in the same render cycle
@@ -237,17 +238,20 @@ export const getPublicProperties = cache(async (
         include: {
             media: {
                 orderBy: { sortOrder: 'asc' },
-                take: 1, // Optimize fetch
             }
         }
     });
 
     // Map media to images array for UI compatibility
-    return properties.map(p => ({
-        ...p,
-        media: p.media, // Pass full media object (contains cloudflareImageId)
-        images: p.media.map(m => m.url)
-    }));
+    return properties.map(p => {
+        const visibleMedia = getVisiblePropertyMedia(p.media as any);
+        const visibleImages = getVisiblePropertyImageMedia(p.media as any);
+        return {
+            ...p,
+            media: visibleMedia,
+            images: visibleImages.map((m: any) => m.url),
+        };
+    });
 });
 
 
@@ -267,10 +271,13 @@ export const getPublicPropertyBySlug = cache(async (locationId: string, slug: st
 
     if (!property) return null;
 
+    const visibleMedia = getVisiblePropertyMedia(property.media as any);
+    const visibleImages = getVisiblePropertyImageMedia(property.media as any);
+
     return {
         ...property,
-        media: property.media, // Pass full media object
-        images: property.media.map(m => m.url)
+        media: visibleMedia,
+        images: visibleImages.map((m: any) => m.url),
     };
 });
 
@@ -286,16 +293,19 @@ export const getFeaturedProperties = cache(async (locationId: string) => {
         include: {
             media: {
                 orderBy: { sortOrder: 'asc' },
-                take: 1,
             }
         }
     });
 
-    return properties.map(p => ({
-        ...p,
-        media: p.media,
-        images: p.media.map(m => m.url)
-    }));
+    return properties.map(p => {
+        const visibleMedia = getVisiblePropertyMedia(p.media as any);
+        const visibleImages = getVisiblePropertyImageMedia(p.media as any);
+        return {
+            ...p,
+            media: visibleMedia,
+            images: visibleImages.map((m: any) => m.url),
+        };
+    });
 });
 
 // Reusable interface for categories
@@ -330,10 +340,11 @@ export const getCategoryCounts = cache(async (locationId: string, config?: Categ
 
         const sample = await db.property.findFirst({
             where: { ...baseWhere, ...whereClause, media: { some: {} } },
-            select: { media: { take: 1, orderBy: { sortOrder: 'asc' } } }
+            select: { media: { orderBy: { sortOrder: 'asc' } } }
         });
 
-        return { count, image: sample?.media[0]?.url || null };
+        const visibleMedia = sample ? getVisiblePropertyMedia(sample.media as any) : [];
+        return { count, image: visibleMedia[0]?.url || null };
     };
 
     // Case 1: Dynamic Configuration Provided

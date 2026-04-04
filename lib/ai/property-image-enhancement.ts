@@ -1,31 +1,25 @@
 import { z } from "zod";
 import type {
-    EnhancementAggression,
     ImageEnhancementAnalysis,
     ImageEnhancementDetectedElement,
     ImageEnhancementSuggestedFix,
 } from "@/lib/ai/property-image-enhancement-types";
+import {
+    buildAnalysisPrompt,
+    buildGenerationPrompt,
+    buildReusablePromptContext,
+    getRemovedDetectedElements,
+    getSelectedFixes,
+} from "@/lib/ai/property-image-enhancement-prompt";
+
+export {
+    buildAnalysisPrompt,
+    buildGenerationPrompt,
+    buildReusablePromptContext,
+} from "@/lib/ai/property-image-enhancement-prompt";
 
 const DEFAULT_IMAGE_MIME_TYPE = "image/jpeg";
 const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
-
-const ENHANCEMENT_BASE_POLICY_PROMPT = `
-Role: You are an Expert AI Image Enhancer and Photoshop Specialist focused on real-estate listing photos.
-Objective: Transform flawed mobile photos into professional, photoreal, listing-ready images while preserving truthfulness of the property.
-
-Core protocol:
-- Fix framing (horizon tilt, awkward crop) and improve composition.
-- Improve technical quality (noise, softness, exposure, white balance, color consistency).
-- Remove distractions and clutter that reduce listing quality.
-- Keep materials, architecture, and layout realistic.
-- Never add misleading structural elements that change what the property is.
-`.trim();
-
-const AGGRESSION_GUIDANCE: Record<EnhancementAggression, string> = {
-    conservative: "Conservative mode: minimal intervention. Preserve geometry, layout, and materials strictly. Only correct technical defects and obvious distractions.",
-    balanced: "Balanced mode: moderate enhancement. Improve composition, lighting, and cleanup while preserving scene identity and property truthfulness.",
-    aggressive: "Aggressive mode: stronger polish and cleanup allowed, but still photoreal and truthful to the property. Do not invent misleading property features.",
-};
 
 const BboxSchema = z.object({
     x: z.number().min(0).max(1),
@@ -55,9 +49,10 @@ const SuggestedFixSchema = z.object({
 
 const AnalysisSchema = z.object({
     sceneSummary: z.string().trim().min(1).max(600).default("Property listing photo ready for technical enhancement."),
+    sceneContext: z.string().trim().min(1).max(2000).optional(),
+    promptPolish: z.string().trim().min(1).max(4000).optional(),
     detectedElements: z.array(DetectedElementSchema).max(40).default([]),
     suggestedFixes: z.array(SuggestedFixSchema).max(40).default([]),
-    promptPolish: z.string().trim().min(1).max(4000).default("Enhance this real-estate photo professionally while preserving photoreal property truth."),
     actionLogDraft: z.array(z.string().trim().min(1).max(200)).max(30).default([]),
 }).strict();
 
@@ -93,7 +88,8 @@ type GenerateEnhancedImageInput = {
     sourceImageMimeType: string;
     analysis: ImageEnhancementAnalysis;
     selectedFixIds: string[];
-    aggression: EnhancementAggression;
+    removedDetectedElementIds?: string[];
+    aggression: "conservative" | "balanced" | "aggressive";
     priorPrompt?: string;
     userInstructions?: string;
 };
@@ -195,9 +191,9 @@ export function normalizeImageEnhancementAnalysis(raw: unknown): ImageEnhancemen
     if (!parsed.success) {
         return {
             sceneSummary: "Property listing photo with opportunities for composition, lighting, and cleanup improvements.",
+            sceneContext: "Property photo showing the true room layout, materials, and lighting conditions for a realistic listing-photo enhancement.",
             detectedElements: [],
             suggestedFixes: [],
-            promptPolish: "Create a professional, photoreal, listing-ready version of this property photo while preserving scene truthfulness.",
             actionLogDraft: [],
         };
     }
@@ -211,149 +207,11 @@ export function normalizeImageEnhancementAnalysis(raw: unknown): ImageEnhancemen
 
     return {
         sceneSummary: toSingleLine(parsed.data.sceneSummary),
+        sceneContext: toSingleLine(parsed.data.sceneContext || parsed.data.promptPolish || parsed.data.sceneSummary),
         detectedElements: normalizedElements,
         suggestedFixes: Array.from(uniqueFixes.values()),
-        promptPolish: String(parsed.data.promptPolish || "").trim(),
         actionLogDraft: parsed.data.actionLogDraft.map((line) => toSingleLine(line)).filter(Boolean),
     };
-}
-
-export function buildAnalysisPrompt(input?: { priorPrompt?: string; userInstructions?: string }): string {
-    const priorPrompt = String(input?.priorPrompt || "").trim();
-    const userInstructions = String(input?.userInstructions || "").trim();
-    return `
-${ENHANCEMENT_BASE_POLICY_PROMPT}
-
-Task:
-1) Analyze the input property photo.
-2) Identify scene elements and concrete listing-quality issues.
-3) Propose practical fixes users can toggle on/off in UI chips.
-4) Produce a polished generation prompt for the next step.
-
-Output strict JSON only:
-{
-  "sceneSummary": "string",
-  "detectedElements": [
-    {
-      "id": "string",
-      "label": "string",
-      "category": "string",
-      "severity": "low|medium|high",
-      "confidence": 0.0,
-      "rationale": "string",
-      "bbox": { "x": 0.1, "y": 0.1, "width": 0.2, "height": 0.2 }
-    }
-  ],
-  "suggestedFixes": [
-    {
-      "id": "string",
-      "label": "string",
-      "description": "string",
-      "impact": "low|medium|high",
-      "defaultSelected": true,
-      "promptInstruction": "short imperative instruction"
-    }
-  ],
-  "promptPolish": "string",
-  "actionLogDraft": ["string"]
-}
-
-Rules:
-- Keep bbox optional and normalized to 0..1 when provided.
-- Keep labels concise and UI-friendly.
-- Focus on real-estate listing improvements (composition, cleanup, lighting, clarity, realism).
-- Do not suggest changes that misrepresent property structure.
-- Pay close attention to operator-reported issues. If the user asks to inspect or remove something specific, prefer returning a candidate fix rather than omitting it entirely, unless it is clearly absent.
-${userInstructions ? `\nOperator instructions / suspected issues:\n${userInstructions}` : ""}
-${priorPrompt ? `\nReference legacy enhancement instructions:\n${priorPrompt}` : ""}
-`.trim();
-}
-
-export function buildGenerationPrompt(input: {
-    analysis: ImageEnhancementAnalysis;
-    selectedFixIds: string[];
-    aggression: EnhancementAggression;
-    priorPrompt?: string;
-    userInstructions?: string;
-}): string {
-    const selectedSet = new Set((input.selectedFixIds || []).map((id) => String(id || "").trim()).filter(Boolean));
-    const selectedFixes = input.analysis.suggestedFixes.filter((fix) => selectedSet.has(fix.id));
-    const selectedInstructions = selectedFixes.map((fix) => `- ${fix.promptInstruction}`);
-    const selectedLabels = selectedFixes.map((fix) => fix.label);
-    const priorPrompt = String(input.priorPrompt || "").trim();
-    const userInstructions = String(input.userInstructions || "").trim();
-    const aggressionGuidance = AGGRESSION_GUIDANCE[input.aggression] || AGGRESSION_GUIDANCE.balanced;
-
-    return `
-${ENHANCEMENT_BASE_POLICY_PROMPT}
-
-Editing mode:
-${aggressionGuidance}
-
-Scene summary:
-${input.analysis.sceneSummary}
-
-Refined prompt context:
-${input.analysis.promptPolish}
-
-User-approved fixes:
-${selectedInstructions.length > 0 ? selectedInstructions.join("\n") : "- Keep composition and only apply gentle technical polish."}
-
-Manual operator instructions:
-${userInstructions ? userInstructions : "None provided."}
-
-Important guardrails:
-- Preserve room layout, dimensions, architecture, and material truthfulness.
-- Remove distractions only when they are non-essential clutter.
-- Keep output photoreal and listing-ready.
-- No fake staging objects unless naturally implied by scene.
-
-Response requirements:
-1) Return an edited image.
-2) Include a short plain-text action log line list describing applied changes.
-3) If a requested fix is not feasible from this image, mention it in action log.
-
-Selected fix labels:
-${selectedLabels.length > 0 ? selectedLabels.join(", ") : "None (technical polish only)"}
-
-${priorPrompt ? `Legacy prompt reference:\n${priorPrompt}` : ""}
-`.trim();
-}
-
-export function buildReusablePromptContext(input: {
-    analysis: ImageEnhancementAnalysis;
-    selectedFixIds: string[];
-    aggression: EnhancementAggression;
-    userInstructions?: string;
-}): string {
-    const selectedSet = new Set((input.selectedFixIds || []).map((id) => String(id || "").trim()).filter(Boolean));
-    const selectedFixes = input.analysis.suggestedFixes.filter((fix) => selectedSet.has(fix.id));
-    const selectedInstructions = selectedFixes.map((fix) => `- ${fix.promptInstruction}`);
-    const userInstructions = String(input.userInstructions || "").trim();
-    const aggressionGuidance = AGGRESSION_GUIDANCE[input.aggression] || AGGRESSION_GUIDANCE.balanced;
-
-    return `
-Reusable enhancement context for similar property photos of the same scene:
-- Keep edits consistent across adjacent shots of this room or exterior.
-- ${aggressionGuidance}
-
-Scene summary:
-${input.analysis.sceneSummary}
-
-Refined prompt context:
-${input.analysis.promptPolish}
-
-Preferred fixes:
-${selectedInstructions.length > 0 ? selectedInstructions.join("\n") : "- Gentle technical polish only."}
-
-Operator notes:
-${userInstructions || "None provided."}
-
-Global guardrails:
-- Preserve architecture, layout, materials, and room proportions.
-- Keep the result photoreal and listing-ready.
-- Avoid introducing staged or misleading property features.
-`.trim();
 }
 
 function getTextPartsFromResponse(response: GeminiGenerateContentResponse): string[] {
@@ -516,6 +374,7 @@ export async function generateEnhancedImage(input: GenerateEnhancedImageInput): 
     const prompt = buildGenerationPrompt({
         analysis: input.analysis,
         selectedFixIds: input.selectedFixIds,
+        removedDetectedElementIds: input.removedDetectedElementIds,
         aggression: input.aggression,
         priorPrompt: input.priorPrompt,
         userInstructions: input.userInstructions,
@@ -523,6 +382,7 @@ export async function generateEnhancedImage(input: GenerateEnhancedImageInput): 
     const reusablePrompt = buildReusablePromptContext({
         analysis: input.analysis,
         selectedFixIds: input.selectedFixIds,
+        removedDetectedElementIds: input.removedDetectedElementIds,
         aggression: input.aggression,
         userInstructions: input.userInstructions,
     });
@@ -554,11 +414,13 @@ export async function generateEnhancedImage(input: GenerateEnhancedImageInput): 
     }
 
     const modelTextParts = getTextPartsFromResponse(response);
+    const removedElements = getRemovedDetectedElements(input.analysis, input.removedDetectedElementIds || []);
     const fallbackActionLog = input.analysis.actionLogDraft.length > 0
         ? input.analysis.actionLogDraft
-        : input.analysis.suggestedFixes
-            .filter((fix) => input.selectedFixIds.includes(fix.id))
-            .map((fix) => fix.label);
+        : [
+            ...getSelectedFixes(input.analysis, input.selectedFixIds).map((fix) => fix.label),
+            ...removedElements.map((element) => `Remove ${element.label}`),
+        ];
 
     const actionLog = normalizeActionLog([
         ...modelTextParts,
