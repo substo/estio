@@ -31,12 +31,14 @@ export function AiSettingsForm({
     locationId,
     settingsVersion,
     hasGoogleAiApiKey,
+    precisionRemoveInfrastructureReady,
     runtimeSummary,
 }: {
     initialData: any,
     locationId: string,
     settingsVersion: number,
     hasGoogleAiApiKey: boolean,
+    precisionRemoveInfrastructureReady: boolean,
     runtimeSummary?: {
         totalPolicies: number;
         enabledPolicies: number;
@@ -486,6 +488,34 @@ export function AiSettingsForm({
                                 </div>
                             </div>
                         </div>
+                    </div>
+                </div>
+
+                <Separator />
+
+                <div className="space-y-4">
+                    <h3 className="text-lg font-medium">Property Image Editing</h3>
+                    <div className="space-y-4 border rounded-lg p-4 bg-slate-50/50">
+                        <label className="flex items-start gap-3 rounded-md border border-slate-200 bg-white px-4 py-3">
+                            <input
+                                id="precisionRemoveEnabled"
+                                name="precisionRemoveEnabled"
+                                type="checkbox"
+                                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                                defaultChecked={initialData?.precisionRemoveEnabled === true}
+                            />
+                            <span className="space-y-1">
+                                <span className="block text-sm font-medium text-slate-900">Enable Precision Remove</span>
+                                <span className="block text-xs text-muted-foreground">
+                                    Allows admins for this location to use manual mask-based object removal inside the property media editor.
+                                </span>
+                                <span className="block text-[11px] text-muted-foreground">
+                                    Infrastructure status: {precisionRemoveInfrastructureReady
+                                        ? "Google Cloud image editing is configured on this server."
+                                        : "Google Cloud image editing is not fully configured on this server yet."}
+                                </span>
+                            </span>
+                        </label>
                     </div>
                 </div>
 

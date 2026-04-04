@@ -44,6 +44,22 @@ type RotateSecretsInput = {
     actorUserId?: string | null;
 };
 
+function stripIgnoredKeys(value: unknown, ignoredKeys: Set<string>): unknown {
+    if (Array.isArray(value)) {
+        return value.map((item) => stripIgnoredKeys(item, ignoredKeys));
+    }
+
+    if (value && typeof value === "object") {
+        return Object.fromEntries(
+            Object.entries(value as Record<string, unknown>)
+                .filter(([key]) => !ignoredKeys.has(key))
+                .map(([key, nestedValue]) => [key, stripIgnoredKeys(nestedValue, ignoredKeys)])
+        );
+    }
+
+    return value;
+}
+
 async function withOptionalTransaction<T>(
     tx: TxClient | undefined,
     action: (txn: TxClient) => Promise<T>
@@ -451,6 +467,7 @@ export class SettingsService {
         scopeId: string;
         domain: SettingsDomain;
         legacyPayload: T;
+        ignoreKeys?: string[];
         actorUserId?: string | null;
         requestId?: string | null;
     }): Promise<{ matched: boolean; documentExists: boolean }> {
@@ -466,7 +483,14 @@ export class SettingsService {
 
         const normalizedLegacy = validateSettingsPayload(input.domain, input.legacyPayload);
         const normalizedNew = validateSettingsPayload(input.domain, doc.payload);
-        const matched = isDeepStrictEqual(normalizedLegacy, normalizedNew);
+        const ignoredKeys = new Set((input.ignoreKeys || []).filter(Boolean));
+        const comparableLegacy = ignoredKeys.size > 0
+            ? stripIgnoredKeys(normalizedLegacy, ignoredKeys)
+            : normalizedLegacy;
+        const comparableNew = ignoredKeys.size > 0
+            ? stripIgnoredKeys(normalizedNew, ignoredKeys)
+            : normalizedNew;
+        const matched = isDeepStrictEqual(comparableLegacy, comparableNew);
 
         if (!matched) {
             await db.settingsAuditLog.create({
@@ -476,8 +500,8 @@ export class SettingsService {
                     scopeId: input.scopeId,
                     domain: input.domain,
                     operation: "PARITY_MISMATCH",
-                    beforeJson: normalizedLegacy as Prisma.InputJsonValue,
-                    afterJson: normalizedNew as Prisma.InputJsonValue,
+                    beforeJson: comparableLegacy as Prisma.InputJsonValue,
+                    afterJson: comparableNew as Prisma.InputJsonValue,
                     requestId: input.requestId ?? null,
                 },
             });

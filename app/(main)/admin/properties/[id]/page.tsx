@@ -2,6 +2,7 @@ import db from "@/lib/db";
 import { getLocationById } from "@/lib/location";
 import PropertyForm from "../_components/property-form";
 import { getLocationContext } from "@/lib/auth/location-context";
+import { isPrecisionRemoveEnabledForLocation } from "@/lib/ai/property-image-precision-remove-config";
 
 
 
@@ -50,7 +51,7 @@ export default async function PropertyEditorPage({ params, searchParams }: { par
 
     // Fetch data for the Form Dropdowns
     // Optimized: Direct DB access to avoid redundant auth checks
-    const [contacts, companies, projects] = await Promise.all([
+    const [contacts, companies, projects, precisionRemoveEnabled] = await Promise.all([
         db.contact.findMany({
             where: { locationId },
             select: { id: true, name: true, email: true, phone: true, message: true },
@@ -64,7 +65,8 @@ export default async function PropertyEditorPage({ params, searchParams }: { par
         db.project.findMany({
             where: { locationId },
             orderBy: { name: 'asc' },
-        })
+        }),
+        isPrecisionRemoveEnabledForLocation(locationId),
     ]);
 
     const contactsData = contacts.map(c => ({ ...c, name: c.name || "Unknown Contact" }));
@@ -74,13 +76,13 @@ export default async function PropertyEditorPage({ params, searchParams }: { par
     // Filter companies for specific roles if needed, or pass full list
     const developersData = companiesData;
     const managementCompaniesData = companiesData;
-
     return (
         <div className="p-6 max-w-4xl mx-auto">
             <h1 className="text-2xl font-bold mb-6">{id === "new" ? "Create Property" : "Edit Property"}</h1>
             <PropertyForm
                 property={property}
                 locationId={locationId}
+                precisionRemoveEnabled={precisionRemoveEnabled}
                 contactsData={contactsData}
                 developersData={developersData}
                 managementCompaniesData={managementCompaniesData}

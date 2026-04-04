@@ -6,12 +6,11 @@ export const GOOGLE_AI_MODELS = [
     // --- Gemini 3.0 Series (SOTA) ---
     { value: "gemini-3-pro-preview", label: "Gemini 3.0 Pro Preview (SOTA Reasoning)" },
     { value: "gemini-3-flash-preview", label: "Gemini 3.0 Flash Preview (Fastest & Newest)" },
-    { value: "gemini-3.1-flash-image-preview", label: "Gemini 3.1 Flash Image Preview (Nano Banana 2)" },
-    { value: "gemini-3-pro-image-preview", label: "Gemini 3.0 Pro Image Preview (Multimedia)" },
+    { value: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image (Nano Banana)" },
+    { value: "gemini-3-pro-image-preview", label: "Gemini 3 Pro Image Preview (Nano Banana Pro)" },
 
     // --- Gemini 2.5 Series (Advanced) ---
     { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro (Advanced Coding & Reasoning)" },
-    { value: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image (Optimized for Images)" },
     { value: GEMINI_FLASH_LATEST_ALIAS, label: "Gemini Flash Latest (Auto-updating Alias)" },
     { value: "gemini-flash-lite-latest", label: "Gemini Flash-Lite Latest" },
     { value: GEMINI_FLASH_STABLE_FALLBACK, label: "Gemini 2.5 Flash (Pinned Stable Fallback)" },

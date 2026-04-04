@@ -25,6 +25,7 @@ const generateRequestSchema = z.object({
     aggression: z.enum(ENHANCEMENT_AGGRESSION_LEVELS).default("balanced"),
     modelTier: z.enum(ENHANCEMENT_MODEL_TIERS).optional(),
     priorPrompt: z.string().trim().max(8000).optional(),
+    userInstructions: z.string().trim().max(4000).optional(),
 }).superRefine((value, ctx) => {
     if (!value.cloudflareImageId && !value.sourceUrl) {
         ctx.addIssue({
@@ -82,6 +83,7 @@ export async function POST(req: Request) {
             aggression: parsed.data.aggression,
             modelTier: parsed.data.modelTier,
             priorPrompt: parsed.data.priorPrompt,
+            userInstructions: parsed.data.userInstructions,
         });
 
         const bytes = Buffer.from(generated.imageBase64, "base64");
@@ -98,6 +100,7 @@ export async function POST(req: Request) {
             generatedImageUrl,
             actionLog: generated.actionLog,
             finalPrompt: generated.finalPrompt,
+            reusablePrompt: generated.reusablePrompt,
             model: generated.model,
         });
     } catch (error) {

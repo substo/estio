@@ -92,6 +92,7 @@ function SortableImage({ id, index, children, onRemove }: SortableImageProps) {
 export default function PropertyForm({
     property: initialProperty,
     locationId,
+    precisionRemoveEnabled = false,
     onSuccess,
     accountHash,
     contactsData,
@@ -101,6 +102,7 @@ export default function PropertyForm({
 }: {
     property?: any,
     locationId: string,
+    precisionRemoveEnabled?: boolean,
     onSuccess?: (savedProperty?: any) => void,
     accountHash?: string;
     // New props for dropdown data
@@ -199,6 +201,7 @@ export default function PropertyForm({
     );
     const [enhanceDialogOpen, setEnhanceDialogOpen] = useState(false);
     const [enhanceImageIndex, setEnhanceImageIndex] = useState<number | null>(null);
+    const [lastEnhancementPrompt, setLastEnhancementPrompt] = useState("");
 
     const persistedImageKeys = useMemo(() => {
         const keys = new Set<string>();
@@ -1123,7 +1126,12 @@ export default function PropertyForm({
                                     propertyId={property?.id}
                                     image={selectedEnhanceImage}
                                     imageIndex={enhanceImageIndex ?? 0}
-                                    onApplyVariant={({ url, cloudflareImageId, setAsPrimary }) => {
+                                    priorPrompt={lastEnhancementPrompt || undefined}
+                                    precisionRemoveEnabled={precisionRemoveEnabled}
+                                    onApplyVariant={({ url, cloudflareImageId, setAsPrimary, reusablePrompt }) => {
+                                        if (reusablePrompt) {
+                                            setLastEnhancementPrompt(reusablePrompt);
+                                        }
                                         setImages((prev) => {
                                             const nextImage = {
                                                 url,

@@ -9,6 +9,7 @@ import {
     isSettingsReadFromNewEnabled,
 } from "@/lib/settings/constants";
 import { ensureDefaultSkillPolicies } from "@/lib/ai/runtime/engine";
+import { isPrecisionRemoveInfrastructureReady } from "@/lib/ai/property-image-precision-remove-config";
 
 export default async function AiSettingsPage(props: { searchParams: Promise<{ locationId?: string }> }) {
     const searchParams = await props.searchParams;
@@ -210,6 +211,7 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
             googleAiModelExtraction: aiDoc.payload?.googleAiModelExtraction || siteConfig?.googleAiModelExtraction,
             googleAiModelDesign: aiDoc.payload?.googleAiModelDesign || siteConfig?.googleAiModelDesign,
             googleAiModelTranscription: aiDoc.payload?.googleAiModelTranscription || siteConfig?.googleAiModelTranscription,
+            precisionRemoveEnabled: aiDoc.payload?.precisionRemoveEnabled === true,
             brandVoice: aiDoc.payload?.brandVoice || siteConfig?.brandVoice,
             outreachConfig: aiDoc.payload?.outreachConfig || siteConfig?.outreachConfig,
             whatsappTranscriptOnDemandEnabled: aiDoc.payload?.whatsappTranscriptOnDemandEnabled ?? siteConfig?.whatsappTranscriptOnDemandEnabled,
@@ -224,7 +226,10 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
             viewingSessionInsightsModel: aiDoc.payload?.viewingSessionInsightsModel ?? siteConfig?.viewingSessionInsightsModel,
             viewingSessionSummaryModel: aiDoc.payload?.viewingSessionSummaryModel ?? siteConfig?.viewingSessionSummaryModel,
         }
-        : siteConfig;
+        : {
+            ...siteConfig,
+            precisionRemoveEnabled: aiDoc?.payload?.precisionRemoveEnabled === true,
+        };
 
     const settingsVersion = aiDoc?.version ?? 0;
 
@@ -243,6 +248,7 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
                     locationId={locationId}
                     settingsVersion={settingsVersion}
                     hasGoogleAiApiKey={hasGoogleAiApiKey || Boolean(siteConfig?.googleAiApiKey)}
+                    precisionRemoveInfrastructureReady={isPrecisionRemoveInfrastructureReady()}
                     runtimeSummary={runtimeSummary}
                 />
             </div>

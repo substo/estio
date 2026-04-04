@@ -122,6 +122,7 @@ export async function updateAiSettings(
             googleAiModelExtraction: formData.get("googleAiModelExtraction") as string || GEMINI_FLASH_LATEST_ALIAS,
             googleAiModelDesign: formData.get("googleAiModelDesign") as string || GEMINI_FLASH_LATEST_ALIAS,
             googleAiModelTranscription: transcriptionModel,
+            precisionRemoveEnabled: formData.get("precisionRemoveEnabled") === "on",
             whatsappTranscriptOnDemandEnabled: transcriptOnDemandEnabled,
             whatsappTranscriptRetentionDays: transcriptRetentionDays,
             whatsappTranscriptVisibility: transcriptVisibility,
@@ -234,6 +235,7 @@ export async function updateAiSettings(
                 scopeId: locationId,
                 domain: SETTINGS_DOMAINS.LOCATION_AI,
                 legacyPayload: legacyComparablePayload,
+                ignoreKeys: ["precisionRemoveEnabled"],
                 actorUserId: localUser?.id,
             });
         }

@@ -6,6 +6,13 @@ export const ENHANCEMENT_AGGRESSION_LEVELS = [
 
 export type EnhancementAggression = typeof ENHANCEMENT_AGGRESSION_LEVELS[number];
 
+export const ENHANCEMENT_MODES = [
+    "polish",
+    "precision_remove",
+] as const;
+
+export type EnhancementMode = typeof ENHANCEMENT_MODES[number];
+
 export const ENHANCEMENT_MODEL_TIERS = [
     "nano_banana_2",
     "nano_banana_pro",
@@ -54,6 +61,7 @@ export interface ImageEnhancementAnalysisRequest {
     sourceUrl?: string;
     modelTier?: EnhancementModelTier;
     priorPrompt?: string;
+    userInstructions?: string;
 }
 
 export interface ImageEnhancementAnalysisResponse {
@@ -72,6 +80,7 @@ export interface ImageEnhancementGenerateRequest {
     aggression: EnhancementAggression;
     modelTier?: EnhancementModelTier;
     priorPrompt?: string;
+    userInstructions?: string;
 }
 
 export interface ImageEnhancementGenerateResponse {
@@ -80,5 +89,37 @@ export interface ImageEnhancementGenerateResponse {
     generatedImageUrl: string;
     actionLog: string[];
     finalPrompt: string;
+    reusablePrompt: string;
     model: string;
+}
+
+export interface ImageEnhancementGeneratedResult {
+    mode: EnhancementMode;
+    generatedImageId: string;
+    generatedImageUrl: string;
+    actionLog: string[];
+    model: string;
+    finalPrompt?: string;
+    reusablePrompt?: string;
+    maskCoverage?: number;
+}
+
+export interface ImagePrecisionRemoveRequest {
+    locationId: string;
+    propertyId: string;
+    cloudflareImageId?: string;
+    sourceUrl?: string;
+    maskPngBase64: string;
+    editorWidth: number;
+    editorHeight: number;
+    guidance?: string;
+}
+
+export interface ImagePrecisionRemoveResponse {
+    success: true;
+    generatedImageId: string;
+    generatedImageUrl: string;
+    actionLog: string[];
+    model: string;
+    maskCoverage: number;
 }

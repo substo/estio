@@ -46,7 +46,10 @@ The Property Form is the primary interface for creating and editing properties. 
 
 6.  **Media**: Images, videos, and documents.
     *   **Images**: Direct upload to Cloudflare. Click "Upload Image" to select files. Optimization is automatic.
-    *   **AI Enhance (Admin, v1)**: Existing persisted images can be enhanced via a 2-step AI modal (analyze issues -> generate polished variant). Generated output is stored as a new image variant while preserving the original.
+    *   **AI Enhance (Admin)**: Existing persisted images can be enhanced via an admin AI modal with two modes:
+        - `Polish`: analyze issues, choose fix chips, then generate a polished variant with optional override instructions and prompt reuse for similar follow-up images.
+        - `Precision Remove`: manually mask an object with brush/box tools, remove it with AI inpainting, then review the result in the same compare view used by Polish.
+      Generated output is stored as a new image variant while preserving the original. `Precision Remove` only appears when Google Cloud image editing is configured on the server and the location has enabled it in `AI Configuration`.
     *   **Videos**: One URL per line.
     *   **Documents**: One URL per line.
     *   **Notes**: Internal and administrative details.
@@ -98,7 +101,7 @@ The application maintains a two-way relationship with GoHighLevel (GHL) to ensur
 
 ## Related Docs
 
-- `documentation/ai-property-image-enhancement-v1.md` (admin 2-step AI image enhancement flow)
+- `documentation/ai-property-image-enhancement-v1.md` (admin AI image enhancement flow, including Precision Remove)
 - `documentation/public-site-media-seo-implementation.md` (Cloudflare media infrastructure)
 
 ### Seeding Mock Data

@@ -8,7 +8,7 @@ import type {
 } from "@/lib/ai/property-image-enhancement-types";
 
 export const PROPERTY_IMAGE_ENHANCEMENT_MODELS: Record<EnhancementModelTier, string> = {
-    nano_banana_2: "gemini-3.1-flash-image-preview",
+    nano_banana_2: "gemini-2.5-flash-image",
     nano_banana_pro: "gemini-3-pro-image-preview",
 };
 
@@ -89,6 +89,7 @@ type AnalyzeImageForEnhancementInput = {
     sourceImageMimeType: string;
     modelTier?: EnhancementModelTier;
     priorPrompt?: string;
+    userInstructions?: string;
 };
 
 type GenerateEnhancedImageInput = {
@@ -100,6 +101,7 @@ type GenerateEnhancedImageInput = {
     aggression: EnhancementAggression;
     modelTier?: EnhancementModelTier;
     priorPrompt?: string;
+    userInstructions?: string;
 };
 
 type GenerateEnhancedImageResult = {
@@ -107,6 +109,7 @@ type GenerateEnhancedImageResult = {
     mimeType: string;
     actionLog: string[];
     finalPrompt: string;
+    reusablePrompt: string;
     model: string;
 };
 
@@ -220,8 +223,9 @@ export function normalizeImageEnhancementAnalysis(raw: unknown): ImageEnhancemen
     };
 }
 
-export function buildAnalysisPrompt(input?: { priorPrompt?: string }): string {
+export function buildAnalysisPrompt(input?: { priorPrompt?: string; userInstructions?: string }): string {
     const priorPrompt = String(input?.priorPrompt || "").trim();
+    const userInstructions = String(input?.userInstructions || "").trim();
     return `
 ${ENHANCEMENT_BASE_POLICY_PROMPT}
 
@@ -264,6 +268,8 @@ Rules:
 - Keep labels concise and UI-friendly.
 - Focus on real-estate listing improvements (composition, cleanup, lighting, clarity, realism).
 - Do not suggest changes that misrepresent property structure.
+- Pay close attention to operator-reported issues. If the user asks to inspect or remove something specific, prefer returning a candidate fix rather than omitting it entirely, unless it is clearly absent.
+${userInstructions ? `\nOperator instructions / suspected issues:\n${userInstructions}` : ""}
 ${priorPrompt ? `\nReference legacy enhancement instructions:\n${priorPrompt}` : ""}
 `.trim();
 }
@@ -273,12 +279,14 @@ export function buildGenerationPrompt(input: {
     selectedFixIds: string[];
     aggression: EnhancementAggression;
     priorPrompt?: string;
+    userInstructions?: string;
 }): string {
     const selectedSet = new Set((input.selectedFixIds || []).map((id) => String(id || "").trim()).filter(Boolean));
     const selectedFixes = input.analysis.suggestedFixes.filter((fix) => selectedSet.has(fix.id));
     const selectedInstructions = selectedFixes.map((fix) => `- ${fix.promptInstruction}`);
     const selectedLabels = selectedFixes.map((fix) => fix.label);
     const priorPrompt = String(input.priorPrompt || "").trim();
+    const userInstructions = String(input.userInstructions || "").trim();
     const aggressionGuidance = AGGRESSION_GUIDANCE[input.aggression] || AGGRESSION_GUIDANCE.balanced;
 
     return `
@@ -296,6 +304,9 @@ ${input.analysis.promptPolish}
 User-approved fixes:
 ${selectedInstructions.length > 0 ? selectedInstructions.join("\n") : "- Keep composition and only apply gentle technical polish."}
 
+Manual operator instructions:
+${userInstructions ? userInstructions : "None provided."}
+
 Important guardrails:
 - Preserve room layout, dimensions, architecture, and material truthfulness.
 - Remove distractions only when they are non-essential clutter.
@@ -311,6 +322,42 @@ Selected fix labels:
 ${selectedLabels.length > 0 ? selectedLabels.join(", ") : "None (technical polish only)"}
 
 ${priorPrompt ? `Legacy prompt reference:\n${priorPrompt}` : ""}
+`.trim();
+}
+
+export function buildReusablePromptContext(input: {
+    analysis: ImageEnhancementAnalysis;
+    selectedFixIds: string[];
+    aggression: EnhancementAggression;
+    userInstructions?: string;
+}): string {
+    const selectedSet = new Set((input.selectedFixIds || []).map((id) => String(id || "").trim()).filter(Boolean));
+    const selectedFixes = input.analysis.suggestedFixes.filter((fix) => selectedSet.has(fix.id));
+    const selectedInstructions = selectedFixes.map((fix) => `- ${fix.promptInstruction}`);
+    const userInstructions = String(input.userInstructions || "").trim();
+    const aggressionGuidance = AGGRESSION_GUIDANCE[input.aggression] || AGGRESSION_GUIDANCE.balanced;
+
+    return `
+Reusable enhancement context for similar property photos of the same scene:
+- Keep edits consistent across adjacent shots of this room or exterior.
+- ${aggressionGuidance}
+
+Scene summary:
+${input.analysis.sceneSummary}
+
+Refined prompt context:
+${input.analysis.promptPolish}
+
+Preferred fixes:
+${selectedInstructions.length > 0 ? selectedInstructions.join("\n") : "- Gentle technical polish only."}
+
+Operator notes:
+${userInstructions || "None provided."}
+
+Global guardrails:
+- Preserve architecture, layout, materials, and room proportions.
+- Keep the result photoreal and listing-ready.
+- Avoid introducing staged or misleading property features.
 `.trim();
 }
 
@@ -387,7 +434,7 @@ function normalizeImageMimeType(contentType: string | null | undefined, imageUrl
     return DEFAULT_IMAGE_MIME_TYPE;
 }
 
-export async function fetchImageAsInlineData(imageUrl: string): Promise<{ mimeType: string; base64: string }> {
+export async function fetchImageBuffer(imageUrl: string): Promise<{ mimeType: string; buffer: Buffer }> {
     const normalizedUrl = String(imageUrl || "").trim();
     if (!normalizedUrl) {
         throw new Error("Source image URL is required.");
@@ -410,7 +457,15 @@ export async function fetchImageAsInlineData(imageUrl: string): Promise<{ mimeTy
 
     return {
         mimeType: normalizeImageMimeType(response.headers.get("content-type"), normalizedUrl),
-        base64: buffer.toString("base64"),
+        buffer,
+    };
+}
+
+export async function fetchImageAsInlineData(imageUrl: string): Promise<{ mimeType: string; base64: string }> {
+    const source = await fetchImageBuffer(imageUrl);
+    return {
+        mimeType: source.mimeType,
+        base64: source.buffer.toString("base64"),
     };
 }
 
@@ -419,7 +474,10 @@ export async function analyzeImageForEnhancement(input: AnalyzeImageForEnhanceme
     model: string;
 }> {
     const model = resolveEnhancementModelForTier(input.modelTier);
-    const prompt = buildAnalysisPrompt({ priorPrompt: input.priorPrompt });
+    const prompt = buildAnalysisPrompt({
+        priorPrompt: input.priorPrompt,
+        userInstructions: input.userInstructions,
+    });
     const response = await callGeminiGenerateContent({
         apiKey: input.apiKey,
         model,
@@ -465,6 +523,13 @@ export async function generateEnhancedImage(input: GenerateEnhancedImageInput): 
         selectedFixIds: input.selectedFixIds,
         aggression: input.aggression,
         priorPrompt: input.priorPrompt,
+        userInstructions: input.userInstructions,
+    });
+    const reusablePrompt = buildReusablePromptContext({
+        analysis: input.analysis,
+        selectedFixIds: input.selectedFixIds,
+        aggression: input.aggression,
+        userInstructions: input.userInstructions,
     });
 
     const response = await callGeminiGenerateContent({
@@ -510,6 +575,7 @@ export async function generateEnhancedImage(input: GenerateEnhancedImageInput): 
         mimeType: image.mimeType || "image/png",
         actionLog,
         finalPrompt: prompt,
+        reusablePrompt,
         model,
     };
 }

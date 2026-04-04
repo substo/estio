@@ -17,6 +17,7 @@ const analyzeRequestSchema = z.object({
     sourceUrl: z.string().trim().url().optional(),
     modelTier: z.enum(ENHANCEMENT_MODEL_TIERS).optional(),
     priorPrompt: z.string().trim().max(8000).optional(),
+    userInstructions: z.string().trim().max(4000).optional(),
 }).superRefine((value, ctx) => {
     if (!value.cloudflareImageId && !value.sourceUrl) {
         ctx.addIssue({
@@ -70,6 +71,7 @@ export async function POST(req: Request) {
             sourceImageMimeType: sourceImage.mimeType,
             modelTier: parsed.data.modelTier,
             priorPrompt: parsed.data.priorPrompt,
+            userInstructions: parsed.data.userInstructions,
         });
 
         return NextResponse.json({

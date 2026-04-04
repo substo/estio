@@ -66,6 +66,7 @@ const aiSchema = z.object({
     googleAiModelExtraction: z.string().trim().min(1),
     googleAiModelDesign: z.string().trim().min(1),
     googleAiModelTranscription: z.string().trim().min(1),
+    precisionRemoveEnabled: z.boolean().default(false),
     brandVoice: nullableTrimmedString,
     outreachConfig: z.object({
         enabled: z.boolean().default(false),

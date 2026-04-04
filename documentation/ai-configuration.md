@@ -1,6 +1,6 @@
 # AI Configuration & Integration
 
-**Last Updated:** 2026-03-13
+**Last Updated:** 2026-04-04
 
 Estio uses Google Gemini models across conversation drafting, selection actions, content generation, and import flows. This document reflects the current model-resolution logic used in production.
 
@@ -36,6 +36,7 @@ UI source:
 - `googleAiModel` (general / draft default)
 - `googleAiModelExtraction` (stage 1 extraction)
 - `googleAiModelDesign` (stage 2 design)
+- `precisionRemoveEnabled` (per-location toggle for masked property photo removal)
 - `brandVoice`
 - `outreachConfig` (`enabled`, `visionIdPrompt`, `icebreakerPrompt`, `qualifierPrompt`)
 - `automationConfig` (legacy compatibility payload; not the primary runtime control plane)
@@ -110,12 +111,119 @@ For user-facing pickers and chat defaults, the effective model is resolved throu
 - `lib/ai/models.ts`
 - `lib/ai/fetch-models.ts`
 - `lib/ai/property-image-enhancement.ts`
+- `lib/ai/property-image-precision-remove-config.ts`
+- `lib/ai/property-image-precision-remove.ts`
 - `app/(main)/admin/settings/ai/actions.ts`
 - `app/(main)/admin/settings/ai/ai-settings-form.tsx`
 - `app/(main)/admin/conversations/actions.ts`
 - `app/(main)/admin/conversations/_components/conversation-composer.tsx`
 - `app/(main)/admin/conversations/_components/chat-window.tsx`
 - `app/(main)/admin/conversations/_components/unified-timeline.tsx`
+
+## Vertex Env Setup For Precision Remove
+
+The `Precision Remove` image-editing mode uses **shared Vertex AI server credentials**.
+
+Unlike the regular `Polish` flow, it does **not** use the per-location Google AI API key from AI Settings.
+
+### Required Env Vars
+
+Add these to the runtime environment used by the app:
+
+```env
+GOOGLE_CLOUD_PROJECT_ID=your-gcp-project-id
+GOOGLE_CLOUD_LOCATION=us-central1
+GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/service-account.json
+```
+
+### What Each Variable Does
+
+- `GOOGLE_CLOUD_PROJECT_ID`
+  - Your Google Cloud project ID where Vertex AI is enabled.
+- `GOOGLE_CLOUD_LOCATION`
+  - Vertex region used for Imagen requests.
+  - Recommended default for this feature: `us-central1`.
+- `GOOGLE_APPLICATION_CREDENTIALS`
+  - Absolute filesystem path to the Google service account JSON file on the server.
+  - This is read by Google auth and used to mint access tokens for Vertex.
+
+### Where To Add Them
+
+#### Local development
+
+Add them to your local runtime env file:
+
+- `.env.local` for normal local dev
+- or `.env.production.local` if you are running a production-like local build
+
+Example:
+
+```env
+GOOGLE_CLOUD_PROJECT_ID=estio-prod
+GOOGLE_CLOUD_LOCATION=us-central1
+GOOGLE_APPLICATION_CREDENTIALS=/Users/yourname/.config/gcp/estio-imagen-service-account.json
+```
+
+#### Production / deploy flow
+
+This repo’s deploy flow copies runtime env from `.env.prod` onto the target server during deploy.
+
+So for production, add the same variables to:
+
+- `.env.prod`
+
+And make sure the JSON file referenced by `GOOGLE_APPLICATION_CREDENTIALS` actually exists on the server at that exact path.
+
+### Service Account Requirements
+
+The service account behind `GOOGLE_APPLICATION_CREDENTIALS` should have:
+
+- Vertex AI enabled in the target GCP project
+- permission to call Vertex prediction endpoints
+
+In practice, use a dedicated service account for image editing rather than reusing a broad owner credential.
+
+### How The App Uses These Vars
+
+The feature gate is evaluated in:
+
+- `lib/ai/property-image-precision-remove-config.ts`
+
+The mode is usable only when:
+
+1. `GOOGLE_CLOUD_PROJECT_ID` is set
+2. `GOOGLE_CLOUD_LOCATION` is set
+3. `GOOGLE_APPLICATION_CREDENTIALS` is set
+4. the current location has `Precision Remove` enabled in `/admin/settings/ai`
+
+### Quick Verification Checklist
+
+After setting env vars:
+
+1. Restart the app server.
+2. Open an existing property in admin.
+3. Go to `Media`.
+4. Click `Enhance` on a persisted image.
+5. Confirm the modal shows both:
+   - `Polish`
+   - `Precision Remove`
+
+If `Precision Remove` is missing, check:
+
+1. the credentials file path is valid on that machine
+2. `GOOGLE_CLOUD_PROJECT_ID` is set
+3. `GOOGLE_CLOUD_LOCATION` is set
+4. the server was restarted after the env change
+5. `Precision Remove` is enabled for that location in AI Settings
+
+### Important Distinction
+
+- `Polish` mode:
+  - Uses per-location Google AI configuration from Admin AI Settings
+- `Precision Remove` mode:
+  - Uses shared server-level Vertex credentials from env vars plus a per-location enable toggle in AI Settings
+
+That split is intentional because masked Imagen editing is currently implemented through shared Vertex access, not the location-specific Gemini API-key flow.
 
 ## Related Docs
 
