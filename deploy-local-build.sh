@@ -197,7 +197,7 @@ ssh $SSH_OPTS $SERVER "chmod +x $TARGET_DIR/scripts/setup-log-rotation.sh && $TA
 # Step 5: Install Production Deps & Schema Sync
 echo "📦 Installing Production Dependencies on Server..."
 echo "🗄️  Applying Prisma schema sync mode: $PRISMA_SCHEMA_SYNC_MODE (CLI $PRISMA_CLI_VERSION)"
-ssh $SSH_OPTS $SERVER bash << ENDSSH
+ssh $SSH_OPTS $SERVER /bin/bash -s << ENDSSH
     set -euo pipefail
     TARGET_DIR="$TARGET_DIR"
     PRISMA_CLI_VERSION="$PRISMA_CLI_VERSION"
