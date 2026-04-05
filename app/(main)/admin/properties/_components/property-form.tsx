@@ -45,6 +45,14 @@ import {
 import { toast } from "sonner";
 import { CSS } from '@dnd-kit/utilities';
 import { PropertyImageEnhanceDialog } from "./property-image-enhance-dialog";
+import type {
+    PropertyImagePromptProfile,
+    PropertyImagePromptProfileUpsert,
+} from "@/lib/ai/property-image-enhancement-types";
+import {
+    mergePropertyImagePromptProfiles,
+    normalizePropertyImagePromptProfile,
+} from "@/lib/ai/property-image-prompt-profiles";
 import {
     applyAiGeneratedImage,
     canRevertAiGeneratedImage,
@@ -213,7 +221,21 @@ export default function PropertyForm({
     );
     const [enhanceDialogOpen, setEnhanceDialogOpen] = useState(false);
     const [enhanceImageIndex, setEnhanceImageIndex] = useState<number | null>(null);
-    const [lastEnhancementPrompt, setLastEnhancementPrompt] = useState("");
+    const [stagedPromptProfileUpserts, setStagedPromptProfileUpserts] = useState<PropertyImagePromptProfileUpsert[]>([]);
+
+    const existingPromptProfiles = useMemo<PropertyImagePromptProfile[]>(() => {
+        const sourceProfiles = Array.isArray(property?.imagePromptProfiles) ? property.imagePromptProfiles : [];
+        return sourceProfiles
+            .map((entry: unknown) => normalizePropertyImagePromptProfile(entry))
+            .filter((entry: PropertyImagePromptProfile | null): entry is PropertyImagePromptProfile => Boolean(entry));
+    }, [property?.imagePromptProfiles]);
+
+    const effectivePromptProfiles = useMemo(() => (
+        mergePropertyImagePromptProfiles({
+            existingProfiles: existingPromptProfiles,
+            stagedUpserts: stagedPromptProfileUpserts,
+        })
+    ), [existingPromptProfiles, stagedPromptProfileUpserts]);
 
     const persistedImageKeys = useMemo(() => {
         const keys = new Set<string>();
@@ -230,6 +252,10 @@ export default function PropertyForm({
     const visibleImages = useMemo(() => getVisiblePropertyImageMedia(images), [images]);
     const selectedEnhanceImage = enhanceImageIndex !== null ? visibleImages[enhanceImageIndex] || null : null;
     const selectedEnhanceImageIdentity = selectedEnhanceImage ? getPropertyMediaIdentity(selectedEnhanceImage) : "";
+
+    useEffect(() => {
+        setStagedPromptProfileUpserts([]);
+    }, [property?.id]);
 
     const sensors = useSensors(
         useSensor(PointerSensor, {
@@ -1062,6 +1088,11 @@ export default function PropertyForm({
                                 {/* Legacy mediaUrls hidden input for backward compat if needed, but we rely on mediaJson now */}
                                 <input type="hidden" name="mediaUrls" value={images.map(i => i.url).join(', ')} />
                                 <input type="hidden" name="mediaJson" value={JSON.stringify(images)} />
+                                <input
+                                    type="hidden"
+                                    name="imagePromptProfilesUpsertsJson"
+                                    value={JSON.stringify(stagedPromptProfileUpserts)}
+                                />
 
                                 <div className="space-y-4 mb-4">
                                     <DndContext
@@ -1177,11 +1208,15 @@ export default function PropertyForm({
                                     propertyId={property?.id}
                                     image={selectedEnhanceImage}
                                     imageIndex={enhanceImageIndex ?? 0}
-                                    priorPrompt={lastEnhancementPrompt || undefined}
+                                    roomPromptProfiles={effectivePromptProfiles}
                                     precisionRemoveEnabled={precisionRemoveEnabled}
-                                    onApplyVariant={({ url, cloudflareImageId, applyMode, reusablePrompt }) => {
-                                        if (reusablePrompt) {
-                                            setLastEnhancementPrompt(reusablePrompt);
+                                    onApplyVariant={({ url, cloudflareImageId, applyMode, promptProfileUpsert }) => {
+                                        if (promptProfileUpsert) {
+                                            setStagedPromptProfileUpserts((prev) => {
+                                                const next = prev.filter((entry) => entry.roomTypeKey !== promptProfileUpsert.roomTypeKey);
+                                                next.push(promptProfileUpsert);
+                                                return next;
+                                            });
                                         }
                                         setImages((prev) => {
                                             if (!selectedEnhanceImageIdentity) {

@@ -98,6 +98,41 @@ export interface ImageEnhancementGeneratedResult {
     maskCoverage?: number;
 }
 
+export interface PropertyImageRoomType {
+    key: string;
+    label: string;
+    confidence?: number;
+}
+
+export interface PropertyImagePromptProfile {
+    roomTypeKey: string;
+    roomTypeLabel: string;
+    promptContext: string;
+    updatedAt?: string;
+    updatedById?: string | null;
+}
+
+export interface PropertyImagePromptProfileUpsert {
+    roomTypeKey: string;
+    roomTypeLabel: string;
+    promptContext: string;
+}
+
+export interface ImageEnhancementRoomTypePredictRequest {
+    locationId: string;
+    propertyId: string;
+    cloudflareImageId?: string;
+    sourceUrl?: string;
+    analysisModel?: string;
+}
+
+export interface ImageEnhancementRoomTypePredictResponse {
+    success: true;
+    suggestedRoomType: PropertyImageRoomType;
+    candidates: PropertyImageRoomType[];
+    model: string;
+}
+
 export interface ImagePrecisionRemoveRequest {
     locationId: string;
     propertyId: string;

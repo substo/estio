@@ -12,6 +12,7 @@ import { syncContactToGHL, syncCompanyToGHL } from "@/lib/ghl/stakeholders";
 import { currentUser } from "@clerk/nextjs/server";
 import { ensureUserExists } from "@/lib/auth/sync-user";
 import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
+import { parsePropertyImagePromptProfileUpsertsJson } from "@/lib/ai/property-image-prompt-profiles";
 
 // Helper to handle Contact Role Upsert (Local + GHL)
 async function upsertContactRole(
@@ -256,6 +257,7 @@ const propertySchema = z.object({
     metaDescription: z.string().optional().nullable(),
     mediaUrls: z.string().optional().nullable(),
     mediaJson: z.string().optional().nullable(),
+    imagePromptProfilesUpsertsJson: z.string().optional().nullable(),
     videoUrls: z.string().optional().nullable(),
     documentUrls: z.string().optional().nullable(),
     // Notes Tab Fields
@@ -411,6 +413,7 @@ export async function upsertProperty(formData: FormData) {
             metaDescription: formData.get("metaDescription"),
             mediaUrls: formData.get("mediaUrls"),
             mediaJson: formData.get("mediaJson"),
+            imagePromptProfilesUpsertsJson: formData.get("imagePromptProfilesUpsertsJson"),
             videoUrls: formData.get("videoUrls"),
             documentUrls: formData.get("documentUrls"),
             // Notes Tab Fields
@@ -480,6 +483,7 @@ export async function upsertProperty(formData: FormData) {
         }
 
         const slug = validated.slug || validated.title.toLowerCase().replace(/ /g, "-") + "-" + Date.now();
+        const promptProfileUpserts = parsePropertyImagePromptProfileUpsertsJson(validated.imagePromptProfilesUpsertsJson);
 
         const mediaItems: { url: string; kind: MediaKind; sortOrder: number; cloudflareImageId?: string; metadata?: unknown }[] = [];
 
@@ -537,6 +541,7 @@ export async function upsertProperty(formData: FormData) {
         delete (data as any).videoUrls;
         delete (data as any).documentUrls;
         delete (data as any).mediaJson; // Remove if added to Zod, though not yet added
+        delete (data as any).imagePromptProfilesUpsertsJson;
 
         // ... (rest of deletion logic matches original)
 
@@ -706,6 +711,31 @@ export async function upsertProperty(formData: FormData) {
         updatePropertyEmbedding(property.id).catch(err =>
             console.error(`Background embedding update failed for ${property.id}:`, err)
         );
+
+        if (promptProfileUpserts.length > 0) {
+            for (const upsert of promptProfileUpserts) {
+                await (db as any).propertyImagePromptProfile.upsert({
+                    where: {
+                        propertyId_roomTypeKey: {
+                            propertyId: property.id,
+                            roomTypeKey: upsert.roomTypeKey,
+                        },
+                    },
+                    create: {
+                        propertyId: property.id,
+                        roomTypeKey: upsert.roomTypeKey,
+                        roomTypeLabel: upsert.roomTypeLabel,
+                        promptContext: upsert.promptContext,
+                        updatedById: dbUser?.id || null,
+                    },
+                    update: {
+                        roomTypeLabel: upsert.roomTypeLabel,
+                        promptContext: upsert.promptContext,
+                        updatedById: dbUser?.id || null,
+                    },
+                });
+            }
+        }
 
         // Process Stakeholders (Contact/Company Roles)
 

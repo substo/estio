@@ -16,8 +16,10 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { CloudflareImage } from "@/components/media/CloudflareImage";
@@ -26,7 +28,11 @@ import type {
     EnhancementMode,
     ImageEnhancementAnalysis,
     ImageEnhancementGeneratedResult,
+    PropertyImagePromptProfile,
+    PropertyImagePromptProfileUpsert,
+    PropertyImageRoomType,
 } from "@/lib/ai/property-image-enhancement-types";
+import { resolvePromptProfileContext } from "@/lib/ai/property-image-prompt-profiles";
 import { buildGenerationPrompt } from "@/lib/ai/property-image-enhancement-prompt";
 import {
     readPropertyImageEnhancementModelPreference,
@@ -34,6 +40,16 @@ import {
     writePropertyImageEnhancementModelPreference,
     type PropertyImageEnhancementModelPreference,
 } from "@/lib/ai/property-image-enhancement-model-preferences";
+import {
+    PROPERTY_IMAGE_ROOM_TYPE_CUSTOM_KEY,
+    PROPERTY_IMAGE_ROOM_TYPE_PREDICTION_MIN_CONFIDENCE,
+    PROPERTY_IMAGE_ROOM_TYPE_PRESETS,
+    PROPERTY_IMAGE_ROOM_TYPE_UNCLASSIFIED_KEY,
+    normalizePropertyImageRoomTypeKey,
+    normalizePropertyImageRoomTypeLabel,
+    resolvePropertyImageRoomType,
+    toRoomTypeSelectValue,
+} from "@/lib/ai/property-image-room-types";
 import {
     PROPERTY_IMAGE_AI_APPLY_MODES,
     type PropertyImageAiApplyMode,
@@ -61,7 +77,7 @@ interface GeneratedVariantPayload {
     url: string;
     cloudflareImageId: string;
     applyMode: PropertyImageAiApplyMode;
-    reusablePrompt: string;
+    promptProfileUpsert?: PropertyImagePromptProfileUpsert;
 }
 
 interface PropertyImageEnhanceDialogProps {
@@ -71,7 +87,7 @@ interface PropertyImageEnhanceDialogProps {
     propertyId?: string;
     image: PropertyImageLike | null;
     imageIndex: number;
-    priorPrompt?: string;
+    roomPromptProfiles?: PropertyImagePromptProfile[];
     precisionRemoveEnabled?: boolean;
     onApplyVariant: (payload: GeneratedVariantPayload) => void;
 }
@@ -101,6 +117,13 @@ interface PrecisionRemoveApiResponse {
     maskCoverage: number;
 }
 
+interface RoomTypePredictApiResponse {
+    success: true;
+    suggestedRoomType: PropertyImageRoomType;
+    candidates: PropertyImageRoomType[];
+    model: string;
+}
+
 const EMPTY_PRECISION_EDITOR_STATE: PrecisionMaskEditorState = {
     isReady: false,
     canUndo: false,
@@ -125,13 +148,14 @@ export function PropertyImageEnhanceDialog({
     propertyId,
     image,
     imageIndex,
-    priorPrompt,
+    roomPromptProfiles = [],
     precisionRemoveEnabled = false,
     onApplyVariant,
 }: PropertyImageEnhanceDialogProps) {
     const precisionEditorRef = useRef<PrecisionMaskEditorHandle | null>(null);
     const analysisModelTouchedRef = useRef(false);
     const generationModelTouchedRef = useRef(false);
+    const roomTypePredictionRequestRef = useRef("");
     const {
         analysisModels,
         generationModels,
@@ -144,7 +168,13 @@ export function PropertyImageEnhanceDialog({
     const [selectedFixIds, setSelectedFixIds] = useState<string[]>([]);
     const [removedDetectedElementIds, setRemovedDetectedElementIds] = useState<string[]>([]);
     const [aggression, setAggression] = useState<EnhancementAggression>("balanced");
-    const [reusePriorPrompt, setReusePriorPrompt] = useState(Boolean(String(priorPrompt || "").trim()));
+    const [roomTypeSelectValue, setRoomTypeSelectValue] = useState(PROPERTY_IMAGE_ROOM_TYPE_UNCLASSIFIED_KEY);
+    const [customRoomTypeLabel, setCustomRoomTypeLabel] = useState("");
+    const [reuseSavedRoomPrompt, setReuseSavedRoomPrompt] = useState(false);
+    const [isPredictingRoomType, setIsPredictingRoomType] = useState(false);
+    const [roomTypePrediction, setRoomTypePrediction] = useState<PropertyImageRoomType | null>(null);
+    const [roomTypeCandidates, setRoomTypeCandidates] = useState<PropertyImageRoomType[]>([]);
+    const [roomTypePredictionModel, setRoomTypePredictionModel] = useState<string | null>(null);
     const [userInstructions, setUserInstructions] = useState("");
     const [selectedAnalysisModel, setSelectedAnalysisModel] = useState("");
     const [selectedGenerationModel, setSelectedGenerationModel] = useState("");
@@ -169,8 +199,28 @@ export function PropertyImageEnhanceDialog({
         if (!image) return false;
         return Boolean(image.cloudflareImageId || image.url);
     }, [propertyId, image]);
-    const hasPriorPrompt = Boolean(String(priorPrompt || "").trim());
-    const effectivePriorPrompt = reusePriorPrompt ? priorPrompt : undefined;
+    const selectedRoomType = useMemo(() => {
+        if (roomTypeSelectValue === PROPERTY_IMAGE_ROOM_TYPE_CUSTOM_KEY) {
+            const normalizedCustomLabel = normalizePropertyImageRoomTypeLabel(customRoomTypeLabel);
+            const normalizedCustomKey = normalizePropertyImageRoomTypeKey(normalizedCustomLabel);
+            return resolvePropertyImageRoomType({
+                key: normalizedCustomKey,
+                label: normalizedCustomLabel,
+            });
+        }
+
+        return resolvePropertyImageRoomType({
+            key: roomTypeSelectValue,
+        });
+    }, [roomTypeSelectValue, customRoomTypeLabel]);
+    const selectedRoomPrompt = useMemo(() => (
+        resolvePromptProfileContext({
+            profiles: roomPromptProfiles,
+            roomTypeKey: selectedRoomType.key,
+        })
+    ), [roomPromptProfiles, selectedRoomType.key]);
+    const hasSelectedRoomPrompt = Boolean(String(selectedRoomPrompt || "").trim());
+    const effectivePriorPrompt = reuseSavedRoomPrompt && hasSelectedRoomPrompt ? selectedRoomPrompt : undefined;
     const stage = generated ? "review" : "edit";
     const isBusy = isAnalyzing || isGenerating || isRemoving;
     const liveFinalPrompt = useMemo(() => {
@@ -192,7 +242,14 @@ export function PropertyImageEnhanceDialog({
             setSelectedFixIds([]);
             setRemovedDetectedElementIds([]);
             setAggression("balanced");
-            setReusePriorPrompt(hasPriorPrompt);
+            setRoomTypeSelectValue(PROPERTY_IMAGE_ROOM_TYPE_UNCLASSIFIED_KEY);
+            setCustomRoomTypeLabel("");
+            setReuseSavedRoomPrompt(false);
+            setIsPredictingRoomType(false);
+            setRoomTypePrediction(null);
+            setRoomTypeCandidates([]);
+            setRoomTypePredictionModel(null);
+            roomTypePredictionRequestRef.current = "";
             setUserInstructions("");
             analysisModelTouchedRef.current = false;
             generationModelTouchedRef.current = false;
@@ -211,7 +268,18 @@ export function PropertyImageEnhanceDialog({
             setError(null);
             setGenerated(null);
         }
-    }, [open, hasPriorPrompt]);
+    }, [open]);
+
+    useEffect(() => {
+        if (!open) return;
+        if (!hasSelectedRoomPrompt && reuseSavedRoomPrompt) {
+            setReuseSavedRoomPrompt(false);
+            return;
+        }
+        if (hasSelectedRoomPrompt && !reuseSavedRoomPrompt) {
+            setReuseSavedRoomPrompt(true);
+        }
+    }, [open, hasSelectedRoomPrompt, selectedRoomType.key, reuseSavedRoomPrompt]); // intentionally key-scoped
 
     useEffect(() => {
         if (!open) return;
@@ -259,6 +327,86 @@ export function PropertyImageEnhanceDialog({
     ]);
 
     useEffect(() => {
+        if (!open || !canRun || !propertyId || !image) return;
+        if (mode !== "polish") return;
+
+        const sourceIdentity = String(image.cloudflareImageId || image.url || "").trim();
+        const requestKey = `${propertyId}:${sourceIdentity}`;
+        if (!requestKey || roomTypePredictionRequestRef.current === requestKey) return;
+        roomTypePredictionRequestRef.current = requestKey;
+
+        let cancelled = false;
+        setIsPredictingRoomType(true);
+        setRoomTypePrediction(null);
+        setRoomTypeCandidates([]);
+        setRoomTypePredictionModel(null);
+
+        (async () => {
+            try {
+                const response = await fetch("/api/images/enhance/room-type/predict", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        locationId,
+                        propertyId,
+                        cloudflareImageId: image.cloudflareImageId,
+                        sourceUrl: image.url,
+                        analysisModel: selectedAnalysisModel || undefined,
+                    }),
+                });
+
+                const json = await response.json().catch(() => null);
+                if (!response.ok) {
+                    throw new Error(String(json?.error || "Failed to predict room type."));
+                }
+
+                const payload = json as RoomTypePredictApiResponse;
+                const suggested = resolvePropertyImageRoomType(payload.suggestedRoomType);
+                const candidates = (Array.isArray(payload.candidates) ? payload.candidates : [])
+                    .map((candidate) => resolvePropertyImageRoomType(candidate))
+                    .slice(0, 5);
+                const isConfident = Number(suggested.confidence || 0) >= PROPERTY_IMAGE_ROOM_TYPE_PREDICTION_MIN_CONFIDENCE;
+
+                if (cancelled) return;
+                setRoomTypePrediction(suggested);
+                setRoomTypeCandidates(candidates);
+                setRoomTypePredictionModel(payload.model || null);
+
+                if (isConfident) {
+                    const nextSelectValue = toRoomTypeSelectValue(suggested.key);
+                    setRoomTypeSelectValue(nextSelectValue);
+                    setCustomRoomTypeLabel(nextSelectValue === PROPERTY_IMAGE_ROOM_TYPE_CUSTOM_KEY ? suggested.label : "");
+                    return;
+                }
+
+                setRoomTypeSelectValue(PROPERTY_IMAGE_ROOM_TYPE_UNCLASSIFIED_KEY);
+                setCustomRoomTypeLabel("");
+            } catch (err) {
+                if (cancelled) return;
+                console.error("[PropertyImageEnhanceDialog] room type prediction error:", err);
+                setRoomTypeSelectValue(PROPERTY_IMAGE_ROOM_TYPE_UNCLASSIFIED_KEY);
+                setCustomRoomTypeLabel("");
+            } finally {
+                if (!cancelled) {
+                    setIsPredictingRoomType(false);
+                }
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [
+        open,
+        canRun,
+        propertyId,
+        image,
+        mode,
+        locationId,
+        selectedAnalysisModel,
+    ]);
+
+    useEffect(() => {
         if (!open) return;
         if (!analysisModelTouchedRef.current && !generationModelTouchedRef.current) return;
 
@@ -293,6 +441,17 @@ export function PropertyImageEnhanceDialog({
                 ? prev.filter((id) => id !== elementId)
                 : [...prev, elementId]
         ));
+    };
+
+    const handleRoomTypeSelectChange = (value: string) => {
+        setRoomTypeSelectValue(value);
+        if (value !== PROPERTY_IMAGE_ROOM_TYPE_CUSTOM_KEY) {
+            setCustomRoomTypeLabel("");
+        }
+    };
+
+    const handleCustomRoomTypeLabelChange = (value: string) => {
+        setCustomRoomTypeLabel(value);
     };
 
     function handleModeChange(nextMode: EnhancementMode) {
@@ -487,11 +646,28 @@ export function PropertyImageEnhanceDialog({
 
     function handleApplyVariant() {
         if (!generated || !selectedApplyMode) return;
+        if (generated.mode === "polish" && selectedRoomType.key === PROPERTY_IMAGE_ROOM_TYPE_UNCLASSIFIED_KEY) {
+            const message = "Choose a room type before keeping this result so prompt memory can be saved.";
+            setError(message);
+            toast.error(message);
+            return;
+        }
+
+        const promptProfileUpsert = (
+            generated.mode === "polish"
+            && selectedRoomType.key !== PROPERTY_IMAGE_ROOM_TYPE_UNCLASSIFIED_KEY
+            && String(generated.reusablePrompt || "").trim()
+        ) ? {
+            roomTypeKey: selectedRoomType.key,
+            roomTypeLabel: selectedRoomType.label,
+            promptContext: String(generated.reusablePrompt || "").trim(),
+        } : undefined;
+
         onApplyVariant({
             url: generated.generatedImageUrl,
             cloudflareImageId: generated.generatedImageId,
             applyMode: selectedApplyMode,
-            reusablePrompt: generated.reusablePrompt || "",
+            promptProfileUpsert,
         });
         toast.success("Enhanced image added. Click Save Property to persist.");
         onOpenChange(false);
@@ -535,17 +711,75 @@ export function PropertyImageEnhanceDialog({
     function renderPolishControls() {
         return (
             <>
-                {hasPriorPrompt ? (
+                <div className="space-y-3 rounded-md border p-3">
+                    <div className="space-y-2">
+                        <Label className="text-sm font-medium">Room Type</Label>
+                        <Select value={roomTypeSelectValue} onValueChange={handleRoomTypeSelectChange}>
+                            <SelectTrigger>
+                                <SelectValue placeholder="Select room type" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {PROPERTY_IMAGE_ROOM_TYPE_PRESETS.map((preset) => (
+                                    <SelectItem key={preset.key} value={preset.key}>
+                                        {preset.label}
+                                    </SelectItem>
+                                ))}
+                                <SelectItem value={PROPERTY_IMAGE_ROOM_TYPE_CUSTOM_KEY}>Custom...</SelectItem>
+                            </SelectContent>
+                        </Select>
+
+                        {roomTypeSelectValue === PROPERTY_IMAGE_ROOM_TYPE_CUSTOM_KEY ? (
+                            <Input
+                                value={customRoomTypeLabel}
+                                onChange={(event) => handleCustomRoomTypeLabelChange(event.target.value)}
+                                placeholder="Example: Outdoor Barbecue Area"
+                            />
+                        ) : null}
+
+                        {isPredictingRoomType ? (
+                            <p className="text-xs text-muted-foreground">Detecting room type from the source image...</p>
+                        ) : roomTypePrediction ? (
+                            <p className="text-xs text-muted-foreground">
+                                Suggested: {roomTypePrediction.label} ({Math.round(Number(roomTypePrediction.confidence || 0) * 100)}%)
+                                {Number(roomTypePrediction.confidence || 0) < PROPERTY_IMAGE_ROOM_TYPE_PREDICTION_MIN_CONFIDENCE
+                                    ? " — confidence is low, so room type defaults to Unclassified."
+                                    : ""}
+                            </p>
+                        ) : (
+                            <p className="text-xs text-muted-foreground">
+                                Room type helps load and evolve prompt memory for similar images.
+                            </p>
+                        )}
+
+                        {roomTypeCandidates.length > 1 ? (
+                            <p className="text-xs text-muted-foreground">
+                                Top candidates: {roomTypeCandidates.slice(0, 3).map((candidate) => candidate.label).join(", ")}
+                            </p>
+                        ) : null}
+
+                        {roomTypePredictionModel ? (
+                            <p className="text-xs text-muted-foreground">
+                                Prediction model: {getModelLabel(roomTypePredictionModel)}
+                            </p>
+                        ) : null}
+                    </div>
+
                     <div className="flex items-center justify-between rounded-md border p-3">
                         <div>
-                            <Label className="text-sm font-medium">Reuse Last Approved Prompt</Label>
+                            <Label className="text-sm font-medium">Use Saved Room Profile Prompt</Label>
                             <p className="text-xs text-muted-foreground">
-                                Helpful for another angle of the same room so edits stay visually consistent.
+                                {hasSelectedRoomPrompt
+                                    ? "Reuses the saved approved prompt for this room type during analysis and generation."
+                                    : "No saved prompt exists for this room type yet."}
                             </p>
                         </div>
-                        <Switch checked={reusePriorPrompt} onCheckedChange={setReusePriorPrompt} />
+                        <Switch
+                            checked={reuseSavedRoomPrompt}
+                            onCheckedChange={setReuseSavedRoomPrompt}
+                            disabled={!hasSelectedRoomPrompt}
+                        />
                     </div>
-                ) : null}
+                </div>
 
                 <div className="space-y-2">
                     <Label className="text-sm font-medium">Additional Instructions / Override</Label>

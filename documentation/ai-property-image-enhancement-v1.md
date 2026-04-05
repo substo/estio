@@ -29,7 +29,7 @@ The latest updates in this implementation cycle focused on the following practic
 2. **Consistency across similar room shots**
    - Previously, each image enhancement run started too independently, which could make adjacent photos from the same room drift stylistically.
    - The flow now produces a bounded `reusablePrompt` context after generation.
-   - That context can be reused for the next enhancement run in the same editing session through **Reuse Last Approved Prompt**.
+   - Prompt memory is now **property-scoped and room-type scoped** (for example: Kitchen, Living Room, Garage) and reused through **Use Saved Room Profile Prompt** in both analyze and generate steps.
 
 3. **Prompt transparency**
    - The generation step now shows the **Final Prompt Used** so operators can understand how the image was instructed and debug unexpected output.
@@ -69,7 +69,8 @@ The latest updates in this implementation cycle focused on the following practic
 5. In **Polish** mode:
    - User adds optional shared guidance:
      - freeform override instructions
-     - optional reuse of the last approved prompt context from the previous image in the current editing session
+     - room type selection (`preset + custom`)
+     - optional use of the saved prompt profile for the selected room type
    - User chooses an **Analysis Model** from a dropdown that only shows structured analysis candidates.
    - User runs **Analyze Photo**.
    - AI returns:
@@ -105,7 +106,9 @@ The latest updates in this implementation cycle focused on the following practic
 
 - The modal can still generate even when `suggestedFixes[]` is empty, as long as analysis has completed.
 - Override instructions are intentionally operator-first and do not depend on the analyzer successfully detecting a target object.
-- Prompt reuse is **session-scoped in the property form UI**. It is not yet persisted in the database across browser refreshes or across users.
+- Prompt reuse is now **property-scoped by room type**.
+  - The room profile prompt can influence both analyze and generate when enabled.
+  - Room profile updates are staged in form state on `Keep Result` and persisted on `Save Property`.
 - Generated output is first applied to unsaved property form state using an explicit gallery mode:
   - `Replace original` hides the source image from the visible gallery and keeps a revert path.
   - `Add before original` keeps both images visible.
@@ -163,6 +166,14 @@ Validates auth + access + property media ownership, downloads the source image, 
 - `actionLog`
 - `model`
 - `maskCoverage`
+
+### `POST /api/images/enhance/room-type/predict`
+
+Validates auth + location access + property media ownership, downloads source image, runs Gemini room-type classification, and returns:
+
+- `suggestedRoomType` (`key`, `label`, `confidence`)
+- `candidates[]` (ranked alternatives)
+- `model`
 
 ## Data Contracts
 
@@ -249,7 +260,6 @@ Resulting image is stored as `PropertyMedia` with `cloudflareImageId`, public de
 - Precision Remove currently uses only **manual** masks (`Brush` and `Box`).
 - The editor does **not** yet support hover-highlight segmentation, semantic object detection, or click-to-select masks.
 - If the analyzer misses an object in `Polish`, the current fallback is text guidance through override instructions rather than automatic region selection.
-- Prompt reuse currently exists only in the active property-editing session; it is not yet stored per property, per room, or per scene cluster.
 - Detected elements are removable through toggle chips, but they are not yet interactive hotspots on the image.
 - Precision Remove currently generates one result per request.
 - Capability classification for image enhancement models is still heuristic because the Google models list used here does not expose a clean, app-ready “supports structured image analysis” vs “supports image editing output” split.

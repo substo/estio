@@ -11,6 +11,13 @@ import { resolveNeutralSceneContext } from "@/lib/ai/property-image-enhancement-
 import { resolvePreferredPropertyImageEnhancementModel } from "@/lib/ai/property-image-enhancement-model-preferences";
 import { buildPropertyImageModelCatalog } from "@/lib/ai/model-capabilities";
 import type { ImageEnhancementAnalysis } from "@/lib/ai/property-image-enhancement-types";
+import { mergePropertyImagePromptProfiles, parsePropertyImagePromptProfileUpsertsJson, resolvePromptProfileContext } from "@/lib/ai/property-image-prompt-profiles";
+import {
+    PROPERTY_IMAGE_ROOM_TYPE_PREDICTION_MIN_CONFIDENCE,
+    PROPERTY_IMAGE_ROOM_TYPE_UNCLASSIFIED_KEY,
+    resolvePropertyImageRoomType,
+    toRoomTypeSelectValue,
+} from "@/lib/ai/property-image-room-types";
 
 test("normalizeImageEnhancementAnalysis falls back safely for malformed model output", () => {
     const malformed = {
@@ -225,4 +232,91 @@ test("resolvePreferredPropertyImageEnhancementModel falls back to first compatib
     });
 
     assert.equal(resolved, "gemini-2.5-flash-image");
+});
+
+test("resolvePropertyImageRoomType normalizes preset and custom room types", () => {
+    const preset = resolvePropertyImageRoomType({
+        key: "kitchen",
+        confidence: 0.89,
+    });
+    assert.equal(preset.key, "kitchen");
+    assert.equal(preset.label, "Kitchen");
+    assert.equal(toRoomTypeSelectValue(preset.key), "kitchen");
+
+    const custom = resolvePropertyImageRoomType({
+        key: "custom",
+        label: "Outdoor Back Patio",
+        confidence: 0.71,
+    });
+    assert.equal(custom.key, "outdoor_back_patio");
+    assert.equal(custom.label, "Outdoor Back Patio");
+    assert.equal(toRoomTypeSelectValue(custom.key), "__custom__");
+});
+
+test("low-confidence room type fallback defaults to unclassified", () => {
+    const predicted = resolvePropertyImageRoomType({
+        key: "living_room",
+        confidence: 0.32,
+    });
+
+    const finalType = Number(predicted.confidence || 0) >= PROPERTY_IMAGE_ROOM_TYPE_PREDICTION_MIN_CONFIDENCE
+        ? predicted
+        : resolvePropertyImageRoomType();
+
+    assert.equal(finalType.key, PROPERTY_IMAGE_ROOM_TYPE_UNCLASSIFIED_KEY);
+    assert.equal(finalType.label, "Unclassified");
+});
+
+test("mergePropertyImagePromptProfiles applies staged override by room type key", () => {
+    const merged = mergePropertyImagePromptProfiles({
+        existingProfiles: [
+            {
+                roomTypeKey: "kitchen",
+                roomTypeLabel: "Kitchen",
+                promptContext: "Old kitchen prompt",
+            },
+            {
+                roomTypeKey: "living_room",
+                roomTypeLabel: "Living Room",
+                promptContext: "Living room prompt",
+            },
+        ],
+        stagedUpserts: [
+            {
+                roomTypeKey: "kitchen",
+                roomTypeLabel: "Kitchen",
+                promptContext: "New kitchen prompt",
+            },
+        ],
+    });
+
+    const kitchenPrompt = resolvePromptProfileContext({
+        profiles: merged,
+        roomTypeKey: "kitchen",
+    });
+    const livingPrompt = resolvePromptProfileContext({
+        profiles: merged,
+        roomTypeKey: "living_room",
+    });
+
+    assert.equal(kitchenPrompt, "New kitchen prompt");
+    assert.equal(livingPrompt, "Living room prompt");
+});
+
+test("parsePropertyImagePromptProfileUpsertsJson rejects malformed rows and keeps valid upserts", () => {
+    const parsed = parsePropertyImagePromptProfileUpsertsJson(JSON.stringify([
+        {
+            roomTypeKey: "garage",
+            roomTypeLabel: "Garage",
+            promptContext: "Keep concrete texture and natural shadows.",
+        },
+        {
+            roomTypeKey: "",
+            roomTypeLabel: "",
+            promptContext: "",
+        },
+    ]));
+
+    assert.equal(parsed.length, 1);
+    assert.equal(parsed[0]?.roomTypeKey, "garage");
 });

@@ -29,6 +29,9 @@ export default async function PropertyViewPage({ params, searchParams }: { param
         where: { id: id, locationId },
         include: {
             media: true,
+            imagePromptProfiles: {
+                orderBy: { updatedAt: "desc" },
+            },
             contactRoles: {
                 include: {
                     contact: true

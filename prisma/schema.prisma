@@ -194,6 +194,7 @@ model User {
   settingsAuditLogs            SettingsAuditLog[]          @relation("SettingsAuditActor")
   acceptedAiSuggestedResponses AiSuggestedResponse[]       @relation("AiSuggestedResponseAcceptedBy")
   rejectedAiSuggestedResponses AiSuggestedResponse[]       @relation("AiSuggestedResponseRejectedBy")
+  updatedPropertyImagePromptProfiles PropertyImagePromptProfile[] @relation("PropertyImagePromptProfileUpdater")
 
   // Google Contact Sync Credentials
   googleAccessToken             String?         @db.Text
@@ -318,6 +319,7 @@ model Property {
   contactRoles           ContactPropertyRole[]
   location               Location              @relation(fields: [locationId], references: [id])
   media                  PropertyMedia[]
+  imagePromptProfiles    PropertyImagePromptProfile[]
   swipes                 PropertySwipe[]
   viewings               Viewing[]
   primaryViewingSessions ViewingSession[]      @relation("ViewingSessionPrimaryProperty")
@@ -357,6 +359,23 @@ model PropertyMedia {
   cloudflareImageId String?
   metadata          Json?
   property          Property  @relation(fields: [propertyId], references: [id])
+}
+
+model PropertyImagePromptProfile {
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  propertyId    String
+  roomTypeKey   String
+  roomTypeLabel String
+  promptContext String   @db.Text
+  updatedById   String?
+
+  property  Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  updatedBy User?    @relation("PropertyImagePromptProfileUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@unique([propertyId, roomTypeKey])
+  @@index([propertyId, updatedAt(sort: Desc)])
 }
 
 model SiteConfig {
