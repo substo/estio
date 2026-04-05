@@ -765,61 +765,67 @@ export function PropertyImageEnhanceDialog({
         );
     }
 
+    function renderRoomTypeSelector() {
+        return (
+            <div className="space-y-2">
+                <Label className="text-sm font-medium">Room Type</Label>
+                <Select value={roomTypeSelectValue} onValueChange={handleRoomTypeSelectChange}>
+                    <SelectTrigger>
+                        <SelectValue placeholder="Select room type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        {PROPERTY_IMAGE_ROOM_TYPE_PRESETS.map((preset) => (
+                            <SelectItem key={preset.key} value={preset.key}>
+                                {preset.label}
+                            </SelectItem>
+                        ))}
+                        <SelectItem value={PROPERTY_IMAGE_ROOM_TYPE_CUSTOM_KEY}>Custom...</SelectItem>
+                    </SelectContent>
+                </Select>
+
+                {roomTypeSelectValue === PROPERTY_IMAGE_ROOM_TYPE_CUSTOM_KEY ? (
+                    <Input
+                        value={customRoomTypeLabel}
+                        onChange={(event) => handleCustomRoomTypeLabelChange(event.target.value)}
+                        placeholder="Example: Outdoor Barbecue Area"
+                    />
+                ) : null}
+
+                {isPredictingRoomType ? (
+                    <p className="text-xs text-muted-foreground">Detecting room type from the source image...</p>
+                ) : roomTypePrediction ? (
+                    <p className="text-xs text-muted-foreground">
+                        Suggested: {roomTypePrediction.label} ({Math.round(Number(roomTypePrediction.confidence || 0) * 100)}%)
+                        {Number(roomTypePrediction.confidence || 0) < PROPERTY_IMAGE_ROOM_TYPE_PREDICTION_MIN_CONFIDENCE
+                            ? " — confidence is low, so room type defaults to Unclassified."
+                            : ""}
+                    </p>
+                ) : (
+                    <p className="text-xs text-muted-foreground">
+                        Room type helps load and evolve prompt memory for similar images.
+                    </p>
+                )}
+
+                {roomTypeCandidates.length > 1 ? (
+                    <p className="text-xs text-muted-foreground">
+                        Top candidates: {roomTypeCandidates.slice(0, 3).map((candidate) => candidate.label).join(", ")}
+                    </p>
+                ) : null}
+
+                {roomTypePredictionModel ? (
+                    <p className="text-xs text-muted-foreground">
+                        Prediction model: {getModelLabel(roomTypePredictionModel)}
+                    </p>
+                ) : null}
+            </div>
+        );
+    }
+
     function renderPolishControls() {
         return (
             <>
                 <div className="space-y-3 rounded-md border p-3">
-                    <div className="space-y-2">
-                        <Label className="text-sm font-medium">Room Type</Label>
-                        <Select value={roomTypeSelectValue} onValueChange={handleRoomTypeSelectChange}>
-                            <SelectTrigger>
-                                <SelectValue placeholder="Select room type" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {PROPERTY_IMAGE_ROOM_TYPE_PRESETS.map((preset) => (
-                                    <SelectItem key={preset.key} value={preset.key}>
-                                        {preset.label}
-                                    </SelectItem>
-                                ))}
-                                <SelectItem value={PROPERTY_IMAGE_ROOM_TYPE_CUSTOM_KEY}>Custom...</SelectItem>
-                            </SelectContent>
-                        </Select>
-
-                        {roomTypeSelectValue === PROPERTY_IMAGE_ROOM_TYPE_CUSTOM_KEY ? (
-                            <Input
-                                value={customRoomTypeLabel}
-                                onChange={(event) => handleCustomRoomTypeLabelChange(event.target.value)}
-                                placeholder="Example: Outdoor Barbecue Area"
-                            />
-                        ) : null}
-
-                        {isPredictingRoomType ? (
-                            <p className="text-xs text-muted-foreground">Detecting room type from the source image...</p>
-                        ) : roomTypePrediction ? (
-                            <p className="text-xs text-muted-foreground">
-                                Suggested: {roomTypePrediction.label} ({Math.round(Number(roomTypePrediction.confidence || 0) * 100)}%)
-                                {Number(roomTypePrediction.confidence || 0) < PROPERTY_IMAGE_ROOM_TYPE_PREDICTION_MIN_CONFIDENCE
-                                    ? " — confidence is low, so room type defaults to Unclassified."
-                                    : ""}
-                            </p>
-                        ) : (
-                            <p className="text-xs text-muted-foreground">
-                                Room type helps load and evolve prompt memory for similar images.
-                            </p>
-                        )}
-
-                        {roomTypeCandidates.length > 1 ? (
-                            <p className="text-xs text-muted-foreground">
-                                Top candidates: {roomTypeCandidates.slice(0, 3).map((candidate) => candidate.label).join(", ")}
-                            </p>
-                        ) : null}
-
-                        {roomTypePredictionModel ? (
-                            <p className="text-xs text-muted-foreground">
-                                Prediction model: {getModelLabel(roomTypePredictionModel)}
-                            </p>
-                        ) : null}
-                    </div>
+                    {renderRoomTypeSelector()}
 
                     <div className="flex items-center justify-between rounded-md border p-3">
                         <div>
@@ -1143,6 +1149,12 @@ export function PropertyImageEnhanceDialog({
                     <div className="space-y-2">
                         <Label>Final Prompt Used</Label>
                         <Textarea value={generated.finalPrompt} readOnly className="min-h-[120px] text-xs" />
+                    </div>
+                ) : null}
+
+                {generated.mode === "polish" ? (
+                    <div className="space-y-3 rounded-md border p-3">
+                        {renderRoomTypeSelector()}
                     </div>
                 ) : null}
 
