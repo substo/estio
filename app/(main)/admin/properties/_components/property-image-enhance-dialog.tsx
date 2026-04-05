@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2, Sparkles, Edit2, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { AiModelSelect } from "@/components/ai/ai-model-select";
 import { usePropertyImageEnhancementModelCatalog } from "@/components/ai/use-property-image-enhancement-model-catalog";
@@ -193,6 +193,10 @@ export function PropertyImageEnhanceDialog({
     const [isRemoving, setIsRemoving] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [generated, setGenerated] = useState<ImageEnhancementGeneratedResult | null>(null);
+    const [editingFixId, setEditingFixId] = useState<string | null>(null);
+    const [editingFixLabel, setEditingFixLabel] = useState("");
+    const [isAddingFix, setIsAddingFix] = useState(false);
+    const [newFixLabel, setNewFixLabel] = useState("");
 
     const canRun = useMemo(() => {
         if (!propertyId) return false;
@@ -267,6 +271,10 @@ export function PropertyImageEnhanceDialog({
             setIsRemoving(false);
             setError(null);
             setGenerated(null);
+            setEditingFixId(null);
+            setEditingFixLabel("");
+            setIsAddingFix(false);
+            setNewFixLabel("");
         }
     }, [open]);
 
@@ -425,6 +433,55 @@ export function PropertyImageEnhanceDialog({
     const handleGenerationModelChange = (value: string) => {
         generationModelTouchedRef.current = true;
         setSelectedGenerationModel(value);
+    };
+
+    const startEditingFix = (fixId: string, label: string) => {
+        setEditingFixId(fixId);
+        setEditingFixLabel(label);
+    };
+
+    const saveEditingFix = () => {
+        if (!editingFixId || !analysis) return;
+        const normalized = editingFixLabel.trim();
+        if (!normalized) {
+            setEditingFixId(null);
+            return;
+        }
+
+        setAnalysis({
+            ...analysis,
+            suggestedFixes: analysis.suggestedFixes.map((f) =>
+                f.id === editingFixId ? { ...f, label: normalized, promptInstruction: normalized } : f
+            ),
+        });
+        setEditingFixId(null);
+    };
+
+    const saveNewFix = () => {
+        if (!analysis) return;
+        const normalized = newFixLabel.trim();
+        if (!normalized) {
+            setIsAddingFix(false);
+            return;
+        }
+
+        const newFixId = `custom_${Date.now()}`;
+        const newFix = {
+            id: newFixId,
+            label: normalized,
+            description: "Custom user fix",
+            impact: "high" as const,
+            defaultSelected: true,
+            promptInstruction: normalized,
+        };
+
+        setAnalysis({
+            ...analysis,
+            suggestedFixes: [...analysis.suggestedFixes, newFix],
+        });
+        setSelectedFixIds((prev) => [...prev, newFixId]);
+        setIsAddingFix(false);
+        setNewFixLabel("");
     };
 
     const toggleFix = (fixId: string) => {
@@ -1237,22 +1294,69 @@ export function PropertyImageEnhanceDialog({
                                                             <div className="flex flex-wrap gap-2">
                                                                 {analysis.suggestedFixes.map((fix) => {
                                                                     const active = selectedFixIds.includes(fix.id);
+                                                                    if (editingFixId === fix.id) {
+                                                                        return (
+                                                                            <div key={fix.id} className="flex items-center gap-1">
+                                                                                <Input
+                                                                                    autoFocus
+                                                                                    value={editingFixLabel}
+                                                                                    onChange={(e) => setEditingFixLabel(e.target.value)}
+                                                                                    onKeyDown={(e) => e.key === "Enter" && saveEditingFix()}
+                                                                                    onBlur={saveEditingFix}
+                                                                                    className="h-7 px-2 py-1 text-xs w-40"
+                                                                                />
+                                                                            </div>
+                                                                        );
+                                                                    }
                                                                     return (
-                                                                        <button
-                                                                            key={fix.id}
-                                                                            type="button"
-                                                                            onClick={() => toggleFix(fix.id)}
-                                                                            className={cn(
-                                                                                "rounded-full border px-3 py-1 text-xs transition-colors",
-                                                                                active
-                                                                                    ? "border-primary bg-primary text-primary-foreground"
-                                                                                    : "border-border bg-background text-foreground hover:bg-muted"
-                                                                            )}
-                                                                        >
-                                                                            {fix.label}
-                                                                        </button>
+                                                                        <div key={fix.id} className="group relative flex items-center">
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => toggleFix(fix.id)}
+                                                                                className={cn(
+                                                                                    "rounded-full border px-3 py-1 text-xs transition-colors pr-7",
+                                                                                    active
+                                                                                        ? "border-primary bg-primary text-primary-foreground"
+                                                                                        : "border-border bg-background text-foreground hover:bg-muted"
+                                                                                )}
+                                                                            >
+                                                                                {fix.label}
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => startEditingFix(fix.id, fix.label)}
+                                                                                className={cn(
+                                                                                    "absolute right-1 p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity",
+                                                                                    active ? "text-primary-foreground hover:bg-primary/20" : "text-muted-foreground hover:bg-muted-foreground/20"
+                                                                                )}
+                                                                            >
+                                                                                <Edit2 className="h-3 w-3" />
+                                                                            </button>
+                                                                        </div>
                                                                     );
                                                                 })}
+                                                                {isAddingFix ? (
+                                                                    <div className="flex items-center gap-1">
+                                                                        <Input
+                                                                            autoFocus
+                                                                            value={newFixLabel}
+                                                                            onChange={(e) => setNewFixLabel(e.target.value)}
+                                                                            onKeyDown={(e) => e.key === "Enter" && saveNewFix()}
+                                                                            onBlur={saveNewFix}
+                                                                            placeholder="Type fix..."
+                                                                            className="h-7 px-2 py-1 text-xs w-32"
+                                                                        />
+                                                                    </div>
+                                                                ) : (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => setIsAddingFix(true)}
+                                                                        className="inline-flex items-center gap-1 rounded-full border border-dashed border-border bg-transparent px-3 py-1 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                                                                    >
+                                                                        <Plus className="h-3 w-3" />
+                                                                        <span>Add Fix</span>
+                                                                    </button>
+                                                                )}
                                                             </div>
                                                         )}
                                                     </div>

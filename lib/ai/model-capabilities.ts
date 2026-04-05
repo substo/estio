@@ -87,6 +87,10 @@ function resolvePreferredModel<T extends AiModelDescriptor>(
         }
     }
 
+    if (allowed.has("gemini-2.5-flash-image")) {
+        return "gemini-2.5-flash-image";
+    }
+
     return normalizeModelValue(models[0]?.value);
 }
 

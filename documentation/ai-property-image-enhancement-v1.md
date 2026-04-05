@@ -29,7 +29,7 @@ The latest updates in this implementation cycle focused on the following practic
 2. **Consistency across similar room shots**
    - Previously, each image enhancement run started too independently, which could make adjacent photos from the same room drift stylistically.
    - The flow now produces a bounded `reusablePrompt` context after generation.
-   - Prompt memory is now **property-scoped and room-type scoped** (for example: Kitchen, Living Room, Garage) and reused through **Use Saved Room Profile Prompt** in both analyze and generate steps.
+   - Prompt memory is now **property-scoped and room-type scoped** (for example: Kitchen, Living Room, Kids Bedroom, Garage) and reused through **Use Saved Room Profile Prompt** in both analyze and generate steps.
 
 3. **Prompt transparency**
    - The generation step now shows the **Final Prompt Used** so operators can understand how the image was instructed and debug unexpected output.
@@ -40,7 +40,7 @@ The latest updates in this implementation cycle focused on the following practic
    - The server validates those selections against capability-aware filters so analysis does not accidentally hit an image model that rejects JSON mode.
    - Defaults now come from the location AI settings already used elsewhere in the product:
      - analysis prefers `googleAiModelExtraction`
-     - generation prefers `googleAiModelDesign`
+     - generation prefers `googleAiModelDesign`, with a hard fallback to `gemini-2.5-flash-image` (Nano Banana 2) when no design model is configured
 
 5. **Precision Remove mode**
    - Added a separate admin-only mode for exact object removal using manual masks.
@@ -51,6 +51,21 @@ The latest updates in this implementation cycle focused on the following practic
    - Both modes now review results in a shared before/after compare viewer.
    - The generated image is no longer shown in a separate preview block below the editor.
    - Desktop uses a draggable compare handle; mobile also exposes a one-tap "Show Original" toggle.
+
+7. **Editable and custom Suggested Fixes**
+   - After analysis, operators can now **rename any Suggested Fix chip** inline by hovering over it and clicking the pencil icon.
+   - Renaming a chip updates both its display label and the `promptInstruction` sent to the generation model, so the Live Final Prompt reflects the edit immediately.
+   - A dashed **+ Add Fix** button appears after the chip list, allowing operators to insert an entirely new custom fix chip that is auto-selected and fed into the prompt.
+   - Edited and custom fixes flow through the existing `reusablePrompt` pipeline so they are saved per room type and reused on the next photo of the same room.
+
+8. **Nano Banana 2 default for generation**
+   - The generation model dropdown now defaults to `gemini-2.5-flash-image` (labelled **Nano Banana 2**) when no explicit preference has been set.
+   - The fallback logic in `model-capabilities.ts` now explicitly prefers this model before falling back to the first available option.
+   - This eliminates the need to manually select the model each time the enhancement dialog opens.
+
+9. **Kids Bedroom room type**
+   - Added `kids_bedroom` with the label **Kids Bedroom** to the preset room type list.
+   - It appears between Bedroom and Bathroom in the dropdown and is available for room-scoped prompt memory.
 
 ## Scope
 

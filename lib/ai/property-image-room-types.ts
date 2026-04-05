@@ -10,6 +10,7 @@ export const PROPERTY_IMAGE_ROOM_TYPE_PRESETS: Array<{ key: string; label: strin
     { key: "kitchen", label: "Kitchen" },
     { key: "dining_room", label: "Dining Room" },
     { key: "bedroom", label: "Bedroom" },
+    { key: "kids_bedroom", label: "Kids Bedroom" },
     { key: "bathroom", label: "Bathroom" },
     { key: "home_office", label: "Home Office" },
     { key: "hallway", label: "Hallway" },

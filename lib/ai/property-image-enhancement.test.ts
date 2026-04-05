@@ -169,7 +169,7 @@ test("buildPropertyImageModelCatalog separates analysis and generation models", 
     const catalog = buildPropertyImageModelCatalog([
         { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
         { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-        { value: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image (Nano Banana)" },
+        { value: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image (Nano Banana 2)" },
         { value: "gemini-3-pro-image-preview", label: "Gemini 3 Pro Image Preview (Nano Banana Pro)" },
     ], {
         general: "gemini-2.5-flash",
@@ -192,7 +192,7 @@ test("buildPropertyImageModelCatalog separates analysis and generation models", 
 test("buildPropertyImageModelCatalog falls back when design default is not image-capable", () => {
     const catalog = buildPropertyImageModelCatalog([
         { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-        { value: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image (Nano Banana)" },
+        { value: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image (Nano Banana 2)" },
     ], {
         general: "gemini-2.5-flash",
         extraction: "gemini-2.5-flash",
