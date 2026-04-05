@@ -108,6 +108,7 @@ export interface PropertyImagePromptProfile {
     roomTypeKey: string;
     roomTypeLabel: string;
     promptContext: string;
+    analysisData?: ImageEnhancementAnalysis;
     updatedAt?: string;
     updatedById?: string | null;
 }
@@ -116,6 +117,7 @@ export interface PropertyImagePromptProfileUpsert {
     roomTypeKey: string;
     roomTypeLabel: string;
     promptContext: string;
+    analysisData?: ImageEnhancementAnalysis;
 }
 
 export interface ImageEnhancementRoomTypePredictRequest {

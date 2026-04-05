@@ -32,7 +32,7 @@ import type {
     PropertyImagePromptProfileUpsert,
     PropertyImageRoomType,
 } from "@/lib/ai/property-image-enhancement-types";
-import { resolvePromptProfileContext } from "@/lib/ai/property-image-prompt-profiles";
+import { resolvePromptProfileContext, resolvePromptProfileAnalysisData } from "@/lib/ai/property-image-prompt-profiles";
 import { buildGenerationPrompt } from "@/lib/ai/property-image-enhancement-prompt";
 import {
     readPropertyImageEnhancementModelPreference,
@@ -225,19 +225,44 @@ export function PropertyImageEnhanceDialog({
     ), [roomPromptProfiles, selectedRoomType.key]);
     const hasSelectedRoomPrompt = Boolean(String(selectedRoomPrompt || "").trim());
     const effectivePriorPrompt = reuseSavedRoomPrompt && hasSelectedRoomPrompt ? selectedRoomPrompt : undefined;
+
+    const selectedRoomAnalysis = useMemo(() => (
+        resolvePromptProfileAnalysisData({
+            profiles: roomPromptProfiles,
+            roomTypeKey: selectedRoomType.key,
+        })
+    ), [roomPromptProfiles, selectedRoomType.key]);
+
+    const effectiveAnalysis = useMemo(() => {
+        if (analysis) return analysis;
+        if (effectivePriorPrompt) {
+            if (selectedRoomAnalysis) {
+                return selectedRoomAnalysis;
+            }
+            return {
+                sceneSummary: "Reusing saved room profile prompt.",
+                sceneContext: effectivePriorPrompt,
+                detectedElements: [],
+                suggestedFixes: [],
+                actionLogDraft: [],
+            } as ImageEnhancementAnalysis;
+        }
+        return null;
+    }, [analysis, effectivePriorPrompt, selectedRoomAnalysis]);
+
     const stage = generated ? "review" : "edit";
     const isBusy = isAnalyzing || isGenerating || isRemoving;
     const liveFinalPrompt = useMemo(() => {
-        if (!analysis) return "";
+        if (!effectiveAnalysis) return "";
         return buildGenerationPrompt({
-            analysis,
+            analysis: effectiveAnalysis,
             selectedFixIds,
             removedDetectedElementIds,
             aggression,
             priorPrompt: effectivePriorPrompt,
             userInstructions,
         });
-    }, [analysis, selectedFixIds, removedDetectedElementIds, aggression, effectivePriorPrompt, userInstructions]);
+    }, [effectiveAnalysis, selectedFixIds, removedDetectedElementIds, aggression, effectivePriorPrompt, userInstructions]);
 
     useEffect(() => {
         if (!open) {
@@ -280,14 +305,19 @@ export function PropertyImageEnhanceDialog({
 
     useEffect(() => {
         if (!open) return;
-        if (!hasSelectedRoomPrompt && reuseSavedRoomPrompt) {
+        if (!hasSelectedRoomPrompt) {
             setReuseSavedRoomPrompt(false);
-            return;
-        }
-        if (hasSelectedRoomPrompt && !reuseSavedRoomPrompt) {
+        } else {
             setReuseSavedRoomPrompt(true);
+            if (selectedRoomAnalysis) {
+                const defaultFixes = selectedRoomAnalysis.suggestedFixes
+                    .filter((f) => f.defaultSelected)
+                    .map((f) => f.id);
+                setSelectedFixIds(defaultFixes);
+            }
         }
-    }, [open, hasSelectedRoomPrompt, selectedRoomType.key, reuseSavedRoomPrompt]); // intentionally key-scoped
+        // intentionally omitting reuseSavedRoomPrompt to allow manual overrides without resetting
+    }, [open, hasSelectedRoomPrompt, selectedRoomType.key, selectedRoomAnalysis]);
 
     useEffect(() => {
         if (!open) return;
@@ -441,7 +471,8 @@ export function PropertyImageEnhanceDialog({
     };
 
     const saveEditingFix = () => {
-        if (!editingFixId || !analysis) return;
+        const current = analysis || effectiveAnalysis;
+        if (!editingFixId || !current) return;
         const normalized = editingFixLabel.trim();
         if (!normalized) {
             setEditingFixId(null);
@@ -449,8 +480,8 @@ export function PropertyImageEnhanceDialog({
         }
 
         setAnalysis({
-            ...analysis,
-            suggestedFixes: analysis.suggestedFixes.map((f) =>
+            ...current,
+            suggestedFixes: current.suggestedFixes.map((f) =>
                 f.id === editingFixId ? { ...f, label: normalized, promptInstruction: normalized } : f
             ),
         });
@@ -458,7 +489,8 @@ export function PropertyImageEnhanceDialog({
     };
 
     const saveNewFix = () => {
-        if (!analysis) return;
+        const current = analysis || effectiveAnalysis;
+        if (!current) return;
         const normalized = newFixLabel.trim();
         if (!normalized) {
             setIsAddingFix(false);
@@ -476,8 +508,8 @@ export function PropertyImageEnhanceDialog({
         };
 
         setAnalysis({
-            ...analysis,
-            suggestedFixes: [...analysis.suggestedFixes, newFix],
+            ...current,
+            suggestedFixes: [...current.suggestedFixes, newFix],
         });
         setSelectedFixIds((prev) => [...prev, newFixId]);
         setIsAddingFix(false);
@@ -551,6 +583,19 @@ export function PropertyImageEnhanceDialog({
             }
 
             const payload = json as AnalyzeApiResponse;
+            
+            // Merge with previously preserved fixes if reusing prompt to retain old custom chips
+            if (effectiveAnalysis && effectiveAnalysis.suggestedFixes.length > 0) {
+                const newFixes = payload.analysis.suggestedFixes;
+                const mergedFixes = [...effectiveAnalysis.suggestedFixes];
+                for (const n of newFixes) {
+                    if (!mergedFixes.find(o => o.id === n.id)) {
+                        mergedFixes.push(n);
+                    }
+                }
+                payload.analysis.suggestedFixes = mergedFixes;
+            }
+
             const defaults = payload.analysis.suggestedFixes
                 .filter((item) => item.defaultSelected)
                 .map((item) => item.id);
@@ -571,7 +616,7 @@ export function PropertyImageEnhanceDialog({
     }
 
     async function handleGenerate() {
-        if (!canRun || !image || !propertyId || !analysis) return;
+        if (!canRun || !image || !propertyId || !effectiveAnalysis) return;
         if (!selectedGenerationModel.trim()) {
             const message = "Choose a generation model before creating the enhanced image.";
             setError(message);
@@ -591,7 +636,7 @@ export function PropertyImageEnhanceDialog({
                     propertyId,
                     cloudflareImageId: image.cloudflareImageId,
                     sourceUrl: image.url,
-                    analysis,
+                    analysis: effectiveAnalysis,
                     selectedFixIds,
                     removedDetectedElementIds,
                     aggression,
@@ -718,6 +763,13 @@ export function PropertyImageEnhanceDialog({
             roomTypeKey: selectedRoomType.key,
             roomTypeLabel: selectedRoomType.label,
             promptContext: String(generated.reusablePrompt || "").trim(),
+            analysisData: effectiveAnalysis ? {
+                ...effectiveAnalysis,
+                suggestedFixes: effectiveAnalysis.suggestedFixes.map(f => ({
+                    ...f,
+                    defaultSelected: selectedFixIds.includes(f.id)
+                }))
+            } : undefined,
         } : undefined;
 
         onApplyVariant({
@@ -924,12 +976,12 @@ export function PropertyImageEnhanceDialog({
                                 Choose an image-editing model and create the listing-ready result.
                             </p>
                         </div>
-                        {analysis ? <Badge variant="secondary">Ready</Badge> : null}
+                        {effectiveAnalysis ? <Badge variant="secondary">Ready</Badge> : null}
                     </div>
 
-                    {!analysis ? (
+                    {!effectiveAnalysis ? (
                         <p className="text-xs text-muted-foreground">
-                            Run analysis first so the next step has fix chips and a polished prompt draft to work from.
+                            Run analysis or use a saved room profile prompt so the next step has context to work from.
                         </p>
                     ) : (
                         <>
@@ -1289,22 +1341,22 @@ export function PropertyImageEnhanceDialog({
                                                 </div>
                                             </div>
 
-                                            {analysis ? (
+                                            {effectiveAnalysis ? (
                                                 <div className="space-y-4 rounded-md border p-4">
                                                     <div className="space-y-1">
                                                         <Label className="text-sm font-medium">Scene Summary</Label>
-                                                        <p className="text-sm text-muted-foreground">{analysis.sceneSummary}</p>
+                                                        <p className="text-sm text-muted-foreground">{effectiveAnalysis.sceneSummary}</p>
                                                     </div>
 
                                                     <div className="space-y-2">
                                                         <Label className="text-sm font-medium">Suggested Fixes</Label>
-                                                        {analysis.suggestedFixes.length === 0 ? (
+                                                        {effectiveAnalysis.suggestedFixes.length === 0 ? (
                                                             <p className="text-sm text-muted-foreground">
                                                                 No fixes were suggested. You can still generate with polish mode or use the override instructions.
                                                             </p>
                                                         ) : (
                                                             <div className="flex flex-wrap gap-2">
-                                                                {analysis.suggestedFixes.map((fix) => {
+                                                                {effectiveAnalysis.suggestedFixes.map((fix) => {
                                                                     const active = selectedFixIds.includes(fix.id);
                                                                     if (editingFixId === fix.id) {
                                                                         return (
@@ -1373,11 +1425,11 @@ export function PropertyImageEnhanceDialog({
                                                         )}
                                                     </div>
 
-                                                    {analysis.detectedElements.length > 0 ? (
+                                                    {effectiveAnalysis.detectedElements.length > 0 ? (
                                                         <div className="space-y-2">
                                                             <Label className="text-sm font-medium">Detected Elements</Label>
                                                             <div className="flex flex-wrap gap-2">
-                                                                {analysis.detectedElements.slice(0, 12).map((item) => {
+                                                                {effectiveAnalysis.detectedElements.slice(0, 12).map((item) => {
                                                                     const markedForRemoval = removedDetectedElementIds.includes(item.id);
                                                                     return (
                                                                         <button

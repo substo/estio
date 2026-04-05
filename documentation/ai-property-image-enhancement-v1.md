@@ -58,12 +58,18 @@ The latest updates in this implementation cycle focused on the following practic
    - A dashed **+ Add Fix** button appears after the chip list, allowing operators to insert an entirely new custom fix chip that is auto-selected and fed into the prompt.
    - Edited and custom fixes flow through the existing `reusablePrompt` pipeline so they are saved per room type and reused on the next photo of the same room.
 
-8. **Nano Banana 2 default for generation**
+8. **Full State Persistence for Reusable Prompts**
+   - The system now reliably stores the entire `ImageEnhancementAnalysis` JSON object inside the PostgreSQL database tracking prompt profiles.
+   - Tricking the **Use Saved Room Profile Prompt** switch immediately hydrates the component state—meaning "Suggested Fixes", active selections, and context are automatically restored instantly.
+   - Users are bypassed around the "Step 1 Analyze" API call completely without losing context and feature chips.
+   - If an operator prefers to re-analyze, the system explicitly merges previously saved (legacy) fix chips with newly discovered elements so no metadata is lost.
+
+9. **Nano Banana 2 default for generation**
    - The generation model dropdown now defaults to `gemini-2.5-flash-image` (labelled **Nano Banana 2**) when no explicit preference has been set.
    - The fallback logic in `model-capabilities.ts` now explicitly prefers this model before falling back to the first available option.
    - This eliminates the need to manually select the model each time the enhancement dialog opens.
 
-9. **Kids Bedroom room type**
+10. **Kids Bedroom room type**
    - Added `kids_bedroom` with the label **Kids Bedroom** to the preset room type list.
    - It appears between Bedroom and Bathroom in the dropdown and is available for room-scoped prompt memory.
 

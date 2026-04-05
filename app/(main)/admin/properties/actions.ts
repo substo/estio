@@ -726,11 +726,13 @@ export async function upsertProperty(formData: FormData) {
                         roomTypeKey: upsert.roomTypeKey,
                         roomTypeLabel: upsert.roomTypeLabel,
                         promptContext: upsert.promptContext,
+                        analysisData: (upsert.analysisData as any) || null,
                         updatedById: dbUser?.id || null,
                     },
                     update: {
                         roomTypeLabel: upsert.roomTypeLabel,
                         promptContext: upsert.promptContext,
+                        analysisData: (upsert.analysisData as any) || null,
                         updatedById: dbUser?.id || null,
                     },
                 });

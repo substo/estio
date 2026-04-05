@@ -33,6 +33,9 @@ export function normalizePropertyImagePromptProfile(input: unknown): PropertyIma
         roomTypeKey: roomType.key,
         roomTypeLabel: roomType.label,
         promptContext,
+        analysisData: typeof source.analysisData === "object" && source.analysisData !== null 
+            ? source.analysisData as any 
+            : undefined,
         updatedAt: typeof source.updatedAt === "string" ? source.updatedAt : undefined,
         updatedById: typeof source.updatedById === "string" ? source.updatedById : null,
     };
@@ -61,6 +64,9 @@ export function normalizePropertyImagePromptProfileUpsert(input: unknown): Prope
         roomTypeKey: normalizePropertyImageRoomTypeKey(roomType.key),
         roomTypeLabel: normalizePropertyImageRoomTypeLabel(roomType.label),
         promptContext,
+        analysisData: typeof source.analysisData === "object" && source.analysisData !== null 
+            ? source.analysisData as any 
+            : undefined,
     };
 }
 
@@ -99,6 +105,24 @@ export function resolvePromptProfileContext(input: {
         if (!normalized) continue;
         if (normalized.roomTypeKey === key) {
             return normalized.promptContext;
+        }
+    }
+
+    return undefined;
+}
+
+export function resolvePromptProfileAnalysisData(input: {
+    profiles: Array<PropertyImagePromptProfile | null | undefined>;
+    roomTypeKey?: string | null;
+}) {
+    const key = normalizePropertyImageRoomTypeKey(String(input.roomTypeKey || ""));
+    if (!key) return undefined;
+
+    for (const entry of input.profiles || []) {
+        const normalized = normalizePropertyImagePromptProfile(entry);
+        if (!normalized) continue;
+        if (normalized.roomTypeKey === key && normalized.analysisData) {
+            return normalized.analysisData;
         }
     }
 

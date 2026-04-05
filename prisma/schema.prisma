@@ -369,6 +369,7 @@ model PropertyImagePromptProfile {
   roomTypeKey   String
   roomTypeLabel String
   promptContext String   @db.Text
+  analysisData  Json?
   updatedById   String?
 
   property  Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
