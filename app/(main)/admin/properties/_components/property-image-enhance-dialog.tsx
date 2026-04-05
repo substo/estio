@@ -222,7 +222,7 @@ export function PropertyImageEnhanceDialog({
         if (!open) return;
         const next = resolvePreferredPropertyImageEnhancementModel({
             allowedValues: analysisModels.map((model) => model.value),
-            currentValue: selectedAnalysisModel,
+            currentValue: analysisModelTouchedRef.current ? selectedAnalysisModel : "",
             persistedValue: persistedModelPreference.analysis,
             defaultValue: modelDefaults.analysis,
             fallbackValue: analysisModels[0]?.value,
@@ -242,7 +242,7 @@ export function PropertyImageEnhanceDialog({
         if (!open) return;
         const next = resolvePreferredPropertyImageEnhancementModel({
             allowedValues: generationModels.map((model) => model.value),
-            currentValue: selectedGenerationModel,
+            currentValue: generationModelTouchedRef.current ? selectedGenerationModel : "",
             persistedValue: persistedModelPreference.generation,
             defaultValue: modelDefaults.generation,
             fallbackValue: generationModels[0]?.value,

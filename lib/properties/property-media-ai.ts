@@ -37,6 +37,14 @@ function normalizeSortOrder<T extends PropertyImageLike>(items: T[]): T[] {
     }));
 }
 
+function reorderByIndex<T>(items: readonly T[], fromIndex: number, toIndex: number): T[] {
+    if (fromIndex === toIndex) return [...items];
+    const next = [...items];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    return next;
+}
+
 function matchesSourceRef(
     item: PropertyImageLike,
     sourceImageId?: string | null,
@@ -254,4 +262,65 @@ export function removePropertyImageByIdentity<T extends PropertyImageLike>(image
     }
 
     return normalizeSortOrder(images.filter((item) => getPropertyMediaIdentity(item) !== imageIdentity));
+}
+
+export function reorderVisiblePropertyImagesByIdentity<T extends PropertyImageLike>(input: {
+    images: T[];
+    activeIdentity: string;
+    overIdentity: string;
+}): T[] {
+    const activeIdentity = String(input.activeIdentity || "").trim();
+    const overIdentity = String(input.overIdentity || "").trim();
+    if (!activeIdentity || !overIdentity || activeIdentity === overIdentity) {
+        return normalizeSortOrder([...input.images]);
+    }
+
+    const ordered = [...input.images].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+    const visible = getVisiblePropertyImageMedia(ordered);
+    const oldIndex = visible.findIndex((item) => getPropertyMediaIdentity(item) === activeIdentity);
+    const newIndex = visible.findIndex((item) => getPropertyMediaIdentity(item) === overIdentity);
+    if (oldIndex < 0 || newIndex < 0) {
+        return normalizeSortOrder(ordered);
+    }
+
+    const reorderedVisible = oldIndex === newIndex ? visible : reorderByIndex(visible, oldIndex, newIndex);
+    const visibleIdentitySet = new Set(reorderedVisible.map((item) => getPropertyMediaIdentity(item)));
+
+    const hiddenFollowersByVisibleIdentity = new Map<string, T[]>();
+    const orphanHidden: T[] = [];
+
+    ordered.forEach((item) => {
+        if (!isHiddenFromGallery(item)) return;
+        const metadata = getPropertyImageAiMetadata(item);
+        const linkedIdentity = String(
+            metadata?.hiddenByImageId
+            || metadata?.hiddenByImageUrl
+            || ""
+        ).trim();
+
+        if (!linkedIdentity || !visibleIdentitySet.has(linkedIdentity)) {
+            orphanHidden.push(item);
+            return;
+        }
+
+        const bucket = hiddenFollowersByVisibleIdentity.get(linkedIdentity) || [];
+        bucket.push(item);
+        hiddenFollowersByVisibleIdentity.set(linkedIdentity, bucket);
+    });
+
+    const nextOrdered: T[] = [];
+    reorderedVisible.forEach((item) => {
+        const identity = getPropertyMediaIdentity(item);
+        nextOrdered.push(item);
+        const followers = hiddenFollowersByVisibleIdentity.get(identity) || [];
+        if (followers.length > 0) {
+            nextOrdered.push(...followers);
+        }
+    });
+
+    if (orphanHidden.length > 0) {
+        nextOrdered.push(...orphanHidden);
+    }
+
+    return normalizeSortOrder(nextOrdered);
 }

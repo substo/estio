@@ -37,7 +37,6 @@ import {
     DragEndEvent
 } from '@dnd-kit/core';
 import {
-    arrayMove,
     SortableContext,
     sortableKeyboardCoordinates,
     useSortable,
@@ -54,6 +53,7 @@ import {
     hasAiOriginalAvailable,
     isAiGeneratedPropertyImage,
     removePropertyImageByIdentity,
+    reorderVisiblePropertyImagesByIdentity,
     revertAiGeneratedReplacement,
 } from "@/lib/properties/property-media-ai";
 
@@ -247,10 +247,11 @@ export default function PropertyForm({
 
         if (over && active.id !== over.id) {
             setImages((items) => {
-                const oldIndex = items.findIndex((item) => (item.cloudflareImageId || item.url) === active.id);
-                const newIndex = items.findIndex((item) => (item.cloudflareImageId || item.url) === over.id);
-
-                return arrayMove(items, oldIndex, newIndex);
+                return reorderVisiblePropertyImagesByIdentity({
+                    images: items,
+                    activeIdentity: String(active.id || ""),
+                    overIdentity: String(over.id || ""),
+                });
             });
         }
     }
