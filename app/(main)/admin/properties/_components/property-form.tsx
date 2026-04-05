@@ -15,7 +15,7 @@ import { PROPERTY_TYPES } from "@/lib/properties/constants";
 import { PROPERTY_LOCATIONS } from "@/lib/properties/locations";
 import { PROPERTY_CONDITIONS, FEATURE_CATEGORIES, PROPERTY_SOURCES } from "@/lib/properties/filter-constants";
 import { MediaUploader } from "@/components/ui/media-uploader";
-import { X, Plus, Pencil, Sparkles } from "lucide-react";
+import { X, Plus, Minus, Pencil, Sparkles, ZoomIn, ZoomOut } from "lucide-react";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { SearchableSelect } from "../../contacts/_components/searchable-select";
 import { MultiPropertySelect } from "../../contacts/_components/multi-property-select";
@@ -222,6 +222,7 @@ export default function PropertyForm({
     const [enhanceDialogOpen, setEnhanceDialogOpen] = useState(false);
     const [enhanceImageIndex, setEnhanceImageIndex] = useState<number | null>(null);
     const [stagedPromptProfileUpserts, setStagedPromptProfileUpserts] = useState<PropertyImagePromptProfileUpsert[]>([]);
+    const [galleryColumns, setGalleryColumns] = useState(4);
 
     const existingPromptProfiles = useMemo<PropertyImagePromptProfile[]>(() => {
         const sourceProfiles = Array.isArray(property?.imagePromptProfiles) ? property.imagePromptProfiles : [];
@@ -1084,7 +1085,31 @@ export default function PropertyForm({
                         <div className="space-y-6">
                             {/* Images Section */}
                             <div className="space-y-4">
-                                <Label className="text-lg font-semibold">Images</Label>
+                                <div className="flex items-center justify-between">
+                                    <Label className="text-lg font-semibold">Images</Label>
+                                    <div className="flex items-center gap-1">
+                                        <span className="text-xs text-muted-foreground mr-1">{visibleImages.length} photos</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setGalleryColumns((c) => Math.min(c + 1, 8))}
+                                            disabled={galleryColumns >= 8}
+                                            className="inline-flex items-center justify-center rounded-md border bg-background p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                                            title="Smaller thumbnails (more per row)"
+                                        >
+                                            <ZoomOut className="h-4 w-4" />
+                                        </button>
+                                        <span className="text-xs tabular-nums text-muted-foreground w-6 text-center">{galleryColumns}</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setGalleryColumns((c) => Math.max(c - 1, 2))}
+                                            disabled={galleryColumns <= 2}
+                                            className="inline-flex items-center justify-center rounded-md border bg-background p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                                            title="Larger thumbnails (fewer per row)"
+                                        >
+                                            <ZoomIn className="h-4 w-4" />
+                                        </button>
+                                    </div>
+                                </div>
                                 {/* Legacy mediaUrls hidden input for backward compat if needed, but we rely on mediaJson now */}
                                 <input type="hidden" name="mediaUrls" value={images.map(i => i.url).join(', ')} />
                                 <input type="hidden" name="mediaJson" value={JSON.stringify(images)} />
@@ -1104,7 +1129,10 @@ export default function PropertyForm({
                                             items={visibleImages.map((img) => getPropertyMediaIdentity(img))}
                                             strategy={rectSortingStrategy}
                                         >
-                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                            <div
+                                                className="grid gap-4"
+                                                style={{ gridTemplateColumns: `repeat(${galleryColumns}, minmax(0, 1fr))` }}
+                                            >
                                                 {visibleImages.map((img, index) => {
                                                     const uniqueId = getPropertyMediaIdentity(img);
                                                     const canEnhance = Boolean(

@@ -46,6 +46,7 @@ The Property Form is the primary interface for creating and editing properties. 
 
 6.  **Media**: Images, videos, and documents.
     *   **Images**: Direct upload to Cloudflare. Click "Upload Image" to select files. Optimization is automatic.
+    *   **Gallery Zoom**: Use the zoom-out (−) / zoom-in (+) buttons next to the image count to change the number of thumbnails per row (2–8 columns). Smaller thumbnails make it easier to reorder large photo sets via drag-and-drop.
     *   **AI Enhance (Admin)**: Existing persisted images can be enhanced via an admin AI modal with two modes:
         - `Polish`: analyze issues, choose fix chips, then generate a polished variant with optional override instructions and prompt reuse for similar follow-up images.
         - `Precision Remove`: manually mask an object with brush/box tools, remove it with AI inpainting, then review the result in the same compare view used by Polish.
