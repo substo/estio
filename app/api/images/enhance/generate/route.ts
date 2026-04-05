@@ -12,6 +12,7 @@ import {
 import {
     ENHANCEMENT_AGGRESSION_LEVELS,
 } from "@/lib/ai/property-image-enhancement-types";
+import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 import { getImageDeliveryUrl, uploadToCloudflare } from "@/lib/cloudflareImages";
 import { resolveOwnedPropertyImageSource } from "../_helpers";
 
@@ -114,6 +115,25 @@ export async function POST(req: Request) {
         const blob = new Blob([bytes], { type: generated.mimeType || "image/png" });
         const upload = await uploadToCloudflare(blob);
         const generatedImageUrl = getImageDeliveryUrl(upload.imageId, "public");
+
+        // Non-blocking AI usage telemetry
+        void securelyRecordAiUsage({
+            locationId: parsed.data.locationId,
+            userId,
+            resourceType: "property",
+            resourceId: parsed.data.propertyId,
+            featureArea: "property_image_enhancement",
+            action: "generate",
+            provider: "google_gemini",
+            model: generated.model,
+            inputTokens: generated.usageMetadata?.promptTokenCount,
+            outputTokens: generated.usageMetadata?.candidatesTokenCount,
+            metadata: {
+                sourceCloudflareImageId: ownedMedia.cloudflareImageId,
+                resultCloudflareImageId: upload.imageId,
+                aggression: parsed.data.aggression,
+            },
+        });
 
         return NextResponse.json({
             success: true,

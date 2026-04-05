@@ -354,6 +354,7 @@ NODE_OPTIONS='--max-old-space-size=8192' npx tsc --noEmit
 
 - `documentation/property-management-guide.md`
 - `documentation/ai-configuration.md`
+- `documentation/ai-usage-metering.md`
 - `documentation/public-site-media-seo-implementation.md`
 - `documentation/ai-property-import-prompts.md`
 

@@ -105,6 +105,12 @@ For selection actions using LLM:
 - `Summarize` and `Custom` persist `AgentExecution` usage/cost metadata
 - Conversation token/cost counters are incremented
 
+For property image enhancement AI operations:
+
+- All image enhancement routes (`analyze`, `generate`, `precision-remove`, `room-type/predict`) record usage in the unified `AiUsage` metering table.
+- Cost is calculated centrally via `lib/ai/pricing-engine.ts`.
+- See `documentation/ai-usage-metering.md` for full architecture.
+
 `Find Contact` is non-AI and does not create model usage traces.
 
 ## Pricing Default Note
@@ -238,5 +244,6 @@ That split is intentional because masked Imagen editing is currently implemented
 - `documentation/ai-agentic-conversations-hub.md`
 - `documentation/conversation-management.md`
 - `documentation/ai-property-image-enhancement-v1.md`
+- `documentation/ai-usage-metering.md`
 
 For exact conversations workspace/polling/search behavior, use `documentation/conversation-management.md` as the canonical reference.

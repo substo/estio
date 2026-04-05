@@ -16,6 +16,11 @@ type GeminiGenerateContentResponse = {
             }>;
         };
     }>;
+    usageMetadata?: {
+        promptTokenCount?: number;
+        candidatesTokenCount?: number;
+        totalTokenCount?: number;
+    };
 };
 
 function clamp01(value: number): number {
@@ -156,6 +161,7 @@ export async function predictPropertyImageRoomType(input: {
     suggestedRoomType: PropertyImageRoomType;
     candidates: PropertyImageRoomType[];
     model: string;
+    usageMetadata?: GeminiGenerateContentResponse["usageMetadata"];
 }> {
     const model = String(input.model || "").trim();
     if (!model) {
@@ -218,5 +224,6 @@ export async function predictPropertyImageRoomType(input: {
         },
         candidates,
         model,
+        usageMetadata: response.usageMetadata,
     };
 }

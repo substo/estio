@@ -70,6 +70,11 @@ type GeminiGenerateContentResponse = {
         };
     }>;
     promptFeedback?: unknown;
+    usageMetadata?: {
+        promptTokenCount?: number;
+        candidatesTokenCount?: number;
+        totalTokenCount?: number;
+    };
 };
 
 type AnalyzeImageForEnhancementInput = {
@@ -101,6 +106,7 @@ type GenerateEnhancedImageResult = {
     finalPrompt: string;
     reusablePrompt: string;
     model: string;
+    usageMetadata?: GeminiGenerateContentResponse["usageMetadata"];
 };
 
 function toSingleLine(text: string): string {
@@ -325,6 +331,7 @@ export async function fetchImageAsInlineData(imageUrl: string): Promise<{ mimeTy
 export async function analyzeImageForEnhancement(input: AnalyzeImageForEnhancementInput): Promise<{
     analysis: ImageEnhancementAnalysis;
     model: string;
+    usageMetadata?: GeminiGenerateContentResponse["usageMetadata"];
 }> {
     const model = requireSelectedModel(input.model, "analysis");
     const prompt = buildAnalysisPrompt({
@@ -357,7 +364,7 @@ export async function analyzeImageForEnhancement(input: AnalyzeImageForEnhanceme
     const parsedJson = parseJsonObjectFromModelText(textOutput);
     const analysis = normalizeImageEnhancementAnalysis(parsedJson);
 
-    return { analysis, model };
+    return { analysis, model, usageMetadata: response.usageMetadata };
 }
 
 function normalizeActionLog(lines: string[]): string[] {
@@ -434,5 +441,6 @@ export async function generateEnhancedImage(input: GenerateEnhancedImageInput): 
         finalPrompt: prompt,
         reusablePrompt,
         model,
+        usageMetadata: response.usageMetadata,
     };
 }

@@ -49,6 +49,7 @@ const DisplaySection = ({ title, children }: { title: string, children: React.Re
 import { useState } from "react";
 import { PropertyEditDialog } from "@/components/properties/property-edit-dialog";
 import { getVisiblePropertyImageMedia } from "@/lib/properties/property-media-ai";
+import { PropertyAiUsageBadge } from "./property-ai-usage-badge";
 
 interface PropertyViewProps {
     property: any;
@@ -126,6 +127,8 @@ export default function PropertyView({
                 managementCompaniesData={managementCompaniesData}
                 projectsData={projectsData}
             />
+
+            <PropertyAiUsageBadge propertyId={property.id} />
 
             <div className="space-y-6 max-w-5xl mx-auto bg-card p-8 rounded-xl shadow-sm border">
 

@@ -6,6 +6,7 @@ import { getPropertyImageEnhancementModelCatalog } from "@/lib/ai/fetch-models";
 import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import { fetchImageAsInlineData } from "@/lib/ai/property-image-enhancement";
 import { predictPropertyImageRoomType } from "@/lib/ai/property-image-room-type";
+import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 import { resolveOwnedPropertyImageSource } from "../../_helpers";
 
 const predictRoomTypeRequestSchema = z.object({
@@ -85,6 +86,24 @@ export async function POST(req: Request) {
             model: analysisModel,
             sourceImageBase64: sourceImage.base64,
             sourceImageMimeType: sourceImage.mimeType,
+        });
+
+        // Non-blocking AI usage telemetry
+        void securelyRecordAiUsage({
+            locationId: parsed.data.locationId,
+            userId,
+            resourceType: "property",
+            resourceId: parsed.data.propertyId,
+            featureArea: "property_image_enhancement",
+            action: "room_type_predict",
+            provider: "google_gemini",
+            model: prediction.model,
+            inputTokens: prediction.usageMetadata?.promptTokenCount,
+            outputTokens: prediction.usageMetadata?.candidatesTokenCount,
+            metadata: {
+                sourceCloudflareImageId: ownedMedia.cloudflareImageId,
+                suggestedRoomType: prediction.suggestedRoomType?.key,
+            },
         });
 
         return NextResponse.json({

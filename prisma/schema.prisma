@@ -59,6 +59,7 @@ model Location {
   viewingSessions               ViewingSession[]
   viewingSessionEvents          ViewingSessionEvent[]
   viewingSessionUsages          ViewingSessionUsage[]
+  aiUsages                      AiUsage[]
 
   // WhatsApp Integration (Native)
   whatsappBusinessAccountId String?
@@ -195,6 +196,7 @@ model User {
   acceptedAiSuggestedResponses AiSuggestedResponse[]       @relation("AiSuggestedResponseAcceptedBy")
   rejectedAiSuggestedResponses AiSuggestedResponse[]       @relation("AiSuggestedResponseRejectedBy")
   updatedPropertyImagePromptProfiles PropertyImagePromptProfile[] @relation("PropertyImagePromptProfileUpdater")
+  aiUsages                     AiUsage[]
 
   // Google Contact Sync Credentials
   googleAccessToken             String?         @db.Text
@@ -1714,6 +1716,45 @@ model AgentExecution {
   @@index([conversationId])
   @@index([createdAt])
   @@index([traceId])
+}
+
+model AiUsage {
+  id         String   @id @default(cuid())
+  createdAt  DateTime @default(now())
+  recordedAt DateTime @default(now())
+
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  // Polymorphic Resource Linking (e.g., "property", "viewing_session")
+  resourceType String
+  resourceId   String?
+  
+  // Feature Context
+  featureArea String   // e.g., "property_image_enhancement"
+  action      String   // e.g., "analyze", "precision_remove"
+  
+  // Provider & Model
+  provider    String   // "google_gemini", "vertex_imagen"
+  model       String   
+  
+  // Quantitative Metering
+  inputTokens      Int?   @default(0)
+  outputTokens     Int?   @default(0)
+  totalTokens      Int?   @default(0)
+  
+  // Exact Cost Tracking for Billing
+  estimatedCostUsd Float @default(0)
+  
+  // Metadata for auditing
+  metadata Json?
+
+  @@index([locationId, recordedAt(sort: Desc)])
+  @@index([resourceType, resourceId, recordedAt(sort: Desc)])
+  @@index([locationId, featureArea, recordedAt(sort: Desc)])
 }
 
 model AiSkillPolicy {

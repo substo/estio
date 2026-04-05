@@ -6,6 +6,7 @@ import { getImageDeliveryUrl, uploadToCloudflare } from "@/lib/cloudflareImages"
 import { fetchImageBuffer } from "@/lib/ai/property-image-enhancement";
 import { assertPrecisionRemoveEnabledForLocation } from "@/lib/ai/property-image-precision-remove-config";
 import { removeImageContentWithPrecisionMask } from "@/lib/ai/property-image-precision-remove";
+import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 import { resolveOwnedPropertyImageSource } from "../_helpers";
 
 const precisionRemoveRequestSchema = z.object({
@@ -72,6 +73,24 @@ export async function POST(req: Request) {
         const blob = new Blob([bytes], { type: result.mimeType });
         const upload = await uploadToCloudflare(blob);
         const generatedImageUrl = getImageDeliveryUrl(upload.imageId, "public");
+
+        // Non-blocking AI usage telemetry (Imagen uses flat-rate pricing, no tokens)
+        void securelyRecordAiUsage({
+            locationId: parsed.data.locationId,
+            userId,
+            resourceType: "property",
+            resourceId: parsed.data.propertyId,
+            featureArea: "property_image_enhancement",
+            action: "precision_remove",
+            provider: "vertex_imagen",
+            model: result.model,
+            quantity: 1,
+            metadata: {
+                sourceCloudflareImageId: ownedMedia.cloudflareImageId,
+                resultCloudflareImageId: upload.imageId,
+                maskCoverage: result.maskCoverage,
+            },
+        });
 
         return NextResponse.json({
             success: true,

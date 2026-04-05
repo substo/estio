@@ -8,6 +8,7 @@ import {
     analyzeImageForEnhancement,
     fetchImageAsInlineData,
 } from "@/lib/ai/property-image-enhancement";
+import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 import { resolveOwnedPropertyImageSource } from "../_helpers";
 
 const analyzeRequestSchema = z.object({
@@ -91,6 +92,23 @@ export async function POST(req: Request) {
             sourceImageMimeType: sourceImage.mimeType,
             priorPrompt: parsed.data.priorPrompt,
             userInstructions: parsed.data.userInstructions,
+        });
+
+        // Non-blocking AI usage telemetry
+        void securelyRecordAiUsage({
+            locationId: parsed.data.locationId,
+            userId,
+            resourceType: "property",
+            resourceId: parsed.data.propertyId,
+            featureArea: "property_image_enhancement",
+            action: "analyze",
+            provider: "google_gemini",
+            model: result.model,
+            inputTokens: result.usageMetadata?.promptTokenCount,
+            outputTokens: result.usageMetadata?.candidatesTokenCount,
+            metadata: {
+                sourceCloudflareImageId: ownedMedia.cloudflareImageId,
+            },
         });
 
         return NextResponse.json({
