@@ -287,7 +287,7 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
     if ! ESTIO_MANAGED_BASE_DIR="/home/martin/estio-app" \
         ESTIO_MANAGED_PORTS="\$BLUE_PORT,\$GREEN_PORT,\$LEGACY_SCRAPE_WORKER_PORT,\$VIEWING_RELAY_PORT" \
         ESTIO_MANAGED_PM2_NAMES="\$TARGET_APP_NAME,\$ACTIVE_APP_NAME,\$SCRAPE_WORKER_APP_NAME,\$VIEWING_RELAY_APP_NAME" \
-        node <<'NODE'
+        node <<-'NODE'
 const { execSync } = require('child_process');
 const fs = require('fs');
 
@@ -556,7 +556,7 @@ NODE
     echo "🩺 Waiting for scrape worker readiness..."
     WORKER_READY=0
     for i in \$(seq 1 45); do
-        if SCRAPE_WORKER_APP_NAME="\$SCRAPE_WORKER_APP_NAME" SCRAPE_WORKER_ENV_PATH="\$SYMLINK_PATH/.env" node <<'NODE'
+        if SCRAPE_WORKER_APP_NAME="\$SCRAPE_WORKER_APP_NAME" SCRAPE_WORKER_ENV_PATH="\$SYMLINK_PATH/.env" node <<-'NODE'
 const { execSync } = require('child_process');
 const fs = require('fs');
 
