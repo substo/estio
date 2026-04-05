@@ -277,7 +277,7 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
 
     VIEWING_RELAY_PORT="\$VIEWING_RELAY_DEFAULT_PORT"
     if [ -f "\$TARGET_DIR/.env" ]; then
-        RAW_VIEWING_RELAY_PORT=\$(grep -E '^VIEWING_SESSION_RELAY_PORT=' "\$TARGET_DIR/.env" | tail -n1 | sed -E 's/^[^=]+=//' | sed -E "s/^['\\\"]|['\\\"]\$//g" | tr -d '[:space:]')
+        RAW_VIEWING_RELAY_PORT=\$(grep -E '^VIEWING_SESSION_RELAY_PORT=' "\$TARGET_DIR/.env" | tail -n1 | sed -E 's/^[^=]+=//' | tr -d "'\"" | tr -d '[:space:]')
         if [[ "\$RAW_VIEWING_RELAY_PORT" =~ ^[0-9]+$ ]]; then
             VIEWING_RELAY_PORT="\$RAW_VIEWING_RELAY_PORT"
         fi
