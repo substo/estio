@@ -53,7 +53,7 @@ export async function securelyRecordAiUsage(input: RecordAiUsageInput): Promise<
                 outputTokens,
                 totalTokens,
                 estimatedCostUsd,
-                metadata: input.metadata || {},
+                metadata: (input.metadata || {}) as any,
             },
         });
     } catch (error) {

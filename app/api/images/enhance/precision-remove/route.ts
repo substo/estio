@@ -74,8 +74,8 @@ export async function POST(req: Request) {
         const upload = await uploadToCloudflare(blob);
         const generatedImageUrl = getImageDeliveryUrl(upload.imageId, "public");
 
-        // Non-blocking AI usage telemetry (Imagen uses flat-rate pricing, no tokens)
-        void securelyRecordAiUsage({
+        // Blocking AI usage telemetry (Imagen uses flat-rate pricing, no tokens)
+        await securelyRecordAiUsage({
             locationId: parsed.data.locationId,
             userId,
             resourceType: "property",

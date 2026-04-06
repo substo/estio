@@ -64,6 +64,7 @@ import {
     reorderVisiblePropertyImagesByIdentity,
     revertAiGeneratedReplacement,
 } from "@/lib/properties/property-media-ai";
+import { PropertyAiUsageBadge } from "./property-ai-usage-badge";
 
 interface SortableImageProps {
     id: string;
@@ -551,6 +552,12 @@ export default function PropertyForm({
                     <p className="text-xs text-muted-foreground ml-2">
                         Fetches details, pricing, and images. Review before saving.
                     </p>
+                </div>
+            )}
+
+            {property?.id && property.id !== 'new' && (
+                <div className="p-4 border-b">
+                    <PropertyAiUsageBadge propertyId={property.id} />
                 </div>
             )}
 

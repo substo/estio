@@ -100,6 +100,12 @@ export interface LocationAiUsageSummary {
         tokens: number;
         costUsd: number;
     }>;
+    todayCalls: number;
+    todayTokens: number;
+    todayEstimatedCostUsd: number;
+    allTimeCalls: number;
+    allTimeTokens: number;
+    allTimeEstimatedCostUsd: number;
 }
 
 export async function getLocationAiUsageSummary(locationId?: string): Promise<LocationAiUsageSummary | null> {
@@ -109,21 +115,34 @@ export async function getLocationAiUsageSummary(locationId?: string): Promise<Lo
     // Aggregate for the current calendar month
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-    const records = await db.aiUsage.findMany({
-        where: {
-            locationId: resolvedLocationId,
-            recordedAt: { gte: startOfMonth },
-        },
-        select: {
-            featureArea: true,
-            action: true,
-            provider: true,
-            model: true,
-            totalTokens: true,
-            estimatedCostUsd: true,
-        },
-    });
+    const [todayAgg, allTimeAgg, records] = await Promise.all([
+        db.aiUsage.aggregate({
+            where: { locationId: resolvedLocationId, recordedAt: { gte: startOfToday } },
+            _count: { id: true },
+            _sum: { totalTokens: true, estimatedCostUsd: true }
+        }),
+        db.aiUsage.aggregate({
+            where: { locationId: resolvedLocationId },
+            _count: { id: true },
+            _sum: { totalTokens: true, estimatedCostUsd: true }
+        }),
+        db.aiUsage.findMany({
+            where: {
+                locationId: resolvedLocationId,
+                recordedAt: { gte: startOfMonth },
+            },
+            select: {
+                featureArea: true,
+                action: true,
+                provider: true,
+                model: true,
+                totalTokens: true,
+                estimatedCostUsd: true,
+            },
+        })
+    ]);
 
     const featureMap = new Map<string, { count: number; tokens: number; costUsd: number }>();
     const modelMap = new Map<string, { provider: string; model: string; count: number; tokens: number; costUsd: number }>();
@@ -157,6 +176,12 @@ export async function getLocationAiUsageSummary(locationId?: string): Promise<Lo
         totalCalls: records.length,
         totalTokens,
         totalEstimatedCostUsd: totalCost,
+        todayCalls: todayAgg._count.id,
+        todayTokens: todayAgg._sum.totalTokens || 0,
+        todayEstimatedCostUsd: todayAgg._sum.estimatedCostUsd || 0,
+        allTimeCalls: allTimeAgg._count.id,
+        allTimeTokens: allTimeAgg._sum.totalTokens || 0,
+        allTimeEstimatedCostUsd: allTimeAgg._sum.estimatedCostUsd || 0,
         byFeatureArea: Array.from(featureMap.entries()).map(([featureArea, data]) => ({
             featureArea,
             ...data,

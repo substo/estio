@@ -12,6 +12,7 @@ import { ensureLocalContactSynced } from "@/lib/crm/contact-sync";
 import { ensureConversationHistory, syncMessageFromWebhook } from "@/lib/ghl/sync";
 import { checkGHLSMSStatus } from "@/lib/ghl/sms";
 import { calculateRunCost, calculateRunCostFromUsage } from "@/lib/ai/pricing";
+import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 import { normalizeReplyLanguage } from "@/lib/ai/reply-language-options";
 import { z } from "zod";
 import { getModelForTask } from "@/lib/ai/model-router";
@@ -871,6 +872,18 @@ async function persistSelectionAiExecution(args: {
             totalTokens: { increment: args.usage.totalTokens || 0 },
             totalCost: { increment: estimatedCost.amount },
         },
+    });
+
+    await securelyRecordAiUsage({
+        locationId: location.id,
+        resourceType: "conversation",
+        resourceId: args.conversationInternalId,
+        featureArea: "conversational_ai",
+        action: args.intent || "selection_tool",
+        provider: "google_gemini",
+        model: args.modelId,
+        inputTokens: args.usage.promptTokens || 0,
+        outputTokens: args.usage.completionTokens || 0,
     });
 
     return estimatedCost.amount;

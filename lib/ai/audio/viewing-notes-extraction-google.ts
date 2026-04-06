@@ -4,6 +4,7 @@ import { z } from "zod";
 import db from "@/lib/db";
 import { GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 import { calculateRunCostFromUsage } from "@/lib/ai/pricing";
+import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 
 const VIEWING_NOTES_DEFAULT_MODEL = GEMINI_FLASH_STABLE_FALLBACK || "gemini-2.5-flash";
 
@@ -509,6 +510,18 @@ export async function extractViewingNotesWithGoogle(input: WhatsAppViewingNotesE
             select: {
                 id: true,
             },
+        });
+
+        await securelyRecordAiUsage({
+            locationId: input.locationId,
+            resourceType: "transcript_extraction",
+            resourceId: transcriptId,
+            featureArea: "audio_transcription",
+            action: "extract_viewing_notes",
+            provider: "google_gemini",
+            model: resolvedModel,
+            inputTokens: promptTokens || 0,
+            outputTokens: completionTokens || 0,
         });
 
         await persistViewingNotesCrmLog({

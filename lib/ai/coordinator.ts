@@ -40,6 +40,7 @@ interface CoordinationContext {
 }
 
 import { calculateRunCost } from "@/lib/ai/pricing";
+import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 
 type DraftMessage = {
     direction: string;
@@ -1009,6 +1010,18 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
                     totalCost: { increment: cost }
                 }
             });
+
+            await securelyRecordAiUsage({
+                locationId: context.locationId,
+                resourceType: "conversation",
+                resourceId: dbConversation.id,
+                featureArea: "conversational_ai",
+                action: "generate_draft",
+                provider: "google_gemini",
+                model: actualModelName,
+                inputTokens: promptTokens,
+                outputTokens: completionTokens,
+            });
         }
 
         telemetry.stageMs.postProcessingMs = Date.now() - postProcessingStartedAt;
@@ -1092,6 +1105,18 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
                             totalTokens: { increment: telemetry.usage.promptTokens + telemetry.usage.completionTokens },
                             totalCost: { increment: errorCost },
                         }
+                    });
+
+                    await securelyRecordAiUsage({
+                        locationId: context.locationId,
+                        resourceType: "conversation",
+                        resourceId: errorDbConversation.id,
+                        featureArea: "conversational_ai",
+                        action: "generate_draft_error",
+                        provider: "google_gemini",
+                        model: telemetry.model.actual,
+                        inputTokens: telemetry.usage.promptTokens,
+                        outputTokens: telemetry.usage.completionTokens,
                     });
                 }
             }

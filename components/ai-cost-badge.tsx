@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Sparkles, X, TrendingUp, Calendar, Clock, MessageSquare, Mic } from "lucide-react";
 import { getAggregateAIUsage } from "@/app/(main)/admin/conversations/actions";
+import { getLocationAiUsageSummary, type LocationAiUsageSummary } from "@/app/(main)/admin/_actions/ai-usage";
 import {
     Dialog,
     DialogContent,
@@ -55,15 +56,24 @@ interface AIUsage {
 
 export function AICostBadge() {
     const [usage, setUsage] = useState<AIUsage | null>(null);
+    const [unifiedUsage, setUnifiedUsage] = useState<LocationAiUsageSummary | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
 
     const fetchUsage = useCallback(async () => {
         try {
-            const data = await getAggregateAIUsage();
-            setUsage(data);
-        } catch (e) {
-            console.error("[AICostBadge] Failed to fetch usage:", e);
+            const [conversational, unified] = await Promise.all([
+                getAggregateAIUsage().catch((e) => {
+                    console.error("[AICostBadge] Failed to fetch conversation usage:", e);
+                    return null;
+                }),
+                getLocationAiUsageSummary().catch((e) => {
+                    console.error("[AICostBadge] Failed to fetch unified usage:", e);
+                    return null;
+                })
+            ]);
+            if (conversational) setUsage(conversational);
+            if (unified) setUnifiedUsage(unified);
         } finally {
             setIsLoading(false);
         }
@@ -121,6 +131,15 @@ export function AICostBadge() {
     };
 
 
+    // Calculate combined metrics
+    const combinedTodayCost = displayUsage.today.totalCost + (displayUsage.transcription?.today?.totalCost || 0) + (unifiedUsage?.todayEstimatedCostUsd || 0);
+    const combinedThisMonthCost = displayUsage.thisMonth.totalCost + (displayUsage.transcription?.thisMonth?.totalCost || 0) + (unifiedUsage?.totalEstimatedCostUsd || 0);
+    const combinedAllTimeCost = displayUsage.allTime.totalCost + (displayUsage.transcription?.allTime?.totalCost || 0) + (unifiedUsage?.allTimeEstimatedCostUsd || 0);
+
+    const combinedTodayTokens = displayUsage.today.totalTokens + (unifiedUsage?.todayTokens || 0);
+    const combinedThisMonthTokens = displayUsage.thisMonth.totalTokens + (unifiedUsage?.totalTokens || 0);
+    const combinedAllTimeTokens = displayUsage.allTime.totalTokens + (unifiedUsage?.allTimeTokens || 0);
+
     return (
         <>
             {/* Badge Button */}
@@ -130,21 +149,21 @@ export function AICostBadge() {
             >
                 <Sparkles className="h-3.5 w-3.5 text-purple-500 dark:text-purple-400" />
 
-                {/* Today's total cost (AI + Transcript) */}
+                {/* Today's total cost */}
                 <div className="flex items-center gap-1">
                     <span className="text-[10px] text-gray-400 dark:text-gray-500">Today</span>
                     <span className="text-xs font-medium text-green-700 dark:text-green-400 font-mono">
-                        {formatCost(displayUsage.today.totalCost + (displayUsage.transcription?.today?.totalCost || 0))}
+                        {formatCost(combinedTodayCost)}
                     </span>
                 </div>
 
                 <span className="text-gray-300 dark:text-gray-600">|</span>
 
-                {/* This month's total cost (AI + Transcript) */}
+                {/* This month's total cost */}
                 <div className="flex items-center gap-1">
                     <span className="text-[10px] text-gray-400 dark:text-gray-500">Month</span>
                     <span className="text-xs font-medium text-blue-700 dark:text-blue-400 font-mono">
-                        {formatCost(displayUsage.thisMonth.totalCost + (displayUsage.transcription?.thisMonth?.totalCost || 0))}
+                        {formatCost(combinedThisMonthCost)}
                     </span>
                 </div>
             </button>
@@ -172,10 +191,10 @@ export function AICostBadge() {
                                     <span className="text-xs font-semibold uppercase tracking-wider">Today</span>
                                 </div>
                                 <div className="text-2xl font-bold text-green-800 dark:text-green-300 font-mono">
-                                    {formatCost(displayUsage.today.totalCost + (displayUsage.transcription?.today?.totalCost || 0))}
+                                    {formatCost(combinedTodayCost)}
                                 </div>
                                 <div className="text-xs text-green-600 dark:text-green-500 font-mono mt-1">
-                                    <Sparkles className="inline h-3 w-3 mr-0.5" />{formatTokens(displayUsage.today.totalTokens)} AI
+                                    <Sparkles className="inline h-3 w-3 mr-0.5" />{formatTokens(combinedTodayTokens)} AI
                                 </div>
                                 {(displayUsage.transcription?.today?.totalTokens || 0) > 0 && (
                                     <div className="text-xs text-green-600 dark:text-green-500 font-mono mt-0.5">
@@ -191,10 +210,10 @@ export function AICostBadge() {
                                     <span className="text-xs font-semibold uppercase tracking-wider">This Month</span>
                                 </div>
                                 <div className="text-2xl font-bold text-blue-800 dark:text-blue-300 font-mono">
-                                    {formatCost(displayUsage.thisMonth.totalCost + (displayUsage.transcription?.thisMonth?.totalCost || 0))}
+                                    {formatCost(combinedThisMonthCost)}
                                 </div>
                                 <div className="text-xs text-blue-600 dark:text-blue-500 font-mono mt-1">
-                                    <Sparkles className="inline h-3 w-3 mr-0.5" />{formatTokens(displayUsage.thisMonth.totalTokens)} AI
+                                    <Sparkles className="inline h-3 w-3 mr-0.5" />{formatTokens(combinedThisMonthTokens)} AI
                                 </div>
                                 {(displayUsage.transcription?.thisMonth?.totalTokens || 0) > 0 && (
                                     <div className="text-xs text-blue-600 dark:text-blue-500 font-mono mt-0.5">
@@ -210,10 +229,10 @@ export function AICostBadge() {
                                     <span className="text-xs font-semibold uppercase tracking-wider">All Time</span>
                                 </div>
                                 <div className="text-2xl font-bold text-purple-800 dark:text-purple-300 font-mono">
-                                    {formatCost(displayUsage.allTime.totalCost + (displayUsage.transcription?.allTime?.totalCost || 0))}
+                                    {formatCost(combinedAllTimeCost)}
                                 </div>
                                 <div className="text-xs text-purple-600 dark:text-purple-500 font-mono mt-1">
-                                    <Sparkles className="inline h-3 w-3 mr-0.5" />{formatTokens(displayUsage.allTime.totalTokens)} AI
+                                    <Sparkles className="inline h-3 w-3 mr-0.5" />{formatTokens(combinedAllTimeTokens)} AI
                                 </div>
                                 {(displayUsage.transcription?.allTime?.totalTokens || 0) > 0 && (
                                     <div className="text-xs text-purple-600 dark:text-purple-500 font-mono mt-0.5">
@@ -319,6 +338,25 @@ export function AICostBadge() {
                                         </table>
                                     </div>
                                 )}
+                            </div>
+                        )}
+
+                        {/* Additional AI Tools (Unified Usage) */}
+                        {unifiedUsage && unifiedUsage.totalCalls > 0 && (
+                            <div className="border-t pt-4">
+                                <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+                                    <Sparkles className="h-4 w-4" />
+                                    Other Tools (This Month)
+                                </h4>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                    {unifiedUsage.byFeatureArea.map((f) => (
+                                        <div key={f.featureArea} className="bg-muted/30 rounded-md p-2 border border-border/50">
+                                            <div className="text-xs text-muted-foreground uppercase">{f.featureArea.replace(/_/g, ' ')}</div>
+                                            <div className="text-sm font-medium">{f.count} calls</div>
+                                            <div className="text-xs text-muted-foreground font-mono">{formatCost(f.costUsd)}</div>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
                         )}
 

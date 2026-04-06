@@ -1,6 +1,7 @@
 
 import db from "@/lib/db";
 import { v4 as uuidv4 } from "uuid";
+import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 
 export interface TraceContext {
     traceId: string;
@@ -60,7 +61,11 @@ export async function endTrace(
     const endTime = Date.now();
     const root = await db.agentExecution.findFirst({
         where: { traceId, spanId: traceId },
-        select: { createdAt: true }
+        select: { 
+            createdAt: true,
+            conversationId: true,
+            conversation: { select: { locationId: true } }
+        }
     });
     const latencyMs = root ? Math.max(0, endTime - root.createdAt.getTime()) : 0;
 
@@ -82,6 +87,20 @@ export async function endTrace(
             latencyMs,
         }
     });
+
+    if (root && root.conversation?.locationId && tokens && (tokens.prompt > 0 || tokens.completion > 0)) {
+        await securelyRecordAiUsage({
+            locationId: root.conversation.locationId,
+            resourceType: "conversation",
+            resourceId: root.conversationId,
+            featureArea: "smart_agent",
+            action: "orchestrate",
+            provider: "google_gemini",
+            model: metadata?.model || "unknown",
+            inputTokens: tokens.prompt || 0,
+            outputTokens: tokens.completion || 0,
+        });
+    }
 }
 
 /**
