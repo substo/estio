@@ -343,12 +343,17 @@ export function CoordinatorPanel({
 
     // Fetch Context on Load or Conversation Change
     useEffect(() => {
-        if (!conversation?.contactId) return;
+        if (!conversation?.contactId) {
+            setContactContext(null);
+            return;
+        }
         if (initialContactContext?.contact) {
             setContactContext(initialContactContext);
             return;
         }
 
+        // Clear previous state explicitly when changing contacts
+        setContactContext(null);
         setLoadingContext(true);
         getContactContext(conversation.contactId, { refreshExternal: false })
             .then(data => setContactContext(data))

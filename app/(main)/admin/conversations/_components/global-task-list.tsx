@@ -195,12 +195,12 @@ export function GlobalTaskList({
                 if (convId) {
                   onSelectConversation(convId);
                 }
-                onSelectTask?.(task.id, convId);
+                setTimeout(() => onSelectTask?.(task.id, convId), 0);
               }}
               className={cn(
                 'p-3 border-b cursor-pointer transition-colors hover:bg-slate-50 relative group',
-                (isConversationSelected || isTaskSelected) && 'bg-slate-50 border-l-4 border-l-blue-600 pl-2',
-                !(isConversationSelected || isTaskSelected) && 'border-l-4 border-l-transparent pl-2',
+                isTaskSelected && 'bg-slate-50 border-l-4 border-l-blue-600 pl-2',
+                !isTaskSelected && 'border-l-4 border-l-transparent pl-2',
                 isBusy && 'opacity-60 pointer-events-none'
               )}
             >

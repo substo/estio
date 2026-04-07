@@ -355,3 +355,10 @@ File: [`app/(main)/admin/settings/integrations/google/tasklist-settings.tsx`](/U
   - in-app inbox/realtime
   - browser web push
 - Browser push requires VAPID keys, a supported browser, and an explicit user opt-in from the bell/settings UI.
+
+## UI Selection and React Batching
+
+When working with `GlobalTaskList` inside the `ConversationInterface` and `CoordinatorPanel`, it is critical to observe strict state isolation during click events and navigation:
+- **GlobalTaskList Highlighting**: The tasks list handles its own `selectedTaskId` independent of the `activeId` (which controls the current conversation context). Because multiple tasks can belong to the same conversation, using `isConversationSelected` as a fallback styling rule causes misattribution (the "top task visual bug"). Always map visual task selection explicitly to `isTaskSelected`.
+- **Race conditions with active conversions**: To avoid Next.js routing or parent-level state resets from destroying child focus states during complex event delegations, `onSelectTask` in `global-task-list.tsx` utilizes a zero-delay `setTimeout` to push the selection payload to the end of the microtask queue, past the batched `activeId` updates.
+- **Stale Contexts explicitly dropped**: The `CoordinatorPanel` lazily fetches `contactContext` when `activeId` changes. To prevent `ContactTaskManager` in the mission control pane from showing "the wrong tasks," the previous contact context is aggressively `null`ed out *immediately* upon an ID change, rather than waiting for the background resolver to settle.
