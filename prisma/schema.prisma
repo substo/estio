@@ -871,11 +871,11 @@ model Viewing {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  contactId String
-  contact   Contact @relation(fields: [contactId], references: [id])
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id])
 
-  propertyId String
-  property   Property @relation(fields: [propertyId], references: [id])
+  propertyId String?
+  property   Property? @relation(fields: [propertyId], references: [id])
 
   userId String // Agent who conducted the viewing
   user   User   @relation(fields: [userId], references: [id])

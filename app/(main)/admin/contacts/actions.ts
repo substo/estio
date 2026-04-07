@@ -1603,8 +1603,9 @@ export async function createCompany(
 // Viewings
 
 const viewingSchema = z.object({
-  contactId: z.string().min(1, 'Contact ID is required'),
-  propertyId: z.string().min(1, 'Property ID is required'),
+  locationId: z.string().min(1, 'Location ID is required'),
+  contactId: z.string().optional().nullable(),
+  propertyId: z.string().optional().nullable(),
   userId: z.string().min(1, 'Agent/User ID is required'),
   date: z.string().optional(),
   scheduledAtIso: z.string().optional(),
@@ -1623,33 +1624,21 @@ type ResolvedViewingAgentTimeZone =
 
 async function resolveViewingAgentTimeZone(params: {
   agentUserId: string;
-  contactId: string;
+  locationId: string;
 }): Promise<ResolvedViewingAgentTimeZone> {
-  const [agent, contact] = await Promise.all([
+  const [agent, location] = await Promise.all([
     db.user.findUnique({
       where: { id: params.agentUserId },
       select: { id: true, timeZone: true },
     }),
-    db.contact.findUnique({
-      where: { id: params.contactId },
-      select: {
-        id: true,
-        location: {
-          select: {
-            id: true,
-            timeZone: true,
-          },
-        },
-      },
+    db.location.findUnique({
+      where: { id: params.locationId },
+      select: { timeZone: true },
     }),
   ]);
 
   if (!agent?.id) {
     return { ok: false, message: 'Assigned agent not found.' };
-  }
-
-  if (!contact?.id) {
-    return { ok: false, message: 'Contact not found.' };
   }
 
   if (agent.timeZone) {
@@ -1663,13 +1652,13 @@ async function resolveViewingAgentTimeZone(params: {
     }
   }
 
-  if (contact.location?.timeZone) {
+  if (location?.timeZone) {
     try {
-      return { ok: true, timeZone: normalizeIanaTimeZoneOrThrow(contact.location.timeZone), source: 'location' };
+      return { ok: true, timeZone: normalizeIanaTimeZoneOrThrow(location.timeZone), source: 'location' };
     } catch {
       return {
         ok: false,
-        message: `Location timezone is invalid (${contact.location.timeZone}). Update the location timezone.`,
+        message: `Location timezone is invalid (${location.timeZone}). Update the location timezone.`,
       };
     }
   }
@@ -1747,8 +1736,9 @@ export async function createViewing(
   formData: FormData
 ) {
   const validatedFields = viewingSchema.safeParse({
-    contactId: formData.get('contactId'),
-    propertyId: formData.get('propertyId'),
+    locationId: formData.get('locationId'),
+    contactId: formData.get('contactId') || undefined,
+    propertyId: formData.get('propertyId') || undefined,
     userId: formData.get('userId'),
     date: formData.get('date') || undefined,
     scheduledAtIso: formData.get('scheduledAtIso') || undefined,
@@ -1786,7 +1776,7 @@ export async function createViewing(
 
   const resolvedAgentTimeZone = await resolveViewingAgentTimeZone({
     agentUserId: data.userId,
-    contactId: data.contactId,
+    locationId: data.locationId,
   });
   if (!resolvedAgentTimeZone.ok) {
     return { success: false, message: resolvedAgentTimeZone.message };
@@ -1848,8 +1838,10 @@ export async function createViewing(
     const endAt = new Date(parsedSchedule.utcDate.getTime() + data.duration * 60 * 1000);
     const viewingResult = await db.viewing.create({
       data: {
-        contactId: data.contactId,
-        propertyId: data.propertyId,
+        // @ts-ignore: Prisma types cache might not reflect the optional schema change yet
+        contactId: data.contactId || null,
+        // @ts-ignore: Prisma types cache might not reflect the optional schema change yet
+        propertyId: data.propertyId || null,
         userId: data.userId,
         date: parsedSchedule.utcDate,
         scheduledTimeZone: parsedSchedule.scheduledTimeZone,
@@ -1869,23 +1861,29 @@ export async function createViewing(
       operation: 'create',
     });
 
-    // Fetch property reference for logging
-    const propertyForLog = await db.property.findUnique({ where: { id: data.propertyId }, select: { reference: true, title: true } });
-    const propertyRef = propertyForLog?.reference || propertyForLog?.title || 'Unknown Property';
+    if (data.contactId) {
+      // Fetch property reference for logging
+      let propertyRef = 'Unknown Property';
+      if (data.propertyId) {
+        const propertyForLog = await db.property.findUnique({ where: { id: data.propertyId }, select: { reference: true, title: true } });
+        propertyRef = propertyForLog?.reference || propertyForLog?.title || 'Unknown Property';
+      }
 
-    // Log Viewing Added
-    await logContactHistory(db, data.contactId, internalUserId, 'VIEWING_ADDED', {
-      property: propertyRef,
-      date: parsedSchedule.utcDate.toISOString(),
-      scheduledLocal: parsedSchedule.scheduledLocal,
-      timeZone: parsedSchedule.scheduledTimeZone,
-      notes: data.notes,
-    });
+      // Log Viewing Added
+      await logContactHistory(db, data.contactId, internalUserId, 'VIEWING_ADDED', {
+        property: propertyRef,
+        date: parsedSchedule.utcDate.toISOString(),
+        scheduledLocal: parsedSchedule.scheduledLocal,
+        timeZone: parsedSchedule.scheduledTimeZone,
+        notes: data.notes,
+      });
 
-    await syncContactInspectedPropertiesFromViewings(db, data.contactId);
+      await syncContactInspectedPropertiesFromViewings(db, data.contactId);
+    }
 
-    revalidatePath(`/admin/properties/${data.propertyId}`);
-    revalidatePath(`/admin/properties/${data.propertyId}`);
+    if (data.propertyId) {
+      revalidatePath(`/admin/properties/${data.propertyId}`);
+    }
     revalidatePath('/admin/contacts');
 
     // Trigger Google Sync for Visual ID Update (only if current user has Google connected)
@@ -1917,8 +1915,9 @@ export async function updateViewing(
 ) {
   const viewingId = formData.get('viewingId') as string;
   const validatedFields = viewingSchema.safeParse({
-    contactId: formData.get('contactId'),
-    propertyId: formData.get('propertyId'),
+    locationId: formData.get('locationId'),
+    contactId: formData.get('contactId') || undefined,
+    propertyId: formData.get('propertyId') || undefined,
     userId: formData.get('userId'),
     date: formData.get('date') || undefined,
     scheduledAtIso: formData.get('scheduledAtIso') || undefined,
@@ -1955,7 +1954,7 @@ export async function updateViewing(
 
   const resolvedAgentTimeZone = await resolveViewingAgentTimeZone({
     agentUserId: validatedFields.data.userId,
-    contactId: validatedFields.data.contactId,
+    locationId: validatedFields.data.locationId,
   });
   if (!resolvedAgentTimeZone.ok) {
     return { success: false, message: resolvedAgentTimeZone.message };
@@ -2025,9 +2024,12 @@ export async function updateViewing(
         date: parsedSchedule.utcDate,
         scheduledTimeZone: parsedSchedule.scheduledTimeZone,
         scheduledLocal: parsedSchedule.scheduledLocal,
-        notes: validatedFields.data.notes,
         userId: validatedFields.data.userId,
-        propertyId: validatedFields.data.propertyId,
+        // @ts-ignore: Prisma types cache might not reflect the optional schema change yet
+        contactId: validatedFields.data.contactId || null,
+        // @ts-ignore: Prisma types cache might not reflect the optional schema change yet
+        propertyId: validatedFields.data.propertyId || null,
+        notes: validatedFields.data.notes,
         title: validatedFields.data.title || null,
         description: validatedFields.data.description || null,
         location: validatedFields.data.location || null,
@@ -2060,8 +2062,11 @@ export async function updateViewing(
     // The schema validation allows extracting it.
     const contactId = validatedFields.data.contactId;
     if (contactId) {
-      const propertyForLog = await db.property.findUnique({ where: { id: validatedFields.data.propertyId }, select: { reference: true, title: true } });
-      const propertyRef = propertyForLog?.reference || propertyForLog?.title || 'Unknown Property';
+      let propertyRef = 'Unknown Property';
+      if (validatedFields.data.propertyId) {
+        const propertyForLog = await db.property.findUnique({ where: { id: validatedFields.data.propertyId }, select: { reference: true, title: true } });
+        propertyRef = propertyForLog?.reference || propertyForLog?.title || 'Unknown Property';
+      }
 
       await logContactHistory(db, contactId, internalUserId, 'VIEWING_UPDATED', {
         property: propertyRef,

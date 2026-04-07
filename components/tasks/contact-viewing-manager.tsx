@@ -40,7 +40,7 @@ import {
 import { createViewingSession } from '@/app/(main)/admin/viewings/sessions/actions';
 import { improveInternalNoteText } from '@/app/(main)/admin/conversations/actions';
 import { useAiModelCatalog } from '@/components/ai/use-ai-model-catalog';
-import { getContactViewings, getPropertiesForSelect, getUsersForSelect } from '@/app/(main)/admin/contacts/fetch-helpers';
+import { getContactViewings, getPropertiesForSelect, getUsersForSelect, getContactsForSelect } from '@/app/(main)/admin/contacts/fetch-helpers';
 import { SearchableSelect } from '@/app/(main)/admin/contacts/_components/searchable-select';
 import {
     formatDateTimeLocalInTimeZone,
@@ -223,7 +223,7 @@ export function ContactViewingManager({
     title = null,
     isEditing = true
 }: {
-    contactId: string;
+    contactId?: string | null;
     locationId: string;
     compact?: boolean;
     className?: string;
@@ -233,6 +233,7 @@ export function ContactViewingManager({
     const [viewings, setViewings] = useState<any[]>([]);
     const [properties, setProperties] = useState<{ id: string; title: string; unitNumber?: string | null }[]>([]);
     const [users, setUsers] = useState<{ id: string; name: string | null; email: string; ghlCalendarId?: string | null; timeZone?: string | null; effectiveTimeZone?: string | null }[]>([]);
+    const [contacts, setContacts] = useState<{ id: string; name: string | null }[]>([]);
     const [loading, setLoading] = useState(true);
 
     const [modalOpen, setModalOpen] = useState(false);
@@ -242,6 +243,7 @@ export function ContactViewingManager({
     // Form State
     const [viewingDate, setViewingDate] = useState('');
     const [viewingPropertyId, setViewingPropertyId] = useState('');
+    const [viewingContactId, setViewingContactId] = useState(contactId || '');
     const [viewingUserId, setViewingUserId] = useState('');
     const [viewingTitle, setViewingTitle] = useState('');
     const [viewingDescription, setViewingDescription] = useState('');
@@ -271,16 +273,16 @@ export function ContactViewingManager({
 
     const loadData = useCallback(async (options?: { silent?: boolean }) => {
         const silent = options?.silent ?? false;
-        if (!contactId) return;
         const requestId = ++loadRequestIdRef.current;
 
         if (!silent) setLoading(true);
 
         try {
-            const [viewingsRes, props, usrs] = await Promise.all([
-                getContactViewings(contactId),
+            const [viewingsRes, props, usrs, cnts] = await Promise.all([
+                contactId ? getContactViewings(contactId) : Promise.resolve({ viewings: [], currentUserId: null, interestedProperties: [] }),
                 getPropertiesForSelect(locationId),
-                getUsersForSelect(locationId)
+                getUsersForSelect(locationId),
+                getContactsForSelect(locationId)
             ]);
 
             if (requestId !== loadRequestIdRef.current) return;
@@ -289,6 +291,7 @@ export function ContactViewingManager({
             setViewings((res.viewings || []).map(normalizeViewing));
             setProperties(props);
             setUsers(usrs);
+            setContacts(cnts);
             setError(null);
 
             // Set Defaults
@@ -330,8 +333,8 @@ export function ContactViewingManager({
     }, [properties, viewingPropertyId]);
 
     const canSubmit = useMemo(
-        () => Boolean(viewingDate && viewingPropertyId && viewingUserId && selectedViewingAgentTimeZone && !submitting),
-        [viewingDate, viewingPropertyId, viewingUserId, selectedViewingAgentTimeZone, submitting]
+        () => Boolean(viewingDate && viewingUserId && selectedViewingAgentTimeZone && !submitting),
+        [viewingDate, viewingUserId, selectedViewingAgentTimeZone, submitting]
     );
 
     const handleImproveViewingDescription = async () => {
@@ -344,7 +347,7 @@ export function ContactViewingManager({
             const result = await improveInternalNoteText({
                 text: sourceText,
                 noteType: "viewing",
-                contactId,
+                contactId: viewingContactId || undefined,
                 modelOverride: resolveModelForKind("general") || undefined,
                 context: {
                     propertyReference: selectedViewingPropertyReference || undefined,
@@ -367,17 +370,13 @@ export function ContactViewingManager({
     const handleSubmit = async () => {
         if (!canSubmit) return;
 
-        if (!contactId) {
-            setError("No contact associated with this conversation. Please link a contact first.");
-            return;
-        }
-
         setSubmitting(true);
         setError(null);
 
         const formData = new FormData();
-        formData.append('contactId', contactId);
-        formData.append('propertyId', viewingPropertyId);
+        formData.append('locationId', locationId); // Always pass locationId
+        if (viewingContactId) formData.append('contactId', viewingContactId);
+        if (viewingPropertyId) formData.append('propertyId', viewingPropertyId);
         formData.append('userId', viewingUserId);
         formData.append('scheduledLocal', viewingDate);
         if (selectedViewingAgentTimeZone) {
@@ -430,7 +429,8 @@ export function ContactViewingManager({
         }
 
         setViewingDate(localISOTime);
-        setViewingPropertyId(viewing.propertyId);
+        setViewingPropertyId(viewing.propertyId || '');
+        setViewingContactId(viewing.contactId || '');
         setViewingUserId(viewing.userId);
         setViewingTitle(viewing.title || '');
         setViewingDescription(viewing.description || viewing.notes || '');
@@ -505,6 +505,7 @@ export function ContactViewingManager({
         setViewingLocation('');
         setViewingDuration(VIEWING_DURATION_DEFAULT);
         setEditingViewingId(null);
+        setViewingContactId(contactId || '');
 
         // Apply smart defaults for New Viewings
         setViewingUserId(defaultUserId || '');
@@ -561,13 +562,13 @@ export function ContactViewingManager({
                             // Keep local browser fallback if timezone metadata is missing/invalid.
                         }
                         const providerBadges = buildProviderBadges(viewing.syncRecords, viewing.outboxJobs);
-                        const propertyName = viewing.property.unitNumber ? `[${viewing.property.unitNumber}] ${viewing.property.title}` : viewing.property.title;
+                        const propertyName = viewing.property?.unitNumber ? `[${viewing.property.unitNumber}] ${viewing.property.title}` : viewing.property?.title || 'No Property Linked';
 
                         return (
                             <div key={viewing.id} className="rounded-md border bg-card p-2.5 text-xs space-y-1.5">
                                 <div className="flex items-start justify-between gap-2">
                                     <div className="flex flex-col gap-0.5">
-                                        <span className="font-medium text-sm text-foreground">{propertyName}</span>
+                                        <span className="font-medium text-sm text-foreground">{viewing.title || propertyName}</span>
                                         <span className="text-muted-foreground">{viewing.user.name}</span>
                                     </div>
 
@@ -653,7 +654,25 @@ export function ContactViewingManager({
                         {/* Property & Agent */}
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
-                                <Label>Property <span className="text-red-500">*</span></Label>
+                                <Label>Contact <span className="text-muted-foreground text-[10px]">(optional)</span></Label>
+                                {!locationId ? (
+                                    <div className="text-xs text-amber-600 py-2">No location configured</div>
+                                ) : (
+                                    <SearchableSelect
+                                        name="viewingContactId"
+                                        value={viewingContactId}
+                                        onChange={setViewingContactId}
+                                        options={contacts.map(c => ({
+                                            value: c.id,
+                                            label: c.name || 'Unknown Contact'
+                                        }))}
+                                        placeholder="Select Contact..."
+                                        searchPlaceholder="Search Contacts..."
+                                    />
+                                )}
+                            </div>
+                            <div className="space-y-2">
+                                <Label>Property <span className="text-muted-foreground text-[10px]">(optional)</span></Label>
                                 {!locationId ? (
                                     <div className="text-xs text-amber-600 py-2">No location configured</div>
                                 ) : (
@@ -670,6 +689,10 @@ export function ContactViewingManager({
                                     />
                                 )}
                             </div>
+                        </div>
+
+                        {/* Agent */}
+                        <div className="gap-4">
                             <div className="space-y-2">
                                 <Label>Assigned Agent <span className="text-red-500">*</span></Label>
                                 {!locationId ? (
