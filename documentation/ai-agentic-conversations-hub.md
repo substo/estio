@@ -262,7 +262,7 @@ Why:
 *   **Shared CRM Logging Path**: `Summarize` and `Custom` persist into `ContactHistory` (`MANUAL_ENTRY`) with normalized one-line entries (`DD.MM.YY FirstName: ...`) so teammates can track progress without opening the full thread.
 *   **Observability**:
     *   `Paste Lead` (`Analyze Lead Text`) persists an `AgentExecution` trace on import confirmation.
-    *   `Summarize` and `Custom` persist `AgentExecution` usage/cost records (`skillName: selection_toolbar`) and increment conversation token/cost aggregates.
+    *   `Summarize` and `Custom` persist `AgentExecution` records, increment conversation stats, and securely record Unified Telemetry (`db.AiUsage`) for accurate global billing visibility.
     *   `Find Contact` is a direct contact search action (non-AI), so it does not create model usage entries.
 
 Server actions used:

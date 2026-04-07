@@ -2533,3 +2533,18 @@ model ScrapedListing {
 
   @@unique([platform, externalId])
 }
+
+model MediaAsset {
+  id                String           @id @default(cuid())
+  cloudflareImageId String           @unique
+  url               String
+  status            MediaAssetStatus @default(ACTIVE)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  deletedAt         DateTime?
+}
+
+enum MediaAssetStatus {
+  ACTIVE
+  SOFT_DELETED
+}

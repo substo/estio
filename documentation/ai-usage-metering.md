@@ -150,14 +150,27 @@ void securelyRecordAiUsage({
 
 All API routes use `void securelyRecordAiUsage(...)` — the `void` operator discards the promise so the HTTP response returns immediately without waiting for the DB write. The internal try/catch ensures unhandled-rejection warnings are suppressed.
 
-## Instrumented API Routes
+## Instrumented Features
 
-| Route | Provider | Token Source | Cost Method | Metadata Recorded |
-|---|---|---|---|---|
-| `/api/images/enhance/analyze` | `google_gemini` | `usageMetadata` from Gemini response | Per-token | `sourceCloudflareImageId` |
-| `/api/images/enhance/generate` | `google_gemini` | `usageMetadata` from Gemini response | Per-token | `sourceCloudflareImageId`, `resultCloudflareImageId`, `aggression` |
-| `/api/images/enhance/precision-remove` | `vertex_imagen` | N/A (no tokens) | Flat $0.03/image | `sourceCloudflareImageId`, `resultCloudflareImageId`, `maskCoverage` |
-| `/api/images/enhance/room-type/predict` | `google_gemini` | `usageMetadata` from Gemini response | Per-token | `sourceCloudflareImageId`, `suggestedRoomType` |
+The following areas of the application are actively emitting Unified Telemetry:
+
+### Image Enhancement
+
+| Route / Feature | Provider | Cost Method | Metadata Recorded |
+|---|---|---|---|
+| `/api/images/enhance/analyze` | `google_gemini` | Per-token | `sourceCloudflareImageId` |
+| `/api/images/enhance/generate` | `google_gemini` | Per-token | `sourceCloudflareImageId`, `resultCloudflareImageId`, `aggression` |
+| `/api/images/enhance/precision-remove` | `vertex_imagen` | Flat $0.03/img | `sourceCloudflareImageId`, `resultCloudflareImageId`, `maskCoverage` |
+| `/api/images/enhance/room-type/predict` | `google_gemini` | Per-token | `sourceCloudflareImageId`, `suggestedRoomType` |
+
+### Conversational AI
+
+| Feature Area | Action | Provider | Token Source |
+|---|---|---|---|
+| `conversational_ai` | `generate_draft`, `generate_draft_error` | `google_gemini` | Extracted by `coordinator.ts` during generation |
+| `conversational_ai` | `summarize`, `ai_task`, etc. | `google_gemini` | Selection Toolbar actions (`actions.ts`) |
+| `smart_agent` | `orchestrate` | `google_gemini` | Orchestrator traces (`tracing.ts`) |
+| `audio_transcription` | `extract_viewing_notes` | `google_gemini` | Audio processing tool (`viewing-notes-extraction-google.ts`) |
 
 ### Token Extraction
 
@@ -276,4 +289,4 @@ No schema changes are needed — the polymorphic `resourceType`/`featureArea` fi
 - `documentation/ai-property-image-enhancement-v1.md` — property image enhancement flow (routes instrumented here)
 - `documentation/ai-configuration.md` — AI model configuration, API keys, cost tracking context
 - `documentation/viewing-intelligence-live-copilot-implementation-tracking.md` — viewing session AI (future candidate for unified metering)
-- `documentation/ai-agentic-conversations-hub.md` — conversation AI (future candidate for unified metering)
+- `documentation/ai-agentic-conversations-hub.md` — conversation AI (fully integrated into unified metering as of April 2026)

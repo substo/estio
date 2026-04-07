@@ -47,6 +47,11 @@ The Property Form is the primary interface for creating and editing properties. 
 6.  **Media**: Images, videos, and documents.
     *   **Images**: Direct upload to Cloudflare. Click "Upload Image" to select files. Optimization is automatic.
     *   **Gallery Zoom**: Use the zoom-out (−) / zoom-in (+) buttons next to the image count to change the number of thumbnails per row (2–8 columns). Smaller thumbnails make it easier to reorder large photo sets via drag-and-drop.
+    *   **Image Removal & Lifecycle**: Removing an image from a property does **not** immediately delete it from Cloudflare. Instead, the system uses a **Centralized Media Library** with **Reference Counting** and **Soft Deletes**:
+        1.  When an image is removed and saved, the system checks if any other property still uses the same Cloudflare image.
+        2.  If no other property references it, the image is **soft-deleted** (moved to Trash) with a 30-day retention period.
+        3.  Soft-deleted images can be **restored** from *Settings → Media Management*.
+        4.  After the retention period expires, admins can **permanently purge** expired images from Cloudflare via the "Empty Trash" button on the same page.
     *   **AI Enhance (Admin)**: Existing persisted images can be enhanced via an admin AI modal with two modes:
         - `Polish`: analyze issues, choose fix chips, then generate a polished variant with optional override instructions and prompt reuse for similar follow-up images.
         - `Precision Remove`: manually mask an object with brush/box tools, remove it with AI inpainting, then review the result in the same compare view used by Polish.

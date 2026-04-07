@@ -78,6 +78,17 @@ export default async function SettingsPage() {
           </Link>
         </div>
 
+        {/* Media Management Card */}
+        <div className="p-4 border rounded-lg bg-card text-card-foreground shadow-sm">
+          <h2 className="text-lg font-semibold mb-2">Media Management</h2>
+          <p className="text-sm text-muted-foreground mb-4">
+            View trashed images, restore accidentally removed photos, and purge expired assets from Cloudflare.
+          </p>
+          <Link href="/admin/settings/media">
+            <Button variant="outline">Manage Media</Button>
+          </Link>
+        </div>
+
         {/* Integrations Card */}
         <div className="p-4 border rounded-lg bg-card text-card-foreground shadow-sm">
           <h2 className="text-lg font-semibold mb-2">Integrations</h2>

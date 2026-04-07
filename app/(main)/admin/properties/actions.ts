@@ -13,6 +13,11 @@ import { currentUser } from "@clerk/nextjs/server";
 import { ensureUserExists } from "@/lib/auth/sync-user";
 import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
 import { parsePropertyImagePromptProfileUpsertsJson } from "@/lib/ai/property-image-prompt-profiles";
+import {
+    ensureMediaAssets,
+    softDeleteOrphanedAssets,
+    computeRemovedCloudflareIds,
+} from "@/lib/media/media-assets";
 
 // Helper to handle Contact Role Upsert (Local + GHL)
 async function upsertContactRole(
@@ -618,8 +623,14 @@ export async function upsertProperty(formData: FormData) {
                 data: propertyData,
             });
 
-            // Update media: Delete all and recreate
-            // NOTE: This strategy allows reordering and removing images easily via the form.
+            // ── Media Asset Reference Counting ──
+            // 1. Capture old Cloudflare IDs before wiping PropertyMedia rows
+            const oldMedia = await db.propertyMedia.findMany({
+                where: { propertyId: id, kind: 'IMAGE' },
+                select: { cloudflareImageId: true },
+            });
+
+            // 2. Delete all and recreate (existing strategy for reordering)
             await db.propertyMedia.deleteMany({ where: { propertyId: id } });
             if (mediaItems.length > 0) {
                 await db.propertyMedia.createMany({
@@ -632,6 +643,13 @@ export async function upsertProperty(formData: FormData) {
                         metadata: item.metadata as any,
                     })),
                 });
+            }
+
+            // 3. Register new assets & soft-delete orphaned ones
+            await ensureMediaAssets(mediaItems);
+            const removedCfIds = computeRemovedCloudflareIds(oldMedia, mediaItems);
+            if (removedCfIds.length > 0) {
+                await softDeleteOrphanedAssets(removedCfIds);
             }
 
         } else {
@@ -669,6 +687,12 @@ export async function upsertProperty(formData: FormData) {
                     data: mergedData,
                 });
 
+                // ── Media Asset Reference Counting (overwrite path) ──
+                const oldOverwriteMedia = await db.propertyMedia.findMany({
+                    where: { propertyId: existing.id, kind: 'IMAGE' },
+                    select: { cloudflareImageId: true },
+                });
+
                 // Re-create media for the overwritten property
                 await db.propertyMedia.deleteMany({ where: { propertyId: existing.id } });
 
@@ -684,6 +708,13 @@ export async function upsertProperty(formData: FormData) {
                             metadata: item.metadata as any,
                         })),
                     });
+                }
+
+                // Register new assets & soft-delete orphaned ones
+                await ensureMediaAssets(mediaItems);
+                const removedOverwriteCfIds = computeRemovedCloudflareIds(oldOverwriteMedia, mediaItems);
+                if (removedOverwriteCfIds.length > 0) {
+                    await softDeleteOrphanedAssets(removedOverwriteCfIds);
                 }
 
             } else {
@@ -704,6 +735,9 @@ export async function upsertProperty(formData: FormData) {
                         },
                     },
                 });
+
+                // Register new assets in the centralized media library
+                await ensureMediaAssets(mediaItems);
             }
         }
 
@@ -873,6 +907,12 @@ export async function deletePropertyAction(propertyId: string, locationId: strin
             throw new Error("Unauthorized: Access Denied");
         }
 
+        // ── Capture media before deletion for orphan detection ──
+        const deletingMedia = await db.propertyMedia.findMany({
+            where: { propertyId, kind: 'IMAGE' },
+            select: { cloudflareImageId: true },
+        });
+
         // Use transaction to ensure all related data is cleaned up or nothing is
         await db.$transaction(async (tx) => {
             // 1. Delete Contact Roles
@@ -905,6 +945,14 @@ export async function deletePropertyAction(propertyId: string, locationId: strin
                 where: { id: propertyId, locationId }
             });
         });
+
+        // ── Soft-delete orphaned media assets (after transaction) ──
+        const cfIdsToCheck = deletingMedia
+            .map(m => m.cloudflareImageId)
+            .filter((id): id is string => !!id);
+        if (cfIdsToCheck.length > 0) {
+            await softDeleteOrphanedAssets(cfIdsToCheck);
+        }
 
         console.log(`Successfully deleted property ${propertyId}`);
         revalidatePath("/admin/properties");
