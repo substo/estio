@@ -18,6 +18,13 @@ import {
     CollapsibleContent,
     CollapsibleTrigger,
 } from '@/components/ui/collapsible';
+import {
+    Sheet,
+    SheetContent,
+    SheetHeader,
+    SheetTitle,
+    SheetTrigger,
+} from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
 import { CONTACT_TYPES, LEAD_GOALS, LEAD_STAGES } from './contact-types';
 
@@ -81,7 +88,6 @@ export function ContactFilters({ leadSources = [], agents = [], view = 'table' }
     // --- Parse URL State ---
     const urlState = useMemo(() => ({
         q: searchParams.get('q') || '',
-        // Default category is still 'real_estate' if undefined, but logic now handles 'all'
         category: searchParams.get('category') || 'real_estate',
         type: searchParams.get('type') || '',
         priority: searchParams.get('priority') || '',
@@ -122,7 +128,6 @@ export function ContactFilters({ leadSources = [], agents = [], view = 'table' }
         const params = new URLSearchParams(searchParams);
 
         Object.entries(updates).forEach(([key, value]) => {
-            // Special handling for category: 'all' is a valid value we want to keep in URL
             if (value === null || value === '' || (value === 'all' && key !== 'category')) {
                 params.delete(key);
             } else {
@@ -130,7 +135,6 @@ export function ContactFilters({ leadSources = [], agents = [], view = 'table' }
             }
         });
 
-        // Reset page on filter change
         params.delete('page');
 
         startTransition(() => {
@@ -146,19 +150,15 @@ export function ContactFilters({ leadSources = [], agents = [], view = 'table' }
     };
 
     // --- Derived State ---
-    const activeCategory = urlState.category; // 'real_estate', 'business', 'all'
+    const activeCategory = urlState.category;
     const isRealEstateOrAll = activeCategory === 'real_estate' || activeCategory === 'all';
 
-    // Determine which types to show in dropdown
     let availableTypes: readonly string[] = [];
     if (activeCategory === 'real_estate') {
         availableTypes = REAL_ESTATE_TYPES;
     } else if (activeCategory === 'business') {
         availableTypes = BUSINESS_TYPES;
     } else {
-        // 'all' - show generic or merged? 
-        // For simplicity and space, we might just show ALL types or let them search by text.
-        // Let's merge them for the "All Contacts" view if they want to filter specific type.
         availableTypes = [...REAL_ESTATE_TYPES, ...BUSINESS_TYPES];
     }
 
@@ -176,18 +176,184 @@ export function ContactFilters({ leadSources = [], agents = [], view = 'table' }
 
     const hasAnyFilter = urlState.q || urlState.type || urlState.priority || activeFilterCount > 0;
 
+    // --- Extracted Render Helpers to reuse across Desktop Block & Mobile Sheet ---
+    
+    // Core Row Filters
+    const renderCategorySelect = (className?: string) => (
+        <Select value={activeCategory} onValueChange={(v) => updateParams({ category: v, type: null, priority: null, filter: null })}>
+            <SelectTrigger className={cn("w-[140px] h-9 text-xs font-medium", className)}>
+                <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+                <SelectItem value="real_estate">Real Estate</SelectItem>
+                <SelectItem value="business">Business</SelectItem>
+                <SelectItem value="all">All Contacts</SelectItem>
+            </SelectContent>
+        </Select>
+    );
+
+    const renderTypeSelect = (className?: string) => (
+        <Select value={urlState.type || 'all'} onValueChange={(v) => updateParams({ type: v === 'all' ? null : v })}>
+            <SelectTrigger className={cn("w-[130px] h-9 text-xs", !urlState.type && "text-muted-foreground", className)}>
+                <SelectValue placeholder="All Types" />
+            </SelectTrigger>
+            <SelectContent>
+                <SelectItem value="all">All Types</SelectItem>
+                {availableTypes.map((t) => (
+                    <SelectItem key={t} value={t}>{t}</SelectItem>
+                ))}
+            </SelectContent>
+        </Select>
+    );
+
+    const renderPrioritySelect = (className?: string) => {
+        if (!isRealEstateOrAll) return null;
+        return (
+            <Select value={urlState.priority || 'all'} onValueChange={(v) => updateParams({ priority: v === 'all' ? null : v })}>
+                <SelectTrigger className={cn("w-[110px] h-9 text-xs", !urlState.priority && "text-muted-foreground", className)}>
+                    <SelectValue placeholder="Priority" />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="all">Any Priority</SelectItem>
+                    {PRIORITIES.map((p) => (
+                        <SelectItem key={p} value={p}>{p}</SelectItem>
+                    ))}
+                </SelectContent>
+            </Select>
+        );
+    };
+
+    const renderSortSelect = (className?: string) => (
+        <Select value={urlState.sort} onValueChange={(v) => updateParams({ sort: v })}>
+            <SelectTrigger className={cn("w-[130px] h-9 text-xs", className)}>
+                <SelectValue placeholder="Sort by" />
+            </SelectTrigger>
+            <SelectContent>
+                {SORT_OPTIONS.map((s) => (
+                    <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                ))}
+            </SelectContent>
+        </Select>
+    );
+
+    // Advanced Filters
+    const renderAdvancedFilters = () => (
+        <>
+            <Select value={urlState.filter || 'all'} onValueChange={(v) => updateParams({ filter: v === 'all' ? null : v })}>
+                <SelectTrigger className={cn("h-9 text-xs w-full", !urlState.filter && "text-muted-foreground")}>
+                    <SelectValue placeholder="Quick Filter" />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="all">Quick Filter...</SelectItem>
+                    {QUICK_FILTERS.map((f) => (
+                        <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>
+                    ))}
+                </SelectContent>
+            </Select>
+
+            <Select value={urlState.source || 'all'} onValueChange={(v) => updateParams({ source: v === 'all' ? null : v })}>
+                <SelectTrigger className={cn("h-9 text-xs w-full", !urlState.source && "text-muted-foreground")}>
+                    <SelectValue placeholder="Source" />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="all">Source...</SelectItem>
+                    {leadSources.map((s) => (
+                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                    ))}
+                </SelectContent>
+            </Select>
+
+            <Select value={urlState.agent || 'all'} onValueChange={(v) => updateParams({ agent: v === 'all' ? null : v })}>
+                <SelectTrigger className={cn("h-9 text-xs w-full", !urlState.agent && "text-muted-foreground")}>
+                    <SelectValue placeholder="Agent" />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="all">Agent...</SelectItem>
+                    {agents.map((a) => (
+                        <SelectItem key={a.id} value={a.id}>{a.name || a.email}</SelectItem>
+                    ))}
+                </SelectContent>
+            </Select>
+
+            <Select value={urlState.goal || 'all'} onValueChange={(v) => updateParams({ goal: v === 'all' ? null : v })}>
+                <SelectTrigger className={cn("h-9 text-xs w-full", !urlState.goal && "text-muted-foreground")}>
+                    <SelectValue placeholder="Goal" />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="all">Goal...</SelectItem>
+                    {LEAD_GOALS.map((g) => (
+                        <SelectItem key={g} value={g}>{g}</SelectItem>
+                    ))}
+                </SelectContent>
+            </Select>
+
+            <Select value={urlState.stage || 'all'} onValueChange={(v) => updateParams({ stage: v === 'all' ? null : v })}>
+                <SelectTrigger className={cn("h-9 text-xs w-full", !urlState.stage && "text-muted-foreground")}>
+                    <SelectValue placeholder="Stage" />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="all">Stage...</SelectItem>
+                    {LEAD_STAGES.map((s) => (
+                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                    ))}
+                </SelectContent>
+            </Select>
+
+            <Select value={urlState.district || 'all'} onValueChange={(v) => updateParams({ district: v === 'all' ? null : v })}>
+                <SelectTrigger className={cn("h-9 text-xs w-full", !urlState.district && "text-muted-foreground")}>
+                    <SelectValue placeholder="District" />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="all">District...</SelectItem>
+                    {DISTRICTS.map((d) => (
+                        <SelectItem key={d} value={d}>{d}</SelectItem>
+                    ))}
+                </SelectContent>
+            </Select>
+
+            <Select value={urlState.createdPreset || 'all'} onValueChange={(v) => updateParams({ createdPreset: v === 'all' ? null : v })}>
+                <SelectTrigger className={cn("h-9 text-xs w-full", !urlState.createdPreset && "text-muted-foreground")}>
+                    <SelectValue placeholder="Created" />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="all">Created...</SelectItem>
+                    {DATE_PRESETS.map((p) => (
+                        <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
+                    ))}
+                </SelectContent>
+            </Select>
+
+            <div className="flex gap-1 w-full">
+                <Input
+                    className="h-9 text-xs min-w-0 flex-1"
+                    placeholder="Prop Ref..."
+                    value={localPropertyRef}
+                    onChange={(e) => setLocalPropertyRef(e.target.value)}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter') updateParams({ propertyRef: localPropertyRef || null });
+                    }}
+                />
+                {localPropertyRef !== urlState.propertyRef && (
+                    <Button size="sm" variant="secondary" className="h-9 px-2 text-xs" onClick={() => updateParams({ propertyRef: localPropertyRef || null })}>
+                        Apply
+                    </Button>
+                )}
+            </div>
+        </>
+    );
+
     // --- Render ---
     return (
         <div className="space-y-3 mb-6">
 
             {/* --- PRIMARY ROW (One-Line) --- */}
-            <div className="flex flex-wrap items-center gap-2">
-                {/* Search Input (Fixed Width) */}
-                <div className="relative w-[220px]">
+            <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                {/* Search Input (Takes up available space on mobile, fixed width on desktop) */}
+                <div className="relative flex-1 md:flex-none md:w-[220px]">
                     <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                     <Input
                         placeholder="Search..."
-                        className="pl-9 pr-8 h-9"
+                        className="pl-9 pr-8 h-9 w-full"
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
                     />
@@ -202,7 +368,7 @@ export function ContactFilters({ leadSources = [], agents = [], view = 'table' }
                 </div>
 
                 {/* View Toggle (List / Pipeline) */}
-                <div className="flex rounded-md shadow-sm">
+                <div className="flex rounded-md shadow-sm shrink-0">
                     <Button
                         variant={view === 'table' ? 'default' : 'outline'}
                         size="sm"
@@ -223,204 +389,103 @@ export function ContactFilters({ leadSources = [], agents = [], view = 'table' }
                     </Button>
                 </div>
 
-                {/* Category Select (View Mode) */}
-                {/* Replaces the toggle switch with a dropdown for better density and "All" option */}
-                <Select
-                    value={activeCategory}
-                    onValueChange={(v) => updateParams({ category: v, type: null, priority: null, filter: null })}
-                >
-                    <SelectTrigger className="w-[140px] h-9 text-xs font-medium">
-                        <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="real_estate">Real Estate</SelectItem>
-                        <SelectItem value="business">Business</SelectItem>
-                        <SelectItem value="all">All Contacts</SelectItem>
-                    </SelectContent>
-                </Select>
+                {/* DESKTOP ONLY: Core Filters */}
+                <div className="hidden md:flex items-center gap-2">
+                    {renderCategorySelect()}
+                    {renderTypeSelect()}
+                    {renderPrioritySelect()}
+                    {renderSortSelect()}
 
-                {/* Type Select */}
-                <Select value={urlState.type || 'all'} onValueChange={(v) => updateParams({ type: v === 'all' ? null : v })}>
-                    <SelectTrigger className={cn("w-[130px] h-9 text-xs", !urlState.type && "text-muted-foreground")}>
-                        <SelectValue placeholder="All Types" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="all">All Types</SelectItem>
-                        {availableTypes.map((t) => (
-                            <SelectItem key={t} value={t}>{t}</SelectItem>
-                        ))}
-                    </SelectContent>
-                </Select>
+                    <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+                        <CollapsibleTrigger asChild>
+                            <Button
+                                variant={activeFilterCount > 0 ? "secondary" : "outline"}
+                                size="sm"
+                                className="h-9 gap-2"
+                            >
+                                <Filter className="h-4 w-4" />
+                                <span>More</span>
+                                {activeFilterCount > 0 && (
+                                    <Badge variant="default" className="h-5 px-1.5 text-[10px] rounded-full">{activeFilterCount}</Badge>
+                                )}
+                                <ChevronDown className={cn("h-3 w-3 transition-transform duration-200", advancedOpen && "rotate-180")} />
+                            </Button>
+                        </CollapsibleTrigger>
+                    </Collapsible>
 
-                {/* Priority Select (Real Estate OR All) */}
-                {isRealEstateOrAll && (
-                    <Select value={urlState.priority || 'all'} onValueChange={(v) => updateParams({ priority: v === 'all' ? null : v })}>
-                        <SelectTrigger className={cn("w-[110px] h-9 text-xs", !urlState.priority && "text-muted-foreground")}>
-                            <SelectValue placeholder="Priority" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="all">Any Priority</SelectItem>
-                            {PRIORITIES.map((p) => (
-                                <SelectItem key={p} value={p}>{p}</SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                )}
-
-                {/* Sort Select */}
-                <Select value={urlState.sort} onValueChange={(v) => updateParams({ sort: v })}>
-                    <SelectTrigger className="w-[130px] h-9 text-xs">
-                        <SelectValue placeholder="Sort by" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        {SORT_OPTIONS.map((s) => (
-                            <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
-                        ))}
-                    </SelectContent>
-                </Select>
-
-                {/* Advanced Toggle */}
-                <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
-                    <CollapsibleTrigger asChild>
-                        <Button
-                            variant={activeFilterCount > 0 ? "secondary" : "outline"}
-                            size="sm"
-                            className="h-9 w-9 p-0 md:w-auto md:px-3 gap-2"
-                        >
-                            <Filter className="h-4 w-4" />
-                            <span className="hidden md:inline">More</span>
-                            {activeFilterCount > 0 && (
-                                <Badge variant="default" className="h-5 px-1.5 text-[10px] rounded-full">{activeFilterCount}</Badge>
-                            )}
-                            <ChevronDown className={cn("h-3 w-3 transition-transform duration-200 hidden md:block", advancedOpen && "rotate-180")} />
+                    {hasAnyFilter && (
+                        <Button variant="ghost" size="sm" onClick={clearAllFilters} className="h-9 px-2 text-muted-foreground hover:text-destructive">
+                            <RotateCcw className="h-4 w-4" />
                         </Button>
-                    </CollapsibleTrigger>
-                </Collapsible>
+                    )}
+                </div>
 
-                {/* Clear All - only show if filters active */}
-                {hasAnyFilter && (
-                    <Button variant="ghost" size="sm" onClick={clearAllFilters} className="h-9 px-2 text-muted-foreground hover:text-destructive">
-                        <RotateCcw className="h-4 w-4" />
-                    </Button>
-                )}
+                {/* MOBILE ONLY: Filters Drawer */}
+                <div className="md:hidden shrink-0">
+                    <Sheet>
+                        <SheetTrigger asChild>
+                            <Button variant="outline" size="sm" className="h-9 gap-2 relative">
+                                <Filter className="h-4 w-4" />
+                                <span className="hidden sm:inline">Filters</span>
+                                {(activeFilterCount > 0 || urlState.type || urlState.priority) && (
+                                    <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
+                                    </span>
+                                )}
+                            </Button>
+                        </SheetTrigger>
+                        <SheetContent side="bottom" className="h-[85vh] p-0 flex flex-col">
+                            <SheetHeader className="p-4 border-b pb-4">
+                                <SheetTitle className="text-left">Filter Contacts</SheetTitle>
+                            </SheetHeader>
+                            <div className="flex-1 overflow-y-auto p-4 space-y-6">
+                                {/* Base Filters */}
+                                <div className="space-y-4">
+                                    <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-widest">Core Grouping</h4>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        {renderCategorySelect("w-full")}
+                                        {renderTypeSelect("w-full")}
+                                        {isRealEstateOrAll && renderPrioritySelect("w-full")}
+                                        {renderSortSelect("w-full")}
+                                    </div>
+                                </div>
+                                {/* Advanced Filters */}
+                                <div className="space-y-4 border-t pt-4">
+                                    <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-widest">Detailed Search</h4>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        {renderAdvancedFilters()}
+                                    </div>
+                                </div>
+                            </div>
+                            {/* Footer Actions */}
+                            <div className="border-t p-4 mt-auto bg-background flex justify-between">
+                                {hasAnyFilter ? (
+                                    <Button variant="ghost" className="text-muted-foreground" onClick={clearAllFilters}>
+                                        Clear All
+                                    </Button>
+                                ) : (
+                                    <div></div>
+                                )}
+                                <SheetTrigger asChild>
+                                    <Button>View Results</Button>
+                                </SheetTrigger>
+                            </div>
+                        </SheetContent>
+                    </Sheet>
+                </div>
             </div>
 
-            {/* --- SECONDARY ROW (Expanded - Slide Down) --- */}
-            <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
-                <CollapsibleContent className="animate-slide-down overflow-hidden">
-                    <div className="pt-2 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
-                        {/* Quick Filter */}
-                        <Select value={urlState.filter || 'all'} onValueChange={(v) => updateParams({ filter: v === 'all' ? null : v })}>
-                            <SelectTrigger className={cn("h-9 text-xs w-full", !urlState.filter && "text-muted-foreground")}>
-                                <SelectValue placeholder="Quick Filter" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">Quick Filter...</SelectItem>
-                                {QUICK_FILTERS.map((f) => (
-                                    <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-
-                        {/* Source */}
-                        <Select value={urlState.source || 'all'} onValueChange={(v) => updateParams({ source: v === 'all' ? null : v })}>
-                            <SelectTrigger className={cn("h-9 text-xs w-full", !urlState.source && "text-muted-foreground")}>
-                                <SelectValue placeholder="Source" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">Source...</SelectItem>
-                                {leadSources.map((s) => (
-                                    <SelectItem key={s} value={s}>{s}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-
-                        {/* Agent */}
-                        <Select value={urlState.agent || 'all'} onValueChange={(v) => updateParams({ agent: v === 'all' ? null : v })}>
-                            <SelectTrigger className={cn("h-9 text-xs w-full", !urlState.agent && "text-muted-foreground")}>
-                                <SelectValue placeholder="Agent" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">Agent...</SelectItem>
-                                {agents.map((a) => (
-                                    <SelectItem key={a.id} value={a.id}>{a.name || a.email}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-
-                        {/* Goal */}
-                        <Select value={urlState.goal || 'all'} onValueChange={(v) => updateParams({ goal: v === 'all' ? null : v })}>
-                            <SelectTrigger className={cn("h-9 text-xs w-full", !urlState.goal && "text-muted-foreground")}>
-                                <SelectValue placeholder="Goal" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">Goal...</SelectItem>
-                                {LEAD_GOALS.map((g) => (
-                                    <SelectItem key={g} value={g}>{g}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-
-                        {/* Stage */}
-                        <Select value={urlState.stage || 'all'} onValueChange={(v) => updateParams({ stage: v === 'all' ? null : v })}>
-                            <SelectTrigger className={cn("h-9 text-xs w-full", !urlState.stage && "text-muted-foreground")}>
-                                <SelectValue placeholder="Stage" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">Stage...</SelectItem>
-                                {LEAD_STAGES.map((s) => (
-                                    <SelectItem key={s} value={s}>{s}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-
-                        {/* District */}
-                        <Select value={urlState.district || 'all'} onValueChange={(v) => updateParams({ district: v === 'all' ? null : v })}>
-                            <SelectTrigger className={cn("h-9 text-xs w-full", !urlState.district && "text-muted-foreground")}>
-                                <SelectValue placeholder="District" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">District...</SelectItem>
-                                {DISTRICTS.map((d) => (
-                                    <SelectItem key={d} value={d}>{d}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-
-                        {/* Created Date */}
-                        <Select value={urlState.createdPreset || 'all'} onValueChange={(v) => updateParams({ createdPreset: v === 'all' ? null : v })}>
-                            <SelectTrigger className={cn("h-9 text-xs w-full", !urlState.createdPreset && "text-muted-foreground")}>
-                                <SelectValue placeholder="Created" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">Created...</SelectItem>
-                                {DATE_PRESETS.map((p) => (
-                                    <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-
-                        {/* Property Ref (Input + Button blended) */}
-                        <div className="flex gap-1 col-span-1 md:col-span-2 lg:col-span-1">
-                            <Input
-                                className="h-9 text-xs min-w-0"
-                                placeholder="Prop Ref..."
-                                value={localPropertyRef}
-                                onChange={(e) => setLocalPropertyRef(e.target.value)}
-                                // Submit on enter
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter') updateParams({ propertyRef: localPropertyRef || null });
-                                }}
-                            />
-                            {localPropertyRef !== urlState.propertyRef && (
-                                <Button size="sm" variant="secondary" className="h-9 px-2 text-xs" onClick={() => updateParams({ propertyRef: localPropertyRef || null })}>
-                                    Apply
-                                </Button>
-                            )}
+            {/* --- SECONDARY ROW (Desktop Advanced Filters - Slide Down) --- */}
+            <div className="hidden md:block">
+                <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+                    <CollapsibleContent className="animate-slide-down overflow-hidden">
+                        <div className="pt-2 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                            {renderAdvancedFilters()}
                         </div>
-                    </div>
-                </CollapsibleContent>
-            </Collapsible>
+                    </CollapsibleContent>
+                </Collapsible>
+            </div>
         </div>
     );
 }

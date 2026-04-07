@@ -9,11 +9,23 @@ import { UserProfile } from '@/components/user-profile'
 import { AICostBadge } from '@/components/ai-cost-badge'
 import config from '@/config'
 import { HamburgerMenuIcon } from '@radix-ui/react-icons'
-import { Home, Settings, List, FileText, MessageSquare, Building, LayoutTemplate, Layers, Languages } from 'lucide-react'
+import { Home, Settings, List, FileText, MessageSquare, Building, LayoutTemplate, Layers, Languages, ArrowRight } from 'lucide-react'
 import Link from 'next/link'
 import { ReactNode } from 'react'
 import { APP_NAME } from "@/components/app-logo"
 import { QuickAssistStartButton } from "@/app/(main)/admin/viewings/sessions/_components/quick-assist-start-button"
+
+// A helper for rendering grouped nav items neatly
+const NavItem = ({ href, icon: Icon, label }: { href: string, icon: any, label: string }) => (
+  <SheetClose asChild>
+    <Link href={href}>
+      <Button variant="ghost" className="w-full justify-start font-normal h-10">
+        <Icon className="mr-3 h-4 w-4 text-muted-foreground" />
+        {label}
+      </Button>
+    </Link>
+  </SheetClose>
+);
 
 export default function DashboardTopNav({ children }: { children: ReactNode }) {
   return (
@@ -21,126 +33,55 @@ export default function DashboardTopNav({ children }: { children: ReactNode }) {
       <header className="flex h-14 lg:h-[55px] items-center gap-4 border-b px-3 bg-background">
         <Sheet>
           <SheetTrigger className="min-[1024px]:hidden p-2 transition">
-            <HamburgerMenuIcon />
+            <HamburgerMenuIcon className="h-5 w-5" />
             <Link href="/admin">
               <span className="sr-only">Home</span>
             </Link>
           </SheetTrigger>
-          <SheetContent side="left">
-            <SheetHeader>
+          <SheetContent side="left" className="w-[85vw] max-w-[320px] p-0 flex flex-col">
+            <SheetHeader className="p-4 border-b text-left">
               <Link href="/">
-                <SheetTitle>{APP_NAME}</SheetTitle>
+                <SheetTitle className="flex items-center gap-2">
+                  <span className="font-bold">{APP_NAME}</span>
+                </SheetTitle>
               </Link>
             </SheetHeader>
-            <div className="flex flex-col space-y-3 mt-[1rem]">
-              <div className="px-1">
-                <QuickAssistStartButton label="Quick Assist" variant="outline" size="sm" className="w-full" />
+            
+            <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-6">
+              
+              <div className="space-y-1">
+                <QuickAssistStartButton label="Start Quick Assist" variant="default" size="sm" className="w-full justify-start gap-2 h-10 mb-2 font-medium" />
+                <NavItem href="/admin" icon={Home} label="Overview" />
+                <NavItem href="/admin/conversations" icon={MessageSquare} label="Conversations" />
+                <NavItem href="/admin/viewings/sessions" icon={Languages} label="Quick Assist Sessions" />
               </div>
-              <SheetClose asChild>
-                <Link href="/admin">
-                  <Button variant="outline" className="w-full">
-                    <Home className="mr-2 h-4 w-4" />
-                    Overview
-                  </Button>
-                </Link>
-              </SheetClose>
-              <SheetClose asChild>
-                <Link href="/admin/conversations">
-                  <Button variant="outline" className="w-full">
-                    <MessageSquare className="mr-2 h-4 w-4" />
-                    Conversations
-                  </Button>
-                </Link>
-              </SheetClose>
-              <SheetClose asChild>
-                <Link href="/admin/viewings/sessions">
-                  <Button variant="outline" className="w-full">
-                    <Languages className="mr-2 h-4 w-4" />
-                    Quick Assist
-                  </Button>
-                </Link>
-              </SheetClose>
-              <SheetClose asChild>
-                <Link href="/admin/properties">
-                  <Button variant="outline" className="w-full">
-                    <List className="mr-2 h-4 w-4" />
-                    Properties
-                  </Button>
-                </Link>
-              </SheetClose>
-              <SheetClose asChild>
-                <Link href="/admin/contacts">
-                  <Button variant="outline" className="w-full">
-                    <FileText className="mr-2 h-4 w-4" />
-                    Contacts
-                  </Button>
-                </Link>
-              </SheetClose>
-              <SheetClose asChild>
-                <Link href="/admin/prospecting">
-                  <Button variant="outline" className="w-full">
-                    <Layers className="mr-2 h-4 w-4" />
-                    Prospects (People)
-                  </Button>
-                </Link>
-              </SheetClose>
-              <SheetClose asChild>
-                <Link href="/admin/prospecting/listings">
-                  <Button variant="outline" className="w-full">
-                    <Home className="mr-2 h-4 w-4" />
-                    Listings Inbox
-                  </Button>
-                </Link>
-              </SheetClose>
-              <SheetClose asChild>
-                <Link href="/admin/companies">
-                  <Button variant="outline" className="w-full">
-                    <Building className="mr-2 h-4 w-4" />
-                    Companies
-                  </Button>
-                </Link>
-              </SheetClose>
-              <SheetClose asChild>
-                <Link href="/admin/projects">
-                  <Button variant="outline" className="w-full">
-                    <Building className="mr-2 h-4 w-4" />
-                    Projects
-                  </Button>
-                </Link>
-              </SheetClose>
-              <SheetClose asChild>
-                <Link href="/admin/content/pages">
-                  <Button variant="outline" className="w-full">
-                    <FileText className="mr-2 h-4 w-4" />
-                    Pages
-                  </Button>
-                </Link>
-              </SheetClose>
-              <SheetClose asChild>
-                <Link href="/admin/content/posts">
-                  <Button variant="outline" className="w-full">
-                    <LayoutTemplate className="mr-2 h-4 w-4" />
-                    Blog
-                  </Button>
-                </Link>
-              </SheetClose>
-              <Separator className="my-3" />
-              <SheetClose asChild>
-                <Link href="/admin/site-settings/navigation">
-                  <Button variant="outline" className="w-full">
-                    <List className="mr-2 h-4 w-4" />
-                    Menus
-                  </Button>
-                </Link>
-              </SheetClose>
-              <SheetClose asChild>
-                <Link href="/admin/settings">
-                  <Button variant="outline" className="w-full">
-                    <Settings className="mr-2 h-4 w-4" />
-                    Settings
-                  </Button>
-                </Link>
-              </SheetClose>
+
+              <div className="space-y-1">
+                <h4 className="px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">CRM</h4>
+                <NavItem href="/admin/contacts" icon={FileText} label="Contacts" />
+                <NavItem href="/admin/prospecting" icon={Layers} label="Prospects (People)" />
+                <NavItem href="/admin/companies" icon={Building} label="Companies" />
+                <NavItem href="/admin/projects" icon={Building} label="Projects" />
+              </div>
+
+              <div className="space-y-1">
+                <h4 className="px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Listings</h4>
+                <NavItem href="/admin/properties" icon={List} label="Properties" />
+                <NavItem href="/admin/prospecting/listings" icon={Home} label="Listings Inbox" />
+              </div>
+
+              <div className="space-y-1">
+                <h4 className="px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Content</h4>
+                <NavItem href="/admin/content/pages" icon={FileText} label="Pages" />
+                <NavItem href="/admin/content/posts" icon={LayoutTemplate} label="Blog" />
+              </div>
+
+              <div className="space-y-1">
+                <h4 className="px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">System</h4>
+                <NavItem href="/admin/site-settings/navigation" icon={List} label="Menus" />
+                <NavItem href="/admin/settings" icon={Settings} label="Settings" />
+              </div>
+              
             </div>
           </SheetContent>
         </Sheet>
