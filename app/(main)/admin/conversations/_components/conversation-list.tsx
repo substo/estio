@@ -112,7 +112,14 @@ export function ConversationList({
     disablePreviewCard = false
 }: ConversationListProps) {
     const [isMenuOpen, setIsMenuOpen] = useState(false);
+    const [isSearchExpanded, setIsSearchExpanded] = useState(!!searchQuery);
+    const [localQuery, setLocalQuery] = useState(searchQuery || "");
     const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+    useEffect(() => {
+        setLocalQuery(searchQuery || "");
+        if (searchQuery) setIsSearchExpanded(true);
+    }, [searchQuery]);
     const listScrollRef = useRef<HTMLDivElement | null>(null);
     const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
 
@@ -294,32 +301,20 @@ export function ConversationList({
         }
 
         return (
-            <div className="border-b bg-slate-50 p-2 min-w-0">
-                {showSearch && (
-                    <div className="relative mb-1 sm:mb-0 sm:mr-1" data-no-pane-swipe>
-                        <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none">
-                            <Search className="h-3 w-3 text-slate-400" />
-                        </div>
-                        <input
-                            type="text"
-                            placeholder="Search..."
-                            className="block w-full pl-7 pr-7 py-1 text-xs border border-transparent rounded-md leading-5 bg-white text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                            value={searchQuery}
-                            onChange={(e) => onSearchChange(e.target.value)}
-                        />
-                        {searchQuery && (
-                            <button
-                                className="absolute inset-y-0 right-0 pr-2 flex items-center text-slate-400 hover:text-slate-600"
-                                onClick={() => onSearchChange("")}
-                            >
-                                <X className="h-3 w-3" />
-                            </button>
-                        )}
-                    </div>
-                )}
-
+            <div className="border-b bg-slate-50 p-2 min-w-0 flex flex-col gap-2">
                 <div className="flex items-center justify-between gap-1 min-w-0">
                     <div className="flex items-center gap-1 min-w-0">
+                        {showSearch && !isSearchExpanded && (
+                            <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                className="h-7 w-7 text-slate-600 hover:text-slate-900 shrink-0"
+                                onClick={() => setIsSearchExpanded(true)}
+                                title="Search Contacts"
+                            >
+                                <Search className="w-4 h-4" />
+                            </Button>
+                        )}
                         {onViewModeChange && (
                             <Tabs value={effectiveViewMode} onValueChange={(v: string) => onViewModeChange(v as 'chats' | 'deals')} className="shrink-0">
                                 <TabsList className="h-8">
@@ -488,6 +483,48 @@ export function ConversationList({
                         </TooltipProvider>
                     )}
                 </div>
+
+                {showSearch && isSearchExpanded && (
+                    <div className="relative animate-in slide-in-from-top-1 fade-in duration-200" data-no-pane-swipe>
+                        <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none">
+                            <Search className="h-3 w-3 text-slate-400" />
+                        </div>
+                        <input
+                            type="text"
+                            placeholder="Search contacts on Enter..."
+                            autoFocus
+                            className="block w-full pl-7 pr-8 py-1.5 text-xs border border-indigo-200 rounded-md leading-5 bg-white text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+                            value={localQuery}
+                            onChange={(e) => setLocalQuery(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    onSearchChange?.(localQuery);
+                                } else if (e.key === 'Escape') {
+                                    setIsSearchExpanded(false);
+                                    setLocalQuery(searchQuery || "");
+                                }
+                            }}
+                            onBlur={() => {
+                                if (!localQuery && !searchQuery) {
+                                    setIsSearchExpanded(false);
+                                }
+                            }}
+                        />
+                        <button
+                            className="absolute inset-y-0 right-0 pr-2 flex items-center text-slate-400 hover:text-slate-600"
+                            onClick={() => {
+                                if (localQuery) {
+                                    setLocalQuery("");
+                                    onSearchChange?.("");
+                                } else {
+                                    setIsSearchExpanded(false);
+                                }
+                            }}
+                        >
+                            <X className="h-3 w-3" />
+                        </button>
+                    </div>
+                )}
             </div>
         );
     };

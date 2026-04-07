@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, type TouchEvent as ReactTouchEvent, type ReactNode } from 'react';
-import { useDebounce } from 'use-debounce';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { Conversation, Message } from '@/lib/ghl/conversations';
 import type { ContactIdentityPatch } from '../../contacts/_components/contact-form';
@@ -551,7 +550,6 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const [viewMode, setViewMode] = useState<'chats' | 'deals'>(initialViewMode);
 
     const [searchQuery, setSearchQuery] = useState('');
-    const [debouncedSearchQuery] = useDebounce(searchQuery, 300);
     const [isSearching, setIsSearching] = useState(false);
     const [searchResults, setSearchResults] = useState<Conversation[]>([]);
 
@@ -581,7 +579,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
     // Global Search Effect
     useEffect(() => {
-        if (!debouncedSearchQuery.trim()) {
+        if (!searchQuery.trim()) {
             setSearchResults([]);
             setIsSearching(false);
             return;
@@ -590,7 +588,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         let isCancelled = false;
         setIsSearching(true);
 
-        searchConversations(debouncedSearchQuery, { limit: 50 })
+        searchConversations(searchQuery, { limit: 50 })
             .then(res => {
                 if (isCancelled) return;
                 if (res.success) {
@@ -612,7 +610,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         return () => {
             isCancelled = true;
         };
-    }, [debouncedSearchQuery]);
+    }, [searchQuery]);
 
     const initialDealId = searchParams.get('dealId');
     const initialUrlConversationId = searchParams.get('id');
@@ -1637,7 +1635,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             realtimeRefreshTimerRef.current = null;
             if (viewMode !== 'chats' || viewFilter === 'tasks') return;
             if (!isTabVisible) return;
-            if (debouncedSearchQuery.trim()) return;
+            if (searchQuery.trim()) return;
 
             try {
                 const selectedConversationId = activeIdRef.current || undefined;
@@ -1691,7 +1689,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         applyConversationDeltaPayload,
         applyWorkspaceCoreSnapshot,
         cacheWorkspaceCoreSnapshot,
-        debouncedSearchQuery,
+        searchQuery,
         isWorkspaceHydrationBusy,
         isTabVisible,
         trackClientRequest,
@@ -2293,7 +2291,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     useEffect(() => {
         if (viewMode !== 'chats' || viewFilter === 'tasks') return;
         if (!isTabVisible) return;
-        if (debouncedSearchQuery.trim()) return;
+        if (searchQuery.trim()) return;
         if (featureFlags.realtimeSse && realtimeMode !== 'fallback') return;
 
         let cancelled = false;
@@ -2339,7 +2337,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             cancelled = true;
             clearInterval(intervalId);
         };
-    }, [viewMode, viewFilter, isTabVisible, debouncedSearchQuery, featureFlags.balancedPolling, featureFlags.workspaceV2, featureFlags.realtimeSse, realtimeMode, applyConversationDeltaPayload, markConversationReadInUi, replaceConversationListFromResponse, trackClientRequest]);
+    }, [viewMode, viewFilter, isTabVisible, searchQuery, featureFlags.balancedPolling, featureFlags.workspaceV2, featureFlags.realtimeSse, realtimeMode, applyConversationDeltaPayload, markConversationReadInUi, replaceConversationListFromResponse, trackClientRequest]);
 
     useEffect(() => {
         if (viewMode !== 'chats' || !activeId) return;
@@ -2511,7 +2509,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
         const shouldDisableRealtime = (
             !isTabVisible
-            || (viewMode === 'chats' && debouncedSearchQuery.trim().length > 0)
+            || (viewMode === 'chats' && searchQuery.trim().length > 0)
             || (viewMode === 'chats' && viewFilter === 'tasks')
             || (viewMode !== 'chats' && viewMode !== 'deals')
         );
@@ -2709,7 +2707,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         activeDealId,
         applyRealtimeMessagePatch,
         cacheWorkspaceCoreSnapshot,
-        debouncedSearchQuery,
+        searchQuery,
         featureFlags.realtimeSse,
         getCachedWorkspaceCoreSnapshot,
         isDealWorkspaceHydrationBusy,
@@ -4371,7 +4369,10 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
     const conversationListPane = (
         <ConversationList
-            conversations={debouncedSearchQuery.trim() ? searchResults : conversations}
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            isSearching={isSearching}
+            conversations={searchQuery.trim() ? searchResults : conversations}
             selectedId={viewMode === 'chats' ? activeId : activeDealId}
             onSelect={handleSelect}
             onHoverConversation={viewMode === 'chats' ? prefetchWorkspaceCore : undefined}
