@@ -41,7 +41,7 @@ interface CoordinatorPanelProps {
     onDeselect?: (id: string) => void;
     onSuggestionsGenerated?: (suggestions: string[]) => void;
     onContactSaved?: (patch: ContactIdentityPatch) => void;
-    onContactMerged?: (targetContactId: string) => void;
+    onContactMerged?: (targetContactId: string, targetConversationId?: string | null) => void;
 }
 
 interface DealContactOption {

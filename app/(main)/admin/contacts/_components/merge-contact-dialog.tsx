@@ -36,7 +36,7 @@ interface MergeContactDialogProps {
     trigger?: React.ReactNode;
     open?: boolean;
     onOpenChange?: (open: boolean) => void;
-    onMergeSuccess?: (targetContactId: string) => void;
+    onMergeSuccess?: (targetContactId: string, targetConversationId?: string | null) => void;
 }
 
 export function MergeContactDialog({ sourceContactId, sourceName, trigger, open, onOpenChange, onMergeSuccess }: MergeContactDialogProps) {
@@ -88,7 +88,7 @@ export function MergeContactDialog({ sourceContactId, sourceName, trigger, open,
                 toast.success("Contacts merged successfully!");
                 setOpen(false);
                 if (onMergeSuccess) {
-                    onMergeSuccess(targetContactId);
+                    onMergeSuccess(targetContactId, (result as any).targetConversationId || null);
                 } else {
                     // Force hard refresh to update UI and redirect
                     // Use window.location.assign to avoid issues with space injection
@@ -146,11 +146,13 @@ export function MergeContactDialog({ sourceContactId, sourceName, trigger, open,
                                     variant="outline"
                                     role="combobox"
                                     aria-expanded={searchOpen}
-                                    className="w-full justify-between"
+                                    className="w-full justify-between min-w-0"
                                 >
-                                    {targetContactId
-                                        ? results.find((c) => c.id === targetContactId)?.name || results.find((c) => c.id === targetContactId)?.phone || "Selected Contact"
-                                        : "Search contact..."}
+                                    <span className="truncate">
+                                        {targetContactId
+                                            ? results.find((c) => c.id === targetContactId)?.name || results.find((c) => c.id === targetContactId)?.phone || "Selected Contact"
+                                            : "Search contact..."}
+                                    </span>
                                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                                 </Button>
                             </PopoverTrigger>

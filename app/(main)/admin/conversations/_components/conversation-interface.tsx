@@ -3320,25 +3320,38 @@ export function ConversationInterface({ locationId, initialConversations, initia
         ));
     }, []);
 
-    const handleContactMerged = useCallback(async (conversationId: string, targetContactId: string) => {
+    const handleContactMerged = useCallback(async (conversationId: string, targetContactId: string, targetConversationId?: string | null) => {
         const normalizedConversationId = String(conversationId || "").trim();
         if (!normalizedConversationId || !targetContactId) return;
 
-        setConversations(prev => prev.map(c =>
-            c.id === normalizedConversationId ? { ...c, contactId: targetContactId } : c
-        ));
+        // 1. Remove the old (source) conversation from the list — it's been deleted/merged
+        setConversations(prev => prev.filter(c => c.id !== normalizedConversationId));
+        setSearchResults(prev => prev.filter(c => c.id !== normalizedConversationId));
 
+        // 2. Invalidate workspace cache for the old conversation
         workspaceCoreCacheRef.current.delete(normalizedConversationId);
 
-        try {
-            const sidebar = await getConversationWorkspaceSidebar(normalizedConversationId);
-            if (sidebar?.success) {
-                setWorkspaceContactContext(sidebar.contactContext);
-                setWorkspaceTaskSummary(sidebar.taskSummary);
-                setWorkspaceViewingSummary(sidebar.viewingSummary);
+        // 3. Navigate to the target conversation if we have one
+        const targetConvId = targetConversationId ? String(targetConversationId).trim() : null;
+        if (targetConvId) {
+            setActiveId(targetConvId);
+        } else {
+            // No target conversation — just deselect
+            setActiveId(null);
+        }
+
+        // 4. Refresh the target conversation's sidebar in background
+        if (targetConvId) {
+            try {
+                const sidebar = await getConversationWorkspaceSidebar(targetConvId);
+                if (sidebar?.success) {
+                    setWorkspaceContactContext(sidebar.contactContext);
+                    setWorkspaceTaskSummary(sidebar.taskSummary);
+                    setWorkspaceViewingSummary(sidebar.viewingSummary);
+                }
+            } catch (e) {
+                console.error("Failed to refresh sidebar after merge", e);
             }
-        } catch (e) {
-            console.error("Failed to refresh sidebar after merge", e);
         }
     }, []);
 
@@ -4640,7 +4653,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 onDeselect={(id) => handleToggleSelect(id, false)}
                 onSuggestionsGenerated={handleMissionSuggestionsGenerated}
                 onContactSaved={(patch) => handleConversationContactSaved(activeConversation.id, patch)}
-                onContactMerged={(targetId) => handleContactMerged(activeConversation.id, targetId)}
+                onContactMerged={(targetId, targetConvId) => handleContactMerged(activeConversation.id, targetId, targetConvId)}
             />
         ) : <div className="h-full bg-slate-50" />
     ) : (
@@ -4661,7 +4674,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 onDeselect={() => undefined} // No deselect in deal mode
                 onSuggestionsGenerated={handleMissionSuggestionsGenerated}
                 onContactSaved={(patch) => handleConversationContactSaved(dealMissionConversation.id, patch)}
-                onContactMerged={(targetId) => handleContactMerged(dealMissionConversation.id, targetId)}
+                onContactMerged={(targetId, targetConvId) => handleContactMerged(dealMissionConversation.id, targetId, targetConvId)}
                 dealContacts={dealContacts}
                 selectedDealConversationId={dealMissionConversation.id}
                 onSelectDealConversation={(conversationId) => setActiveId(conversationId)}

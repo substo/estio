@@ -2483,8 +2483,8 @@ export async function searchContactsAction(query: string) {
       locationId: location.id,
       OR: orClauses,
     },
-    take: 40,
-    orderBy: { updatedAt: 'desc' },
+    take: 20,
+    orderBy: { createdAt: 'desc' },
     select: {
       id: true,
       name: true,
@@ -2492,7 +2492,7 @@ export async function searchContactsAction(query: string) {
       lastName: true,
       phone: true,
       email: true,
-      updatedAt: true,
+      createdAt: true,
       location: { select: { name: true } },
       conversations: {
         orderBy: { lastMessageAt: 'desc' },
@@ -2590,16 +2590,16 @@ export async function searchContactsAction(query: string) {
         conversationStatus: latestConversation?.status || null,
         matchReason,
         _score: score,
-        _updatedAt: contact.updatedAt?.getTime?.() || 0,
+        _createdAt: contact.createdAt?.getTime?.() || 0,
       };
     })
     .filter((row) => row._score > 0 || (!queryDigits && !looksLikeEmail))
     .sort((a, b) => {
       if (b._score !== a._score) return b._score - a._score;
-      return b._updatedAt - a._updatedAt;
+      return b._createdAt - a._createdAt;
     })
     .slice(0, 12)
-    .map(({ _score, _updatedAt, ...row }) => row);
+    .map(({ _score, _createdAt, ...row }) => row);
 
   return scored;
 }
@@ -2611,6 +2611,8 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
   // Resolve internal user ID
   const dbUser = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } });
   const internalUserId = dbUser?.id || null;
+
+  let targetConversationId: string | null = null;
 
   try {
     await db.$transaction(async (tx) => {
@@ -2667,14 +2669,27 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
           });
           // Delete source conv
           await tx.conversation.delete({ where: { id: sourceConv.id } });
+          // Track the target conversation for post-merge navigation
+          targetConversationId = targetConv.id;
         } else {
           console.log(`[Merge] Moving conversation ${sourceConv.id} to contact ${targetContactId}`);
-          // Move conv
+          // Move conv — the source conv is now the target's conv
           await tx.conversation.update({
             where: { id: sourceConv.id },
             data: { contactId: targetContactId }
           });
+          targetConversationId = sourceConv.id;
         }
+      }
+
+      // If source had no conversations, look up target's existing conversation
+      if (!targetConversationId) {
+        const existingTargetConv = await tx.conversation.findFirst({
+          where: { contactId: targetContactId },
+          orderBy: { lastMessageAt: 'desc' },
+          select: { id: true }
+        });
+        targetConversationId = existingTargetConv?.id || null;
       }
 
       // 4. Delete Source Contact
@@ -2685,7 +2700,8 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
     });
 
     revalidatePath('/admin/contacts');
-    return { success: true, message: "Merged successfully" };
+    revalidatePath('/admin/conversations');
+    return { success: true, message: "Merged successfully", targetContactId, targetConversationId };
   } catch (error: any) {
     console.error("Merge error:", error);
     return { success: false, message: error.message };
