@@ -44,6 +44,7 @@ We utilize Cloudflare Images for performant, resized, and optimized image delive
         *   `public`: Standard display (optimized webP/avif).
         *   `social`: Open Graph optimization (1200x630).
         *   `thumbnail`: Small previews.
+*   **Lifecycle:** Image removal is managed via the `MediaAsset` table with reference counting and 30-day soft deletes. See [Property Management Guide](./property-management-guide.md) for details.
 
 ### 3. Lead Capture Flow
 The public site serves as a primary lead generation tool.

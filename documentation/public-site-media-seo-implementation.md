@@ -20,6 +20,8 @@ We replaced the legacy "Image URL string" approach with a direct-upload integrat
     *   Properties imported via external bulk XML Feeds natively intercept and ingest standard image URLs into Cloudflare Images (`lib/feed/feed-service.ts`).
 *   **Schema Update:**
     *   Added `cloudflareImageId` to the `PropertyMedia` model.
+    *   Added `MediaAsset` model for centralized image lifecycle tracking (reference counting, soft deletes).
+        See [Property Management Guide](./property-management-guide.md#media) for the full image removal lifecycle.
 *   **Optimization:**
     *   Created `CloudflareImage` component to render optimized, resized images (`webP`, `avif`) via `imagedelivery.net`.
     *   Updated `getImageDeliveryUrl` helper to use `NEXT_PUBLIC_CLOUDFLARE_IMAGES_ACCOUNT_HASH`.
