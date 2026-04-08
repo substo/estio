@@ -39,6 +39,20 @@ type MaskAction = StrokeAction | BoxAction;
 
 type DraftAction = StrokeAction | BoxAction | null;
 
+export interface PrecisionMaskSelectableRegionBoundingBox {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
+
+export interface PrecisionMaskSelectableRegion {
+    id: string;
+    label: string;
+    bbox: PrecisionMaskSelectableRegionBoundingBox;
+    confidence?: number;
+}
+
 export interface PrecisionMaskEditorState {
     isReady: boolean;
     canUndo: boolean;
@@ -62,6 +76,7 @@ export interface PrecisionMaskEditorHandle {
     undo: () => void;
     redo: () => void;
     clear: () => void;
+    applyRegionMask: (input: { bbox: PrecisionMaskSelectableRegionBoundingBox; erase?: boolean }) => void;
     exportMask: () => Promise<PrecisionMaskSnapshot | null>;
 }
 
@@ -70,6 +85,9 @@ interface PropertyImageMaskEditorProps {
     tool: PrecisionMaskTool;
     brushSize: number;
     eraseMode: boolean;
+    selectableRegions?: PrecisionMaskSelectableRegion[];
+    clickSelectEnabled?: boolean;
+    onSelectableRegionApplied?: (payload: { regionId: string; action: "add" | "erase" }) => void;
     disabled?: boolean;
     onStateChange?: (state: PrecisionMaskEditorState) => void;
     className?: string;
@@ -124,6 +142,48 @@ function drawMaskAction(ctx: CanvasRenderingContext2D, action: MaskAction) {
     ctx.restore();
 }
 
+function clamp01(value: number): number {
+    if (!Number.isFinite(value)) return 0;
+    return Math.max(0, Math.min(1, value));
+}
+
+function normalizeSelectableRegionBoundingBox(
+    bbox: PrecisionMaskSelectableRegionBoundingBox
+): PrecisionMaskSelectableRegionBoundingBox | null {
+    const x = clamp01(Number(bbox?.x));
+    const y = clamp01(Number(bbox?.y));
+    const width = Math.max(0, clamp01(Number(bbox?.width)));
+    const height = Math.max(0, clamp01(Number(bbox?.height)));
+    if (width <= 0 || height <= 0) return null;
+    if (x >= 1 || y >= 1) return null;
+
+    const clampedWidth = Math.min(width, 1 - x);
+    const clampedHeight = Math.min(height, 1 - y);
+    if (clampedWidth <= 0 || clampedHeight <= 0) return null;
+
+    return {
+        x,
+        y,
+        width: clampedWidth,
+        height: clampedHeight,
+    };
+}
+
+function toPixelBox(
+    bbox: PrecisionMaskSelectableRegionBoundingBox,
+    editorWidth: number,
+    editorHeight: number
+): BoxAction {
+    return {
+        kind: "box",
+        erase: false,
+        x: bbox.x * editorWidth,
+        y: bbox.y * editorHeight,
+        width: bbox.width * editorWidth,
+        height: bbox.height * editorHeight,
+    };
+}
+
 function getCanvasPoint(event: ReactPointerEvent<HTMLCanvasElement>, canvas: HTMLCanvasElement) {
     const rect = canvas.getBoundingClientRect();
     if (!rect.width || !rect.height) {
@@ -145,6 +205,9 @@ export const PropertyImageMaskEditor = forwardRef<PrecisionMaskEditorHandle, Pro
         tool,
         brushSize,
         eraseMode = false,
+        selectableRegions = [],
+        clickSelectEnabled = false,
+        onSelectableRegionApplied,
         disabled = false,
         onStateChange,
         className,
@@ -164,6 +227,19 @@ export const PropertyImageMaskEditor = forwardRef<PrecisionMaskEditorHandle, Pro
             if (!editorSize.width || !editorSize.height) return 16 / 9;
             return editorSize.width / editorSize.height;
         }, [editorSize.height, editorSize.width]);
+
+        const interactiveSelectableRegions = useMemo(() => (
+            selectableRegions
+                .map((region) => {
+                    const normalizedBbox = normalizeSelectableRegionBoundingBox(region.bbox);
+                    if (!normalizedBbox) return null;
+                    return {
+                        ...region,
+                        bbox: normalizedBbox,
+                    };
+                })
+                .filter(Boolean) as PrecisionMaskSelectableRegion[]
+        ), [selectableRegions]);
 
         useEffect(() => {
             let cancelled = false;
@@ -303,6 +379,16 @@ export const PropertyImageMaskEditor = forwardRef<PrecisionMaskEditorHandle, Pro
                 setActions([]);
                 setRedoActions([]);
             },
+            applyRegionMask({ bbox, erase = false }) {
+                if (!editorSize.width || !editorSize.height || !isReady) return;
+                const normalizedBbox = normalizeSelectableRegionBoundingBox(bbox);
+                if (!normalizedBbox) return;
+                const action = toPixelBox(normalizedBbox, editorSize.width, editorSize.height);
+                commitAction({
+                    ...action,
+                    erase,
+                });
+            },
             async exportMask() {
                 const canvas = maskCanvasRef.current;
                 if (!canvas || !editorSize.width || !editorSize.height || maskCoverage <= 0) {
@@ -319,7 +405,7 @@ export const PropertyImageMaskEditor = forwardRef<PrecisionMaskEditorHandle, Pro
                     maskCoverage,
                 };
             },
-        }), [editorSize.height, editorSize.width, maskCoverage]);
+        }), [editorSize.height, editorSize.width, isReady, maskCoverage]);
 
         function commitAction(action: MaskAction | null) {
             if (!action) return;
@@ -400,6 +486,19 @@ export const PropertyImageMaskEditor = forwardRef<PrecisionMaskEditorHandle, Pro
             handlePointerUp(event);
         }
 
+        function handleSelectableRegionClick(region: PrecisionMaskSelectableRegion) {
+            if (!isReady || disabled || !editorSize.width || !editorSize.height) return;
+            const action = toPixelBox(region.bbox, editorSize.width, editorSize.height);
+            commitAction({
+                ...action,
+                erase: eraseMode,
+            });
+            onSelectableRegionApplied?.({
+                regionId: region.id,
+                action: eraseMode ? "erase" : "add",
+            });
+        }
+
         return (
             <div className={cn("space-y-2", className)}>
                 <div
@@ -430,6 +529,34 @@ export const PropertyImageMaskEditor = forwardRef<PrecisionMaskEditorHandle, Pro
                         onPointerCancel={handlePointerUp}
                         onPointerLeave={handlePointerLeave}
                     />
+
+                    {clickSelectEnabled && interactiveSelectableRegions.length > 0 ? (
+                        <div className="absolute inset-0 pointer-events-none">
+                            {interactiveSelectableRegions.map((region) => (
+                                <button
+                                    key={region.id}
+                                    type="button"
+                                    title={`${region.label}${region.confidence !== undefined ? ` (${Math.round(region.confidence * 100)}%)` : ""}`}
+                                    className={cn(
+                                        "absolute min-h-3 min-w-3 rounded-sm border-2 border-cyan-300/80 bg-cyan-400/10 transition-colors",
+                                        "hover:bg-cyan-400/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300",
+                                        disabled ? "pointer-events-none" : "pointer-events-auto"
+                                    )}
+                                    style={{
+                                        left: `${region.bbox.x * 100}%`,
+                                        top: `${region.bbox.y * 100}%`,
+                                        width: `${region.bbox.width * 100}%`,
+                                        height: `${region.bbox.height * 100}%`,
+                                    }}
+                                    onClick={(event) => {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        handleSelectableRegionClick(region);
+                                    }}
+                                />
+                            ))}
+                        </div>
+                    ) : null}
                 </div>
             </div>
         );

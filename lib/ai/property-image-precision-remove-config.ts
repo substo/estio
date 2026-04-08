@@ -51,25 +51,15 @@ export async function getPrecisionRemoveLocationSettings(
 }
 
 export async function isPrecisionRemoveEnabledForLocation(locationId?: string): Promise<boolean> {
-    if (!isPrecisionRemoveInfrastructureReady()) {
-        return false;
-    }
-
     const settings = await getPrecisionRemoveLocationSettings(locationId);
     return settings.precisionRemoveEnabled;
 }
 
-export async function assertPrecisionRemoveEnabledForLocation(locationId: string): Promise<PrecisionRemoveConfig> {
+export async function assertPrecisionRemoveEnabledForLocation(locationId: string): Promise<void> {
     const normalizedLocationId = String(locationId || "").trim();
-    const config = getPrecisionRemoveInfrastructureConfig();
-    if (!config) {
-        throw new Error("Precision Remove is not configured on this server.");
-    }
 
     const settings = await getPrecisionRemoveLocationSettings(normalizedLocationId);
     if (!settings.precisionRemoveEnabled) {
         throw new Error("Precision Remove is disabled in AI settings for this location.");
     }
-
-    return config;
 }

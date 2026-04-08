@@ -54,12 +54,14 @@ import {
     PROPERTY_IMAGE_AI_APPLY_MODES,
     type PropertyImageAiApplyMode,
 } from "@/lib/properties/property-media-ai";
+import { PRECISION_REMOVE_SMART_PRESETS } from "@/lib/ai/property-image-semantic-mask-classes";
 import {
     PropertyImageCompareViewer,
 } from "./property-image-compare-viewer";
 import {
     PropertyImageMaskEditor,
     type PrecisionMaskEditorHandle,
+    type PrecisionMaskSelectableRegion,
     type PrecisionMaskEditorState,
     type PrecisionMaskSnapshot,
     type PrecisionMaskTool,
@@ -114,8 +116,16 @@ interface PrecisionRemoveApiResponse {
     generatedImageUrl: string;
     actionLog: string[];
     model: string;
-    maskCoverage: number;
+    maskCoverage?: number;
 }
+
+type PrecisionRemoveMaskMode = "user_provided" | "background" | "foreground" | "semantic";
+
+type PrecisionRemoveRunOptions = {
+    maskMode?: PrecisionRemoveMaskMode;
+    snapshot?: PrecisionMaskSnapshot | null;
+    semanticMaskClassIds?: number[];
+};
 
 interface RoomTypePredictApiResponse {
     success: true;
@@ -140,6 +150,32 @@ const EMPTY_MODEL_PREFERENCE: PropertyImageEnhancementModelPreference = {
     analysis: "",
     generation: "",
 };
+
+function resolvePrecisionSelectableRegions(analysis: ImageEnhancementAnalysis | null): PrecisionMaskSelectableRegion[] {
+    if (!analysis) return [];
+
+    return analysis.detectedElements
+        .filter((element) => (
+            element.bbox
+            && Number.isFinite(element.bbox.x)
+            && Number.isFinite(element.bbox.y)
+            && Number.isFinite(element.bbox.width)
+            && Number.isFinite(element.bbox.height)
+            && element.bbox.width > 0
+            && element.bbox.height > 0
+        ))
+        .map((element) => ({
+            id: element.id,
+            label: element.label,
+            confidence: Number(element.confidence || 0),
+            bbox: {
+                x: element.bbox!.x,
+                y: element.bbox!.y,
+                width: element.bbox!.width,
+                height: element.bbox!.height,
+            },
+        }));
+}
 
 export function PropertyImageEnhanceDialog({
     open,
@@ -185,8 +221,11 @@ export function PropertyImageEnhanceDialog({
     const [precisionBrushSize, setPrecisionBrushSize] = useState(36);
     const [precisionEraseMode, setPrecisionEraseMode] = useState(false);
     const [precisionGuidance, setPrecisionGuidance] = useState("");
+    const [precisionClickSelectEnabled, setPrecisionClickSelectEnabled] = useState(false);
+    const [precisionSelectableRegions, setPrecisionSelectableRegions] = useState<PrecisionMaskSelectableRegion[]>([]);
+    const [isDetectingPrecisionObjects, setIsDetectingPrecisionObjects] = useState(false);
     const [precisionEditorState, setPrecisionEditorState] = useState<PrecisionMaskEditorState>(EMPTY_PRECISION_EDITOR_STATE);
-    const [lastPrecisionSnapshot, setLastPrecisionSnapshot] = useState<PrecisionMaskSnapshot | null>(null);
+    const [lastPrecisionRequest, setLastPrecisionRequest] = useState<PrecisionRemoveRunOptions | null>(null);
     const [selectedApplyMode, setSelectedApplyMode] = useState<PropertyImageAiApplyMode | null>(null);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [isGenerating, setIsGenerating] = useState(false);
@@ -251,7 +290,7 @@ export function PropertyImageEnhanceDialog({
     }, [analysis, effectivePriorPrompt, selectedRoomAnalysis]);
 
     const stage = generated ? "review" : "edit";
-    const isBusy = isAnalyzing || isGenerating || isRemoving;
+    const isBusy = isAnalyzing || isGenerating || isRemoving || isDetectingPrecisionObjects;
     const liveFinalPrompt = useMemo(() => {
         if (!effectiveAnalysis) return "";
         return buildGenerationPrompt({
@@ -288,8 +327,11 @@ export function PropertyImageEnhanceDialog({
             setPrecisionBrushSize(36);
             setPrecisionEraseMode(false);
             setPrecisionGuidance("");
+            setPrecisionClickSelectEnabled(false);
+            setPrecisionSelectableRegions([]);
+            setIsDetectingPrecisionObjects(false);
             setPrecisionEditorState(EMPTY_PRECISION_EDITOR_STATE);
-            setLastPrecisionSnapshot(null);
+            setLastPrecisionRequest(null);
             setSelectedApplyMode(null);
             setIsAnalyzing(false);
             setIsGenerating(false);
@@ -302,6 +344,12 @@ export function PropertyImageEnhanceDialog({
             setNewFixLabel("");
         }
     }, [open]);
+
+    useEffect(() => {
+        if (!open) return;
+        setPrecisionSelectableRegions([]);
+        setPrecisionClickSelectEnabled(false);
+    }, [open, image?.cloudflareImageId, image?.url]);
 
     useEffect(() => {
         if (!open) return;
@@ -455,6 +503,14 @@ export function PropertyImageEnhanceDialog({
         setPersistedModelPreference(next);
     }, [open, locationId, selectedAnalysisModel, selectedGenerationModel]);
 
+    useEffect(() => {
+        if (!open) return;
+        const regions = resolvePrecisionSelectableRegions(effectiveAnalysis);
+        if (regions.length === 0) return;
+        if (precisionSelectableRegions.length > 0) return;
+        setPrecisionSelectableRegions(regions);
+    }, [open, effectiveAnalysis, precisionSelectableRegions.length]);
+
     const handleAnalysisModelChange = (value: string) => {
         analysisModelTouchedRef.current = true;
         setSelectedAnalysisModel(value);
@@ -547,6 +603,59 @@ export function PropertyImageEnhanceDialog({
         if (stage === "review") return;
         setMode(nextMode);
         setError(null);
+    }
+
+    async function handlePrecisionDetectSelectableObjects() {
+        if (!canRun || !image || !propertyId) return;
+
+        setError(null);
+        setIsDetectingPrecisionObjects(true);
+
+        try {
+            const existingRegions = resolvePrecisionSelectableRegions(effectiveAnalysis);
+            if (existingRegions.length > 0) {
+                setPrecisionSelectableRegions(existingRegions);
+                setPrecisionClickSelectEnabled(true);
+                toast.success(`Loaded ${existingRegions.length} selectable objects from current analysis.`);
+                return;
+            }
+
+            const response = await fetch("/api/images/enhance/analyze", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    locationId,
+                    propertyId,
+                    cloudflareImageId: image.cloudflareImageId,
+                    sourceUrl: image.url,
+                    analysisModel: selectedAnalysisModel || undefined,
+                    priorPrompt: effectivePriorPrompt,
+                    userInstructions: userInstructions.trim() || undefined,
+                }),
+            });
+
+            const json = await response.json().catch(() => null);
+            if (!response.ok) {
+                throw new Error(String(json?.error || "Failed to detect selectable objects."));
+            }
+
+            const payload = json as AnalyzeApiResponse;
+            const regions = resolvePrecisionSelectableRegions(payload.analysis);
+            if (regions.length === 0) {
+                throw new Error("No selectable objects were detected for click selection.");
+            }
+
+            setPrecisionSelectableRegions(regions);
+            setPrecisionClickSelectEnabled(true);
+            toast.success(`Detected ${regions.length} selectable objects.`);
+        } catch (err) {
+            console.error("[PropertyImageEnhanceDialog] precision detect objects error:", err);
+            const message = err instanceof Error ? err.message : "Failed to detect selectable objects.";
+            setError(message);
+            toast.error(message);
+        } finally {
+            setIsDetectingPrecisionObjects(false);
+        }
     }
 
     async function handleAnalyze() {
@@ -672,21 +781,29 @@ export function PropertyImageEnhanceDialog({
         }
     }
 
-    async function handlePrecisionRemove(snapshotOverride?: PrecisionMaskSnapshot | null) {
+    async function handlePrecisionRemove(options?: PrecisionRemoveRunOptions | null) {
         if (!canRun || !image || !propertyId) return;
 
-        const snapshot = snapshotOverride || await precisionEditorRef.current?.exportMask();
-        if (!snapshot) {
-            const message = "Draw a mask before removing content.";
-            setError(message);
-            toast.error(message);
-            return;
+        const maskMode: PrecisionRemoveMaskMode = options?.maskMode || "user_provided";
+        let snapshot = options?.snapshot || null;
+
+        if (maskMode === "user_provided") {
+            snapshot = snapshot || await precisionEditorRef.current?.exportMask() || null;
+            if (!snapshot) {
+                const message = "Draw a mask before removing content.";
+                setError(message);
+                toast.error(message);
+                return;
+            }
         }
 
         setError(null);
         setIsRemoving(true);
 
         try {
+            const editorWidth = snapshot?.editorWidth || precisionEditorState.editorWidth || undefined;
+            const editorHeight = snapshot?.editorHeight || precisionEditorState.editorHeight || undefined;
+
             const response = await fetch("/api/images/enhance/precision-remove", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -695,9 +812,11 @@ export function PropertyImageEnhanceDialog({
                     propertyId,
                     cloudflareImageId: image.cloudflareImageId,
                     sourceUrl: image.url,
-                    maskPngBase64: snapshot.maskPngBase64,
-                    editorWidth: snapshot.editorWidth,
-                    editorHeight: snapshot.editorHeight,
+                    maskMode,
+                    maskPngBase64: snapshot?.maskPngBase64,
+                    editorWidth,
+                    editorHeight,
+                    semanticMaskClassIds: options?.semanticMaskClassIds,
                     guidance: precisionGuidance.trim() || undefined,
                 }),
             });
@@ -708,7 +827,11 @@ export function PropertyImageEnhanceDialog({
             }
 
             const payload = json as PrecisionRemoveApiResponse;
-            setLastPrecisionSnapshot(snapshot);
+            setLastPrecisionRequest({
+                maskMode,
+                snapshot,
+                semanticMaskClassIds: options?.semanticMaskClassIds,
+            });
             setSelectedApplyMode(null);
             setGenerated({
                 mode: "precision_remove",
@@ -733,7 +856,7 @@ export function PropertyImageEnhanceDialog({
         if (!generated) return;
 
         if (generated.mode === "precision_remove") {
-            await handlePrecisionRemove(lastPrecisionSnapshot);
+            await handlePrecisionRemove(lastPrecisionRequest);
             return;
         }
 
@@ -1077,6 +1200,38 @@ export function PropertyImageEnhanceDialog({
                     </div>
                 </div>
 
+                <div className="space-y-3 rounded-md border p-3">
+                    <div className="flex items-start justify-between gap-3">
+                        <div>
+                            <Label className="text-sm font-medium">Click To Select (Beta)</Label>
+                            <p className="text-xs text-muted-foreground">
+                                Detect objects, then click highlighted regions directly on the image to add them to the mask.
+                            </p>
+                        </div>
+                        <Switch
+                            checked={precisionClickSelectEnabled}
+                            onCheckedChange={setPrecisionClickSelectEnabled}
+                            disabled={precisionSelectableRegions.length === 0 || isBusy}
+                        />
+                    </div>
+
+                    <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => void handlePrecisionDetectSelectableObjects()}
+                        disabled={isBusy}
+                    >
+                        {isDetectingPrecisionObjects ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                        {precisionSelectableRegions.length > 0 ? "Re-detect Objects" : "Detect Objects"}
+                    </Button>
+
+                    {precisionSelectableRegions.length > 0 ? (
+                        <p className="text-xs text-muted-foreground">
+                            {precisionSelectableRegions.length} selectable object regions available.
+                        </p>
+                    ) : null}
+                </div>
+
                 <div className="space-y-2">
                     <div className="flex items-center justify-between">
                         <Label className="text-sm font-medium">Brush Size</Label>
@@ -1152,14 +1307,39 @@ export function PropertyImageEnhanceDialog({
 
                 <Button
                     type="button"
-                    onClick={() => void handlePrecisionRemove()}
+                    onClick={() => void handlePrecisionRemove({ maskMode: "user_provided" })}
                     disabled={!precisionEditorState.isReady || !precisionEditorState.hasMask || isBusy}
                 >
                     {isRemoving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                     Remove Selected Area
                 </Button>
 
-                <p className="text-xs text-muted-foreground">Provider: Imagen 3 via shared Vertex AI.</p>
+                <div className="space-y-2 rounded-md border p-3">
+                    <Label className="text-sm font-medium">Smart Remove</Label>
+                    <p className="text-xs text-muted-foreground">
+                        One-click automatic segmentation for common cleanup tasks.
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                        {PRECISION_REMOVE_SMART_PRESETS.map((preset) => (
+                            <Button
+                                key={preset.key}
+                                type="button"
+                                variant="secondary"
+                                onClick={() => void handlePrecisionRemove({
+                                    maskMode: preset.maskMode,
+                                    semanticMaskClassIds: preset.semanticMaskClassIds,
+                                })}
+                                disabled={!precisionEditorState.isReady || isBusy}
+                                title={preset.description}
+                            >
+                                {isRemoving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                                {preset.label}
+                            </Button>
+                        ))}
+                    </div>
+                </div>
+
+                <p className="text-xs text-muted-foreground">Provider: Gemini 2.5 Flash Image.</p>
             </>
         );
     }
@@ -1313,6 +1493,8 @@ export function PropertyImageEnhanceDialog({
                                                 tool={precisionTool}
                                                 brushSize={precisionBrushSize}
                                                 eraseMode={precisionEraseMode}
+                                                selectableRegions={precisionSelectableRegions}
+                                                clickSelectEnabled={precisionClickSelectEnabled}
                                                 disabled={isBusy}
                                                 onStateChange={setPrecisionEditorState}
                                             />

@@ -1,6 +1,6 @@
 # AI Property Image Enhancement (Admin)
 
-**Last Updated:** 2026-04-05
+**Last Updated:** 2026-04-08
 
 ## Overview
 
@@ -13,7 +13,7 @@ The feature now has two editing modes inside the **Property Form -> Media** tab:
    - Generate a polished variant image based on selected fixes, aggression level, and step-specific model selection.
 2. **Precision Remove**
    - Let the operator paint or box-mask an exact area.
-   - Remove the masked object with Vertex AI Imagen inpainting, then blend the masked edit back over the original image.
+   - Remove the masked object with Gemini image editing (mask-conditioned), then blend the masked edit back over the original image.
 
 Outputs remain in **Cloudflare Images** and are added as a new `PropertyMedia` variant (original image is preserved).
 
@@ -45,7 +45,7 @@ The latest updates in this implementation cycle focused on the following practic
 5. **Precision Remove mode**
    - Added a separate admin-only mode for exact object removal using manual masks.
    - The UI supports `Brush` and `Box` tools, erase mode, undo/redo, clear mask, and optional replacement guidance.
-   - Removal uses Vertex AI Imagen with a user-provided mask instead of relying only on prompt interpretation.
+   - Removal uses Gemini image editing with an explicit user-provided mask plus blending, instead of relying only on prompt interpretation.
 
 6. **Compare-first review**
    - Both modes now review results in a shared before/after compare viewer.
@@ -180,7 +180,7 @@ This route now also validates that the submitted model belongs to the server-der
 
 ### `POST /api/images/enhance/precision-remove`
 
-Validates auth + access + property media ownership, downloads the source image, applies a user mask, calls Vertex AI Imagen object removal, blends the masked result back over the original, uploads the generated image to Cloudflare, and returns:
+Validates auth + access + property media ownership, downloads the source image, applies a manual or automatic mask mode, calls Gemini image editing for object removal, blends the result for manual masks, uploads the generated image to Cloudflare, and returns:
 
 - `generatedImageId`
 - `generatedImageUrl`
@@ -239,15 +239,13 @@ AI key resolution uses `resolveLocationGoogleAiApiKey(locationId)`.
 
 Precision Remove model routing is defined in `lib/ai/property-image-precision-remove.ts`:
 
-- `imagen-3.0-capability-001` with `EDIT_MODE_INPAINT_REMOVAL`
+- `gemini-2.5-flash-image` (non-deprecation path)
 
-Vertex configuration is shared across the server:
+Precision Remove now uses the same location-level Google AI API key resolution as other image enhancement routes:
 
-- `GOOGLE_CLOUD_PROJECT_ID`
-- `GOOGLE_CLOUD_LOCATION`
-- `GOOGLE_APPLICATION_CREDENTIALS`
+- `resolveLocationGoogleAiApiKey(locationId)`
 
-Per-location availability is controlled in:
+Per-location feature availability is controlled in:
 
 - `/admin/settings/ai` -> `Enable Precision Remove`
 
@@ -258,7 +256,7 @@ Per-location availability is controlled in:
 - Rejects media that is not owned by the target property + location.
 - Prompts enforce photorealism and discourage misleading structural edits.
 - Manual override instructions are treated as guidance, but prompts still explicitly preserve architecture, layout, materials, and room truthfulness.
-- Precision Remove is hidden entirely when shared Google Cloud configuration is unavailable or the current location has not enabled it in AI Settings.
+- Precision Remove is controlled by location AI settings and remains visible when enabled there.
 - Precision Remove blends only the masked region back over the original image so non-selected areas stay as close as possible to the source photo.
 
 ## Cloudflare Hosting Strategy
@@ -278,23 +276,22 @@ Resulting image is stored as `PropertyMedia` with `cloudflareImageId`, public de
 
 ## Known Limitations
 
-- Precision Remove currently uses only **manual** masks (`Brush` and `Box`).
-- The editor does **not** yet support hover-highlight segmentation, semantic object detection, or click-to-select masks.
-- If the analyzer misses an object in `Polish`, the current fallback is text guidance through override instructions rather than automatic region selection.
-- Detected elements are removable through toggle chips, but they are not yet interactive hotspots on the image.
+- Precision Remove supports manual masks (`Brush` and `Box`), one-click smart presets (`Remove People`, `Remove Background`), and server-assisted click-to-select object regions based on analyzer bounding boxes.
+- Click-to-select currently uses bounding boxes, not pixel-accurate segmentation masks, so manual touch-up is still recommended for tight edges.
+- If the analyzer misses an object in `Polish`, the current fallback is text guidance through override instructions rather than guaranteed automatic region selection.
 - Precision Remove currently generates one result per request.
 - Capability classification for image enhancement models is still heuristic because the Google models list used here does not expose a clean, app-ready “supports structured image analysis” vs “supports image editing output” split.
 
 ## Recommended Next Phase
 
-For future improvements beyond the current manual-mask implementation:
+For future improvements beyond the current server-assisted click-to-select implementation:
 
-1. Add an image overlay with hover/click selection.
-2. Use a segmentation model to produce masks for selected objects.
-3. Feed the selected mask into the existing inpainting/removal backend.
-4. Optionally run Nano Banana afterward as the polish/finalization pass.
+1. Upgrade from bounding boxes to true pixel-accurate segmentation masks.
+2. Add low-latency hover previews for object boundaries (client-side SAM/ONNX or equivalent).
+3. Add confidence-aware region ranking so the best click targets appear first for dense scenes.
+4. Optionally chain a second polish pass after object removal for final artifact cleanup.
 
-This would build on the current Precision Remove foundation rather than replace it.
+This builds on the current Precision Remove foundation without replacing existing manual controls.
 
 ## UI Integration Points
 
@@ -358,6 +355,6 @@ NODE_OPTIONS='--max-old-space-size=8192' npx tsc --noEmit
 - `documentation/public-site-media-seo-implementation.md`
 - `documentation/ai-property-import-prompts.md`
 
-For Vertex env setup details used by `Precision Remove`, see:
+For location AI key setup used by `Precision Remove`, see:
 
-- `documentation/ai-configuration.md#vertex-env-setup-for-precision-remove`
+- `documentation/ai-configuration.md#google-ai-api-key`

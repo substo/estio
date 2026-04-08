@@ -140,9 +140,11 @@ export interface ImagePrecisionRemoveRequest {
     propertyId: string;
     cloudflareImageId?: string;
     sourceUrl?: string;
-    maskPngBase64: string;
-    editorWidth: number;
-    editorHeight: number;
+    maskMode?: "user_provided" | "background" | "foreground" | "semantic";
+    maskPngBase64?: string;
+    editorWidth?: number;
+    editorHeight?: number;
+    semanticMaskClassIds?: number[];
     guidance?: string;
 }
 
@@ -152,5 +154,5 @@ export interface ImagePrecisionRemoveResponse {
     generatedImageUrl: string;
     actionLog: string[];
     model: string;
-    maskCoverage: number;
+    maskCoverage?: number;
 }

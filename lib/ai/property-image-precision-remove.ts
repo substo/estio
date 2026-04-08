@@ -1,24 +1,24 @@
 import sharp from "sharp";
-import { google } from "googleapis";
 import { DEFAULT_EDITOR_MAX_LONG_EDGE, resolveEditorDimensions } from "@/lib/ai/property-image-editor";
+import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import {
     assertPrecisionRemoveEnabledForLocation,
-    type PrecisionRemoveConfig,
 } from "@/lib/ai/property-image-precision-remove-config";
 
-const IMAGEN_PRECISION_REMOVE_MODEL = "imagen-3.0-capability-001";
-const IMAGEN_MASK_DILATION = 0.01;
-const IMAGEN_BASE_STEPS = 12;
-const IMAGEN_SAMPLE_COUNT = 1;
-const CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform";
+const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
+const GEMINI_PRECISION_REMOVE_MODEL = "gemini-2.5-flash-image";
+
+export type PrecisionRemoveMaskMode = "user_provided" | "background" | "foreground" | "semantic";
 
 type PrecisionRemoveInput = {
     sourceImageBuffer: Buffer;
     sourceImageMimeType: string;
-    maskPngBase64: string;
-    editorWidth: number;
-    editorHeight: number;
+    maskPngBase64?: string;
+    editorWidth?: number;
+    editorHeight?: number;
     guidance?: string;
+    maskMode?: PrecisionRemoveMaskMode;
+    semanticMaskClassIds?: number[];
 };
 
 type PrecisionRemoveResult = {
@@ -26,18 +26,19 @@ type PrecisionRemoveResult = {
     mimeType: string;
     actionLog: string[];
     model: string;
-    maskCoverage: number;
+    maskCoverage?: number;
 };
 
-type VertexImagenPredictResponse = {
-    predictions?: Array<{
-        bytesBase64Encoded?: string;
-        mimeType?: string;
-        raiFilteredReason?: string;
+type GeminiGenerateContentResponse = {
+    candidates?: Array<{
+        content?: {
+            parts?: Array<{
+                text?: string;
+                inline_data?: { mime_type?: string; data?: string };
+                inlineData?: { mimeType?: string; data?: string };
+            }>;
+        };
     }>;
-    error?: {
-        message?: string;
-    };
 };
 
 function normalizeMaskBase64(input: string): string {
@@ -55,21 +56,79 @@ export function buildPrecisionRemovePrompt(guidance?: string): string {
     return String(guidance || "").trim();
 }
 
-async function getVertexAccessToken(): Promise<string> {
-    const auth = new google.auth.GoogleAuth({
-        scopes: [CLOUD_PLATFORM_SCOPE],
-    });
-    const client = await auth.getClient();
-    const tokenResponse = await client.getAccessToken();
-    const token = typeof tokenResponse === "string"
-        ? tokenResponse
-        : tokenResponse?.token;
+function buildPromptForMaskMode(input: {
+    maskMode: PrecisionRemoveMaskMode;
+    guidance?: string;
+    semanticMaskClassIds?: number[];
+}): string {
+    const guidance = buildPrecisionRemovePrompt(input.guidance);
 
-    if (!token) {
-        throw new Error("Unable to acquire Vertex AI access token.");
+    const sharedInstructions = [
+        "You are editing a real estate listing photo.",
+        "Preserve photorealism, perspective, and lighting consistency.",
+        "Avoid altering architecture, room geometry, camera framing, and untouched details.",
+    ];
+
+    let modeInstructions = "";
+    if (input.maskMode === "user_provided") {
+        modeInstructions = [
+            "Two images are provided.",
+            "Image 1 is the source photo. Image 2 is a binary mask.",
+            "White mask pixels mark regions to remove. Black pixels should be preserved.",
+            "Remove only the white-masked regions and inpaint naturally.",
+        ].join(" ");
+    } else if (input.maskMode === "background") {
+        modeInstructions = [
+            "Automatically detect the background and remove background clutter while preserving the main foreground subject.",
+            "Keep the subject edges natural and avoid halo artifacts.",
+        ].join(" ");
+    } else if (input.maskMode === "foreground") {
+        modeInstructions = [
+            "Automatically detect foreground subjects and remove the unwanted ones while preserving believable context.",
+            "Do not remove static architecture or structural room elements unless explicitly requested.",
+        ].join(" ");
+    } else {
+        const semanticHint = input.semanticMaskClassIds?.length
+            ? `Target semantic classes: ${input.semanticMaskClassIds.join(", ")}.`
+            : "Target semantic classes should be treated as removal targets.";
+        modeInstructions = [
+            "Use semantic segmentation intent to identify removal targets.",
+            semanticHint,
+            "Remove only those semantic targets and preserve everything else.",
+        ].join(" ");
     }
 
-    return token;
+    return [
+        ...sharedInstructions,
+        modeInstructions,
+        guidance ? `Additional guidance: ${guidance}` : null,
+    ].filter(Boolean).join("\n");
+}
+
+function resolveEditorDimensionsFromInput(input: {
+    sourceImageBuffer: Buffer;
+    editorWidth?: number;
+    editorHeight?: number;
+}): Promise<{ width: number; height: number; scale: number }> {
+    const providedWidth = Number(input.editorWidth);
+    const providedHeight = Number(input.editorHeight);
+
+    if (Number.isFinite(providedWidth) && providedWidth > 0 && Number.isFinite(providedHeight) && providedHeight > 0) {
+        return Promise.resolve(resolveEditorDimensions(
+            Math.round(providedWidth),
+            Math.round(providedHeight),
+            DEFAULT_EDITOR_MAX_LONG_EDGE
+        ));
+    }
+
+    return sharp(input.sourceImageBuffer)
+        .metadata()
+        .then((metadata) => {
+            if (!metadata.width || !metadata.height) {
+                throw new Error("Unable to resolve editor dimensions for Precision Remove.");
+            }
+            return resolveEditorDimensions(metadata.width, metadata.height, DEFAULT_EDITOR_MAX_LONG_EDGE);
+        });
 }
 
 export async function preparePrecisionRemoveMaskAlpha(
@@ -103,11 +162,19 @@ export async function preparePrecisionRemoveMaskAlpha(
         throw new Error("Draw a mask before removing content.");
     }
 
-    const rawMaskPngBuffer = await sharp(rawAlpha.data, {
+    const rgbMaskData = Buffer.alloc(rawAlpha.info.width * rawAlpha.info.height * 3);
+    for (let i = 0; i < rawAlpha.data.length; i += 1) {
+        const val = rawAlpha.data[i] > 0 ? 255 : 0;
+        rgbMaskData[i * 3] = val;
+        rgbMaskData[i * 3 + 1] = val;
+        rgbMaskData[i * 3 + 2] = val;
+    }
+
+    const rawMaskPngBuffer = await sharp(rgbMaskData, {
         raw: {
             width: rawAlpha.info.width,
             height: rawAlpha.info.height,
-            channels: 1,
+            channels: 3,
         },
     }).png().toBuffer();
 
@@ -129,7 +196,7 @@ async function resizeSourceForEditor(
     width: number,
     height: number,
     sourceMimeType: string
-): Promise<Buffer> {
+): Promise<{ imageBuffer: Buffer; mimeType: string }> {
     const outputFormat = String(sourceMimeType || "").toLowerCase().includes("png")
         ? "png"
         : "jpeg";
@@ -146,89 +213,110 @@ async function resizeSourceForEditor(
         pipeline = pipeline.jpeg({ quality: 92 });
     }
 
-    return pipeline.toBuffer();
+    return {
+        imageBuffer: await pipeline.toBuffer(),
+        mimeType: outputFormat === "png" ? "image/png" : "image/jpeg",
+    };
 }
 
-async function callImagenPrecisionRemove(input: {
-    config: PrecisionRemoveConfig;
-    sourceImageBase64: string;
-    maskImageBase64: string;
-    guidance?: string;
-}): Promise<{ imageBuffer: Buffer; mimeType: string }> {
-    const accessToken = await getVertexAccessToken();
-    const prompt = buildPrecisionRemovePrompt(input.guidance);
-    const endpoint = `https://${input.config.location}-aiplatform.googleapis.com/v1/projects/${input.config.projectId}/locations/${input.config.location}/publishers/google/models/${IMAGEN_PRECISION_REMOVE_MODEL}:predict`;
+function normalizeActionLog(lines: Array<string | null | undefined>): string[] {
+    const cleaned = lines
+        .flatMap((line) => String(line || "").split("\n"))
+        .map((line) => line.replace(/^[-*•\d.\s]+/, "").trim())
+        .filter(Boolean);
 
-    const body = {
-        instances: [{
-            prompt,
-            referenceImages: [
-                {
-                    referenceType: "REFERENCE_TYPE_RAW",
-                    referenceId: 1,
-                    referenceImage: {
-                        bytesBase64Encoded: input.sourceImageBase64,
-                    },
-                },
-                {
-                    referenceType: "REFERENCE_TYPE_MASK",
-                    referenceId: 2,
-                    referenceImage: {
-                        bytesBase64Encoded: input.maskImageBase64,
-                    },
-                    maskImageConfig: {
-                        maskMode: "MASK_MODE_USER_PROVIDED",
-                        dilation: IMAGEN_MASK_DILATION,
-                    },
-                },
-            ],
-        }],
-        parameters: {
-            editConfig: {
-                baseSteps: IMAGEN_BASE_STEPS,
-            },
-            editMode: "EDIT_MODE_INPAINT_REMOVAL",
-            sampleCount: IMAGEN_SAMPLE_COUNT,
-            outputOptions: {
-                mimeType: "image/png",
+    return Array.from(new Set(cleaned)).slice(0, 12);
+}
+
+function defaultActionForMaskMode(maskMode: PrecisionRemoveMaskMode): string {
+    if (maskMode === "background") return "Auto-removed background content.";
+    if (maskMode === "foreground") return "Auto-removed detected foreground content.";
+    if (maskMode === "semantic") return "Auto-removed semantic targets from the image.";
+    return "Removed content from the selected mask area.";
+}
+
+async function callGeminiPrecisionRemove(input: {
+    apiKey: string;
+    model: string;
+    sourceImageBase64: string;
+    sourceImageMimeType: string;
+    maskImageBase64?: string;
+    prompt: string;
+}): Promise<{ imageBuffer: Buffer; mimeType: string; textParts: string[] }> {
+    const endpoint = `${GEMINI_API_BASE_URL}/${input.model}:generateContent`;
+
+    const parts: Array<Record<string, unknown>> = [
+        { text: input.prompt },
+        {
+            inline_data: {
+                mime_type: input.sourceImageMimeType,
+                data: input.sourceImageBase64,
             },
         },
-    };
+    ];
+
+    if (input.maskImageBase64) {
+        parts.push({
+            inline_data: {
+                mime_type: "image/png",
+                data: input.maskImageBase64,
+            },
+        });
+    }
 
     const response = await fetch(endpoint, {
         method: "POST",
         headers: {
-            Authorization: `Bearer ${accessToken}`,
             "Content-Type": "application/json",
+            "x-goog-api-key": input.apiKey,
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+            contents: [{ parts }],
+            generationConfig: {
+                responseModalities: ["IMAGE", "TEXT"],
+            },
+        }),
     });
 
-    const responseText = await response.text().catch(() => "");
     if (!response.ok) {
-        throw new Error(`Imagen precision remove failed (${response.status}): ${responseText || response.statusText}`);
+        const responseText = await response.text().catch(() => "");
+        throw new Error(`Gemini precision remove failed (${response.status}): ${responseText || response.statusText}`);
     }
 
-    const parsed = responseText
-        ? JSON.parse(responseText) as VertexImagenPredictResponse
-        : {} as VertexImagenPredictResponse;
+    const parsed = await response.json() as GeminiGenerateContentResponse;
 
-    if (parsed.error?.message) {
-        throw new Error(parsed.error.message);
-    }
+    const textParts: string[] = [];
+    let imageData: string | null = null;
+    let mimeType = "image/png";
 
-    const prediction = parsed.predictions?.[0];
-    if (!prediction?.bytesBase64Encoded) {
-        const filteredReason = String(prediction?.raiFilteredReason || "").trim();
-        if (filteredReason) {
-            throw new Error(`Precision Remove result was filtered by Vertex AI (${filteredReason}).`);
+    for (const candidate of parsed.candidates || []) {
+        for (const part of candidate.content?.parts || []) {
+            if (part.text?.trim()) {
+                textParts.push(part.text.trim());
+            }
+
+            const inlineLegacy = part.inline_data;
+            if (!imageData && inlineLegacy?.data) {
+                imageData = inlineLegacy.data;
+                mimeType = inlineLegacy.mime_type || mimeType;
+            }
+
+            const inlineCamel = part.inlineData;
+            if (!imageData && inlineCamel?.data) {
+                imageData = inlineCamel.data;
+                mimeType = inlineCamel.mimeType || mimeType;
+            }
         }
-        throw new Error("Imagen did not return an edited image.");
+    }
+
+    if (!imageData) {
+        throw new Error("Gemini did not return an edited image.");
     }
 
     return {
-        imageBuffer: Buffer.from(prediction.bytesBase64Encoded, "base64"),
-        mimeType: prediction.mimeType || "image/png",
+        imageBuffer: Buffer.from(imageData, "base64"),
+        mimeType,
+        textParts,
     };
 }
 
@@ -290,57 +378,86 @@ export async function blendEditedImageWithMask(input: {
 export async function removeImageContentWithPrecisionMask(
     input: PrecisionRemoveInput & { locationId: string }
 ): Promise<PrecisionRemoveResult> {
-    const config = await assertPrecisionRemoveEnabledForLocation(input.locationId);
-    const resolvedEditor = resolveEditorDimensions(
-        input.editorWidth,
-        input.editorHeight,
-        DEFAULT_EDITOR_MAX_LONG_EDGE
-    );
+    await assertPrecisionRemoveEnabledForLocation(input.locationId);
 
-    const normalizedMaskBase64 = normalizeMaskBase64(input.maskPngBase64);
-    const maskBuffer = Buffer.from(normalizedMaskBase64, "base64");
-    if (!maskBuffer.length) {
-        throw new Error("Mask image is empty.");
+    const apiKey = await resolveLocationGoogleAiApiKey(input.locationId);
+    if (!apiKey) {
+        throw new Error("Google AI API key is not configured for this location.");
     }
 
-    const preparedSourceBuffer = await resizeSourceForEditor(
+    const maskMode: PrecisionRemoveMaskMode = input.maskMode || "user_provided";
+    const resolvedEditor = await resolveEditorDimensionsFromInput({
+        sourceImageBuffer: input.sourceImageBuffer,
+        editorWidth: input.editorWidth,
+        editorHeight: input.editorHeight,
+    });
+
+    const preparedSource = await resizeSourceForEditor(
         input.sourceImageBuffer,
         resolvedEditor.width,
         resolvedEditor.height,
         input.sourceImageMimeType
     );
 
-    const {
-        rawMaskPngBuffer,
-        featheredMaskRawBuffer,
-        maskCoverage,
-    } = await preparePrecisionRemoveMaskAlpha(maskBuffer, resolvedEditor.width, resolvedEditor.height);
+    let maskCoverage: number | undefined;
+    let rawMaskPngBuffer: Buffer | null = null;
+    let featheredMaskRawBuffer: Buffer | null = null;
 
-    const imagenResult = await callImagenPrecisionRemove({
-        config,
-        sourceImageBase64: preparedSourceBuffer.toString("base64"),
-        maskImageBase64: rawMaskPngBuffer.toString("base64"),
+    if (maskMode === "user_provided") {
+        const normalizedMaskBase64 = normalizeMaskBase64(input.maskPngBase64 || "");
+        const maskBuffer = Buffer.from(normalizedMaskBase64, "base64");
+        if (!maskBuffer.length) {
+            throw new Error("Mask image is empty.");
+        }
+
+        const preparedMask = await preparePrecisionRemoveMaskAlpha(maskBuffer, resolvedEditor.width, resolvedEditor.height);
+        rawMaskPngBuffer = preparedMask.rawMaskPngBuffer;
+        featheredMaskRawBuffer = preparedMask.featheredMaskRawBuffer;
+        maskCoverage = preparedMask.maskCoverage;
+    }
+
+    const prompt = buildPromptForMaskMode({
+        maskMode,
         guidance: input.guidance,
+        semanticMaskClassIds: input.semanticMaskClassIds,
     });
 
-    const blendedBuffer = await blendEditedImageWithMask({
-        originalImageBuffer: preparedSourceBuffer,
-        editedImageBuffer: imagenResult.imageBuffer,
-        featheredMaskRawBuffer,
-        width: resolvedEditor.width,
-        height: resolvedEditor.height,
+    const geminiResult = await callGeminiPrecisionRemove({
+        apiKey,
+        model: GEMINI_PRECISION_REMOVE_MODEL,
+        sourceImageBase64: preparedSource.imageBuffer.toString("base64"),
+        sourceImageMimeType: preparedSource.mimeType,
+        maskImageBase64: rawMaskPngBuffer?.toString("base64"),
+        prompt,
     });
 
-    const actionLog = [
-        "Removed content from the selected mask area.",
-        input.guidance ? "Applied optional removal guidance for the selected area." : null,
-    ].filter(Boolean) as string[];
+    let outputBuffer: Buffer;
+    if (maskMode === "user_provided" && featheredMaskRawBuffer) {
+        outputBuffer = await blendEditedImageWithMask({
+            originalImageBuffer: preparedSource.imageBuffer,
+            editedImageBuffer: geminiResult.imageBuffer,
+            featheredMaskRawBuffer,
+            width: resolvedEditor.width,
+            height: resolvedEditor.height,
+        });
+    } else {
+        outputBuffer = await sharp(geminiResult.imageBuffer)
+            .resize(resolvedEditor.width, resolvedEditor.height, { fit: "fill" })
+            .png()
+            .toBuffer();
+    }
+
+    const actionLog = normalizeActionLog([
+        defaultActionForMaskMode(maskMode),
+        input.guidance ? "Applied optional removal guidance." : null,
+        ...geminiResult.textParts,
+    ]);
 
     return {
-        imageBuffer: blendedBuffer,
+        imageBuffer: outputBuffer,
         mimeType: "image/png",
         actionLog,
-        model: IMAGEN_PRECISION_REMOVE_MODEL,
+        model: GEMINI_PRECISION_REMOVE_MODEL,
         maskCoverage,
     };
 }
