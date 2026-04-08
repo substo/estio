@@ -7,6 +7,9 @@ export type ConversationFeatureFlags = {
     workspaceSplit: boolean;
     realtimeSse: boolean;
     shallowUrlSync: boolean;
+    conversationTranslationRead: boolean;
+    conversationTranslationWrite: boolean;
+    conversationTranslationBanner: boolean;
     canaryMatch: boolean;
 };
 
@@ -78,6 +81,18 @@ export function getConversationFeatureFlags(locationId?: string | null): Convers
         readEnv("CONVERSATIONS_SHALLOW_URL_SYNC", "shallow_url_sync", "SHALLOW_URL_SYNC"),
         "on"
     );
+    const translationReadMode = parseMode(
+        readEnv("CONVERSATIONS_TRANSLATION_READ", "conversation_translation_read", "TRANSLATION_READ"),
+        "off"
+    );
+    const translationWriteMode = parseMode(
+        readEnv("CONVERSATIONS_TRANSLATION_WRITE", "conversation_translation_write", "TRANSLATION_WRITE"),
+        "off"
+    );
+    const translationBannerMode = parseMode(
+        readEnv("CONVERSATIONS_TRANSLATION_BANNER", "conversation_translation_banner", "TRANSLATION_BANNER"),
+        "off"
+    );
 
     return {
         workspaceV2: evaluateMode(workspaceMode, isCanaryLocation),
@@ -86,6 +101,9 @@ export function getConversationFeatureFlags(locationId?: string | null): Convers
         workspaceSplit: evaluateMode(workspaceSplitMode, isCanaryLocation),
         realtimeSse: evaluateMode(realtimeSseMode, isCanaryLocation),
         shallowUrlSync: evaluateMode(shallowUrlSyncMode, isCanaryLocation),
+        conversationTranslationRead: evaluateMode(translationReadMode, isCanaryLocation),
+        conversationTranslationWrite: evaluateMode(translationWriteMode, isCanaryLocation),
+        conversationTranslationBanner: evaluateMode(translationBannerMode, isCanaryLocation),
         canaryMatch: isCanaryLocation,
     };
 }

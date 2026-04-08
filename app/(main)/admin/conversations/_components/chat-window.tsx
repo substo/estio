@@ -3,7 +3,7 @@ import { Conversation, Message } from "@/lib/ghl/conversations";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, MessageSquare, RefreshCw, FileText, Trash2, Search, AudioLines, NotebookPen, ArrowLeft, ListTodo, MoreHorizontal, Wand2 } from "lucide-react";
+import { Loader2, MessageSquare, RefreshCw, FileText, Trash2, Search, AudioLines, NotebookPen, ArrowLeft, ListTodo, MoreHorizontal, Wand2, Languages } from "lucide-react";
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -36,7 +36,15 @@ interface ChatWindowProps {
     onInitialPaintReady?: () => void;
     onBack?: () => void;
     onOpenMissionControl?: () => void;
-    onSendMessage: (text: string, type: 'SMS' | 'Email' | 'WhatsApp') => void | Promise<void>;
+    onSendMessage: (
+        text: string,
+        type: 'SMS' | 'Email' | 'WhatsApp',
+        options?: {
+            translationSourceText?: string | null;
+            translationTargetLanguage?: string | null;
+            translationDetectedSourceLanguage?: string | null;
+        }
+    ) => void | Promise<void>;
     onSendMedia?: (file: File, caption: string) => void | Promise<void>;
     onRefetchMedia?: (messageId: string) => void | Promise<void>;
     onRequestTranscript?: (
@@ -61,6 +69,42 @@ interface ChatWindowProps {
         onChunk?: (chunk: string) => void
     ) => Promise<string | null>;
     onSetReplyLanguageOverride?: (replyLanguage: string | null) => Promise<{ success: boolean; error?: string; replyLanguageOverride?: string | null }>;
+    onTranslateMessage?: (messageId: string, targetLanguage?: string | null) => Promise<{
+        success: boolean;
+        error?: string;
+        messageId?: string;
+        translation?: {
+            targetLanguage: string;
+            sourceLanguage?: string | null;
+            sourceText: string;
+            translatedText: string;
+            status: "completed" | "failed";
+            provider?: string | null;
+            model?: string | null;
+            updatedAt?: string | null;
+        } | null;
+    }>;
+    onTranslateVisibleThread?: (visibleMessageIds: string[], targetLanguage?: string | null) => Promise<{
+        success: boolean;
+        error?: string;
+        translatedCount?: number;
+        failedCount?: number;
+    }>;
+    onPreviewTranslatedReply?: (
+        sourceText: string,
+        channel: "SMS" | "Email" | "WhatsApp",
+        targetLanguage?: string | null
+    ) => Promise<{
+        success: boolean;
+        error?: string;
+        targetLanguage?: string;
+        sourceText?: string;
+        translatedText?: string;
+        detectedSourceLanguage?: string | null;
+    }>;
+    translationReadEnabled?: boolean;
+    translationWriteEnabled?: boolean;
+    translationBannerEnabled?: boolean;
     onAddActivityEntry?: (entryText: string, dateIso: string) => Promise<void>;
     suggestedResponseQueue?: SuggestedResponseQueueItem[];
     suggestedResponseQueueLoading?: boolean;
@@ -148,6 +192,12 @@ export function ChatWindow({
     onSync,
     onGenerateDraft,
     onSetReplyLanguageOverride,
+    onTranslateMessage,
+    onTranslateVisibleThread,
+    onPreviewTranslatedReply,
+    translationReadEnabled = false,
+    translationWriteEnabled = false,
+    translationBannerEnabled = false,
     onFetchHistory,
     onAddActivityEntry,
     suggestedResponseQueue = [],
@@ -190,6 +240,8 @@ export function ChatWindow({
     const [addNoteDate, setAddNoteDate] = useState(new Date().toISOString().slice(0, 16));
     const [addingNote, setAddingNote] = useState(false);
     const [improvingNote, setImprovingNote] = useState(false);
+    const [translatingVisibleThread, setTranslatingVisibleThread] = useState(false);
+    const [translationBannerDismissed, setTranslationBannerDismissed] = useState(false);
 
     // Merge messages and activity log into a single timeline
     const timelineItems = useMemo(() => {
@@ -277,6 +329,7 @@ export function ChatWindow({
         hasInitializedKnownMessagesRef.current = false;
         hasReportedInitialPaintRef.current = false;
         setIsTimelineReady(false);
+        setTranslationBannerDismissed(false);
     }, [conversation.id]);
 
     useEffect(() => {
@@ -524,6 +577,45 @@ export function ChatWindow({
     }, [handleTranscriptSearch]);
 
     const batchContextText = useMemo(() => buildBatchContextText(selectionBatch), [selectionBatch]);
+    const inboundForeignCandidates = useMemo(() => {
+        return messages.filter((message) => {
+            if (message.direction !== "inbound") return false;
+            const body = String(message.body || "").trim();
+            if (!body) return false;
+            const detected = String(message.detectedLanguage || "").trim().toLowerCase();
+            if (detected && detected !== "en") return true;
+            const nonAsciiChars = body.replace(/[ -~]/g, "");
+            if (nonAsciiChars.length >= 4) return true;
+            return /\b(hola|bonjour|ciao|merci|gracias|buenos|ola|γειά|привет|salut|buenas)\b/i.test(body);
+        });
+    }, [messages]);
+    const shouldShowTranslationBanner = translationReadEnabled
+        && translationBannerEnabled
+        && !translationBannerDismissed
+        && inboundForeignCandidates.length >= 2
+        && !!onTranslateVisibleThread;
+
+    const handleTranslateVisibleThread = useCallback(async () => {
+        if (!onTranslateVisibleThread || translatingVisibleThread) return;
+        const visibleInboundIds = messages
+            .filter((message) => message.direction === "inbound" && String(message.body || "").trim().length > 0)
+            .map((message) => String(message.id || "").trim())
+            .filter(Boolean);
+        if (visibleInboundIds.length === 0) return;
+
+        setTranslatingVisibleThread(true);
+        try {
+            const result = await onTranslateVisibleThread(visibleInboundIds, conversation.replyLanguageOverride || "en");
+            if (!result?.success) {
+                toast.error(result?.error || "Failed to translate visible messages.");
+                return;
+            }
+            toast.success(`Translated ${Number(result.translatedCount || 0)} messages.`);
+            setTranslationBannerDismissed(true);
+        } finally {
+            setTranslatingVisibleThread(false);
+        }
+    }, [conversation.replyLanguageOverride, messages, onTranslateVisibleThread, translatingVisibleThread]);
     const previousTailMessageId = previousTailMessageIdRef.current;
     const previousTailIndex = previousTailMessageId
         ? messages.findIndex((message) => message.id === previousTailMessageId)
@@ -884,6 +976,33 @@ export function ChatWindow({
                 </div>
             )}
 
+            {shouldShowTranslationBanner && (
+                <div className="border-b bg-amber-50/70 px-4 py-2.5" data-no-pane-swipe>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-amber-900">
+                        <Languages className="h-3.5 w-3.5" />
+                        <span className="font-medium">Some inbound messages appear to be in another language.</span>
+                        <Button
+                            type="button"
+                            size="sm"
+                            className="h-7 px-2 text-[11px]"
+                            onClick={() => void handleTranslateVisibleThread()}
+                            disabled={translatingVisibleThread}
+                        >
+                            {translatingVisibleThread ? "Translating..." : "Translate visible thread"}
+                        </Button>
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 px-2 text-[11px]"
+                            onClick={() => setTranslationBannerDismissed(true)}
+                        >
+                            Not now
+                        </Button>
+                    </div>
+                </div>
+            )}
+
             {/* Messages Area */}
             <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 bg-slate-50/50">
                 <div
@@ -954,6 +1073,8 @@ export function ChatWindow({
                                     onClearSelectionBatch={handleClearSelectionBatch}
                                     enableMountAnimation={enableMountAnimation}
                                     onResendMessage={onResendMessage}
+                                    translationReadEnabled={translationReadEnabled}
+                                    onTranslateMessage={onTranslateMessage}
                                 />
                             </div>
                         );
@@ -981,6 +1102,8 @@ export function ChatWindow({
                 onSendMedia={onSendMedia}
                 onGenerateDraft={onGenerateDraft}
                 onSetReplyLanguageOverride={onSetReplyLanguageOverride}
+                onPreviewTranslatedReply={onPreviewTranslatedReply}
+                translationWriteEnabled={translationWriteEnabled}
                 suggestions={suggestions}
                 onModelChange={setSelectedModel}
                 insertDraftSeed={composerInsertSeed}

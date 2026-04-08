@@ -38,7 +38,15 @@ type SmsEligibilityState =
 
 interface ConversationComposerProps {
     conversation: Conversation | null;
-    onSendMessage: (text: string, type: ComposerChannel) => void | Promise<void>;
+    onSendMessage: (
+        text: string,
+        type: ComposerChannel,
+        options?: {
+            translationSourceText?: string | null;
+            translationTargetLanguage?: string | null;
+            translationDetectedSourceLanguage?: string | null;
+        }
+    ) => void | Promise<void>;
     onSendMedia?: (file: File, caption: string) => void | Promise<void>;
     onGenerateDraft?: (
         instruction?: string,
@@ -47,6 +55,19 @@ interface ConversationComposerProps {
         onChunk?: (chunk: string) => void
     ) => Promise<string | null>;
     onSetReplyLanguageOverride?: (replyLanguage: string | null) => Promise<{ success: boolean; error?: string; replyLanguageOverride?: string | null }>;
+    onPreviewTranslatedReply?: (
+        sourceText: string,
+        channel: ComposerChannel,
+        targetLanguage?: string | null
+    ) => Promise<{
+        success: boolean;
+        error?: string;
+        targetLanguage?: string;
+        sourceText?: string;
+        translatedText?: string;
+        detectedSourceLanguage?: string | null;
+    }>;
+    translationWriteEnabled?: boolean;
     suggestions?: string[];
     disabled?: boolean;
     disabledReason?: string;
@@ -81,6 +102,8 @@ export function ConversationComposer({
     onSendMedia,
     onGenerateDraft,
     onSetReplyLanguageOverride,
+    onPreviewTranslatedReply,
+    translationWriteEnabled = false,
     suggestions = [],
     disabled = false,
     disabledReason,
@@ -100,6 +123,11 @@ export function ConversationComposer({
     );
     const [replyLanguageOpen, setReplyLanguageOpen] = useState(false);
     const [savingReplyLanguage, setSavingReplyLanguage] = useState(false);
+    const [previewingTranslation, setPreviewingTranslation] = useState(false);
+    const [translationPreviewText, setTranslationPreviewText] = useState("");
+    const [translationPreviewLanguage, setTranslationPreviewLanguage] = useState<string | null>(null);
+    const [translationPreviewDetectedSource, setTranslationPreviewDetectedSource] = useState<string | null>(null);
+    const [translationPreviewSourceText, setTranslationPreviewSourceText] = useState("");
     const [whatsAppEligibility, setWhatsAppEligibility] = useState<WhatsAppEligibilityState>({ status: "checking" });
     const [smsEligibility, setSmsEligibility] = useState<SmsEligibilityState>({ status: "checking" });
     const [isRecording, setIsRecording] = useState(false);
@@ -128,6 +156,10 @@ export function ConversationComposer({
         setDraft("");
         setIsRecording(false);
         setSelectedReplyLanguage(conversation?.replyLanguageOverride || REPLY_LANGUAGE_AUTO_VALUE);
+        setTranslationPreviewText("");
+        setTranslationPreviewLanguage(null);
+        setTranslationPreviewDetectedSource(null);
+        setTranslationPreviewSourceText("");
     }, [conversation?.id]);
 
     useEffect(() => {
@@ -139,6 +171,17 @@ export function ConversationComposer({
     useEffect(() => {
         setSelectedReplyLanguage(conversation?.replyLanguageOverride || REPLY_LANGUAGE_AUTO_VALUE);
     }, [conversation?.replyLanguageOverride]);
+
+    useEffect(() => {
+        const current = String(draft || "").trim();
+        if (!translationPreviewText) return;
+        if (!translationPreviewSourceText) return;
+        if (current === translationPreviewSourceText) return;
+        setTranslationPreviewText("");
+        setTranslationPreviewLanguage(null);
+        setTranslationPreviewDetectedSource(null);
+        setTranslationPreviewSourceText("");
+    }, [draft, translationPreviewSourceText, translationPreviewText]);
 
     useEffect(() => {
         if (!conversation?.id) {
@@ -254,14 +297,53 @@ export function ConversationComposer({
         }
     }, [selectedChannel, isRecording]);
 
-    const handleSend = async () => {
+    const handleSend = async (mode: "original" | "translated" = "original") => {
         if (isUnavailable || isRecording || !draft.trim()) return;
+
+        const sourceText = draft.trim();
+        const textToSend = mode === "translated" && translationPreviewText.trim()
+            ? translationPreviewText.trim()
+            : sourceText;
+        const shouldAttachTranslationMeta = mode === "translated" && translationPreviewText.trim() && sourceText !== textToSend;
+
         setSending(true);
         try {
-            await Promise.resolve(onSendMessage(draft, selectedChannel));
+            await Promise.resolve(onSendMessage(textToSend, selectedChannel, shouldAttachTranslationMeta
+                ? {
+                    translationSourceText: sourceText,
+                    translationTargetLanguage: translationPreviewLanguage || (selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE ? null : selectedReplyLanguage),
+                    translationDetectedSourceLanguage: translationPreviewDetectedSource || null,
+                }
+                : undefined));
             setDraft("");
+            setTranslationPreviewText("");
+            setTranslationPreviewLanguage(null);
+            setTranslationPreviewDetectedSource(null);
+            setTranslationPreviewSourceText("");
         } finally {
             setSending(false);
+        }
+    };
+
+    const handlePreviewTranslation = async () => {
+        if (!onPreviewTranslatedReply || previewingTranslation || isUnavailable) return;
+        const sourceText = String(draft || "").trim();
+        if (!sourceText) return;
+
+        setPreviewingTranslation(true);
+        try {
+            const targetLanguage = selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE ? null : selectedReplyLanguage;
+            const result = await onPreviewTranslatedReply(sourceText, selectedChannel, targetLanguage);
+            if (!result?.success || !result.translatedText) {
+                toast.error(result?.error || "Failed to preview translation.");
+                return;
+            }
+            setTranslationPreviewText(String(result.translatedText || ""));
+            setTranslationPreviewLanguage(result.targetLanguage || targetLanguage || null);
+            setTranslationPreviewDetectedSource(result.detectedSourceLanguage || null);
+            setTranslationPreviewSourceText(sourceText);
+        } finally {
+            setPreviewingTranslation(false);
         }
     };
 
@@ -461,8 +543,8 @@ export function ConversationComposer({
     };
 
     const selectedReplyLanguageLabel = selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE
-        ? "Reply: Auto"
-        : `Reply: ${getReplyLanguageLabel(selectedReplyLanguage) || selectedReplyLanguage}`;
+        ? "Send: Auto"
+        : `Send: ${getReplyLanguageLabel(selectedReplyLanguage) || selectedReplyLanguage}`;
     const replyLanguageSourceHint = selectedReplyLanguage !== REPLY_LANGUAGE_AUTO_VALUE
         ? `Source: Conversation override (${getReplyLanguageLabel(selectedReplyLanguage) || selectedReplyLanguage})`
         : conversation?.contactPreferredLanguage
@@ -477,6 +559,8 @@ export function ConversationComposer({
             : isWhatsAppDisabled
                 ? (whatsAppEligibility.reason || "WhatsApp not available for this contact")
                 : undefined;
+    const canUseWriteTranslation = translationWriteEnabled && !!onPreviewTranslatedReply;
+    const hasTranslationPreview = !!translationPreviewText.trim();
 
     return (
         <div className="border-t bg-white pb-[env(safe-area-inset-bottom)]" data-no-pane-swipe>
@@ -516,10 +600,36 @@ export function ConversationComposer({
                         disabled={isUnavailable || sending || isRecording}
                         onKeyDown={(e) => {
                             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                                handleSend();
+                                handleSend("original");
                             }
                         }}
                     />
+
+                    {canUseWriteTranslation && hasTranslationPreview && (
+                        <div className="mx-3 mb-2 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs">
+                            <div className="mb-1 flex items-center justify-between gap-2 text-[11px] text-slate-500">
+                                <span>
+                                    Preview translation
+                                    {translationPreviewLanguage ? ` (${translationPreviewLanguage})` : ""}
+                                </span>
+                                <button
+                                    type="button"
+                                    className="text-slate-500 hover:text-slate-700"
+                                    onClick={() => {
+                                        setTranslationPreviewText("");
+                                        setTranslationPreviewLanguage(null);
+                                        setTranslationPreviewDetectedSource(null);
+                                        setTranslationPreviewSourceText("");
+                                    }}
+                                >
+                                    Clear
+                                </button>
+                            </div>
+                            <div className="max-h-28 overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere] text-slate-700">
+                                {translationPreviewText}
+                            </div>
+                        </div>
+                    )}
 
                     <div className="flex flex-wrap items-center gap-1 px-2 pb-1.5 sm:flex-nowrap sm:justify-between">
                         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 sm:flex-nowrap">
@@ -605,6 +715,18 @@ export function ConversationComposer({
                                             </Command>
                                         </PopoverContent>
                                     </Popover>
+                                    {canUseWriteTranslation && (
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => void handlePreviewTranslation()}
+                                            disabled={isUnavailable || previewingTranslation || !draft.trim()}
+                                            className="h-7 text-[11px] font-medium text-slate-600 hover:text-slate-800 hover:bg-slate-100 gap-1 px-1.5 sm:px-2"
+                                        >
+                                            {previewingTranslation ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                                            {previewingTranslation ? "..." : "Preview"}
+                                        </Button>
+                                    )}
                                     <Button
                                         variant="ghost"
                                         size="sm"
@@ -659,17 +781,40 @@ export function ConversationComposer({
                             {selectedChannel === "SMS" && draft.length > 0 && (
                                 <span className="text-[10px] text-slate-400">{draft.length}</span>
                             )}
-                            <Button
-                                size="sm"
-                                className={cn(
-                                    "h-7 rounded-lg px-3 transition-all duration-150",
-                                    draft.trim() ? "bg-blue-600 hover:bg-blue-700" : "bg-slate-100 text-slate-400 hover:bg-slate-200"
-                                )}
-                                onClick={handleSend}
-                                disabled={isUnavailable || sending || isRecording || !draft.trim()}
-                            >
-                                {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-                            </Button>
+                            {canUseWriteTranslation && hasTranslationPreview ? (
+                                <>
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-7 rounded-lg px-2.5 text-[11px]"
+                                        onClick={() => handleSend("original")}
+                                        disabled={isUnavailable || sending || isRecording || !draft.trim()}
+                                    >
+                                        Send Original
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        className="h-7 rounded-lg px-3 transition-all duration-150 bg-blue-600 hover:bg-blue-700"
+                                        onClick={() => handleSend("translated")}
+                                        disabled={isUnavailable || sending || isRecording || !draft.trim()}
+                                    >
+                                        {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                                        <span className="ml-1 text-[11px]">Send translated</span>
+                                    </Button>
+                                </>
+                            ) : (
+                                <Button
+                                    size="sm"
+                                    className={cn(
+                                        "h-7 rounded-lg px-3 transition-all duration-150",
+                                        draft.trim() ? "bg-blue-600 hover:bg-blue-700" : "bg-slate-100 text-slate-400 hover:bg-slate-200"
+                                    )}
+                                    onClick={() => handleSend("original")}
+                                    disabled={isUnavailable || sending || isRecording || !draft.trim()}
+                                >
+                                    {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                                </Button>
+                            )}
                         </div>
                     </div>
                 </div>

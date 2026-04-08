@@ -60,6 +60,7 @@ model Location {
   viewingSessionEvents          ViewingSessionEvent[]
   viewingSessionUsages          ViewingSessionUsage[]
   aiUsages                      AiUsage[]
+  messageTranslationCaches      MessageTranslationCache[]
 
   // WhatsApp Integration (Native)
   whatsappBusinessAccountId String?
@@ -1449,6 +1450,7 @@ model Conversation {
   aiDecisions                AiDecision[]
   aiSuggestedResponses       AiSuggestedResponse[]
   whatsappOutboundOutboxJobs WhatsAppOutboundOutbox[]
+  messageTranslationCaches   MessageTranslationCache[]
 
   @@unique([locationId, contactId])
   @@index([locationId])
@@ -1993,6 +1995,7 @@ model Message {
   conversation                 Conversation                  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   attachments                  MessageAttachment[]
   transcripts                  MessageTranscript[]
+  translationCaches            MessageTranslationCache[]
   legacyCrmLeadEmailProcessing LegacyCrmLeadEmailProcessing?
   outboundWhatsAppOutbox       WhatsAppOutboundOutbox?
 
@@ -2003,6 +2006,37 @@ model Message {
   @@index([createdAt])
   @@index([conversationId, updatedAt(sort: Desc)])
   @@index([emailThreadId])
+}
+
+model MessageTranslationCache {
+  id String @id @default(cuid())
+
+  messageId      String
+  conversationId String
+  locationId     String
+
+  targetLanguage         String
+  sourceHash             String
+  sourceText             String  @db.Text
+  translatedText         String  @db.Text
+  detectedSourceLanguage String?
+  detectionConfidence    Float?
+  status                 String  @default("completed") // completed | failed
+  provider               String?
+  model                  String?
+  error                  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  message      Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  location     Location     @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, targetLanguage, sourceHash])
+  @@index([messageId, targetLanguage, updatedAt(sort: Desc)])
+  @@index([conversationId, updatedAt(sort: Desc)])
+  @@index([locationId, updatedAt(sort: Desc)])
 }
 
 model WhatsAppOutboundOutbox {

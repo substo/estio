@@ -21,7 +21,15 @@ interface UnifiedTimelineProps {
     onBack?: () => void;
     onOpenMissionControl?: () => void;
     onInitialPaintReady?: () => void;
-    onSendMessage?: (text: string, type: 'SMS' | 'Email' | 'WhatsApp') => void | Promise<void>;
+    onSendMessage?: (
+        text: string,
+        type: 'SMS' | 'Email' | 'WhatsApp',
+        options?: {
+            translationSourceText?: string | null;
+            translationTargetLanguage?: string | null;
+            translationDetectedSourceLanguage?: string | null;
+        }
+    ) => void | Promise<void>;
     onSendMedia?: (file: File, caption: string) => void | Promise<void>;
     onGenerateDraft?: (
         instruction?: string,
@@ -30,6 +38,19 @@ interface UnifiedTimelineProps {
         onChunk?: (chunk: string) => void
     ) => Promise<string | null>;
     onSetReplyLanguageOverride?: (replyLanguage: string | null) => Promise<{ success: boolean; error?: string; replyLanguageOverride?: string | null }>;
+    onPreviewTranslatedReply?: (
+        sourceText: string,
+        channel: 'SMS' | 'Email' | 'WhatsApp',
+        targetLanguage?: string | null
+    ) => Promise<{
+        success: boolean;
+        error?: string;
+        targetLanguage?: string;
+        sourceText?: string;
+        translatedText?: string;
+        detectedSourceLanguage?: string | null;
+    }>;
+    translationWriteEnabled?: boolean;
     suggestions?: string[];
     composerDisabled?: boolean;
     composerDisabledReason?: string;
@@ -56,6 +77,8 @@ export function UnifiedTimeline({
     onSendMedia,
     onGenerateDraft,
     onSetReplyLanguageOverride,
+    onPreviewTranslatedReply,
+    translationWriteEnabled = false,
     suggestions = [],
     composerDisabled = false,
     composerDisabledReason,
@@ -317,10 +340,12 @@ export function UnifiedTimeline({
 
             <ConversationComposer
                 conversation={composerConversation}
-                onSendMessage={(text, type) => Promise.resolve(onSendMessage?.(text, type))}
+                onSendMessage={(text, type, options) => Promise.resolve(onSendMessage?.(text, type, options))}
                 onSendMedia={onSendMedia}
                 onGenerateDraft={onGenerateDraft}
                 onSetReplyLanguageOverride={onSetReplyLanguageOverride}
+                onPreviewTranslatedReply={onPreviewTranslatedReply}
+                translationWriteEnabled={translationWriteEnabled}
                 suggestions={suggestions}
                 disabled={composerDisabled || !composerConversation}
                 disabledReason={composerDisabledReason}

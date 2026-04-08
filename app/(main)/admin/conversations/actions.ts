@@ -20,6 +20,7 @@ import { callLLM, callLLMWithMetadata } from "@/lib/ai/llm";
 import { auth } from "@clerk/nextjs/server";
 import { Prisma } from "@prisma/client";
 import { revalidatePath, revalidateTag, unstable_cache } from "next/cache";
+import { createHash } from "crypto";
 import { runGoogleAutoSyncForContact } from "@/lib/google/automation";
 import { createContactTask } from "@/app/(main)/admin/tasks/actions";
 import { isLocalDateTimeWithoutZone } from "@/lib/tasks/datetime-local";
@@ -218,6 +219,81 @@ function runDetachedTask(taskName: string, task: () => Promise<void>) {
     void task().catch((error) => {
         console.error(`[DetachedTask:${taskName}] Failed:`, error);
     });
+}
+
+const DEFAULT_TRANSLATION_TARGET_LANGUAGE = "en";
+const MESSAGE_TRANSLATION_STATUS = {
+    completed: "completed",
+    failed: "failed",
+} as const;
+
+function stripHtmlToText(input: string): string {
+    return String(input || "")
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
+        .replace(/<[^>]*>/g, " ")
+        .replace(/&nbsp;/gi, " ")
+        .replace(/&amp;/gi, "&")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function normalizeTranslationTargetLanguage(
+    input: string | null | undefined,
+    fallback: string = DEFAULT_TRANSLATION_TARGET_LANGUAGE
+): string {
+    return normalizeReplyLanguage(input) || fallback;
+}
+
+function buildTranslationSourceHash(sourceText: string): string {
+    return createHash("sha256").update(String(sourceText || "").trim(), "utf8").digest("hex");
+}
+
+async function runMessageTranslationLLM(args: {
+    sourceText: string;
+    targetLanguage: string;
+    modelOverride?: string;
+}) {
+    const modelId = String(args.modelOverride || "").trim() || getModelForTask("simple_generation");
+    const systemPrompt = [
+        "You are a translation assistant for enterprise SaaS conversation inboxes.",
+        "Translate the source text to the requested target language while preserving meaning, tone, and business intent.",
+        "Do not add or remove factual content.",
+        "Return strict JSON: {\"translatedText\": string, \"detectedSourceLanguage\": string, \"confidence\": number}.",
+        "Confidence must be a number between 0 and 1.",
+    ].join("\n");
+    const userPrompt = [
+        `Target language (BCP-47): ${args.targetLanguage}`,
+        "Source text:",
+        String(args.sourceText || ""),
+    ].join("\n\n");
+
+    const { text, usage } = await callLLMWithMetadata(
+        modelId,
+        systemPrompt,
+        userPrompt,
+        { jsonMode: true, temperature: 0.1, maxOutputTokens: 1200, thinkingBudget: 0 }
+    );
+    const parsed = parseJsonObjectFromModelOutput(text);
+    const translatedText = String((parsed as any)?.translatedText || "").trim();
+    if (!translatedText) {
+        throw new Error("Translation model returned empty output.");
+    }
+
+    const detectedSourceLanguage = normalizeReplyLanguage(String((parsed as any)?.detectedSourceLanguage || "").trim()) || null;
+    const confidenceRaw = Number((parsed as any)?.confidence);
+    const confidence = Number.isFinite(confidenceRaw)
+        ? Math.min(1, Math.max(0, confidenceRaw))
+        : null;
+
+    return {
+        translatedText,
+        detectedSourceLanguage,
+        confidence,
+        provider: "google",
+        model: modelId,
+        usage,
+    };
 }
 
 function normalizeSingleLine(text: string, fallback: string): string {
@@ -1163,6 +1239,10 @@ function mapConversationRowToUi(c: any, location: { ghlLocationId?: string | nul
         contactEmail: c.contact?.email || undefined,
         contactPreferredLanguage: c.contact?.preferredLang || null,
         replyLanguageOverride: c.replyLanguageOverride || null,
+        detectedThreadLanguage: c.detectedThreadLanguage || null,
+        detectedThreadLanguageConfidence: Number.isFinite(Number(c.detectedThreadLanguageConfidence))
+            ? Number(c.detectedThreadLanguageConfidence)
+            : null,
         lastMessageBody: c.lastMessageBody || "",
         lastMessageDate: Math.floor(new Date(c.lastMessageAt).getTime() / 1000),
         unreadCount: c.unreadCount,
@@ -1556,6 +1636,22 @@ export async function fetchMessages(
                     lockedAt: true,
                 },
             },
+            translationCaches: {
+                orderBy: [{ updatedAt: "desc" }],
+                take: 12,
+                select: {
+                    id: true,
+                    targetLanguage: true,
+                    sourceText: true,
+                    translatedText: true,
+                    detectedSourceLanguage: true,
+                    detectionConfidence: true,
+                    status: true,
+                    provider: true,
+                    model: true,
+                    updatedAt: true,
+                },
+            },
             ...(includeLegacyEmailMeta ? {
                 legacyCrmLeadEmailProcessing: {
                     select: {
@@ -1685,6 +1781,40 @@ export async function fetchMessages(
         emailFrom: m.emailFrom || undefined,
         emailTo: m.emailTo || undefined,
         source: m.source || undefined,
+        detectedLanguage: (m.translationCaches?.[0]?.detectedSourceLanguage || null) || null,
+        detectedLanguageConfidence: Number.isFinite(Number(m.translationCaches?.[0]?.detectionConfidence))
+            ? Number(m.translationCaches?.[0]?.detectionConfidence)
+            : null,
+        translation: m.translationCaches?.[0]
+            ? {
+                id: m.translationCaches[0].id,
+                targetLanguage: m.translationCaches[0].targetLanguage,
+                sourceLanguage: m.translationCaches[0].detectedSourceLanguage || null,
+                sourceText: m.translationCaches[0].sourceText || "",
+                translatedText: m.translationCaches[0].translatedText || "",
+                status: String(m.translationCaches[0].status || MESSAGE_TRANSLATION_STATUS.completed).toLowerCase() === MESSAGE_TRANSLATION_STATUS.failed
+                    ? MESSAGE_TRANSLATION_STATUS.failed
+                    : MESSAGE_TRANSLATION_STATUS.completed,
+                provider: m.translationCaches[0].provider || null,
+                model: m.translationCaches[0].model || null,
+                updatedAt: m.translationCaches[0].updatedAt
+                    ? new Date(m.translationCaches[0].updatedAt).toISOString()
+                    : null,
+            }
+            : null,
+        translations: (m.translationCaches || []).map((entry: any) => ({
+            id: entry.id,
+            targetLanguage: entry.targetLanguage,
+            sourceLanguage: entry.detectedSourceLanguage || null,
+            sourceText: entry.sourceText || "",
+            translatedText: entry.translatedText || "",
+            status: String(entry.status || MESSAGE_TRANSLATION_STATUS.completed).toLowerCase() === MESSAGE_TRANSLATION_STATUS.failed
+                ? MESSAGE_TRANSLATION_STATUS.failed
+                : MESSAGE_TRANSLATION_STATUS.completed,
+            provider: entry.provider || null,
+            model: entry.model || null,
+            updatedAt: entry.updatedAt ? new Date(entry.updatedAt).toISOString() : null,
+        })),
         attachments: (m.attachments || []).map((a: any) => ({
             id: a.id,
             url: String(a.url || "").startsWith("r2://")
@@ -5383,7 +5513,12 @@ export async function sendReply(
     contactId: string,
     messageBody: string,
     type: 'SMS' | 'Email' | 'WhatsApp',
-    options?: { clientMessageId?: string }
+    options?: {
+        clientMessageId?: string;
+        translationSourceText?: string | null;
+        translationTargetLanguage?: string | null;
+        translationDetectedSourceLanguage?: string | null;
+    }
 ) {
     try {
         if (type === "WhatsApp") {
@@ -5451,6 +5586,30 @@ export async function sendReply(
                 source: "app_user",
                 clientMessageId: options?.clientMessageId || null,
             });
+
+            const translationSourceText = String(options?.translationSourceText || "").trim();
+            const translationTargetLanguage = normalizeTranslationTargetLanguage(options?.translationTargetLanguage || null);
+            if (translationSourceText && translationSourceText !== normalizedBody && enqueueResult?.messageId) {
+                const sourceHash = buildTranslationSourceHash(translationSourceText);
+                await (db as any).messageTranslationCache.create({
+                    data: {
+                        messageId: enqueueResult.messageId,
+                        conversationId: conversation.id,
+                        locationId: location.id,
+                        targetLanguage: translationTargetLanguage,
+                        sourceHash,
+                        sourceText: translationSourceText,
+                        translatedText: normalizedBody,
+                        detectedSourceLanguage: normalizeReplyLanguage(options?.translationDetectedSourceLanguage || null),
+                        detectionConfidence: null,
+                        status: MESSAGE_TRANSLATION_STATUS.completed,
+                        provider: "manual_send_preview",
+                        model: "manual_send_preview",
+                    },
+                }).catch((error: any) => {
+                    console.warn("[sendReply] Failed to persist WhatsApp outbound translation cache:", error?.message || error);
+                });
+            }
 
             invalidateConversationReadCaches(conversationId);
             emitConversationRealtimeEvent({
@@ -5554,6 +5713,52 @@ export async function sendReply(
                 locationId: location.ghlLocationId,
             };
             await syncMessageFromWebhook(msgData);
+
+            const translationSourceText = String(options?.translationSourceText || "").trim();
+            const translationTargetLanguage = normalizeTranslationTargetLanguage(options?.translationTargetLanguage || null);
+            if (translationSourceText && translationSourceText !== messageBody) {
+                const localConversation = await db.conversation.findFirst({
+                    where: {
+                        ghlConversationId: conversationId,
+                        locationId: location.id,
+                    },
+                    select: { id: true },
+                });
+                if (localConversation) {
+                    const localMessage = await db.message.findFirst({
+                        where: {
+                            conversationId: localConversation.id,
+                            OR: [
+                                { ghlMessageId: messageId },
+                                { id: messageId },
+                            ],
+                        },
+                        select: { id: true },
+                    });
+
+                    if (localMessage?.id) {
+                        const sourceHash = buildTranslationSourceHash(translationSourceText);
+                        await (db as any).messageTranslationCache.create({
+                            data: {
+                                messageId: localMessage.id,
+                                conversationId: localConversation.id,
+                                locationId: location.id,
+                                targetLanguage: translationTargetLanguage,
+                                sourceHash,
+                                sourceText: translationSourceText,
+                                translatedText: messageBody,
+                                detectedSourceLanguage: normalizeReplyLanguage(options?.translationDetectedSourceLanguage || null),
+                                detectionConfidence: null,
+                                status: MESSAGE_TRANSLATION_STATUS.completed,
+                                provider: "manual_send_preview",
+                                model: "manual_send_preview",
+                            },
+                        }).catch((error: any) => {
+                            console.warn("[sendReply] Failed to persist outbound translation cache:", error?.message || error);
+                        });
+                    }
+                }
+            }
         }
 
         invalidateConversationReadCaches(conversationId);
@@ -5734,6 +5939,313 @@ export async function setConversationReplyLanguageOverride(
         success: true as const,
         conversationId: conversation.ghlConversationId,
         replyLanguageOverride: normalizedReplyLanguage,
+    };
+}
+
+export async function previewTranslatedReply(
+    conversationId: string,
+    sourceText: string,
+    channel: "SMS" | "Email" | "WhatsApp",
+    targetLanguage?: string | null
+) {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const trimmedConversationId = String(conversationId || "").trim();
+    const normalizedSourceText = String(sourceText || "").trim();
+    const normalizedChannel = String(channel || "").trim() || "SMS";
+
+    if (!trimmedConversationId) {
+        return { success: false as const, error: "Missing conversation ID." };
+    }
+    if (!normalizedSourceText) {
+        return { success: false as const, error: "Source text is empty." };
+    }
+
+    const conversation = await db.conversation.findFirst({
+        where: {
+            locationId: location.id,
+            OR: [
+                { id: trimmedConversationId },
+                { ghlConversationId: trimmedConversationId },
+            ],
+        },
+        include: {
+            contact: {
+                select: { preferredLang: true },
+            },
+        },
+    });
+    if (!conversation) {
+        return { success: false as const, error: "Conversation not found." };
+    }
+
+    const resolvedTargetLanguage = normalizeTranslationTargetLanguage(
+        targetLanguage || conversation.replyLanguageOverride || conversation.contact?.preferredLang || DEFAULT_TRANSLATION_TARGET_LANGUAGE
+    );
+    const sourceHash = buildTranslationSourceHash(normalizedSourceText);
+
+    try {
+        const translation = await runMessageTranslationLLM({
+            sourceText: normalizedSourceText,
+            targetLanguage: resolvedTargetLanguage,
+        });
+
+        return {
+            success: true as const,
+            channel: normalizedChannel,
+            targetLanguage: resolvedTargetLanguage,
+            sourceText: normalizedSourceText,
+            sourceHash,
+            translatedText: translation.translatedText,
+            detectedSourceLanguage: translation.detectedSourceLanguage,
+            detectionConfidence: translation.confidence,
+            provider: translation.provider,
+            model: translation.model,
+        };
+    } catch (error: any) {
+        return {
+            success: false as const,
+            error: String(error?.message || "Failed to generate translation preview."),
+            targetLanguage: resolvedTargetLanguage,
+        };
+    }
+}
+
+export async function translateConversationMessage(
+    messageId: string,
+    targetLanguage?: string | null
+) {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const trimmedMessageId = String(messageId || "").trim();
+    if (!trimmedMessageId) {
+        return { success: false as const, error: "Missing message ID." };
+    }
+
+    const message = await db.message.findFirst({
+        where: {
+            id: trimmedMessageId,
+            conversation: { locationId: location.id },
+        },
+        include: {
+            conversation: {
+                include: {
+                    contact: {
+                        select: { preferredLang: true },
+                    },
+                },
+            },
+        },
+    });
+    if (!message) {
+        return { success: false as const, error: "Message not found." };
+    }
+
+    const sourceRaw = String(message.body || "").trim();
+    const sourceText = String(message.type || "").toUpperCase().includes("EMAIL")
+        ? stripHtmlToText(sourceRaw)
+        : sourceRaw;
+    if (!sourceText) {
+        return { success: false as const, error: "Message has no translatable text." };
+    }
+
+    const resolvedTargetLanguage = normalizeTranslationTargetLanguage(
+        targetLanguage || message.conversation.replyLanguageOverride || message.conversation.contact?.preferredLang || DEFAULT_TRANSLATION_TARGET_LANGUAGE
+    );
+    const sourceHash = buildTranslationSourceHash(sourceText);
+
+    const existing = await (db as any).messageTranslationCache.findFirst({
+        where: {
+            messageId: message.id,
+            targetLanguage: resolvedTargetLanguage,
+            sourceHash,
+            status: MESSAGE_TRANSLATION_STATUS.completed,
+        },
+        orderBy: [{ updatedAt: "desc" }],
+    });
+    if (existing) {
+        return {
+            success: true as const,
+            conversationId: message.conversation.ghlConversationId,
+            messageId: message.id,
+            translation: {
+                id: existing.id,
+                targetLanguage: existing.targetLanguage,
+                sourceLanguage: existing.detectedSourceLanguage || null,
+                sourceText: existing.sourceText || sourceText,
+                translatedText: existing.translatedText || "",
+                status: MESSAGE_TRANSLATION_STATUS.completed,
+                provider: existing.provider || null,
+                model: existing.model || null,
+                updatedAt: existing.updatedAt ? new Date(existing.updatedAt).toISOString() : null,
+            },
+            cached: true as const,
+        };
+    }
+
+    try {
+        const translation = await runMessageTranslationLLM({
+            sourceText,
+            targetLanguage: resolvedTargetLanguage,
+        });
+
+        const stored = await (db as any).messageTranslationCache.create({
+            data: {
+                messageId: message.id,
+                conversationId: message.conversationId,
+                locationId: location.id,
+                targetLanguage: resolvedTargetLanguage,
+                sourceHash,
+                sourceText,
+                translatedText: translation.translatedText,
+                detectedSourceLanguage: translation.detectedSourceLanguage,
+                detectionConfidence: translation.confidence,
+                status: MESSAGE_TRANSLATION_STATUS.completed,
+                provider: translation.provider,
+                model: translation.model,
+            },
+        });
+
+        invalidateConversationReadCaches(message.conversation.ghlConversationId);
+        emitConversationRealtimeEvent({
+            locationId: location.id,
+            conversationId: message.conversation.ghlConversationId,
+            type: "conversation.message_translation.created",
+            payload: {
+                messageId: message.id,
+                targetLanguage: resolvedTargetLanguage,
+                cacheId: stored.id,
+            },
+        });
+
+        return {
+            success: true as const,
+            conversationId: message.conversation.ghlConversationId,
+            messageId: message.id,
+            translation: {
+                id: stored.id,
+                targetLanguage: stored.targetLanguage,
+                sourceLanguage: stored.detectedSourceLanguage || null,
+                sourceText: stored.sourceText || sourceText,
+                translatedText: stored.translatedText || "",
+                status: MESSAGE_TRANSLATION_STATUS.completed,
+                provider: stored.provider || null,
+                model: stored.model || null,
+                updatedAt: stored.updatedAt ? new Date(stored.updatedAt).toISOString() : null,
+            },
+            cached: false as const,
+        };
+    } catch (error: any) {
+        const messageText = String(error?.message || "Translation failed.");
+        await (db as any).messageTranslationCache.create({
+            data: {
+                messageId: message.id,
+                conversationId: message.conversationId,
+                locationId: location.id,
+                targetLanguage: resolvedTargetLanguage,
+                sourceHash,
+                sourceText,
+                translatedText: "",
+                detectedSourceLanguage: null,
+                detectionConfidence: null,
+                status: MESSAGE_TRANSLATION_STATUS.failed,
+                provider: "google",
+                model: getModelForTask("simple_generation"),
+                error: messageText,
+            },
+        }).catch(() => null);
+        return {
+            success: false as const,
+            error: messageText,
+            messageId: message.id,
+            conversationId: message.conversation.ghlConversationId,
+        };
+    }
+}
+
+export async function translateConversationThread(
+    conversationId: string,
+    targetLanguage?: string | null,
+    visibleMessageIds?: string[] | null
+) {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const trimmedConversationId = String(conversationId || "").trim();
+    if (!trimmedConversationId) {
+        return { success: false as const, error: "Missing conversation ID." };
+    }
+
+    const conversation = await db.conversation.findFirst({
+        where: {
+            locationId: location.id,
+            OR: [
+                { id: trimmedConversationId },
+                { ghlConversationId: trimmedConversationId },
+            ],
+        },
+        include: {
+            contact: { select: { preferredLang: true } },
+        },
+    });
+    if (!conversation) {
+        return { success: false as const, error: "Conversation not found." };
+    }
+
+    const normalizedIds = Array.isArray(visibleMessageIds)
+        ? visibleMessageIds.map((id) => String(id || "").trim()).filter(Boolean)
+        : [];
+    const resolvedTargetLanguage = normalizeTranslationTargetLanguage(
+        targetLanguage || conversation.replyLanguageOverride || conversation.contact?.preferredLang || DEFAULT_TRANSLATION_TARGET_LANGUAGE
+    );
+
+    const rows = await db.message.findMany({
+        where: {
+            conversationId: conversation.id,
+            direction: "inbound",
+            body: { not: null },
+            ...(normalizedIds.length > 0 ? { id: { in: normalizedIds } } : {}),
+        },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: normalizedIds.length > 0 ? Math.min(normalizedIds.length, 250) : 120,
+        select: {
+            id: true,
+        },
+    });
+
+    let translatedCount = 0;
+    let cachedCount = 0;
+    const failed: Array<{ messageId: string; error: string }> = [];
+
+    for (const row of rows) {
+        const result = await translateConversationMessage(row.id, resolvedTargetLanguage);
+        if (result?.success) {
+            translatedCount += 1;
+            if ((result as any).cached) cachedCount += 1;
+        } else {
+            failed.push({
+                messageId: row.id,
+                error: String((result as any)?.error || "Translation failed"),
+            });
+        }
+    }
+
+    emitConversationRealtimeEvent({
+        locationId: location.id,
+        conversationId: conversation.ghlConversationId,
+        type: "conversation.thread_translation.created",
+        payload: {
+            targetLanguage: resolvedTargetLanguage,
+            translatedCount,
+            cachedCount,
+            failedCount: failed.length,
+        },
+    });
+
+    return {
+        success: true as const,
+        conversationId: conversation.ghlConversationId,
+        targetLanguage: resolvedTargetLanguage,
+        translatedCount,
+        cachedCount,
+        failedCount: failed.length,
+        failed,
     };
 }
 

@@ -16,6 +16,9 @@ import {
     sendWhatsAppMediaReply,
     generateAIDraft,
     setConversationReplyLanguageOverride,
+    translateConversationMessage,
+    translateConversationThread,
+    previewTranslatedReply,
     deleteConversations,
     restoreConversations,
     archiveConversations,
@@ -3162,6 +3165,11 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const handleSendMessage = async (
         text: string,
         type: 'SMS' | 'Email' | 'WhatsApp',
+        options?: {
+            translationSourceText?: string | null;
+            translationTargetLanguage?: string | null;
+            translationDetectedSourceLanguage?: string | null;
+        },
         targetConversation?: Conversation
     ) => {
         const conversationTarget = targetConversation || activeConversation;
@@ -3188,6 +3196,18 @@ export function ConversationInterface({ locationId, initialConversations, initia
             dateAdded: new Date().toISOString(),
             createdAt: new Date(),
             updatedAt: new Date(),
+            ...(options?.translationSourceText && String(options.translationSourceText).trim() ? {
+                translation: {
+                    targetLanguage: options.translationTargetLanguage || conversationTarget.replyLanguageOverride || "en",
+                    sourceLanguage: options.translationDetectedSourceLanguage || null,
+                    sourceText: String(options.translationSourceText || "").trim(),
+                    translatedText: text,
+                    status: "completed",
+                    provider: "manual_send_preview",
+                    model: "manual_send_preview",
+                    updatedAt: new Date().toISOString(),
+                },
+            } : {}),
         };
 
         if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
@@ -3206,6 +3226,9 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
         sendReply(capturedConversationId, capturedContactId, text, type, {
             clientMessageId: optimisticClientMessageId,
+            translationSourceText: options?.translationSourceText || null,
+            translationTargetLanguage: options?.translationTargetLanguage || null,
+            translationDetectedSourceLanguage: options?.translationDetectedSourceLanguage || null,
         })
             .then(async (res) => {
                 if (!res.success) {
@@ -3305,6 +3328,81 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 });
             });
     };
+
+    const handleTranslateMessage = useCallback(async (messageId: string, targetLanguage?: string | null) => {
+        const normalizedMessageId = String(messageId || "").trim();
+        if (!normalizedMessageId) {
+            return { success: false as const, error: "Missing message ID." };
+        }
+        const activeConversationId = String(activeIdRef.current || "").trim();
+        if (!activeConversationId) {
+            return { success: false as const, error: "No active conversation." };
+        }
+
+        const result = await translateConversationMessage(normalizedMessageId, targetLanguage || null);
+        if (!result?.success || !result.translation) {
+            return {
+                success: false as const,
+                error: String(result?.error || "Failed to translate message."),
+            };
+        }
+
+        setMessages((prev) => prev.map((message) => {
+            if (String(message.id || "") !== normalizedMessageId) return message;
+            return {
+                ...message,
+                detectedLanguage: result.translation?.sourceLanguage || null,
+                translation: result.translation,
+                translations: result.translation ? [result.translation] : [],
+            };
+        }));
+
+        return {
+            success: true as const,
+            messageId: normalizedMessageId,
+            translation: result.translation,
+        };
+    }, []);
+
+    const handleTranslateVisibleThread = useCallback(async (visibleMessageIds: string[], targetLanguage?: string | null) => {
+        const activeConversationId = String(activeIdRef.current || "").trim();
+        if (!activeConversationId) {
+            return { success: false as const, error: "No active conversation." };
+        }
+
+        const result = await translateConversationThread(activeConversationId, targetLanguage || null, visibleMessageIds || []);
+        if (!result?.success) {
+            return { success: false as const, error: String(result?.error || "Failed to translate thread.") };
+        }
+
+        try {
+            const refreshed = await fetchMessages(activeConversationId);
+            if (activeIdRef.current === activeConversationId) {
+                setMessages(refreshed);
+                messageSignatureRef.current = getMessageSignature(refreshed);
+            }
+        } catch {
+            // Ignore refresh errors; optimistic/message-level updates can still continue.
+        }
+
+        return {
+            success: true as const,
+            translatedCount: Number(result.translatedCount || 0),
+            failedCount: Number(result.failedCount || 0),
+        };
+    }, []);
+
+    const handlePreviewTranslatedReply = useCallback(async (
+        sourceText: string,
+        channel: "SMS" | "Email" | "WhatsApp",
+        targetLanguage?: string | null
+    ) => {
+        const conversationId = String(activeIdRef.current || "").trim();
+        if (!conversationId) {
+            return { success: false as const, error: "No active conversation." };
+        }
+        return previewTranslatedReply(conversationId, sourceText, channel, targetLanguage || null);
+    }, []);
 
     const applyConversationReplyLanguageOverride = useCallback((conversationId: string, replyLanguageOverride: string | null) => {
         setConversations((prev) => prev.map((conversationItem) =>
@@ -4439,6 +4537,12 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 onBack={isMobileViewport ? handleBackToList : undefined}
                 onOpenMissionControl={isMobileViewport ? handleOpenMissionControl : undefined}
                 onSendMessage={handleSendMessage}
+                onTranslateMessage={handleTranslateMessage}
+                onTranslateVisibleThread={handleTranslateVisibleThread}
+                onPreviewTranslatedReply={handlePreviewTranslatedReply}
+                translationReadEnabled={featureFlags.conversationTranslationRead}
+                translationWriteEnabled={featureFlags.conversationTranslationWrite}
+                translationBannerEnabled={featureFlags.conversationTranslationBanner}
                 onResendMessage={handleResendMessage}
                 onSendMedia={handleSendMedia}
                 onRefetchMedia={handleRefetchMedia}
@@ -4558,9 +4662,16 @@ export function ConversationInterface({ locationId, initialConversations, initia
                         setDealTimelineInitialPainted(true);
                     }
                 }}
-                onSendMessage={(text, type) => handleSendMessage(text, type, selectedDealConversation || undefined)}
+                onSendMessage={(text, type, options) => handleSendMessage(text, type, options, selectedDealConversation || undefined)}
                 onResendMessage={handleResendMessage}
                 onSendMedia={(file, caption) => handleSendMedia(file, caption, selectedDealConversation || undefined)}
+                onPreviewTranslatedReply={async (sourceText, channel, targetLanguage) => {
+                    if (!selectedDealConversation) {
+                        return { success: false as const, error: "No conversation selected." };
+                    }
+                    return previewTranslatedReply(selectedDealConversation.id, sourceText, channel, targetLanguage || null);
+                }}
+                translationWriteEnabled={featureFlags.conversationTranslationWrite}
                 onGenerateDraft={async (
                     instruction?: string,
                     model?: string,
@@ -4670,7 +4781,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 initialAgentSummary={workspaceAgentSummary}
                 lazySidebarDataEnabled={featureFlags.lazySidebarData}
                 onBackToConversation={isMobileViewport ? handleBackToConversation : undefined}
-                onDraftApproved={(text) => handleSendMessage(text, getMessageType(dealMissionConversation), dealMissionConversation)}
+                onDraftApproved={(text) => handleSendMessage(text, getMessageType(dealMissionConversation), undefined, dealMissionConversation)}
                 onDeselect={() => undefined} // No deselect in deal mode
                 onSuggestionsGenerated={handleMissionSuggestionsGenerated}
                 onContactSaved={(patch) => handleConversationContactSaved(dealMissionConversation.id, patch)}

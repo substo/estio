@@ -88,6 +88,19 @@ export interface MessageBubbleProps {
             canReprocess?: boolean;
             detectionEnabled?: boolean;
         };
+        detectedLanguage?: string | null;
+        detectedLanguageConfidence?: number | null;
+        translation?: {
+            id?: string;
+            targetLanguage: string;
+            sourceLanguage?: string | null;
+            sourceText: string;
+            translatedText: string;
+            status: "completed" | "failed";
+            provider?: string | null;
+            model?: string | null;
+            updatedAt?: string | null;
+        } | null;
     };
     contactPhone?: string;
     contactEmail?: string;
@@ -111,6 +124,22 @@ export interface MessageBubbleProps {
     ) => void | Promise<void>;
     onRetryTranscript?: (messageId: string, attachmentId: string) => void | Promise<void>;
     onResendMessage?: (messageId: string) => void | Promise<void>;
+    translationReadEnabled?: boolean;
+    onTranslateMessage?: (messageId: string, targetLanguage?: string | null) => Promise<{
+        success: boolean;
+        error?: string;
+        translation?: {
+            id?: string;
+            targetLanguage: string;
+            sourceLanguage?: string | null;
+            sourceText: string;
+            translatedText: string;
+            status: "completed" | "failed";
+            provider?: string | null;
+            model?: string | null;
+            updatedAt?: string | null;
+        } | null;
+    }>;
 }
 
 export function MessageBubble({
@@ -129,6 +158,8 @@ export function MessageBubble({
     onExtractViewingNotes,
     onRetryTranscript,
     onResendMessage,
+    translationReadEnabled = false,
+    onTranslateMessage,
 }: MessageBubbleProps) {
     const isOutbound = message.direction === 'outbound';
     const isEmail = (message.type || '').toUpperCase().includes('EMAIL');
@@ -141,6 +172,9 @@ export function MessageBubble({
     const [transcriptActionAttachmentId, setTranscriptActionAttachmentId] = useState<string | null>(null);
     const [extractActionAttachmentId, setExtractActionAttachmentId] = useState<string | null>(null);
     const [expandedTranscriptIds, setExpandedTranscriptIds] = useState<Record<string, boolean>>({});
+    const [activeTranslation, setActiveTranslation] = useState<MessageBubbleProps["message"]["translation"] | null>(message.translation || null);
+    const [showOriginalText, setShowOriginalText] = useState(false);
+    const [isTranslatingMessage, setIsTranslatingMessage] = useState(false);
     const contentRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -148,7 +182,14 @@ export function MessageBubble({
         setExpandedTranscriptIds({});
         setTranscriptActionAttachmentId(null);
         setExtractActionAttachmentId(null);
+        setActiveTranslation(message.translation || null);
+        setShowOriginalText(false);
+        setIsTranslatingMessage(false);
     }, [message.id, isExpanded]);
+
+    useEffect(() => {
+        setActiveTranslation(message.translation || null);
+    }, [message.translation]);
 
     // Helper to detect if content is rich HTML (heuristic)
     const isRichHtml = message.body && (message.body.includes('<div') || message.body.includes('<html') || message.body.includes('<table'));
@@ -350,6 +391,50 @@ export function MessageBubble({
         setSelectionFromRect(selection.text, selection.rect, "email");
     };
 
+    const canTranslateMessage = translationReadEnabled
+        && !isOutbound
+        && !!onTranslateMessage
+        && String(message.body || "").trim().length > 0;
+
+    const handleTranslateMessage = async () => {
+        if (!onTranslateMessage || isTranslatingMessage) return;
+        setIsTranslatingMessage(true);
+        try {
+            const result = await onTranslateMessage(message.id, null);
+            if (!result?.success || !result?.translation) return;
+            setActiveTranslation(result.translation);
+            setShowOriginalText(false);
+        } finally {
+            setIsTranslatingMessage(false);
+        }
+    };
+
+    const renderMessageBody = () => {
+        const translatedText = String(activeTranslation?.translatedText || "").trim();
+        if (translatedText && !showOriginalText) {
+            return (
+                <div className="space-y-1">
+                    <div className={cn(
+                        "text-[11px] font-medium",
+                        isOutbound ? "text-blue-100" : "text-slate-500"
+                    )}>
+                        Translated{activeTranslation?.sourceLanguage ? ` from ${activeTranslation.sourceLanguage}` : ""}
+                    </div>
+                    <LinkifiedText text={translatedText} />
+                </div>
+            );
+        }
+
+        if (showOriginalText && (isEmail || isRichHtml)) {
+            return <EmailFrame html={message.body} onSelectionChange={handleEmailSelectionChange} />;
+        }
+
+        if ((isEmail || isRichHtml) && !activeTranslation) {
+            return <EmailFrame html={message.body} onSelectionChange={handleEmailSelectionChange} />;
+        }
+        return <LinkifiedText text={message.body} />;
+    };
+
     return (
         <div
             className={cn(
@@ -439,14 +524,65 @@ export function MessageBubble({
                             {snippet || "Click to view email content..."}
                         </div>
                     ) : (
-                        // Full View
-                        (isEmail || isRichHtml) ? (
-                            <EmailFrame html={message.body} onSelectionChange={handleEmailSelectionChange} />
-                        ) : (
-                            <LinkifiedText text={message.body} />
-                        )
+                        renderMessageBody()
                     )}
                 </div>
+
+                {(canTranslateMessage || activeTranslation) && (
+                    <div className={cn("px-4 pb-1", isEmail && "bg-white")}>
+                        <div className="flex items-center gap-2 text-[11px]">
+                            {canTranslateMessage && !activeTranslation && (
+                                <button
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        void handleTranslateMessage();
+                                    }}
+                                    disabled={isTranslatingMessage}
+                                    className={cn(
+                                        "rounded px-1.5 py-0.5",
+                                        isOutbound ? "text-blue-100 hover:bg-white/20" : "text-blue-600 hover:bg-blue-50"
+                                    )}
+                                >
+                                    {isTranslatingMessage ? "Translating..." : "Translate"}
+                                </button>
+                            )}
+                            {activeTranslation && (
+                                <>
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setShowOriginalText((prev) => !prev);
+                                        }}
+                                        className={cn(
+                                            "rounded px-1.5 py-0.5",
+                                            isOutbound ? "text-blue-100 hover:bg-white/20" : "text-slate-600 hover:bg-slate-100"
+                                        )}
+                                    >
+                                        {showOriginalText ? "Show translation" : "Show original"}
+                                    </button>
+                                    {canTranslateMessage && (
+                                        <button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                void handleTranslateMessage();
+                                            }}
+                                            disabled={isTranslatingMessage}
+                                            className={cn(
+                                                "rounded px-1.5 py-0.5",
+                                                isOutbound ? "text-blue-100 hover:bg-white/20" : "text-blue-600 hover:bg-blue-50"
+                                            )}
+                                        >
+                                            {isTranslatingMessage ? "Refreshing..." : "Refresh translation"}
+                                        </button>
+                                    )}
+                                </>
+                            )}
+                        </div>
+                    </div>
+                )}
 
                 {/* Attachments */}
                 {attachments.length > 0 && (

@@ -277,6 +277,28 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
   - Choosing a language persists `Conversation.replyLanguageOverride` immediately through a secured server action and refreshes thread caches.
   - The composer shows the active source hint as `Conversation override`, `Contact default`, or `Auto-detected`.
   - Deal mode and chats mode use the same control and payload contract.
+- **Conversation Translation (Apr 8, 2026, V1)**:
+  - Feature flags:
+    - `conversationTranslationRead`
+    - `conversationTranslationWrite`
+    - `conversationTranslationBanner`
+  - Read flow:
+    - inbound message bubbles expose a per-message `Translate` action when enabled
+    - translated output renders inline with a `Show original` / `Show translation` toggle
+    - translated copies are agent-side overlays and do not mutate canonical message content
+  - Thread assist banner:
+    - chats mode can show a lightweight banner when repeated likely foreign-language inbound messages are detected
+    - banner CTA translates the currently visible inbound thread window
+  - Send flow:
+    - the shared composer supports translation preview before send
+    - users can `Send translated` or `Send original`
+    - when a translated variant is sent, source/translated pairing is cached for auditability and outbound toggle UX
+  - Persistence:
+    - translation cache records are stored in `MessageTranslationCache` keyed by `messageId + targetLanguage + sourceHash`
+    - cache payload includes source text, translated text, detected source language/confidence, provider/model, status, and timestamps
+    - reopening a thread reuses cached translations to avoid repeated model calls
+  - Realtime:
+    - translation writes emit conversation realtime events (`conversation.message_translation.created`, `conversation.thread_translation.created`) so active threads can refresh without full reload.
 - **WhatsApp Media Composer**: In any WhatsApp-eligible reply context, the shared composer supports media upload (`image/*`, `audio/*`, and various document types like PDF/CSV) and in-app voice-note recording (`MediaRecorder`). Media is sent through the private R2 -> Evolution `sendMedia` flow and rendered inline (image preview, audio player, or document download link) from signed attachment URLs.
 - **WhatsApp Media Recovery**: Message bubbles now expose `Re-fetch Media` for WhatsApp media messages/placeholders to recover missing or stale attachment storage. Source-of-truth details: [`whatsapp-integration.md`](whatsapp-integration.md#61-media-re-fetch-recovery-mar-2026).
 - **Source of Truth (Selection Workflow)**: This document is the canonical reference for chat text-selection behavior, batch summarize/custom flow, and CRM-log save semantics.

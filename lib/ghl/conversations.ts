@@ -16,6 +16,8 @@ export interface Conversation {
     contactEmail?: string; // For Email display
     contactPreferredLanguage?: string | null;
     replyLanguageOverride?: string | null;
+    detectedThreadLanguage?: string | null;
+    detectedThreadLanguageConfidence?: number | null;
     activeDealId?: string;
     activeDealTitle?: string;
     lastMessageDirection?: 'inbound' | 'outbound';
@@ -103,6 +105,30 @@ export interface Message {
         canReprocess?: boolean;
         detectionEnabled?: boolean;
     };
+    detectedLanguage?: string | null;
+    detectedLanguageConfidence?: number | null;
+    translation?: {
+        id?: string;
+        targetLanguage: string;
+        sourceLanguage?: string | null;
+        sourceText: string;
+        translatedText: string;
+        status: "completed" | "failed";
+        provider?: string | null;
+        model?: string | null;
+        updatedAt?: string | null;
+    } | null;
+    translations?: Array<{
+        id?: string;
+        targetLanguage: string;
+        sourceLanguage?: string | null;
+        sourceText: string;
+        translatedText: string;
+        status: "completed" | "failed";
+        provider?: string | null;
+        model?: string | null;
+        updatedAt?: string | null;
+    }>;
 }
 
 interface GetConversationsParams {
