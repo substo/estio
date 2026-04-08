@@ -26,6 +26,18 @@ export interface PropertyImageLike {
     metadata?: unknown;
 }
 
+export interface PropertyImageOverlayState<T extends PropertyImageLike = PropertyImageLike> {
+    isAiGenerated: boolean;
+    hasOriginalAvailable: boolean;
+    canPreviewOriginal: boolean;
+    originalImage: T | null;
+}
+
+export interface ResolvedPropertyImageDisplay<T extends PropertyImageLike = PropertyImageLike>
+    extends PropertyImageOverlayState<T> {
+    displayImage: T;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
     return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -135,6 +147,44 @@ export function hasAiOriginalAvailable(item: PropertyImageLike, allImages: Prope
     }
 
     return allImages.some((candidate) => matchesSourceRef(candidate, aiMetadata.sourceImageId, aiMetadata.sourceImageUrl));
+}
+
+export function resolveAiOriginalImage<T extends PropertyImageLike>(item: T, allImages: T[]): T | null {
+    const aiMetadata = getPropertyImageAiMetadata(item);
+    if (!aiMetadata?.isAiGenerated) {
+        return null;
+    }
+
+    return allImages.find((candidate) => matchesSourceRef(candidate, aiMetadata.sourceImageId, aiMetadata.sourceImageUrl)) || null;
+}
+
+export function resolvePropertyImageOverlayState<T extends PropertyImageLike>(item: T, allImages: T[]): PropertyImageOverlayState<T> {
+    const isAiGenerated = isAiGeneratedPropertyImage(item);
+    const originalImage = resolveAiOriginalImage(item, allImages);
+    const hasOriginalAvailable = Boolean(originalImage);
+
+    return {
+        isAiGenerated,
+        hasOriginalAvailable,
+        canPreviewOriginal: isAiGenerated && hasOriginalAvailable,
+        originalImage,
+    };
+}
+
+export function resolvePropertyImageDisplay<T extends PropertyImageLike>(input: {
+    item: T;
+    allImages: T[];
+    previewOriginal: boolean;
+}): ResolvedPropertyImageDisplay<T> {
+    const overlayState = resolvePropertyImageOverlayState(input.item, input.allImages);
+    const shouldPreviewOriginal = input.previewOriginal && overlayState.canPreviewOriginal;
+
+    return {
+        ...overlayState,
+        displayImage: shouldPreviewOriginal && overlayState.originalImage
+            ? overlayState.originalImage
+            : input.item,
+    };
 }
 
 export function getVisiblePropertyImageMedia<T extends PropertyImageLike>(items: T[]): T[] {

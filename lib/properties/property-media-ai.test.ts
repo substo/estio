@@ -8,6 +8,9 @@ import {
     getVisiblePropertyImageMedia,
     hasAiOriginalAvailable,
     removePropertyImageByIdentity,
+    resolveAiOriginalImage,
+    resolvePropertyImageDisplay,
+    resolvePropertyImageOverlayState,
     reorderVisiblePropertyImagesByIdentity,
     revertAiGeneratedReplacement,
     type PropertyImageLike,
@@ -199,4 +202,96 @@ test("reorderVisiblePropertyImagesByIdentity keeps hidden original attached to r
     const hiddenOriginalIndex = reordered.findIndex((item) => item.cloudflareImageId === "orig-a");
     assert.equal(hiddenOriginalIndex, aiIndex + 1);
     assert.equal(getPropertyImageAiMetadata(reordered[hiddenOriginalIndex])?.hiddenFromGallery, true);
+});
+
+test("resolveAiOriginalImage resolves original image from ai metadata by image id", () => {
+    const source = makeImage("orig-a", 0);
+    const applied = applyAiGeneratedImage({
+        images: [source],
+        sourceImageIdentity: "orig-a",
+        generatedImage: {
+            url: "https://example.com/ai-a.jpg",
+            cloudflareImageId: "ai-a",
+        },
+        applyMode: "replace_original",
+    });
+    const aiImage = applied.find((item) => item.cloudflareImageId === "ai-a");
+    assert.ok(aiImage);
+
+    const resolvedOriginal = resolveAiOriginalImage(aiImage!, applied);
+    assert.ok(resolvedOriginal);
+    assert.equal(resolvedOriginal?.cloudflareImageId, "orig-a");
+});
+
+test("resolveAiOriginalImage falls back to matching source url when source id is absent", () => {
+    const source = makeImage("orig-no-id", 0, {
+        cloudflareImageId: null,
+        url: "https://example.com/original-no-id.jpg",
+    });
+    const applied = applyAiGeneratedImage({
+        images: [source],
+        sourceImageIdentity: getPropertyMediaIdentity(source),
+        generatedImage: {
+            url: "https://example.com/ai-no-id.jpg",
+            cloudflareImageId: "ai-no-id",
+        },
+        applyMode: "replace_original",
+    });
+    const aiImage = applied.find((item) => item.cloudflareImageId === "ai-no-id");
+    assert.ok(aiImage);
+
+    const resolvedOriginal = resolveAiOriginalImage(aiImage!, applied);
+    assert.ok(resolvedOriginal);
+    assert.equal(resolvedOriginal?.url, "https://example.com/original-no-id.jpg");
+});
+
+test("resolveAiOriginalImage returns null for non-ai images", () => {
+    const source = makeImage("orig-a", 0);
+    const resolvedOriginal = resolveAiOriginalImage(source, [source]);
+    assert.equal(resolvedOriginal, null);
+});
+
+test("resolvePropertyImageOverlayState marks preview availability for ai variants with originals", () => {
+    const source = makeImage("orig-a", 0);
+    const applied = applyAiGeneratedImage({
+        images: [source],
+        sourceImageIdentity: "orig-a",
+        generatedImage: {
+            url: "https://example.com/ai-a.jpg",
+            cloudflareImageId: "ai-a",
+        },
+        applyMode: "replace_original",
+    });
+    const aiImage = applied.find((item) => item.cloudflareImageId === "ai-a");
+    assert.ok(aiImage);
+
+    const overlayState = resolvePropertyImageOverlayState(aiImage!, applied);
+    assert.equal(overlayState.isAiGenerated, true);
+    assert.equal(overlayState.hasOriginalAvailable, true);
+    assert.equal(overlayState.canPreviewOriginal, true);
+    assert.equal(overlayState.originalImage?.cloudflareImageId, "orig-a");
+});
+
+test("resolvePropertyImageDisplay swaps display image when previewOriginal is enabled", () => {
+    const source = makeImage("orig-a", 0);
+    const applied = applyAiGeneratedImage({
+        images: [source],
+        sourceImageIdentity: "orig-a",
+        generatedImage: {
+            url: "https://example.com/ai-a.jpg",
+            cloudflareImageId: "ai-a",
+        },
+        applyMode: "replace_original",
+    });
+    const aiImage = applied.find((item) => item.cloudflareImageId === "ai-a");
+    assert.ok(aiImage);
+
+    const resolved = resolvePropertyImageDisplay({
+        item: aiImage!,
+        allImages: applied,
+        previewOriginal: true,
+    });
+
+    assert.equal(resolved.displayImage.cloudflareImageId, "orig-a");
+    assert.equal(resolved.originalImage?.cloudflareImageId, "orig-a");
 });

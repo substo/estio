@@ -45,6 +45,8 @@ import {
 import { toast } from "sonner";
 import { CSS } from '@dnd-kit/utilities';
 import { PropertyImageEnhanceDialog } from "./property-image-enhance-dialog";
+import { PropertyImageViewer } from "./property-image-viewer";
+import { PropertyImageAiTags } from "./property-image-ai-tags";
 import type {
     PropertyImagePromptProfile,
     PropertyImagePromptProfileUpsert,
@@ -57,9 +59,8 @@ import {
     applyAiGeneratedImage,
     canRevertAiGeneratedImage,
     getPropertyMediaIdentity,
+    resolvePropertyImageOverlayState,
     getVisiblePropertyImageMedia,
-    hasAiOriginalAvailable,
-    isAiGeneratedPropertyImage,
     removePropertyImageByIdentity,
     reorderVisiblePropertyImagesByIdentity,
     revertAiGeneratedReplacement,
@@ -70,9 +71,10 @@ interface SortableImageProps {
     id: string;
     children: React.ReactNode;
     onRemove: () => void;
+    onOpen?: () => void;
 }
 
-function SortableImage({ id, children, onRemove }: SortableImageProps) {
+function SortableImage({ id, children, onRemove, onOpen }: SortableImageProps) {
     const {
         attributes,
         listeners,
@@ -90,10 +92,23 @@ function SortableImage({ id, children, onRemove }: SortableImageProps) {
     };
 
     return (
-        <div ref={setNodeRef} style={style} {...attributes} {...listeners} className="relative group aspect-square rounded-lg overflow-hidden border bg-gray-100 touch-none">
+        <div
+            ref={setNodeRef}
+            style={style}
+            {...attributes}
+            {...listeners}
+            className="relative group aspect-square rounded-lg overflow-hidden border bg-gray-100 touch-none"
+            onClick={(event) => {
+                if (!onOpen || isDragging) return;
+                const target = event.target as HTMLElement | null;
+                if (target?.closest('[data-image-action="true"]')) return;
+                onOpen();
+            }}
+        >
             {children}
             <button
                 type="button"
+                data-image-action="true"
                 onClick={(e) => {
                     e.stopPropagation(); // Prevent affecting drag
                     onRemove();
@@ -224,6 +239,10 @@ export default function PropertyForm({
     const [enhanceImageIndex, setEnhanceImageIndex] = useState<number | null>(null);
     const [stagedPromptProfileUpserts, setStagedPromptProfileUpserts] = useState<PropertyImagePromptProfileUpsert[]>([]);
     const [galleryColumns, setGalleryColumns] = useState(4);
+    const [imageViewerOpen, setImageViewerOpen] = useState(false);
+    const [imageViewerIndex, setImageViewerIndex] = useState(0);
+    const [persistentOriginalPreview, setPersistentOriginalPreview] = useState(false);
+    const [holdOriginalPreview, setHoldOriginalPreview] = useState(false);
 
     const existingPromptProfiles = useMemo<PropertyImagePromptProfile[]>(() => {
         const sourceProfiles = Array.isArray(property?.imagePromptProfiles) ? property.imagePromptProfiles : [];
@@ -262,6 +281,25 @@ export default function PropertyForm({
         setStagedPromptProfileUpserts([]);
     }, [property?.id]);
 
+    useEffect(() => {
+        if (visibleImages.length === 0) {
+            setImageViewerIndex(0);
+            if (imageViewerOpen) setImageViewerOpen(false);
+            return;
+        }
+
+        if (imageViewerIndex >= visibleImages.length) {
+            setImageViewerIndex(visibleImages.length - 1);
+        }
+    }, [imageViewerIndex, imageViewerOpen, visibleImages.length]);
+
+    useEffect(() => {
+        if (!imageViewerOpen) {
+            setPersistentOriginalPreview(false);
+            setHoldOriginalPreview(false);
+        }
+    }, [imageViewerOpen]);
+
     const sensors = useSensors(
         useSensor(PointerSensor, {
             activationConstraint: {
@@ -293,6 +331,13 @@ export default function PropertyForm({
 
     const handleRevertAiImage = (imageIdentity: string) => {
         setImages((prev) => revertAiGeneratedReplacement(prev, imageIdentity));
+    };
+
+    const handleOpenImageViewer = (index: number) => {
+        setImageViewerIndex(index);
+        setPersistentOriginalPreview(false);
+        setHoldOriginalPreview(false);
+        setImageViewerOpen(true);
     };
 
     const handleRemoveMedia = (type: 'video' | 'document', index: number) => {
@@ -1150,14 +1195,14 @@ export default function PropertyForm({
                                                         && property.id !== "new"
                                                         && persistedImageKeys.has(uniqueId)
                                                     );
-                                                    const isAiGenerated = isAiGeneratedPropertyImage(img);
-                                                    const originalAvailable = hasAiOriginalAvailable(img, images);
+                                                    const overlayState = resolvePropertyImageOverlayState(img, images);
                                                     const canRevert = canRevertAiGeneratedImage(img, images);
                                                     return (
                                                         <SortableImage
                                                             key={uniqueId}
                                                             id={uniqueId}
                                                             onRemove={() => handleRemoveImage(uniqueId)}
+                                                            onOpen={() => handleOpenImageViewer(index)}
                                                         >
                                                             {img.cloudflareImageId ? (
                                                                 <CloudflareImage
@@ -1171,22 +1216,15 @@ export default function PropertyForm({
                                                             ) : (
                                                                 <img src={img.url} alt={`Property ${index + 1}`} className="w-full h-full object-cover" />
                                                             )}
-                                                            {(isAiGenerated || originalAvailable) ? (
-                                                                <div className="absolute left-2 top-2 z-10 flex flex-col gap-1">
-                                                                    {isAiGenerated ? (
-                                                                        <span className="rounded-full bg-blue-600/90 px-2 py-1 text-[10px] font-medium text-white">
-                                                                            AI Generated
-                                                                        </span>
-                                                                    ) : null}
-                                                                    {isAiGenerated && originalAvailable ? (
-                                                                        <span className="rounded-full bg-black/70 px-2 py-1 text-[10px] font-medium text-white">
-                                                                            Original Available
-                                                                        </span>
-                                                                    ) : null}
-                                                                </div>
-                                                            ) : null}
+                                                            <div className="absolute left-2 top-2 z-10">
+                                                                <PropertyImageAiTags
+                                                                    isAiGenerated={overlayState.isAiGenerated}
+                                                                    hasOriginalAvailable={overlayState.hasOriginalAvailable}
+                                                                />
+                                                            </div>
                                                             <button
                                                                 type="button"
+                                                                data-image-action="true"
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
                                                                     if (!canEnhance) return;
@@ -1204,6 +1242,7 @@ export default function PropertyForm({
                                                             {canRevert ? (
                                                                 <button
                                                                     type="button"
+                                                                    data-image-action="true"
                                                                     onClick={(e) => {
                                                                         e.stopPropagation();
                                                                         handleRevertAiImage(uniqueId);
@@ -1237,6 +1276,23 @@ export default function PropertyForm({
                                         }]);
                                     }}
                                     buttonLabel="Upload Image"
+                                />
+
+                                <PropertyImageViewer
+                                    visibleImages={visibleImages}
+                                    allImages={images}
+                                    open={imageViewerOpen}
+                                    activeIndex={imageViewerIndex}
+                                    onOpenChange={setImageViewerOpen}
+                                    onActiveIndexChange={(nextIndex) => {
+                                        setImageViewerIndex(nextIndex);
+                                        setPersistentOriginalPreview(false);
+                                        setHoldOriginalPreview(false);
+                                    }}
+                                    persistentOriginalPreview={persistentOriginalPreview}
+                                    holdOriginalPreview={holdOriginalPreview}
+                                    onPersistentOriginalPreviewChange={setPersistentOriginalPreview}
+                                    onHoldOriginalPreviewChange={setHoldOriginalPreview}
                                 />
 
                                 <PropertyImageEnhanceDialog
