@@ -4,6 +4,7 @@ import PropertyView from "../../_components/property-view";
 import { generatePreviewToken } from "@/lib/jwt-utils";
 import { QuickAssistStartButton } from "@/app/(main)/admin/viewings/sessions/_components/quick-assist-start-button";
 import { VIEWING_SESSION_QUICK_START_SOURCES } from "@/lib/viewings/sessions/types";
+import { isPrecisionRemoveEnabledForLocation } from "@/lib/ai/property-image-precision-remove-config";
 
 
 
@@ -54,7 +55,7 @@ export default async function PropertyViewPage({ params, searchParams }: { param
     // Fetch data for the Edit Modal
     // Fetch data for the Edit Modal
     // Optimized: Direct DB access to avoid redundant auth checks
-    const [contacts, companies, projects] = await Promise.all([
+    const [contacts, companies, projects, precisionRemoveEnabled] = await Promise.all([
         db.contact.findMany({
             where: { locationId },
             select: { id: true, name: true },
@@ -69,7 +70,8 @@ export default async function PropertyViewPage({ params, searchParams }: { param
             where: { locationId },
             select: { id: true, name: true },
             orderBy: { name: 'asc' },
-        })
+        }),
+        isPrecisionRemoveEnabledForLocation(locationId),
     ]);
 
     const contactsData = contacts.map(c => ({ ...c, name: c.name || 'Unknown Contact' }));
@@ -96,6 +98,7 @@ export default async function PropertyViewPage({ params, searchParams }: { param
                 property={property}
                 domain={locationCtx?.domain}
                 locationId={locationId}
+                precisionRemoveEnabled={precisionRemoveEnabled}
                 contactsData={contactsData}
                 developersData={developersData}
                 managementCompaniesData={managementCompaniesData}

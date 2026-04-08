@@ -15,6 +15,7 @@ interface PropertyEditDialogProps {
     onOpenChange: (open: boolean) => void;
     property: any;
     locationId: string;
+    precisionRemoveEnabled?: boolean;
     contactsData?: { id: string; name: string }[];
     developersData?: { id: string; name: string }[];
     managementCompaniesData?: { id: string; name: string }[];
@@ -27,6 +28,7 @@ export function PropertyEditDialog({
     onOpenChange,
     property,
     locationId,
+    precisionRemoveEnabled = false,
     contactsData,
     developersData,
     managementCompaniesData,
@@ -51,6 +53,7 @@ export function PropertyEditDialog({
                     <PropertyForm
                         property={property}
                         locationId={locationId}
+                        precisionRemoveEnabled={precisionRemoveEnabled}
                         onSuccess={(savedProperty) => {
                             // If parent provided onSuccess, call it with result
                             if (onSuccess) onSuccess(savedProperty);

@@ -55,6 +55,7 @@ interface PropertyViewProps {
     property: any;
     domain?: string | null;
     locationId: string;
+    precisionRemoveEnabled?: boolean;
     contactsData?: { id: string; name: string }[];
     developersData?: { id: string; name: string }[];
     managementCompaniesData?: { id: string; name: string }[];
@@ -66,6 +67,7 @@ export default function PropertyView({
     property,
     domain,
     locationId,
+    precisionRemoveEnabled = false,
     contactsData,
     developersData,
     managementCompaniesData,
@@ -122,6 +124,7 @@ export default function PropertyView({
                 onOpenChange={setIsEditOpen}
                 property={property}
                 locationId={locationId}
+                precisionRemoveEnabled={precisionRemoveEnabled}
                 contactsData={contactsData}
                 developersData={developersData}
                 managementCompaniesData={managementCompaniesData}

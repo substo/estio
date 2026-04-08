@@ -10,6 +10,7 @@ import { Plus } from 'lucide-react';
 // Import fetch helpers
 import Link from 'next/link';
 import { generatePreviewToken } from '@/lib/jwt-utils';
+import { isPrecisionRemoveEnabledForLocation } from "@/lib/ai/property-image-precision-remove-config";
 
 export const dynamic = 'force-dynamic';
 
@@ -44,6 +45,7 @@ export default async function PropertiesPage(props: PageProps) {
     }
 
     const previewToken = generatePreviewToken(location.id);
+    const precisionRemoveEnabled = await isPrecisionRemoveEnabledForLocation(location.id);
 
     // Parse search params
     const limit = 10;
@@ -240,6 +242,7 @@ export default async function PropertiesPage(props: PageProps) {
                         limit={limit}
                         skip={skip}
                         locationId={location.id}
+                        precisionRemoveEnabled={precisionRemoveEnabled}
                         domain={location.domain}
                         editingProperty={editingProperty}
                         contactsData={contactsData}

@@ -37,6 +37,7 @@ interface PropertyTableProps {
     limit: number;
     skip: number;
     locationId: string;
+    precisionRemoveEnabled?: boolean;
     editingProperty?: any;
     // New props for form options
     contactsData?: { id: string; name: string }[];
@@ -53,6 +54,7 @@ export function PropertyTable({
     limit,
     skip,
     locationId,
+    precisionRemoveEnabled = false,
     editingProperty,
     contactsData,
     developersData,
@@ -316,6 +318,7 @@ export function PropertyTable({
                 onOpenChange={handleClose}
                 property={editingProperty}
                 locationId={locationId}
+                precisionRemoveEnabled={precisionRemoveEnabled}
                 contactsData={contactsData}
                 developersData={developersData}
                 managementCompaniesData={managementCompaniesData}
