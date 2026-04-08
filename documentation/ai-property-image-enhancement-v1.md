@@ -73,6 +73,27 @@ The latest updates in this implementation cycle focused on the following practic
    - Added `kids_bedroom` with the label **Kids Bedroom** to the preset room type list.
    - It appears between Bedroom and Bathroom in the dropdown and is available for room-scoped prompt memory.
 
+11. **Precision Remove UI gating fix**
+   - The front end now shows Precision Remove based on the location AI settings value, rather than hiding it behind strict local infrastructure checks.
+   - This keeps the feature visible when it is enabled in `/admin/settings/ai`, while server-side validation still protects execution-time failures.
+
+12. **Precision Remove model selection and iterative editing**
+   - Precision Remove now has its own generation model selector, using the same location-aware model catalog approach as the Polish flow.
+   - After a removal pass, the review rail includes **Apply Iteration & Continue Editing**, allowing multiple cleanup passes inside the same dialog before the final gallery apply.
+
+13. **Iteration-safe source resolution**
+   - Iterative Precision Remove now works against unsaved generated variants in the open editor.
+   - The backend safely accepts transient Cloudflare delivery URLs for current-session AI variants when resolving the source image for a follow-up removal request.
+   - This fixes the failure mode where a second iteration returned `Image not found on this property.`
+
+14. **In-editor revert for applied iterations**
+   - After an iteration has been applied inside Precision Remove, the operator can now use **Undo Last Applied Iteration** directly in the editor.
+   - This removes the old need to close the modal, revert from the gallery, and reopen the enhancer.
+
+15. **Improved object-removal mask quality**
+   - Manual masks are now expanded slightly before inpainting.
+   - This reduces edge leftovers and the common failure mode where the target object remains mostly unchanged or only shifts slightly.
+
 ## Scope
 
 - Enabled only in admin property editor.
@@ -109,12 +130,15 @@ The latest updates in this implementation cycle focused on the following practic
    - User runs **Generate Enhanced Image**.
 6. In **Precision Remove** mode:
    - User masks the object with `Brush` or `Box`.
+   - User may optionally run `Detect Objects` and enable click-select to add detected regions directly to the mask.
    - User may erase parts of the mask, undo, redo, or clear the mask.
    - User may optionally add short replacement guidance such as "continue the lawn texture naturally".
+   - User chooses a **Generation Model** from the location image-generation catalog.
    - User runs **Remove Selected Area**.
 7. Modal moves to the shared **Review** stage:
    - Compare viewer shows before/after in the main image area.
    - Action log is shown in the side rail.
+   - In Precision Remove, user may choose **Apply Iteration & Continue Editing** to keep removing more objects before the final gallery apply step.
    - User chooses one gallery apply mode:
      - `Replace original`
      - `Add before original`
@@ -136,12 +160,15 @@ The latest updates in this implementation cycle focused on the following practic
   - `Add as primary` prepends the AI result.
 - AI-generated images are marked in the admin gallery, and replace-mode results expose `Revert`.
 - `Precision Remove` is intentionally a separate mode and does not auto-chain into `Polish` in the same run.
+- Precision Remove supports iterative passes against unsaved generated variants inside the same open dialog.
+- When an iteration has been applied inside Precision Remove, the edit rail exposes `Undo Last Applied Iteration` so the operator can step back without leaving the modal.
 - The review stage uses one consistent compare viewer for both modes to keep the modal smaller and easier to scan.
 - In `Polish`, the rail is progressive:
   - Step 1 shows only the analysis-model selector.
   - After analysis completes, Step 2 shows the generation-model selector.
   - This keeps both model controls available without showing both at once.
 - The analyze route can now fail fast with a compatibility error when an incompatible model is submitted, rather than forwarding a bad request to Gemini and surfacing a lower-level provider error later.
+- Precision Remove requests continue to work after a prior unsaved iteration because the backend can resolve transient Cloudflare delivery URLs for current-session AI variants.
 
 ## API Endpoints
 
@@ -188,6 +215,14 @@ Validates auth + access + property media ownership, downloads the source image, 
 - `model`
 - `maskCoverage`
 
+Supports:
+
+- `generationModel`
+- `maskMode`
+- `maskDataUrl` for manual masks
+- optional `userInstructions`
+- optional `semanticMaskClassIds`
+
 ### `POST /api/images/enhance/room-type/predict`
 
 Validates auth + location access + property media ownership, downloads source image, runs Gemini room-type classification, and returns:
@@ -217,6 +252,14 @@ Notable request fields for `Polish`:
 - `generationModel?: string`
 - `removedDetectedElementIds: string[]`
 
+Notable request fields for `Precision Remove`:
+
+- `generationModel?: string`
+- `maskMode: "user_provided" | "background" | "foreground" | "semantic"`
+- `maskDataUrl?: string`
+- `semanticMaskClassIds?: number[]`
+- `userInstructions?: string`
+
 ## Model Routing
 
 Property image model options now come from the shared model catalog in `lib/ai/fetch-models.ts`.
@@ -240,6 +283,7 @@ AI key resolution uses `resolveLocationGoogleAiApiKey(locationId)`.
 Precision Remove model routing is defined in `lib/ai/property-image-precision-remove.ts`:
 
 - `gemini-2.5-flash-image` (non-deprecation path)
+- the operator may override the generation model from the location generation catalog, but the server falls back to `gemini-2.5-flash-image` when no valid explicit selection is supplied
 
 Precision Remove now uses the same location-level Google AI API key resolution as other image enhancement routes:
 
@@ -258,6 +302,7 @@ Per-location feature availability is controlled in:
 - Manual override instructions are treated as guidance, but prompts still explicitly preserve architecture, layout, materials, and room truthfulness.
 - Precision Remove is controlled by location AI settings and remains visible when enabled there.
 - Precision Remove blends only the masked region back over the original image so non-selected areas stay as close as possible to the source photo.
+- For iterative in-dialog editing, transient source fallback is restricted to Cloudflare Images delivery URLs from the app's configured account.
 
 ## Cloudflare Hosting Strategy
 
@@ -335,6 +380,7 @@ Covered scenarios:
 - editor dimension resolution
 - empty-mask rejection
 - mask coverage calculation
+- pre-inpaint manual mask expansion
 - guidance omission when blank
 - masked blending preserves unselected pixels
 
