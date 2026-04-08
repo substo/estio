@@ -254,6 +254,9 @@ export default function PropertyForm({
     const visibleImages = useMemo(() => getVisiblePropertyImageMedia(images), [images]);
     const selectedEnhanceImage = enhanceImageIndex !== null ? visibleImages[enhanceImageIndex] || null : null;
     const selectedEnhanceImageIdentity = selectedEnhanceImage ? getPropertyMediaIdentity(selectedEnhanceImage) : "";
+    const canRevertSelectedEnhanceImage = selectedEnhanceImage
+        ? canRevertAiGeneratedImage(selectedEnhanceImage, images)
+        : false;
 
     useEffect(() => {
         setStagedPromptProfileUpserts([]);
@@ -1245,6 +1248,11 @@ export default function PropertyForm({
                                     imageIndex={enhanceImageIndex ?? 0}
                                     roomPromptProfiles={effectivePromptProfiles}
                                     precisionRemoveEnabled={precisionRemoveEnabled}
+                                    canRevertActiveSource={canRevertSelectedEnhanceImage}
+                                    onRevertActiveSource={() => {
+                                        if (!selectedEnhanceImageIdentity) return;
+                                        setImages((prev) => revertAiGeneratedReplacement(prev, selectedEnhanceImageIdentity));
+                                    }}
                                     onApplyVariant={({ url, cloudflareImageId, applyMode, promptProfileUpsert }) => {
                                         if (promptProfileUpsert) {
                                             setStagedPromptProfileUpserts((prev) => {

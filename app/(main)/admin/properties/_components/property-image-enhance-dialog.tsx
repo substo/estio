@@ -92,6 +92,8 @@ interface PropertyImageEnhanceDialogProps {
     roomPromptProfiles?: PropertyImagePromptProfile[];
     precisionRemoveEnabled?: boolean;
     onApplyVariant: (payload: GeneratedVariantPayload) => void;
+    canRevertActiveSource?: boolean;
+    onRevertActiveSource?: () => void;
 }
 
 interface AnalyzeApiResponse {
@@ -188,6 +190,8 @@ export function PropertyImageEnhanceDialog({
     roomPromptProfiles = [],
     precisionRemoveEnabled = false,
     onApplyVariant,
+    canRevertActiveSource = false,
+    onRevertActiveSource,
 }: PropertyImageEnhanceDialogProps) {
     const precisionEditorRef = useRef<PrecisionMaskEditorHandle | null>(null);
     const analysisModelTouchedRef = useRef(false);
@@ -931,6 +935,13 @@ export function PropertyImageEnhanceDialog({
         setError(null);
     }
 
+    function handleUndoAppliedIteration() {
+        if (!onRevertActiveSource) return;
+        onRevertActiveSource();
+        setError(null);
+        toast.success("Reverted to the previous iteration source image.");
+    }
+
     function renderModeSwitcher() {
         if (!precisionRemoveEnabled) return null;
 
@@ -1329,6 +1340,17 @@ export function PropertyImageEnhanceDialog({
                         Clear
                     </Button>
                 </div>
+
+                {canRevertActiveSource ? (
+                    <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleUndoAppliedIteration}
+                        disabled={isBusy}
+                    >
+                        Undo Last Applied Iteration
+                    </Button>
+                ) : null}
 
                 <div className="space-y-2">
                     <Label className="text-sm font-medium">Replacement Guidance (optional)</Label>
