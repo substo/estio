@@ -127,9 +127,12 @@ function buildModelOptions(apiModels: NonNullable<ModelsApiResponse["models"]>):
         .filter(isGeminiGenerateContentModel)
         .map((m) => {
             const id = normalizeModelId(m)!;
+            const curatedLabel = mapCuratedLabel(id);
+            const displayName = (typeof m.displayName === "string" && m.displayName.trim()) || "";
             return {
                 value: id,
-                label: (typeof m.displayName === "string" && m.displayName.trim()) || mapCuratedLabel(id) || id,
+                // Prefer curated labels so the UI uses stable product naming.
+                label: curatedLabel || displayName || id,
                 description: m.description
             } satisfies ModelOption;
         });

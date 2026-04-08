@@ -125,6 +125,7 @@ type PrecisionRemoveRunOptions = {
     maskMode?: PrecisionRemoveMaskMode;
     snapshot?: PrecisionMaskSnapshot | null;
     semanticMaskClassIds?: number[];
+    generationModel?: string;
 };
 
 interface RoomTypePredictApiResponse {
@@ -785,7 +786,15 @@ export function PropertyImageEnhanceDialog({
         if (!canRun || !image || !propertyId) return;
 
         const maskMode: PrecisionRemoveMaskMode = options?.maskMode || "user_provided";
+        const generationModel = String(options?.generationModel || selectedGenerationModel || "").trim();
         let snapshot = options?.snapshot || null;
+
+        if (!generationModel) {
+            const message = "Choose a generation model before removing content.";
+            setError(message);
+            toast.error(message);
+            return;
+        }
 
         if (maskMode === "user_provided") {
             snapshot = snapshot || await precisionEditorRef.current?.exportMask() || null;
@@ -818,6 +827,7 @@ export function PropertyImageEnhanceDialog({
                     editorHeight,
                     semanticMaskClassIds: options?.semanticMaskClassIds,
                     guidance: precisionGuidance.trim() || undefined,
+                    generationModel,
                 }),
             });
 
@@ -831,6 +841,7 @@ export function PropertyImageEnhanceDialog({
                 maskMode,
                 snapshot,
                 semanticMaskClassIds: options?.semanticMaskClassIds,
+                generationModel,
             });
             setSelectedApplyMode(null);
             setGenerated({
@@ -903,6 +914,21 @@ export function PropertyImageEnhanceDialog({
         });
         toast.success("Enhanced image added. Click Save Property to persist.");
         onOpenChange(false);
+    }
+
+    function handleApplyPrecisionIterationAndContinue() {
+        if (!generated || generated.mode !== "precision_remove") return;
+
+        onApplyVariant({
+            url: generated.generatedImageUrl,
+            cloudflareImageId: generated.generatedImageId,
+            applyMode: "replace_original",
+        });
+        toast.success("Iteration applied. Continue masking additional objects.");
+        setGenerated(null);
+        setSelectedApplyMode(null);
+        setLastPrecisionRequest(null);
+        setError(null);
     }
 
     function renderModeSwitcher() {
@@ -1177,6 +1203,25 @@ export function PropertyImageEnhanceDialog({
         return (
             <>
                 <div className="space-y-2">
+                    <Label className="text-sm font-medium">Generation Model</Label>
+                    <AiModelSelect
+                        value={selectedGenerationModel}
+                        models={generationModels}
+                        onValueChange={handleGenerationModelChange}
+                        disabled={isBusy || modelCatalogLoading}
+                        placeholder={modelCatalogLoading ? "Loading models..." : "Select generation model"}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                        Select the image-editing model used for object removal.
+                    </p>
+                    {generationModels.length === 0 && !modelCatalogLoading ? (
+                        <p className="text-xs text-amber-700">
+                            No compatible image-generation models are available for this location&apos;s Google AI key.
+                        </p>
+                    ) : null}
+                </div>
+
+                <div className="space-y-2">
                     <Label className="text-sm font-medium">Selection Tool</Label>
                     <div className="grid grid-cols-2 gap-2">
                         {[
@@ -1308,7 +1353,7 @@ export function PropertyImageEnhanceDialog({
                 <Button
                     type="button"
                     onClick={() => void handlePrecisionRemove({ maskMode: "user_provided" })}
-                    disabled={!precisionEditorState.isReady || !precisionEditorState.hasMask || isBusy}
+                    disabled={!precisionEditorState.isReady || !precisionEditorState.hasMask || isBusy || !selectedGenerationModel}
                 >
                     {isRemoving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                     Remove Selected Area
@@ -1329,7 +1374,7 @@ export function PropertyImageEnhanceDialog({
                                     maskMode: preset.maskMode,
                                     semanticMaskClassIds: preset.semanticMaskClassIds,
                                 })}
-                                disabled={!precisionEditorState.isReady || isBusy}
+                                disabled={!precisionEditorState.isReady || isBusy || !selectedGenerationModel}
                                 title={preset.description}
                             >
                                 {isRemoving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
@@ -1339,7 +1384,9 @@ export function PropertyImageEnhanceDialog({
                     </div>
                 </div>
 
-                <p className="text-xs text-muted-foreground">Provider: Gemini 2.5 Flash Image.</p>
+                <p className="text-xs text-muted-foreground">
+                    Active generation model: {getModelLabel(selectedGenerationModel)}
+                </p>
             </>
         );
     }
@@ -1375,6 +1422,20 @@ export function PropertyImageEnhanceDialog({
                     <p className="text-xs text-muted-foreground">
                         Mask coverage: {(generated.maskCoverage * 100).toFixed(1)}%
                     </p>
+                ) : null}
+
+                {generated.mode === "precision_remove" ? (
+                    <div className="space-y-2 rounded-md border p-3">
+                        <div>
+                            <Label className="text-sm font-medium">Iteration Workflow</Label>
+                            <p className="text-xs text-muted-foreground">
+                                Apply this pass as a reversible replacement, then continue removing more objects.
+                            </p>
+                        </div>
+                        <Button type="button" variant="secondary" onClick={handleApplyPrecisionIterationAndContinue} disabled={isBusy}>
+                            Apply Iteration & Continue Editing
+                        </Button>
+                    </div>
                 ) : null}
 
                 {generated.mode === "polish" && generated.finalPrompt ? (

@@ -146,6 +146,7 @@ export interface ImagePrecisionRemoveRequest {
     editorHeight?: number;
     semanticMaskClassIds?: number[];
     guidance?: string;
+    generationModel?: string;
 }
 
 export interface ImagePrecisionRemoveResponse {

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
 import { getImageDeliveryUrl, uploadToCloudflare } from "@/lib/cloudflareImages";
 import { fetchImageBuffer } from "@/lib/ai/property-image-enhancement";
+import { getPropertyImageEnhancementModelCatalog } from "@/lib/ai/fetch-models";
 import { assertPrecisionRemoveEnabledForLocation } from "@/lib/ai/property-image-precision-remove-config";
 import { removeImageContentWithPrecisionMask } from "@/lib/ai/property-image-precision-remove";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
@@ -20,6 +21,7 @@ const precisionRemoveRequestSchema = z.object({
     editorHeight: z.number().int().min(1).max(4096).optional(),
     semanticMaskClassIds: z.array(z.number().int().min(0).max(5000)).max(40).optional(),
     guidance: z.string().trim().max(500).optional(),
+    generationModel: z.string().trim().min(1).max(200).optional(),
 }).superRefine((value, ctx) => {
     if (!value.cloudflareImageId && !value.sourceUrl) {
         ctx.addIssue({
@@ -69,6 +71,25 @@ export async function POST(req: Request) {
 
         await assertPrecisionRemoveEnabledForLocation(parsed.data.locationId);
 
+        const modelCatalog = await getPropertyImageEnhancementModelCatalog(parsed.data.locationId);
+        const availableGenerationModels = new Set(modelCatalog.generationModels.map((model) => model.value));
+        const requestedGenerationModel = String(parsed.data.generationModel || "").trim();
+
+        if (requestedGenerationModel && !availableGenerationModels.has(requestedGenerationModel)) {
+            return NextResponse.json(
+                { error: "The selected generation model is unavailable or incompatible with image editing." },
+                { status: 400 }
+            );
+        }
+
+        const generationModel = requestedGenerationModel || modelCatalog.defaults.generation;
+        if (!generationModel) {
+            return NextResponse.json(
+                { error: "No compatible image generation models are available for this location." },
+                { status: 400 }
+            );
+        }
+
         const ownedMedia = await resolveOwnedPropertyImageSource({
             locationId: parsed.data.locationId,
             propertyId: parsed.data.propertyId,
@@ -87,6 +108,7 @@ export async function POST(req: Request) {
             maskMode: parsed.data.maskMode,
             semanticMaskClassIds: parsed.data.semanticMaskClassIds,
             guidance: parsed.data.guidance,
+            generationModel,
         });
 
         const bytes = new Uint8Array(result.imageBuffer);

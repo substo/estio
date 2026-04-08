@@ -19,6 +19,7 @@ type PrecisionRemoveInput = {
     guidance?: string;
     maskMode?: PrecisionRemoveMaskMode;
     semanticMaskClassIds?: number[];
+    generationModel?: string;
 };
 
 type PrecisionRemoveResult = {
@@ -424,7 +425,7 @@ export async function removeImageContentWithPrecisionMask(
 
     const geminiResult = await callGeminiPrecisionRemove({
         apiKey,
-        model: GEMINI_PRECISION_REMOVE_MODEL,
+        model: String(input.generationModel || "").trim() || GEMINI_PRECISION_REMOVE_MODEL,
         sourceImageBase64: preparedSource.imageBuffer.toString("base64"),
         sourceImageMimeType: preparedSource.mimeType,
         maskImageBase64: rawMaskPngBuffer?.toString("base64"),
@@ -457,7 +458,7 @@ export async function removeImageContentWithPrecisionMask(
         imageBuffer: outputBuffer,
         mimeType: "image/png",
         actionLog,
-        model: GEMINI_PRECISION_REMOVE_MODEL,
+        model: String(input.generationModel || "").trim() || GEMINI_PRECISION_REMOVE_MODEL,
         maskCoverage,
     };
 }
