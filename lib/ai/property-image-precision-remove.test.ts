@@ -93,7 +93,8 @@ test("preparePrecisionRemoveMaskAlpha rejects empty masks", async () => {
 test("preparePrecisionRemoveMaskAlpha computes mask coverage", async () => {
     const mask = await createHalfMaskPng(10, 10);
     const prepared = await preparePrecisionRemoveMaskAlpha(mask, 10, 10);
-    assert.equal(prepared.maskCoverage, 0.5);
+    assert.ok(prepared.maskCoverage >= 0.5, "coverage should include the selected half");
+    assert.ok(prepared.maskCoverage <= 1, "coverage should remain normalized");
 });
 
 test("blendEditedImageWithMask preserves pixels outside the mask", async () => {

@@ -7,6 +7,7 @@ import {
 
 const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 const GEMINI_PRECISION_REMOVE_MODEL = "gemini-2.5-flash-image";
+const PRECISION_MASK_EXPANSION_RADIUS = 2;
 
 export type PrecisionRemoveMaskMode = "user_provided" | "background" | "foreground" | "semantic";
 
@@ -152,8 +153,27 @@ export async function preparePrecisionRemoveMaskAlpha(
         .raw()
         .toBuffer({ resolveWithObject: true });
 
+    const binaryMaskRaw = Buffer.alloc(rawAlpha.data.length);
+    for (let i = 0; i < rawAlpha.data.length; i += 1) {
+        binaryMaskRaw[i] = rawAlpha.data[i] > 0 ? 255 : 0;
+    }
+
+    const expandedMaskRaw = await sharp(binaryMaskRaw, {
+        raw: {
+            width: rawAlpha.info.width,
+            height: rawAlpha.info.height,
+            channels: 1,
+        },
+    })
+        // Expand user-painted masks so object edges are less likely to survive.
+        .blur(PRECISION_MASK_EXPANSION_RADIUS)
+        .threshold(1)
+        .extractChannel(0)
+        .raw()
+        .toBuffer();
+
     let maskedPixels = 0;
-    for (const alpha of rawAlpha.data) {
+    for (const alpha of expandedMaskRaw) {
         if (alpha > 0) maskedPixels += 1;
     }
 
@@ -164,8 +184,8 @@ export async function preparePrecisionRemoveMaskAlpha(
     }
 
     const rgbMaskData = Buffer.alloc(rawAlpha.info.width * rawAlpha.info.height * 3);
-    for (let i = 0; i < rawAlpha.data.length; i += 1) {
-        const val = rawAlpha.data[i] > 0 ? 255 : 0;
+    for (let i = 0; i < expandedMaskRaw.length; i += 1) {
+        const val = expandedMaskRaw[i] > 0 ? 255 : 0;
         rgbMaskData[i * 3] = val;
         rgbMaskData[i * 3 + 1] = val;
         rgbMaskData[i * 3 + 2] = val;
