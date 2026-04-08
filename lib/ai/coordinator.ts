@@ -596,6 +596,8 @@ export async function generateDraft(context: CoordinationContext) {
             latestInboundText: latestInboundMessage,
             contactPreferredLanguage: contact?.preferredLang ?? null,
             threadText,
+            fallbackLanguage: "en",
+            useContactPreferredLanguage: Boolean(manualReplyLanguage),
         });
         const communicationContract = buildDealProtectiveCommunicationContract({
             expectedLanguage: languageResolution.expectedLanguage,
@@ -674,7 +676,7 @@ export async function generateDraft(context: CoordinationContext) {
         - Role: Intermediary connecting leads, owners, and agents.
         - Tone: ${isEmail ? "Professional, clear, polite, human." : "Natural, concise, friendly, human."}
         - Channel: ${channelName}
-        - Expected reply language: ${languageResolution.expectedLanguage || "same as contact language"}
+        - Expected reply language: ${languageResolution.expectedLanguage || "en"}
 
         ${communicationContract}
 

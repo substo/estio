@@ -558,7 +558,8 @@ async function synthesizeReplyFromToolResults(params: {
         latestInboundText: params.context.latestInboundText || params.context.message,
         contactPreferredLanguage: params.context.contactPreferredLanguage || params.context.expectedReplyLanguage || null,
         threadText: params.context.conversationHistory,
-        fallbackLanguage: params.context.expectedReplyLanguage || params.context.threadDefaultLanguage || null,
+        fallbackLanguage: params.context.expectedReplyLanguage || params.context.threadDefaultLanguage || "en",
+        useContactPreferredLanguage: false,
     });
     const communicationContract = buildDealProtectiveCommunicationContract({
         expectedLanguage: languageResolution.expectedLanguage,
@@ -709,7 +710,8 @@ export async function executeSkill(
         latestInboundText: context.latestInboundText || context.message,
         contactPreferredLanguage: context.contactPreferredLanguage || context.expectedReplyLanguage || null,
         threadText: context.conversationHistory,
-        fallbackLanguage: context.expectedReplyLanguage || context.threadDefaultLanguage || null,
+        fallbackLanguage: context.expectedReplyLanguage || context.threadDefaultLanguage || "en",
+        useContactPreferredLanguage: false,
     });
     const communicationContract = buildDealProtectiveCommunicationContract({
         expectedLanguage: languageResolution.expectedLanguage,

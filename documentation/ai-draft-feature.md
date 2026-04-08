@@ -77,7 +77,8 @@ It is critical to distinguish between **Content** and **Metadata**:
 
 ### Communication Policy (Mar 2026)
 - Drafts must use the shared reply-language resolver.
-- Precedence is `Conversation.replyLanguageOverride` -> `Contact.preferredLang` -> latest inbound -> thread default -> fallback.
+- Auto-mode precedence is `Conversation.replyLanguageOverride` -> latest inbound -> thread default -> fallback English (`en`).
+- `Contact.preferredLang` is not used for Auto drafts.
 - Tone must stay neutral, factual, commercially aware, and non-pushy.
 - Drafts avoid hard authority/finality claims unless confirmed in context.
 - Urgency wording must be evidence-based (for example, confirmed competing offer activity), not pressure language.
@@ -86,7 +87,7 @@ It is critical to distinguish between **Content** and **Metadata**:
 ### Reply Language Controls (Mar 10, 2026)
 - The shared composer includes a `Reply language` selector next to the channel/model controls.
 - Options are `Auto` plus a curated searchable language list.
-- `Auto` clears the conversation override and falls back to contact default or auto-detection.
+- `Auto` clears the conversation override and resolves language from chat history first (latest inbound -> thread default), then falls back to English when detection is unclear.
 - The active source is shown in the composer as `Conversation override`, `Contact default`, or `Auto-detected`.
 - The same language selection is forwarded through manual draft entry points in chats mode, deal mode, and Mission Control quick draft.
 

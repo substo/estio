@@ -37,6 +37,19 @@ test("resolveCommunicationLanguage falls back to preferred language", () => {
     assert.equal(resolution.source, "contact_preferred");
 });
 
+test("resolveCommunicationLanguage defaults to English when contact preference is ignored and no language is detected", () => {
+    const resolution = resolveCommunicationLanguage({
+        latestInboundText: "ok",
+        contactPreferredLanguage: "pt",
+        threadText: "Agent: Thanks",
+        fallbackLanguage: "en",
+        useContactPreferredLanguage: false,
+    });
+
+    assert.equal(resolution.expectedLanguage, "en");
+    assert.equal(resolution.source, "thread_default");
+});
+
 test("resolveCommunicationLanguage uses latest inbound when no override/default", () => {
     const resolution = resolveCommunicationLanguage({
         latestInboundText: "Καλησπέρα, ενδιαφέρομαι για το ακίνητο.",

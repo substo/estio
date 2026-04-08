@@ -89,6 +89,8 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
         latestInboundText,
         contactPreferredLanguage: contactData?.preferredLang ?? null,
         threadText: input.conversationHistory,
+        fallbackLanguage: "en",
+        useContactPreferredLanguage: false,
     });
     const communicationEvidence = inferCommunicationEvidenceFromText(`${input.conversationHistory}\n${input.message}`);
 

@@ -21,6 +21,7 @@ export interface ResolveCommunicationLanguageInput {
     contactPreferredLanguage?: string | null;
     threadText?: string | null;
     fallbackLanguage?: string | null;
+    useContactPreferredLanguage?: boolean;
 }
 
 export interface BuildCommunicationContractInput {
@@ -131,6 +132,7 @@ export function resolveCommunicationLanguage(
     const contactPreferredLanguage = normalizeLanguageTag(input.contactPreferredLanguage);
     const threadDefaultLanguage = detectLanguageFromText(input.threadText);
     const fallbackLanguage = normalizeLanguageTag(input.fallbackLanguage);
+    const useContactPreferredLanguage = input.useContactPreferredLanguage !== false;
 
     if (manualOverrideLanguage) {
         return {
@@ -143,7 +145,7 @@ export function resolveCommunicationLanguage(
         };
     }
 
-    if (contactPreferredLanguage) {
+    if (useContactPreferredLanguage && contactPreferredLanguage) {
         return {
             expectedLanguage: contactPreferredLanguage,
             manualOverrideLanguage,

@@ -16,10 +16,9 @@ All outbound AI messages must follow this contract:
 
 1. Reply in the resolved reply language using this precedence:
    - `Conversation.replyLanguageOverride` when a user explicitly sets a manual reply language for the thread.
-   - `Contact.preferredLang` when no conversation override is set.
    - latest inbound detected language.
    - thread-level detected default language.
-   - final fallback language from the shared resolver.
+   - final fallback language from the shared resolver (`en` for drafting flows).
 2. Keep tone neutral, factual, concise, and non-pushy.
 3. Avoid implying final authority unless explicitly confirmed by the appropriate party.
 4. Prefer probability-based language over absolutes ("at this stage", "unlikely to accept below").
@@ -76,6 +75,10 @@ Composer source hint values:
 - `Auto-detected`
 
 Selecting `Auto` clears `Conversation.replyLanguageOverride`. Selecting a language persists the override immediately.
+
+Current drafting behavior in auto mode:
+- default to English when language cannot be detected from existing chat text,
+- do not use `Contact.preferredLang` for auto-draft language resolution.
 
 ## Enforcement Layer
 Policy enforcement lives in:
