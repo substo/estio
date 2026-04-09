@@ -29,6 +29,7 @@ export function PropertyPrintPreview({ data }: { data: any }) {
                     className="print-page mx-auto overflow-hidden bg-white shadow-2xl shrink-0"
                     style={{
                         width: `${widthMm}mm`,
+                        minWidth: `${widthMm}mm`,
                         minHeight: `${heightMm}mm`,
                     }}
                 >
