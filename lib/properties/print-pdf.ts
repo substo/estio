@@ -116,7 +116,7 @@ export async function generatePropertyPrintPdf(data: any) {
     }
 
     let cursorY = height - margin - 24;
-    page.drawText(data.property.priceText, {
+    page.drawText(String(data.property.priceText || ""), {
         x: width * 0.58,
         y: cursorY,
         font: fontBold,
@@ -125,7 +125,7 @@ export async function generatePropertyPrintPdf(data: any) {
     });
 
     cursorY -= 30;
-    page.drawText(data.draft.generatedContent.title || data.property.title, {
+    page.drawText(String(data.draft.generatedContent.title || data.property.title || ""), {
         x: width * 0.58,
         y: cursorY,
         font: fontBold,
@@ -135,7 +135,7 @@ export async function generatePropertyPrintPdf(data: any) {
     });
 
     cursorY -= 24;
-    page.drawText(data.draft.generatedContent.subtitle || data.property.locationLine || "", {
+    page.drawText(String(data.draft.generatedContent.subtitle || data.property.locationLine || ""), {
         x: width * 0.58,
         y: cursorY,
         font: fontRegular,
@@ -146,7 +146,7 @@ export async function generatePropertyPrintPdf(data: any) {
 
     cursorY -= 28;
     for (const fact of data.property.facts.slice(0, 4)) {
-        page.drawText(`${fact.label}: ${fact.value}`, {
+        page.drawText(String(`${fact.label || ""}: ${fact.value || ""}`), {
             x: width * 0.58,
             y: cursorY,
             font: fontBold,
@@ -161,7 +161,7 @@ export async function generatePropertyPrintPdf(data: any) {
         .filter((block: any) => data.draft.languages.includes(block.language))
         .slice(0, 2);
     for (const block of languages) {
-        page.drawText(block.label, {
+        page.drawText(String(block.label || ""), {
             x: width * 0.58,
             y: cursorY,
             font: fontBold,
@@ -171,7 +171,7 @@ export async function generatePropertyPrintPdf(data: any) {
         cursorY -= 16;
         const lines = wrapText(block.body, 48).slice(0, 11);
         for (const line of lines) {
-            page.drawText(line, {
+            page.drawText(String(line || ""), {
                 x: width * 0.58,
                 y: cursorY,
                 font: fontRegular,
@@ -191,7 +191,7 @@ export async function generatePropertyPrintPdf(data: any) {
         color: rgb(0.85, 0.85, 0.87),
     });
 
-    page.drawText(data.property.reference || "", {
+    page.drawText(String(data.property.reference || ""), {
         x: margin,
         y: footerY + 12,
         font: fontBold,
@@ -222,7 +222,7 @@ export async function generatePropertyPrintPdf(data: any) {
     const footerNoteLines = wrapText(data.draft.generatedContent.footerNote || "", 90).slice(0, 3);
     let footerNoteY = footerY - 24;
     for (const line of footerNoteLines) {
-        page.drawText(line, {
+        page.drawText(String(line || ""), {
             x: margin,
             y: footerNoteY,
             font: fontRegular,

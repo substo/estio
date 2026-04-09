@@ -493,8 +493,8 @@ export function PropertyPrintDesignerDialog({
         }));
     };
 
-    const previewHref = selectedDraft ? `/admin/properties/${propertyId}/print/${selectedDraft.id}` : null;
-    const pdfHref = selectedDraft ? `/admin/properties/${propertyId}/print/${selectedDraft.id}/pdf` : null;
+    const previewHref = selectedDraft ? `/print-preview/${propertyId}/${selectedDraft.id}` : null;
+    const pdfHref = selectedDraft ? `/print-preview/${propertyId}/${selectedDraft.id}/pdf` : null;
     const generatedContent = normalizePropertyPrintGeneratedContent(selectedDraft?.generatedContent || DEFAULT_PROPERTY_PRINT_GENERATED_CONTENT);
     const promptSettings = normalizePropertyPrintPromptSettings(selectedDraft?.promptSettings || DEFAULT_PROPERTY_PRINT_PROMPT_SETTINGS);
     const designSettings = normalizePropertyPrintDesignSettings(selectedDraft?.designSettings || DEFAULT_PROPERTY_PRINT_DESIGN_SETTINGS);

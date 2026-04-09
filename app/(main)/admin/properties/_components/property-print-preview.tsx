@@ -24,9 +24,9 @@ export function PropertyPrintPreview({ data }: { data: any }) {
                 }
             `}</style>
 
-            <div className="print-shell px-6 py-8 print:px-0 print:py-0">
+            <div className="print-shell px-6 py-8 print:px-0 print:py-0 overflow-x-auto">
                 <div
-                    className="print-page mx-auto overflow-hidden bg-white shadow-2xl"
+                    className="print-page mx-auto overflow-hidden bg-white shadow-2xl shrink-0"
                     style={{
                         width: `${widthMm}mm`,
                         minHeight: `${heightMm}mm`,
