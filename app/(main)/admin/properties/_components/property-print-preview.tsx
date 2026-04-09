@@ -33,13 +33,13 @@ export function PropertyPrintPreview({ data }: { data: any }) {
                     }}
                 >
                     {draft.templateId === "a4-photo-heavy" ? (
-                        <div className="grid min-h-full grid-cols-1 md:grid-cols-[1.15fr_0.85fr]">
-                            <div className="flex min-h-full flex-col bg-stone-100">
-                                <div className="relative min-h-[52vh] bg-stone-200">
+                        <div className={`grid min-h-full ${draft.orientation === 'landscape' ? 'grid-rows-[55%_45%]' : 'grid-cols-1 md:grid-cols-[1.15fr_0.85fr]'}`}>
+                            <div className={`flex min-h-full bg-stone-100 ${draft.orientation === 'landscape' ? 'flex-row' : 'flex-col'}`}>
+                                <div className={`relative bg-stone-200 ${draft.orientation === 'landscape' ? 'flex-1' : 'min-h-[52vh]'}`}>
                                     {heroImage ? <img src={heroImage.url} alt={heroImage.alt} className="h-full w-full object-cover" /> : null}
                                 </div>
                                 {supportingImages.length > 0 ? (
-                                    <div className="grid flex-1 grid-cols-3 gap-1 bg-white p-1">
+                                    <div className={`grid gap-1 bg-white p-1 ${draft.orientation === 'landscape' ? 'w-[25%] grid-rows-3' : 'flex-1 grid-cols-3'}`}>
                                         {supportingImages.map((image: any) => (
                                             <div key={image.id} className="min-h-[120px] bg-stone-200">
                                                 <img src={image.url} alt={image.alt} className="h-full w-full object-cover" />
@@ -48,15 +48,17 @@ export function PropertyPrintPreview({ data }: { data: any }) {
                                     </div>
                                 ) : null}
                             </div>
-                            <div className="flex flex-col p-8">
+                            <div className={`p-8 ${draft.orientation === 'landscape' ? 'columns-2 gap-10 block' : 'flex flex-col'}`}>
                                 {draft.designSettings.showLogo && branding.logoUrl ? (
-                                    <div className="mb-6 flex justify-center">
+                                    <div className="mb-6 flex justify-center break-inside-avoid">
                                         <img src={branding.logoUrl} alt={branding.brandName} className="max-h-20 max-w-[240px] object-contain" />
                                     </div>
                                 ) : null}
-                                <div className="mb-4 text-3xl font-semibold" style={{ color: primaryColor }}>{property.priceText}</div>
-                                <div className="mb-2 text-2xl font-bold text-slate-900">{draft.generatedContent.title || property.title}</div>
-                                <div className="mb-4 text-sm uppercase tracking-[0.2em] text-slate-500">{draft.generatedContent.subtitle || property.locationLine}</div>
+                                <div className="break-inside-avoid">
+                                    <div className="mb-4 text-3xl font-semibold" style={{ color: primaryColor }}>{property.priceText}</div>
+                                    <div className="mb-2 text-2xl font-bold text-slate-900">{draft.generatedContent.title || property.title}</div>
+                                    <div className="mb-4 text-sm uppercase tracking-[0.2em] text-slate-500">{draft.generatedContent.subtitle || property.locationLine}</div>
+                                </div>
                                 {draft.designSettings.showFacts ? (
                                     <div className="mb-5 flex flex-wrap gap-2">
                                         {property.facts.map((fact: any) => (
@@ -69,7 +71,7 @@ export function PropertyPrintPreview({ data }: { data: any }) {
                                 {draft.designSettings.showLanguages ? (
                                     <div className="flex-1 space-y-4">
                                         {languageBlocks.map((block: any) => (
-                                            <div key={block.language}>
+                                            <div key={block.language} className="break-inside-avoid mb-4">
                                                 <div className="mb-1 text-xs font-semibold uppercase tracking-[0.2em]" style={{ color: primaryColor }}>
                                                     {block.label}
                                                 </div>
@@ -79,20 +81,20 @@ export function PropertyPrintPreview({ data }: { data: any }) {
                                     </div>
                                 ) : null}
                                 {draft.designSettings.showFooter ? (
-                                    <div className="mt-6 border-t pt-4 text-sm text-slate-600">
+                                    <div className="mt-6 border-t pt-4 text-sm text-slate-600 break-inside-avoid">
                                         {draft.generatedContent.footerNote}
                                     </div>
                                 ) : null}
                             </div>
                         </div>
                     ) : draft.templateId === "a3-poster-split" ? (
-                        <div className="grid min-h-full grid-cols-[1.15fr_0.85fr]">
-                            <div className="flex min-h-full flex-col">
+                        <div className={`grid min-h-full ${draft.orientation === 'landscape' ? 'grid-rows-[55%_45%]' : 'grid-cols-[1.15fr_0.85fr]'}`}>
+                            <div className={`flex min-h-full ${draft.orientation === 'landscape' ? 'flex-row' : 'flex-col'}`}>
                                 <div className="flex-1 bg-stone-200">
                                     {heroImage ? <img src={heroImage.url} alt={heroImage.alt} className="h-full w-full object-cover" /> : null}
                                 </div>
                                 {supportingImages.length > 0 ? (
-                                    <div className="grid h-[24%] grid-cols-2 gap-1 bg-white p-1">
+                                    <div className={`grid gap-1 bg-white p-1 ${draft.orientation === 'landscape' ? 'w-[24%] grid-rows-2' : 'h-[24%] grid-cols-2'}`}>
                                         {supportingImages.slice(0, 2).map((image: any) => (
                                             <div key={image.id} className="bg-stone-200">
                                                 <img src={image.url} alt={image.alt} className="h-full w-full object-cover" />
@@ -101,21 +103,23 @@ export function PropertyPrintPreview({ data }: { data: any }) {
                                     </div>
                                 ) : null}
                             </div>
-                            <div className="flex flex-col bg-stone-50 p-10">
+                            <div className={`bg-stone-50 p-10 ${draft.orientation === 'landscape' ? 'columns-2 gap-12 block' : 'flex flex-col'}`}>
                                 {draft.designSettings.showLogo && branding.logoUrl ? (
-                                    <div className="mb-8 flex justify-center">
+                                    <div className="mb-8 flex justify-center break-inside-avoid">
                                         <img src={branding.logoUrl} alt={branding.brandName} className="max-h-20 max-w-[260px] object-contain" />
                                     </div>
                                 ) : null}
-                                {draft.designSettings.showPrice ? (
-                                    <div className="mb-5 text-4xl font-semibold" style={{ color: primaryColor }}>
-                                        {property.priceText}
-                                    </div>
-                                ) : null}
-                                <div className="mb-3 text-3xl font-bold text-slate-900">{draft.generatedContent.title || property.title}</div>
-                                <div className="mb-5 text-lg text-slate-600">{draft.generatedContent.subtitle || property.locationLine}</div>
+                                <div className="break-inside-avoid">
+                                    {draft.designSettings.showPrice ? (
+                                        <div className="mb-5 text-4xl font-semibold" style={{ color: primaryColor }}>
+                                            {property.priceText}
+                                        </div>
+                                    ) : null}
+                                    <div className="mb-3 text-3xl font-bold text-slate-900">{draft.generatedContent.title || property.title}</div>
+                                    <div className="mb-5 text-lg text-slate-600">{draft.generatedContent.subtitle || property.locationLine}</div>
+                                </div>
                                 {draft.designSettings.showFacts ? (
-                                    <div className="mb-6 grid grid-cols-2 gap-3">
+                                    <div className="mb-6 grid grid-cols-2 gap-3 break-inside-avoid">
                                         {property.facts.map((fact: any) => (
                                             <div key={fact.label} className="rounded-lg border bg-white px-4 py-3">
                                                 <div className="text-xs uppercase tracking-[0.2em] text-slate-500">{fact.label}</div>
@@ -127,7 +131,7 @@ export function PropertyPrintPreview({ data }: { data: any }) {
                                 {draft.designSettings.showLanguages ? (
                                     <div className="flex-1 space-y-6">
                                         {languageBlocks.map((block: any) => (
-                                            <div key={block.language}>
+                                            <div key={block.language} className="break-inside-avoid mb-6">
                                                 <div className="mb-2 text-sm font-semibold uppercase tracking-[0.2em]" style={{ color: primaryColor }}>
                                                     {block.label}
                                                 </div>
@@ -136,7 +140,7 @@ export function PropertyPrintPreview({ data }: { data: any }) {
                                         ))}
                                     </div>
                                 ) : null}
-                                <div className="mt-8 border-t pt-5">
+                                <div className="mt-8 border-t pt-5 break-inside-avoid">
                                     <div className="text-sm font-medium text-slate-800">{draft.generatedContent.contactCta}</div>
                                     {draft.designSettings.showContact ? (
                                         <div className="mt-3 space-y-1 text-sm text-slate-600">
