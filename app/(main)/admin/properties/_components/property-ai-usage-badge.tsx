@@ -9,6 +9,9 @@ const ACTION_LABELS: Record<string, string> = {
     generate: "Generation",
     precision_remove: "Precision Remove",
     room_type_predict: "Room Type",
+    generate_print_copy: "Print Copy",
+    generate_pdf: "Print PDF",
+    regenerate_language: "Language Refresh",
 };
 
 function formatCost(cost: number): string {

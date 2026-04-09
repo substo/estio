@@ -322,6 +322,7 @@ model Property {
   contactRoles           ContactPropertyRole[]
   location               Location              @relation(fields: [locationId], references: [id])
   media                  PropertyMedia[]
+  printDrafts            PropertyPrintDraft[]
   imagePromptProfiles    PropertyImagePromptProfile[]
   swipes                 PropertySwipe[]
   viewings               Viewing[]
@@ -349,6 +350,29 @@ model Property {
   feedHash        String? // Hash to detect changes
 
   @@unique([feedId, feedReferenceId])
+}
+
+model PropertyPrintDraft {
+  id                 String   @id @default(cuid())
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  propertyId         String
+  name               String
+  templateId         String
+  paperSize          String
+  orientation        String
+  languages          String[] @default([])
+  selectedMediaIds   String[] @default([])
+  isDefault          Boolean  @default(false)
+  designSettings     Json?
+  promptSettings     Json?
+  generatedContent   Json?
+  generationMetadata Json?
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId, updatedAt(sort: Desc)])
+  @@index([propertyId, isDefault])
 }
 
 model PropertyMedia {

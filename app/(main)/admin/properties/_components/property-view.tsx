@@ -50,6 +50,7 @@ import { useState } from "react";
 import { PropertyEditDialog } from "@/components/properties/property-edit-dialog";
 import { getVisiblePropertyImageMedia } from "@/lib/properties/property-media-ai";
 import { PropertyAiUsageBadge } from "./property-ai-usage-badge";
+import { PropertyPrintDesignerDialog } from "./property-print-designer-dialog";
 
 interface PropertyViewProps {
     property: any;
@@ -104,6 +105,13 @@ export default function PropertyView({
                     </Link>
                 </Button>
                 <div className="flex gap-2">
+                    <PropertyPrintDesignerDialog
+                        propertyId={property.id}
+                        locationId={locationId}
+                        propertyTitle={property.title}
+                        media={property.media || []}
+                        initialDrafts={property.printDrafts || []}
+                    />
                     {domain && (
                         <Button variant="outline" asChild>
                             <a href={`http://${domain}/properties/${property.slug}${previewToken ? `?previewToken=${previewToken}` : ''}`} target="_blank" rel="noopener noreferrer">
