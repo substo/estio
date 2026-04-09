@@ -1,5 +1,5 @@
 # AI Communication Policy: Deal-Protective Multilingual Guardrails
-**Last Updated:** 2026-03-10
+**Last Updated:** 2026-04-08
 
 ## Purpose
 This document is the source of truth for outbound AI communication style across drafting, smart suggestions, skill-based agent replies, and critic/reflexion passes.
@@ -59,6 +59,14 @@ This applies to manual AI draft entry points only:
 
 This does **not** yet apply to background or semi-auto automation flows.
 
+## Manual Translation Boundary
+Manual typed sends now have a separate conversation-translation path in the shared composer:
+
+- agents can write source text, preview a translated variant, and choose `Send translated` or `Send original`
+- this is a manual send-time translation workflow, not AI draft rewriting
+- canonical message content is still the actually sent outbound body; translation metadata is stored separately for auditability and UI toggles
+- the full UI/runtime contract for this feature lives in [Conversation Management](./conversation-management.md)
+
 ## UI Contract
 The reply-language UX is intentionally split by persistence scope:
 
@@ -107,5 +115,6 @@ Result model:
 ## Notes
 - Current implementation includes schema-backed manual/default language fields.
 - Scope is AI-generated outbound communication and AI-generated suggestion intents.
-- Manual user-typed messages are not auto-rewritten by this policy.
+- Manual user-typed messages are still not auto-rewritten by this policy.
+- Manual typed messages may now be translated on demand in the shared composer before send; that UX is documented in [Conversation Management](./conversation-management.md).
 - For UI placement and manual draft entry points, see [Conversation Management](./conversation-management.md) and [AI Draft Feature](./ai-draft-feature.md).

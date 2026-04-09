@@ -6,6 +6,9 @@ import {
     normalizePropertyPrintDesignSettings,
     normalizePropertyPrintGeneratedContent,
     normalizePropertyPrintLanguages,
+    normalizePropertyPrintPromptSettings,
+    getPaperDimensions,
+    buildPrintLayoutPreviewDescriptor,
 } from "@/lib/properties/print-designer";
 import { buildPropertyPrintPreviewData } from "@/lib/properties/print-preview";
 
@@ -86,3 +89,69 @@ test("preview data prefers selected media ids and generated brochure blocks", ()
     assert.equal(data.draft.generatedContent.languages.length, 2);
     assert.equal(data.branding.publicUrl, "https://example.com/properties/sea-view-villa");
 });
+
+test("paper dimensions: A4 portrait is 210x297", () => {
+    const dims = getPaperDimensions("A4", "portrait");
+    assert.equal(dims.widthMm, 210);
+    assert.equal(dims.heightMm, 297);
+});
+
+test("paper dimensions: A4 landscape is 297x210", () => {
+    const dims = getPaperDimensions("A4", "landscape");
+    assert.equal(dims.widthMm, 297);
+    assert.equal(dims.heightMm, 210);
+});
+
+test("paper dimensions: A3 portrait is 297x420", () => {
+    const dims = getPaperDimensions("A3", "portrait");
+    assert.equal(dims.widthMm, 297);
+    assert.equal(dims.heightMm, 420);
+});
+
+test("paper dimensions: A3 landscape is 420x297", () => {
+    const dims = getPaperDimensions("A3", "landscape");
+    assert.equal(dims.widthMm, 420);
+    assert.equal(dims.heightMm, 297);
+});
+
+test("inline preview descriptor updates with orientation and template changes", () => {
+    const settings = normalizePropertyPrintDesignSettings({ showQr: false, showFooter: false });
+    const descriptor = buildPrintLayoutPreviewDescriptor(
+        "a4-photo-heavy", "A4", "landscape", settings, ["en", "pl"], 3,
+    );
+    assert.equal(descriptor.widthMm, 297);
+    assert.equal(descriptor.heightMm, 210);
+    assert.equal(descriptor.orientation, "landscape");
+    assert.equal(descriptor.templateId, "a4-photo-heavy");
+    assert.equal(descriptor.imageSlots, 4);
+    assert.equal(descriptor.hasHeroImage, true);
+    assert.equal(descriptor.languageCount, 2);
+    assert.ok(!descriptor.visibleSections.includes("qr"));
+    assert.ok(!descriptor.visibleSections.includes("footer"));
+    assert.ok(descriptor.visibleSections.includes("logo"));
+});
+
+test("prompt settings normalization preserves modelOverride", () => {
+    const settings = normalizePropertyPrintPromptSettings({
+        toneInstructions: "Keep it premium",
+        modelOverride: "gemini-2.5-flash",
+    });
+    assert.equal(settings.toneInstructions, "Keep it premium");
+    assert.equal(settings.modelOverride, "gemini-2.5-flash");
+});
+
+test("prompt settings normalization defaults modelOverride to null", () => {
+    const settings = normalizePropertyPrintPromptSettings({});
+    assert.equal(settings.modelOverride, null);
+});
+
+test("draft normalization preserves explicit landscape orientation", () => {
+    const settings = normalizePropertyPrintDesignSettings({});
+    const descriptor = buildPrintLayoutPreviewDescriptor(
+        "a3-poster-split", "A3", "landscape", settings, ["en"], 2,
+    );
+    assert.equal(descriptor.orientation, "landscape");
+    assert.equal(descriptor.widthMm, 420);
+    assert.equal(descriptor.heightMm, 297);
+});
+

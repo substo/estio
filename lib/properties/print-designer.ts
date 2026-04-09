@@ -65,6 +65,7 @@ export const propertyPrintDesignSettingsSchema = z.object({
 
 export const propertyPrintPromptSettingsSchema = z.object({
     toneInstructions: z.string().trim().nullish().transform((value) => value || null),
+    modelOverride: z.string().trim().nullish().transform((value) => value || null),
 }).strict();
 
 export const propertyPrintGeneratedLanguageSchema = z.object({
@@ -112,6 +113,7 @@ export const DEFAULT_PROPERTY_PRINT_DESIGN_SETTINGS: PropertyPrintDesignSettings
 
 export const DEFAULT_PROPERTY_PRINT_PROMPT_SETTINGS: PropertyPrintPromptSettings = {
     toneInstructions: null,
+    modelOverride: null,
 };
 
 export const DEFAULT_PROPERTY_PRINT_GENERATED_CONTENT: PropertyPrintGeneratedContent = {
@@ -226,7 +228,7 @@ export function buildPropertyFeatureBullets(property: any) {
 
 export function getPaperDimensions(size: PropertyPrintPaperSize, orientation: PropertyPrintOrientation) {
     const dimensions = size === "A3"
-        ? { widthMm: 420, heightMm: 297 }
+        ? { widthMm: 297, heightMm: 420 }
         : { widthMm: 210, heightMm: 297 };
 
     if (orientation === "landscape") {
@@ -247,4 +249,52 @@ export function clampSelectedMediaIds(
 ) {
     const allowed = new Set(availableMediaIds);
     return (mediaIds || []).filter((id) => allowed.has(id)).slice(0, limit);
+}
+
+export type PrintLayoutPreviewDescriptor = {
+    widthMm: number;
+    heightMm: number;
+    orientation: PropertyPrintOrientation;
+    templateId: string;
+    templateLabel: string;
+    imageSlots: number;
+    hasHeroImage: boolean;
+    languageCount: number;
+    visibleSections: string[];
+};
+
+export function buildPrintLayoutPreviewDescriptor(
+    templateId: string,
+    paperSize: PropertyPrintPaperSize,
+    orientation: PropertyPrintOrientation,
+    designSettings: PropertyPrintDesignSettings,
+    languages: string[],
+    selectedImageCount: number,
+): PrintLayoutPreviewDescriptor {
+    const template = getPropertyPrintTemplate(templateId);
+    const { widthMm, heightMm } = getPaperDimensions(
+        paperSize as PropertyPrintPaperSize,
+        orientation,
+    );
+    const visibleSections: string[] = [];
+    if (designSettings.showLogo) visibleSections.push("logo");
+    if (designSettings.showContact) visibleSections.push("contact");
+    if (designSettings.showQr) visibleSections.push("qr");
+    if (designSettings.showPrice) visibleSections.push("price");
+    if (designSettings.showFacts) visibleSections.push("facts");
+    if (designSettings.showFeatures) visibleSections.push("features");
+    if (designSettings.showLanguages) visibleSections.push("languages");
+    if (designSettings.showFooter) visibleSections.push("footer");
+
+    return {
+        widthMm,
+        heightMm,
+        orientation,
+        templateId: template.id,
+        templateLabel: template.label,
+        imageSlots: template.imageSlots,
+        hasHeroImage: selectedImageCount > 0,
+        languageCount: normalizePropertyPrintLanguages(languages).length,
+        visibleSections,
+    };
 }

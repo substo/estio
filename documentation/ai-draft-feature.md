@@ -15,6 +15,8 @@ Source of truth: [AI Communication Policy](./ai-communication-policy.md).
 
 As of Mar 10, 2026, manual draft generation also supports an explicit **reply language override** at the conversation level plus a persistent contact-level default. The policy and precedence rules remain documented only in [AI Communication Policy](./ai-communication-policy.md).
 
+As of Apr 8, 2026, the shared composer also supports a separate **manual translation preview** flow for typed outbound sends. That send-time translation UX is not part of AI draft generation and is documented in [Conversation Management](./conversation-management.md).
+
 ## 2. Architecture: Local-First Hybrid
 To ensure resilience, speed, and compatibility with both "Synced" (GHL) and "Shadow" (WhatsApp-only) conversations, we use a **Local-First** architecture.
 
@@ -90,6 +92,7 @@ It is critical to distinguish between **Content** and **Metadata**:
 - `Auto` clears the conversation override and resolves language from chat history first (latest inbound -> thread default), then falls back to English when detection is unclear.
 - The active source is shown in the composer as `Conversation override`, `Contact default`, or `Auto-detected`.
 - The same language selection is forwarded through manual draft entry points in chats mode, deal mode, and Mission Control quick draft.
+- When an agent is manually typing a reply instead of generating a draft, the same shared composer can now preview a translated send variant; the implementation and persistence details for that workflow live only in [Conversation Management](./conversation-management.md).
 
 ### Timeline Context Rules (Mar 2026)
 - Suggestion bubbles and explicit `AI Draft` actions both flow through the same draft generator and therefore use the same timeline-parity context rules.

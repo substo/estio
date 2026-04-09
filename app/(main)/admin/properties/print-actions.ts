@@ -259,6 +259,7 @@ export async function generatePropertyPrintDraftCopy(input: {
     draftId: string;
     propertyId: string;
     locationId: string;
+    modelOverride?: string | null;
 }) {
     const draftId = String(input.draftId || "").trim();
     const propertyId = String(input.propertyId || "").trim();
@@ -268,11 +269,22 @@ export async function generatePropertyPrintDraftCopy(input: {
         throw new Error("Unable to resolve the current user for AI usage tracking.");
     }
 
+    // Resolve model: explicit input > draft promptSettings > location defaults
+    const draft = await db.propertyPrintDraft.findFirst({
+        where: { id: draftId, propertyId },
+        select: { promptSettings: true },
+    });
+    const savedModelOverride = (draft?.promptSettings && typeof draft.promptSettings === "object")
+        ? String((draft.promptSettings as any).modelOverride || "").trim()
+        : "";
+    const effectiveModel = String(input.modelOverride || "").trim() || savedModelOverride || undefined;
+
     const result = await generatePropertyPrintCopy({
         propertyId,
         draftId,
         locationId,
         userId: dbUser.id,
+        modelOverride: effectiveModel,
     });
 
     const updated = await db.propertyPrintDraft.update({

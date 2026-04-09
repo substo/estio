@@ -1,6 +1,6 @@
 # Property Print Designer
 
-**Last Updated:** 2026-04-09
+**Last Updated:** 2026-04-09 (v1.1 — UX hardening + bug fixes)
 
 ## Overview
 
@@ -88,32 +88,76 @@ Main component:
 
 The property view now includes a `Print Designer` action beside the existing property actions.
 
-The dialog is organized into three tabs:
+### Modal layout
 
-1. `Setup`
-   - draft name
-   - template
-   - paper size
-   - orientation
-   - language selection
-   - AI tone instructions
-   - section visibility toggles
-   - accent color override
-2. `Content`
+The dialog is viewport-bounded (`max-h-[calc(100vh-2rem)]`) with a flex layout:
+
+- header and action bar are sticky (never scroll away)
+- the draft rail scrolls independently on its own `ScrollArea`
+- the editor pane scrolls independently within the remaining space
+- no browser zoom-out required on small laptop screens
+
+### Tab structure
+
+Three controlled tabs (`value` / `onValueChange` for programmatic switching):
+
+1. `Setup` — document settings, organized into grouped cards:
+   - **Document**: draft name, template
+   - **Layout**: paper size, orientation, inline layout preview thumbnail
+   - **Languages**: language pills (max 2), helper text
+   - **AI Copy**: shared AI model picker (`AiModelSelect` + `useAiModelCatalog`), tone instructions
+   - **Visibility**: section checkboxes, accent color
+2. `Content` — generated/manual brochure copy:
    - brochure title/subtitle
    - feature bullets
    - footer note
    - contact CTA
    - per-language editable text blocks
+   - inline loading state with shimmer placeholders during generation
+   - inline error banner on generation failure
 3. `Media & Layout`
    - selected image list
    - image reorder via `dnd-kit`
    - add/remove property photos for the draft
 
+### Action bar
+
+Primary actions: `Save Draft`, `Generate Copy` (with spinner).
+Secondary actions: `Preview`, `PDF`, `Default`, `Delete` (ghost/destructive).
+
+### Draft rail
+
+- stronger selection state with `ring-2 ring-primary/20`
+- filled star icon for default draft badge
+- compact layout with orientation/paper badge per draft
+
+### Inline layout preview
+
+A `PrintLayoutPreviewThumbnail` component renders in the Layout card of the Setup tab:
+
+- proportional rectangle reflecting the actual page ratio from `getPaperDimensions`
+- placeholder blocks for hero image, text columns, language sections, logo, footer
+- updates live when template, paper size, orientation, language count, or section toggles change
+- badge showing paper size and orientation
+
+This is a pure CSS preview, not a second full print renderer.
+
+Helper: `buildPrintLayoutPreviewDescriptor()` in `lib/properties/print-designer.ts`.
+
+### Generation flow UX
+
+When the user clicks `Generate Copy`:
+
+1. the active tab switches to `Content` immediately
+2. a loading banner and shimmer placeholders display while generation is in progress
+3. on success, the Content tab stays focused with populated fields
+4. on failure, an inline error banner appears in Content alongside a toast
+
 The dialog uses the existing admin component stack:
 
 - shadcn/Radix inputs, tabs, dialog, badges, scroll areas
 - `dnd-kit` for image ordering
+- `AiModelSelect` + `useAiModelCatalog` for model selection
 - existing property media and Cloudflare image helpers
 
 ## AI Generation
@@ -129,10 +173,21 @@ Draft actions:
 Generation behavior:
 
 - resolves the location Google AI key using the existing shared key lookup
-- resolves the design model from the location AI settings path
+- accepts an explicit `modelOverride` parameter that takes priority over location resolution
+- falls back to the design model from the location AI settings path when no override is provided
 - uses property facts as deterministic input
 - asks Gemini for strict JSON brochure output
 - supports one or two brochure languages in a single request
+
+Model resolution order:
+
+1. explicit `modelOverride` parameter (from dialog model picker)
+2. `promptSettings.modelOverride` saved in the draft
+3. location AI settings (`googleAiModelDesign` / `googleAiModel`)
+4. `SiteConfig` legacy fallback
+5. `resolveAiModelDefault(locationId, "design")`
+
+The AI model picker in the dialog uses the shared `AiModelSelect` + `useAiModelCatalog` system (same as conversations and image enhance). The selected model is persisted in the draft's `promptSettings.modelOverride` field.
 
 The AI is responsible for:
 
@@ -164,7 +219,7 @@ Feature area:
 Current actions:
 
 - `generate_print_copy`
-- `generate_pdf`
+- `generate_pdf` (only recorded on successful PDF generation)
 
 Resource mapping:
 
@@ -174,6 +229,8 @@ Resource mapping:
 UI surfacing:
 
 - existing property AI usage badge now includes print-related action labels
+
+Note: the PDF route only records usage on success. Failed PDF generation does not create a metering entry.
 
 ## Branding and Content Sources
 
@@ -221,6 +278,29 @@ Rendering strategy:
 - preview applies print CSS and `@page` sizing
 - PDF export reuses the same saved draft data model, but is a close-match brochure export rather than a pixel-perfect mirror of the HTML preview
 
+### Paper dimensions
+
+Base dimensions are portrait-first:
+
+- A4: 210 × 297 mm
+- A3: 297 × 420 mm
+
+The `getPaperDimensions()` helper swaps width/height only when orientation is `landscape`. Both the browser preview and PDF generation consume this helper.
+
+### PDF image handling
+
+The PDF generator uses a `safeEmbedImage` helper that:
+
+- directly embeds JPEG and PNG images
+- gracefully skips unsupported formats (WebP, AVIF, SVG, etc.) with a console warning instead of crashing
+- wraps all embedding in try/catch so corrupted image data also does not crash the route
+
+The PDF route itself:
+
+- wraps generation in try/catch and returns a controlled `500` response on failure
+- logs errors server-side without leaking sensitive data
+- only records AI usage metering on successful generation
+
 ## Shared Utilities
 
 Core print-domain helpers:
@@ -231,11 +311,12 @@ Responsibilities:
 
 - template metadata
 - default draft values
-- schema normalization
+- schema normalization (including `modelOverride` in prompt settings)
 - language normalization
 - image slot rules
-- paper size helpers
+- paper size helpers (portrait-first base dimensions)
 - property fact formatting
+- `PrintLayoutPreviewDescriptor` type and `buildPrintLayoutPreviewDescriptor()` builder for the inline setup-tab thumbnail
 
 Preview-data assembly:
 
@@ -243,7 +324,7 @@ Preview-data assembly:
 
 ## Verification
 
-Focused test added:
+Focused test file:
 
 - `lib/properties/print-designer.test.ts`
 
@@ -251,6 +332,17 @@ Verified during implementation:
 
 - `npx prisma generate`
 - `npx tsx --test lib/properties/print-designer.test.ts`
+
+Current test coverage (11 tests):
+
+- default draft template and orientation
+- language normalization with dedup and cap
+- preview data assembly with selected media and generated content
+- paper dimensions: A4 portrait, A4 landscape, A3 portrait, A3 landscape
+- inline preview descriptor updates with orientation and template changes
+- prompt settings `modelOverride` round-trip preservation
+- prompt settings `modelOverride` defaults to null
+- landscape orientation preservation in preview descriptor
 
 Repo-wide note:
 

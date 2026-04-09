@@ -43,26 +43,32 @@ export async function GET(
 
     const branding = await getLocationPrintBranding(property.locationId);
     const data = buildPropertyPrintPreviewData({ property, draft, branding });
-    const pdfBytes = await generatePropertyPrintPdf(data);
 
-    void securelyRecordAiUsage({
-        locationId: property.locationId,
-        resourceType: "property",
-        resourceId: property.id,
-        featureArea: "property_printing",
-        action: "generate_pdf",
-        provider: "system",
-        model: String((draft.generationMetadata as any)?.model || "pdf-lib"),
-        metadata: {
-            draftId: draft.id,
-            templateId: draft.templateId,
-        },
-    });
+    try {
+        const pdfBytes = await generatePropertyPrintPdf(data);
 
-    return new Response(Buffer.from(pdfBytes), {
-        headers: {
-            "Content-Type": "application/pdf",
-            "Content-Disposition": `inline; filename="${property.slug || property.id}-${draft.id}.pdf"`,
-        },
-    });
+        void securelyRecordAiUsage({
+            locationId: property.locationId,
+            resourceType: "property",
+            resourceId: property.id,
+            featureArea: "property_printing",
+            action: "generate_pdf",
+            provider: "system",
+            model: String((draft.generationMetadata as any)?.model || "pdf-lib"),
+            metadata: {
+                draftId: draft.id,
+                templateId: draft.templateId,
+            },
+        });
+
+        return new Response(Buffer.from(pdfBytes), {
+            headers: {
+                "Content-Type": "application/pdf",
+                "Content-Disposition": `inline; filename="${property.slug || property.id}-${draft.id}.pdf"`,
+            },
+        });
+    } catch (error) {
+        console.error("[print-pdf-route] PDF generation failed:", error);
+        return new Response("Failed to generate PDF. Please try again or use browser print.", { status: 500 });
+    }
 }

@@ -51,6 +51,23 @@ async function fetchImageBytes(url: string | null | undefined) {
     }
 }
 
+async function safeEmbedImage(pdfDoc: PDFDocument, imageData: { bytes: ArrayBuffer; contentType: string }) {
+    try {
+        if (imageData.contentType.includes("png")) {
+            return await pdfDoc.embedPng(imageData.bytes);
+        }
+        if (imageData.contentType.includes("jpeg") || imageData.contentType.includes("jpg")) {
+            return await pdfDoc.embedJpg(imageData.bytes);
+        }
+        // Unsupported format (WebP, AVIF, SVG, etc.) — skip gracefully
+        console.warn(`[print-pdf] Skipping unsupported image format: ${imageData.contentType}`);
+        return null;
+    } catch (err) {
+        console.warn(`[print-pdf] Failed to embed image:`, err);
+        return null;
+    }
+}
+
 export async function generatePropertyPrintPdf(data: any) {
     const pdfDoc = await PDFDocument.create();
     const paper = getPaperDimensions(data.draft.paperSize, data.draft.orientation);
@@ -74,28 +91,28 @@ export async function generatePropertyPrintPdf(data: any) {
     const heroImage = data.images[0];
     const heroBytes = await fetchImageBytes(heroImage?.url);
     if (heroBytes) {
-        const embedded = heroBytes.contentType.includes("png")
-            ? await pdfDoc.embedPng(heroBytes.bytes)
-            : await pdfDoc.embedJpg(heroBytes.bytes);
-        page.drawImage(embedded, {
-            x: margin,
-            y: height - 250,
-            width: width * 0.52,
-            height: 220,
-        });
+        const embedded = await safeEmbedImage(pdfDoc, heroBytes);
+        if (embedded) {
+            page.drawImage(embedded, {
+                x: margin,
+                y: height - 250,
+                width: width * 0.52,
+                height: 220,
+            });
+        }
     }
 
     const logoBytes = await fetchImageBytes(data.branding.logoUrl);
     if (logoBytes) {
-        const embeddedLogo = logoBytes.contentType.includes("png")
-            ? await pdfDoc.embedPng(logoBytes.bytes)
-            : await pdfDoc.embedJpg(logoBytes.bytes);
-        page.drawImage(embeddedLogo, {
-            x: width - 180,
-            y: height - 80,
-            width: 140,
-            height: 40,
-        });
+        const embeddedLogo = await safeEmbedImage(pdfDoc, logoBytes);
+        if (embeddedLogo) {
+            page.drawImage(embeddedLogo, {
+                x: width - 180,
+                y: height - 80,
+                width: 140,
+                height: 40,
+            });
+        }
     }
 
     let cursorY = height - margin - 24;

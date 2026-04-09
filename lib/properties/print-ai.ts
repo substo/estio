@@ -38,6 +38,7 @@ export async function generatePropertyPrintCopy(params: {
     draftId: string;
     locationId: string;
     userId?: string | null;
+    modelOverride?: string | null;
 }) {
     const property = await db.property.findFirst({
         where: { id: params.propertyId, locationId: params.locationId },
@@ -57,6 +58,8 @@ export async function generatePropertyPrintCopy(params: {
         throw new Error("Google AI API key is not configured for this location.");
     }
 
+    const explicitOverride = String(params.modelOverride || "").trim();
+
     const aiDoc = await settingsService.getDocument<any>({
         scopeType: "LOCATION",
         scopeId: params.locationId,
@@ -67,7 +70,7 @@ export async function generatePropertyPrintCopy(params: {
         select: { googleAiModel: true, googleAiModelDesign: true, brandVoice: true },
     });
 
-    const model = String(
+    const model = explicitOverride || String(
         aiDoc?.payload?.googleAiModelDesign
         || aiDoc?.payload?.googleAiModel
         || siteConfig?.googleAiModelDesign

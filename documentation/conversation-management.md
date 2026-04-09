@@ -294,11 +294,49 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
     - users can `Send translated` or `Send original`
     - when a translated variant is sent, source/translated pairing is cached for auditability and outbound toggle UX
   - Persistence:
-    - translation cache records are stored in `MessageTranslationCache` keyed by `messageId + targetLanguage + sourceHash`
-    - cache payload includes source text, translated text, detected source language/confidence, provider/model, status, and timestamps
+    - translation cache records are stored in Prisma model `MessageTranslationCache`
+    - schema fields:
+      - `messageId`
+      - `conversationId`
+      - `locationId`
+      - `targetLanguage`
+      - `sourceHash`
+      - `sourceText`
+      - `translatedText`
+      - `detectedSourceLanguage`
+      - `detectionConfidence`
+      - `status`
+      - `provider`
+      - `model`
+      - `error`
+      - `createdAt`
+      - `updatedAt`
+    - cache uniqueness is `@@unique([messageId, targetLanguage, sourceHash])`
     - reopening a thread reuses cached translations to avoid repeated model calls
+    - failed translation attempts are also persisted with `status = failed` for audit/debug visibility, but only completed entries are reused as active translations
   - Realtime:
     - translation writes emit conversation realtime events (`conversation.message_translation.created`, `conversation.thread_translation.created`) so active threads can refresh without full reload.
+  - Server actions:
+    - `previewTranslatedReply(conversationId, sourceText, channel, targetLanguage?)`
+      - used by the shared composer preview panel before send
+      - resolves target language from explicit target -> `Conversation.replyLanguageOverride` -> `Contact.preferredLang` -> fallback English
+      - returns preview metadata without mutating `Message`
+    - `translateConversationMessage(messageId, targetLanguage?)`
+      - translates a single inbound message
+      - strips HTML to plain text for email bodies in v1 before translation
+      - returns cached completed translations when `messageId + targetLanguage + sourceHash` already exists
+    - `translateConversationThread(conversationId, targetLanguage?, visibleMessageIds?)`
+      - batch-translates the currently visible inbound message set
+      - emits a thread-level realtime refresh event after completion
+  - DTO contract:
+    - conversation/message payloads now expose translation metadata for UI rendering:
+      - `detectedLanguage`
+      - `detectedLanguageConfidence`
+      - `translation`
+      - `translations`
+  - Deployment note:
+    - this feature shipped via Prisma migration `20260408120000_message_translation_cache`
+    - production applied it with `prisma migrate deploy`; this was not a `prisma db push` rollout
 - **WhatsApp Media Composer**: In any WhatsApp-eligible reply context, the shared composer supports media upload (`image/*`, `audio/*`, and various document types like PDF/CSV) and in-app voice-note recording (`MediaRecorder`). Media is sent through the private R2 -> Evolution `sendMedia` flow and rendered inline (image preview, audio player, or document download link) from signed attachment URLs.
 - **WhatsApp Media Recovery**: Message bubbles now expose `Re-fetch Media` for WhatsApp media messages/placeholders to recover missing or stale attachment storage. Source-of-truth details: [`whatsapp-integration.md`](whatsapp-integration.md#61-media-re-fetch-recovery-mar-2026).
 - **Source of Truth (Selection Workflow)**: This document is the canonical reference for chat text-selection behavior, batch summarize/custom flow, and CRM-log save semantics.
