@@ -507,7 +507,7 @@ export function PropertyPrintDesignerDialog({
                     Print Designer
                 </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-[95vw] w-[1200px] max-h-[calc(100vh-2rem)] overflow-hidden p-0 gap-0 flex flex-col">
+            <DialogContent className="max-w-[95vw] w-[1200px] h-[calc(100vh-2rem)] max-h-[calc(100vh-2rem)] overflow-hidden p-0 gap-0 flex flex-col">
                 <DialogHeader className="shrink-0 border-b px-6 py-4">
                     <DialogTitle>Property Print Designer</DialogTitle>
                     <DialogDescription>
@@ -517,8 +517,8 @@ export function PropertyPrintDesignerDialog({
 
                 <div className="flex min-h-0 flex-1 overflow-hidden">
                     {/* Draft Rail — independently scrollable */}
-                    <div className="w-[240px] shrink-0 border-r bg-muted/20">
-                        <div className="border-b px-4 py-3">
+                    <div className="flex flex-col w-[240px] shrink-0 border-r bg-muted/20 overflow-hidden">
+                        <div className="shrink-0 border-b px-4 py-3">
                             <div className="flex items-center justify-between">
                                 <div>
                                     <div className="text-sm font-medium">Drafts</div>
@@ -530,7 +530,7 @@ export function PropertyPrintDesignerDialog({
                                 </Button>
                             </div>
                         </div>
-                        <ScrollArea className="h-[calc(100vh-12rem)]">
+                        <ScrollArea className="flex-1 min-h-0">
                             <div className="space-y-1.5 p-3">
                                 {drafts.map((draft) => (
                                     <button
