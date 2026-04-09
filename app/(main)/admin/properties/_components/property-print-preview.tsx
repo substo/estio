@@ -1,6 +1,20 @@
 import { getPaperDimensions, getPaperPageCss } from "@/lib/properties/print-designer";
 
-export function PropertyPrintPreview({ data }: { data: any }) {
+/**
+ * Property Print Preview — renders a true-to-scale paper preview.
+ *
+ * KEY DESIGN DECISIONS (matching the proven original static HTML):
+ *   1. The container uses FIXED width + height (not minHeight) so the paper
+ *      never grows beyond its physical dimensions regardless of content length.
+ *   2. The orientation flag ONLY controls paper dimensions (width/height swap).
+ *      The template layout (left images, right text) stays the SAME in both
+ *      portrait and landscape — exactly like the original HTML poster.
+ *   3. Content that doesn't fit is clipped by overflow:hidden on the container.
+ *
+ * When `embedded` is true the @page style and body background are omitted
+ * so the component can render inline inside the designer dialog.
+ */
+export function PropertyPrintPreview({ data, embedded }: { data: any; embedded?: boolean }) {
     const { draft, branding, property, images } = data;
     const { widthMm, heightMm } = getPaperDimensions(draft.paperSize, draft.orientation);
     const pageCss = getPaperPageCss(draft.paperSize, draft.orientation);
@@ -14,148 +28,189 @@ export function PropertyPrintPreview({ data }: { data: any }) {
 
     return (
         <>
-            <style>{`
-                @page { size: ${pageCss}; margin: 0; }
-                body { background: #e7e5e4; }
-                @media print {
-                    body { background: #fff; }
-                    .print-shell { padding: 0 !important; }
-                    .print-page { box-shadow: none !important; }
-                }
-            `}</style>
+            {/* Only inject @page / body styles on the standalone preview page */}
+            {!embedded ? (
+                <style>{`
+                    @page { size: ${pageCss}; margin: 0; }
+                    body { background: #e7e5e4; }
+                    @media print {
+                        body { background: #fff; }
+                        .print-shell { padding: 0 !important; }
+                        .print-page { box-shadow: none !important; }
+                    }
+                `}</style>
+            ) : null}
 
-            <div className="print-shell px-6 py-8 print:px-0 print:py-0 overflow-x-auto">
+            <div className={embedded ? "overflow-auto" : "print-shell px-6 py-8 print:px-0 print:py-0 overflow-x-auto"}>
+                {/*
+                 * Paper container — FIXED width AND height.
+                 * This is the #1 root cause fix: the original used height:297mm
+                 * but the app was using minHeight which let content push it tall.
+                 */}
                 <div
                     className="print-page mx-auto overflow-hidden bg-white shadow-2xl shrink-0"
                     style={{
                         width: `${widthMm}mm`,
-                        minWidth: `${widthMm}mm`,
-                        minHeight: `${heightMm}mm`,
+                        height: `${heightMm}mm`,
                     }}
                 >
                     {draft.templateId === "a4-photo-heavy" ? (
-                        <div className={`grid min-h-full ${draft.orientation === 'landscape' ? 'grid-rows-[55%_45%]' : 'grid-cols-1 md:grid-cols-[1.15fr_0.85fr]'}`}>
-                            <div className={`flex min-h-full bg-stone-100 ${draft.orientation === 'landscape' ? 'flex-row' : 'flex-col'}`}>
-                                <div className={`relative bg-stone-200 ${draft.orientation === 'landscape' ? 'flex-1' : 'min-h-[52vh]'}`}>
+                        /*
+                         * A4 Photo Heavy — left/right flex split (same in both orientations).
+                         * Left = 55% images, Right = 45% text.
+                         * Matches original: .poster-container { display: flex; }
+                         */
+                        <div className="flex h-full">
+                            {/* LEFT COLUMN: Images */}
+                            <div className="flex h-full w-[55%] flex-col">
+                                <div className="relative flex-1 bg-stone-200">
                                     {heroImage ? <img src={heroImage.url} alt={heroImage.alt} className="h-full w-full object-cover" /> : null}
                                 </div>
                                 {supportingImages.length > 0 ? (
-                                    <div className={`grid gap-1 bg-white p-1 ${draft.orientation === 'landscape' ? 'w-[25%] grid-rows-3' : 'flex-1 grid-cols-3'}`}>
+                                    <div className="flex h-[25%]">
                                         {supportingImages.map((image: any) => (
-                                            <div key={image.id} className="min-h-[120px] bg-stone-200">
+                                            <div key={image.id} className="flex-1 border-l-[5px] border-t-[5px] border-white first:border-l-0 bg-stone-200">
                                                 <img src={image.url} alt={image.alt} className="h-full w-full object-cover" />
                                             </div>
                                         ))}
                                     </div>
                                 ) : null}
                             </div>
-                            <div className={`p-8 ${draft.orientation === 'landscape' ? 'columns-2 gap-10 block' : 'flex flex-col'}`}>
+
+                            {/* RIGHT COLUMN: Text */}
+                            <div className="flex h-full w-[45%] flex-col overflow-hidden bg-stone-50 p-[15mm]">
                                 {draft.designSettings.showLogo && branding.logoUrl ? (
-                                    <div className="mb-6 flex justify-center break-inside-avoid">
+                                    <div className="mb-[8mm] flex justify-center">
                                         <img src={branding.logoUrl} alt={branding.brandName} className="max-h-20 max-w-[240px] object-contain" />
                                     </div>
                                 ) : null}
-                                <div className="break-inside-avoid">
-                                    <div className="mb-4 text-3xl font-semibold" style={{ color: primaryColor }}>{property.priceText}</div>
-                                    <div className="mb-2 text-2xl font-bold text-slate-900">{draft.generatedContent.title || property.title}</div>
-                                    <div className="mb-4 text-sm uppercase tracking-[0.2em] text-slate-500">{draft.generatedContent.subtitle || property.locationLine}</div>
-                                </div>
+                                <div className="mb-[4mm] text-3xl font-semibold" style={{ color: primaryColor }}>{property.priceText}</div>
+                                <div className="mb-[6mm] text-2xl font-bold leading-tight text-slate-900">{draft.generatedContent.title || property.title}</div>
                                 {draft.designSettings.showFacts ? (
-                                    <div className="mb-5 flex flex-wrap gap-2">
+                                    <div className="mb-[8mm] flex flex-wrap gap-5 text-base font-bold text-slate-600">
                                         {property.facts.map((fact: any) => (
-                                            <div key={fact.label} className="rounded-full border px-3 py-1 text-sm text-slate-700">
-                                                <strong>{fact.value}</strong> {fact.label}
-                                            </div>
+                                            <span key={fact.label}>{fact.value} {fact.label}</span>
                                         ))}
                                     </div>
                                 ) : null}
                                 {draft.designSettings.showLanguages ? (
-                                    <div className="flex-1 space-y-4">
+                                    <div className="flex flex-1 flex-col gap-[6mm] overflow-hidden">
                                         {languageBlocks.map((block: any) => (
-                                            <div key={block.language} className="break-inside-avoid mb-4">
-                                                <div className="mb-1 text-xs font-semibold uppercase tracking-[0.2em]" style={{ color: primaryColor }}>
+                                            <div key={block.language} className="overflow-hidden">
+                                                <h4 className="mb-[2mm] text-xs font-semibold uppercase tracking-widest" style={{ color: primaryColor }}>
                                                     {block.label}
-                                                </div>
-                                                <div className="text-sm leading-6 text-slate-700">{block.body}</div>
+                                                </h4>
+                                                <div className="text-[13pt] leading-[1.5] text-slate-700 text-justify">{block.body}</div>
                                             </div>
                                         ))}
                                     </div>
                                 ) : null}
-                                {draft.designSettings.showFooter ? (
-                                    <div className="mt-6 border-t pt-4 text-sm text-slate-600 break-inside-avoid">
-                                        {draft.generatedContent.footerNote}
+                                {draft.designSettings.showFooter || draft.designSettings.showContact ? (
+                                    <div className="mt-auto flex items-end justify-between border-t-2 border-slate-200 pt-[5mm]">
+                                        <div className="text-sm leading-relaxed text-slate-800">
+                                            {property.reference ? <div><strong style={{ color: primaryColor }}>Ref:</strong> {property.reference}</div> : null}
+                                            {branding.contact.landline ? <div><strong style={{ color: primaryColor }}>Tel:</strong> {branding.contact.landline}</div> : null}
+                                            {branding.contact.mobile ? <div><strong style={{ color: primaryColor }}>Mob:</strong> {branding.contact.mobile}</div> : null}
+                                            {branding.publicUrl ? <div><strong style={{ color: primaryColor }}>Web:</strong> {branding.publicUrl.replace(/^https?:\/\//, '')}</div> : null}
+                                        </div>
+                                        {draft.designSettings.showQr && branding.publicUrl ? (
+                                            <div>
+                                                <img
+                                                    src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(branding.publicUrl)}`}
+                                                    alt="QR"
+                                                    className="h-24 w-24 border-2 p-0.5 bg-white"
+                                                    style={{ borderColor: primaryColor }}
+                                                />
+                                            </div>
+                                        ) : null}
                                     </div>
                                 ) : null}
                             </div>
                         </div>
                     ) : draft.templateId === "a3-poster-split" ? (
-                        <div className={`grid min-h-full ${draft.orientation === 'landscape' ? 'grid-rows-[55%_45%]' : 'grid-cols-[1.15fr_0.85fr]'}`}>
-                            <div className={`flex min-h-full ${draft.orientation === 'landscape' ? 'flex-row' : 'flex-col'}`}>
+                        /*
+                         * A3 Poster Split — identical left/right flex approach.
+                         * Left = 55% images (hero + 2 thumbnails), Right = 45% text.
+                         * Orientation ONLY controls paper dimensions via widthMm/heightMm.
+                         */
+                        <div className="flex h-full">
+                            {/* LEFT COLUMN: Images */}
+                            <div className="flex h-full w-[55%] flex-col">
                                 <div className="flex-1 bg-stone-200">
-                                    {heroImage ? <img src={heroImage.url} alt={heroImage.alt} className="h-full w-full object-cover" /> : null}
+                                    {heroImage ? <img src={heroImage.url} alt={heroImage.alt} className="h-full w-full object-cover block" /> : null}
                                 </div>
                                 {supportingImages.length > 0 ? (
-                                    <div className={`grid gap-1 bg-white p-1 ${draft.orientation === 'landscape' ? 'w-[24%] grid-rows-2' : 'h-[24%] grid-cols-2'}`}>
+                                    <div className="flex h-[25%]">
                                         {supportingImages.slice(0, 2).map((image: any) => (
-                                            <div key={image.id} className="bg-stone-200">
-                                                <img src={image.url} alt={image.alt} className="h-full w-full object-cover" />
+                                            <div key={image.id} className="flex-1 border-l-[5px] border-t-[5px] border-white first:border-l-0 bg-stone-200">
+                                                <img src={image.url} alt={image.alt} className="h-full w-full object-cover block" />
                                             </div>
                                         ))}
                                     </div>
                                 ) : null}
                             </div>
-                            <div className={`bg-stone-50 p-10 ${draft.orientation === 'landscape' ? 'columns-2 gap-12 block' : 'flex flex-col'}`}>
+
+                            {/* RIGHT COLUMN: Text */}
+                            <div className="flex h-full w-[45%] flex-col overflow-hidden bg-stone-50 p-[15mm]">
                                 {draft.designSettings.showLogo && branding.logoUrl ? (
-                                    <div className="mb-8 flex justify-center break-inside-avoid">
+                                    <div className="mb-[8mm] flex justify-center">
                                         <img src={branding.logoUrl} alt={branding.brandName} className="max-h-20 max-w-[260px] object-contain" />
                                     </div>
                                 ) : null}
-                                <div className="break-inside-avoid">
-                                    {draft.designSettings.showPrice ? (
-                                        <div className="mb-5 text-4xl font-semibold" style={{ color: primaryColor }}>
-                                            {property.priceText}
-                                        </div>
-                                    ) : null}
-                                    <div className="mb-3 text-3xl font-bold text-slate-900">{draft.generatedContent.title || property.title}</div>
-                                    <div className="mb-5 text-lg text-slate-600">{draft.generatedContent.subtitle || property.locationLine}</div>
-                                </div>
+                                {draft.designSettings.showPrice ? (
+                                    <div className="mb-[4mm] text-4xl font-bold" style={{ color: primaryColor }}>
+                                        {property.priceText}
+                                    </div>
+                                ) : null}
+                                <div className="mb-[6mm] text-3xl font-bold leading-tight text-slate-900">{draft.generatedContent.title || property.title}</div>
                                 {draft.designSettings.showFacts ? (
-                                    <div className="mb-6 grid grid-cols-2 gap-3 break-inside-avoid">
+                                    <div className="mb-[8mm] flex flex-wrap gap-5 text-lg font-bold text-slate-600">
                                         {property.facts.map((fact: any) => (
-                                            <div key={fact.label} className="rounded-lg border bg-white px-4 py-3">
-                                                <div className="text-xs uppercase tracking-[0.2em] text-slate-500">{fact.label}</div>
-                                                <div className="text-lg font-semibold text-slate-900">{fact.value}</div>
-                                            </div>
+                                            <span key={fact.label}>{fact.value} {fact.label}</span>
                                         ))}
                                     </div>
                                 ) : null}
                                 {draft.designSettings.showLanguages ? (
-                                    <div className="flex-1 space-y-6">
+                                    <div className="flex flex-1 flex-col gap-[6mm] overflow-hidden">
                                         {languageBlocks.map((block: any) => (
-                                            <div key={block.language} className="break-inside-avoid mb-6">
-                                                <div className="mb-2 text-sm font-semibold uppercase tracking-[0.2em]" style={{ color: primaryColor }}>
+                                            <div key={block.language} className="overflow-hidden">
+                                                <h4 className="mb-[2mm] text-xs font-semibold uppercase tracking-widest" style={{ color: primaryColor }}>
                                                     {block.label}
-                                                </div>
-                                                <div className="text-[15px] leading-7 text-slate-700">{block.body}</div>
+                                                </h4>
+                                                <div className="text-[13pt] leading-[1.5] text-slate-700 text-justify">{block.body}</div>
                                             </div>
                                         ))}
                                     </div>
                                 ) : null}
-                                <div className="mt-8 border-t pt-5 break-inside-avoid">
-                                    <div className="text-sm font-medium text-slate-800">{draft.generatedContent.contactCta}</div>
-                                    {draft.designSettings.showContact ? (
-                                        <div className="mt-3 space-y-1 text-sm text-slate-600">
-                                            {branding.contact.mobile ? <div>{branding.contact.mobile}</div> : null}
-                                            {branding.contact.landline ? <div>{branding.contact.landline}</div> : null}
-                                            {branding.contact.email ? <div>{branding.contact.email}</div> : null}
-                                            {branding.publicUrl ? <div>{branding.publicUrl}</div> : null}
+                                <div className="mt-auto flex items-end justify-between border-t-2 border-slate-200 pt-[5mm]">
+                                    <div className="text-sm leading-relaxed text-slate-800">
+                                        {draft.generatedContent.contactCta ? <div className="mb-1 font-medium">{draft.generatedContent.contactCta}</div> : null}
+                                        {draft.designSettings.showContact ? (
+                                            <>
+                                                {property.reference ? <div><strong style={{ color: primaryColor }}>Ref:</strong> {property.reference}</div> : null}
+                                                {branding.contact.landline ? <div><strong style={{ color: primaryColor }}>Tel:</strong> {branding.contact.landline}</div> : null}
+                                                {branding.contact.mobile ? <div><strong style={{ color: primaryColor }}>Mob:</strong> {branding.contact.mobile}</div> : null}
+                                                {branding.contact.email ? <div>{branding.contact.email}</div> : null}
+                                                {branding.publicUrl ? <div>{branding.publicUrl.replace(/^https?:\/\//, '')}</div> : null}
+                                            </>
+                                        ) : null}
+                                    </div>
+                                    {draft.designSettings.showQr && branding.publicUrl ? (
+                                        <div>
+                                            <img
+                                                src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(branding.publicUrl)}`}
+                                                alt="QR"
+                                                className="h-24 w-24 border-2 p-0.5 bg-white"
+                                                style={{ borderColor: primaryColor }}
+                                            />
                                         </div>
                                     ) : null}
                                 </div>
                             </div>
                         </div>
                     ) : (
-                        <div className="flex min-h-full flex-col">
+                        /* A4 Property Sheet — column layout (hero top, details below, footer bottom) */
+                        <div className="flex h-full flex-col">
                             <div className="grid grid-cols-[1.05fr_0.95fr]">
                                 <div className="min-h-[56vh] bg-stone-200">
                                     {heroImage ? <img src={heroImage.url} alt={heroImage.alt} className="h-full w-full object-cover" /> : null}

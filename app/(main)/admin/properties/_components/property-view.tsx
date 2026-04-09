@@ -60,8 +60,9 @@ interface PropertyViewProps {
     contactsData?: { id: string; name: string }[];
     developersData?: { id: string; name: string }[];
     managementCompaniesData?: { id: string; name: string }[];
-    projectsData?: any[]; // Project[] but avoiding cyclic import for now or simplify
+    projectsData?: any[];
     previewToken?: string;
+    printBranding?: any;
 }
 
 export default function PropertyView({
@@ -73,7 +74,8 @@ export default function PropertyView({
     developersData,
     managementCompaniesData,
     projectsData,
-    previewToken
+    previewToken,
+    printBranding,
 }: PropertyViewProps) {
     const [isEditOpen, setIsEditOpen] = useState(false);
 
@@ -109,8 +111,10 @@ export default function PropertyView({
                         propertyId={property.id}
                         locationId={locationId}
                         propertyTitle={property.title}
+                        property={property}
                         media={property.media || []}
                         initialDrafts={property.printDrafts || []}
+                        printBranding={printBranding}
                     />
                     {domain && (
                         <Button variant="outline" asChild>

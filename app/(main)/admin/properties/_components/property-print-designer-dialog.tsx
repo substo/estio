@@ -62,10 +62,23 @@ import {
     normalizePropertyPrintLanguages,
     normalizePropertyPrintPromptSettings,
     buildPrintLayoutPreviewDescriptor,
+    formatPropertyPrice,
+    buildPropertyFactItems,
+    buildPropertyFeatureBullets,
+    resolvePrintImageUrl,
+    clampSelectedMediaIds,
     type PropertyPrintPaperSize,
     type PropertyPrintOrientation,
 } from "@/lib/properties/print-designer";
 import { REPLY_LANGUAGE_OPTIONS, getReplyLanguageLabel } from "@/lib/ai/reply-language-options";
+import { PropertyPrintPreview } from "./property-print-preview";
+
+function buildPublicUrl(domain: string | null | undefined, slug: string | null | undefined) {
+    const d = String(domain || "").trim();
+    const s = String(slug || "").trim();
+    if (!d || !s) return null;
+    return `https://${d}/properties/${s}`;
+}
 
 type PropertyImage = {
     id: string;
@@ -277,14 +290,18 @@ export function PropertyPrintDesignerDialog({
     propertyId,
     locationId,
     propertyTitle,
+    property,
     media,
     initialDrafts,
+    printBranding,
 }: {
     propertyId: string;
     locationId: string;
     propertyTitle: string;
+    property: any;
     media: PropertyImage[];
     initialDrafts: DraftLike[];
+    printBranding?: any;
 }) {
     const [open, setOpen] = useState(false);
     const [drafts, setDrafts] = useState(() => initialDrafts.map(normalizeDraft));
@@ -629,6 +646,7 @@ export function PropertyPrintDesignerDialog({
                                                     {isGenerating ? <Loader2 className="ml-1.5 h-3 w-3 animate-spin" /> : null}
                                                 </TabsTrigger>
                                                 <TabsTrigger value="media">Media &amp; Layout</TabsTrigger>
+                                                <TabsTrigger value="preview">Preview</TabsTrigger>
                                             </TabsList>
 
                                             <TabsContent value="setup" className="space-y-4">
@@ -1068,6 +1086,79 @@ export function PropertyPrintDesignerDialog({
                                                         })}
                                                     </div>
                                                 </div>
+                                            </TabsContent>
+
+                                            <TabsContent value="preview">
+                                                {selectedDraft ? (() => {
+                                                    const previewDesignSettings = normalizePropertyPrintDesignSettings(selectedDraft.designSettings);
+                                                    const previewGeneratedContent = normalizePropertyPrintGeneratedContent(selectedDraft.generatedContent);
+                                                    const previewLanguages = normalizePropertyPrintLanguages(selectedDraft.languages);
+                                                    const availableImages = imageMedia.filter((m) => m.kind === "IMAGE");
+                                                    const selectedIds = clampSelectedMediaIds(
+                                                        selectedDraft.selectedMediaIds,
+                                                        availableImages.map((m) => m.id),
+                                                        template.imageSlots,
+                                                    );
+                                                    const previewImages = [
+                                                        ...selectedIds.map((id) => availableImages.find((m) => m.id === id)).filter(Boolean),
+                                                        ...availableImages.filter((m) => !selectedIds.includes(m.id)),
+                                                    ].slice(0, template.imageSlots).map((m: any) => ({
+                                                        id: m.id,
+                                                        alt: property?.title || "Property photo",
+                                                        url: resolvePrintImageUrl(m),
+                                                    }));
+                                                    const brandingTheme = printBranding?.theme || {};
+                                                    const brandingContact = printBranding?.contactInfo || {};
+                                                    const brandingDomain = printBranding?.domain || null;
+                                                    const publicUrl = buildPublicUrl(brandingDomain, property?.slug);
+                                                    const previewData = {
+                                                        draft: {
+                                                            id: selectedDraft.id,
+                                                            name: selectedDraft.name,
+                                                            templateId: template.id,
+                                                            templateLabel: template.label,
+                                                            paperSize: selectedDraft.paperSize,
+                                                            orientation: selectedDraft.orientation,
+                                                            languages: previewLanguages,
+                                                            designSettings: previewDesignSettings,
+                                                            promptSettings: normalizePropertyPrintPromptSettings(selectedDraft.promptSettings),
+                                                            generatedContent: previewGeneratedContent,
+                                                        },
+                                                        branding: {
+                                                            logoUrl: brandingTheme?.logo?.url || null,
+                                                            brandName: brandingTheme?.logo?.textTop || printBranding?.locationName || "Estio",
+                                                            brandTagline: brandingTheme?.logo?.textBottom || null,
+                                                            primaryColor: previewDesignSettings.accentColor || brandingTheme?.primaryColor || "#9d0917",
+                                                            contact: {
+                                                                mobile: brandingContact?.mobile || null,
+                                                                landline: brandingContact?.landline || null,
+                                                                email: brandingContact?.email || null,
+                                                                address: brandingContact?.address || null,
+                                                            },
+                                                            publicUrl,
+                                                        },
+                                                        property: {
+                                                            id: property?.id || propertyId,
+                                                            title: property?.title || propertyTitle || "",
+                                                            reference: property?.reference || property?.slug || "",
+                                                            locationLine: [property?.city, property?.propertyArea, property?.country].filter(Boolean).join(", "),
+                                                            priceText: formatPropertyPrice(property || {}),
+                                                            facts: buildPropertyFactItems(property || {}),
+                                                            featureBullets: previewGeneratedContent.featureBullets.length > 0
+                                                                ? previewGeneratedContent.featureBullets
+                                                                : buildPropertyFeatureBullets(property || {}),
+                                                            descriptionHtml: property?.description || "",
+                                                        },
+                                                        images: previewImages,
+                                                    };
+                                                    return (
+                                                        <div className="overflow-auto rounded-lg border bg-stone-100 p-4" style={{ maxHeight: '60vh' }}>
+                                                            <PropertyPrintPreview data={previewData} embedded />
+                                                        </div>
+                                                    );
+                                                })() : (
+                                                    <div className="text-sm text-muted-foreground">Select a draft to see the preview.</div>
+                                                )}
                                             </TabsContent>
                                         </Tabs>
                                     </div>

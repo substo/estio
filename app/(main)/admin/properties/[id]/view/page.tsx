@@ -5,6 +5,7 @@ import { generatePreviewToken } from "@/lib/jwt-utils";
 import { QuickAssistStartButton } from "@/app/(main)/admin/viewings/sessions/_components/quick-assist-start-button";
 import { VIEWING_SESSION_QUICK_START_SOURCES } from "@/lib/viewings/sessions/types";
 import { isPrecisionRemoveEnabledForLocation } from "@/lib/ai/property-image-precision-remove-config";
+import { getLocationPrintBranding } from "@/lib/properties/print-preview";
 
 
 
@@ -61,7 +62,7 @@ export default async function PropertyViewPage({ params, searchParams }: { param
     // Fetch data for the Edit Modal
     // Fetch data for the Edit Modal
     // Optimized: Direct DB access to avoid redundant auth checks
-    const [contacts, companies, projects, precisionRemoveEnabled] = await Promise.all([
+    const [contacts, companies, projects, precisionRemoveEnabled, printBranding] = await Promise.all([
         db.contact.findMany({
             where: { locationId },
             select: { id: true, name: true },
@@ -78,6 +79,7 @@ export default async function PropertyViewPage({ params, searchParams }: { param
             orderBy: { name: 'asc' },
         }),
         isPrecisionRemoveEnabledForLocation(locationId),
+        getLocationPrintBranding(locationId),
     ]);
 
     const contactsData = contacts.map(c => ({ ...c, name: c.name || 'Unknown Contact' }));
@@ -110,6 +112,7 @@ export default async function PropertyViewPage({ params, searchParams }: { param
                 managementCompaniesData={managementCompaniesData}
                 projectsData={projectsData}
                 previewToken={previewToken}
+                printBranding={printBranding}
             />
         </div>
     );
