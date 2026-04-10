@@ -16,7 +16,17 @@ import { PrintScaleWrapper } from "./print-scale-wrapper";
  * so the component can render inline inside the designer dialog, and a CSS
  * transform is applied to scale the paper down to fit the available width.
  */
-export function PropertyPrintPreview({ data, embedded }: { data: any; embedded?: boolean }) {
+export function PropertyPrintPreview({ 
+    data, 
+    embedded,
+    fitMode = 'width',
+    zoomScale = 1,
+}: { 
+    data: any; 
+    embedded?: boolean;
+    fitMode?: 'width' | 'both';
+    zoomScale?: number;
+}) {
     const { draft, branding, property, images } = data;
     const { widthMm, heightMm } = getPaperDimensions(draft.paperSize, draft.orientation);
     const pageCss = getPaperPageCss(draft.paperSize, draft.orientation);
@@ -57,48 +67,24 @@ export function PropertyPrintPreview({ data, embedded }: { data: any; embedded?:
                 `}</style>
             ) : null}
 
-            {embedded ? (
-                /*
-                 * Embedded mode: use CSS scale to fit A3 inside the dialog.
-                 * The paper is rendered at full size inside a scaled wrapper
-                 * so the proportions are always correct.
-                 */
-                <div style={{ width: '100%', overflow: 'hidden' }}>
+            <div className={embedded ? "" : "print-shell px-6 py-8 print:px-0 print:py-0"}>
+                <PrintScaleWrapper 
+                    widthMm={widthMm} 
+                    heightMm={heightMm} 
+                    fitMode={fitMode} 
+                    zoomScale={zoomScale}
+                >
                     <div
-                        className="print-scale-wrapper"
+                        className="print-page mx-auto overflow-hidden bg-white shadow-2xl shrink-0"
                         style={{
                             width: `${widthMm}mm`,
-                            transformOrigin: 'top left',
-                            /* scale to fit ~1060px dialog content width */
-                            transform: `scale(${Math.min(1, 1060 / (widthMm * 3.7795275591))})`,
+                            height: `${heightMm}mm`,
                         }}
                     >
-                        <div
-                            className="print-page overflow-hidden bg-white shadow-2xl"
-                            style={{
-                                width: `${widthMm}mm`,
-                                height: `${heightMm}mm`,
-                            }}
-                        >
-                            {renderTemplate(draft, branding, property, heroImage, supportingImages, primaryColor, languageBlocks)}
-                        </div>
+                        {renderTemplate(draft, branding, property, heroImage, supportingImages, primaryColor, languageBlocks)}
                     </div>
-                </div>
-            ) : (
-                <div className="print-shell px-6 py-8 print:px-0 print:py-0 overflow-x-auto flex justify-center">
-                    <PrintScaleWrapper widthMm={widthMm}>
-                        <div
-                            className="print-page mx-auto overflow-hidden bg-white shadow-2xl shrink-0"
-                            style={{
-                                width: `${widthMm}mm`,
-                                height: `${heightMm}mm`,
-                            }}
-                        >
-                            {renderTemplate(draft, branding, property, heroImage, supportingImages, primaryColor, languageBlocks)}
-                        </div>
-                    </PrintScaleWrapper>
-                </div>
-            )}
+                </PrintScaleWrapper>
+            </div>
         </>
     );
 }

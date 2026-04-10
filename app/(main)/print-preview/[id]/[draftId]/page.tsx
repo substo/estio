@@ -2,8 +2,7 @@ import { currentUser } from "@clerk/nextjs/server";
 import db from "@/lib/db";
 import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
 import { getLocationPrintBranding, buildPropertyPrintPreviewData } from "@/lib/properties/print-preview";
-import { PropertyPrintPreview } from "@/app/(main)/admin/properties/_components/property-print-preview";
-import { PropertyPrintPreviewActions } from "@/app/(main)/admin/properties/_components/property-print-preview-actions";
+import { PrintPreviewViewer } from "@/app/(main)/admin/properties/_components/print-preview-viewer";
 
 export const dynamic = "force-dynamic";
 
@@ -49,9 +48,9 @@ export default async function PropertyPrintPreviewPage({
     const data = buildPropertyPrintPreviewData({ property, draft, branding });
 
     return (
-        <div>
-            <PropertyPrintPreviewActions pdfHref={`/print-preview/${property.id}/${draft.id}/pdf`} />
-            <PropertyPrintPreview data={data} />
-        </div>
+        <PrintPreviewViewer 
+            pdfHref={`/print-preview/${property.id}/${draft.id}/pdf`} 
+            data={data} 
+        />
     );
 }
