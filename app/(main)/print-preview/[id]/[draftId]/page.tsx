@@ -50,7 +50,7 @@ export default async function PropertyPrintPreviewPage({
 
     return (
         <div>
-            <PropertyPrintPreviewActions pdfHref={`/admin/properties/${property.id}/print/${draft.id}/pdf`} />
+            <PropertyPrintPreviewActions pdfHref={`/print-preview/${property.id}/${draft.id}/pdf`} />
             <PropertyPrintPreview data={data} />
         </div>
     );
