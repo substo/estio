@@ -1141,7 +1141,7 @@ export function PropertyPrintDesignerDialog({
                                                                     <span className="text-[10px] text-muted-foreground">Visible</span>
                                                                 </label>
                                                             </div>
-                                                            {selectedDraft.languages.map((language) => {
+                                                            {normalizePropertyPrintLanguages(selectedDraft.languages).map((language) => {
                                                                 const languageBlock = generatedContent.languages.find((item) => item.language === language) || {
                                                                     language,
                                                                     label: getReplyLanguageLabel(language) || language,

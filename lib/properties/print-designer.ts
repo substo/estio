@@ -72,7 +72,7 @@ export const propertyPrintPromptSettingsSchema = z.object({
 }).strict();
 
 export const propertyPrintGeneratedLanguageSchema = z.object({
-    language: z.string().trim().min(2),
+    language: z.string().trim().min(2).toLowerCase(),
     label: z.string().trim().min(1),
     title: z.string().trim().default(""),
     subtitle: z.string().trim().default(""),
@@ -172,10 +172,20 @@ export function normalizePropertyPrintPromptSettings(value: unknown): PropertyPr
 }
 
 export function normalizePropertyPrintGeneratedContent(value: unknown): PropertyPrintGeneratedContent {
-    return propertyPrintGeneratedContentSchema.parse({
+    const parsed = propertyPrintGeneratedContentSchema.parse({
         ...DEFAULT_PROPERTY_PRINT_GENERATED_CONTENT,
         ...(value && typeof value === "object" ? value : {}),
     });
+    
+    if (parsed.languages && parsed.languages.length > 0) {
+        const uniqueLangs = new Map();
+        for (const block of parsed.languages) {
+            uniqueLangs.set(block.language, block);
+        }
+        parsed.languages = Array.from(uniqueLangs.values());
+    }
+    
+    return parsed;
 }
 
 export function normalizePropertyPrintGenerationMetadata(value: unknown): PropertyPrintGenerationMetadata | null {
