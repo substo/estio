@@ -67,7 +67,7 @@ export function PropertyPrintPreview({
                 `}</style>
             ) : null}
 
-            <div className={embedded ? "" : "print-shell px-6 py-8 print:px-0 print:py-0"}>
+            <div className={embedded ? "w-full" : "print-shell px-6 py-8 print:px-0 print:py-0 w-full flex-1"}>
                 <PrintScaleWrapper 
                     widthMm={widthMm} 
                     heightMm={heightMm} 
@@ -183,11 +183,11 @@ function renderTemplate(
 
                     {/* Language blocks */}
                     {draft.designSettings.showLanguages ? (
-                        <div className="flex flex-1 flex-col gap-[6mm] overflow-hidden">
+                        <div className="flex flex-1 flex-col gap-[6mm] overflow-hidden min-h-0">
                             {languageBlocks.map((block: any) => (
-                                <div key={block.language} className="overflow-hidden">
+                                <div key={block.language} className="overflow-hidden min-h-0 flex flex-col">
                                     <h4
-                                        className="mb-[2mm] font-semibold uppercase"
+                                        className="mb-[2mm] font-semibold uppercase shrink-0"
                                         style={{
                                             color: primaryColor,
                                             fontSize: draft.templateId === "a3-poster-split" ? '12pt' : '10pt',
@@ -197,7 +197,7 @@ function renderTemplate(
                                         {block.label}
                                     </h4>
                                     <div
-                                        className="text-slate-700 text-justify"
+                                        className="text-slate-700 text-justify overflow-hidden text-ellipsis"
                                         style={{
                                             fontSize: draft.templateId === "a3-poster-split" ? '13pt' : '11pt',
                                             lineHeight: 1.5,
@@ -212,7 +212,7 @@ function renderTemplate(
 
                     {/* Footer / Contact */}
                     {(draft.designSettings.showFooter || draft.designSettings.showContact) ? (
-                        <div className="mt-auto flex items-end justify-between border-t-2 border-slate-200 pt-[5mm]">
+                        <div className="mt-auto shrink-0 flex items-end justify-between border-t-2 border-slate-200 pt-[5mm] bg-stone-50 relative z-10">
                             <div style={{ fontSize: '14pt', lineHeight: 1.6, color: '#333' }}>
                                 {draft.generatedContent.contactCta ? (
                                     <div className="mb-1 font-medium">{draft.generatedContent.contactCta}</div>

@@ -70,7 +70,9 @@ export function PrintScaleWrapper({
 
     return (
         /* The outmost flex container allows center alignment if there's extra room */
-        <div ref={containerRef} className="w-full h-full flex justify-center items-center print:block overflow-auto">
+        <div className="w-full flex-1 relative flex justify-center items-center print:block overflow-auto min-h-0">
+            {/* Absolute observer div to independently track container true size without causing feedback loop with children */}
+            <div ref={containerRef} className="absolute inset-0 pointer-events-none print:hidden drop-shadow-none bg-transparent" />
             
             {/* The scaled boundary box: enforces exact width/height of the scaled document in the DOM flow.
                 Keeps scrollbars honest and prevents layout collapsing. */}
@@ -78,7 +80,8 @@ export function PrintScaleWrapper({
                 className={`print:!w-auto print:!h-auto transition-opacity duration-300 ${isMeasured || zoomScale !== 1 ? 'opacity-100' : 'opacity-0'}`}
                 style={{ 
                     width: `${scaledWidth}px`, 
-                    height: `${scaledHeight}px` 
+                    height: `${scaledHeight}px`,
+                    flexShrink: 0
                 }}
             >
                 {/* The actual transform scaled content. Bounded cleanly inside the exact scaled dimensions above. */}

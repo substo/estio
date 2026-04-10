@@ -22,7 +22,7 @@ export function PrintPreviewViewer({
                 isZoomed={isZoomed}
                 onToggleZoom={() => setIsZoomed(!isZoomed)}
             />
-            <div className={`flex-1 overflow-auto ${isZoomed ? "p-8" : "p-4"}`}>
+            <div className={`flex flex-1 overflow-auto ${isZoomed ? "p-8" : "p-4"}`}>
                 <PropertyPrintPreview 
                     data={data} 
                     embedded={false} 
