@@ -110,6 +110,7 @@ function renderTemplate(
     const activeEmail = g.emailOverride || branding.contact.email;
     const activeWebsite = g.websiteOverride || branding.publicUrl;
     const activeSubtitle = g.subtitle || property.locationLine;
+    const fontScale = draft.designSettings.fontScale ?? 1;
 
     if (draft.templateId === "a4-photo-heavy" || draft.templateId === "a3-poster-split") {
         /*
@@ -175,26 +176,26 @@ function renderTemplate(
 
                     {/* Price */}
                     {draft.designSettings.showPrice !== false && activePrice ? (
-                        <div className="mb-[4mm] font-bold" style={{ color: primaryColor, fontSize: draft.templateId === "a3-poster-split" ? '34pt' : '24pt' }}>
+                        <div className="mb-[4mm] font-bold" style={{ color: primaryColor, fontSize: draft.templateId === "a3-poster-split" ? `calc(34pt * ${fontScale})` : `calc(24pt * ${fontScale})` }}>
                             {activePrice}
                         </div>
                     ) : null}
 
                     {/* Title */}
-                    <div className="mb-[6mm] font-bold leading-tight text-slate-900" style={{ fontSize: draft.templateId === "a3-poster-split" ? '22pt' : '18pt' }}>
+                    <div className="mb-[6mm] font-bold leading-tight text-slate-900" style={{ fontSize: draft.templateId === "a3-poster-split" ? `calc(22pt * ${fontScale})` : `calc(18pt * ${fontScale})` }}>
                         {activeTitle}
                     </div>
 
                     {/* Subtitle */}
                     {activeSubtitle ? (
-                        <div className="mb-[6mm] text-slate-600" style={{ fontSize: draft.templateId === "a3-poster-split" ? '16pt' : '12pt', marginTop: '-4mm' }}>
+                        <div className="mb-[6mm] text-slate-600" style={{ fontSize: draft.templateId === "a3-poster-split" ? `calc(16pt * ${fontScale})` : `calc(12pt * ${fontScale})`, marginTop: '-4mm' }}>
                             {activeSubtitle}
                         </div>
                     ) : null}
 
                     {/* Facts */}
                     {draft.designSettings.showFacts ? (
-                        <div className="mb-[8mm] grid grid-cols-2 md:grid-cols-4 gap-4" style={{ fontSize: draft.templateId === "a3-poster-split" ? '16pt' : '10pt' }}>
+                        <div className="mb-[8mm] grid grid-cols-2 md:grid-cols-4 gap-4" style={{ fontSize: draft.templateId === "a3-poster-split" ? `calc(16pt * ${fontScale})` : `calc(10pt * ${fontScale})` }}>
                             {(!draft.designSettings.visibleFacts || draft.designSettings.visibleFacts.includes("bedrooms")) && (
                                 <div className="flex flex-col items-center justify-center p-3 rounded-md bg-black/5 border border-black/10">
                                     <Bed className="mb-2 shrink-0" style={{ width: draft.templateId === "a3-poster-split" ? '24pt' : '18pt', height: draft.templateId === "a3-poster-split" ? '24pt' : '18pt', color: primaryColor }} />
@@ -231,10 +232,10 @@ function renderTemplate(
                     {/* Feature Bullets */}
                     {draft.designSettings.showFeatures && property.featureBullets?.length > 0 ? (
                         <div className="mb-[6mm]">
-                            <div className="mb-[2mm] font-semibold uppercase tracking-[0.2em]" style={{ color: primaryColor, fontSize: draft.templateId === "a3-poster-split" ? '14pt' : '10pt' }}>
+                            <div className="mb-[2mm] font-semibold uppercase tracking-[0.2em]" style={{ color: primaryColor, fontSize: draft.templateId === "a3-poster-split" ? `calc(14pt * ${fontScale})` : `calc(10pt * ${fontScale})` }}>
                                 Highlights
                             </div>
-                            <ul className="space-y-[1.5mm] text-slate-700" style={{ fontSize: draft.templateId === "a3-poster-split" ? '14pt' : '10pt' }}>
+                            <ul className="space-y-[1.5mm] text-slate-700" style={{ fontSize: draft.templateId === "a3-poster-split" ? `calc(14pt * ${fontScale})` : `calc(10pt * ${fontScale})` }}>
                                 {property.featureBullets.slice(0, 5).map((bullet: string) => (
                                     <li key={bullet}>• {bullet}</li>
                                 ))}
@@ -251,7 +252,7 @@ function renderTemplate(
                                         className="mb-[2mm] font-semibold uppercase shrink-0"
                                         style={{
                                             color: primaryColor,
-                                            fontSize: draft.templateId === "a3-poster-split" ? '12pt' : '10pt',
+                                            fontSize: draft.templateId === "a3-poster-split" ? `calc(12pt * ${fontScale})` : `calc(10pt * ${fontScale})`,
                                             letterSpacing: '1px',
                                         }}
                                     >
@@ -260,7 +261,7 @@ function renderTemplate(
                                     <div className="flex-1 min-h-0 relative">
                                         <div className="absolute inset-0">
                                             <AutoFitText
-                                                maxFontSize={draft.templateId === "a3-poster-split" ? 13 : 11}
+                                                maxFontSize={(draft.templateId === "a3-poster-split" ? 13 : 11) * fontScale}
                                                 minFontSize={7}
                                                 step={0.5}
                                                 className="text-slate-700 text-justify"
@@ -278,7 +279,7 @@ function renderTemplate(
                     {/* Footer / Contact */}
                     {(draft.designSettings.showFooter || draft.designSettings.showContact) ? (
                         <div className="mt-auto shrink-0 flex items-end justify-between border-t-2 border-slate-200 pt-[5mm] bg-stone-50 relative z-10">
-                            <div style={{ fontSize: '14pt', lineHeight: 1.6, color: '#333' }}>
+                            <div style={{ fontSize: `calc(14pt * ${fontScale})`, lineHeight: 1.6, color: '#333' }}>
                                 {(draft.designSettings.showFooter && draft.generatedContent.footerNote) ? (
                                     <div className="mb-2 text-slate-600 max-w-[80%]">{draft.generatedContent.footerNote}</div>
                                 ) : null}
@@ -326,48 +327,48 @@ function renderTemplate(
                         </div>
                     ) : null}
                     {draft.designSettings.showPrice !== false && activePrice ? (
-                        <div className="mb-4 text-3xl font-semibold" style={{ color: primaryColor }}>{activePrice}</div>
+                        <div className="mb-4 font-semibold" style={{ color: primaryColor, fontSize: `calc(1.875rem * ${fontScale})` }}>{activePrice}</div>
                     ) : null}
-                    <div className="mb-2 text-2xl font-bold text-slate-900">{activeTitle}</div>
-                    <div className="mb-4 text-sm text-slate-600">{draft.generatedContent.subtitle || property.locationLine}</div>
+                    <div className="mb-2 font-bold text-slate-900" style={{ fontSize: `calc(1.5rem * ${fontScale})` }}>{activeTitle}</div>
+                    <div className="mb-4 text-slate-600" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>{draft.generatedContent.subtitle || property.locationLine}</div>
                     {draft.designSettings.showFacts ? (
                         <div className="mb-4 grid grid-cols-2 lg:grid-cols-4 gap-2">
                             {(!draft.designSettings.visibleFacts || draft.designSettings.visibleFacts.includes("bedrooms")) && (
-                                <div className="rounded-md border p-2 text-center text-sm shadow-sm bg-white">
+                                <div className="rounded-md border p-2 text-center shadow-sm bg-white" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>
                                     <Bed className="mx-auto mb-1 h-4 w-4" style={{ color: primaryColor }} />
                                     <div className="font-bold">{property.bedrooms || "-"}</div>
-                                    <div className="text-[10px] uppercase text-slate-500">Beds</div>
+                                    <div className="uppercase text-slate-500" style={{ fontSize: `calc(10px * ${fontScale})` }}>Beds</div>
                                 </div>
                             )}
                             {(!draft.designSettings.visibleFacts || draft.designSettings.visibleFacts.includes("bathrooms")) && (
-                                <div className="rounded-md border p-2 text-center text-sm shadow-sm bg-white">
+                                <div className="rounded-md border p-2 text-center shadow-sm bg-white" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>
                                     <Bath className="mx-auto mb-1 h-4 w-4" style={{ color: primaryColor }} />
                                     <div className="font-bold">{property.bathrooms || "-"}</div>
-                                    <div className="text-[10px] uppercase text-slate-500">Baths</div>
+                                    <div className="uppercase text-slate-500" style={{ fontSize: `calc(10px * ${fontScale})` }}>Baths</div>
                                 </div>
                             )}
                             {(!draft.designSettings.visibleFacts || draft.designSettings.visibleFacts.includes("areaSqm")) && (
-                                <div className="rounded-md border p-2 text-center text-sm shadow-sm bg-white">
+                                <div className="rounded-md border p-2 text-center shadow-sm bg-white" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>
                                     <Maximize className="mx-auto mb-1 h-4 w-4" style={{ color: primaryColor }} />
                                     <div className="font-bold">{property.areaSqm || "-"}</div>
-                                    <div className="text-[10px] uppercase text-slate-500">Area</div>
+                                    <div className="uppercase text-slate-500" style={{ fontSize: `calc(10px * ${fontScale})` }}>Area</div>
                                 </div>
                             )}
                             {(!draft.designSettings.visibleFacts || draft.designSettings.visibleFacts.includes("parking")) && (
-                                <div className="rounded-md border p-2 text-center text-sm shadow-sm bg-white">
+                                <div className="rounded-md border p-2 text-center shadow-sm bg-white" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>
                                     <Car className="mx-auto mb-1 h-4 w-4" style={{ color: primaryColor }} />
                                     <div className="font-bold">{(property.features || []).some((f: string) => typeof f === 'string' && f.toLowerCase().includes('parking')) ? "Yes" : "-"}</div>
-                                    <div className="text-[10px] uppercase text-slate-500">Parking</div>
+                                    <div className="uppercase text-slate-500" style={{ fontSize: `calc(10px * ${fontScale})` }}>Parking</div>
                                 </div>
                             )}
                         </div>
                     ) : null}
                     {draft.designSettings.showFeatures ? (
                         <div className="mb-4">
-                            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.2em]" style={{ color: primaryColor }}>
+                            <div className="mb-2 font-semibold uppercase tracking-[0.2em]" style={{ color: primaryColor, fontSize: `calc(0.75rem * ${fontScale})` }}>
                                 Highlights
                             </div>
-                            <ul className="space-y-1 text-sm text-slate-700">
+                            <ul className="space-y-1 text-slate-700" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>
                                 {property.featureBullets.slice(0, 5).map((bullet: string) => (
                                     <li key={bullet}>• {bullet}</li>
                                 ))}
@@ -378,10 +379,10 @@ function renderTemplate(
                         <div className="flex-1 space-y-4">
                             {languageBlocks.map((block: any) => (
                                 <div key={block.language}>
-                                    <div className="mb-1 text-xs font-semibold uppercase tracking-[0.2em]" style={{ color: primaryColor }}>
+                                    <div className="mb-1 font-semibold uppercase tracking-[0.2em]" style={{ color: primaryColor, fontSize: `calc(0.75rem * ${fontScale})` }}>
                                         {block.label}
                                     </div>
-                                    <div className="text-sm leading-6 text-slate-700">{block.body}</div>
+                                    <div className="leading-6 text-slate-700" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>{block.body}</div>
                                 </div>
                             ))}
                         </div>
@@ -400,10 +401,10 @@ function renderTemplate(
             <div className="grid grid-cols-[1fr_auto] items-start gap-6 border-t px-8 py-5">
                 <div>
                     {draft.designSettings.showFooter ? (
-                        <div className="text-sm text-slate-600">{draft.generatedContent.footerNote}</div>
+                        <div className="text-slate-600" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>{draft.generatedContent.footerNote}</div>
                     ) : null}
                     {draft.designSettings.showContact ? (
-                        <div className="mt-3 space-y-1 text-sm text-slate-700">
+                        <div className="mt-3 space-y-1 text-slate-700" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>
                             {activeMob ? <div>{activeMob}</div> : null}
                             {activeTel ? <div>{activeTel}</div> : null}
                             {activeEmail ? <div>{activeEmail}</div> : null}
@@ -417,7 +418,7 @@ function renderTemplate(
                             alt="QR code"
                             className="h-24 w-24 border p-1"
                         />
-                        <div className="mt-2 text-xs text-slate-500">{activeRef}</div>
+                        <div className="mt-2 text-slate-500" style={{ fontSize: `calc(0.75rem * ${fontScale})` }}>{activeRef}</div>
                     </div>
                 ) : null}
             </div>

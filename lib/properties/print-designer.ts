@@ -53,6 +53,7 @@ export const PROPERTY_PRINT_LANGUAGE_LIMIT = 2;
 
 export const propertyPrintDesignSettingsSchema = z.object({
     accentColor: z.string().trim().nullish().transform((value) => value || null),
+    fontScale: z.number().default(1),
     showLogo: z.boolean().default(true),
     showContact: z.boolean().default(true),
     showQr: z.boolean().default(true),
@@ -109,6 +110,7 @@ export type PropertyPrintGenerationMetadata = z.infer<typeof propertyPrintGenera
 
 export const DEFAULT_PROPERTY_PRINT_DESIGN_SETTINGS: PropertyPrintDesignSettings = {
     accentColor: null,
+    fontScale: 1,
     showLogo: true,
     showContact: true,
     showQr: true,

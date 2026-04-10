@@ -887,20 +887,41 @@ export function PropertyPrintDesignerDialog({
                                                         </div>
                                                     )}
 
-                                                    <div className="space-y-1.5 pt-2">
-                                                        <Label className="text-xs">Accent Color</Label>
-                                                        <Input
-                                                            value={designSettings.accentColor || ""}
-                                                            onChange={(event) => updateCurrentDraft((draft) => ({
-                                                                ...draft,
-                                                                designSettings: {
-                                                                    ...normalizePropertyPrintDesignSettings(draft.designSettings),
-                                                                    accentColor: event.target.value,
-                                                                },
-                                                            }))}
-                                                            placeholder="#9d0917"
-                                                            className="max-w-[200px]"
-                                                        />
+                                                    <div className="grid gap-4 md:grid-cols-2 pt-2">
+                                                        <div className="space-y-1.5">
+                                                            <Label className="text-xs">Accent Color</Label>
+                                                            <Input
+                                                                value={designSettings.accentColor || ""}
+                                                                onChange={(event) => updateCurrentDraft((draft) => ({
+                                                                    ...draft,
+                                                                    designSettings: {
+                                                                        ...normalizePropertyPrintDesignSettings(draft.designSettings),
+                                                                        accentColor: event.target.value,
+                                                                    },
+                                                                }))}
+                                                                placeholder="#9d0917"
+                                                            />
+                                                        </div>
+                                                        <div className="space-y-1.5">
+                                                            <Label className="text-xs">Global Font Scale</Label>
+                                                            <div className="flex items-center gap-2">
+                                                                <Input
+                                                                    type="number"
+                                                                    min={0.7}
+                                                                    max={1.5}
+                                                                    step={0.05}
+                                                                    value={designSettings.fontScale ?? 1}
+                                                                    onChange={(event) => updateCurrentDraft((draft) => ({
+                                                                        ...draft,
+                                                                        designSettings: {
+                                                                            ...normalizePropertyPrintDesignSettings(draft.designSettings),
+                                                                            fontScale: parseFloat(event.target.value) || 1,
+                                                                        },
+                                                                    }))}
+                                                                />
+                                                                <span className="text-xs text-muted-foreground w-8">x</span>
+                                                            </div>
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </TabsContent>
