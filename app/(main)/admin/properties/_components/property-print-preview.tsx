@@ -267,7 +267,9 @@ function renderTemplate(
                                                 className="text-slate-700 text-justify"
                                                 style={{ lineHeight: 1.5 }}
                                             >
-                                                {block.body}
+                                                {block.title && <div className="font-semibold mb-[2mm]">{block.title}</div>}
+                                                {block.subtitle && <div className="italic mb-[2mm]">{block.subtitle}</div>}
+                                                <div dangerouslySetInnerHTML={{ __html: block.body.replace(/\n/g, '<br/>') }} />
                                             </AutoFitText>
                                         </div>
                                     </div>
@@ -389,7 +391,11 @@ function renderTemplate(
                                     <div className="mb-1 font-semibold uppercase tracking-[0.2em]" style={{ color: primaryColor, fontSize: `calc(0.75rem * ${fontScale})` }}>
                                         {block.label}
                                     </div>
-                                    <div className="leading-6 text-slate-700" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>{block.body}</div>
+                                    <div className="leading-6 text-slate-700" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>
+                                        {block.title && <div className="font-semibold mb-1">{block.title}</div>}
+                                        {block.subtitle && <div className="italic mb-2">{block.subtitle}</div>}
+                                        <div dangerouslySetInnerHTML={{ __html: block.body.replace(/\n/g, '<br/>') }} />
+                                    </div>
                                 </div>
                             ))}
                         </div>
