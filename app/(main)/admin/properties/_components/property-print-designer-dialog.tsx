@@ -530,6 +530,73 @@ export function PropertyPrintDesignerDialog({
     const fallbackMob = brandingContact?.mobile || "";
     const fallbackEmail = brandingContact?.email || "";
 
+    // Reactive preview data — rebuilds whenever any draft/property state changes
+    const previewData = useMemo(() => {
+        if (!selectedDraft) return null;
+        const pvDesign = normalizePropertyPrintDesignSettings(selectedDraft.designSettings);
+        const pvContent = normalizePropertyPrintGeneratedContent(selectedDraft.generatedContent);
+        const pvLangs = normalizePropertyPrintLanguages(selectedDraft.languages);
+        const available = imageMedia.filter((m) => m.kind === "IMAGE");
+        const ids = clampSelectedMediaIds(
+            selectedDraft.selectedMediaIds,
+            available.map((m) => m.id),
+            template.imageSlots,
+        );
+        const pvImages = [
+            ...ids.map((id) => available.find((m) => m.id === id)).filter(Boolean),
+            ...available.filter((m) => !ids.includes(m.id)),
+        ].slice(0, template.imageSlots).map((m: any) => ({
+            id: m.id,
+            alt: property?.title || "Property photo",
+            url: resolvePrintImageUrl(m),
+        }));
+        const publicUrl = buildPublicUrl(brandingDomain, property?.slug);
+        return {
+            draft: {
+                id: selectedDraft.id,
+                name: selectedDraft.name,
+                templateId: template.id,
+                templateLabel: template.label,
+                paperSize: selectedDraft.paperSize,
+                orientation: selectedDraft.orientation,
+                languages: pvLangs,
+                designSettings: pvDesign,
+                promptSettings: normalizePropertyPrintPromptSettings(selectedDraft.promptSettings),
+                generatedContent: pvContent,
+            },
+            branding: {
+                logoUrl: brandingTheme?.logo?.url || null,
+                brandName: brandingTheme?.logo?.textTop || printBranding?.locationName || "Estio",
+                brandTagline: brandingTheme?.logo?.textBottom || null,
+                primaryColor: pvDesign.accentColor || brandingTheme?.primaryColor || "#9d0917",
+                contact: {
+                    mobile: brandingContact?.mobile || null,
+                    landline: brandingContact?.landline || null,
+                    email: brandingContact?.email || null,
+                    address: brandingContact?.address || null,
+                },
+                publicUrl,
+            },
+            property: {
+                id: property?.id || propertyId,
+                title: property?.title || propertyTitle || "",
+                reference: property?.reference || property?.slug || "",
+                locationLine: [property?.city, property?.propertyArea, property?.country].filter(Boolean).join(", "),
+                priceText: formatPropertyPrice(property || {}),
+                bedrooms: property?.bedrooms,
+                bathrooms: property?.bathrooms,
+                areaSqm: property?.areaSqm,
+                features: property?.features || [],
+                facts: buildPropertyFactItems(property || {}),
+                featureBullets: pvContent.featureBullets.length > 0
+                    ? pvContent.featureBullets
+                    : buildPropertyFeatureBullets(property || {}),
+                descriptionHtml: property?.description || "",
+            },
+            images: pvImages,
+        };
+    }, [selectedDraft, imageMedia, template, property, propertyId, propertyTitle, printBranding, brandingTheme, brandingContact, brandingDomain]);
+
     return (
         <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
@@ -538,7 +605,7 @@ export function PropertyPrintDesignerDialog({
                     Print Designer
                 </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-[95vw] w-[1200px] h-[calc(100vh-2rem)] max-h-[calc(100vh-2rem)] overflow-hidden p-0 gap-0 flex flex-col">
+            <DialogContent className="max-w-[95vw] w-[1400px] h-[calc(100vh-2rem)] max-h-[calc(100vh-2rem)] overflow-hidden p-0 gap-0 flex flex-col">
                 <DialogHeader className="shrink-0 border-b px-6 py-4">
                     <DialogTitle>Property Print Designer</DialogTitle>
                     <DialogDescription>
@@ -686,7 +753,10 @@ export function PropertyPrintDesignerDialog({
                                     </div>
                                 </div>
 
-                                {/* Scrollable tab content */}
+                                {/* Split panel: Editor + Live Preview */}
+                                <div className="flex min-h-0 flex-1 overflow-hidden">
+                                {/* Left: Editor controls */}
+                                <div className="flex flex-col min-h-0 w-[420px] shrink-0 border-r overflow-hidden">
                                 <ScrollArea className="min-h-0 flex-1">
                                     <div className="p-5">
                                         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-5">
@@ -697,7 +767,6 @@ export function PropertyPrintDesignerDialog({
                                                     {isGenerating ? <Loader2 className="ml-1.5 h-3 w-3 animate-spin" /> : null}
                                                 </TabsTrigger>
                                                 <TabsTrigger value="media">Media &amp; Layout</TabsTrigger>
-                                                <TabsTrigger value="preview">Preview</TabsTrigger>
                                             </TabsList>
 
                                             <TabsContent value="setup" className="space-y-4">
@@ -1301,85 +1370,26 @@ export function PropertyPrintDesignerDialog({
                                                 </div>
                                             </TabsContent>
 
-                                            <TabsContent value="preview">
-                                                {selectedDraft ? (() => {
-                                                    const previewDesignSettings = normalizePropertyPrintDesignSettings(selectedDraft.designSettings);
-                                                    const previewGeneratedContent = normalizePropertyPrintGeneratedContent(selectedDraft.generatedContent);
-                                                    const previewLanguages = normalizePropertyPrintLanguages(selectedDraft.languages);
-                                                    const availableImages = imageMedia.filter((m) => m.kind === "IMAGE");
-                                                    const selectedIds = clampSelectedMediaIds(
-                                                        selectedDraft.selectedMediaIds,
-                                                        availableImages.map((m) => m.id),
-                                                        template.imageSlots,
-                                                    );
-                                                    const previewImages = [
-                                                        ...selectedIds.map((id) => availableImages.find((m) => m.id === id)).filter(Boolean),
-                                                        ...availableImages.filter((m) => !selectedIds.includes(m.id)),
-                                                    ].slice(0, template.imageSlots).map((m: any) => ({
-                                                        id: m.id,
-                                                        alt: property?.title || "Property photo",
-                                                        url: resolvePrintImageUrl(m),
-                                                    }));
-                                                    const brandingTheme = printBranding?.theme || {};
-                                                    const brandingContact = printBranding?.contactInfo || {};
-                                                    const brandingDomain = printBranding?.domain || null;
-                                                    const publicUrl = buildPublicUrl(brandingDomain, property?.slug);
-                                                    const previewData = {
-                                                        draft: {
-                                                            id: selectedDraft.id,
-                                                            name: selectedDraft.name,
-                                                            templateId: template.id,
-                                                            templateLabel: template.label,
-                                                            paperSize: selectedDraft.paperSize,
-                                                            orientation: selectedDraft.orientation,
-                                                            languages: previewLanguages,
-                                                            designSettings: previewDesignSettings,
-                                                            promptSettings: normalizePropertyPrintPromptSettings(selectedDraft.promptSettings),
-                                                            generatedContent: previewGeneratedContent,
-                                                        },
-                                                        branding: {
-                                                            logoUrl: brandingTheme?.logo?.url || null,
-                                                            brandName: brandingTheme?.logo?.textTop || printBranding?.locationName || "Estio",
-                                                            brandTagline: brandingTheme?.logo?.textBottom || null,
-                                                            primaryColor: previewDesignSettings.accentColor || brandingTheme?.primaryColor || "#9d0917",
-                                                            contact: {
-                                                                mobile: brandingContact?.mobile || null,
-                                                                landline: brandingContact?.landline || null,
-                                                                email: brandingContact?.email || null,
-                                                                address: brandingContact?.address || null,
-                                                            },
-                                                            publicUrl,
-                                                        },
-                                                        property: {
-                                                            id: property?.id || propertyId,
-                                                            title: property?.title || propertyTitle || "",
-                                                            reference: property?.reference || property?.slug || "",
-                                                            locationLine: [property?.city, property?.propertyArea, property?.country].filter(Boolean).join(", "),
-                                                            priceText: formatPropertyPrice(property || {}),
-                                                            bedrooms: property?.bedrooms,
-                                                            bathrooms: property?.bathrooms,
-                                                            areaSqm: property?.areaSqm,
-                                                            features: property?.features || [],
-                                                            facts: buildPropertyFactItems(property || {}),
-                                                            featureBullets: previewGeneratedContent.featureBullets.length > 0
-                                                                ? previewGeneratedContent.featureBullets
-                                                                : buildPropertyFeatureBullets(property || {}),
-                                                            descriptionHtml: property?.description || "",
-                                                        },
-                                                        images: previewImages,
-                                                    };
-                                                    return (
-                                                        <div className="overflow-auto rounded-lg border bg-stone-100 p-4" style={{ maxHeight: '60vh' }}>
-                                                            <PropertyPrintPreview data={previewData} embedded />
-                                                        </div>
-                                                    );
-                                                })() : (
-                                                    <div className="text-sm text-muted-foreground">Select a draft to see the preview.</div>
-                                                )}
-                                            </TabsContent>
                                         </Tabs>
                                     </div>
                                 </ScrollArea>
+                                </div>
+                                {/* Right: Live Preview */}
+                                <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-stone-100/50">
+                                    <div className="shrink-0 border-b px-4 py-2 flex items-center">
+                                        <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Live Preview</div>
+                                    </div>
+                                    <div className="flex-1 min-h-0 overflow-auto p-4">
+                                        {previewData ? (
+                                            <PropertyPrintPreview data={previewData} embedded fitMode="both" />
+                                        ) : (
+                                            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                                                Select a draft to preview
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                                </div>
                             </>
                         ) : (
                             <div className="flex flex-1 items-center justify-center p-8 text-center text-muted-foreground">
