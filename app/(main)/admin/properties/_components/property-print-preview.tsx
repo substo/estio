@@ -69,7 +69,7 @@ export function PropertyPrintPreview({
                 `}</style>
             ) : null}
 
-            <div className={embedded ? "w-full" : "print-shell px-6 py-8 print:px-0 print:py-0 w-full flex-1"}>
+            <div className={embedded ? "w-full h-full" : "print-shell px-6 py-8 print:px-0 print:py-0 w-full flex-1"}>
                 <PrintScaleWrapper 
                     widthMm={widthMm} 
                     heightMm={heightMm} 
