@@ -278,34 +278,41 @@ function renderTemplate(
 
                     {/* Footer / Contact */}
                     {(draft.designSettings.showFooter || draft.designSettings.showContact) ? (
-                        <div className="mt-auto shrink-0 flex items-end justify-between border-t-2 border-slate-200 pt-[5mm] bg-stone-50 relative z-10">
-                            <div style={{ fontSize: `calc(14pt * ${fontScale})`, lineHeight: 1.6, color: '#333' }}>
-                                {(draft.designSettings.showFooter && draft.generatedContent.footerNote) ? (
-                                    <div className="mb-2 text-slate-600 max-w-[80%]">{draft.generatedContent.footerNote}</div>
-                                ) : null}
-                                {draft.generatedContent.contactCta ? (
-                                    <div className="mb-1 font-medium">{draft.generatedContent.contactCta}</div>
-                                ) : null}
-                                {draft.designSettings.showContact ? (
-                                    <>
-                                        {activeRef ? <div><strong style={{ color: primaryColor }}>Ref:</strong> {activeRef}</div> : null}
-                                        {activeTel ? <div><strong style={{ color: primaryColor }}>Tel:</strong> {activeTel}</div> : null}
-                                        {activeMob ? <div><strong style={{ color: primaryColor }}>Mob:</strong> {activeMob}</div> : null}
-                                        {activeEmail ? <div>{activeEmail}</div> : null}
-                                        {activeWebsite ? <div>{activeWebsite.replace(/^https?:\/\//, '')}</div> : null}
-                                    </>
+                        <div className="mt-auto shrink-0 bg-stone-50 relative z-10">
+                            <div className="border-t-2 border-slate-200 mb-[3mm]" />
+                            <div className="flex items-end justify-between gap-[4mm]">
+                                <div style={{ fontSize: `calc(12pt * ${fontScale})`, lineHeight: 1.5, color: '#333' }}>
+                                    {(draft.designSettings.showFooter && draft.generatedContent.footerNote) ? (
+                                        <div className="mb-[2mm] text-slate-600">{draft.generatedContent.footerNote}</div>
+                                    ) : null}
+                                    {draft.generatedContent.contactCta ? (
+                                        <div className="mb-[1mm] font-medium">{draft.generatedContent.contactCta}</div>
+                                    ) : null}
+                                    {draft.designSettings.showContact ? (
+                                        <div className="space-y-[0.5mm]">
+                                            {activeRef ? <div><strong style={{ color: primaryColor }}>Ref:</strong> {activeRef}</div> : null}
+                                            {(activeTel || activeMob) ? (
+                                                <div className="flex flex-wrap gap-x-[4mm]">
+                                                    {activeTel ? <span><strong style={{ color: primaryColor }}>Tel:</strong> {activeTel}</span> : null}
+                                                    {activeMob ? <span><strong style={{ color: primaryColor }}>Mob:</strong> {activeMob}</span> : null}
+                                                </div>
+                                            ) : null}
+                                            {activeEmail ? <div>{activeEmail}</div> : null}
+                                            {activeWebsite ? <div><strong style={{ color: primaryColor }}>Web:</strong> {activeWebsite.replace(/^https?:\/\//, '')}</div> : null}
+                                        </div>
+                                    ) : null}
+                                </div>
+                                {draft.designSettings.showQr && activeWebsite ? (
+                                    <div className="shrink-0">
+                                        <img
+                                            src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(activeWebsite)}`}
+                                            alt="QR"
+                                            className="border-2 p-0.5 bg-white"
+                                            style={{ width: '80px', height: '80px', aspectRatio: '1', borderColor: primaryColor }}
+                                        />
+                                    </div>
                                 ) : null}
                             </div>
-                            {draft.designSettings.showQr && activeWebsite ? (
-                                <div>
-                                    <img
-                                        src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(activeWebsite)}`}
-                                        alt="QR"
-                                        className="border-2 p-0.5 bg-white"
-                                        style={{ width: '100px', height: '100px', borderColor: primaryColor }}
-                                    />
-                                </div>
-                            ) : null}
                         </div>
                     ) : null}
                 </div>
@@ -398,29 +405,39 @@ function renderTemplate(
                     ))}
                 </div>
             ) : null}
-            <div className="grid grid-cols-[1fr_auto] items-start gap-6 border-t px-8 py-5">
-                <div>
-                    {draft.designSettings.showFooter ? (
-                        <div className="text-slate-600" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>{draft.generatedContent.footerNote}</div>
-                    ) : null}
-                    {draft.designSettings.showContact ? (
-                        <div className="mt-3 space-y-1 text-slate-700" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>
-                            {activeMob ? <div>{activeMob}</div> : null}
-                            {activeTel ? <div>{activeTel}</div> : null}
-                            {activeEmail ? <div>{activeEmail}</div> : null}
+            <div className="px-8 py-4">
+                <div className="border-t border-slate-200 mb-3" />
+                <div className="flex items-end justify-between gap-6">
+                    <div>
+                        {draft.designSettings.showFooter ? (
+                            <div className="text-slate-600 mb-2" style={{ fontSize: `calc(0.8rem * ${fontScale})` }}>{draft.generatedContent.footerNote}</div>
+                        ) : null}
+                        {draft.designSettings.showContact ? (
+                            <div className="space-y-0.5 text-slate-700" style={{ fontSize: `calc(0.8rem * ${fontScale})` }}>
+                                {activeRef ? <div><strong style={{ color: primaryColor }}>Ref:</strong> {activeRef}</div> : null}
+                                {(activeTel || activeMob) ? (
+                                    <div className="flex flex-wrap gap-x-4">
+                                        {activeTel ? <span><strong style={{ color: primaryColor }}>Tel:</strong> {activeTel}</span> : null}
+                                        {activeMob ? <span><strong style={{ color: primaryColor }}>Mob:</strong> {activeMob}</span> : null}
+                                    </div>
+                                ) : null}
+                                {activeEmail ? <div>{activeEmail}</div> : null}
+                                {activeWebsite ? <div><strong style={{ color: primaryColor }}>Web:</strong> {activeWebsite.replace(/^https?:\/\//, '')}</div> : null}
+                            </div>
+                        ) : null}
+                    </div>
+                    {draft.designSettings.showQr && activeWebsite ? (
+                        <div className="shrink-0 text-right">
+                            <img
+                                src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(activeWebsite)}`}
+                                alt="QR code"
+                                className="border p-1"
+                                style={{ width: '80px', height: '80px', aspectRatio: '1' }}
+                            />
+                            <div className="mt-1 text-slate-500" style={{ fontSize: `calc(0.65rem * ${fontScale})` }}>{activeRef}</div>
                         </div>
                     ) : null}
                 </div>
-                {draft.designSettings.showQr && activeWebsite ? (
-                    <div className="text-right">
-                        <img
-                            src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(activeWebsite)}`}
-                            alt="QR code"
-                            className="h-24 w-24 border p-1"
-                        />
-                        <div className="mt-2 text-slate-500" style={{ fontSize: `calc(0.75rem * ${fontScale})` }}>{activeRef}</div>
-                    </div>
-                ) : null}
             </div>
         </div>
     );
