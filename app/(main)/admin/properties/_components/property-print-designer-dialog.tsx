@@ -1297,6 +1297,10 @@ export function PropertyPrintDesignerDialog({
                                                             reference: property?.reference || property?.slug || "",
                                                             locationLine: [property?.city, property?.propertyArea, property?.country].filter(Boolean).join(", "),
                                                             priceText: formatPropertyPrice(property || {}),
+                                                            bedrooms: property?.bedrooms,
+                                                            bathrooms: property?.bathrooms,
+                                                            areaSqm: property?.areaSqm,
+                                                            features: property?.features || [],
                                                             facts: buildPropertyFactItems(property || {}),
                                                             featureBullets: previewGeneratedContent.featureBullets.length > 0
                                                                 ? previewGeneratedContent.featureBullets

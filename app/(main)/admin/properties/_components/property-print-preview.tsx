@@ -109,6 +109,7 @@ function renderTemplate(
     const activeMob = g.mobOverride || branding.contact.mobile;
     const activeEmail = g.emailOverride || branding.contact.email;
     const activeWebsite = g.websiteOverride || branding.publicUrl;
+    const activeSubtitle = g.subtitle || property.locationLine;
 
     if (draft.templateId === "a4-photo-heavy" || draft.templateId === "a3-poster-split") {
         /*
@@ -184,6 +185,13 @@ function renderTemplate(
                         {activeTitle}
                     </div>
 
+                    {/* Subtitle */}
+                    {activeSubtitle ? (
+                        <div className="mb-[6mm] text-slate-600" style={{ fontSize: draft.templateId === "a3-poster-split" ? '16pt' : '12pt', marginTop: '-4mm' }}>
+                            {activeSubtitle}
+                        </div>
+                    ) : null}
+
                     {/* Facts */}
                     {draft.designSettings.showFacts ? (
                         <div className="mb-[8mm] grid grid-cols-2 md:grid-cols-4 gap-4" style={{ fontSize: draft.templateId === "a3-poster-split" ? '16pt' : '10pt' }}>
@@ -217,6 +225,20 @@ function renderTemplate(
                                     <span className="uppercase text-slate-500 tracking-wider font-semibold" style={{ fontSize: '0.7em' }}>Parking</span>
                                 </div>
                             )}
+                        </div>
+                    ) : null}
+
+                    {/* Feature Bullets */}
+                    {draft.designSettings.showFeatures && property.featureBullets?.length > 0 ? (
+                        <div className="mb-[6mm]">
+                            <div className="mb-[2mm] font-semibold uppercase tracking-[0.2em]" style={{ color: primaryColor, fontSize: draft.templateId === "a3-poster-split" ? '14pt' : '10pt' }}>
+                                Highlights
+                            </div>
+                            <ul className="space-y-[1.5mm] text-slate-700" style={{ fontSize: draft.templateId === "a3-poster-split" ? '14pt' : '10pt' }}>
+                                {property.featureBullets.slice(0, 5).map((bullet: string) => (
+                                    <li key={bullet}>• {bullet}</li>
+                                ))}
+                            </ul>
                         </div>
                     ) : null}
 
@@ -257,6 +279,9 @@ function renderTemplate(
                     {(draft.designSettings.showFooter || draft.designSettings.showContact) ? (
                         <div className="mt-auto shrink-0 flex items-end justify-between border-t-2 border-slate-200 pt-[5mm] bg-stone-50 relative z-10">
                             <div style={{ fontSize: '14pt', lineHeight: 1.6, color: '#333' }}>
+                                {(draft.designSettings.showFooter && draft.generatedContent.footerNote) ? (
+                                    <div className="mb-2 text-slate-600 max-w-[80%]">{draft.generatedContent.footerNote}</div>
+                                ) : null}
                                 {draft.generatedContent.contactCta ? (
                                     <div className="mb-1 font-medium">{draft.generatedContent.contactCta}</div>
                                 ) : null}
