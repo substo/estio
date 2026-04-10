@@ -1,5 +1,6 @@
 import { getPaperDimensions, getPaperPageCss } from "@/lib/properties/print-designer";
-import { PrintScaleWrapper } from "./print-scale-wrapper";
+import { PrintScaleWrapper } from "@/app/(main)/admin/properties/_components/print-scale-wrapper";
+import { AutoFitText } from "@/app/(main)/admin/properties/_components/auto-fit-text";
 
 /**
  * Property Print Preview — renders a true-to-scale paper preview.
@@ -196,14 +197,18 @@ function renderTemplate(
                                     >
                                         {block.label}
                                     </h4>
-                                    <div
-                                        className="text-slate-700 text-justify overflow-hidden text-ellipsis"
-                                        style={{
-                                            fontSize: draft.templateId === "a3-poster-split" ? '13pt' : '11pt',
-                                            lineHeight: 1.5,
-                                        }}
-                                    >
-                                        {block.body}
+                                    <div className="flex-1 min-h-0 relative">
+                                        <div className="absolute inset-0">
+                                            <AutoFitText
+                                                maxFontSize={draft.templateId === "a3-poster-split" ? 13 : 11}
+                                                minFontSize={7}
+                                                step={0.5}
+                                                className="text-slate-700 text-justify"
+                                                style={{ lineHeight: 1.5 }}
+                                            >
+                                                {block.body}
+                                            </AutoFitText>
+                                        </div>
                                     </div>
                                 </div>
                             ))}
