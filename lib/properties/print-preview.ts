@@ -118,6 +118,10 @@ export function buildPropertyPrintPreviewData({
             reference: property.reference || property.slug || "",
             locationLine: [property.city, property.propertyArea, property.country].filter(Boolean).join(", "),
             priceText: formatPropertyPrice(property),
+            bedrooms: property.bedrooms,
+            bathrooms: property.bathrooms,
+            areaSqm: property.areaSqm,
+            features: property.features || [],
             facts: buildPropertyFactItems(property),
             featureBullets: generatedContent.featureBullets.length > 0
                 ? generatedContent.featureBullets

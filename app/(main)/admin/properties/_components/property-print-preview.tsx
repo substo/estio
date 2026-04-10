@@ -1,6 +1,7 @@
 import { getPaperDimensions, getPaperPageCss } from "@/lib/properties/print-designer";
 import { PrintScaleWrapper } from "@/app/(main)/admin/properties/_components/print-scale-wrapper";
 import { AutoFitText } from "@/app/(main)/admin/properties/_components/auto-fit-text";
+import { Bed, Bath, Maximize, Car } from "lucide-react";
 
 /**
  * Property Print Preview — renders a true-to-scale paper preview.
@@ -175,10 +176,37 @@ function renderTemplate(
 
                     {/* Facts */}
                     {draft.designSettings.showFacts ? (
-                        <div className="mb-[8mm] flex flex-wrap gap-5 font-bold text-slate-600" style={{ fontSize: draft.templateId === "a3-poster-split" ? '16pt' : '12pt' }}>
-                            {property.facts.map((fact: any) => (
-                                <span key={fact.label}>{fact.value} {fact.label}</span>
-                            ))}
+                        <div className="mb-[8mm] grid grid-cols-2 md:grid-cols-4 gap-4" style={{ fontSize: draft.templateId === "a3-poster-split" ? '16pt' : '10pt' }}>
+                            {(!draft.designSettings.visibleFacts || draft.designSettings.visibleFacts.includes("bedrooms")) && (
+                                <div className="flex flex-col items-center justify-center p-3 rounded-md bg-black/5 border border-black/10">
+                                    <Bed className="mb-2 shrink-0" style={{ width: draft.templateId === "a3-poster-split" ? '24pt' : '18pt', height: draft.templateId === "a3-poster-split" ? '24pt' : '18pt', color: primaryColor }} />
+                                    <span className="font-bold text-slate-800 leading-none mb-1">{property.bedrooms || "-"}</span>
+                                    <span className="uppercase text-slate-500 tracking-wider font-semibold" style={{ fontSize: '0.7em' }}>Bedrooms</span>
+                                </div>
+                            )}
+                            {(!draft.designSettings.visibleFacts || draft.designSettings.visibleFacts.includes("bathrooms")) && (
+                                <div className="flex flex-col items-center justify-center p-3 rounded-md bg-black/5 border border-black/10">
+                                    <Bath className="mb-2 shrink-0" style={{ width: draft.templateId === "a3-poster-split" ? '24pt' : '18pt', height: draft.templateId === "a3-poster-split" ? '24pt' : '18pt', color: primaryColor }} />
+                                    <span className="font-bold text-slate-800 leading-none mb-1">{property.bathrooms || "-"}</span>
+                                    <span className="uppercase text-slate-500 tracking-wider font-semibold" style={{ fontSize: '0.7em' }}>Bathrooms</span>
+                                </div>
+                            )}
+                            {(!draft.designSettings.visibleFacts || draft.designSettings.visibleFacts.includes("areaSqm")) && (
+                                <div className="flex flex-col items-center justify-center p-3 rounded-md bg-black/5 border border-black/10">
+                                    <Maximize className="mb-2 shrink-0" style={{ width: draft.templateId === "a3-poster-split" ? '24pt' : '18pt', height: draft.templateId === "a3-poster-split" ? '24pt' : '18pt', color: primaryColor }} />
+                                    <span className="font-bold text-slate-800 leading-none mb-1">{property.areaSqm || "-"} m&sup2;</span>
+                                    <span className="uppercase text-slate-500 tracking-wider font-semibold" style={{ fontSize: '0.7em' }}>Covered</span>
+                                </div>
+                            )}
+                            {(!draft.designSettings.visibleFacts || draft.designSettings.visibleFacts.includes("parking")) && (
+                                <div className="flex flex-col items-center justify-center p-3 rounded-md bg-black/5 border border-black/10">
+                                    <Car className="mb-2 shrink-0" style={{ width: draft.templateId === "a3-poster-split" ? '24pt' : '18pt', height: draft.templateId === "a3-poster-split" ? '24pt' : '18pt', color: primaryColor }} />
+                                    <span className="font-bold text-slate-800 leading-none mb-1">
+                                        {(property.features || []).some((f: string) => typeof f === 'string' && f.toLowerCase().includes('parking')) ? "Yes" : "-"}
+                                    </span>
+                                    <span className="uppercase text-slate-500 tracking-wider font-semibold" style={{ fontSize: '0.7em' }}>Parking</span>
+                                </div>
+                            )}
                         </div>
                     ) : null}
 

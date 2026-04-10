@@ -61,6 +61,7 @@ export const propertyPrintDesignSettingsSchema = z.object({
     showFeatures: z.boolean().default(true),
     showLanguages: z.boolean().default(true),
     showFooter: z.boolean().default(true),
+    visibleFacts: z.array(z.string()).default(["bedrooms", "bathrooms", "areaSqm", "parking"]),
 }).strict();
 
 export const propertyPrintPromptSettingsSchema = z.object({
@@ -109,6 +110,7 @@ export const DEFAULT_PROPERTY_PRINT_DESIGN_SETTINGS: PropertyPrintDesignSettings
     showFeatures: true,
     showLanguages: true,
     showFooter: true,
+    visibleFacts: ["bedrooms", "bathrooms", "areaSqm", "parking"],
 };
 
 export const DEFAULT_PROPERTY_PRINT_PROMPT_SETTINGS: PropertyPrintPromptSettings = {

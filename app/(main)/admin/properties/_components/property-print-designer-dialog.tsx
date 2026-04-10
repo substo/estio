@@ -835,7 +835,46 @@ export function PropertyPrintDesignerDialog({
                                                             </label>
                                                         ))}
                                                     </div>
-                                                    <div className="space-y-1.5">
+
+                                                    {designSettings.showFacts && (
+                                                        <div className="pt-2 border-t border-border mt-3">
+                                                            <div className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wider">Visible Features</div>
+                                                            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                                                                {[
+                                                                    ["bedrooms", "Bedrooms"],
+                                                                    ["bathrooms", "Bathrooms"],
+                                                                    ["areaSqm", "Area"],
+                                                                    ["parking", "Parking"],
+                                                                ].map(([key, label]) => {
+                                                                    const isChecked = (designSettings.visibleFacts || []).includes(key);
+                                                                    return (
+                                                                        <label key={key} className="flex items-center gap-2 rounded-md border p-1.5 px-2.5 text-xs bg-muted/20">
+                                                                            <Checkbox
+                                                                                checked={isChecked}
+                                                                                onCheckedChange={(checked) => updateCurrentDraft((draft) => {
+                                                                                    const currentSettings = normalizePropertyPrintDesignSettings(draft.designSettings);
+                                                                                    const currentFacts = currentSettings.visibleFacts || [];
+                                                                                    let newFacts = [...currentFacts];
+                                                                                    if (checked && !newFacts.includes(key)) newFacts.push(key);
+                                                                                    if (!checked) newFacts = newFacts.filter((f) => f !== key);
+                                                                                    return {
+                                                                                        ...draft,
+                                                                                        designSettings: {
+                                                                                            ...currentSettings,
+                                                                                            visibleFacts: newFacts,
+                                                                                        },
+                                                                                    };
+                                                                                })}
+                                                                            />
+                                                                            <span>{label}</span>
+                                                                        </label>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    <div className="space-y-1.5 pt-2">
                                                         <Label className="text-xs">Accent Color</Label>
                                                         <Input
                                                             value={designSettings.accentColor || ""}
