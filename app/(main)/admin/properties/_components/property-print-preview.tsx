@@ -37,7 +37,7 @@ export function PropertyPrintPreview({
     const primaryColor = branding.primaryColor || "#9d0917";
 
     const languageBlocks = draft.generatedContent.languages
-        .filter((block: any) => draft.languages.includes(block.language))
+        .filter((block: any) => draft.languages.map((l: string) => l.toLowerCase()).includes(block.language?.toLowerCase()))
         .slice(0, 2);
 
     /*
