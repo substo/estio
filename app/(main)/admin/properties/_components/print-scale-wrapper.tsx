@@ -15,7 +15,9 @@ export function PrintScaleWrapper({
     zoomScale?: number; // 1 means auto-fit according to fitMode. >1 means a specific zoom factor override.
     children: React.ReactNode;
 }) {
-    const [autoScale, setAutoScale] = useState(1);
+    // Default to a small scale initially to avoid jumping/oversize before measurement
+    const [autoScale, setAutoScale] = useState(0.1); 
+    const [isMeasured, setIsMeasured] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -24,8 +26,11 @@ export function PrintScaleWrapper({
 
         const observer = new ResizeObserver((entries) => {
             if (!entries[0]) return;
-            const availableWidth = entries[0].contentRect.width;
-            const availableHeight = entries[0].contentRect.height;
+            // Get available dimensions from the container wrapper
+            // Remove some padding so it doesn't touch the exact edges
+            const padding = 32;
+            const availableWidth = Math.max(10, entries[0].contentRect.width - padding);
+            const availableHeight = Math.max(10, entries[0].contentRect.height - padding);
             
             const pixelWidth = widthMm * 3.7795275591;
             const pixelHeight = heightMm * 3.7795275591;
@@ -42,6 +47,7 @@ export function PrintScaleWrapper({
 
             // Cap at 1.0 (don't upscale beyond 100% physically if container is huge)
             setAutoScale(Math.min(1, scale));
+            setIsMeasured(true);
         });
 
         observer.observe(container);
@@ -51,33 +57,44 @@ export function PrintScaleWrapper({
         };
     }, [widthMm, heightMm, fitMode]);
 
+    // When Zoom is forced by user (e.g. 100%), bypass the autoScale
     const activeScale = zoomScale !== 1 ? zoomScale : autoScale;
 
-    // Calculate actual pixel footprint based on active scale
+    // Calculate physical native footprint of the paper in pixels
     const pixelWidth = widthMm * 3.7795275591;
     const pixelHeight = heightMm * 3.7795275591;
+    
+    // Calculate final scaled dimensions
     const scaledWidth = pixelWidth * activeScale;
     const scaledHeight = pixelHeight * activeScale;
 
     return (
-        <div ref={containerRef} className="w-full h-full flex justify-center items-center print:block print:w-auto print:h-auto overflow-hidden">
-            <div
-                className="print:!transform-none print:w-auto print:h-auto transition-transform duration-200"
-                style={{
-                    transform: `scale(${activeScale})`,
-                    transformOrigin: "center center",
-                    /* Make the wrapper precisely the scaled dimension so scrollbars (if any) wrap it perfectly */
-                    width: `${pixelWidth}px`,
-                    height: `${pixelHeight}px`,
-                    /* margin offsets to cancel out the unscaled footprint */
-                    marginBottom: `-${pixelHeight - scaledHeight}px`,
-                    marginRight: `-${pixelWidth - scaledWidth}px`,
-                    marginLeft: `-${pixelWidth - scaledWidth}px`,
-                    marginTop: `-${pixelHeight - scaledHeight}px`
+        /* The outmost flex container allows center alignment if there's extra room */
+        <div ref={containerRef} className="w-full h-full flex justify-center items-center print:block overflow-auto">
+            
+            {/* The scaled boundary box: enforces exact width/height of the scaled document in the DOM flow.
+                Keeps scrollbars honest and prevents layout collapsing. */}
+            <div 
+                className={`print:!w-auto print:!h-auto transition-opacity duration-300 ${isMeasured || zoomScale !== 1 ? 'opacity-100' : 'opacity-0'}`}
+                style={{ 
+                    width: `${scaledWidth}px`, 
+                    height: `${scaledHeight}px` 
                 }}
             >
-                {children}
+                {/* The actual transform scaled content. Bounded cleanly inside the exact scaled dimensions above. */}
+                <div
+                    className="print:!transform-none print:w-auto print:h-auto transition-transform duration-200"
+                    style={{
+                        width: `${pixelWidth}px`,
+                        height: `${pixelHeight}px`,
+                        transform: `scale(${activeScale})`,
+                        transformOrigin: "top left",
+                    }}
+                >
+                    {children}
+                </div>
             </div>
+            
         </div>
     );
 }
