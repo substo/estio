@@ -100,6 +100,16 @@ function renderTemplate(
     primaryColor: string,
     languageBlocks: any[],
 ) {
+    const g = draft.generatedContent || {};
+    const activeLogo = g.logoUrlOverride || branding.logoUrl;
+    const activePrice = g.priceOverride || property.priceText;
+    const activeTitle = g.title || property.title;
+    const activeRef = g.referenceOverride || property.reference;
+    const activeTel = g.telOverride || branding.contact.landline;
+    const activeMob = g.mobOverride || branding.contact.mobile;
+    const activeEmail = g.emailOverride || branding.contact.email;
+    const activeWebsite = g.websiteOverride || branding.publicUrl;
+
     if (draft.templateId === "a4-photo-heavy" || draft.templateId === "a3-poster-split") {
         /*
          * Both poster templates use the same structural layout:
@@ -156,22 +166,22 @@ function renderTemplate(
                 {/* RIGHT COLUMN: Text */}
                 <div className="flex h-full w-[45%] flex-col overflow-hidden bg-stone-50 p-[15mm]">
                     {/* Logo */}
-                    {draft.designSettings.showLogo && branding.logoUrl ? (
+                    {draft.designSettings.showLogo && activeLogo ? (
                         <div className="mb-[8mm] flex justify-center">
-                            <img src={branding.logoUrl} alt={branding.brandName} className="max-h-20 max-w-[260px] object-contain" />
+                            <img src={activeLogo} alt={branding.brandName} className="max-h-20 max-w-[260px] object-contain" />
                         </div>
                     ) : null}
 
                     {/* Price */}
-                    {draft.designSettings.showPrice !== false ? (
+                    {draft.designSettings.showPrice !== false && activePrice ? (
                         <div className="mb-[4mm] font-bold" style={{ color: primaryColor, fontSize: draft.templateId === "a3-poster-split" ? '34pt' : '24pt' }}>
-                            {property.priceText}
+                            {activePrice}
                         </div>
                     ) : null}
 
                     {/* Title */}
                     <div className="mb-[6mm] font-bold leading-tight text-slate-900" style={{ fontSize: draft.templateId === "a3-poster-split" ? '22pt' : '18pt' }}>
-                        {draft.generatedContent.title || property.title}
+                        {activeTitle}
                     </div>
 
                     {/* Facts */}
@@ -252,18 +262,18 @@ function renderTemplate(
                                 ) : null}
                                 {draft.designSettings.showContact ? (
                                     <>
-                                        {property.reference ? <div><strong style={{ color: primaryColor }}>Ref:</strong> {property.reference}</div> : null}
-                                        {branding.contact.landline ? <div><strong style={{ color: primaryColor }}>Tel:</strong> {branding.contact.landline}</div> : null}
-                                        {branding.contact.mobile ? <div><strong style={{ color: primaryColor }}>Mob:</strong> {branding.contact.mobile}</div> : null}
-                                        {branding.contact.email ? <div>{branding.contact.email}</div> : null}
-                                        {branding.publicUrl ? <div>{branding.publicUrl.replace(/^https?:\/\//, '')}</div> : null}
+                                        {activeRef ? <div><strong style={{ color: primaryColor }}>Ref:</strong> {activeRef}</div> : null}
+                                        {activeTel ? <div><strong style={{ color: primaryColor }}>Tel:</strong> {activeTel}</div> : null}
+                                        {activeMob ? <div><strong style={{ color: primaryColor }}>Mob:</strong> {activeMob}</div> : null}
+                                        {activeEmail ? <div>{activeEmail}</div> : null}
+                                        {activeWebsite ? <div>{activeWebsite.replace(/^https?:\/\//, '')}</div> : null}
                                     </>
                                 ) : null}
                             </div>
-                            {draft.designSettings.showQr && branding.publicUrl ? (
+                            {draft.designSettings.showQr && activeWebsite ? (
                                 <div>
                                     <img
-                                        src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(branding.publicUrl)}`}
+                                        src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(activeWebsite)}`}
                                         alt="QR"
                                         className="border-2 p-0.5 bg-white"
                                         style={{ width: '100px', height: '100px', borderColor: primaryColor }}
@@ -285,23 +295,46 @@ function renderTemplate(
                     {heroImage ? <img src={heroImage.url} alt={heroImage.alt} className="h-full w-full object-cover" /> : null}
                 </div>
                 <div className="flex flex-col p-8">
-                    {draft.designSettings.showLogo && branding.logoUrl ? (
-                        <div className="mb-6">
-                            <img src={branding.logoUrl} alt={branding.brandName} className="max-h-16 max-w-[220px] object-contain" />
+                    {draft.designSettings.showLogo && activeLogo ? (
+                        <div className="mb-8">
+                            <img src={activeLogo} alt={branding.brandName} className="max-h-16 max-w-[220px] object-contain" />
                         </div>
                     ) : null}
-                    {draft.designSettings.showPrice !== false ? (
-                        <div className="mb-4 text-3xl font-semibold" style={{ color: primaryColor }}>{property.priceText}</div>
+                    {draft.designSettings.showPrice !== false && activePrice ? (
+                        <div className="mb-4 text-3xl font-semibold" style={{ color: primaryColor }}>{activePrice}</div>
                     ) : null}
-                    <div className="mb-2 text-2xl font-bold text-slate-900">{draft.generatedContent.title || property.title}</div>
+                    <div className="mb-2 text-2xl font-bold text-slate-900">{activeTitle}</div>
                     <div className="mb-4 text-sm text-slate-600">{draft.generatedContent.subtitle || property.locationLine}</div>
                     {draft.designSettings.showFacts ? (
-                        <div className="mb-4 flex flex-wrap gap-2">
-                            {property.facts.map((fact: any) => (
-                                <div key={fact.label} className="rounded-md border px-3 py-1 text-sm">
-                                    <strong>{fact.value}</strong> {fact.label}
+                        <div className="mb-4 grid grid-cols-2 lg:grid-cols-4 gap-2">
+                            {(!draft.designSettings.visibleFacts || draft.designSettings.visibleFacts.includes("bedrooms")) && (
+                                <div className="rounded-md border p-2 text-center text-sm shadow-sm bg-white">
+                                    <Bed className="mx-auto mb-1 h-4 w-4" style={{ color: primaryColor }} />
+                                    <div className="font-bold">{property.bedrooms || "-"}</div>
+                                    <div className="text-[10px] uppercase text-slate-500">Beds</div>
                                 </div>
-                            ))}
+                            )}
+                            {(!draft.designSettings.visibleFacts || draft.designSettings.visibleFacts.includes("bathrooms")) && (
+                                <div className="rounded-md border p-2 text-center text-sm shadow-sm bg-white">
+                                    <Bath className="mx-auto mb-1 h-4 w-4" style={{ color: primaryColor }} />
+                                    <div className="font-bold">{property.bathrooms || "-"}</div>
+                                    <div className="text-[10px] uppercase text-slate-500">Baths</div>
+                                </div>
+                            )}
+                            {(!draft.designSettings.visibleFacts || draft.designSettings.visibleFacts.includes("areaSqm")) && (
+                                <div className="rounded-md border p-2 text-center text-sm shadow-sm bg-white">
+                                    <Maximize className="mx-auto mb-1 h-4 w-4" style={{ color: primaryColor }} />
+                                    <div className="font-bold">{property.areaSqm || "-"}</div>
+                                    <div className="text-[10px] uppercase text-slate-500">Area</div>
+                                </div>
+                            )}
+                            {(!draft.designSettings.visibleFacts || draft.designSettings.visibleFacts.includes("parking")) && (
+                                <div className="rounded-md border p-2 text-center text-sm shadow-sm bg-white">
+                                    <Car className="mx-auto mb-1 h-4 w-4" style={{ color: primaryColor }} />
+                                    <div className="font-bold">{(property.features || []).some((f: string) => typeof f === 'string' && f.toLowerCase().includes('parking')) ? "Yes" : "-"}</div>
+                                    <div className="text-[10px] uppercase text-slate-500">Parking</div>
+                                </div>
+                            )}
                         </div>
                     ) : null}
                     {draft.designSettings.showFeatures ? (
@@ -346,20 +379,20 @@ function renderTemplate(
                     ) : null}
                     {draft.designSettings.showContact ? (
                         <div className="mt-3 space-y-1 text-sm text-slate-700">
-                            {branding.contact.mobile ? <div>{branding.contact.mobile}</div> : null}
-                            {branding.contact.landline ? <div>{branding.contact.landline}</div> : null}
-                            {branding.contact.email ? <div>{branding.contact.email}</div> : null}
+                            {activeMob ? <div>{activeMob}</div> : null}
+                            {activeTel ? <div>{activeTel}</div> : null}
+                            {activeEmail ? <div>{activeEmail}</div> : null}
                         </div>
                     ) : null}
                 </div>
-                {draft.designSettings.showQr && branding.publicUrl ? (
+                {draft.designSettings.showQr && activeWebsite ? (
                     <div className="text-right">
                         <img
-                            src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(branding.publicUrl)}`}
+                            src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(activeWebsite)}`}
                             alt="QR code"
                             className="h-24 w-24 border p-1"
                         />
-                        <div className="mt-2 text-xs text-slate-500">{property.reference}</div>
+                        <div className="mt-2 text-xs text-slate-500">{activeRef}</div>
                     </div>
                 ) : null}
             </div>

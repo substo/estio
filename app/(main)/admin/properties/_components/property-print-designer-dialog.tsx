@@ -17,7 +17,7 @@ import {
     useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { FileDown, GripVertical, Languages, Loader2, Plus, Printer, Save, Sparkles, Star, Trash2 } from "lucide-react";
+import { FileDown, GripVertical, Languages, Loader2, Plus, Printer, Save, Sparkles, Star, Trash2, Image as ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -42,6 +42,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { CloudflareImage } from "@/components/media/CloudflareImage";
+import { MediaGalleryDialog } from "@/components/media/MediaGalleryDialog";
 import { AiModelSelect } from "@/components/ai/ai-model-select";
 import { useAiModelCatalog } from "@/components/ai/use-ai-model-catalog";
 import {
@@ -515,6 +516,18 @@ export function PropertyPrintDesignerDialog({
     const generatedContent = normalizePropertyPrintGeneratedContent(selectedDraft?.generatedContent || DEFAULT_PROPERTY_PRINT_GENERATED_CONTENT);
     const promptSettings = normalizePropertyPrintPromptSettings(selectedDraft?.promptSettings || DEFAULT_PROPERTY_PRINT_PROMPT_SETTINGS);
     const designSettings = normalizePropertyPrintDesignSettings(selectedDraft?.designSettings || DEFAULT_PROPERTY_PRINT_DESIGN_SETTINGS);
+
+    const brandingTheme = printBranding?.theme || {};
+    const brandingContact = printBranding?.contactInfo || {};
+    const brandingDomain = printBranding?.domain || null;
+    const fallbackWebsite = brandingDomain ? buildPublicUrl(brandingDomain, property?.slug) : "";
+    const fallbackLogo = brandingTheme?.logo?.url || "";
+    const fallbackPrice = formatPropertyPrice(property || {});
+    const fallbackTitle = property?.title || "";
+    const fallbackRef = property?.reference || property?.slug || "";
+    const fallbackTel = brandingContact?.landline || "";
+    const fallbackMob = brandingContact?.mobile || "";
+    const fallbackEmail = brandingContact?.email || "";
 
     return (
         <Dialog open={open} onOpenChange={setOpen}>
@@ -1065,6 +1078,108 @@ export function PropertyPrintDesignerDialog({
                                                                     </div>
                                                                 );
                                                             })}
+                                                        </div>
+
+                                                        <div className="space-y-4 pt-4 border-t border-border mt-6">
+                                                            <div className="space-y-1.5">
+                                                                <Label className="text-sm font-semibold">Manual Overrides</Label>
+                                                                <div className="text-xs text-muted-foreground">
+                                                                    Leave these blank to use the system default values (shown as placeholders).
+                                                                </div>
+                                                            </div>
+                                                            <div className="grid gap-4 md:grid-cols-2">
+                                                                <div className="space-y-1.5 flex flex-col">
+                                                                    <Label className="text-xs">Logo Image URL</Label>
+                                                                    <div className="flex gap-2">
+                                                                        <Input
+                                                                            placeholder={fallbackLogo}
+                                                                            value={generatedContent.logoUrlOverride || ""}
+                                                                            onChange={(event) => updateCurrentDraft((draft) => ({
+                                                                                ...draft,
+                                                                                generatedContent: { ...normalizePropertyPrintGeneratedContent(draft.generatedContent), logoUrlOverride: event.target.value || null },
+                                                                            }))}
+                                                                        />
+                                                                        <MediaGalleryDialog 
+                                                                            siteConfig={{ locationId }}
+                                                                            onSelect={(url) => updateCurrentDraft((draft) => ({
+                                                                                ...draft,
+                                                                                generatedContent: { ...normalizePropertyPrintGeneratedContent(draft.generatedContent), logoUrlOverride: url || null },
+                                                                            }))}
+                                                                            trigger={
+                                                                                <Button variant="outline" size="icon" className="shrink-0" type="button">
+                                                                                    <ImageIcon className="w-4 h-4" />
+                                                                                </Button>
+                                                                            }
+                                                                        />
+                                                                    </div>
+                                                                </div>
+                                                                <div className="space-y-1.5">
+                                                                    <Label className="text-xs">Price Text</Label>
+                                                                    <Input
+                                                                        placeholder={fallbackPrice}
+                                                                        value={generatedContent.priceOverride || ""}
+                                                                        onChange={(event) => updateCurrentDraft((draft) => ({
+                                                                            ...draft,
+                                                                            generatedContent: { ...normalizePropertyPrintGeneratedContent(draft.generatedContent), priceOverride: event.target.value || null },
+                                                                        }))}
+                                                                    />
+                                                                </div>
+                                                                <div className="space-y-1.5">
+                                                                    <Label className="text-xs">Reference</Label>
+                                                                    <Input
+                                                                        placeholder={fallbackRef}
+                                                                        value={generatedContent.referenceOverride || ""}
+                                                                        onChange={(event) => updateCurrentDraft((draft) => ({
+                                                                            ...draft,
+                                                                            generatedContent: { ...normalizePropertyPrintGeneratedContent(draft.generatedContent), referenceOverride: event.target.value || null },
+                                                                        }))}
+                                                                    />
+                                                                </div>
+                                                                <div className="space-y-1.5">
+                                                                    <Label className="text-xs">Website URL (updates QR)</Label>
+                                                                    <Input
+                                                                        placeholder={fallbackWebsite || undefined}
+                                                                        value={generatedContent.websiteOverride || ""}
+                                                                        onChange={(event) => updateCurrentDraft((draft) => ({
+                                                                            ...draft,
+                                                                            generatedContent: { ...normalizePropertyPrintGeneratedContent(draft.generatedContent), websiteOverride: event.target.value || null },
+                                                                        }))}
+                                                                    />
+                                                                </div>
+                                                                <div className="space-y-1.5">
+                                                                    <Label className="text-xs">Telephone</Label>
+                                                                    <Input
+                                                                        placeholder={fallbackTel}
+                                                                        value={generatedContent.telOverride || ""}
+                                                                        onChange={(event) => updateCurrentDraft((draft) => ({
+                                                                            ...draft,
+                                                                            generatedContent: { ...normalizePropertyPrintGeneratedContent(draft.generatedContent), telOverride: event.target.value || null },
+                                                                        }))}
+                                                                    />
+                                                                </div>
+                                                                <div className="space-y-1.5">
+                                                                    <Label className="text-xs">Mobile</Label>
+                                                                    <Input
+                                                                        placeholder={fallbackMob}
+                                                                        value={generatedContent.mobOverride || ""}
+                                                                        onChange={(event) => updateCurrentDraft((draft) => ({
+                                                                            ...draft,
+                                                                            generatedContent: { ...normalizePropertyPrintGeneratedContent(draft.generatedContent), mobOverride: event.target.value || null },
+                                                                        }))}
+                                                                    />
+                                                                </div>
+                                                                <div className="space-y-1.5">
+                                                                    <Label className="text-xs">Email</Label>
+                                                                    <Input
+                                                                        placeholder={fallbackEmail}
+                                                                        value={generatedContent.emailOverride || ""}
+                                                                        onChange={(event) => updateCurrentDraft((draft) => ({
+                                                                            ...draft,
+                                                                            generatedContent: { ...normalizePropertyPrintGeneratedContent(draft.generatedContent), emailOverride: event.target.value || null },
+                                                                        }))}
+                                                                    />
+                                                                </div>
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 )}
