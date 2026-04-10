@@ -518,6 +518,15 @@ export function PropertyPrintDesignerDialog({
     const promptSettings = normalizePropertyPrintPromptSettings(selectedDraft?.promptSettings || DEFAULT_PROPERTY_PRINT_PROMPT_SETTINGS);
     const designSettings = normalizePropertyPrintDesignSettings(selectedDraft?.designSettings || DEFAULT_PROPERTY_PRINT_DESIGN_SETTINGS);
 
+    const toggleDesignFlag = (key: string, value: boolean) =>
+        updateCurrentDraft((draft) => ({
+            ...draft,
+            designSettings: {
+                ...normalizePropertyPrintDesignSettings(draft.designSettings),
+                [key]: value,
+            },
+        }));
+
     const brandingTheme = printBranding?.theme || {};
     const brandingContact = printBranding?.contactInfo || {};
     const brandingDomain = printBranding?.domain || null;
@@ -926,35 +935,9 @@ export function PropertyPrintDesignerDialog({
                                                     </div>
                                                 </div>
 
-                                                {/* Visibility card */}
+                                                {/* Appearance card */}
                                                 <div className="rounded-lg border p-4 space-y-3">
-                                                    <div className="text-sm font-medium text-foreground">Visibility</div>
-                                                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                                                        {[
-                                                            ["showLogo", "Logo"],
-                                                            ["showContact", "Contact"],
-                                                            ["showQr", "QR"],
-                                                            ["showPrice", "Price"],
-                                                            ["showFacts", "Facts"],
-                                                            ["showFeatures", "Features"],
-                                                            ["showLanguages", "Language Text"],
-                                                            ["showFooter", "Footer"],
-                                                        ].map(([key, label]) => (
-                                                            <label key={key} className="flex items-center gap-2 rounded-md border p-2.5 text-sm">
-                                                                <Checkbox
-                                                                    checked={Boolean((designSettings as any)[key])}
-                                                                    onCheckedChange={(checked) => updateCurrentDraft((draft) => ({
-                                                                        ...draft,
-                                                                        designSettings: {
-                                                                            ...normalizePropertyPrintDesignSettings(draft.designSettings),
-                                                                            [key]: Boolean(checked),
-                                                                        },
-                                                                    }))}
-                                                                />
-                                                                <span>{label}</span>
-                                                            </label>
-                                                        ))}
-                                                    </div>
+                                                    <div className="text-sm font-medium text-foreground">Appearance</div>
 
                                                     {designSettings.showFacts && (
                                                         <div className="pt-2 border-t border-border mt-3">
@@ -1093,9 +1076,16 @@ export function PropertyPrintDesignerDialog({
                                                             </div>
                                                         </div>
                                                         <div className="space-y-1.5">
-                                                            <Label className="text-xs">Feature Bullets</Label>
+                                                            <div className="flex items-center justify-between">
+                                                                <Label className="text-xs">Feature Bullets</Label>
+                                                                <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                                                                    <Checkbox checked={designSettings.showFeatures} onCheckedChange={(v) => toggleDesignFlag("showFeatures", Boolean(v))} className="h-3.5 w-3.5" />
+                                                                    <span className="text-[10px] text-muted-foreground">Visible</span>
+                                                                </label>
+                                                            </div>
                                                             <Textarea
                                                                 rows={3}
+                                                                className={!designSettings.showFeatures ? "opacity-50" : ""}
                                                                 value={generatedContent.featureBullets.join("\n")}
                                                                 onChange={(event) => updateCurrentDraft((draft) => ({
                                                                     ...draft,
@@ -1108,9 +1098,16 @@ export function PropertyPrintDesignerDialog({
                                                         </div>
                                                         <div className="grid gap-4 md:grid-cols-2">
                                                             <div className="space-y-1.5">
-                                                                <Label className="text-xs">Footer Note</Label>
+                                                                <div className="flex items-center justify-between">
+                                                                    <Label className="text-xs">Footer Note</Label>
+                                                                    <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                                                                        <Checkbox checked={designSettings.showFooter} onCheckedChange={(v) => toggleDesignFlag("showFooter", Boolean(v))} className="h-3.5 w-3.5" />
+                                                                        <span className="text-[10px] text-muted-foreground">Visible</span>
+                                                                    </label>
+                                                                </div>
                                                                 <Textarea
                                                                     rows={2}
+                                                                    className={!designSettings.showFooter ? "opacity-50" : ""}
                                                                     value={generatedContent.footerNote}
                                                                     onChange={(event) => updateCurrentDraft((draft) => ({
                                                                         ...draft,
@@ -1137,7 +1134,13 @@ export function PropertyPrintDesignerDialog({
                                                             </div>
                                                         </div>
                                                         <div className="space-y-4">
-                                                            <Label className="text-xs">Language Blocks</Label>
+                                                            <div className="flex items-center justify-between">
+                                                                <Label className="text-xs">Language Blocks</Label>
+                                                                <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                                                                    <Checkbox checked={designSettings.showLanguages} onCheckedChange={(v) => toggleDesignFlag("showLanguages", Boolean(v))} className="h-3.5 w-3.5" />
+                                                                    <span className="text-[10px] text-muted-foreground">Visible</span>
+                                                                </label>
+                                                            </div>
                                                             {selectedDraft.languages.map((language) => {
                                                                 const languageBlock = generatedContent.languages.find((item) => item.language === language) || {
                                                                     language,
@@ -1217,7 +1220,13 @@ export function PropertyPrintDesignerDialog({
                                                             </div>
                                                             <div className="grid gap-4 md:grid-cols-2">
                                                                 <div className="space-y-1.5 flex flex-col">
-                                                                    <Label className="text-xs">Logo Image URL</Label>
+                                                                    <div className="flex items-center justify-between">
+                                                                        <Label className="text-xs">Logo Image URL</Label>
+                                                                        <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                                                                            <Checkbox checked={designSettings.showLogo} onCheckedChange={(v) => toggleDesignFlag("showLogo", Boolean(v))} className="h-3.5 w-3.5" />
+                                                                            <span className="text-[10px] text-muted-foreground">Visible</span>
+                                                                        </label>
+                                                                    </div>
                                                                     <div className="flex gap-2">
                                                                         <Input
                                                                             placeholder={fallbackLogo}
@@ -1242,8 +1251,15 @@ export function PropertyPrintDesignerDialog({
                                                                     </div>
                                                                 </div>
                                                                 <div className="space-y-1.5">
-                                                                    <Label className="text-xs">Price Text</Label>
+                                                                    <div className="flex items-center justify-between">
+                                                                        <Label className="text-xs">Price Text</Label>
+                                                                        <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                                                                            <Checkbox checked={designSettings.showPrice} onCheckedChange={(v) => toggleDesignFlag("showPrice", Boolean(v))} className="h-3.5 w-3.5" />
+                                                                            <span className="text-[10px] text-muted-foreground">Visible</span>
+                                                                        </label>
+                                                                    </div>
                                                                     <Input
+                                                                        className={!designSettings.showPrice ? "opacity-50" : ""}
                                                                         placeholder={fallbackPrice}
                                                                         value={generatedContent.priceOverride || ""}
                                                                         onChange={(event) => updateCurrentDraft((draft) => ({
@@ -1264,7 +1280,13 @@ export function PropertyPrintDesignerDialog({
                                                                     />
                                                                 </div>
                                                                 <div className="space-y-1.5">
-                                                                    <Label className="text-xs">Website URL (updates QR)</Label>
+                                                                    <div className="flex items-center justify-between">
+                                                                        <Label className="text-xs">Website URL</Label>
+                                                                        <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                                                                            <Checkbox checked={designSettings.showQr} onCheckedChange={(v) => toggleDesignFlag("showQr", Boolean(v))} className="h-3.5 w-3.5" />
+                                                                            <span className="text-[10px] text-muted-foreground">QR</span>
+                                                                        </label>
+                                                                    </div>
                                                                     <Input
                                                                         placeholder={fallbackWebsite || undefined}
                                                                         value={generatedContent.websiteOverride || ""}
@@ -1275,8 +1297,15 @@ export function PropertyPrintDesignerDialog({
                                                                     />
                                                                 </div>
                                                                 <div className="space-y-1.5">
-                                                                    <Label className="text-xs">Telephone</Label>
+                                                                    <div className="flex items-center justify-between">
+                                                                        <Label className="text-xs">Telephone</Label>
+                                                                        <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                                                                            <Checkbox checked={designSettings.showContact} onCheckedChange={(v) => toggleDesignFlag("showContact", Boolean(v))} className="h-3.5 w-3.5" />
+                                                                            <span className="text-[10px] text-muted-foreground">Contact</span>
+                                                                        </label>
+                                                                    </div>
                                                                     <Input
+                                                                        className={!designSettings.showContact ? "opacity-50" : ""}
                                                                         placeholder={fallbackTel}
                                                                         value={generatedContent.telOverride || ""}
                                                                         onChange={(event) => updateCurrentDraft((draft) => ({
@@ -1288,6 +1317,7 @@ export function PropertyPrintDesignerDialog({
                                                                 <div className="space-y-1.5">
                                                                     <Label className="text-xs">Mobile</Label>
                                                                     <Input
+                                                                        className={!designSettings.showContact ? "opacity-50" : ""}
                                                                         placeholder={fallbackMob}
                                                                         value={generatedContent.mobOverride || ""}
                                                                         onChange={(event) => updateCurrentDraft((draft) => ({
@@ -1297,8 +1327,15 @@ export function PropertyPrintDesignerDialog({
                                                                     />
                                                                 </div>
                                                                 <div className="space-y-1.5">
-                                                                    <Label className="text-xs">Email</Label>
+                                                                    <div className="flex items-center justify-between">
+                                                                        <Label className="text-xs">Email</Label>
+                                                                        <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                                                                            <Checkbox checked={designSettings.showEmail} onCheckedChange={(v) => toggleDesignFlag("showEmail", Boolean(v))} className="h-3.5 w-3.5" />
+                                                                            <span className="text-[10px] text-muted-foreground">Visible</span>
+                                                                        </label>
+                                                                    </div>
                                                                     <Input
+                                                                        className={!designSettings.showEmail ? "opacity-50" : ""}
                                                                         placeholder={fallbackEmail}
                                                                         value={generatedContent.emailOverride || ""}
                                                                         onChange={(event) => updateCurrentDraft((draft) => ({
