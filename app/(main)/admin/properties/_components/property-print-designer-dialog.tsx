@@ -17,7 +17,7 @@ import {
     useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { FileDown, GripVertical, Languages, Loader2, Plus, Printer, Save, Sparkles, Star, Trash2, Image as ImageIcon } from "lucide-react";
+import { FileDown, GripVertical, Languages, Loader2, Plus, Printer, Save, Sparkles, Star, Trash2, Image as ImageIcon, PanelLeftClose, PanelLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -511,6 +511,7 @@ export function PropertyPrintDesignerDialog({
         }));
     };
 
+    const [draftsCollapsed, setDraftsCollapsed] = useState(false);
     const previewHref = selectedDraft ? `/print-preview/${propertyId}/${selectedDraft.id}` : null;
     const pdfHref = selectedDraft ? `/print-preview/${propertyId}/${selectedDraft.id}/pdf` : null;
     const generatedContent = normalizePropertyPrintGeneratedContent(selectedDraft?.generatedContent || DEFAULT_PROPERTY_PRINT_GENERATED_CONTENT);
@@ -546,64 +547,101 @@ export function PropertyPrintDesignerDialog({
                 </DialogHeader>
 
                 <div className="flex min-h-0 flex-1 overflow-hidden">
-                    {/* Draft Rail — independently scrollable */}
-                    <div className="flex flex-col w-[240px] shrink-0 border-r bg-muted/20 overflow-hidden">
-                        <div className="shrink-0 border-b px-4 py-3">
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <div className="text-sm font-medium">Drafts</div>
-                                    <div className="text-xs text-muted-foreground">{drafts.length} saved</div>
+                    {/* Draft Rail — collapsible, independently scrollable */}
+                    <div
+                        className="flex flex-col shrink-0 border-r bg-muted/20 overflow-hidden transition-[width] duration-200 ease-in-out"
+                        style={{ width: draftsCollapsed ? 48 : 240 }}
+                    >
+                        <div className="shrink-0 border-b px-2 py-3">
+                            {draftsCollapsed ? (
+                                <div className="flex flex-col items-center gap-2">
+                                    <Button type="button" size="icon" variant="ghost" onClick={() => setDraftsCollapsed(false)} className="h-7 w-7">
+                                        <PanelLeft className="h-4 w-4" />
+                                    </Button>
+                                    <Button type="button" size="icon" variant="outline" onClick={handleCreateDraft} disabled={isPending} className="h-7 w-7">
+                                        <Plus className="h-3.5 w-3.5" />
+                                    </Button>
                                 </div>
-                                <Button type="button" size="sm" variant="outline" onClick={handleCreateDraft} disabled={isPending}>
-                                    <Plus className="mr-1 h-3 w-3" />
-                                    New
-                                </Button>
-                            </div>
-                        </div>
-                        <ScrollArea className="flex-1 min-h-0">
-                            <div className="space-y-1.5 p-3">
-                                {drafts.map((draft) => (
-                                    <button
-                                        key={draft.id}
-                                        type="button"
-                                        className={`w-full rounded-lg border p-2.5 text-left transition-colors ${draft.id === selectedDraftId ? "border-primary ring-2 ring-primary/20 bg-background" : "bg-background/60 hover:bg-background"}`}
-                                        onClick={() => setSelectedDraftId(draft.id)}
-                                    >
-                                        <div className="flex items-center justify-between gap-1.5">
-                                            <div className="truncate text-sm font-medium">{draft.name}</div>
-                                            {draft.isDefault ? (
-                                                <Badge variant="secondary" className="text-[10px] shrink-0">
-                                                    <Star className="mr-0.5 h-2.5 w-2.5 fill-current" />
-                                                    Default
-                                                </Badge>
-                                            ) : null}
-                                        </div>
-                                        <div className="mt-1.5 flex items-center gap-1.5">
-                                            <Badge variant="outline" className="text-[10px]">
-                                                {draft.paperSize} {draft.orientation === "landscape" ? "L" : "P"}
-                                            </Badge>
-                                            <span className="text-[10px] text-muted-foreground truncate">
-                                                {getPropertyPrintTemplate(draft.templateId).label}
-                                            </span>
-                                        </div>
-                                        {draft.languages.length > 0 ? (
-                                            <div className="mt-1.5 flex flex-wrap gap-1">
-                                                {draft.languages.map((language) => (
-                                                    <Badge key={language} variant="outline" className="text-[10px]">
-                                                        {getReplyLanguageLabel(language) || language}
-                                                    </Badge>
-                                                ))}
-                                            </div>
-                                        ) : null}
-                                    </button>
-                                ))}
-                                {drafts.length === 0 ? (
-                                    <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                                        Create a print draft to start designing brochures.
+                            ) : (
+                                <div className="flex items-center justify-between px-2">
+                                    <div>
+                                        <div className="text-sm font-medium">Drafts</div>
+                                        <div className="text-xs text-muted-foreground">{drafts.length} saved</div>
                                     </div>
-                                ) : null}
-                            </div>
-                        </ScrollArea>
+                                    <div className="flex items-center gap-1">
+                                        <Button type="button" size="sm" variant="outline" onClick={handleCreateDraft} disabled={isPending}>
+                                            <Plus className="mr-1 h-3 w-3" />
+                                            New
+                                        </Button>
+                                        <Button type="button" size="icon" variant="ghost" onClick={() => setDraftsCollapsed(true)} className="h-8 w-8">
+                                            <PanelLeftClose className="h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        {!draftsCollapsed ? (
+                            <ScrollArea className="flex-1 min-h-0">
+                                <div className="space-y-1.5 p-3">
+                                    {drafts.map((draft) => (
+                                        <button
+                                            key={draft.id}
+                                            type="button"
+                                            className={`w-full rounded-lg border p-2.5 text-left transition-colors ${draft.id === selectedDraftId ? "border-primary ring-2 ring-primary/20 bg-background" : "bg-background/60 hover:bg-background"}`}
+                                            onClick={() => setSelectedDraftId(draft.id)}
+                                        >
+                                            <div className="flex items-center justify-between gap-1.5">
+                                                <div className="truncate text-sm font-medium">{draft.name}</div>
+                                                {draft.isDefault ? (
+                                                    <Badge variant="secondary" className="text-[10px] shrink-0">
+                                                        <Star className="mr-0.5 h-2.5 w-2.5 fill-current" />
+                                                        Default
+                                                    </Badge>
+                                                ) : null}
+                                            </div>
+                                            <div className="mt-1.5 flex items-center gap-1.5">
+                                                <Badge variant="outline" className="text-[10px]">
+                                                    {draft.paperSize} {draft.orientation === "landscape" ? "L" : "P"}
+                                                </Badge>
+                                                <span className="text-[10px] text-muted-foreground truncate">
+                                                    {getPropertyPrintTemplate(draft.templateId).label}
+                                                </span>
+                                            </div>
+                                            {draft.languages.length > 0 ? (
+                                                <div className="mt-1.5 flex flex-wrap gap-1">
+                                                    {draft.languages.map((language) => (
+                                                        <Badge key={language} variant="outline" className="text-[10px]">
+                                                            {getReplyLanguageLabel(language) || language}
+                                                        </Badge>
+                                                    ))}
+                                                </div>
+                                            ) : null}
+                                        </button>
+                                    ))}
+                                    {drafts.length === 0 ? (
+                                        <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                                            Create a print draft to start designing brochures.
+                                        </div>
+                                    ) : null}
+                                </div>
+                            </ScrollArea>
+                        ) : (
+                            <ScrollArea className="flex-1 min-h-0">
+                                <div className="flex flex-col items-center gap-1.5 py-2">
+                                    {drafts.map((draft) => (
+                                        <button
+                                            key={draft.id}
+                                            type="button"
+                                            title={draft.name}
+                                            className={`h-8 w-8 rounded-md border text-[10px] font-bold transition-colors ${draft.id === selectedDraftId ? "border-primary ring-2 ring-primary/20 bg-background" : "bg-background/60 hover:bg-background"}`}
+                                            onClick={() => setSelectedDraftId(draft.id)}
+                                        >
+                                            {draft.name.charAt(0).toUpperCase()}
+                                        </button>
+                                    ))}
+                                </div>
+                            </ScrollArea>
+                        )}
                     </div>
 
                     {/* Main editor pane */}
