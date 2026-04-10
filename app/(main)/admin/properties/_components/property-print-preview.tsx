@@ -245,9 +245,9 @@ function renderTemplate(
 
                     {/* Language blocks */}
                     {draft.designSettings.showLanguages ? (
-                        <div className="flex flex-1 flex-col gap-[6mm] overflow-hidden min-h-0">
+                        <div className="flex flex-1 flex-col gap-[6mm] overflow-hidden min-h-[100px]">
                             {languageBlocks.map((block: any) => (
-                                <div key={block.language} className="overflow-hidden min-h-0 flex flex-col">
+                                <div key={block.language} className="overflow-hidden min-h-[50px] flex flex-col">
                                     <h4
                                         className="mb-[2mm] font-semibold uppercase shrink-0"
                                         style={{
@@ -258,7 +258,7 @@ function renderTemplate(
                                     >
                                         {block.label}
                                     </h4>
-                                    <div className="flex-1 min-h-0 relative">
+                                    <div className="flex-1 min-h-[50px] relative">
                                         <div className="absolute inset-0">
                                             <AutoFitText
                                                 maxFontSize={(draft.templateId === "a3-poster-split" ? 13 : 11) * fontScale}
@@ -269,7 +269,7 @@ function renderTemplate(
                                             >
                                                 {block.title && <div className="font-semibold mb-[2mm]">{block.title}</div>}
                                                 {block.subtitle && <div className="italic mb-[2mm]">{block.subtitle}</div>}
-                                                <div dangerouslySetInnerHTML={{ __html: block.body.replace(/\n/g, '<br/>') }} />
+                                                <div className="whitespace-pre-wrap">{block.body}</div>
                                             </AutoFitText>
                                         </div>
                                     </div>
@@ -394,7 +394,7 @@ function renderTemplate(
                                     <div className="leading-6 text-slate-700" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>
                                         {block.title && <div className="font-semibold mb-1">{block.title}</div>}
                                         {block.subtitle && <div className="italic mb-2">{block.subtitle}</div>}
-                                        <div dangerouslySetInnerHTML={{ __html: block.body.replace(/\n/g, '<br/>') }} />
+                                        <div className="whitespace-pre-wrap">{block.body}</div>
                                     </div>
                                 </div>
                             ))}
