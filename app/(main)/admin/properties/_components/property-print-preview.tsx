@@ -247,7 +247,7 @@ function renderTemplate(
                     {draft.designSettings.showLanguages ? (
                         <div className="flex flex-1 flex-col gap-[6mm] overflow-hidden min-h-[100px]">
                             {languageBlocks.map((block: any) => (
-                                <div key={block.language} className="overflow-hidden min-h-[50px] flex flex-col">
+                                <div key={block.language} className="flex-1 overflow-hidden min-h-[50px] flex flex-col">
                                     <h4
                                         className="mb-[2mm] font-semibold uppercase shrink-0"
                                         style={{
