@@ -272,7 +272,7 @@ export async function generatePropertyPrintDraftCopy(input: {
     // Resolve model: explicit input > draft promptSettings > location defaults
     const draft = await db.propertyPrintDraft.findFirst({
         where: { id: draftId, propertyId },
-        select: { promptSettings: true },
+        select: { promptSettings: true, generatedContent: true },
     });
     const savedModelOverride = (draft?.promptSettings && typeof draft.promptSettings === "object")
         ? String((draft.promptSettings as any).modelOverride || "").trim()
@@ -287,10 +287,26 @@ export async function generatePropertyPrintDraftCopy(input: {
         modelOverride: effectiveModel,
     });
 
+    const existingGenContent = (draft?.generatedContent && typeof draft.generatedContent === "object")
+        ? (draft.generatedContent as any)
+        : {};
+
+    const mergedContent = {
+        ...(result.generatedContent as object),
+        logoUrlOverride: existingGenContent.logoUrlOverride || null,
+        priceOverride: existingGenContent.priceOverride || null,
+        vatText: existingGenContent.vatText || "",
+        referenceOverride: existingGenContent.referenceOverride || null,
+        telOverride: existingGenContent.telOverride || null,
+        mobOverride: existingGenContent.mobOverride || null,
+        emailOverride: existingGenContent.emailOverride || null,
+        websiteOverride: existingGenContent.websiteOverride || null,
+    };
+
     const updated = await db.propertyPrintDraft.update({
         where: { id: draftId },
         data: {
-            generatedContent: result.generatedContent as any,
+            generatedContent: mergedContent as any,
             generationMetadata: result.generationMetadata as any,
         },
     });

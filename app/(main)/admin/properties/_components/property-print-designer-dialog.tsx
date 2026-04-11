@@ -17,7 +17,7 @@ import {
     useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { FileDown, GripVertical, Languages, Loader2, Plus, Printer, Save, Sparkles, Star, Trash2, Image as ImageIcon, PanelLeftClose, PanelLeft } from "lucide-react";
+import { FileDown, GripVertical, Languages, Loader2, Plus, Printer, Save, Sparkles, Star, Trash2, Image as ImageIcon, PanelLeftClose, PanelLeft, Building } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -1236,6 +1236,19 @@ export function PropertyPrintDesignerDialog({
                                                                                 generatedContent: { ...normalizePropertyPrintGeneratedContent(draft.generatedContent), logoUrlOverride: event.target.value || null },
                                                                             }))}
                                                                         />
+                                                                        <Button 
+                                                                            variant="outline" 
+                                                                            size="icon" 
+                                                                            className="shrink-0" 
+                                                                            type="button"
+                                                                            title="Use Default Downtown Logo"
+                                                                            onClick={() => updateCurrentDraft((draft) => ({
+                                                                                ...draft,
+                                                                                generatedContent: { ...normalizePropertyPrintGeneratedContent(draft.generatedContent), logoUrlOverride: "https://imagedelivery.net/CgOhaOjkCC4UB7N5l7b9sg/46eac6af-6cbb-4459-571c-a57bc510f600/public" },
+                                                                            }))}
+                                                                        >
+                                                                            <Building className="w-4 h-4" />
+                                                                        </Button>
                                                                         <MediaGalleryDialog 
                                                                             siteConfig={{ locationId }}
                                                                             onSelect={(url) => updateCurrentDraft((draft) => ({
