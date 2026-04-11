@@ -128,6 +128,12 @@ export async function generatePropertyPrintCopy(params: {
         `Languages to generate: ${languages.join(", ")}`,
         `Template: ${draft.templateId}`,
         `Tone override: ${String(promptSettings.toneInstructions || "").trim() || "none"}`,
+        "COPYWRITING STRATEGY (CRITICAL):",
+        "- DO NOT use flowery, cliché real estate jargon (e.g., avoid 'proud to present', 'seamless blend', 'breathtaking', 'discerning investor', 'nestled in', 'dream home').",
+        "- Write with a professional, enthusiastic, yet factual and direct tone.",
+        "- Focus on a Feature-Benefit logic. Don't just list features; explain the benefit (e.g. instead of 'Has double glazing', write 'Double-glazed windows ensure sound insulation and energy efficiency').",
+        "- Structure the 'body' into 2-3 short paragraphs using physical line breaks (\\n\\n). People scan brochures; they do not read walls of text.",
+        "- Do NOT end the body description with a generic call-to-action like 'Contact us today' or 'Trust our expert team' (the brochure already has a dedicated CTA).",
         "Use the supplied property facts only. Do not invent hard facts or amenities not present in the data.",
         "Return strict JSON with this shape:",
         JSON.stringify({
