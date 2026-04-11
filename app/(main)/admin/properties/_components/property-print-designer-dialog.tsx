@@ -1269,6 +1269,17 @@ export function PropertyPrintDesignerDialog({
                                                                     />
                                                                 </div>
                                                                 <div className="space-y-1.5">
+                                                                    <Label className="text-xs">VAT Text Suffix</Label>
+                                                                    <Input
+                                                                        placeholder="e.g. + VAT"
+                                                                        value={generatedContent.vatText || ""}
+                                                                        onChange={(event) => updateCurrentDraft((draft) => ({
+                                                                            ...draft,
+                                                                            generatedContent: { ...normalizePropertyPrintGeneratedContent(draft.generatedContent), vatText: event.target.value },
+                                                                        }))}
+                                                                    />
+                                                                </div>
+                                                                <div className="space-y-1.5">
                                                                     <Label className="text-xs">Reference</Label>
                                                                     <Input
                                                                         placeholder={fallbackRef}

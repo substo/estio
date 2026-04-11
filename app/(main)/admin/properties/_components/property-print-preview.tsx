@@ -178,6 +178,7 @@ function renderTemplate(
                     {draft.designSettings.showPrice !== false && activePrice ? (
                         <div className="mb-[4mm] font-bold" style={{ color: primaryColor, fontSize: draft.templateId === "a3-poster-split" ? `calc(34pt * ${fontScale})` : `calc(24pt * ${fontScale})` }}>
                             {activePrice}
+                            {draft.generatedContent.vatText ? <span style={{ fontSize: '0.6em', opacity: 0.8, marginLeft: '0.1em' }} className="font-semibold">{draft.generatedContent.vatText}</span> : null}
                         </div>
                     ) : null}
 
@@ -336,7 +337,10 @@ function renderTemplate(
                         </div>
                     ) : null}
                     {draft.designSettings.showPrice !== false && activePrice ? (
-                        <div className="mb-4 font-semibold" style={{ color: primaryColor, fontSize: `calc(1.875rem * ${fontScale})` }}>{activePrice}</div>
+                        <div className="mb-4 font-semibold shrink-0" style={{ color: primaryColor, fontSize: `calc(1.875rem * ${fontScale})` }}>
+                            {activePrice}
+                            {draft.generatedContent.vatText ? <span style={{ fontSize: '0.6em', opacity: 0.8, marginLeft: '0.1em' }} className="font-semibold">{draft.generatedContent.vatText}</span> : null}
+                        </div>
                     ) : null}
                     <div className="mb-2 font-bold text-slate-900" style={{ fontSize: `calc(1.5rem * ${fontScale})` }}>{activeTitle}</div>
                     <div className="mb-4 text-slate-600" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>{draft.generatedContent.subtitle || property.locationLine}</div>

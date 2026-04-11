@@ -82,6 +82,7 @@ export const propertyPrintGeneratedLanguageSchema = z.object({
 export const propertyPrintGeneratedContentSchema = z.object({
     title: z.string().trim().default(""),
     subtitle: z.string().trim().default(""),
+    vatText: z.string().trim().default(""),
     priceOverride: z.string().trim().nullish(),
     referenceOverride: z.string().trim().nullish(),
     telOverride: z.string().trim().nullish(),
@@ -132,6 +133,7 @@ export const DEFAULT_PROPERTY_PRINT_PROMPT_SETTINGS: PropertyPrintPromptSettings
 export const DEFAULT_PROPERTY_PRINT_GENERATED_CONTENT: PropertyPrintGeneratedContent = {
     title: "",
     subtitle: "",
+    vatText: "",
     priceOverride: null,
     referenceOverride: null,
     telOverride: null,

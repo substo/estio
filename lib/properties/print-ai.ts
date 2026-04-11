@@ -133,6 +133,7 @@ export async function generatePropertyPrintCopy(params: {
         JSON.stringify({
             title: "string",
             subtitle: "string",
+            vatText: "string",
             featureBullets: ["string"],
             footerNote: "string",
             contactCta: "string",
@@ -148,6 +149,8 @@ export async function generatePropertyPrintCopy(params: {
         }),
         "Rules:",
         "- Keep title/subtitle concise and brochure-friendly.",
+        "- Generate 'vatText' as a short suffix to append to the price (e.g., '+ VAT.', 'NO VAT.', or an empty string '' for rentals if VAT doesn't apply).",
+        "- CRITICAL: Do absolutely NOT mention the price, or use the word 'Price', inside featureBullets or language body text. The price is already displayed prominently elsewhere.",
         "- language entries must exactly match the requested languages.",
         "- featureBullets should be short, useful, and printable.",
         "- body should be 80-140 words per language for A4/A3 brochure use.",
