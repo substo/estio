@@ -83,7 +83,7 @@ export async function createPropertyPrintDraft(input: {
         where: { propertyId: property.id },
     });
 
-    const defaults = createDefaultPropertyPrintDraftInput();
+    const defaults = createDefaultPropertyPrintDraftInput(property);
     const template = getPropertyPrintTemplate(defaults.templateId);
     const selectedMediaIds = property.media.slice(0, template.imageSlots).map((media) => media.id);
 

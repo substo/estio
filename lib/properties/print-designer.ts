@@ -195,8 +195,52 @@ export function normalizePropertyPrintGenerationMetadata(value: unknown): Proper
     return propertyPrintGenerationMetadataSchema.parse(value);
 }
 
-export function createDefaultPropertyPrintDraftInput() {
+function stripHtml(html: string): string {
+    if (!html) return "";
+    // Remove all HTML tags
+    const decoded = html.replace(/<[^>]*>?/gm, " ");
+    // Replace multiple spaces/newlines with just a single space
+    return decoded.replace(/\s+/g, " ").trim();
+}
+
+function truncateForBrochureBody(text: string, maxLen = 600): string {
+    if (!text || text.length <= maxLen) return text;
+    const truncated = text.substring(0, maxLen);
+    // Find the last space to avoid cutting in the middle of a word
+    const lastSpace = truncated.lastIndexOf(" ");
+    if (lastSpace > 0) {
+        return truncated.substring(0, lastSpace) + "...";
+    }
+    return truncated + "...";
+}
+
+export function createDefaultPropertyPrintDraftInput(property?: any) {
     const template = PROPERTY_PRINT_TEMPLATES[0];
+
+    let generatedContent = { ...DEFAULT_PROPERTY_PRINT_GENERATED_CONTENT };
+
+    if (property) {
+        const subtitleStr = [property.propertyArea, property.city].filter(Boolean).join(", ");
+        const titleStr = property.title || "";
+        const bodyContent = truncateForBrochureBody(stripHtml(property.description || ""));
+
+        generatedContent = {
+            ...generatedContent,
+            title: titleStr,
+            subtitle: subtitleStr,
+            featureBullets: buildPropertyFeatureBullets(property).slice(0, 5),
+            languages: [
+                {
+                    language: "en",
+                    label: "English",
+                    title: titleStr,
+                    subtitle: subtitleStr,
+                    body: bodyContent,
+                }
+            ]
+        };
+    }
+
     return {
         name: "Default Print Draft",
         templateId: template.id,
@@ -207,7 +251,7 @@ export function createDefaultPropertyPrintDraftInput() {
         isDefault: true,
         designSettings: DEFAULT_PROPERTY_PRINT_DESIGN_SETTINGS,
         promptSettings: DEFAULT_PROPERTY_PRINT_PROMPT_SETTINGS,
-        generatedContent: DEFAULT_PROPERTY_PRINT_GENERATED_CONTENT,
+        generatedContent,
         generationMetadata: null,
     };
 }
