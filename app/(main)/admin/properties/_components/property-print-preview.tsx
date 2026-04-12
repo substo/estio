@@ -301,7 +301,6 @@ function renderTemplate(
                                                 </div>
                                             ) : null}
                                             {(activeEmail && draft.designSettings.showEmail) ? <div>{activeEmail}</div> : null}
-                                            {activeWebsite ? <div><strong style={{ color: primaryColor }}>Web:</strong> {activeWebsite.replace(/^https?:\/\//, '')}</div> : null}
                                         </div>
                                     ) : null}
                                 </div>
@@ -316,6 +315,11 @@ function renderTemplate(
                                     </div>
                                 ) : null}
                             </div>
+                            {draft.designSettings.showContact && activeWebsite ? (
+                                <div className="mt-[2mm]" style={{ fontSize: `calc(12pt * ${fontScale})`, lineHeight: 1.5, color: '#333' }}>
+                                    <strong style={{ color: primaryColor }}>Web:</strong> {activeWebsite.replace(/^https?:\/\//, '')}
+                                </div>
+                            ) : null}
                         </div>
                     ) : null}
                 </div>
@@ -434,7 +438,6 @@ function renderTemplate(
                                     </div>
                                 ) : null}
                                 {(activeEmail && draft.designSettings.showEmail) ? <div>{activeEmail}</div> : null}
-                                {activeWebsite ? <div><strong style={{ color: primaryColor }}>Web:</strong> {activeWebsite.replace(/^https?:\/\//, '')}</div> : null}
                             </div>
                         ) : null}
                     </div>
@@ -450,6 +453,11 @@ function renderTemplate(
                         </div>
                     ) : null}
                 </div>
+                {draft.designSettings.showContact && activeWebsite ? (
+                    <div className="mt-1 text-slate-700" style={{ fontSize: `calc(0.8rem * ${fontScale})` }}>
+                        <strong style={{ color: primaryColor }}>Web:</strong> {activeWebsite.replace(/^https?:\/\//, '')}
+                    </div>
+                ) : null}
             </div>
         </div>
     );
