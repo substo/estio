@@ -1306,12 +1306,19 @@ export function PropertyPrintDesignerDialog({
                                                                 <div className="space-y-1.5">
                                                                     <div className="flex items-center justify-between">
                                                                         <Label className="text-xs">Website URL</Label>
-                                                                        <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                                                                            <Checkbox checked={designSettings.showQr} onCheckedChange={(v) => toggleDesignFlag("showQr", Boolean(v))} className="h-3.5 w-3.5" />
-                                                                            <span className="text-[10px] text-muted-foreground">QR</span>
-                                                                        </label>
+                                                                        <div className="flex items-center gap-3">
+                                                                            <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                                                                                <Checkbox checked={designSettings.showWebsite !== false} onCheckedChange={(v) => toggleDesignFlag("showWebsite", Boolean(v))} className="h-3.5 w-3.5" />
+                                                                                <span className="text-[10px] text-muted-foreground">Visible</span>
+                                                                            </label>
+                                                                            <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                                                                                <Checkbox checked={designSettings.showQr} onCheckedChange={(v) => toggleDesignFlag("showQr", Boolean(v))} className="h-3.5 w-3.5" />
+                                                                                <span className="text-[10px] text-muted-foreground">QR</span>
+                                                                            </label>
+                                                                        </div>
                                                                     </div>
                                                                     <Input
+                                                                        className={designSettings.showWebsite === false && !designSettings.showQr ? "opacity-50" : ""}
                                                                         placeholder={fallbackWebsite || undefined}
                                                                         value={generatedContent.websiteOverride || ""}
                                                                         onChange={(event) => updateCurrentDraft((draft) => ({
