@@ -196,30 +196,30 @@ function renderTemplate(
 
                     {/* Facts */}
                     {draft.designSettings.showFacts ? (
-                        <div className="mb-[8mm] grid grid-cols-2 md:grid-cols-4 gap-4" style={{ fontSize: draft.templateId === "a3-poster-split" ? `calc(16pt * ${fontScale})` : `calc(10pt * ${fontScale})` }}>
+                        <div className="mb-[8mm] flex flex-wrap gap-[4mm]" style={{ fontSize: draft.templateId === "a3-poster-split" ? `calc(16pt * ${fontScale})` : `calc(10pt * ${fontScale})` }}>
                             {(!draft.designSettings.visibleFacts || draft.designSettings.visibleFacts.includes("bedrooms")) && (
-                                <div className="flex items-center justify-center gap-[6px] p-[3mm] rounded-md bg-black/5 border border-black/10">
+                                <div className="flex items-center justify-center gap-[6px] p-[3mm] rounded-md bg-black/5 border border-black/10 whitespace-nowrap">
                                     <Bed className="shrink-0" style={{ width: draft.templateId === "a3-poster-split" ? '24pt' : '18pt', height: draft.templateId === "a3-poster-split" ? '24pt' : '18pt', color: primaryColor }} />
                                     <span className="font-bold text-slate-800 leading-none">{property.bedrooms || "-"}</span>
                                     <span className="uppercase text-slate-500 tracking-wider font-semibold leading-none" style={{ fontSize: '0.75em' }}>Beds</span>
                                 </div>
                             )}
                             {(!draft.designSettings.visibleFacts || draft.designSettings.visibleFacts.includes("bathrooms")) && (
-                                <div className="flex items-center justify-center gap-[6px] p-[3mm] rounded-md bg-black/5 border border-black/10">
+                                <div className="flex items-center justify-center gap-[6px] p-[3mm] rounded-md bg-black/5 border border-black/10 whitespace-nowrap">
                                     <Bath className="shrink-0" style={{ width: draft.templateId === "a3-poster-split" ? '24pt' : '18pt', height: draft.templateId === "a3-poster-split" ? '24pt' : '18pt', color: primaryColor }} />
                                     <span className="font-bold text-slate-800 leading-none">{property.bathrooms || "-"}</span>
                                     <span className="uppercase text-slate-500 tracking-wider font-semibold leading-none" style={{ fontSize: '0.75em' }}>Baths</span>
                                 </div>
                             )}
                             {(!draft.designSettings.visibleFacts || draft.designSettings.visibleFacts.includes("areaSqm")) && (
-                                <div className="flex items-center justify-center gap-[6px] p-[3mm] rounded-md bg-black/5 border border-black/10">
+                                <div className="flex items-center justify-center gap-[6px] p-[3mm] rounded-md bg-black/5 border border-black/10 whitespace-nowrap">
                                     <Maximize className="shrink-0" style={{ width: draft.templateId === "a3-poster-split" ? '24pt' : '18pt', height: draft.templateId === "a3-poster-split" ? '24pt' : '18pt', color: primaryColor }} />
-                                    <span className="font-bold text-slate-800 leading-none">{property.areaSqm || "-"} m&sup2;</span>
+                                    <span className="font-bold text-slate-800 leading-none">{property.areaSqm || "-"}m&sup2;</span>
                                     <span className="uppercase text-slate-500 tracking-wider font-semibold leading-none" style={{ fontSize: '0.75em' }}>Covered</span>
                                 </div>
                             )}
                             {(!draft.designSettings.visibleFacts || draft.designSettings.visibleFacts.includes("parking")) && (
-                                <div className="flex items-center justify-center gap-[6px] p-[3mm] rounded-md bg-black/5 border border-black/10">
+                                <div className="flex items-center justify-center gap-[6px] p-[3mm] rounded-md bg-black/5 border border-black/10 whitespace-nowrap">
                                     <Car className="shrink-0" style={{ width: draft.templateId === "a3-poster-split" ? '24pt' : '18pt', height: draft.templateId === "a3-poster-split" ? '24pt' : '18pt', color: primaryColor }} />
                                     <span className="font-bold text-slate-800 leading-none">
                                         {(property.features || []).some((f: string) => typeof f === 'string' && f.toLowerCase().includes('parking')) ? "Yes" : "-"}
@@ -345,30 +345,30 @@ function renderTemplate(
                     <div className="mb-2 font-bold text-slate-900" style={{ fontSize: `calc(1.5rem * ${fontScale})` }}>{activeTitle}</div>
                     <div className="mb-4 text-slate-600" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>{draft.generatedContent.subtitle || property.locationLine}</div>
                     {draft.designSettings.showFacts ? (
-                        <div className="mb-4 grid grid-cols-2 lg:grid-cols-4 gap-2">
+                        <div className="mb-4 flex flex-wrap gap-2">
                             {(!draft.designSettings.visibleFacts || draft.designSettings.visibleFacts.includes("bedrooms")) && (
-                                <div className="flex items-center justify-center gap-1.5 rounded-md border p-2 text-left shadow-sm bg-white" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>
+                                <div className="flex items-center justify-center gap-1.5 rounded-md border p-2 text-left shadow-sm bg-white whitespace-nowrap" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>
                                     <Bed className="shrink-0 h-4 w-4" style={{ color: primaryColor }} />
                                     <span className="font-bold leading-none">{property.bedrooms || "-"}</span>
                                     <span className="uppercase text-slate-500 leading-none" style={{ fontSize: `calc(10px * ${fontScale})` }}>Beds</span>
                                 </div>
                             )}
                             {(!draft.designSettings.visibleFacts || draft.designSettings.visibleFacts.includes("bathrooms")) && (
-                                <div className="flex items-center justify-center gap-1.5 rounded-md border p-2 text-left shadow-sm bg-white" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>
+                                <div className="flex items-center justify-center gap-1.5 rounded-md border p-2 text-left shadow-sm bg-white whitespace-nowrap" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>
                                     <Bath className="shrink-0 h-4 w-4" style={{ color: primaryColor }} />
                                     <span className="font-bold leading-none">{property.bathrooms || "-"}</span>
                                     <span className="uppercase text-slate-500 leading-none" style={{ fontSize: `calc(10px * ${fontScale})` }}>Baths</span>
                                 </div>
                             )}
                             {(!draft.designSettings.visibleFacts || draft.designSettings.visibleFacts.includes("areaSqm")) && (
-                                <div className="flex items-center justify-center gap-1.5 rounded-md border p-2 text-left shadow-sm bg-white" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>
+                                <div className="flex items-center justify-center gap-1.5 rounded-md border p-2 text-left shadow-sm bg-white whitespace-nowrap" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>
                                     <Maximize className="shrink-0 h-4 w-4" style={{ color: primaryColor }} />
-                                    <span className="font-bold leading-none">{property.areaSqm || "-"}</span>
+                                    <span className="font-bold leading-none">{property.areaSqm || "-"}m&sup2;</span>
                                     <span className="uppercase text-slate-500 leading-none" style={{ fontSize: `calc(10px * ${fontScale})` }}>Area</span>
                                 </div>
                             )}
                             {(!draft.designSettings.visibleFacts || draft.designSettings.visibleFacts.includes("parking")) && (
-                                <div className="flex items-center justify-center gap-1.5 rounded-md border p-2 text-left shadow-sm bg-white" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>
+                                <div className="flex items-center justify-center gap-1.5 rounded-md border p-2 text-left shadow-sm bg-white whitespace-nowrap" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>
                                     <Car className="shrink-0 h-4 w-4" style={{ color: primaryColor }} />
                                     <span className="font-bold leading-none">
                                         {(property.features || []).some((f: string) => typeof f === 'string' && f.toLowerCase().includes('parking')) ? "Yes" : "-"}
