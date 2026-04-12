@@ -293,7 +293,6 @@ function renderTemplate(
                                     ) : null}
                                     {draft.designSettings.showContact ? (
                                         <div className="space-y-[0.5mm]">
-                                            {activeRef ? <div><strong style={{ color: primaryColor }}>Ref:</strong> {activeRef}</div> : null}
                                             {(activeTel || activeMob) ? (
                                                 <div className="flex flex-wrap gap-x-[4mm]">
                                                     {activeTel ? <span><strong style={{ color: primaryColor }}>Tel:</strong> {activeTel}</span> : null}
@@ -304,16 +303,23 @@ function renderTemplate(
                                         </div>
                                     ) : null}
                                 </div>
-                                {draft.designSettings.showQr && activeWebsite ? (
-                                    <div className="shrink-0">
-                                        <img
-                                            src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(activeWebsite)}`}
-                                            alt="QR"
-                                            className="border-2 p-0.5 bg-white"
-                                            style={{ width: '80px', height: '80px', aspectRatio: '1', borderColor: primaryColor }}
-                                        />
-                                    </div>
-                                ) : null}
+                                <div className="shrink-0 flex flex-col items-end gap-[1.5mm] text-right">
+                                    {activeRef ? (
+                                        <div style={{ fontSize: `calc(11pt * ${fontScale})`, lineHeight: 1.2, color: '#333' }}>
+                                            <strong style={{ color: primaryColor }}>Ref:</strong> {activeRef}
+                                        </div>
+                                    ) : null}
+                                    {draft.designSettings.showQr && activeWebsite ? (
+                                        <div className="shrink-0">
+                                            <img
+                                                src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(activeWebsite)}`}
+                                                alt="QR"
+                                                className="border-2 p-0.5 bg-white"
+                                                style={{ width: '80px', height: '80px', aspectRatio: '1', borderColor: primaryColor }}
+                                            />
+                                        </div>
+                                    ) : null}
+                                </div>
                             </div>
                             {draft.designSettings.showContact && activeWebsite ? (
                                 <div className="mt-[2mm]" style={{ fontSize: `calc(12pt * ${fontScale})`, lineHeight: 1.5, color: '#333' }}>
@@ -430,7 +436,6 @@ function renderTemplate(
                         ) : null}
                         {draft.designSettings.showContact ? (
                             <div className="space-y-0.5 text-slate-700" style={{ fontSize: `calc(0.8rem * ${fontScale})` }}>
-                                {activeRef ? <div><strong style={{ color: primaryColor }}>Ref:</strong> {activeRef}</div> : null}
                                 {(activeTel || activeMob) ? (
                                     <div className="flex flex-wrap gap-x-4">
                                         {activeTel ? <span><strong style={{ color: primaryColor }}>Tel:</strong> {activeTel}</span> : null}
@@ -441,17 +446,23 @@ function renderTemplate(
                             </div>
                         ) : null}
                     </div>
-                    {draft.designSettings.showQr && activeWebsite ? (
-                        <div className="shrink-0 text-right">
-                            <img
-                                src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(activeWebsite)}`}
-                                alt="QR code"
-                                className="border p-1"
-                                style={{ width: '80px', height: '80px', aspectRatio: '1' }}
-                            />
-                            <div className="mt-1 text-slate-500" style={{ fontSize: `calc(0.65rem * ${fontScale})` }}>{activeRef}</div>
-                        </div>
-                    ) : null}
+                    <div className="shrink-0 flex flex-col items-end gap-1.5 text-right">
+                        {activeRef ? (
+                            <div className="text-slate-700" style={{ fontSize: `calc(0.75rem * ${fontScale})` }}>
+                                <strong style={{ color: primaryColor }}>Ref:</strong> {activeRef}
+                            </div>
+                        ) : null}
+                        {draft.designSettings.showQr && activeWebsite ? (
+                            <div className="shrink-0 text-right">
+                                <img
+                                    src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(activeWebsite)}`}
+                                    alt="QR code"
+                                    className="border p-1"
+                                    style={{ width: '80px', height: '80px', aspectRatio: '1' }}
+                                />
+                            </div>
+                        ) : null}
+                    </div>
                 </div>
                 {draft.designSettings.showContact && activeWebsite ? (
                     <div className="mt-1 text-slate-700" style={{ fontSize: `calc(0.8rem * ${fontScale})` }}>
