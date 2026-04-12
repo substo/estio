@@ -333,9 +333,9 @@ function renderTemplate(
                                         </div>
                                     ) : null}
                                 </div>
-                                <div className="shrink-0 flex flex-col items-end gap-[1.5mm] text-right">
+                                <div className="shrink-0 flex flex-col items-end gap-[1.5mm] text-right" style={{ width: '80px' }}>
                                     {activeRef ? (
-                                        <div style={{ fontSize: `calc(11pt * ${fontScale})`, lineHeight: 1.2, color: '#333' }}>
+                                        <div className="w-full text-right truncate" style={{ fontSize: `calc(9pt * ${fontScale})`, lineHeight: 1.2, color: '#333' }}>
                                             <strong style={{ color: primaryColor }}>Ref:</strong> {activeRef}
                                         </div>
                                     ) : null}
@@ -478,9 +478,9 @@ function renderTemplate(
                             </div>
                         ) : null}
                     </div>
-                    <div className="shrink-0 flex flex-col items-end gap-1.5 text-right">
+                    <div className="shrink-0 flex flex-col items-end gap-1.5 text-right" style={{ width: '80px' }}>
                         {activeRef ? (
-                            <div className="text-slate-700" style={{ fontSize: `calc(0.75rem * ${fontScale})` }}>
+                            <div className="w-full text-right truncate text-slate-700" style={{ fontSize: `calc(0.65rem * ${fontScale})` }}>
                                 <strong style={{ color: primaryColor }}>Ref:</strong> {activeRef}
                             </div>
                         ) : null}
