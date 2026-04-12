@@ -91,6 +91,36 @@ export function PropertyPrintPreview({
     );
 }
 
+const LANGUAGE_FLAGS: Record<string, string> = {
+    english: "🇬🇧",
+    russian: "🇷🇺",
+    greek: "🇬🇷",
+    french: "🇫🇷",
+    german: "🇩🇪",
+    chinese: "🇨🇳",
+    arabic: "🇸🇦",
+    turkish: "🇹🇷",
+    swedish: "🇸🇪",
+    norwegian: "🇳🇴",
+    hebrew: "🇮🇱",
+    spanish: "🇪🇸",
+    italian: "🇮🇹",
+    portuguese: "🇵🇹",
+    dutch: "🇳🇱",
+    polish: "🇵🇱",
+    czech: "🇨🇿",
+    romanian: "🇷🇴",
+    bulgarian: "🇧🇬",
+    ukrainian: "🇺🇦",
+    persian: "🇮🇷",
+    japanese: "🇯🇵",
+    korean: "🇰🇷",
+};
+
+function getLanguageFlag(language: string): string {
+    return LANGUAGE_FLAGS[language.toLowerCase()] || "🌐";
+}
+
 function renderTemplate(
     draft: any,
     branding: any,
@@ -249,16 +279,6 @@ function renderTemplate(
                         <div className="flex flex-1 flex-col gap-[6mm] overflow-hidden min-h-[100px]">
                             {languageBlocks.map((block: any) => (
                                 <div key={block.language} className="flex-1 overflow-hidden min-h-[50px] flex flex-col">
-                                    <h4
-                                        className="mb-[2mm] font-semibold uppercase shrink-0"
-                                        style={{
-                                            color: primaryColor,
-                                            fontSize: draft.templateId === "a3-poster-split" ? `calc(12pt * ${fontScale})` : `calc(10pt * ${fontScale})`,
-                                            letterSpacing: '1px',
-                                        }}
-                                    >
-                                        {block.label}
-                                    </h4>
                                     <div className="flex-1 min-h-[50px] relative">
                                         <div className="absolute inset-0">
                                             <AutoFitText
@@ -268,7 +288,17 @@ function renderTemplate(
                                                 className="text-slate-700 text-justify"
                                                 style={{ lineHeight: 1.5 }}
                                             >
-                                                {block.title && <div className="font-semibold mb-[2mm]">{block.title}</div>}
+                                                {block.title && (
+                                                    <div className="font-semibold mb-[2mm]">
+                                                        <span style={{ fontSize: '1.15em' }}>{getLanguageFlag(block.language)}</span>{" "}
+                                                        {block.title}
+                                                    </div>
+                                                )}
+                                                {!block.title && (
+                                                    <div className="font-semibold mb-[2mm]">
+                                                        <span style={{ fontSize: '1.15em' }}>{getLanguageFlag(block.language)}</span>
+                                                    </div>
+                                                )}
                                                 {block.subtitle && <div className="italic mb-[2mm]">{block.subtitle}</div>}
                                                 <div className="whitespace-pre-wrap">{block.body}</div>
                                             </AutoFitText>
@@ -400,11 +430,18 @@ function renderTemplate(
                         <div className="flex-1 space-y-4">
                             {languageBlocks.map((block: any) => (
                                 <div key={block.language}>
-                                    <div className="mb-1 font-semibold uppercase tracking-[0.2em]" style={{ color: primaryColor, fontSize: `calc(0.75rem * ${fontScale})` }}>
-                                        {block.label}
-                                    </div>
                                     <div className="leading-6 text-slate-700" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>
-                                        {block.title && <div className="font-semibold mb-1">{block.title}</div>}
+                                        {block.title && (
+                                            <div className="font-semibold mb-1">
+                                                <span style={{ fontSize: '1.15em' }}>{getLanguageFlag(block.language)}</span>{" "}
+                                                {block.title}
+                                            </div>
+                                        )}
+                                        {!block.title && (
+                                            <div className="font-semibold mb-1">
+                                                <span style={{ fontSize: '1.15em' }}>{getLanguageFlag(block.language)}</span>
+                                            </div>
+                                        )}
                                         {block.subtitle && <div className="italic mb-2">{block.subtitle}</div>}
                                         <div className="whitespace-pre-wrap">{block.body}</div>
                                     </div>
