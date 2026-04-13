@@ -2,6 +2,7 @@ import { getPaperDimensions, getPaperPageCss } from "@/lib/properties/print-desi
 import { PrintScaleWrapper } from "@/app/(main)/admin/properties/_components/print-scale-wrapper";
 import { AutoFitText } from "@/app/(main)/admin/properties/_components/auto-fit-text";
 import { Bed, Bath, Maximize, Car } from "lucide-react";
+import { FEATURE_CATEGORIES } from "@/lib/properties/filter-constants";
 
 /**
  * Property Print Preview — renders a true-to-scale paper preview.
@@ -119,6 +120,18 @@ const LANGUAGE_FLAGS: Record<string, string> = {
 
 function getLanguageFlag(language: string): string {
     return LANGUAGE_FLAGS[language.toLowerCase()] || "🌐";
+}
+
+/** Resolve a feature key to its human-readable label via FEATURE_CATEGORIES.
+ *  Canonical keys are snake_case (e.g. "air_conditioning") and map to catalog labels.
+ *  Non-catalog values are already human-readable strings from scraped imports
+ *  (e.g. "Parking: Covered", "Sea View") and are returned as-is. */
+function getFeatureLabel(key: string): string {
+    for (const category of FEATURE_CATEGORIES) {
+        const found = category.items.find(item => item.key === key);
+        if (found) return found.label;
+    }
+    return key;
 }
 
 function renderTemplate(
@@ -358,145 +371,224 @@ function renderTemplate(
         );
     }
 
-    /* A4 Property Sheet — column layout (hero top, details beside, footer bottom) */
+    /* ──────────────────────────────────────────────────────────────────────
+     * A4 PROPERTY SHEET — Reference-style three-row layout
+     *
+     * Structure:
+     *   ┌─────────────────────────────────────────────┐
+     *   │  [Logo]       For Sale €X           [QR]    │  Header
+     *   ├────────────┬────────────────────────────────┤
+     *   │ Hero Image │  Property Ref. XXXX            │  Row 1
+     *   │   (45%)    │  detail lines …                │
+     *   ├────────────┼────────────────────────────────┤
+     *   │ Image 2    │  Property Features             │  Row 2
+     *   │   (45%)    │  ✔ feature …                   │
+     *   ├────────────┼────────────────────────────────┤
+     *   │ Image 3    │  Description                   │  Row 3
+     *   │   (45%)    │  body text …                   │
+     *   ├────────────┴────────────────────────────────┤
+     *   │  email · website · company info             │  Footer
+     *   └─────────────────────────────────────────────┘
+     * ──────────────────────────────────────────────────────────────────── */
+
+    // Helper: extract feature value from features array by keyword
+    const findFeature = (keyword: string) =>
+        (property.features || []).find((f: string) => typeof f === 'string' && f.toLowerCase().includes(keyword.toLowerCase()));
+    const parkingFeature = findFeature('parking');
+    const titleDeedFeature = findFeature('title deed');
+    const beachFeature = findFeature('beach');
+
+    // Determine description text: first language block body, or stripped HTML description
+    const descriptionText = (() => {
+        if (draft.designSettings.showLanguages && languageBlocks.length > 0) {
+            return languageBlocks[0].body || '';
+        }
+        // Strip HTML tags from description
+        const raw = property.descriptionHtml || '';
+        return raw.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ').trim();
+    })();
+
+    // All three images for the three rows
+    const rowImages = [heroImage, supportingImages[0] || null, supportingImages[1] || null];
+
+    // Detail lines for Row 1 (icon + label, conditionally rendered)
+    const detailLines: Array<{ icon: string; text: string }> = [];
+    if (draft.designSettings.showPrice !== false && activePrice) {
+        detailLines.push({ icon: '💰', text: `${activePrice}${draft.generatedContent.vatText ? ' ' + draft.generatedContent.vatText : ''}` });
+    }
+    if (property.propertyArea || property.city) {
+        detailLines.push({ icon: '📍', text: [property.propertyArea, property.city].filter(Boolean).join(', ') });
+    }
+    if (property.type) {
+        detailLines.push({ icon: '🏠', text: property.type });
+    }
+    if (property.buildYear) {
+        detailLines.push({ icon: '📅', text: `Year Built ${property.buildYear}` });
+    }
+    if (draft.designSettings.showFacts) {
+        if (property.bedrooms || property.bathrooms) {
+            const parts = [];
+            if (property.bedrooms) parts.push(`${property.bedrooms} Bedrooms`);
+            if (property.bathrooms) parts.push(`${property.bathrooms} Bathrooms`);
+            detailLines.push({ icon: '🛏️', text: parts.join(' ') });
+        }
+        if (property.coveredAreaSqm || property.areaSqm) {
+            detailLines.push({ icon: '📐', text: `${property.coveredAreaSqm || property.areaSqm}m² Covered` });
+        }
+        if (property.plotAreaSqm) {
+            detailLines.push({ icon: '✂️', text: `${property.plotAreaSqm}m² Plot` });
+        }
+    }
+    if (titleDeedFeature) {
+        detailLines.push({ icon: '📜', text: getFeatureLabel(titleDeedFeature) });
+    }
+    if (parkingFeature) {
+        detailLines.push({ icon: '🅿️', text: getFeatureLabel(parkingFeature) });
+    }
+    if (beachFeature) {
+        detailLines.push({ icon: '🏖️', text: getFeatureLabel(beachFeature) });
+    }
+
+    const baseFontSize = `calc(0.8rem * ${fontScale})`;
+    const headingFontSize = `calc(1.35rem * ${fontScale})`;
+    const sectionHeadingSize = `calc(1.15rem * ${fontScale})`;
+
     return (
-        <div className="flex h-full flex-col">
-            <div className="grid grid-cols-[1.05fr_0.95fr]">
-                <div className="min-h-[56vh] bg-stone-200">
-                    {heroImage ? <img src={heroImage.url} alt={heroImage.alt} className="h-full w-full object-cover" /> : null}
-                </div>
-                <div className="flex flex-col p-8">
-                    {draft.designSettings.showLogo && activeLogo ? (
-                        <div className="mb-8">
-                            <img src={activeLogo} alt={branding.brandName} className="max-h-16 max-w-[220px] object-contain" />
-                        </div>
-                    ) : null}
-                    {draft.designSettings.showPrice !== false && activePrice ? (
-                        <div className="mb-4 font-semibold shrink-0" style={{ color: primaryColor, fontSize: `calc(1.875rem * ${fontScale})` }}>
-                            {activePrice}
-                            {draft.generatedContent.vatText ? <span style={{ fontSize: '0.6em', opacity: 0.8, marginLeft: '0.1em' }} className="font-semibold">{draft.generatedContent.vatText}</span> : null}
-                        </div>
-                    ) : null}
-                    <div className="mb-2 font-bold text-slate-900" style={{ fontSize: `calc(1.5rem * ${fontScale})` }}>{activeTitle}</div>
-                    <div className="mb-4 text-slate-600" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>{draft.generatedContent.subtitle || property.locationLine}</div>
-                    {draft.designSettings.showFacts ? (
-                        <div className="mb-4 flex w-full gap-1.5">
-                            {(!draft.designSettings.visibleFacts || draft.designSettings.visibleFacts.includes("bedrooms")) && (
-                                <div className="flex-1 min-w-0 flex items-center justify-center gap-1 rounded-md border py-2 px-1 text-center shadow-sm bg-white whitespace-nowrap overflow-hidden" style={{ fontSize: `calc(0.75rem * ${fontScale})` }}>
-                                    <Bed className="shrink-0 h-3.5 w-3.5" style={{ color: primaryColor }} />
-                                    <span className="font-bold leading-none">{property.bedrooms || "-"}</span>
-                                    <span className="uppercase text-slate-500 leading-none" style={{ fontSize: `calc(9px * ${fontScale})` }}>Beds</span>
-                                </div>
-                            )}
-                            {(!draft.designSettings.visibleFacts || draft.designSettings.visibleFacts.includes("bathrooms")) && (
-                                <div className="flex-1 min-w-0 flex items-center justify-center gap-1 rounded-md border py-2 px-1 text-center shadow-sm bg-white whitespace-nowrap overflow-hidden" style={{ fontSize: `calc(0.75rem * ${fontScale})` }}>
-                                    <Bath className="shrink-0 h-3.5 w-3.5" style={{ color: primaryColor }} />
-                                    <span className="font-bold leading-none">{property.bathrooms || "-"}</span>
-                                    <span className="uppercase text-slate-500 leading-none" style={{ fontSize: `calc(9px * ${fontScale})` }}>Baths</span>
-                                </div>
-                            )}
-                            {(!draft.designSettings.visibleFacts || draft.designSettings.visibleFacts.includes("areaSqm")) && (
-                                <div className="flex-1 min-w-0 flex items-center justify-center gap-1 rounded-md border py-2 px-1 text-center shadow-sm bg-white whitespace-nowrap overflow-hidden" style={{ fontSize: `calc(0.75rem * ${fontScale})` }}>
-                                    <Maximize className="shrink-0 h-3.5 w-3.5" style={{ color: primaryColor }} />
-                                    <span className="font-bold leading-none">{property.areaSqm || "-"} m&sup2;</span>
-                                </div>
-                            )}
-                            {(!draft.designSettings.visibleFacts || draft.designSettings.visibleFacts.includes("parking")) && (
-                                <div className="flex-1 min-w-0 flex items-center justify-center gap-1 rounded-md border py-2 px-1 text-center shadow-sm bg-white whitespace-nowrap overflow-hidden" style={{ fontSize: `calc(0.75rem * ${fontScale})` }}>
-                                    <Car className="shrink-0 h-3.5 w-3.5" style={{ color: primaryColor }} />
-                                    <span className="font-bold leading-none">
-                                        {(property.features || []).some((f: string) => typeof f === 'string' && f.toLowerCase().includes('parking')) ? "Yes" : "-"}
-                                    </span>
-                                    <span className="uppercase text-slate-500 leading-none" style={{ fontSize: `calc(9px * ${fontScale})` }}>Parking</span>
-                                </div>
-                            )}
-                        </div>
-                    ) : null}
-                    {draft.designSettings.showFeatures ? (
-                        <div className="mb-4">
-                            <div className="mb-2 font-semibold uppercase tracking-[0.2em]" style={{ color: primaryColor, fontSize: `calc(0.75rem * ${fontScale})` }}>
-                                Highlights
+        <div className="flex h-full flex-col bg-white">
+            {/* ── HEADER BAR ── */}
+            <div className="shrink-0 border-b-2" style={{ borderColor: primaryColor }}>
+                <div className="flex items-center justify-between px-[8mm] py-[4mm]">
+                    {/* Logo */}
+                    <div className="flex-1">
+                        {draft.designSettings.showLogo && activeLogo ? (
+                            <img src={activeLogo} alt={branding.brandName} className="max-h-[14mm] max-w-[50mm] object-contain" />
+                        ) : null}
+                    </div>
+                    {/* Sale badge + price */}
+                    <div className="flex-1 text-center">
+                        {draft.designSettings.showPrice !== false && activePrice ? (
+                            <div className="font-bold" style={{ color: primaryColor, fontSize: `calc(1.1rem * ${fontScale})` }}>
+                                {property.goal === 'RENT' ? 'For Rent' : 'For Sale'} {activePrice}
+                                {draft.generatedContent.vatText ? <span style={{ fontSize: '0.7em', opacity: 0.8, marginLeft: '0.2em' }}>{draft.generatedContent.vatText}</span> : null}
                             </div>
-                            <ul className="space-y-1 text-slate-700" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>
-                                {property.featureBullets.slice(0, 5).map((bullet: string) => (
-                                    <li key={bullet}>• {bullet}</li>
-                                ))}
-                            </ul>
+                        ) : null}
+                    </div>
+                    {/* QR code */}
+                    <div className="flex-1 flex justify-end">
+                        {draft.designSettings.showQr && activeWebsite ? (
+                            <img
+                                src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(activeWebsite)}`}
+                                alt="QR"
+                                className="border p-0.5"
+                                style={{ width: '18mm', height: '18mm', borderColor: '#ddd' }}
+                            />
+                        ) : null}
+                    </div>
+                </div>
+            </div>
+
+            {/* ── BODY: Three content rows ── */}
+            <div className="flex-1 flex flex-col min-h-0 overflow-hidden border-x" style={{ borderColor: '#e5e5e5', margin: '0 3mm' }}>
+
+                {/* ROW 1: Hero Image + Property Details */}
+                <div className="flex flex-1 min-h-0 border-b" style={{ borderColor: '#e5e5e5' }}>
+                    {/* Image */}
+                    <div className="w-[45%] shrink-0 bg-stone-200 overflow-hidden">
+                        {rowImages[0] ? (
+                            <img src={rowImages[0].url} alt={rowImages[0].alt} className="h-full w-full object-cover block" />
+                        ) : (
+                            <div className="flex h-full items-center justify-center text-stone-400" style={{ fontSize: baseFontSize }}>No image</div>
+                        )}
+                    </div>
+                    {/* Details */}
+                    <div className="flex-1 p-[5mm] flex flex-col justify-center overflow-hidden">
+                        {/* Property Ref heading */}
+                        <div className="font-bold mb-[3mm]" style={{ color: primaryColor, fontSize: headingFontSize }}>
+                            Property Ref. {activeRef || '—'}
                         </div>
-                    ) : null}
-                    {draft.designSettings.showLanguages ? (
-                        <div className="flex-1 space-y-4">
-                            {languageBlocks.map((block: any) => (
-                                <div key={block.language}>
-                                    <div className="leading-6 text-slate-700" style={{ fontSize: `calc(0.875rem * ${fontScale})` }}>
-                                        {block.title && (
-                                            <div className="font-semibold mb-1">
-                                                <span style={{ fontSize: '1.15em' }}>{getLanguageFlag(block.language)}</span>{" "}
-                                                {block.title}
-                                            </div>
-                                        )}
-                                        {!block.title && (
-                                            <div className="font-semibold mb-1">
-                                                <span style={{ fontSize: '1.15em' }}>{getLanguageFlag(block.language)}</span>
-                                            </div>
-                                        )}
-                                        {block.subtitle && <div className="italic mb-2">{block.subtitle}</div>}
-                                        <div className="whitespace-pre-wrap">{block.body}</div>
-                                    </div>
+                        {/* Detail lines */}
+                        <div className="space-y-[1.5mm]">
+                            {detailLines.map((line, idx) => (
+                                <div key={idx} className="flex items-start gap-[2mm] text-slate-800" style={{ fontSize: baseFontSize, lineHeight: 1.5 }}>
+                                    <span className="shrink-0 w-[5mm] text-center" style={{ fontSize: `calc(0.85rem * ${fontScale})` }}>{line.icon}</span>
+                                    <span>{line.text}</span>
                                 </div>
                             ))}
                         </div>
-                    ) : null}
+                    </div>
                 </div>
-            </div>
-            {supportingImages.length > 0 ? (
-                <div className="grid flex-1 grid-cols-2 gap-1 bg-white p-1">
-                    {supportingImages.map((image: any) => (
-                        <div key={image.id} className="min-h-[160px] bg-stone-200">
-                            <img src={image.url} alt={image.alt} className="h-full w-full object-cover" />
+
+                {/* ROW 2: Image 2 + Property Features */}
+                {draft.designSettings.showFeatures ? (
+                    <div className="flex flex-1 min-h-0 border-b" style={{ borderColor: '#e5e5e5' }}>
+                        {/* Image */}
+                        <div className="w-[45%] shrink-0 bg-stone-200 overflow-hidden">
+                            {rowImages[1] ? (
+                                <img src={rowImages[1].url} alt={rowImages[1].alt} className="h-full w-full object-cover block" />
+                            ) : (
+                                <div className="flex h-full items-center justify-center text-stone-400" style={{ fontSize: baseFontSize }}>No image</div>
+                            )}
                         </div>
-                    ))}
+                        {/* Features checklist */}
+                        <div className="flex-1 p-[5mm] flex flex-col overflow-hidden">
+                            <div className="font-bold mb-[3mm]" style={{ color: primaryColor, fontSize: sectionHeadingSize }}>
+                                Property Features
+                            </div>
+                            <div className="flex-1 overflow-hidden" style={{ fontSize: baseFontSize, lineHeight: 1.6 }}>
+                                <div className="columns-1 gap-[4mm]" style={{ columnCount: (property.features || []).length > 8 ? 2 : 1 }}>
+                                    {(property.features || []).map((feature: string, idx: number) => (
+                                        <div key={idx} className="flex items-start gap-[1.5mm] break-inside-avoid text-slate-800" style={{ marginBottom: '1mm' }}>
+                                            <span className="shrink-0 font-bold" style={{ color: primaryColor }}>✔</span>
+                                            <span>{getFeatureLabel(feature)}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                ) : null}
+
+                {/* ROW 3: Image 3 + Description */}
+                {draft.designSettings.showLanguages ? (
+                    <div className="flex flex-1 min-h-0">
+                        {/* Image */}
+                        <div className="w-[45%] shrink-0 bg-stone-200 overflow-hidden">
+                            {rowImages[draft.designSettings.showFeatures ? 2 : 1] ? (
+                                <img src={rowImages[draft.designSettings.showFeatures ? 2 : 1]!.url} alt={rowImages[draft.designSettings.showFeatures ? 2 : 1]!.alt} className="h-full w-full object-cover block" />
+                            ) : (
+                                <div className="flex h-full items-center justify-center text-stone-400" style={{ fontSize: baseFontSize }}>No image</div>
+                            )}
+                        </div>
+                        {/* Description */}
+                        <div className="flex-1 p-[5mm] flex flex-col overflow-hidden">
+                            <div className="font-bold mb-[3mm]" style={{ color: primaryColor, fontSize: sectionHeadingSize }}>
+                                Description
+                            </div>
+                            <div className="flex-1 overflow-hidden text-slate-700 text-justify" style={{ fontSize: baseFontSize, lineHeight: 1.6 }}>
+                                <div className="whitespace-pre-wrap">{descriptionText}</div>
+                            </div>
+                        </div>
+                    </div>
+                ) : null}
+            </div>
+
+            {/* ── FOOTER ── */}
+            {(draft.designSettings.showFooter || draft.designSettings.showContact) ? (
+                <div className="shrink-0 border-t-2 px-[8mm] py-[3mm] text-center" style={{ borderColor: primaryColor }}>
+                    <div className="space-y-[0.5mm]" style={{ fontSize: `calc(0.65rem * ${fontScale})`, lineHeight: 1.5, color: '#555' }}>
+                        {draft.designSettings.showContact ? (
+                            <div className="flex items-center justify-center gap-[2mm] flex-wrap">
+                                {(activeEmail && draft.designSettings.showEmail) ? <span>{activeEmail}</span> : null}
+                                {(activeEmail && draft.designSettings.showEmail && activeWebsite && draft.designSettings.showWebsite !== false) ? <span>-</span> : null}
+                                {(activeWebsite && draft.designSettings.showWebsite !== false) ? <span>{activeWebsite.replace(/^https?:\/\//, '')}</span> : null}
+                            </div>
+                        ) : null}
+                        {draft.designSettings.showFooter && draft.generatedContent.footerNote ? (
+                            <div className="text-slate-500">{draft.generatedContent.footerNote}</div>
+                        ) : null}
+                    </div>
                 </div>
             ) : null}
-            <div className="px-8 py-4">
-                <div className="border-t border-slate-200 mb-3" />
-                <div className="flex items-end justify-between gap-6">
-                    <div>
-                        {draft.designSettings.showFooter ? (
-                            <div className="text-slate-600 mb-2" style={{ fontSize: `calc(0.8rem * ${fontScale})` }}>{draft.generatedContent.footerNote}</div>
-                        ) : null}
-                        {draft.designSettings.showContact ? (
-                            <div className="space-y-0.5 text-slate-700" style={{ fontSize: `calc(0.8rem * ${fontScale})` }}>
-                                {(activeTel || activeMob) ? (
-                                    <div className="flex flex-wrap gap-x-4">
-                                        {activeTel ? <span><strong style={{ color: primaryColor }}>Tel:</strong> {activeTel}</span> : null}
-                                        {activeMob ? <span><strong style={{ color: primaryColor }}>Mob:</strong> {activeMob}</span> : null}
-                                    </div>
-                                ) : null}
-                                {(activeEmail && draft.designSettings.showEmail) ? <div>{activeEmail}</div> : null}
-                                {(activeWebsite && draft.designSettings.showWebsite !== false) ? <div><strong style={{ color: primaryColor }}>Web:</strong> {activeWebsite.replace(/^https?:\/\//, '')}</div> : null}
-                            </div>
-                        ) : null}
-                    </div>
-                    <div className="shrink-0 flex flex-col items-end gap-1.5 text-right" style={{ width: '80px' }}>
-                        {activeRef ? (
-                            <div className="w-full text-right truncate text-slate-700" style={{ fontSize: `calc(0.65rem * ${fontScale})` }}>
-                                <strong style={{ color: primaryColor }}>Ref:</strong> {activeRef}
-                            </div>
-                        ) : null}
-                        {draft.designSettings.showQr && activeWebsite ? (
-                            <div className="shrink-0 text-right">
-                                <img
-                                    src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(activeWebsite)}`}
-                                    alt="QR code"
-                                    className="border p-1"
-                                    style={{ width: '80px', height: '80px', aspectRatio: '1' }}
-                                />
-                            </div>
-                        ) : null}
-                    </div>
-                </div>
-            </div>
         </div>
     );
 }
