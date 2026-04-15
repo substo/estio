@@ -197,19 +197,78 @@ function normalizeLeadParseInput(text: string, maxLength: number = LEAD_PARSE_MA
     return normalized.slice(0, maxLength);
 }
 
+/**
+ * Enterprise-grade JSON normalizer for LLM outputs.
+ * 
+ * LLMs often produce invalid JSON when asked to output heavily line-wrapped or formatted
+ * natural language text (e.g. email bodies) inside JSON string values. They frequently
+ * output literal newlines (\n) instead of escaped newlines (\\n).
+ * 
+ * This state machine fixes malformed JSON by escaping unescaped control characters 
+ * strictly within JSON string literals.
+ */
+function sanitizeLlmJson(input: string): string {
+    let inString = false;
+    let isEscaped = false;
+    let sanitized = '';
+
+    for (let i = 0; i < input.length; i++) {
+        const char = input[i];
+
+        if (char === '\\' && !isEscaped) {
+            isEscaped = true;
+            sanitized += char;
+            continue;
+        }
+
+        if (char === '"' && !isEscaped) {
+            inString = !inString;
+            sanitized += char;
+        } else if (inString) {
+            // Escape common unescaped control characters inside string literals
+            if (char === '\n') {
+                sanitized += '\\n';
+            } else if (char === '\r') {
+                sanitized += '\\r';
+            } else if (char === '\t') {
+                sanitized += '\\t';
+            } else if (char === '\f') {
+                sanitized += '\\f';
+            } else if (char === '\b') {
+                sanitized += '\\b';
+            } else {
+                sanitized += char;
+            }
+        } else {
+            sanitized += char;
+        }
+
+        isEscaped = false;
+    }
+
+    return sanitized;
+}
+
 function parseJsonObjectFromModelOutput(rawText: string): any {
     const cleanJson = String(rawText || "")
         .replace(/```json/gi, "")
         .replace(/```/g, "")
         .trim();
 
+    const sanitizedJson = sanitizeLlmJson(cleanJson);
+
     try {
-        return JSON.parse(cleanJson);
+        return JSON.parse(sanitizedJson);
     } catch {
-        const firstBrace = cleanJson.indexOf("{");
-        const lastBrace = cleanJson.lastIndexOf("}");
+        const firstBrace = sanitizedJson.indexOf("{");
+        const lastBrace = sanitizedJson.lastIndexOf("}");
         if (firstBrace >= 0 && lastBrace > firstBrace) {
-            return JSON.parse(cleanJson.slice(firstBrace, lastBrace + 1));
+            try {
+                return JSON.parse(sanitizedJson.slice(firstBrace, lastBrace + 1));
+            } catch (innerError) {
+                // Fall back to original cleanJson slicing on the rare chance 
+                // sanitization altered meaning, though this is a final resort
+            }
         }
         throw new Error("Model did not return a valid JSON object");
     }
