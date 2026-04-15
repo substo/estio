@@ -7,6 +7,7 @@ import axios from "axios";
 import { evolutionClient } from "@/lib/evolution/client";
 import { getLocationContext } from "@/lib/auth/location-context";
 import { parseEvolutionMessageContent } from "@/lib/whatsapp/evolution-media";
+import { extractPhoneJidCandidate, normalizeDigits } from "@/lib/whatsapp/identity";
 import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
 import { settingsService } from "@/lib/settings/service";
 import {
@@ -432,28 +433,73 @@ export async function syncEvolutionChats(locationId?: string | null) {
             const remoteJid = chat.id || chat.remoteJid;
             if (!remoteJid || remoteJid.includes("@g.us")) continue; // Skip groups
 
-            const phoneNumber = remoteJid.replace('@s.whatsapp.net', '');
-            const contactName = chat.name || chat.pushName || `WhatsApp ${phoneNumber}`;
+            const lidJid = remoteJid.endsWith("@lid") ? remoteJid : null;
+            const phoneNumber =
+                extractPhoneJidCandidate(remoteJid) ||
+                extractPhoneJidCandidate(chat.remoteJidAlt) ||
+                extractPhoneJidCandidate(chat.participantAlt) ||
+                extractPhoneJidCandidate(chat.senderPn) ||
+                extractPhoneJidCandidate(chat.previousRemoteJid);
+
+            let contact = null;
+
+            if (lidJid) {
+                contact = await db.contact.findFirst({
+                    where: {
+                        locationId: location.id,
+                        lid: { contains: lidJid.replace("@lid", "") },
+                    }
+                });
+            }
+
+            if (!contact && phoneNumber) {
+                const phoneSuffix = phoneNumber.slice(-7);
+                const candidates = await db.contact.findMany({
+                    where: {
+                        locationId: location.id,
+                        phone: { contains: phoneSuffix }
+                    }
+                });
+
+                contact = candidates.find((candidate) => {
+                    if (!candidate.phone) return false;
+                    const candidateDigits = normalizeDigits(candidate.phone);
+                    return (
+                        candidateDigits === phoneNumber ||
+                        (candidateDigits.endsWith(phoneNumber) && phoneNumber.length >= 7) ||
+                        (phoneNumber.endsWith(candidateDigits) && candidateDigits.length >= 7)
+                    );
+                }) || null;
+            }
+
+            if (!contact && !phoneNumber) {
+                console.warn(`[Chat Sync] Skipping unresolved LID chat ${remoteJid}; no high-confidence phone mapping is available yet.`);
+                continue;
+            }
+
+            const contactName = chat.name || chat.pushName || `WhatsApp ${phoneNumber || remoteJid}`;
 
             // Find or create contact
-            let contact = await db.contact.findFirst({
-                where: {
-                    locationId: location.id,
-                    phone: { contains: phoneNumber.slice(-7) } // Match last 7 digits
-                }
-            });
-
             if (!contact) {
                 contact = await db.contact.create({
                     data: {
                         locationId: location.id,
-                        phone: `+${phoneNumber}`,
+                        phone: phoneNumber ? `+${phoneNumber}` : undefined,
                         name: contactName,
                         status: "New",
-                        contactType: "Lead"
+                        contactType: "Lead",
+                        lid: lidJid || undefined,
                     }
                 });
                 contactsCreated++;
+            } else if ((lidJid && !contact.lid) || (phoneNumber && !contact.phone)) {
+                contact = await db.contact.update({
+                    where: { id: contact.id },
+                    data: {
+                        ...(lidJid && !contact.lid ? { lid: lidJid } : {}),
+                        ...(phoneNumber && !contact.phone ? { phone: `+${phoneNumber}` } : {}),
+                    }
+                });
             }
 
             // Find or create conversation

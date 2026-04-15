@@ -1,6 +1,12 @@
 import db from "@/lib/db";
 import { generateSmartReplies } from "@/lib/ai/smart-replies";
 import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-events";
+import {
+    evolutionContactMatchesRequestedJid,
+    extractPhoneFromEvolutionContact,
+    isHighConfidenceResolvedPhone,
+    normalizeDigits,
+} from "@/lib/whatsapp/identity";
 
 const LID_RETRY_INTERVAL_MS = Number(process.env.WHATSAPP_LID_RETRY_INTERVAL_MS || 30000);
 const LID_RETRY_MAX_ATTEMPTS = Number(process.env.WHATSAPP_LID_MAX_ATTEMPTS || 240);
@@ -46,45 +52,6 @@ type DeferredLidMessage = {
 
 const deferredLidMessages = new Map<string, DeferredLidMessage>();
 
-function normalizeDigits(value: string | null | undefined) {
-    return String(value || '').replace(/\D/g, '');
-}
-
-function normalizePhoneCandidate(value: unknown): string | null {
-    const raw = String(value || '').trim();
-    if (!raw) return null;
-
-    const deJid = raw
-        .replace('@s.whatsapp.net', '')
-        .replace('whatsapp:', '')
-        .trim();
-    const digits = normalizeDigits(deJid);
-
-    return digits.length >= 7 ? digits : null;
-}
-
-function extractPhoneFromEvolutionContact(contact: any): string | null {
-    if (!contact) return null;
-
-    const candidates = [
-        contact.phoneNumber,
-        contact.phone,
-        contact.number,
-        contact.id,
-        contact.remoteJid,
-        contact.jid,
-        contact.participant,
-        contact.owner
-    ];
-
-    for (const candidate of candidates) {
-        const parsed = normalizePhoneCandidate(candidate);
-        if (parsed) return parsed;
-    }
-
-    return null;
-}
-
 async function tryResolveLidToPhone(locationId: string, lidJid: string, instanceName?: string | null): Promise<string | null> {
     const lidRaw = String(lidJid || '').replace('@lid', '');
     if (!lidRaw) return null;
@@ -99,9 +66,12 @@ async function tryResolveLidToPhone(locationId: string, lidJid: string, instance
         select: { phone: true }
     });
 
-    const dbPhone = normalizePhoneCandidate(existing?.phone);
-    if (dbPhone) {
+    const dbPhone = normalizeDigits(existing?.phone);
+    if (isHighConfidenceResolvedPhone(dbPhone)) {
         return dbPhone;
+    }
+    if (dbPhone) {
+        console.warn(`[LID Resolve] Ignoring low-confidence DB phone mapping for ${lidJid}: +${dbPhone}`);
     }
 
     // 2) Ask Evolution contact endpoint (sometimes contains phoneNumber for known contact)
@@ -119,22 +89,17 @@ async function tryResolveLidToPhone(locationId: string, lidJid: string, instance
             const allContacts = await evolutionClient.fetchContacts(instanceName);
             if (Array.isArray(allContacts)) {
                 for (const c of allContacts) {
-                    const cLid = String(c.lid || '').replace('@lid', '');
-                    if (cLid && cLid === lidRaw) {
-                        // This contact has our LID — check if it also has a phone
-                        const cId = String(c.id || '');
-                        if (cId.endsWith('@s.whatsapp.net')) {
-                            const phone = normalizePhoneCandidate(cId.replace('@s.whatsapp.net', ''));
-                            if (phone) {
-                                console.log(`[LID Resolve] Found phone via Evolution contacts scan: ${lidJid} -> +${phone}`);
-                                // Proactively save this mapping to DB for next time
-                                await db.contact.updateMany({
-                                    where: { locationId, lid: { contains: lidRaw }, phone: null },
-                                    data: { phone: `+${phone}` }
-                                }).catch(() => { });
-                                return phone;
-                            }
-                        }
+                    if (!evolutionContactMatchesRequestedJid(c, lidJid)) continue;
+
+                    const phone = extractPhoneFromEvolutionContact(c);
+                    if (phone) {
+                        console.log(`[LID Resolve] Found phone via Evolution contacts scan: ${lidJid} -> +${phone}`);
+                        // Proactively save this mapping to DB for next time
+                        await db.contact.updateMany({
+                            where: { locationId, lid: { contains: lidRaw }, phone: null },
+                            data: { phone: `+${phone}` }
+                        }).catch(() => { });
+                        return phone;
                     }
                 }
             }
@@ -488,11 +453,15 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     // --- LID RESOLUTION CHECK ---
     // If contactPhone implies an LID (ends with @lid) but we have a resolved phone from webhook/route.ts, use it.
     if (msg.resolvedPhone) {
-        // Use the phone resolved by webhook
-        const p = msg.resolvedPhone.startsWith('+') ? msg.resolvedPhone : `+${msg.resolvedPhone}`;
-        if (!contactPhone.includes(p)) {
-            console.log(`[WhatsApp Sync] Using Webhook Resolved Phone: ${p} instead of ${contactPhone}`);
-            contactPhone = p;
+        const resolvedDigits = normalizeDigits(msg.resolvedPhone);
+        if (isHighConfidenceResolvedPhone(resolvedDigits)) {
+            const p = `+${resolvedDigits}`;
+            if (!contactPhone.includes(p)) {
+                console.log(`[WhatsApp Sync] Using Webhook Resolved Phone: ${p} instead of ${contactPhone}`);
+                contactPhone = p;
+            }
+        } else if (resolvedDigits) {
+            console.warn(`[WhatsApp Sync] Ignoring low-confidence resolved phone for ${msg.wamId}: +${resolvedDigits}`);
         }
     }
 

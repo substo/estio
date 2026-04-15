@@ -51,14 +51,11 @@ export async function GET(req: NextRequest) {
                     return;
                 }
 
-                // 3. Fetch Chats AND Contacts (for LID resolution)
-                send({ type: 'status', message: "Fetching chats and contacts..." });
+                // 3. Fetch chats. LID-only chats stay unresolved until we have a
+                // high-confidence phone mapping from explicit webhook/history metadata.
+                send({ type: 'status', message: "Fetching chats..." });
 
-                // Run in parallel for speed
-                const [allChats, allContacts] = await Promise.all([
-                    evolutionClient.fetchChats(location!.evolutionInstanceId!),
-                    evolutionClient.fetchContacts(location!.evolutionInstanceId!)
-                ]);
+                const allChats = await evolutionClient.fetchChats(location!.evolutionInstanceId!);
 
                 if (!allChats || allChats.length === 0) {
                     send({ type: 'done', stats: { chatsProcessed: 0, messagesImported: 0, messagesSkipped: 0, errors: 0 } });
@@ -98,54 +95,15 @@ export async function GET(req: NextRequest) {
                 const BATCH_SIZE = 50;
                 const STOP_ON_DUPLICATES = isFullSync ? 50 : 5;
 
-                // --- LID RESOLUTION STRATEGY: Profile Picture Matching ---
-                // Build a map of ProfilePicURL -> Phone Number from:
-                // 1. Standard @s.whatsapp.net chats
-                // 2. Global contacts list (for people we don't have active chats with yet)
-                const profilePicToPhoneMap = new Map<string, string>();
-
-                // Process Chats
-                for (const chat of validChats) {
-                    if (chat.remoteJid?.endsWith('@s.whatsapp.net') && chat.profilePicUrl) {
-                        const phone = chat.remoteJid.replace('@s.whatsapp.net', '');
-                        profilePicToPhoneMap.set(chat.profilePicUrl, phone);
-                    }
-                }
-
-                // Process Contacts (Merge in, don't overwrite if chat exists - priority doesn't matter much as pic should be same)
-                if (Array.isArray(allContacts)) {
-                    for (const contact of allContacts) {
-                        const jid = contact.id || contact.remoteJid; // Contacts use 'id' usually
-                        if (jid?.endsWith('@s.whatsapp.net') && contact.profilePicUrl) {
-                            const phone = jid.replace('@s.whatsapp.net', '');
-                            if (!profilePicToPhoneMap.has(contact.profilePicUrl)) {
-                                profilePicToPhoneMap.set(contact.profilePicUrl, phone);
-                            }
-                        }
-                    }
-                }
-
-                console.log(`[WhatsApp Sync] Built Profile Pic Map with ${profilePicToPhoneMap.size} entries (Merged Chats + Contacts).`);
-
                 for (const chat of validChats) {
                     const remoteJid = chat.remoteJid || chat.jid;
                     const isGroup = remoteJid.endsWith('@g.us');
                     const isLid = remoteJid.endsWith('@lid');
                     const rawNumber = remoteJid.replace('@s.whatsapp.net', '').replace('@g.us', '').replace('@lid', '');
 
-                    // Attempt to resolve LID via Profile Picture Match
-                    let resolvedPhone: string | undefined;
-                    if (isLid && chat.profilePicUrl) {
-                        const match = profilePicToPhoneMap.get(chat.profilePicUrl);
-                        if (match) {
-                            console.log(`[WhatsApp Sync] Auto-resolved LID ${remoteJid} to ${match} via Profile Picture Match`);
-                            resolvedPhone = match;
-                        }
-                    }
-
-                    // If resolved, use the real phone. If not, keep LID.
-                    // For LID chats, preserve @lid so processNormalizedMessage triggers LID resolution (if not auto-resolved here)
-                    const contactIdentifier = resolvedPhone ? resolvedPhone : (isLid ? `${rawNumber}@lid` : rawNumber);
+                    // For LID chats, preserve @lid so processNormalizedMessage can
+                    // defer until a trusted phone mapping exists.
+                    const contactIdentifier = isLid ? `${rawNumber}@lid` : rawNumber;
 
                     const name = chat.name || chat.subject || chat.pushName || (isGroup ? "Unknown Group" : rawNumber);
 

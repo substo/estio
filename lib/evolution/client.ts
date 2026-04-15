@@ -1,6 +1,7 @@
 import { Location } from '@prisma/client';
 import axios from 'axios';
 import db from '@/lib/db';
+import { evolutionContactMatchesRequestedJid } from '@/lib/whatsapp/identity';
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || 'http://localhost:8080';
 const EVOLUTION_GLOBAL_API_KEY = process.env.EVOLUTION_GLOBAL_API_KEY || 'B5578027581745429188210F037B5C60';
@@ -669,12 +670,29 @@ export const evolutionClient = {
                     }
                 }
             );
-            // Response is usually an array of contacts
             const data = response.data;
-            if (Array.isArray(data) && data.length > 0) {
-                return data[0];
+            if (Array.isArray(data)) {
+                const exactMatch = data.find((item: any) => evolutionContactMatchesRequestedJid(item, jid));
+                if (exactMatch) {
+                    return exactMatch;
+                }
+
+                if (data.length > 0) {
+                    console.warn(
+                        `[Evolution] findContact returned ${data.length} rows but none exactly matched ${jid}; refusing low-confidence fallback.`
+                    );
+                }
+                return null;
             }
-            return data; // Return object if single
+
+            if (data && evolutionContactMatchesRequestedJid(data, jid)) {
+                return data;
+            }
+
+            if (data) {
+                console.warn(`[Evolution] findContact returned a non-matching row for ${jid}; refusing low-confidence fallback.`);
+            }
+            return null;
         } catch (error: any) {
             console.error('Error finding contact:', error.response?.data || error);
             return null;
