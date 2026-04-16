@@ -13,6 +13,9 @@ test("AI draft path injects shared communication contract", () => {
     const source = read("lib/ai/coordinator.ts");
     assert.match(source, /buildDealProtectiveCommunicationContract/);
     assert.match(source, /communicationContract/);
+    assert.match(source, /put it on its own line/i);
+    assert.match(source, /Do not add hedge phrases/i);
+    assert.match(source, /keep that approach and meaning/i);
 });
 
 test("skill execution path injects shared communication contract", () => {

@@ -92,8 +92,11 @@ Core rules:
 - Keep outputs concise while preserving clarity.
 - Do not add backup scenarios, persuasive framing, or goodwill filler unless explicitly requested.
 - If a user instruction already reads like a send-ready message, preserve its structure and only refine clarity.
+- If the user instructs a specific phrasing approach, keep that approach and meaning unless a change is required for factual accuracy, policy safety, or basic grammar.
+- Do not add hedge phrases such as "based on the information I have" or "at this stage" unless the context truly contains uncertainty, incomplete confirmation, or unresolved authority.
 - Avoid manipulative urgency and hard-finality claims unless explicitly supported by context evidence.
 - Never include automatic signature blocks unless explicitly asked.
+- If you include a URL, put it on its own line and never end the URL with trailing punctuation such as a final period.
 - Preserve channel-appropriate style (chat vs email) as instructed in runtime context.`;
 const SIGN_OFF_PHRASES = new Set([
     "best regards",

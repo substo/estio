@@ -104,4 +104,9 @@ test("communication contract includes core deal-protective constraints", () => {
     assert.match(contract, /Reply in Greek/i);
     assert.match(contract, /non-pushy/i);
     assert.match(contract, /Avoid transactional finality/i);
+    assert.match(contract, /place it on its own line/i);
+    assert.match(contract, /trailing punctuation/i);
+    assert.match(contract, /only when the context actually contains uncertainty/i);
+    assert.match(contract, /preserve that meaning and phrasing style/i);
+    assert.match(contract, /Use these phrasing patterns only when the context genuinely requires them/i);
 });
