@@ -40,7 +40,7 @@ import { MultiPropertySelect } from './multi-property-select';
 import { ContactPropertyTypeSelector } from './contact-property-type-selector';
 // AI Analyzer moved to Coordinator Panel
 import {
-    CONTACT_TYPES, CONTACT_TYPE_CONFIG, DEFAULT_CONTACT_TYPE, type ContactType,
+    CONTACT_TYPES, CONTACT_TYPE_CONFIG, DEFAULT_CONTACT_TYPE, isKnownContactType, type ContactType,
     LEAD_GOALS, LEAD_PRIORITIES, LEAD_STAGES, REQUIREMENT_STATUSES, REQUIREMENT_CONDITIONS
 } from './contact-types';
 import { LeadScoreBadge } from './lead-score-badge';
@@ -309,7 +309,9 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
     };
 
     // Determine initial contact type from existing data or default
-    const initialContactType = (contact?.contactType as ContactType) || DEFAULT_CONTACT_TYPE;
+    const initialContactType = isKnownContactType(contact?.contactType)
+        ? contact.contactType
+        : DEFAULT_CONTACT_TYPE;
 
     // Contact Type State
     const [contactType, setContactType] = useState<ContactType>(initialContactType);

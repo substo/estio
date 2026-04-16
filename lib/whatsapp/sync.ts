@@ -7,6 +7,7 @@ import {
     isHighConfidenceResolvedPhone,
     normalizeDigits,
 } from "@/lib/whatsapp/identity";
+import { extractGroupParticipantIdentity } from "@/lib/whatsapp/group-participants";
 
 const LID_RETRY_INTERVAL_MS = Number(process.env.WHATSAPP_LID_RETRY_INTERVAL_MS || 30000);
 const LID_RETRY_MAX_ATTEMPTS = Number(process.env.WHATSAPP_LID_MAX_ATTEMPTS || 240);
@@ -24,7 +25,11 @@ export interface NormalizedMessage {
     source: "whatsapp_native" | "whatsapp_twilio" | "whatsapp_evolution";
     direction?: "inbound" | "outbound";
     isGroup?: boolean;
-    participant?: string; // Real sender phone in group chat
+    participant?: string;
+    participantJid?: string;
+    participantPhoneJid?: string;
+    participantLidJid?: string;
+    participantDisplayName?: string;
     lid?: string; // WhatsApp Lightweight ID
     resolvedPhone?: string; // Explicitly passed resolved phone from webhook
     __skipUnresolvedLidDeferral?: boolean; // Internal: avoid enqueue loop during retry
@@ -51,6 +56,14 @@ type DeferredLidMessage = {
 };
 
 const deferredLidMessages = new Map<string, DeferredLidMessage>();
+
+function isRefGroupMemberPlaceholder(contact: {
+    contactType?: string | null;
+    name?: string | null;
+}) {
+    return contact.contactType === "Ref-GroupMember"
+        || (contact.name || "").startsWith("Group Member ");
+}
 
 async function tryResolveLidToPhone(locationId: string, lidJid: string, instanceName?: string | null): Promise<string | null> {
     const lidRaw = String(lidJid || '').replace('@lid', '');
@@ -323,6 +336,66 @@ async function tryReconcileOutboundWebhookToPendingMessage(args: {
     };
 }
 
+async function upsertGroupParticipantShadow(params: {
+    conversationId: string;
+    timestamp: Date;
+    role?: string | null;
+    participantJid?: string | null;
+    participantPhoneJid?: string | null;
+    participantLidJid?: string | null;
+    participantDisplayName?: string | null;
+}) {
+    const identity = extractGroupParticipantIdentity({
+        participantJid: params.participantJid || params.participantLidJid || params.participantPhoneJid || null,
+        senderPhoneJid: params.participantPhoneJid || null,
+        pushName: params.participantDisplayName || null,
+    });
+
+    if (!identity.identityKey) {
+        return null;
+    }
+
+    const existing = await db.conversationParticipant.findFirst({
+        where: {
+            conversationId: params.conversationId,
+            OR: [
+                { identityKey: identity.identityKey },
+                ...(identity.phoneJid ? [{ phoneJid: identity.phoneJid }] : []),
+                ...(identity.lidJid ? [{ lidJid: identity.lidJid }] : []),
+                ...(identity.participantJid ? [{ participantJid: identity.participantJid }] : []),
+            ],
+        },
+        select: { id: true, contactId: true },
+    });
+
+    const data = {
+        identityKey: identity.identityKey,
+        role: params.role || "member",
+        participantJid: identity.participantJid,
+        lidJid: identity.lidJid,
+        phoneJid: identity.phoneJid,
+        phoneDigits: identity.phoneDigits,
+        displayName: identity.displayName,
+        lastSeenAt: params.timestamp,
+        resolutionConfidence: identity.resolutionConfidence,
+        source: identity.source,
+    };
+
+    if (existing?.id) {
+        return db.conversationParticipant.update({
+            where: { id: existing.id },
+            data,
+        });
+    }
+
+    return db.conversationParticipant.create({
+        data: {
+            conversationId: params.conversationId,
+            ...data,
+        },
+    });
+}
+
 export async function processNormalizedMessage(msg: NormalizedMessage) {
     console.log(`[WhatsApp Sync] processNormalizedMessage Called for ${msg.wamId} (${msg.direction})`);
     const { locationId, from, to, body, type, wamId, timestamp, contactName, source, isGroup, participant } = msg;
@@ -478,28 +551,38 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
             console.log(`[WhatsApp Sync] Resolved LID ${lidJid} -> +${resolvedDigits} before contact lookup`);
         } else {
             if (msg.__skipUnresolvedLidDeferral) {
-                console.warn(`[WhatsApp Sync] LID still unresolved after retry ${msg.__deferredAttempt || 0}: ${lidJid}`);
+                const attempt = msg.__deferredAttempt || 0;
+                const LID_FALLTHROUGH_THRESHOLD = 10;
+                if (attempt < LID_FALLTHROUGH_THRESHOLD) {
+                    console.warn(`[WhatsApp Sync] LID still unresolved after retry ${attempt}: ${lidJid}`);
+                    return {
+                        status: 'deferred_unresolved_lid',
+                        reason: 'lid_unresolved_retry',
+                        attempts: attempt
+                    };
+                }
+                // After threshold retries, stop deferring — fall through to create
+                // a placeholder contact (phone: null, lid: set). The existing LID
+                // merge logic will auto-merge when a phone mapping arrives later.
+                console.warn(`[WhatsApp Sync] LID unresolved after ${attempt} retries — creating placeholder contact for ${lidJid}`);
+                contactPhone = lidJid;
+            } else {
+                // First encounter: enqueue for background retry
+                try {
+                    const { initWhatsAppLidResolveWorker, enqueueDeferredLidMessage } = await import('@/lib/queue/whatsapp-lid-resolve');
+                    await initWhatsAppLidResolveWorker();
+                    await enqueueDeferredLidMessage(msg, lidJid);
+                    console.warn(`[WhatsApp Sync] Deferred unresolved inbound LID message in BullMQ ${msg.wamId} (${lidJid}).`);
+                } catch (queueErr) {
+                    console.error('[WhatsApp Sync] Failed to enqueue unresolved LID message in BullMQ. Falling back to in-memory deferral:', queueErr);
+                    enqueueInMemoryDeferredLidMessage(msg, lidJid);
+                }
+
                 return {
                     status: 'deferred_unresolved_lid',
-                    reason: 'lid_unresolved_retry',
-                    attempts: msg.__deferredAttempt || 0
+                    reason: 'lid_unresolved_deferred'
                 };
             }
-
-            try {
-                const { initWhatsAppLidResolveWorker, enqueueDeferredLidMessage } = await import('@/lib/queue/whatsapp-lid-resolve');
-                await initWhatsAppLidResolveWorker();
-                await enqueueDeferredLidMessage(msg, lidJid);
-                console.warn(`[WhatsApp Sync] Deferred unresolved inbound LID message in BullMQ ${msg.wamId} (${lidJid}).`);
-            } catch (queueErr) {
-                console.error('[WhatsApp Sync] Failed to enqueue unresolved LID message in BullMQ. Falling back to in-memory deferral:', queueErr);
-                enqueueInMemoryDeferredLidMessage(msg, lidJid);
-            }
-
-            return {
-                status: 'deferred_unresolved_lid',
-                reason: 'lid_unresolved_deferred'
-            };
         }
     }
 
@@ -541,7 +624,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     });
 
     // Strategy: Prefer LID match -> Then Phone Match
-    const phoneMatchCandidate = candidates.find(c => {
+    const phoneMatches = candidates.filter(c => {
         if (!c.phone) return false;
         const rawDbPhone = c.phone.replace(/\D/g, '');
         // Require exact match or at least 9-digit overlap to prevent cross-contact false positives
@@ -551,13 +634,19 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         const inputEndsWithDb = rawInputPhone.endsWith(rawDbPhone) && rawDbPhone.length >= minOverlap;
         return exactMatch || dbEndsWithInput || inputEndsWithDb;
     });
+    const phoneMatchCandidate =
+        phoneMatches.find((candidate) => candidate.contactType !== "Ref-GroupMember")
+        || phoneMatches[0];
 
     let matchedByLid = false;
-    let contact = candidates.find((c: any) => {
+    const lidMatches = candidates.filter((c: any) => {
         if (!msg.lid || !c.lid) return false;
         // Normalize both for comparison (strip @lid if present)
         return c.lid.replace('@lid', '') === msg.lid.replace('@lid', '');
     });
+    let contact =
+        lidMatches.find((candidate: any) => candidate.contactType !== "Ref-GroupMember")
+        || lidMatches[0];
     if (contact) matchedByLid = true;
 
     let isNewContact = false;
@@ -565,18 +654,41 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         contact = phoneMatchCandidate;
     }
 
+    if (contact && !isGroup && contact.contactType === "Ref-GroupMember") {
+        const participationCount = await db.conversationParticipant.count({
+            where: { contactId: contact.id }
+        });
+
+        if (participationCount === 0) {
+            const shouldRename = !!nameToUse && isRefGroupMemberPlaceholder(contact);
+            contact = await db.contact.update({
+                where: { id: contact.id },
+                data: {
+                    contactType: "Lead",
+                    ...(shouldRename ? { name: nameToUse } : {})
+                } as any
+            });
+            console.warn(`[WhatsApp Sync] Promoted leaked Ref-GroupMember ${contact.id} to Lead for direct chat handling`);
+        }
+    }
+
     // If we matched by LID placeholder but now have a real phone (e.g. payload has previousRemoteJid),
     // backfill phone directly or merge into existing phone contact if one already exists.
     if (contact && matchedByLid && !isGroup && !contact.phone && !contactPhone.includes('@lid') && rawInputPhone.length >= 7) {
         const normalizedPhone = contactPhone.startsWith('+') ? contactPhone : `+${rawInputPhone}`;
-        const shouldRename = !!nameToUse && (contact.name || '').startsWith('WhatsApp User');
+        const shouldRename = !!nameToUse && (
+            (contact.name || '').startsWith('WhatsApp User')
+            || (contact.name || '').startsWith('Group Member ')
+        );
+        const shouldPromoteRefGroupMember = contact.contactType === "Ref-GroupMember";
 
         try {
             contact = await db.contact.update({
                 where: { id: contact.id },
                 data: {
                     phone: normalizedPhone,
-                    ...(shouldRename ? { name: nameToUse } : {})
+                    ...(shouldRename ? { name: nameToUse } : {}),
+                    ...(shouldPromoteRefGroupMember ? { contactType: "Lead" } : {})
                 } as any
             });
             console.log(`[WhatsApp Sync] Backfilled phone ${normalizedPhone} on LID contact ${contact.id}`);
@@ -799,42 +911,6 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
             .catch(err => console.error("[GoogleAutoSync] WhatsApp inbound sync failed:", err));
     }
 
-    // --- Check Participant (Sender) for Groups ---
-    let pContact: any = null; // Hoisted for later use
-
-    if (isGroup && participant && direction === 'inbound') {
-        const pPhone = participant.startsWith('+') ? participant : `+${participant}`;
-        const pRaw = pPhone.replace(/\D/g, '');
-        const pSuffix = pRaw.length > 2 ? pRaw.slice(-2) : pRaw;
-
-        // Find existing contact for participant
-        const pCandidates = await db.contact.findMany({
-            where: { locationId, phone: { contains: pSuffix } }
-        });
-
-        pContact = pCandidates.find(c => {
-            if (!c.phone) return false;
-            const r = c.phone.replace(/\D/g, '');
-            return (r === pRaw || r.endsWith(pRaw) || pRaw.endsWith(r));
-        });
-
-        if (!pContact) {
-            console.log(`[WhatsApp Sync] Creating new contact for Group Participant: ${pPhone}`);
-            pContact = await db.contact.create({
-                data: {
-                    locationId,
-                    phone: pPhone,
-                    name: `Group Member ${pPhone}`,
-                    status: "New",
-                    contactType: "Ref-GroupMember"
-                }
-            }).catch(e => {
-                console.error("Participant create error", e);
-                return null; // Ensure pContact is null on error
-            });
-        }
-    }
-
     // 4. Find or Create Conversation — anchored by contactId + locationId
     let conversation = await db.conversation.findFirst({
         where: { contactId: contact.id, locationId }
@@ -870,28 +946,20 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     }
 
     // 5. Group Participant Sync (New Architecture)
-    if (isGroup && participant && conversation && pContact) { // Ensure pContact is resolved
+    if (isGroup && direction === "inbound" && conversation) {
         try {
-            await db.conversationParticipant.upsert({
-                where: {
-                    conversationId_contactId: {
-                        conversationId: conversation.id,
-                        contactId: pContact.id
-                    }
-                },
-                create: {
-                    conversationId: conversation.id,
-                    contactId: pContact.id,
-                    role: 'member',
-                    joinedAt: new Date()
-                },
-                update: {
-                    // Update joinedAt or lastActive?
-                }
+            await upsertGroupParticipantShadow({
+                conversationId: conversation.id,
+                timestamp,
+                role: "member",
+                participantJid: msg.participantJid || null,
+                participantPhoneJid: msg.participantPhoneJid || null,
+                participantLidJid: msg.participantLidJid || null,
+                participantDisplayName: msg.participantDisplayName || contactName || null,
             });
-            console.log(`[WhatsApp Sync] Linked Participant ${pContact.name} to Group Conversation ${conversation.id}`);
+            console.log(`[WhatsApp Sync] Upserted shadow participant for Group Conversation ${conversation.id}`);
         } catch (err) {
-            console.error("[WhatsApp Sync] Failed to link group participant:", err);
+            console.error("[WhatsApp Sync] Failed to upsert group participant shadow:", err);
         }
     }
 

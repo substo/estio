@@ -34,7 +34,7 @@ import { HistoryTab } from './history-tab';
 import { DeleteContactDialog } from './delete-contact-dialog';
 
 import { ContactForm, type ContactData, type ContactIdentityPatch } from './contact-form';
-import { CONTACT_TYPE_CONFIG, type ContactType } from './contact-types';
+import { CONTACT_TYPE_CONFIG, DEFAULT_CONTACT_TYPE, isKnownContactType, type ContactType } from './contact-types';
 import { MergeContactDialog } from './merge-contact-dialog';
 import { ContactTaskManager } from '@/components/tasks/contact-task-manager';
 import { ContactViewingManager } from '@/components/tasks/contact-viewing-manager';
@@ -130,7 +130,10 @@ export function EditContactForm({ contact, onSuccess, onDelete, onContactSaved, 
     };
 
 
-    const contactConfig = CONTACT_TYPE_CONFIG[(contact.contactType as ContactType) || 'Lead'];
+    const contactType = isKnownContactType(contact.contactType)
+        ? (contact.contactType as ContactType)
+        : DEFAULT_CONTACT_TYPE;
+    const contactConfig = CONTACT_TYPE_CONFIG[contactType];
     // Show Viewings only if 'properties' tab is enabled (implies property interest/seeker)
     const showViewings = contactConfig.visibleTabs.includes('properties');
 

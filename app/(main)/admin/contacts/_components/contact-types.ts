@@ -20,6 +20,10 @@ export const CONTACT_TYPES = [
 
 export type ContactType = (typeof CONTACT_TYPES)[number];
 
+export function isKnownContactType(value: string | null | undefined): value is ContactType {
+    return CONTACT_TYPES.includes((value || '') as ContactType);
+}
+
 // --- Enums / Constants for Validation ---
 
 export const LEAD_GOALS = [

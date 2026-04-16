@@ -11,7 +11,7 @@ import { useState } from "react";
 import { EditContactDialog } from "./edit-contact-dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ContactData } from "./contact-form";
-import { CONTACT_TYPE_CONFIG, ContactType, DEFAULT_CONTACT_TYPE } from "./contact-types";
+import { CONTACT_TYPE_CONFIG, ContactType, DEFAULT_CONTACT_TYPE, isKnownContactType } from "./contact-types";
 import { OutlookSyncManager } from "./outlook-sync-manager";
 
 
@@ -89,7 +89,9 @@ export default function ContactView({
     const viewings = contact.viewings || []; // Assuming these might be passed attached
 
     // Determine Config
-    const contactType = (contact.contactType as ContactType) || DEFAULT_CONTACT_TYPE;
+    const contactType = isKnownContactType(contact.contactType)
+        ? (contact.contactType as ContactType)
+        : DEFAULT_CONTACT_TYPE;
     const config = CONTACT_TYPE_CONFIG[contactType];
 
     return (

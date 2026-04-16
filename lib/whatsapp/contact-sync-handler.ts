@@ -1,6 +1,14 @@
 
 import db from "@/lib/db";
 
+function isStandaloneGroupMemberPlaceholder(contact: {
+    contactType?: string | null;
+    name?: string | null;
+}) {
+    return contact.contactType === 'Ref-GroupMember'
+        || (contact.name || '').startsWith('Group Member ');
+}
+
 export async function handleContactSyncEvent(payload: any, locationId?: string) {
     // payload is the whole webhook body
     // expected: payload.event === 'CONTACTS_UPSERT' or 'CONTACTS_UPDATE'
@@ -180,7 +188,12 @@ export async function handleContactSyncEvent(payload: any, locationId?: string) 
                             data: {
                                 phone: `+${rawPhone}`,
                                 // Update name if it's the placeholder?
-                                name: (existingLidContact.name || '').startsWith('WhatsApp User') ? (contact.name || contact.notify || existingLidContact.name) : existingLidContact.name
+                                name: ((existingLidContact.name || '').startsWith('WhatsApp User') || (existingLidContact.name || '').startsWith('Group Member '))
+                                    ? (contact.name || contact.notify || existingLidContact.name)
+                                    : existingLidContact.name,
+                                ...(isStandaloneGroupMemberPlaceholder(existingLidContact)
+                                    ? { contactType: 'Lead' }
+                                    : {})
                             }
                         });
                         console.log(`[Contact Sync] Resolved Placeholder Contact ${existingLidContact.id}: LID ${lidJid} -> Phone ${rawPhone}`);
