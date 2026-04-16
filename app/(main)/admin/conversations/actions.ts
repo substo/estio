@@ -55,6 +55,10 @@ import {
 import { ingestEvolutionMediaAttachment, parseEvolutionMessageContent } from "@/lib/whatsapp/evolution-media";
 import { enqueueWhatsAppOutbound } from "@/lib/whatsapp/outbound-enqueue";
 import {
+    canOpenDirectChatForParticipant,
+    formatGroupParticipantIdentitySummary,
+} from "@/lib/whatsapp/group-participants";
+import {
     enqueueWhatsAppAudioTranscription,
     initWhatsAppAudioTranscriptionWorker,
 } from "@/lib/queue/whatsapp-audio-transcription";
@@ -508,6 +512,257 @@ function phoneDigitsLikelyMatch(a: string, b: string): boolean {
 
 function escapeRegExp(value: string): string {
     return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeParticipantDisplayName(value: string | null | undefined): string {
+    return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeContactPhoneForStorage(value: string | null | undefined): string | null {
+    const raw = String(value || "").trim();
+    if (!raw) return null;
+    if (raw.startsWith("+")) return raw;
+    const digits = normalizePhoneDigits(raw);
+    return digits ? `+${digits}` : null;
+}
+
+function buildGroupParticipantDraftName(participant: {
+    displayName?: string | null;
+    phoneDigits?: string | null;
+    lidJid?: string | null;
+    participantJid?: string | null;
+}) {
+    const displayName = normalizeParticipantDisplayName(participant.displayName);
+    if (displayName) return displayName;
+    if (participant.phoneDigits) return `WhatsApp ${participant.phoneDigits}`;
+    if (participant.lidJid) return `WhatsApp ${participant.lidJid}`;
+    if (participant.participantJid) return `WhatsApp ${participant.participantJid}`;
+    return "WhatsApp Contact";
+}
+
+async function getScopedConversationParticipant(locationId: string, participantId: string) {
+    return db.conversationParticipant.findFirst({
+        where: {
+            id: participantId,
+            conversation: { locationId },
+        },
+        include: {
+            contact: {
+                select: {
+                    id: true,
+                    name: true,
+                    phone: true,
+                    email: true,
+                    contactType: true,
+                },
+            },
+            conversation: {
+                select: {
+                    id: true,
+                    ghlConversationId: true,
+                    locationId: true,
+                    contactId: true,
+                    contact: {
+                        select: {
+                            id: true,
+                            name: true,
+                            phone: true,
+                            contactType: true,
+                        },
+                    },
+                },
+            },
+        },
+    });
+}
+
+async function findLikelyContactsForGroupParticipant(locationId: string, participant: {
+    id: string;
+    phoneDigits?: string | null;
+    lidJid?: string | null;
+    displayName?: string | null;
+    contactId?: string | null;
+}) {
+    const phoneDigits = normalizePhoneDigits(participant.phoneDigits);
+    const lidRaw = String(participant.lidJid || "").replace("@lid", "").trim();
+    const displayName = normalizeParticipantDisplayName(participant.displayName);
+    const nameTokens = displayName.split(/\s+/).filter(Boolean);
+
+    const candidates = await db.contact.findMany({
+        where: {
+            locationId,
+            ...(participant.contactId ? { id: { not: participant.contactId } } : {}),
+            OR: [
+                ...(phoneDigits && phoneDigits.length >= 7 ? [{ phone: { contains: phoneDigits.slice(-7) } }] : []),
+                ...(lidRaw ? [{ lid: { contains: lidRaw } }] : []),
+                ...(displayName && displayName.length >= 3
+                    ? [{ name: { contains: displayName, mode: "insensitive" as const } }]
+                    : []),
+                ...(nameTokens.length >= 2
+                    ? [{ name: { contains: nameTokens[0], mode: "insensitive" as const } }]
+                    : []),
+            ],
+        },
+        select: {
+            id: true,
+            name: true,
+            phone: true,
+            email: true,
+            contactType: true,
+            lid: true,
+        },
+        take: 12,
+    });
+
+    const seen = new Set<string>();
+    const ranked = candidates
+        .map((contact) => {
+            const contactDigits = normalizePhoneDigits(contact.phone);
+            const contactLidRaw = String(contact.lid || "").replace("@lid", "").trim();
+            const phoneMatch = !!(phoneDigits && contactDigits && phoneDigitsLikelyMatch(phoneDigits, contactDigits));
+            const lidMatch = !!(lidRaw && contactLidRaw && lidRaw === contactLidRaw);
+            const exactNameMatch = !!(displayName && contact.name && displayName.toLowerCase() === String(contact.name).trim().toLowerCase());
+            const looseNameMatch = !!(displayName && contact.name && String(contact.name).toLowerCase().includes(displayName.toLowerCase()));
+
+            let rank = 0;
+            let matchReason = "Name suggestion";
+            if (phoneMatch) {
+                rank = 1;
+                matchReason = "Phone match";
+            } else if (lidMatch) {
+                rank = 2;
+                matchReason = "LID match";
+            } else if (exactNameMatch) {
+                rank = 3;
+                matchReason = "Exact name";
+            } else if (looseNameMatch) {
+                rank = 4;
+                matchReason = "Name suggestion";
+            } else {
+                rank = 5;
+            }
+
+            return {
+                ...contact,
+                matchReason,
+                rank,
+            };
+        })
+        .sort((left, right) => left.rank - right.rank || String(left.name || "").localeCompare(String(right.name || "")))
+        .filter((contact) => {
+            if (seen.has(contact.id)) return false;
+            seen.add(contact.id);
+            return contact.rank <= 4;
+        });
+
+    return ranked;
+}
+
+async function linkConversationParticipantToContact(
+    participantId: string,
+    contactId: string
+) {
+    return db.conversationParticipant.update({
+        where: { id: participantId },
+        data: { contactId },
+    });
+}
+
+async function ensureRealContactForGroupParticipant(params: {
+    locationId: string;
+    participant: Awaited<ReturnType<typeof getScopedConversationParticipant>>;
+    contactId?: string | null;
+    name?: string | null;
+    phone?: string | null;
+}) {
+    const participant = params.participant;
+    if (!participant) throw new Error("Participant not found");
+
+    const requestedContactId = String(params.contactId || "").trim() || null;
+    const draftName = normalizeParticipantDisplayName(params.name) || buildGroupParticipantDraftName(participant);
+    const trustedPhone = canOpenDirectChatForParticipant(participant)
+        ? normalizeContactPhoneForStorage(params.phone || participant.phoneDigits)
+        : normalizeContactPhoneForStorage(params.phone);
+    const participantLidRaw = String(participant.lidJid || "").replace("@lid", "").trim();
+
+    if (requestedContactId) {
+        const existing = await db.contact.findFirst({
+            where: { id: requestedContactId, locationId: params.locationId },
+            select: { id: true, phone: true, lid: true, name: true },
+        });
+        if (!existing) {
+            throw new Error("Selected contact not found");
+        }
+
+        await db.contact.update({
+            where: { id: existing.id },
+            data: {
+                ...(participant.lidJid && !existing.lid ? { lid: participant.lidJid } : {}),
+                ...(trustedPhone && !existing.phone ? { phone: trustedPhone } : {}),
+            },
+        });
+
+        await linkConversationParticipantToContact(participant.id, existing.id);
+        return existing.id;
+    }
+
+    if (participant.contactId) {
+        const existing = await db.contact.findFirst({
+            where: { id: participant.contactId, locationId: params.locationId },
+            select: { id: true, phone: true, lid: true, name: true },
+        });
+        if (existing) {
+            await db.contact.update({
+                where: { id: existing.id },
+                data: {
+                    ...(participant.lidJid && !existing.lid ? { lid: participant.lidJid } : {}),
+                    ...(trustedPhone && !existing.phone ? { phone: trustedPhone } : {}),
+                    ...(!existing.name && draftName ? { name: draftName } : {}),
+                },
+            });
+            return existing.id;
+        }
+    }
+
+    if (trustedPhone || participantLidRaw) {
+        const existingExact = await db.contact.findFirst({
+            where: {
+                locationId: params.locationId,
+                OR: [
+                    ...(trustedPhone ? [{ phone: trustedPhone }] : []),
+                    ...(participantLidRaw ? [{ lid: { contains: participantLidRaw } }] : []),
+                ],
+            },
+            select: { id: true, phone: true, lid: true, name: true },
+        });
+        if (existingExact) {
+            await db.contact.update({
+                where: { id: existingExact.id },
+                data: {
+                    ...(participant.lidJid && !existingExact.lid ? { lid: participant.lidJid } : {}),
+                    ...(trustedPhone && !existingExact.phone ? { phone: trustedPhone } : {}),
+                    ...(!existingExact.name && draftName ? { name: draftName } : {}),
+                },
+            });
+            await linkConversationParticipantToContact(participant.id, existingExact.id);
+            return existingExact.id;
+        }
+    }
+
+    const created = await db.contact.create({
+        data: {
+            locationId: params.locationId,
+            name: draftName,
+            phone: trustedPhone,
+            lid: participant.lidJid || undefined,
+            status: "New",
+            contactType: "Lead",
+        },
+        select: { id: true },
+    });
+
+    await linkConversationParticipantToContact(participant.id, created.id);
+    return created.id;
 }
 
 function replaceContactIdentityMentionsWithFirstName(
@@ -5107,6 +5362,10 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
                     contactName: isGroup ? undefined : (msg.pushName || realSenderPhone), // Don't rename group to sender name
                     isGroup: isGroup,
                     participant: participantPhone, // Pass resolved participant to sync
+                    participantJid: typeof key.participant === "string" ? key.participant : undefined,
+                    participantPhoneJid: typeof (msg as any).senderPn === "string" ? String((msg as any).senderPn) : undefined,
+                    participantLidJid: typeof key.participant === "string" && key.participant.endsWith("@lid") ? key.participant : undefined,
+                    participantDisplayName: isGroup ? (msg.pushName || realSenderPhone || undefined) : undefined,
                     lid: !isGroup ? extractEvolutionLidJid(key) : undefined,
                     resolvedPhone: !isGroup && phone ? phone : undefined,
                 };
@@ -8312,12 +8571,131 @@ export async function getConversationParticipants(conversationId: string) {
                     }
                 }
             },
-            orderBy: { role: 'asc' }
+            orderBy: [
+                { role: 'asc' },
+                { displayName: 'asc' }
+            ]
         });
 
-        return { success: true, participants };
+        return {
+            success: true,
+            participants: participants.map((participant) => ({
+                id: participant.id,
+                role: participant.role,
+                displayName: participant.displayName || participant.contact?.name || "Unknown",
+                identitySummary: formatGroupParticipantIdentitySummary(participant),
+                participantJid: participant.participantJid,
+                lidJid: participant.lidJid,
+                phoneJid: participant.phoneJid,
+                phoneDigits: participant.phoneDigits,
+                resolutionConfidence: participant.resolutionConfidence,
+                source: participant.source,
+                lastSeenAt: participant.lastSeenAt,
+                linkedContact: participant.contact,
+                canSave: true,
+                canOpenDirect: canOpenDirectChatForParticipant(participant),
+                directChatLabel: participant.contactId ? "Open Direct Chat" : "Start Direct Chat",
+            })),
+        };
     } catch (error: any) {
         console.error("Failed to fetch participants:", error);
+        return { success: false, error: error.message };
+    }
+}
+
+export async function prepareGroupParticipantSave(participantId: string) {
+    try {
+        const location = await getLocationContext();
+        if (!location) throw new Error("Unauthorized");
+
+        const participant = await getScopedConversationParticipant(location.id, participantId);
+        if (!participant) return { success: false, error: "Participant not found" };
+
+        const matches = await findLikelyContactsForGroupParticipant(location.id, participant);
+        const draftName = buildGroupParticipantDraftName(participant);
+        const draftPhone = canOpenDirectChatForParticipant(participant)
+            ? normalizeContactPhoneForStorage(participant.phoneDigits)
+            : null;
+
+        return {
+            success: true,
+            participant: {
+                id: participant.id,
+                displayName: participant.displayName || participant.contact?.name || draftName,
+                identitySummary: formatGroupParticipantIdentitySummary(participant),
+                linkedContact: participant.contact,
+                phoneDigits: participant.phoneDigits,
+                phoneJid: participant.phoneJid,
+                lidJid: participant.lidJid,
+            },
+            draft: {
+                name: draftName,
+                phone: draftPhone,
+            },
+            matches,
+        };
+    } catch (error: any) {
+        console.error("prepareGroupParticipantSave failed:", error);
+        return { success: false, error: error.message };
+    }
+}
+
+const SaveGroupParticipantSchema = z.object({
+    participantId: z.string().trim().min(1),
+    action: z.enum(["create", "link"]),
+    contactId: z.string().trim().optional(),
+    name: z.string().trim().optional(),
+    phone: z.string().trim().optional(),
+});
+
+export async function saveGroupParticipantContact(input: z.infer<typeof SaveGroupParticipantSchema>) {
+    try {
+        const location = await getLocationContext();
+        if (!location) throw new Error("Unauthorized");
+
+        const parsed = SaveGroupParticipantSchema.parse(input);
+        const participant = await getScopedConversationParticipant(location.id, parsed.participantId);
+        if (!participant) return { success: false, error: "Participant not found" };
+
+        const contactId = await ensureRealContactForGroupParticipant({
+            locationId: location.id,
+            participant,
+            contactId: parsed.action === "link" ? parsed.contactId : null,
+            name: parsed.name,
+            phone: parsed.phone,
+        });
+
+        revalidatePath("/admin/conversations");
+        revalidatePath("/admin/contacts");
+        return { success: true, contactId };
+    } catch (error: any) {
+        console.error("saveGroupParticipantContact failed:", error);
+        return { success: false, error: error.message };
+    }
+}
+
+export async function openConversationForGroupParticipant(participantId: string) {
+    try {
+        const location = await getLocationContext();
+        if (!location) throw new Error("Unauthorized");
+
+        const participant = await getScopedConversationParticipant(location.id, participantId);
+        if (!participant) return { success: false, error: "Participant not found" };
+        if (!canOpenDirectChatForParticipant(participant)) {
+            return { success: false, error: "Direct chat is unavailable until a trusted direct WhatsApp number is known." };
+        }
+
+        const contactId = await ensureRealContactForGroupParticipant({
+            locationId: location.id,
+            participant,
+            name: participant.displayName,
+            phone: participant.phoneDigits ? `+${participant.phoneDigits}` : null,
+        });
+
+        const { openOrStartConversationForContact } = await import("../contacts/actions");
+        return openOrStartConversationForContact(contactId);
+    } catch (error: any) {
+        console.error("openConversationForGroupParticipant failed:", error);
         return { success: false, error: error.message };
     }
 }
@@ -8592,7 +8970,11 @@ export async function syncAllEvolutionChats() {
                             locationId: location.id,
                             contactName: isGroup ? (chat.name || chat.subject) : (isFromMe ? undefined : (msg.pushName || realSenderPhone)),
                             isGroup: isGroup,
-                            participant: participantPhone
+                            participant: participantPhone,
+                            participantJid: typeof key.participant === "string" ? key.participant : undefined,
+                            participantPhoneJid: typeof (msg as any).senderPn === "string" ? String((msg as any).senderPn) : undefined,
+                            participantLidJid: typeof key.participant === "string" && key.participant.endsWith("@lid") ? key.participant : undefined,
+                            participantDisplayName: isGroup ? (msg.pushName || realSenderPhone || undefined) : undefined,
                         };
 
                         if ((parsedContent.type === "image" || parsedContent.type === "audio") && location.evolutionInstanceId) {

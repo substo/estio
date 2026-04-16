@@ -322,6 +322,7 @@ model Property {
   contactRoles           ContactPropertyRole[]
   location               Location              @relation(fields: [locationId], references: [id])
   media                  PropertyMedia[]
+  translations           PropertyTranslation[]
   printDrafts            PropertyPrintDraft[]
   imagePromptProfiles    PropertyImagePromptProfile[]
   swipes                 PropertySwipe[]
@@ -373,6 +374,24 @@ model PropertyPrintDraft {
 
   @@index([propertyId, updatedAt(sort: Desc)])
   @@index([propertyId, isDefault])
+}
+
+model PropertyTranslation {
+  id              String   @id @default(cuid())
+  propertyId      String
+  languageCode    String
+  title           String?
+  description     String?  @db.Text
+  metaTitle       String?
+  metaDescription String?  @db.Text
+  isAiGenerated   Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  
+  @@unique([propertyId, languageCode])
+  @@index([propertyId])
 }
 
 model PropertyMedia {
@@ -1675,16 +1694,27 @@ model UserNotificationDelivery {
 model ConversationParticipant {
   id             String   @id @default(cuid())
   conversationId String
-  contactId      String
+  identityKey    String
+  contactId      String?
   role           String   @default("member") // admin, member
+  participantJid String?
+  lidJid         String?
+  phoneJid       String?
+  phoneDigits    String?
+  displayName    String?
+  lastSeenAt     DateTime?
+  resolutionConfidence String @default("unknown")
+  source         String   @default("whatsapp_evolution")
   joinedAt       DateTime @default(now())
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  contact      Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  contact      Contact?     @relation(fields: [contactId], references: [id], onDelete: Cascade)
 
-  @@unique([conversationId, contactId])
+  @@unique([conversationId, identityKey])
   @@index([conversationId])
   @@index([contactId])
+  @@index([lidJid])
+  @@index([phoneDigits])
 }
 
 // AI Agent Execution History - stores complete trace of each agent action

@@ -221,7 +221,13 @@ export async function POST(req: NextRequest) {
                 locationId: location.id,
                 contactName: isGroup ? undefined : (msg.pushName || realPhone), // Don't rename group to sender name
                 isGroup: isGroup,
-                participant: participant, // Pass resolved participant to sync
+                participant: participant,
+                participantJid: typeof (key.participant || msg.participant) === "string" ? (key.participant || msg.participant) : undefined,
+                participantPhoneJid: typeof (key.senderPn || msg.senderPn) === "string" ? (key.senderPn || msg.senderPn) : undefined,
+                participantLidJid: typeof (key.participant || msg.participant) === "string" && String(key.participant || msg.participant).endsWith("@lid")
+                    ? String(key.participant || msg.participant)
+                    : undefined,
+                participantDisplayName: isGroup ? (msg.pushName || undefined) : undefined,
                 // If remoteJid is phone but Evolution includes previousRemoteJid as @lid,
                 // pass that LID so sync.ts can stitch phone<->lid to one contact.
                 lid: !isGroup

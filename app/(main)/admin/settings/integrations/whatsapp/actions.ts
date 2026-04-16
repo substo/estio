@@ -591,7 +591,11 @@ export async function fetchConversationHistory(conversationId: string) {
                     locationId: location.id,
                     contactName: msg.pushName || realSenderPhone,
                     isGroup: isGroup,
-                    participant: participantPhone
+                    participant: participantPhone,
+                    participantJid: typeof key.participant === "string" ? key.participant : undefined,
+                    participantPhoneJid: typeof (msg as any).senderPn === "string" ? String((msg as any).senderPn) : undefined,
+                    participantLidJid: typeof key.participant === "string" && key.participant.endsWith("@lid") ? key.participant : undefined,
+                    participantDisplayName: isGroup ? (msg.pushName || realSenderPhone || undefined) : undefined,
                 };
 
                 await processNormalizedMessage(normalized);

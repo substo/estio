@@ -179,6 +179,10 @@ export async function GET(req: NextRequest) {
                                         contactName: isGroup ? (chat.name || chat.subject) : (isFromMe ? undefined : (msg.pushName || realSenderPhone)),
                                         isGroup: isGroup,
                                         participant: participantPhone,
+                                        participantJid: typeof key.participant === "string" ? key.participant : undefined,
+                                        participantPhoneJid: typeof (msg as any).senderPn === "string" ? String((msg as any).senderPn) : undefined,
+                                        participantLidJid: typeof key.participant === "string" && key.participant.endsWith("@lid") ? key.participant : undefined,
+                                        participantDisplayName: isGroup ? (msg.pushName || realSenderPhone || undefined) : undefined,
                                         lid: isLid ? rawNumber : undefined
                                     };
 
