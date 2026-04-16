@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
@@ -202,6 +202,9 @@ export function MessageSelectionActions({
     const [summarizeSelectionText, setSummarizeSelectionText] = useState("");
     const [isSummarizing, setIsSummarizing] = useState(false);
     const [summarySavedEntry, setSummarySavedEntry] = useState("");
+    const [summarizeStreamingText, setSummarizeStreamingText] = useState("");
+    const [summarizeSkipped, setSummarizeSkipped] = useState(false);
+    const summarizeAbortRef = useRef<AbortController | null>(null);
 
     const [customOpen, setCustomOpen] = useState(false);
     const [customSelectionText, setCustomSelectionText] = useState("");
@@ -354,6 +357,131 @@ export function MessageSelectionActions({
         if (selection?.text?.trim()) onClearSelection();
     };
 
+    const streamSummarizeToLog = useCallback(async (text: string) => {
+        if (!conversationId || !text.trim()) return;
+
+        // Abort any existing stream
+        summarizeAbortRef.current?.abort();
+        const abortController = new AbortController();
+        summarizeAbortRef.current = abortController;
+
+        setIsSummarizing(true);
+        setSummarizeStreamingText("");
+        setSummarySavedEntry("");
+        setSummarizeSkipped(false);
+
+        try {
+            const response = await fetch("/api/conversations/summarize-stream", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    conversationId,
+                    selectedText: text,
+                    model: activeAiModel,
+                }),
+                signal: abortController.signal,
+            });
+
+            if (!response.ok) {
+                const payload = await response.json().catch(() => null);
+                throw new Error(payload?.error || `Summarize stream failed (${response.status})`);
+            }
+
+            if (!response.body) {
+                throw new Error("Summarize stream response body was empty.");
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+            let accumulated = "";
+            let finalEntry = "";
+            let finalSkipped = false;
+
+            const parseLine = (line: string) => {
+                if (!line.trim()) return;
+                let payload: any = null;
+                try { payload = JSON.parse(line); } catch { return; }
+
+                if (payload?.type === "chunk" && typeof payload.text === "string") {
+                    accumulated += payload.text;
+                    setSummarizeStreamingText(accumulated);
+                    return;
+                }
+
+                if (payload?.type === "error") {
+                    throw new Error(String(payload?.message || "Summarize stream failed."));
+                }
+
+                if (payload?.type === "complete") {
+                    finalEntry = String(payload.entry || "");
+                    finalSkipped = !!payload.skipped;
+                }
+            };
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                let newlineIndex = buffer.indexOf("\n");
+                while (newlineIndex >= 0) {
+                    const line = buffer.slice(0, newlineIndex);
+                    buffer = buffer.slice(newlineIndex + 1);
+                    parseLine(line);
+                    newlineIndex = buffer.indexOf("\n");
+                }
+            }
+            buffer += decoder.decode();
+            if (buffer.trim()) parseLine(buffer.trim());
+
+            if (abortController.signal.aborted) return;
+
+            if (finalEntry) {
+                setSummarySavedEntry(finalEntry);
+                setSummarizeSkipped(finalSkipped);
+                if (finalSkipped) {
+                    toast.message("No new info found. Skipped duplicate CRM log entry.");
+                } else {
+                    toast.success("Summary saved to CRM log");
+                }
+                if (hasBatchSelections) {
+                    onClearSelectionBatch?.();
+                }
+            }
+        } catch (error: any) {
+            if (abortController.signal.aborted) return;
+
+            // Fallback to server action
+            console.warn("[Summarize] Stream path failed, falling back to server action.", error);
+            try {
+                const res = await summarizeSelectionToCrmLog(conversationId, text, activeAiModel);
+                if (abortController.signal.aborted) return;
+                if (!res?.success || !res?.entry) {
+                    toast.error(res?.error || "Failed to summarize and save to CRM log");
+                    return;
+                }
+                setSummarySavedEntry(res.entry);
+                setSummarizeSkipped(!!res?.skipped);
+                if (res?.skipped) {
+                    toast.message("No new info found. Skipped duplicate CRM log entry.");
+                } else {
+                    toast.success("Summary saved to CRM log");
+                }
+                if (hasBatchSelections) {
+                    onClearSelectionBatch?.();
+                }
+            } catch (fallbackError: any) {
+                if (!abortController.signal.aborted) {
+                    toast.error(fallbackError?.message || "Failed to summarize and save to CRM log");
+                }
+            }
+        } finally {
+            if (!abortController.signal.aborted) {
+                setIsSummarizing(false);
+            }
+        }
+    }, [conversationId, activeAiModel, hasBatchSelections, onClearSelectionBatch]);
+
     const openSummarizeDialog = () => {
         const text = hasBatchSelections
             ? batchContextText
@@ -361,8 +489,12 @@ export function MessageSelectionActions({
         if (!text) return;
         setSummarizeSelectionText(text);
         setSummarySavedEntry("");
+        setSummarizeStreamingText("");
+        setSummarizeSkipped(false);
         setSummarizeOpen(true);
         if (selection?.text?.trim()) onClearSelection();
+        // Auto-trigger streaming summarize
+        void streamSummarizeToLog(text);
     };
 
     const openCustomDialog = () => {
@@ -597,28 +729,7 @@ export function MessageSelectionActions({
             return;
         }
         if (!summarizeSelectionText.trim()) return;
-
-        setIsSummarizing(true);
-        try {
-            const res = await summarizeSelectionToCrmLog(conversationId, summarizeSelectionText, activeAiModel);
-            if (!res?.success || !res?.entry) {
-                toast.error(res?.error || "Failed to summarize and save to CRM log");
-                return;
-            }
-            setSummarySavedEntry(res.entry);
-            if (res?.skipped) {
-                toast.message("No new info found. Skipped duplicate CRM log entry.");
-            } else {
-                toast.success("Summary saved to CRM log");
-            }
-            if (hasBatchSelections) {
-                onClearSelectionBatch?.();
-            }
-        } catch (error: any) {
-            toast.error(error?.message || "Failed to summarize and save to CRM log");
-        } finally {
-            setIsSummarizing(false);
-        }
+        void streamSummarizeToLog(summarizeSelectionText);
     };
 
     const handleRunCustomPrompt = async () => {
@@ -1399,8 +1510,11 @@ export function MessageSelectionActions({
                 onOpenChange={(open) => {
                     setSummarizeOpen(open);
                     if (!open) {
+                        summarizeAbortRef.current?.abort();
                         setIsSummarizing(false);
                         setSummarySavedEntry("");
+                        setSummarizeStreamingText("");
+                        setSummarizeSkipped(false);
                     }
                 }}
             >
@@ -1464,19 +1578,41 @@ export function MessageSelectionActions({
                             </div>
                         ) : null}
 
-                        <Button
-                            type="button"
-                            className="w-full gap-2"
-                            onClick={handleSummarizeToCrmLog}
-                            disabled={isSummarizing || !summarizeSelectionText.trim() || !canUseCrmLogActions}
-                        >
-                            {isSummarizing ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-                            {isSummarizing ? "Summarizing..." : "Summarize & Save to CRM Log"}
-                        </Button>
+                        {/* Streaming live preview */}
+                        {isSummarizing && summarizeStreamingText && !summarySavedEntry ? (
+                            <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
+                                <div className="mb-1 flex items-center gap-2 font-semibold">
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                    Generating summary...
+                                </div>
+                                <p className="whitespace-pre-wrap">{summarizeStreamingText}</p>
+                            </div>
+                        ) : null}
+
+                        {/* Show spinner when streaming hasn't started outputting yet */}
+                        {isSummarizing && !summarizeStreamingText && !summarySavedEntry ? (
+                            <div className="flex items-center justify-center gap-2 py-4 text-sm text-slate-500">
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                Summarizing...
+                            </div>
+                        ) : null}
+
+                        {/* Retry button (only shown when not already running and no saved entry yet) */}
+                        {!isSummarizing && !summarySavedEntry ? (
+                            <Button
+                                type="button"
+                                className="w-full gap-2"
+                                onClick={handleSummarizeToCrmLog}
+                                disabled={isSummarizing || !summarizeSelectionText.trim() || !canUseCrmLogActions}
+                            >
+                                <FileText className="h-4 w-4" />
+                                Retry Summarize & Save to CRM Log
+                            </Button>
+                        ) : null}
 
                         {summarySavedEntry ? (
                             <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
-                                <div className="mb-1 font-semibold">Saved Entry</div>
+                                <div className="mb-1 font-semibold">{summarizeSkipped ? "Existing Entry (Duplicate Skipped)" : "Saved Entry"}</div>
                                 <p className="whitespace-pre-wrap">{summarySavedEntry}</p>
                             </div>
                         ) : null}

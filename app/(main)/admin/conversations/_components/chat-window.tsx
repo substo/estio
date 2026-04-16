@@ -634,21 +634,98 @@ export function ChatWindow({
     const handleSummarizeBatch = async () => {
         if (!selectionBatch.length) return;
         setIsSummarizingBatch(true);
+        const modelOverride = typeof selectedModel === "string" && selectedModel.trim() ? selectedModel.trim() : undefined;
+
         try {
-            const modelOverride = typeof selectedModel === "string" && selectedModel.trim() ? selectedModel.trim() : undefined;
-            const res = await summarizeSelectionToCrmLog(conversation.id, batchContextText, modelOverride);
-            if (!res?.success || !res?.entry) {
-                toast.error(res?.error || "Failed to summarize batch");
-                return;
+            // Try streaming endpoint first
+            const response = await fetch("/api/conversations/summarize-stream", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    conversationId: conversation.id,
+                    selectedText: batchContextText,
+                    model: modelOverride,
+                }),
+            });
+
+            if (!response.ok || !response.body) {
+                throw new Error("Stream unavailable");
             }
-            if (res?.skipped) {
-                toast.message("No new info found. Skipped duplicate CRM log entry.");
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+            let finalEntry = "";
+            let finalSkipped = false;
+            let streamError: string | null = null;
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                let newlineIndex = buffer.indexOf("\n");
+                while (newlineIndex >= 0) {
+                    const line = buffer.slice(0, newlineIndex);
+                    buffer = buffer.slice(newlineIndex + 1);
+                    if (line.trim()) {
+                        try {
+                            const payload = JSON.parse(line);
+                            if (payload?.type === "complete") {
+                                finalEntry = String(payload.entry || "");
+                                finalSkipped = !!payload.skipped;
+                            }
+                            if (payload?.type === "error") {
+                                streamError = String(payload.message || "Stream error");
+                            }
+                        } catch { /* ignore parse errors */ }
+                    }
+                    newlineIndex = buffer.indexOf("\n");
+                }
+            }
+            buffer += decoder.decode();
+            if (buffer.trim()) {
+                try {
+                    const payload = JSON.parse(buffer.trim());
+                    if (payload?.type === "complete") {
+                        finalEntry = String(payload.entry || "");
+                        finalSkipped = !!payload.skipped;
+                    }
+                    if (payload?.type === "error") {
+                        streamError = String(payload.message || "Stream error");
+                    }
+                } catch { /* ignore */ }
+            }
+
+            if (streamError) throw new Error(streamError);
+
+            if (finalEntry) {
+                if (finalSkipped) {
+                    toast.message("No new info found. Skipped duplicate CRM log entry.");
+                } else {
+                    toast.success("Batch summary saved to CRM log");
+                }
+                setSelectionBatch([]);
             } else {
-                toast.success("Batch summary saved to CRM log");
+                toast.error("Failed to summarize batch");
             }
-            setSelectionBatch([]);
-        } catch (error: any) {
-            toast.error(error?.message || "Failed to summarize batch");
+        } catch (streamErr: any) {
+            // Fallback to server action
+            console.warn("[Summarize Batch] Stream failed, falling back to server action.", streamErr);
+            try {
+                const res = await summarizeSelectionToCrmLog(conversation.id, batchContextText, modelOverride);
+                if (!res?.success || !res?.entry) {
+                    toast.error(res?.error || "Failed to summarize batch");
+                    return;
+                }
+                if (res?.skipped) {
+                    toast.message("No new info found. Skipped duplicate CRM log entry.");
+                } else {
+                    toast.success("Batch summary saved to CRM log");
+                }
+                setSelectionBatch([]);
+            } catch (fallbackErr: any) {
+                toast.error(fallbackErr?.message || "Failed to summarize batch");
+            }
         } finally {
             setIsSummarizingBatch(false);
         }
