@@ -16,8 +16,7 @@ All outbound AI messages must follow this contract:
 
 1. Reply in the resolved reply language using this precedence:
    - `Conversation.replyLanguageOverride` when a user explicitly sets a manual reply language for the thread.
-   - latest inbound detected language.
-   - thread-level detected default language.
+   - location-level default reply language from `location.ai.defaultReplyLanguage` when the thread is left on `Auto`.
    - final fallback language from the shared resolver (`en` for drafting flows).
 2. Keep tone neutral, factual, concise, and non-pushy.
 3. Avoid implying final authority unless explicitly confirmed by the appropriate party.
@@ -40,16 +39,15 @@ Key capabilities:
 - lightweight evidence inference for policy checks.
 
 ## Manual Reply Language Controls
-Manual drafting flows now support a dual-layer reply-language model:
+Manual drafting flows now support a location-backed default plus a per-conversation override:
 
 - **Conversation override**: `Conversation.replyLanguageOverride`
   - nullable string
   - normalized BCP-47 code
   - `null` means `Auto`
-- **Contact default**: `Contact.preferredLang`
-  - nullable string
+- **Location default**: `location.ai.defaultReplyLanguage`
   - normalized BCP-47 code
-  - used only when no conversation override is set
+  - used whenever the conversation stays on `Auto`
 
 This applies to manual AI draft entry points only:
 - composer AI Draft in chats mode
@@ -71,7 +69,7 @@ Manual typed sends now have a separate conversation-translation path in the shar
 The reply-language UX is intentionally split by persistence scope:
 
 - **Conversation composer** is the primary control surface for fast per-thread changes.
-- **Contact settings** is the persistent default for future/manual drafting when no thread override exists.
+- **AI Settings** stores the location-wide default used by `Auto`.
 
 Composer options:
 - `Auto`
@@ -79,14 +77,13 @@ Composer options:
 
 Composer source hint values:
 - `Conversation override`
-- `Contact default`
-- `Auto-detected`
+- `Location default`
 
 Selecting `Auto` clears `Conversation.replyLanguageOverride`. Selecting a language persists the override immediately.
 
 Current drafting behavior in auto mode:
-- default to English when language cannot be detected from existing chat text,
-- do not use `Contact.preferredLang` for auto-draft language resolution.
+- use the location-level default reply language,
+- do not auto-switch based on phone prefix, contact preference, or inferred chat language.
 
 ## Enforcement Layer
 Policy enforcement lives in:

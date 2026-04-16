@@ -275,7 +275,7 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
   - Options are `Auto` plus a curated searchable language list.
   - Choosing `Auto` clears `Conversation.replyLanguageOverride`.
   - Choosing a language persists `Conversation.replyLanguageOverride` immediately through a secured server action and refreshes thread caches.
-  - The composer shows the active source hint as `Conversation override`, `Contact default`, or `Auto-detected`.
+  - The composer shows the active source hint as `Conversation override` or `Location default`.
   - Deal mode and chats mode use the same control and payload contract.
 - **Conversation Translation (Apr 8, 2026, V1)**:
   - Feature flags:

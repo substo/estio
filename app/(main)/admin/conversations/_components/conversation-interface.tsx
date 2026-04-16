@@ -3198,7 +3198,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             updatedAt: new Date(),
             ...(options?.translationSourceText && String(options.translationSourceText).trim() ? {
                 translation: {
-                    targetLanguage: options.translationTargetLanguage || conversationTarget.replyLanguageOverride || "en",
+                    targetLanguage: options.translationTargetLanguage || conversationTarget.replyLanguageOverride || conversationTarget.locationDefaultReplyLanguage || "en",
                     sourceLanguage: options.translationDetectedSourceLanguage || null,
                     sourceText: String(options.translationSourceText || "").trim(),
                     translatedText: text,

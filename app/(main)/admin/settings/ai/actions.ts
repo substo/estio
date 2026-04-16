@@ -4,6 +4,7 @@ import db from "@/lib/db";
 import { auth } from "@clerk/nextjs/server";
 import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
 import { revalidatePath } from "next/cache";
+import { DEFAULT_REPLY_LANGUAGE, normalizeReplyLanguage } from "@/lib/ai/reply-language-options";
 import { GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 import {
     listAiDecisions,
@@ -116,12 +117,14 @@ export async function updateAiSettings(
         const viewingSessionTranslationModel = normalizeOptionalModelOverride(formData.get("viewingSessionTranslationModel"));
         const viewingSessionInsightsModel = normalizeOptionalModelOverride(formData.get("viewingSessionInsightsModel"));
         const viewingSessionSummaryModel = normalizeOptionalModelOverride(formData.get("viewingSessionSummaryModel"));
+        const defaultReplyLanguage = normalizeReplyLanguage(formData.get("defaultReplyLanguage")) || DEFAULT_REPLY_LANGUAGE;
         const payload = {
             ...existingPayload,
             googleAiModel: formData.get("googleAiModel") as string || GEMINI_FLASH_LATEST_ALIAS,
             googleAiModelExtraction: formData.get("googleAiModelExtraction") as string || GEMINI_FLASH_LATEST_ALIAS,
             googleAiModelDesign: formData.get("googleAiModelDesign") as string || GEMINI_FLASH_LATEST_ALIAS,
             googleAiModelTranscription: transcriptionModel,
+            defaultReplyLanguage,
             precisionRemoveEnabled: formData.get("precisionRemoveEnabled") === "on",
             whatsappTranscriptOnDemandEnabled: transcriptOnDemandEnabled,
             whatsappTranscriptRetentionDays: transcriptRetentionDays,
@@ -230,6 +233,7 @@ export async function updateAiSettings(
         if (isSettingsDualWriteLegacyEnabled() && isSettingsParityCheckEnabled()) {
             const legacyComparablePayload: Record<string, unknown> = { ...payload };
             delete legacyComparablePayload.automationConfig;
+            delete legacyComparablePayload.defaultReplyLanguage;
             await settingsService.checkDocumentParity({
                 scopeType: "LOCATION",
                 scopeId: locationId,

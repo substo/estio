@@ -13,7 +13,8 @@ import { ensureConversationHistory, syncMessageFromWebhook } from "@/lib/ghl/syn
 import { checkGHLSMSStatus } from "@/lib/ghl/sms";
 import { calculateRunCost, calculateRunCostFromUsage } from "@/lib/ai/pricing";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
-import { normalizeReplyLanguage } from "@/lib/ai/reply-language-options";
+import { DEFAULT_REPLY_LANGUAGE, normalizeReplyLanguage } from "@/lib/ai/reply-language-options";
+import { getLocationDefaultReplyLanguage } from "@/lib/ai/location-reply-language";
 import { z } from "zod";
 import { getModelForTask } from "@/lib/ai/model-router";
 import { callLLM, callLLMWithMetadata } from "@/lib/ai/llm";
@@ -1289,7 +1290,12 @@ async function getAuthenticatedLocation() {
     return getAuthenticatedLocationExternal();
 }
 
-function mapConversationRowToUi(c: any, location: { ghlLocationId?: string | null }, dealMap?: Map<string, { id: string; title: string }>) {
+function mapConversationRowToUi(
+    c: any,
+    location: { ghlLocationId?: string | null },
+    dealMap?: Map<string, { id: string; title: string }>,
+    locationDefaultReplyLanguage?: string | null,
+) {
     return {
         id: c.ghlConversationId,
         contactId: c.contact?.ghlContactId || c.contactId,
@@ -1298,6 +1304,7 @@ function mapConversationRowToUi(c: any, location: { ghlLocationId?: string | nul
         contactEmail: c.contact?.email || undefined,
         contactPreferredLanguage: c.contact?.preferredLang || null,
         replyLanguageOverride: c.replyLanguageOverride || null,
+        locationDefaultReplyLanguage: locationDefaultReplyLanguage || DEFAULT_REPLY_LANGUAGE,
         detectedThreadLanguage: c.detectedThreadLanguage || null,
         detectedThreadLanguageConfidence: Number.isFinite(Number(c.detectedThreadLanguageConfidence))
             ? Number(c.detectedThreadLanguageConfidence)
@@ -1564,7 +1571,8 @@ export async function fetchConversations(
                 });
 
             const dealMap = new Map<string, { id: string; title: string }>(snapshot.dealMapEntries);
-            const conversations = snapshot.rows.map((row: any) => mapConversationRowToUi(row, location, dealMap));
+            const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(location.id);
+            const conversations = snapshot.rows.map((row: any) => mapConversationRowToUi(row, location, dealMap, locationDefaultReplyLanguage));
             return {
                 traceId,
                 conversations,
@@ -2200,6 +2208,7 @@ async function queryConversationWorkspaceCoreMetadata(args: {
     for (const row of activeDealRows) {
         dealMap.set(conversation.ghlConversationId, { id: row.id, title: row.title });
     }
+    const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(args.locationId);
 
     const latestMessageAtIso = conversation.lastMessageAt ? new Date(conversation.lastMessageAt).toISOString() : null;
     const nowMs = Date.now();
@@ -2210,7 +2219,8 @@ async function queryConversationWorkspaceCoreMetadata(args: {
         conversationHeader: mapConversationRowToUi(
             conversation,
             { ghlLocationId: args.locationGhlId || null },
-            dealMap
+            dealMap,
+            locationDefaultReplyLanguage,
         ),
         freshness: {
             generatedAt: new Date().toISOString(),
@@ -2391,6 +2401,7 @@ async function queryConversationWorkspaceMetadata(args: {
     for (const row of activeDealRows) {
         dealMap.set(conversation.ghlConversationId, { id: row.id, title: row.title });
     }
+    const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(args.locationId);
 
     const parsedPlan = parsePlanSteps(conversation.agentPlan);
     const latestMessageAtIso = conversation.lastMessageAt ? new Date(conversation.lastMessageAt).toISOString() : null;
@@ -2402,7 +2413,8 @@ async function queryConversationWorkspaceMetadata(args: {
         conversationHeader: mapConversationRowToUi(
             conversation,
             { ghlLocationId: args.locationGhlId || null },
-            dealMap
+            dealMap,
+            locationDefaultReplyLanguage,
         ),
         contactContext,
         taskSummary: taskMetrics,
@@ -2778,6 +2790,7 @@ export async function getConversationListDelta(
                     dealMap.set(conversationId, { id: deal.id, title: deal.title });
                 }
             }
+            const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(location.id);
 
             const deltas = rows.map((row) => {
                 const matchesFilter = doesConversationMatchStatus(normalizedStatus, row);
@@ -2787,7 +2800,7 @@ export async function getConversationListDelta(
                     unreadCount: row.unreadCount,
                     lastMessageBody: row.lastMessageBody || "",
                     lastMessageDate: Math.floor(new Date(row.lastMessageAt).getTime() / 1000),
-                    conversation: matchesFilter ? mapConversationRowToUi(row, location, dealMap) : null,
+                    conversation: matchesFilter ? mapConversationRowToUi(row, location, dealMap, locationDefaultReplyLanguage) : null,
                 };
             });
 
@@ -6038,7 +6051,7 @@ export async function previewTranslatedReply(
     }
 
     const resolvedTargetLanguage = normalizeTranslationTargetLanguage(
-        targetLanguage || conversation.replyLanguageOverride || conversation.contact?.preferredLang || DEFAULT_TRANSLATION_TARGET_LANGUAGE
+        targetLanguage || conversation.replyLanguageOverride || await getLocationDefaultReplyLanguage(location.id, DEFAULT_TRANSLATION_TARGET_LANGUAGE)
     );
     const sourceHash = buildTranslationSourceHash(normalizedSourceText);
 
@@ -6107,7 +6120,7 @@ export async function translateConversationMessage(
     }
 
     const resolvedTargetLanguage = normalizeTranslationTargetLanguage(
-        targetLanguage || message.conversation.replyLanguageOverride || message.conversation.contact?.preferredLang || DEFAULT_TRANSLATION_TARGET_LANGUAGE
+        targetLanguage || message.conversation.replyLanguageOverride || await getLocationDefaultReplyLanguage(location.id, DEFAULT_TRANSLATION_TARGET_LANGUAGE)
     );
     const sourceHash = buildTranslationSourceHash(sourceText);
 
@@ -6251,7 +6264,7 @@ export async function translateConversationThread(
         ? visibleMessageIds.map((id) => String(id || "").trim()).filter(Boolean)
         : [];
     const resolvedTargetLanguage = normalizeTranslationTargetLanguage(
-        targetLanguage || conversation.replyLanguageOverride || conversation.contact?.preferredLang || DEFAULT_TRANSLATION_TARGET_LANGUAGE
+        targetLanguage || conversation.replyLanguageOverride || await getLocationDefaultReplyLanguage(location.id, DEFAULT_TRANSLATION_TARGET_LANGUAGE)
     );
 
     const rows = await db.message.findMany({
@@ -7995,6 +8008,7 @@ export async function refreshConversation(conversationId: string) {
         contactEmail: conversation.contact.email || undefined,
         contactPreferredLanguage: conversation.contact.preferredLang || null,
         replyLanguageOverride: conversation.replyLanguageOverride || null,
+        locationDefaultReplyLanguage: await getLocationDefaultReplyLanguage(location.id),
         lastMessageBody: conversation.lastMessageBody || "",
         lastMessageDate: Math.floor(conversation.lastMessageAt.getTime() / 1000),
         unreadCount: conversation.unreadCount,
@@ -11784,6 +11798,7 @@ export async function searchConversations(query: string, options?: { limit?: num
                 dealMap.set(conversationId, { id: deal.id, title: deal.title });
             }
         }
+        const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(location.id);
 
         const rankIndex = new Map<string, number>();
         rankedConversationIds.forEach((id, idx) => rankIndex.set(id, idx));
@@ -11797,7 +11812,7 @@ export async function searchConversations(query: string, options?: { limit?: num
         return {
             success: true,
             traceId,
-            conversations: sortedRows.map((row) => mapConversationRowToUi(row, location, dealMap)),
+            conversations: sortedRows.map((row) => mapConversationRowToUi(row, location, dealMap, locationDefaultReplyLanguage)),
             total: sortedRows.length,
             hasMore: false,
             nextCursor: null,

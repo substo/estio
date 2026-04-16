@@ -1,10 +1,22 @@
 import { z } from "zod";
 import { SETTINGS_DOMAINS, type SettingsDomain } from "./constants";
 import { AiAutomationConfigSchema } from "@/lib/ai/automation/config";
+import { DEFAULT_REPLY_LANGUAGE, normalizeReplyLanguage } from "@/lib/ai/reply-language-options";
 
 const nullableTrimmedString = z.string().trim().nullish().transform((v) => v ?? null);
 const hexColor = z.string().regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, "Expected hex color");
 const optionalHexColor = hexColor.optional().nullable();
+const defaultReplyLanguageSchema = z.string().trim().nullish().transform((value, ctx) => {
+    const normalized = normalizeReplyLanguage(value);
+    if (value != null && String(value).trim() && !normalized) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Expected a valid reply language code",
+        });
+        return z.NEVER;
+    }
+    return normalized || DEFAULT_REPLY_LANGUAGE;
+});
 
 const navLinkSchema: z.ZodType<any> = z.lazy(() => z.object({
     id: z.string().optional(),
@@ -66,6 +78,7 @@ const aiSchema = z.object({
     googleAiModelExtraction: z.string().trim().min(1),
     googleAiModelDesign: z.string().trim().min(1),
     googleAiModelTranscription: z.string().trim().min(1),
+    defaultReplyLanguage: defaultReplyLanguageSchema,
     precisionRemoveEnabled: z.boolean().default(false),
     brandVoice: nullableTrimmedString,
     outreachConfig: z.object({

@@ -6,6 +6,7 @@ export type ReplyLanguageOption = {
 };
 
 export const REPLY_LANGUAGE_AUTO_VALUE = "auto";
+export const DEFAULT_REPLY_LANGUAGE = "en";
 
 export const REPLY_LANGUAGE_OPTIONS: ReplyLanguageOption[] = [
     { value: "en", label: "English (en)" },

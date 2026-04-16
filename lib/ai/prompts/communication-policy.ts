@@ -1,5 +1,6 @@
 type LanguageSource =
     | "conversation_override"
+    | "location_default"
     | "latest_inbound"
     | "contact_preferred"
     | "thread_default"
@@ -9,6 +10,7 @@ type LanguageSource =
 export interface CommunicationLanguageResolution {
     expectedLanguage: string | null;
     manualOverrideLanguage: string | null;
+    locationDefaultLanguage: string | null;
     latestInboundLanguage: string | null;
     contactPreferredLanguage: string | null;
     threadDefaultLanguage: string | null;
@@ -17,10 +19,12 @@ export interface CommunicationLanguageResolution {
 
 export interface ResolveCommunicationLanguageInput {
     manualOverrideLanguage?: string | null;
+    locationDefaultLanguage?: string | null;
     latestInboundText?: string | null;
     contactPreferredLanguage?: string | null;
     threadText?: string | null;
     fallbackLanguage?: string | null;
+    preferLocationDefaultLanguage?: boolean;
     useContactPreferredLanguage?: boolean;
 }
 
@@ -128,16 +132,19 @@ export function resolveCommunicationLanguage(
     input: ResolveCommunicationLanguageInput
 ): CommunicationLanguageResolution {
     const manualOverrideLanguage = normalizeLanguageTag(input.manualOverrideLanguage);
+    const locationDefaultLanguage = normalizeLanguageTag(input.locationDefaultLanguage);
     const latestInboundLanguage = detectLanguageFromText(input.latestInboundText);
     const contactPreferredLanguage = normalizeLanguageTag(input.contactPreferredLanguage);
     const threadDefaultLanguage = detectLanguageFromText(input.threadText);
     const fallbackLanguage = normalizeLanguageTag(input.fallbackLanguage);
+    const preferLocationDefaultLanguage = input.preferLocationDefaultLanguage === true;
     const useContactPreferredLanguage = input.useContactPreferredLanguage !== false;
 
     if (manualOverrideLanguage) {
         return {
             expectedLanguage: manualOverrideLanguage,
             manualOverrideLanguage,
+            locationDefaultLanguage,
             latestInboundLanguage,
             contactPreferredLanguage,
             threadDefaultLanguage,
@@ -145,10 +152,23 @@ export function resolveCommunicationLanguage(
         };
     }
 
+    if (preferLocationDefaultLanguage && locationDefaultLanguage) {
+        return {
+            expectedLanguage: locationDefaultLanguage,
+            manualOverrideLanguage,
+            locationDefaultLanguage,
+            latestInboundLanguage,
+            contactPreferredLanguage,
+            threadDefaultLanguage,
+            source: "location_default",
+        };
+    }
+
     if (useContactPreferredLanguage && contactPreferredLanguage) {
         return {
             expectedLanguage: contactPreferredLanguage,
             manualOverrideLanguage,
+            locationDefaultLanguage,
             latestInboundLanguage,
             contactPreferredLanguage,
             threadDefaultLanguage,
@@ -160,6 +180,7 @@ export function resolveCommunicationLanguage(
         return {
             expectedLanguage: latestInboundLanguage,
             manualOverrideLanguage,
+            locationDefaultLanguage,
             latestInboundLanguage,
             contactPreferredLanguage,
             threadDefaultLanguage,
@@ -171,6 +192,7 @@ export function resolveCommunicationLanguage(
         return {
             expectedLanguage: threadDefaultLanguage,
             manualOverrideLanguage,
+            locationDefaultLanguage,
             latestInboundLanguage,
             contactPreferredLanguage,
             threadDefaultLanguage,
@@ -178,10 +200,23 @@ export function resolveCommunicationLanguage(
         };
     }
 
+    if (locationDefaultLanguage) {
+        return {
+            expectedLanguage: locationDefaultLanguage,
+            manualOverrideLanguage,
+            locationDefaultLanguage,
+            latestInboundLanguage,
+            contactPreferredLanguage,
+            threadDefaultLanguage,
+            source: "location_default",
+        };
+    }
+
     if (fallbackLanguage) {
         return {
             expectedLanguage: fallbackLanguage,
             manualOverrideLanguage,
+            locationDefaultLanguage,
             latestInboundLanguage,
             contactPreferredLanguage,
             threadDefaultLanguage,
@@ -192,6 +227,7 @@ export function resolveCommunicationLanguage(
     return {
         expectedLanguage: null,
         manualOverrideLanguage,
+        locationDefaultLanguage,
         latestInboundLanguage,
         contactPreferredLanguage,
         threadDefaultLanguage,

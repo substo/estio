@@ -1,6 +1,7 @@
 import db from "@/lib/db";
 import { AiSettingsForm } from "./ai-settings-form";
 import { cookies } from "next/headers";
+import { DEFAULT_REPLY_LANGUAGE } from "@/lib/ai/reply-language-options";
 import { getLocationContext } from "@/lib/auth/location-context";
 import { settingsService } from "@/lib/settings/service";
 import {
@@ -211,6 +212,7 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
             googleAiModelExtraction: aiDoc.payload?.googleAiModelExtraction || siteConfig?.googleAiModelExtraction,
             googleAiModelDesign: aiDoc.payload?.googleAiModelDesign || siteConfig?.googleAiModelDesign,
             googleAiModelTranscription: aiDoc.payload?.googleAiModelTranscription || siteConfig?.googleAiModelTranscription,
+            defaultReplyLanguage: aiDoc.payload?.defaultReplyLanguage || DEFAULT_REPLY_LANGUAGE,
             precisionRemoveEnabled: aiDoc.payload?.precisionRemoveEnabled === true,
             brandVoice: aiDoc.payload?.brandVoice || siteConfig?.brandVoice,
             outreachConfig: aiDoc.payload?.outreachConfig || siteConfig?.outreachConfig,
@@ -228,6 +230,7 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
         }
         : {
             ...siteConfig,
+            defaultReplyLanguage: DEFAULT_REPLY_LANGUAGE,
             precisionRemoveEnabled: aiDoc?.payload?.precisionRemoveEnabled === true,
         };
 

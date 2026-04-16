@@ -16,6 +16,7 @@ import {
     type TimelineBucketCounts 
 } from "@/lib/conversations/timeline-events";
 import { getDraftModelWithCachedContext } from "@/lib/ai/draft-context-cache";
+import { getLocationDefaultReplyLanguage } from "@/lib/ai/location-reply-language";
 import {
     buildDealProtectiveCommunicationContract,
     detectLanguageFromText,
@@ -594,13 +595,16 @@ export async function generateDraft(context: CoordinationContext) {
         const manualReplyLanguage = context.replyLanguageOverride === undefined
             ? localConversationReplyLanguageOverride
             : context.replyLanguageOverride;
+        const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(context.locationId);
         const languageResolution = resolveCommunicationLanguage({
             manualOverrideLanguage: manualReplyLanguage,
+            locationDefaultLanguage: locationDefaultReplyLanguage,
             latestInboundText: latestInboundMessage,
             contactPreferredLanguage: contact?.preferredLang ?? null,
             threadText,
-            fallbackLanguage: "en",
-            useContactPreferredLanguage: Boolean(manualReplyLanguage),
+            fallbackLanguage: locationDefaultReplyLanguage,
+            preferLocationDefaultLanguage: !manualReplyLanguage,
+            useContactPreferredLanguage: false,
         });
         const communicationContract = buildDealProtectiveCommunicationContract({
             expectedLanguage: languageResolution.expectedLanguage,

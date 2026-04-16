@@ -4,6 +4,7 @@ import { useActionState, useState, useEffect, useRef } from "react";
 import { useFormStatus } from "react-dom";
 import { updateAiSettings } from "./actions";
 import { Input } from "@/components/ui/input";
+import { DEFAULT_REPLY_LANGUAGE, REPLY_LANGUAGE_OPTIONS } from "@/lib/ai/reply-language-options";
 import { GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK, GOOGLE_AI_MODELS } from "@/lib/ai/models";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -213,6 +214,24 @@ export function AiSettingsForm({
                 <div className="space-y-4">
                     <h3 className="text-lg font-medium">Model Configuration</h3>
                     <div className="space-y-4 border rounded-lg p-4 bg-slate-50/50">
+                        <div className="grid gap-2">
+                            <Label htmlFor="defaultReplyLanguage">Default Reply Language</Label>
+                            <select
+                                id="defaultReplyLanguage"
+                                name="defaultReplyLanguage"
+                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                defaultValue={String(initialData?.defaultReplyLanguage || DEFAULT_REPLY_LANGUAGE)}
+                            >
+                                {REPLY_LANGUAGE_OPTIONS.map((language) => (
+                                    <option key={language.value} value={language.value}>
+                                        {language.label}
+                                    </option>
+                                ))}
+                            </select>
+                            <p className="text-[10px] text-muted-foreground">
+                                AI Draft `Auto` follows this location default unless the conversation picker is set to a specific language.
+                            </p>
+                        </div>
 
                         {/* General / Default */}
                         <div className="grid gap-2">

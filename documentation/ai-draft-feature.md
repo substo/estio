@@ -79,18 +79,19 @@ It is critical to distinguish between **Content** and **Metadata**:
 
 ### Communication Policy (Mar 2026)
 - Drafts must use the shared reply-language resolver.
-- Auto-mode precedence is `Conversation.replyLanguageOverride` -> latest inbound -> thread default -> fallback English (`en`).
-- `Contact.preferredLang` is not used for Auto drafts.
+- Auto-mode precedence is `Conversation.replyLanguageOverride` -> location default reply language -> fallback English (`en`).
+- `Contact.preferredLang` and detected thread language are not used for Auto drafts.
 - Tone must stay neutral, factual, commercially aware, and non-pushy.
 - Drafts avoid hard authority/finality claims unless confirmed in context.
 - Urgency wording must be evidence-based (for example, confirmed competing offer activity), not pressure language.
+- When including a URL in a drafted message, place the URL on its own line and do not add trailing punctuation (especially a final `.`), so the link remains clickable in chat clients.
 - Guardrail outcomes are attached to draft metadata for review visibility.
 
 ### Reply Language Controls (Mar 10, 2026)
 - The shared composer includes a `Reply language` selector next to the channel/model controls.
 - Options are `Auto` plus a curated searchable language list.
-- `Auto` clears the conversation override and resolves language from chat history first (latest inbound -> thread default), then falls back to English when detection is unclear.
-- The active source is shown in the composer as `Conversation override`, `Contact default`, or `Auto-detected`.
+- `Auto` clears the conversation override and uses the location-level default reply language from AI Settings.
+- The active source is shown in the composer as `Conversation override` or `Location default`.
 - The same language selection is forwarded through manual draft entry points in chats mode, deal mode, and Mission Control quick draft.
 - When an agent is manually typing a reply instead of generating a draft, the same shared composer can now preview a translated send variant; the implementation and persistence details for that workflow live only in [Conversation Management](./conversation-management.md).
 

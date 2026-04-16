@@ -1,6 +1,7 @@
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
+import { getLocationDefaultReplyLanguage } from "@/lib/ai/location-reply-language";
 import { getMessages, getConversation } from "@/lib/ghl/conversations";
 import { DEFAULT_MODEL } from "@/lib/ai/pricing";
 import {
@@ -60,9 +61,14 @@ export async function generateMultiContextDraft(params: MultiContextParams) {
             .reverse()
             .find((message: any) => message?.direction === "inbound" && String(message?.body || "").trim().length > 0)?.body || "";
         const threadText = allMessages.map((message: any) => String(message?.body || "").trim()).filter(Boolean).join("\n");
+        const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(dealContext.location.id);
         const languageResolution = resolveCommunicationLanguage({
+            locationDefaultLanguage: locationDefaultReplyLanguage,
             latestInboundText: latestInboundMessage,
             threadText,
+            fallbackLanguage: locationDefaultReplyLanguage,
+            preferLocationDefaultLanguage: true,
+            useContactPreferredLanguage: false,
         });
         const communicationContract = buildDealProtectiveCommunicationContract({
             expectedLanguage: languageResolution.expectedLanguage,

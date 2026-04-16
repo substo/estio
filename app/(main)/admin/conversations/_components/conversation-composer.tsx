@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Conversation } from "@/lib/ghl/conversations";
 import {
+    DEFAULT_REPLY_LANGUAGE,
     getReplyLanguageLabel,
     normalizeReplyLanguage,
     REPLY_LANGUAGE_AUTO_VALUE,
@@ -547,9 +548,7 @@ export function ConversationComposer({
         : `Send: ${getReplyLanguageLabel(selectedReplyLanguage) || selectedReplyLanguage}`;
     const replyLanguageSourceHint = selectedReplyLanguage !== REPLY_LANGUAGE_AUTO_VALUE
         ? `Source: Conversation override (${getReplyLanguageLabel(selectedReplyLanguage) || selectedReplyLanguage})`
-        : conversation?.contactPreferredLanguage
-            ? `Source: Contact default (${getReplyLanguageLabel(conversation.contactPreferredLanguage) || conversation.contactPreferredLanguage})`
-            : "Source: Auto-detected";
+        : `Source: Location default (${getReplyLanguageLabel(conversation?.locationDefaultReplyLanguage || DEFAULT_REPLY_LANGUAGE) || conversation?.locationDefaultReplyLanguage || DEFAULT_REPLY_LANGUAGE})`;
 
     const isWhatsAppDisabled = whatsAppEligibility.status === "ineligible";
     const isSmsDisabled = smsEligibility.status === "ineligible";

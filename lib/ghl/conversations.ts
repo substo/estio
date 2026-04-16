@@ -16,6 +16,7 @@ export interface Conversation {
     contactEmail?: string; // For Email display
     contactPreferredLanguage?: string | null;
     replyLanguageOverride?: string | null;
+    locationDefaultReplyLanguage?: string | null;
     detectedThreadLanguage?: string | null;
     detectedThreadLanguageConfidence?: number | null;
     activeDealId?: string;

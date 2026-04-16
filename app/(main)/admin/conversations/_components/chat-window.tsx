@@ -605,7 +605,10 @@ export function ChatWindow({
 
         setTranslatingVisibleThread(true);
         try {
-            const result = await onTranslateVisibleThread(visibleInboundIds, conversation.replyLanguageOverride || "en");
+            const result = await onTranslateVisibleThread(
+                visibleInboundIds,
+                conversation.replyLanguageOverride || conversation.locationDefaultReplyLanguage || "en"
+            );
             if (!result?.success) {
                 toast.error(result?.error || "Failed to translate visible messages.");
                 return;
@@ -615,7 +618,7 @@ export function ChatWindow({
         } finally {
             setTranslatingVisibleThread(false);
         }
-    }, [conversation.replyLanguageOverride, messages, onTranslateVisibleThread, translatingVisibleThread]);
+    }, [conversation.locationDefaultReplyLanguage, conversation.replyLanguageOverride, messages, onTranslateVisibleThread, translatingVisibleThread]);
     const previousTailMessageId = previousTailMessageIdRef.current;
     const previousTailIndex = previousTailMessageId
         ? messages.findIndex((message) => message.id === previousTailMessageId)
