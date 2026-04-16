@@ -350,7 +350,7 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
     });
 
     return (
-        <div className="p-6">
+        <div className="min-w-0 p-6">
             <div className="flex flex-col sm:flex-row sm:justify-between items-start sm:items-center gap-4 mb-6">
                 <div>
                     <h1 className="text-2xl font-bold">Contacts</h1>
@@ -378,18 +378,18 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
                     isGhlConnected={!!location.ghlAccessToken}
                 />
             ) : (
-                <div className="border rounded-lg overflow-hidden overflow-x-auto">
-                    <table className="w-full text-sm text-left min-w-[800px]">
+                <div className="min-w-0 overflow-x-auto rounded-lg border">
+                    <table className="w-full min-w-[1180px] table-fixed text-left text-sm">
                     <thead className="bg-gray-100 dark:bg-gray-800">
                         <tr>
-                            <th className="p-4">Date</th>
-                            <th className="p-4">Name</th>
-                            <th className="p-4">Contact</th>
-                            <th className="p-4">Roles & Properties</th>
-                            <th className="p-4">Score</th>
-                            <th className="p-4">Status</th>
-                            <th className="p-4">Conversation</th>
-                            <th className="p-4">Actions</th>
+                            <th className="w-[144px] p-4">Date</th>
+                            <th className="w-[180px] p-4">Name</th>
+                            <th className="w-[220px] p-4">Contact</th>
+                            <th className="w-[320px] p-4">Roles & Properties</th>
+                            <th className="w-[96px] p-4">Score</th>
+                            <th className="w-[120px] p-4">Status</th>
+                            <th className="sticky right-16 z-20 w-[112px] bg-gray-100 p-4 shadow-[-1px_0_0_0_rgba(0,0,0,0.08)] dark:bg-gray-800">Conversation</th>
+                            <th className="sticky right-0 z-20 w-16 bg-gray-100 p-4 shadow-[-1px_0_0_0_rgba(0,0,0,0.08)] dark:bg-gray-800">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -419,4 +419,3 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
         </div>
     );
 }
-

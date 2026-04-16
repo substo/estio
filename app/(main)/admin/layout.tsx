@@ -101,7 +101,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
     <div className="grid min-h-screen w-full lg:grid-cols-[160px_minmax(0,1fr)]">
       <DashboardSideBar logoUrl={logoUrl} lightUrl={lightUrl} />
       <DashboardTopNav>
-        <main className="flex flex-col gap-4 p-4 lg:gap-6">
+        <main className="min-w-0 flex flex-col gap-4 p-4 lg:gap-6">
           {needsOnboarding ? (
             <div className="flex flex-col items-center justify-center min-h-[50vh] space-y-4">
               <div className="text-center">

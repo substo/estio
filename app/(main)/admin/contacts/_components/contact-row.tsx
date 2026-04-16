@@ -105,7 +105,7 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
             <tr onClick={handleRowClick} className="border-t hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer transition-colors">
 
 
-                <td className="p-4">
+                <td className="w-[144px] p-4 align-top">
                 <div className="flex flex-col gap-1">
                     <span>{format(new Date(contact.createdAt), "dd/MM/yyyy")}</span>
                     {contact.leadSource && (
@@ -113,26 +113,30 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
                     )}
                 </div>
             </td>
-                <td className="p-4 font-medium">{contact.name || "Unknown"}</td>
-                <td className="p-4">
-                    <div className="flex flex-col">
-                        <span>{contact.email}</span>
-                        <span className="text-xs text-gray-500">{contact.phone}</span>
+                <td className="w-[180px] p-4 align-top font-medium">
+                    <div className="max-w-[180px] truncate" title={contact.name || "Unknown"}>
+                        {contact.name || "Unknown"}
                     </div>
                 </td>
-                <td className="p-4">
-                    <div className="flex flex-col gap-1">
+                <td className="w-[220px] p-4 align-top">
+                    <div className="flex max-w-[220px] flex-col">
+                        <span className="truncate" title={contact.email || undefined}>{contact.email || "-"}</span>
+                        <span className="truncate text-xs text-gray-500" title={contact.phone || undefined}>{contact.phone || "-"}</span>
+                    </div>
+                </td>
+                <td className="w-[320px] p-4 align-top">
+                    <div className="flex max-w-[320px] flex-col gap-1">
                         {(contact.propertyRoles.length === 0 && contact.companyRoles.length === 0) ? (
-                            <span className="text-gray-500 italic">General Inquiry</span>
+                            <span className="truncate text-gray-500 italic">General Inquiry</span>
                         ) : (
                             <>
                                 {contact.propertyRoles.map((r, i) => (
-                                    <span key={`prop-${i}`} className="text-xs">
+                                    <span key={`prop-${i}`} className="block truncate text-xs" title={`${r.role}: ${r.property.title}`}>
                                         <span className="font-semibold capitalize">{r.role}:</span> {r.property.title}
                                     </span>
                                 ))}
                                 {contact.companyRoles.map((r, i) => (
-                                    <span key={`comp-${i}`} className="text-xs">
+                                    <span key={`comp-${i}`} className="block truncate text-xs" title={`${r.role}: ${r.company.name}`}>
                                         <span className="font-semibold capitalize">{r.role}:</span> {r.company.name}
                                     </span>
                                 ))}
@@ -140,18 +144,18 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
                         )}
                     </div>
                 </td>
-                <td className="p-4">
-                    <div className="flex flex-col items-center gap-0.5 w-[fit-content]">
+                <td className="w-[96px] p-4 align-top">
+                    <div className="flex w-full flex-col items-center gap-0.5">
                         <LeadScoreBadge score={contact.leadScore ?? 0} />
                         {contact.qualificationStage && (
-                        <span className="text-[10px] text-muted-foreground uppercase">
+                        <span className="text-center text-[10px] text-muted-foreground uppercase">
                             {contact.qualificationStage.replace('_', ' ')}
                         </span>
                         )}
                     </div>
                 </td>
-                <td className="p-4">
-                    <div className="flex items-center gap-2">
+                <td className="w-[120px] p-4 align-top">
+                    <div className="flex items-center gap-2 whitespace-nowrap">
                         <span className={`px-2 py-1 rounded text-xs ${contact.status === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                             {contact.status}
                         </span>
@@ -183,8 +187,8 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
                         </Button>
                     </div>
                 </td>
-                <td className="p-4" onClick={(e) => e.stopPropagation()}>
-                    <div className="flex items-center gap-2">
+                <td className="sticky right-16 z-10 w-[112px] bg-background p-4 align-top shadow-[-1px_0_0_0_rgba(0,0,0,0.08)]" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center gap-2 whitespace-nowrap">
                         <TooltipProvider delayDuration={200}>
                             <Tooltip>
                                 <TooltipTrigger asChild>
@@ -238,7 +242,7 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
                         <p className="mt-1 text-[11px] text-red-600">{conversationError}</p>
                     )}
                 </td>
-                <td className="p-4" onClick={(e) => e.stopPropagation()} >
+                <td className="sticky right-0 z-10 w-16 bg-background p-4 align-top shadow-[-1px_0_0_0_rgba(0,0,0,0.08)]" onClick={(e) => e.stopPropagation()} >
                     {/* Explicit stop propagation for the action cell */}
                     <EditContactDialog
                         contact={contact}

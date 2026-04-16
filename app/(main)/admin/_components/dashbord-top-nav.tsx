@@ -29,7 +29,7 @@ const NavItem = ({ href, icon: Icon, label }: { href: string, icon: any, label: 
 
 export default function DashboardTopNav({ children }: { children: ReactNode }) {
   return (
-    <div className="flex flex-col">
+    <div className="min-w-0 flex flex-col">
       <header className="flex h-14 lg:h-[55px] items-center gap-4 border-b px-3 bg-background">
         <Sheet>
           <SheetTrigger className="min-[1024px]:hidden p-2 transition">
