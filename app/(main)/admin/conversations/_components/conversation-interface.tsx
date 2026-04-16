@@ -3429,12 +3429,11 @@ export function ConversationInterface({ locationId, initialConversations, initia
         // 2. Invalidate workspace cache for the old conversation
         workspaceCoreCacheRef.current.delete(normalizedConversationId);
 
-        // 3. Navigate to the target conversation if we have one
+        // 3. Keep local state coherent while we navigate away from the merged source contact
         const targetConvId = targetConversationId ? String(targetConversationId).trim() : null;
         if (targetConvId) {
             setActiveId(targetConvId);
         } else {
-            // No target conversation — just deselect
             setActiveId(null);
         }
 
@@ -3451,7 +3450,9 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 console.error("Failed to refresh sidebar after merge", e);
             }
         }
-    }, []);
+
+        router.push(`/admin/contacts/${encodeURIComponent(targetContactId)}/view?locationId=${encodeURIComponent(locationId)}`);
+    }, [locationId, router]);
 
     const handleConversationContactSaved = useCallback(async (conversationId: string, patch: ContactIdentityPatch) => {
         const normalizedConversationId = String(conversationId || "").trim();
