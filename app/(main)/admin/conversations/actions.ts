@@ -9477,6 +9477,146 @@ function normalizeRequirementBedrooms(raw?: string | null): string | null {
     return `${count}+ Bedrooms`;
 }
 
+function extractBedroomSummary(raw?: string | null): string | null {
+    if (!raw) return null;
+    const match = raw.match(/\d+\+?/);
+    if (!match) return null;
+    return `${match[0]}Bdr`;
+}
+
+function abbreviatePropertyType(raw?: string | null): string | null {
+    const text = String(raw || "").trim();
+    if (!text) return null;
+    const lower = text.toLowerCase();
+
+    if (lower === "apartment") return "Apt";
+    if (lower === "appartment") return "Apt";
+    if (lower === "apt") return "Apt";
+    if (lower === "bedroom") return "Bdr";
+    if (lower === "bedrooms") return "Bdr";
+    if (lower.includes("apartment")) return text.replace(/apartment/gi, "Apt");
+    if (lower.includes("appartment")) return text.replace(/appartment/gi, "Apt");
+    if (lower.includes("bedroom")) return text.replace(/bedrooms?/gi, "Bdr");
+
+    return text;
+}
+
+function normalizeWhitespace(value?: string | null): string {
+    return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function splitLeadPersonName(contact: ParsedLeadData["contact"] | undefined) {
+    const explicitFirst = normalizeWhitespace(contact?.firstName);
+    const explicitLast = normalizeWhitespace(contact?.lastName);
+    const fallbackName = normalizeWhitespace(contact?.name);
+
+    if (explicitFirst || explicitLast) {
+        return {
+            firstName: explicitFirst,
+            lastName: explicitLast,
+            fullName: normalizeWhitespace(`${explicitFirst} ${explicitLast}`),
+        };
+    }
+
+    if (!fallbackName) {
+        return { firstName: "", lastName: "", fullName: "" };
+    }
+
+    const parts = fallbackName.split(/\s+/).filter(Boolean);
+    if (parts.length === 1) {
+        return {
+            firstName: parts[0],
+            lastName: "",
+            fullName: parts[0],
+        };
+    }
+
+    return {
+        firstName: parts[0],
+        lastName: parts.slice(1).join(" "),
+        fullName: fallbackName,
+    };
+}
+
+function inferLeadContactRole(rawLeadText: string, parsedRole?: string | null): "Lead" | "Owner" | "Agent" {
+    const normalizedRole = normalizeWhitespace(parsedRole);
+    if (normalizedRole === "Lead" || normalizedRole === "Owner" || normalizedRole === "Agent") {
+        return normalizedRole;
+    }
+
+    const text = rawLeadText.toLowerCase();
+    if (/\bowner\b/.test(text)) return "Owner";
+    if (/\bagent\b/.test(text)) return "Agent";
+    return "Lead";
+}
+
+function formatLeadGoalLabel(status?: "For Rent" | "For Sale" | null): "Rent" | "Sale" | "" {
+    if (status === "For Rent") return "Rent";
+    if (status === "For Sale") return "Sale";
+    return "";
+}
+
+function shouldUseMatchedPropertyTitle(title?: string | null): boolean {
+    const text = normalizeWhitespace(title).toLowerCase();
+    if (!text) return false;
+    return text.includes("#")
+        || text.includes("block")
+        || text.includes("residence")
+        || text.includes("residences");
+}
+
+function buildStructuredLeadPropertySummary(args: {
+    matchedProperty?: ResolvedLeadPropertyMatch;
+    requirements?: ParsedLeadData["requirements"];
+}): string {
+    const matchedProperty = args.matchedProperty || null;
+    if (matchedProperty?.title && shouldUseMatchedPropertyTitle(matchedProperty.title)) {
+        return normalizeWhitespace(matchedProperty.title);
+    }
+
+    const bedrooms = extractBedroomSummary(args.requirements?.bedrooms);
+    const propertyType = abbreviatePropertyType(args.requirements?.type);
+    const location = normalizeWhitespace(
+        matchedProperty?.propertyLocation
+        || matchedProperty?.city
+        || args.requirements?.location
+    );
+
+    return [bedrooms, propertyType, location].filter(Boolean).join(" ").trim();
+}
+
+function buildStructuredLeadDisplayName(args: {
+    contact: ParsedLeadData["contact"];
+    rawLeadText: string;
+    inferredStatus: "For Rent" | "For Sale" | null;
+    matchedProperty?: ResolvedLeadPropertyMatch;
+    requirements?: ParsedLeadData["requirements"];
+}): string {
+    const person = splitLeadPersonName(args.contact);
+    const personName = person.fullName
+        || normalizeWhitespace(args.contact?.name)
+        || normalizeWhitespace(args.contact?.email)
+        || normalizeWhitespace(args.contact?.phone)
+        || "Lead";
+    const refs = extractPropertyRefsFromLeadText(args.rawLeadText);
+
+    if (refs.length > 1) {
+        return normalizeWhitespace(`${personName} ${refs.join(", ")}`);
+    }
+
+    const role = inferLeadContactRole(args.rawLeadText, args.contact?.role);
+    const goal = formatLeadGoalLabel(args.inferredStatus);
+    const singleRef = refs[0] || normalizeWhitespace(args.matchedProperty?.reference);
+    const propertySummary = refs.length <= 1
+        ? buildStructuredLeadPropertySummary({
+            matchedProperty: args.matchedProperty,
+            requirements: args.requirements,
+        })
+        : "";
+
+    return [personName, role, goal, singleRef, propertySummary].filter(Boolean).join(" ").trim();
+}
+
 function inferRequirementStatusFromLead(rawLeadText: string, budgetText?: string | null): "For Rent" | "For Sale" | null {
     const text = `${rawLeadText}\n${budgetText || ""}`.toLowerCase();
     if (
@@ -9570,6 +9710,9 @@ async function resolveLeadPropertyMatch(locationId: string, rawLeadText: string)
 const LeadParsingSchema = z.object({
     contact: z.object({
         name: z.string().nullable().optional(),
+        firstName: z.string().nullable().optional(),
+        lastName: z.string().nullable().optional(),
+        role: z.enum(["Lead", "Owner", "Agent"]).nullable().optional(),
         phone: z.string().nullable().optional(),
         email: z.string().nullable().optional(),
     }),
@@ -11110,10 +11253,13 @@ async function parseLeadFromTextInternal(
             "Extract structured lead data from the input text.",
             "Return a JSON object only (no markdown, no prose).",
             "Separate direct lead message content from operator/internal notes.",
+            "Extract the person's real first name and last name when available.",
+            "Do not return a structured CRM display name in the name fields.",
+            "Set contact.role to exactly one of Lead, Owner, or Agent when inferable; otherwise default to Lead.",
             "",
             "JSON schema:",
             "{",
-            '  "contact": { "name": string|null, "phone": string|null, "email": string|null },',
+            '  "contact": { "name": string|null, "firstName": string|null, "lastName": string|null, "role": "Lead"|"Owner"|"Agent"|null, "phone": string|null, "email": string|null },',
             '  "requirements": { "budget": string|null, "location": string|null, "type": string|null, "bedrooms": string|null },',
             '  "messageContent": string|null,',
             '  "internalNotes": string|null,',
@@ -11412,6 +11558,16 @@ export async function createParsedLead(
         const normalizedMinPrice = mapToMinPriceOption(parsedBudget.min);
         const normalizedMaxPrice = mapToMaxPriceOption(parsedBudget.max);
         const inferredStatus = inferRequirementStatusFromLead(leadResolutionText, data.requirements?.budget);
+        const matchedPropertyForName = await resolveLeadPropertyMatch(location.id, leadResolutionText);
+        const parsedPersonName = splitLeadPersonName(data.contact);
+        const inferredRole = inferLeadContactRole(leadResolutionText, data.contact?.role);
+        const structuredDisplayName = buildStructuredLeadDisplayName({
+            contact: data.contact,
+            rawLeadText: leadResolutionText,
+            inferredStatus,
+            matchedProperty: matchedPropertyForName,
+            requirements: data.requirements,
+        });
 
         if (data.requirements) {
             if (normalizedMinPrice) contactData.requirementMinPrice = normalizedMinPrice;
@@ -11420,6 +11576,10 @@ export async function createParsedLead(
             if (normalizedBedrooms) contactData.requirementBedrooms = normalizedBedrooms;
             if (data.requirements.type) contactData.requirementPropertyTypes = [data.requirements.type];
         }
+        if (structuredDisplayName) contactData.name = structuredDisplayName;
+        if (parsedPersonName.firstName) contactData.firstName = parsedPersonName.firstName;
+        if (parsedPersonName.lastName) contactData.lastName = parsedPersonName.lastName;
+        contactData.contactType = inferredRole;
         if (normalizedDistrict) contactData.requirementPropertyLocations = [normalizedDistrict];
         if (inferredStatus) contactData.requirementStatus = inferredStatus;
         if (data.internalNotes) contactData.requirementOtherDetails = data.internalNotes;
@@ -11571,7 +11731,7 @@ export async function createParsedLead(
             if (parseTrace) backgroundJobsQueued.push("tracePersistence");
             backgroundJobsQueued.push("propertyEnrichment");
             runDetachedTask(`paste_lead_post_import:${conversation.id}`, async () => {
-                const matchedProperty = await resolveLeadPropertyMatch(location.id, leadResolutionText);
+                const matchedProperty = matchedPropertyForName || await resolveLeadPropertyMatch(location.id, leadResolutionText);
                 if (matchedProperty) {
                     await applyMatchedPropertyToContact({
                         contactId: contactId!,
