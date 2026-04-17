@@ -166,6 +166,11 @@ export function MessageSelectionActions({
     const router = useRouter();
     const toolbarRef = useRef<HTMLDivElement>(null);
     const suggestGenerationRunIdRef = useRef(0);
+    const leadParseCacheRef = useRef<{
+        key: string;
+        result: Awaited<ReturnType<typeof parseLeadFromText>> | null;
+        promise: Promise<Awaited<ReturnType<typeof parseLeadFromText>>> | null;
+    }>({ key: "", result: null, promise: null });
 
     const [pasteLeadOpen, setPasteLeadOpen] = useState(false);
     const [findContactOpen, setFindContactOpen] = useState(false);
@@ -303,10 +308,59 @@ export function MessageSelectionActions({
         };
     }, [findContactOpen, contactQuery]);
 
+    const requestLeadPreview = useCallback((text: string) => {
+        const key = text.trim();
+        if (!key || key.length < 5) {
+            return Promise.resolve({ success: false as const, error: "Text is too short" });
+        }
+
+        const cached = leadParseCacheRef.current;
+        if (cached.key === key) {
+            if (cached.result) return Promise.resolve(cached.result);
+            if (cached.promise) return cached.promise;
+        }
+
+        const promise = parseLeadFromText(key, activeAiModel)
+            .then((res) => {
+                if (leadParseCacheRef.current.key === key) {
+                    leadParseCacheRef.current.result = res;
+                    leadParseCacheRef.current.promise = null;
+                }
+                return res;
+            })
+            .catch((error) => {
+                if (leadParseCacheRef.current.key === key) {
+                    leadParseCacheRef.current.promise = null;
+                }
+                throw error;
+            });
+
+        leadParseCacheRef.current = {
+            key,
+            result: null,
+            promise,
+        };
+
+        return promise;
+    }, [activeAiModel]);
+
+    useEffect(() => {
+        if (!pasteLeadOpen || parsedLead) return;
+        const text = leadText.trim();
+        if (text.length < 5) return;
+
+        const timer = window.setTimeout(() => {
+            void requestLeadPreview(text).catch(() => {});
+        }, 250);
+
+        return () => window.clearTimeout(timer);
+    }, [pasteLeadOpen, leadText, parsedLead, requestLeadPreview]);
+
     const openPasteLeadDialog = () => {
         if (!selection?.text?.trim()) return;
         setLeadText(selection.text.trim());
         setParsedLead(null);
+        leadParseCacheRef.current = { key: "", result: null, promise: null };
         setPasteLeadOpen(true);
         onClearSelection();
     };
@@ -537,7 +591,7 @@ export function MessageSelectionActions({
         if (!leadText.trim()) return;
         setIsAnalyzingLead(true);
         try {
-            const res = await parseLeadFromText(leadText, activeAiModel);
+            const res = await requestLeadPreview(leadText);
             if (!res.success || !res.data) {
                 toast.error(res.error || "Failed to analyze selected text");
                 return;
@@ -969,6 +1023,7 @@ export function MessageSelectionActions({
                     if (!open) {
                         setIsAnalyzingLead(false);
                         setIsImportingLead(false);
+                        leadParseCacheRef.current = { key: "", result: null, promise: null };
                     }
                 }}
             >
