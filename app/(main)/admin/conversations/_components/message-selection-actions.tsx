@@ -1621,7 +1621,23 @@ export function MessageSelectionActions({
 
                         {summarySavedEntry ? (
                             <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
-                                <div className="mb-1 font-semibold">{summarizeSkipped ? "Existing Entry (Duplicate Skipped)" : "Saved Entry"}</div>
+                                <div className="mb-1 flex items-center justify-between">
+                                    <span className="font-semibold">{summarizeSkipped ? "Existing Entry (Duplicate Skipped)" : "Saved Entry"}</span>
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-6 gap-1 px-2 text-[10px] text-emerald-700 hover:bg-emerald-100 hover:text-emerald-900"
+                                        onClick={() => {
+                                            navigator.clipboard.writeText(summarySavedEntry);
+                                            toast.success("Copied to clipboard");
+                                        }}
+                                        title="Copy to clipboard"
+                                    >
+                                        <Clipboard className="h-3 w-3" />
+                                        Copy
+                                    </Button>
+                                </div>
                                 <p className="whitespace-pre-wrap">{summarySavedEntry}</p>
                             </div>
                         ) : null}
