@@ -83,20 +83,6 @@ import {
 const MAX_SELECTION_TEXT_LENGTH = 12000;
 const MAX_CUSTOM_OUTPUT_LENGTH = 2200;
 const CRM_LOG_DEDUPE_RECENT_LIMIT = 30;
-const MAX_NOTE_IMPROVEMENT_INPUT_LENGTH = 5000;
-const NOTE_IMPROVEMENT_OUTPUT_MAX_CHARS = {
-    activity: 200,
-    viewing: 360,
-} as const;
-const NOTE_IMPROVEMENT_MAX_WORDS = {
-    activity: 24,
-    viewingSegment: 8,
-} as const;
-const NOTE_IMPROVEMENT_MAX_OUTPUT_TOKENS = {
-    activity: 90,
-    viewing: 130,
-} as const;
-const NOTE_IMPROVEMENT_THINKING_BUDGET = 0;
 const LEAD_PARSE_MAX_INPUT_LENGTH = 8000;
 const LEAD_PARSE_MAX_OUTPUT_TOKENS = 350;
 const LEAD_PARSE_THINKING_BUDGET = 0;
@@ -132,7 +118,7 @@ type TranscriptManualAuditEventType = typeof TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES
 const TaskSuggestionPrioritySchema = z.enum(["low", "medium", "high"]);
 const ImproveNoteTypeSchema = z.enum(["activity", "viewing"]);
 const ImproveNoteInputSchema = z.object({
-    text: z.string().trim().min(3).max(MAX_NOTE_IMPROVEMENT_INPUT_LENGTH),
+    text: z.string().trim().min(3),
     noteType: ImproveNoteTypeSchema,
     conversationId: z.string().trim().optional(),
     contactId: z.string().trim().optional(),
@@ -813,76 +799,11 @@ function replaceContactIdentityMentionsWithFirstName(
     return rewritten;
 }
 
-function trimToMaxCharsPreservingWords(value: string, maxChars: number): string {
-    const normalized = String(value || "").trim();
-    if (!normalized || normalized.length <= maxChars) return normalized;
-
-    const hardTrimmed = normalized.slice(0, Math.max(0, maxChars)).trim();
-    const lastWhitespace = hardTrimmed.lastIndexOf(" ");
-    if (lastWhitespace <= Math.floor(maxChars * 0.55)) return hardTrimmed;
-    return hardTrimmed.slice(0, lastWhitespace).trim();
-}
-
-function trimToMaxWords(value: string, maxWords: number): string {
-    const normalized = normalizeSingleLine(value, "");
-    if (!normalized || maxWords <= 0) return normalized;
-    const words = normalized.split(" ").filter(Boolean);
-    if (words.length <= maxWords) return normalized;
-    return words.slice(0, maxWords).join(" ");
-}
-
-function buildImprovedViewingTemplateLine(value: string): string {
-    const cleaned = normalizeSingleLine(value, "");
-    if (!cleaned) {
-        return "Prospect: n/a | Fit: n/a | Concerns: n/a | Next step: n/a";
-    }
-
-    const splitSegments = cleaned
-        .split("|")
-        .map((segment) => normalizeSingleLine(segment, ""))
-        .filter(Boolean);
-
-    const labels = ["Prospect", "Fit", "Concerns", "Next step"];
-    const values = labels.map((label, index) => {
-        const existing = splitSegments[index] || "";
-        if (!existing) return "n/a";
-        if (new RegExp(`^${label}\\s*:`, "i").test(existing)) {
-            const stripped = existing.replace(/^[^:]+:\s*/i, "").trim();
-            return trimToMaxWords(stripped || "n/a", NOTE_IMPROVEMENT_MAX_WORDS.viewingSegment) || "n/a";
-        }
-        return trimToMaxWords(existing, NOTE_IMPROVEMENT_MAX_WORDS.viewingSegment) || "n/a";
-    });
-
-    return labels
-        .map((label, index) => `${label}: ${values[index]}`)
-        .join(" | ");
-}
-
-function normalizeImprovedNoteOutput(
-    noteType: z.infer<typeof ImproveNoteTypeSchema>,
-    rawOutput: string,
-    originalText: string
-): string {
-    if (noteType === "viewing") {
-        const fallback = buildImprovedViewingTemplateLine(originalText);
-        const templated = buildImprovedViewingTemplateLine(rawOutput || fallback);
-        return trimToMaxCharsPreservingWords(
-            templated,
-            NOTE_IMPROVEMENT_OUTPUT_MAX_CHARS.viewing
-        );
-    }
-
-    const fallback = normalizeSingleLine(
-        originalText,
-        "Captured lead update and next step."
-    );
-    const normalized = normalizeSingleLine(rawOutput, fallback)
-        .replace(/\s*\|\s*/g, " | ");
-    const wordLimited = trimToMaxWords(normalized, NOTE_IMPROVEMENT_MAX_WORDS.activity);
-    return trimToMaxCharsPreservingWords(
-        wordLimited,
-        NOTE_IMPROVEMENT_OUTPUT_MAX_CHARS.activity
-    );
+function normalizeImprovedNoteOutput(rawOutput: string, originalText: string): string {
+    return normalizeSingleLine(
+        rawOutput,
+        normalizeSingleLine(originalText, "Captured lead update and next step.")
+    ).replace(/\s*\|\s*/g, " | ");
 }
 
 function buildImproveNotePrompt(args: {
@@ -895,7 +816,6 @@ function buildImproveNotePrompt(args: {
         scheduledLocal?: string;
     };
 }) {
-    const trimmedText = trimSelectionText(args.text, MAX_NOTE_IMPROVEMENT_INPUT_LENGTH);
     const contextHints = [
         args.context?.propertyReference ? `Property reference: ${args.context.propertyReference}` : null,
         args.context?.scheduledLocal ? `Scheduled local datetime: ${args.context.scheduledLocal}` : null,
@@ -910,6 +830,7 @@ function buildImproveNotePrompt(args: {
             "Rules:",
             "- Keep each segment 3-8 words and factual.",
             "- Preserve only facts present in the source note.",
+            "- Use the optional context to resolve likely transcription mistakes in names, place names, property references, dates, or similar proper nouns when the context clearly supports the correction.",
             "- Do not invent details, promises, numbers, dates, or outcomes.",
             "- Fix grammar and structure, remove fluff, keep concise.",
             "- Keep the full line compact and easy to scan quickly.",
@@ -924,33 +845,41 @@ function buildImproveNotePrompt(args: {
             contextHints.length > 0 ? "" : null,
             "Source note:",
             '"""',
-            trimmedText,
+            args.text,
             '"""',
         ].filter(Boolean).join("\n");
     }
 
     return [
         "You improve internal CRM timeline notes for real-estate teams.",
-        "Return exactly one plain-text sentence (max 24 words).",
+        "Return exactly one plain-text line that reads like a polished internal note.",
         "Rules:",
-        "- Keep it concise, factual, and action-oriented.",
+        "- Keep it factual, readable, and useful for future agent handoff, search, and follow-up.",
         "- Fix grammar and clarity while preserving original meaning.",
         "- Preserve only facts from the source; do not invent details.",
+        "- Use the optional context to resolve likely transcription mistakes in names, area names, property references, dates, and similar proper nouns when the context clearly supports the correction.",
+        "- Preserve essential specifics when present: property type and size, preferred and excluded areas, must-have and must-avoid features, legal or price conditions, household details, pets, mobility or travel constraints, and next steps.",
+        "- Keep important negatives and conditions such as exclusions, refusals, preferences, compromises, and 'would consider if...' details.",
+        "- If a detail could affect search, qualification, property matching, follow-up, negotiation, or future contact context, keep it.",
+        "- Compress wording, not substance.",
+        "- Remove fluff and repetition, but do not collapse multiple concrete requirements into a vague summary.",
+        "- Prefer grouping related details in a natural order: search criteria, exclusions, conditions, then personal/context notes.",
+        "- You may use commas, semicolons, or short clauses to keep multiple requirements clear in one line.",
         "- Include next step only if present in source.",
-        "- Remove fluff and repetition.",
         "- No markdown, bullets, emojis, quotes, date prefixes, or agent signature.",
         args.contactFirstName
             ? `- If mentioning the contact, use first name only (${args.contactFirstName}).`
             : "- If a name appears, use first name only.",
         "- Never include phone or email.",
-        "- Prefer one clear action/outcome statement.",
+        "- Prefer a skimmable note, but keep enough detail to be operationally useful later.",
+        "- Do not shorten aggressively just to sound neat.",
         "",
         contextHints.length > 0 ? "Optional context:" : null,
         ...contextHints,
         contextHints.length > 0 ? "" : null,
         "Source note:",
         '"""',
-        trimmedText,
+        args.text,
         '"""',
     ].filter(Boolean).join("\n");
 }
@@ -10313,15 +10242,10 @@ export async function improveInternalNoteText(input: z.infer<typeof ImproveNoteI
         const { text: rawOutput, usage } = await callLLMWithMetadata(
             modelId,
             prompt,
-            undefined,
-            {
-                temperature: noteType === "viewing" ? 0.1 : 0.15,
-                maxOutputTokens: NOTE_IMPROVEMENT_MAX_OUTPUT_TOKENS[noteType],
-                thinkingBudget: NOTE_IMPROVEMENT_THINKING_BUDGET,
-            }
+            undefined
         );
         const latencyMs = Date.now() - startedAt;
-        const normalizedOutput = normalizeImprovedNoteOutput(noteType, rawOutput, text);
+        const normalizedOutput = normalizeImprovedNoteOutput(rawOutput, text);
         const improvedText = replaceContactIdentityMentionsWithFirstName(
             normalizedOutput,
             contact
