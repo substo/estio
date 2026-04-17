@@ -34,7 +34,21 @@ export default async function ContactViewPage({ params, searchParams }: { params
                 include: {
                     company: true
                 }
-            }
+            },
+            conversations: {
+                select: {
+                    ghlConversationId: true,
+                    unreadCount: true,
+                    deletedAt: true,
+                    archivedAt: true,
+                    lastMessageAt: true,
+                },
+                orderBy: [
+                    { lastMessageAt: "desc" },
+                    { createdAt: "desc" },
+                ],
+                take: 1,
+            },
         },
     });
 

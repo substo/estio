@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useState, useEffect, useActionState, useTransition, useRef, useCallback } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button } from '@/components/ui/button';
-import { X, Pencil } from 'lucide-react';
+import { X, Pencil, MessageCircle, MessageCirclePlus } from 'lucide-react';
 
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -26,7 +26,7 @@ import {
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { createContact, updateContact, deleteContactRole, verifyAndHealContact } from '../actions';
+import { createContact, updateContact, deleteContactRole, verifyAndHealContact, openOrStartConversationForContact } from '../actions';
 import { useToast } from '@/components/ui/use-toast';
 import { GoogleSyncManager } from './google-sync-manager';
 import { OutlookSyncManager } from './outlook-sync-manager';
@@ -129,6 +129,13 @@ export type ContactData = {
     googleContactId?: string | null;
     lastGoogleSync?: Date | null;
     payload?: any;
+    conversations?: {
+        ghlConversationId: string;
+        unreadCount: number;
+        deletedAt?: Date | null;
+        archivedAt?: Date | null;
+        lastMessageAt?: Date | null;
+    }[];
 };
 
 export type ContactIdentityPatch = {
@@ -230,6 +237,8 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
     const router = useRouter();
     const [managerOpen, setManagerOpen] = useState(false);
     const [outlookOpen, setOutlookOpen] = useState(false);
+    const [isOpeningConversation, startConversationTransition] = useTransition();
+    const [conversationError, setConversationError] = useState<string | null>(null);
     const [contactPatch, setContactPatch] = useState<Partial<ContactData>>({});
     const [formRenderKey, setFormRenderKey] = useState(0);
     const contact = baseContact ? ({ ...baseContact, ...contactPatch } as ContactData) : undefined;
@@ -267,6 +276,21 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
 
     const [isEditing, setIsEditing] = useState(initialMode !== 'view');
     const isCreating = initialMode === 'create';
+    const latestConversation = contact?.conversations?.[0];
+    const hasConversation = !!latestConversation?.ghlConversationId;
+    const canStartConversation = !!contact?.phone;
+
+    const getConversationHref = useCallback((ghlConversationId: string) => {
+        const params = new URLSearchParams({ id: ghlConversationId });
+
+        if (latestConversation?.deletedAt) {
+            params.set('view', 'trash');
+        } else if (latestConversation?.archivedAt) {
+            params.set('view', 'archived');
+        }
+
+        return `/admin/conversations?${params.toString()}`;
+    }, [latestConversation?.archivedAt, latestConversation?.deletedAt]);
 
     const openDuplicateContact = (contactId: string) => {
         if (isCreating && onSuccess) onSuccess();
@@ -306,6 +330,29 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
         }
         if (isCreating) return;
         setIsEditing(!isEditing);
+    };
+
+    const handleConversationClick = () => {
+        if (!contact?.id) return;
+        setConversationError(null);
+
+        if (hasConversation && latestConversation?.ghlConversationId) {
+            router.push(getConversationHref(latestConversation.ghlConversationId));
+            return;
+        }
+
+        if (!canStartConversation || isOpeningConversation) return;
+
+        startConversationTransition(async () => {
+            const res = await openOrStartConversationForContact(contact.id);
+            if (res?.success && res.conversationId) {
+                router.push(`/admin/conversations?id=${encodeURIComponent(res.conversationId)}`);
+                router.refresh();
+                return;
+            }
+
+            setConversationError(res?.error || 'Failed to open conversation');
+        });
     };
 
     // Determine initial contact type from existing data or default
@@ -1147,6 +1194,32 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                             {/* Manage Sync Button (Only in View Mode) */}
                             {contact && !isCreating && (
                                 <>
+                                    <div className="flex flex-col items-start gap-1">
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={handleConversationClick}
+                                            disabled={isOpeningConversation || (!hasConversation && !canStartConversation)}
+                                        >
+                                            {hasConversation ? (
+                                                <>
+                                                    <MessageCircle className="mr-2 h-4 w-4" />
+                                                    Messages
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <MessageCirclePlus className="mr-2 h-4 w-4" />
+                                                    {isOpeningConversation ? 'Opening...' : 'Send Message'}
+                                                </>
+                                            )}
+                                        </Button>
+                                        {conversationError ? (
+                                            <p className="text-xs text-red-600">{conversationError}</p>
+                                        ) : !hasConversation && !canStartConversation ? (
+                                            <p className="text-xs text-muted-foreground">No phone number to start a conversation</p>
+                                        ) : null}
+                                    </div>
                                     <Button type="button" variant="outline" size="sm" onClick={() => setManagerOpen(true)}>
                                         <RefreshCw className="mr-2 h-4 w-4" />
                                         Manage Sync
