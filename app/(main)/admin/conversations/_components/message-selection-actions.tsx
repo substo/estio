@@ -29,12 +29,12 @@ import {
     applySuggestedTasksFromSelection,
     parseLeadFromText,
     createParsedLead,
+    importLeadFromText,
     suggestTasksFromSelection,
     summarizeSelectionToCrmLog,
     runCustomSelectionPrompt,
     saveCustomSelectionToCrmLog,
     type ParsedLeadData,
-    type LeadAnalysisTrace,
     type SelectionTaskSuggestion,
     suggestViewingsFromSelection,
 } from "@/app/(main)/admin/conversations/actions";
@@ -174,7 +174,6 @@ export function MessageSelectionActions({
     const [isAnalyzingLead, setIsAnalyzingLead] = useState(false);
     const [isImportingLead, setIsImportingLead] = useState(false);
     const [parsedLead, setParsedLead] = useState<ParsedLeadData | null>(null);
-    const [leadAnalysisTrace, setLeadAnalysisTrace] = useState<LeadAnalysisTrace | undefined>(undefined);
 
     const [contactQuery, setContactQuery] = useState("");
     const [findContactSelectionPreview, setFindContactSelectionPreview] = useState("");
@@ -308,7 +307,6 @@ export function MessageSelectionActions({
         if (!selection?.text?.trim()) return;
         setLeadText(selection.text.trim());
         setParsedLead(null);
-        setLeadAnalysisTrace(undefined);
         setPasteLeadOpen(true);
         onClearSelection();
     };
@@ -545,7 +543,6 @@ export function MessageSelectionActions({
                 return;
             }
             setParsedLead(res.data);
-            setLeadAnalysisTrace(res.trace);
         } catch (error: any) {
             toast.error(error?.message || "Failed to analyze selected text");
         } finally {
@@ -557,13 +554,13 @@ export function MessageSelectionActions({
         if (!parsedLead) return;
         setIsImportingLead(true);
         try {
-            const res = await createParsedLead(parsedLead, leadText, leadAnalysisTrace);
+            const res = await createParsedLead(parsedLead, leadText);
             if (!res.success || !res.conversationId) {
                 toast.error(res.error || "Failed to import lead");
                 return;
             }
 
-            toast.success("Lead imported");
+            toast.success(res.backgroundJobsQueued?.length ? "Lead imported, enriching in background" : "Lead imported");
             setPasteLeadOpen(false);
             router.push(`/admin/conversations?id=${encodeURIComponent(res.conversationId)}`);
         } catch (error: any) {
@@ -982,7 +979,7 @@ export function MessageSelectionActions({
                             Paste Lead From Selection
                         </DialogTitle>
                         <DialogDescription>
-                            Analyze the selected text with the existing lead import flow, then review before importing.
+                            Import the selected text directly, or review the parsed lead before importing.
                         </DialogDescription>
                     </DialogHeader>
 
@@ -1004,14 +1001,41 @@ export function MessageSelectionActions({
                                 <Button
                                     type="button"
                                     size="sm"
+                                    variant="outline"
                                     className="gap-2"
                                     onClick={handleAnalyzeLead}
-                                    disabled={!leadText.trim() || isAnalyzingLead}
+                                    disabled={!leadText.trim() || isAnalyzingLead || isImportingLead}
                                 >
                                     {isAnalyzingLead ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-                                    Analyze Text
+                                    Review First
                                 </Button>
                             </div>
+                            <Button
+                                type="button"
+                                className="w-full gap-2 bg-green-600 hover:bg-green-700"
+                                onClick={async () => {
+                                    if (!leadText.trim()) return;
+                                    setIsImportingLead(true);
+                                    try {
+                                        const res = await importLeadFromText(leadText, activeAiModel);
+                                        if (!res.success || !res.conversationId) {
+                                            toast.error(res.error || "Failed to import lead");
+                                            return;
+                                        }
+                                        toast.success(res.backgroundJobsQueued?.length ? "Lead imported, enriching in background" : "Lead imported");
+                                        setPasteLeadOpen(false);
+                                        router.push(`/admin/conversations?id=${encodeURIComponent(res.conversationId)}`);
+                                    } catch (error: any) {
+                                        toast.error(error?.message || "Failed to import lead");
+                                    } finally {
+                                        setIsImportingLead(false);
+                                    }
+                                }}
+                                disabled={!leadText.trim() || isAnalyzingLead || isImportingLead}
+                            >
+                                {isImportingLead ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clipboard className="h-4 w-4" />}
+                                {isImportingLead ? "Importing..." : "Import Lead"}
+                            </Button>
                         </div>
                     ) : (
                         <div className="space-y-4">

@@ -18,6 +18,7 @@ import { getLocationDefaultReplyLanguage } from "@/lib/ai/location-reply-languag
 import { z } from "zod";
 import { getModelForTask } from "@/lib/ai/model-router";
 import { callLLM, callLLMWithMetadata } from "@/lib/ai/llm";
+import { GEMINI_DRAFT_FAST_DEFAULT } from "@/lib/ai/models";
 import { auth } from "@clerk/nextjs/server";
 import { Prisma } from "@prisma/client";
 import { revalidatePath, revalidateTag, unstable_cache } from "next/cache";
@@ -9585,7 +9586,7 @@ const LeadParsingSchema = z.object({
 
 export type ParsedLeadData = z.infer<typeof LeadParsingSchema>;
 
-export interface LeadAnalysisTrace {
+interface LeadAnalysisTrace {
     traceId: string; // Temporary ID for client side reference if needed
     start: number;
     end: number;
@@ -9635,6 +9636,16 @@ export interface LeadAnalysisTrace {
     completionTokens: number;
     totalTokens: number;
 }
+
+export interface LeadParseTelemetry {
+    traceId: string;
+    model: string;
+    latencyMs: number;
+}
+
+type LeadParseWithTraceResult =
+    | { success: true; data: ParsedLeadData; telemetry: LeadParseTelemetry; trace: LeadAnalysisTrace; normalizedInput: string }
+    | { success: false; error: string };
 
 type ResolvedLeadPropertyMatch = Awaited<ReturnType<typeof resolveLeadPropertyMatch>>;
 
@@ -11069,8 +11080,25 @@ export async function saveCustomSelectionToCrmLog(conversationId: string, output
     }
 }
 
-export async function parseLeadFromText(text: string, modelOverride?: string) {
-    await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+type CreateParsedLeadOptions = {
+    locationOverride?: any;
+    skipAuthUserLookup?: boolean;
+    preferredUserIdOverride?: string | null;
+    parseTrace?: LeadAnalysisTrace;
+};
+
+function resolveLeadParserModelId(modelOverride?: string) {
+    return typeof modelOverride === "string" && modelOverride.trim()
+        ? modelOverride.trim()
+        : GEMINI_DRAFT_FAST_DEFAULT;
+}
+
+async function parseLeadFromTextInternal(
+    text: string,
+    modelOverride?: string,
+    locationOverride?: any
+): Promise<LeadParseWithTraceResult> {
+    await (locationOverride || getAuthenticatedLocationReadOnly({ requireGhlToken: false }));
     const normalizedInput = normalizeLeadParseInput(text);
     if (!normalizedInput || normalizedInput.length < 5) {
         return { success: false, error: "Text is too short" };
@@ -11098,10 +11126,7 @@ export async function parseLeadFromText(text: string, modelOverride?: string) {
             '"""',
         ].join("\n");
 
-        const modelId = typeof modelOverride === "string" && modelOverride.trim()
-            ? modelOverride.trim()
-            : getModelForTask("lead_parsing");
-
+        const modelId = resolveLeadParserModelId(modelOverride);
         const start = Date.now();
         const { text: jsonStr, usage } = await callLLMWithMetadata(modelId, prompt, undefined, {
             jsonMode: true,
@@ -11121,9 +11146,9 @@ export async function parseLeadFromText(text: string, modelOverride?: string) {
         const cleanJson = jsonStr.replace(/```json/gi, "").replace(/```/g, "").trim();
         const parsed = parseJsonObjectFromModelOutput(jsonStr);
         const result = LeadParsingSchema.parse(parsed);
-
+        const traceId = `trace_${Date.now()}`;
         const trace: LeadAnalysisTrace = {
-            traceId: `trace_${Date.now()}`, // Temp
+            traceId,
             start,
             end,
             model: modelId,
@@ -11154,26 +11179,146 @@ export async function parseLeadFromText(text: string, modelOverride?: string) {
             totalTokens: usage.totalTokens
         };
 
-        return { success: true, data: result, trace };
+        return {
+            success: true,
+            data: result,
+            telemetry: {
+                traceId,
+                model: modelId,
+                latencyMs: end - start,
+            },
+            trace,
+            normalizedInput,
+        };
     } catch (error: any) {
         console.error("parseLeadFromText Error:", error);
         return { success: false, error: error.message };
     }
 }
 
-type CreateParsedLeadOptions = {
-    locationOverride?: any;
-    skipAuthUserLookup?: boolean;
-    preferredUserIdOverride?: string | null;
-};
+function resolveInitialLeadChannelType(
+    location: { evolutionInstanceId?: string | null },
+    data: ParsedLeadData
+): 'TYPE_WHATSAPP' | 'TYPE_SMS' | 'TYPE_EMAIL' {
+    const phoneDigits = String(data.contact?.phone || '').replace(/\D/g, '');
+    if (phoneDigits.length < 7 && data.contact?.email) {
+        return 'TYPE_EMAIL';
+    }
+    if (phoneDigits.length >= 7 && location?.evolutionInstanceId) {
+        return 'TYPE_WHATSAPP';
+    }
+    return 'TYPE_SMS';
+}
+
+async function applyMatchedPropertyToContact(args: {
+    contactId: string;
+    matchedProperty: NonNullable<ResolvedLeadPropertyMatch>;
+    inferredStatus: "For Rent" | "For Sale" | null;
+}) {
+    const { contactId, matchedProperty, inferredStatus } = args;
+    const contactForProperty = await db.contact.findUnique({
+        where: { id: contactId },
+        select: {
+            propertiesInterested: true,
+            requirementStatus: true,
+            requirementDistrict: true,
+            requirementPropertyLocations: true
+        }
+    });
+
+    const nextInterested = Array.from(new Set([
+        ...(contactForProperty?.propertiesInterested || []),
+        matchedProperty.id
+    ]));
+
+    const statusFromProperty = inferRequirementStatusFromMatchedProperty(matchedProperty);
+    const derivedStatus = inferredStatus || statusFromProperty;
+    const propertyDistrict = normalizeRequirementDistrict(matchedProperty.propertyLocation || matchedProperty.city || null);
+
+    const propertyPatch: any = {
+        propertiesInterested: nextInterested
+    };
+
+    if (derivedStatus) {
+        propertyPatch.requirementStatus = derivedStatus;
+    }
+
+    if ((!contactForProperty?.requirementDistrict || contactForProperty.requirementDistrict === "Any District") && propertyDistrict) {
+        propertyPatch.requirementDistrict = propertyDistrict;
+    }
+
+    if (propertyDistrict) {
+        propertyPatch.requirementPropertyLocations = Array.from(new Set([
+            ...(contactForProperty?.requirementPropertyLocations || []),
+            propertyDistrict
+        ]));
+    }
+
+    await db.contact.update({
+        where: { id: contactId },
+        data: propertyPatch
+    });
+}
+
+export async function parseLeadFromText(text: string, modelOverride?: string) {
+    const parsed = await parseLeadFromTextInternal(text, modelOverride);
+    if (!parsed.success) {
+        return parsed;
+    }
+    return {
+        success: true as const,
+        data: parsed.data,
+        telemetry: parsed.telemetry,
+    };
+}
+
+export async function importLeadFromText(text: string, modelOverride?: string) {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const totalStartedAt = Date.now();
+    const parsed = await parseLeadFromTextInternal(text, modelOverride, location);
+    if (!parsed.success) {
+        return parsed;
+    }
+
+    const importStartedAt = Date.now();
+    const imported = await createParsedLead(parsed.data, parsed.normalizedInput, {
+        locationOverride: location,
+        parseTrace: parsed.trace,
+    });
+    const totalLatencyMs = Date.now() - totalStartedAt;
+
+    if (!imported.success) {
+        return imported;
+    }
+
+    const importLatencyMs = Date.now() - importStartedAt;
+    console.log("[PasteLeadFastPath] Parse+import completed", JSON.stringify({
+        traceId: parsed.telemetry.traceId,
+        model: parsed.telemetry.model,
+        parseLatencyMs: parsed.telemetry.latencyMs,
+        importLatencyMs,
+        totalLatencyMs,
+        conversationId: imported.internalConversationId || imported.conversationId || null,
+        backgroundJobsQueued: imported.backgroundJobsQueued || [],
+    }));
+
+    return {
+        ...imported,
+        parseTelemetry: parsed.telemetry,
+        parseLatencyMs: parsed.telemetry.latencyMs,
+        importLatencyMs,
+        totalLatencyMs,
+    };
+}
 
 export async function createParsedLead(
     data: ParsedLeadData,
     originalText: string,
-    trace?: LeadAnalysisTrace,
     options?: CreateParsedLeadOptions
 ) {
     const location = options?.locationOverride || await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const importStartedAt = Date.now();
+    const backgroundJobsQueued: string[] = [];
 
     let preferredUserId: string | null = options?.preferredUserIdOverride ?? null;
     if (!options?.skipAuthUserLookup && preferredUserId == null) {
@@ -11213,12 +11358,7 @@ export async function createParsedLead(
             .filter(Boolean)
             .join("\n");
 
-        let preferredChannelType: 'TYPE_WHATSAPP' | 'TYPE_SMS' | 'TYPE_EMAIL' =
-            await resolvePreferredChannelTypeForPhone(location, data.contact?.phone);
-        const phoneDigits = String(data.contact?.phone || '').replace(/\D/g, '');
-        if (phoneDigits.length < 7 && data.contact?.email) {
-            preferredChannelType = 'TYPE_EMAIL';
-        }
+        const preferredChannelType = resolveInitialLeadChannelType(location, data);
 
         // Try to find by Phone
         if (data.contact?.phone) {
@@ -11367,56 +11507,8 @@ export async function createParsedLead(
             }
         }
 
-        // Deterministic property matching/linking for paste imports (before orchestration)
-        const matchedProperty = await resolveLeadPropertyMatch(location.id, leadResolutionText);
-        if (matchedProperty && contactId) {
-            const contactForProperty = await db.contact.findUnique({
-                where: { id: contactId },
-                select: {
-                    propertiesInterested: true,
-                    requirementStatus: true,
-                    requirementDistrict: true,
-                    requirementPropertyLocations: true
-                }
-            });
-
-            const nextInterested = Array.from(new Set([
-                ...(contactForProperty?.propertiesInterested || []),
-                matchedProperty.id
-            ]));
-
-            const statusFromProperty = inferRequirementStatusFromMatchedProperty(matchedProperty);
-            const derivedStatus = inferredStatus || statusFromProperty;
-            const propertyDistrict = normalizeRequirementDistrict(matchedProperty.propertyLocation || matchedProperty.city || null);
-
-            const propertyPatch: any = {
-                propertiesInterested: nextInterested
-            };
-
-            if (derivedStatus) {
-                propertyPatch.requirementStatus = derivedStatus;
-            }
-
-            if ((!contactForProperty?.requirementDistrict || contactForProperty.requirementDistrict === "Any District") && propertyDistrict) {
-                propertyPatch.requirementDistrict = propertyDistrict;
-            }
-
-            if (propertyDistrict) {
-                propertyPatch.requirementPropertyLocations = Array.from(new Set([
-                    ...(contactForProperty?.requirementPropertyLocations || []),
-                    propertyDistrict
-                ]));
-            }
-
-            // Do not auto-create ContactPropertyRole for lead imports.
-            // "Roles & Associations" is reserved for explicit relationship roles, not initial lead interest.
-            await db.contact.update({
-                where: { id: contactId },
-                data: propertyPatch
-            });
-        }
-
         if (contactId) {
+            backgroundJobsQueued.push("googleAutoSync");
             runDetachedTask(`paste_lead_google_autosync:${contactId}`, async () => {
                 await runGoogleAutoSyncForContact({
                     locationId: location.id,
@@ -11460,15 +11552,48 @@ export async function createParsedLead(
             });
         }
 
-        // 2.5 Save analysis trace asynchronously; this should not block import UX.
-        if (trace) {
-            runDetachedTask(`paste_lead_trace:${conversation.id}`, async () => {
-                await persistLeadAnalysisTraceRecord({
+        if (data.contact?.phone && preferredChannelType === 'TYPE_WHATSAPP') {
+            backgroundJobsQueued.push("channelVerification");
+            runDetachedTask(`paste_lead_channel_verify:${conversation.id}`, async () => {
+                const resolvedType = await resolvePreferredChannelTypeForPhone(location, data.contact?.phone);
+                if (resolvedType !== preferredChannelType) {
+                    await db.conversation.update({
+                        where: { id: conversation.id },
+                        data: { lastMessageType: resolvedType }
+                    });
+                    console.log(`[PasteLeadFastPath] Adjusted conversation ${conversation.id} channel ${preferredChannelType} -> ${resolvedType}`);
+                }
+            });
+        }
+
+        if (contactId) {
+            const parseTrace = options?.parseTrace;
+            if (parseTrace) backgroundJobsQueued.push("tracePersistence");
+            backgroundJobsQueued.push("propertyEnrichment");
+            runDetachedTask(`paste_lead_post_import:${conversation.id}`, async () => {
+                const matchedProperty = await resolveLeadPropertyMatch(location.id, leadResolutionText);
+                if (matchedProperty) {
+                    await applyMatchedPropertyToContact({
+                        contactId: contactId!,
+                        matchedProperty,
+                        inferredStatus,
+                    });
+                }
+
+                if (parseTrace) {
+                    await persistLeadAnalysisTraceRecord({
+                        conversationId: conversation.id,
+                        locationId: conversation.locationId,
+                        trace: parseTrace,
+                        matchedProperty,
+                    });
+                }
+
+                console.log("[PasteLeadFastPath] Background post-import complete", JSON.stringify({
                     conversationId: conversation.id,
-                    locationId: conversation.locationId,
-                    trace,
-                    matchedProperty,
-                });
+                    matchedPropertyId: matchedProperty?.id || null,
+                    tracePersisted: !!parseTrace,
+                }));
             });
         }
 
@@ -11497,16 +11622,27 @@ export async function createParsedLead(
             });
 
             // Trigger AI in background so import/save returns immediately.
+            backgroundJobsQueued.push("orchestration");
             runDetachedTask(`paste_lead_orchestrate:${conversation.ghlConversationId}`, async () => {
                 await orchestrateAction(conversation.ghlConversationId, contactId!);
             });
+
+            const importLatencyMs = Date.now() - importStartedAt;
+            console.log("[PasteLeadFastPath] Imported lead with inbound message", JSON.stringify({
+                conversationId: conversation.id,
+                ghlConversationId: conversation.ghlConversationId,
+                contactId,
+                importLatencyMs,
+                backgroundJobsQueued,
+            }));
 
             return {
                 success: true,
                 conversationId: conversation.ghlConversationId,
                 internalConversationId: conversation.id,
                 contactId,
-                action: 'replied'
+                action: 'replied',
+                backgroundJobsQueued,
             };
         } else {
             // NO MESSAGE (Just Notes)
@@ -11530,12 +11666,22 @@ export async function createParsedLead(
                 });
             }
 
+            const importLatencyMs = Date.now() - importStartedAt;
+            console.log("[PasteLeadFastPath] Imported notes-only lead", JSON.stringify({
+                conversationId: conversation.id,
+                ghlConversationId: conversation.ghlConversationId,
+                contactId,
+                importLatencyMs,
+                backgroundJobsQueued,
+            }));
+
             return {
                 success: true,
                 conversationId: conversation.ghlConversationId,
                 internalConversationId: conversation.id,
                 contactId,
-                action: 'imported'
+                action: 'imported',
+                backgroundJobsQueued,
             };
         }
     } catch (e: any) {
@@ -11786,7 +11932,6 @@ export async function processLegacyCrmLeadEmailForLocation(args: {
         const importResult = await createParsedLead(
             parsed.parsedLeadData,
             parsed.bodyText,
-            undefined,
             { locationOverride: { ...(location as any), id: locationId }, skipAuthUserLookup: true }
         );
 

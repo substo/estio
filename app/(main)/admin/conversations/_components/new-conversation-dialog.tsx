@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { MessageCirclePlus, Loader2, Phone, Users, Search, CheckCircle2, MessageCircle, ArrowRight } from 'lucide-react';
-import { fetchEvolutionChats, startNewConversation, parseLeadFromText, createParsedLead, type ParsedLeadData, type LeadAnalysisTrace } from '../actions';
+import { fetchEvolutionChats, startNewConversation, parseLeadFromText, createParsedLead, importLeadFromText, type ParsedLeadData } from '../actions';
 import { cn } from '@/lib/utils';
 import { Textarea } from '@/components/ui/textarea';
 import { Card } from '@/components/ui/card';
@@ -48,7 +48,6 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
     const [leadText, setLeadText] = useState('');
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [parsedLead, setParsedLead] = useState<ParsedLeadData | null>(null);
-    const [analysisTrace, setAnalysisTrace] = useState<LeadAnalysisTrace | undefined>(undefined);
 
     // Google Contacts State
     const [googleSearch, setGoogleSearch] = useState('');
@@ -128,7 +127,6 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
         setLeadText('');
 
         setParsedLead(null);
-        setAnalysisTrace(undefined);
         setGoogleSearch('');
         setGoogleResults([]);
         setGoogleNotConnected(false);
@@ -475,18 +473,49 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                             setIsAnalyzing(false);
                                             if (res.success && res.data) {
                                                 setParsedLead(res.data);
-                                                setAnalysisTrace(res.trace);
                                             } else {
                                                 setError(res.error || "Failed to parse text");
                                             }
                                         }}
                                         disabled={!leadText.trim() || isAnalyzing}
-                                        className="gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white border-0"
+                                        variant="outline"
+                                        className="gap-2"
                                     >
                                         {isAnalyzing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
-                                        Analyze Text
+                                        Review First
                                     </Button>
                                 </div>
+                                <Button
+                                    onClick={async () => {
+                                        if (!leadText.trim()) return;
+                                        setCreating(true);
+                                        setError(null);
+                                        try {
+                                            const res = await importLeadFromText(leadText);
+                                            if (res.success && res.conversationId) {
+                                                toast({
+                                                    title: "Lead imported",
+                                                    description: res.backgroundJobsQueued?.length
+                                                        ? "Lead imported, enriching in background."
+                                                        : "Conversation is ready.",
+                                                });
+                                                onConversationCreated?.(res.conversationId);
+                                                handleClose();
+                                            } else {
+                                                setError(res.error || "Failed to import lead");
+                                            }
+                                        } catch (err: any) {
+                                            setError(err.message);
+                                        } finally {
+                                            setCreating(false);
+                                        }
+                                    }}
+                                    disabled={!leadText.trim() || isAnalyzing || creating}
+                                    className="w-full bg-green-600 hover:bg-green-700 gap-2"
+                                >
+                                    {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
+                                    Import Lead
+                                </Button>
                             </div>
                         ) : (
                             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
@@ -539,8 +568,14 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                             setCreating(true);
 
                                             try {
-                                                const res = await createParsedLead(parsedLead, leadText, analysisTrace);
+                                                const res = await createParsedLead(parsedLead, leadText);
                                                 if (res.success && res.conversationId) {
+                                                    toast({
+                                                        title: "Lead imported",
+                                                        description: res.backgroundJobsQueued?.length
+                                                            ? "Lead imported, enriching in background."
+                                                            : "Conversation is ready.",
+                                                    });
                                                     onConversationCreated?.(res.conversationId);
                                                     handleClose();
                                                 } else {
