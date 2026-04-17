@@ -136,6 +136,11 @@ import {
 import type { SelectionBatchInput, SelectionBatchItem } from "./message-selection-actions";
 import { ConversationComposer } from "./conversation-composer";
 import { calculatePrependScrollTop } from "@/lib/conversations/thread-hydration";
+import {
+    getResolvedConversationTranslationLanguage,
+    isLikelyForeignLanguageMessage,
+    shouldDefaultThreadToTranslated,
+} from "@/lib/conversations/translation-view";
 
 type TranscriptSearchResult = Awaited<ReturnType<typeof searchConversationTranscriptMatches>>;
 type TranscriptSearchSuccess = Extract<TranscriptSearchResult, { success: true }>;
@@ -171,6 +176,10 @@ function buildSelectionBatchId(conversationId: string, item: SelectionBatchInput
 
 function buildBatchContextText(items: SelectionBatchItem[]) {
     return items.map((item, index) => `Snippet ${index + 1}:\n${item.text}`).join("\n\n");
+}
+
+function getThreadTranslationPreferenceKey(conversationId: string, targetLanguage: string) {
+    return `conversation-thread-translation:${conversationId}:${targetLanguage.toLowerCase()}`;
 }
 
 export function ChatWindow({
@@ -242,6 +251,9 @@ export function ChatWindow({
     const [improvingNote, setImprovingNote] = useState(false);
     const [translatingVisibleThread, setTranslatingVisibleThread] = useState(false);
     const [translationBannerDismissed, setTranslationBannerDismissed] = useState(false);
+    const [threadTranslationMode, setThreadTranslationMode] = useState<"original" | "translated">("original");
+    const [autoTranslatingThread, setAutoTranslatingThread] = useState(false);
+    const autoTranslationAttemptedRef = useRef<string | null>(null);
 
     // Merge messages and activity log into a single timeline
     const timelineItems = useMemo(() => {
@@ -330,6 +342,9 @@ export function ChatWindow({
         hasReportedInitialPaintRef.current = false;
         setIsTimelineReady(false);
         setTranslationBannerDismissed(false);
+        setThreadTranslationMode("original");
+        setAutoTranslatingThread(false);
+        autoTranslationAttemptedRef.current = null;
     }, [conversation.id]);
 
     useEffect(() => {
@@ -577,48 +592,110 @@ export function ChatWindow({
     }, [handleTranscriptSearch]);
 
     const batchContextText = useMemo(() => buildBatchContextText(selectionBatch), [selectionBatch]);
+    const resolvedTranslationTargetLanguage = useMemo(
+        () => getResolvedConversationTranslationLanguage(conversation),
+        [conversation.locationDefaultReplyLanguage, conversation.replyLanguageOverride]
+    );
     const inboundForeignCandidates = useMemo(() => {
-        return messages.filter((message) => {
-            if (message.direction !== "inbound") return false;
-            const body = String(message.body || "").trim();
-            if (!body) return false;
-            const detected = String(message.detectedLanguage || "").trim().toLowerCase();
-            if (detected && detected !== "en") return true;
-            const nonAsciiChars = body.replace(/[ -~]/g, "");
-            if (nonAsciiChars.length >= 4) return true;
-            return /\b(hola|bonjour|ciao|merci|gracias|buenos|ola|γειά|привет|salut|buenas)\b/i.test(body);
-        });
-    }, [messages]);
+        return messages.filter((message) => isLikelyForeignLanguageMessage(message, resolvedTranslationTargetLanguage));
+    }, [messages, resolvedTranslationTargetLanguage]);
+    const eligibleInboundTranslationIds = useMemo(() => {
+        return messages
+            .filter((message) => {
+                if (!isLikelyForeignLanguageMessage(message, resolvedTranslationTargetLanguage)) return false;
+                return message.translation?.viewDefault !== "translated";
+            })
+            .map((message) => String(message.id || "").trim())
+            .filter(Boolean);
+    }, [messages, resolvedTranslationTargetLanguage]);
+    const threadSupportsTranslatedDefault = useMemo(
+        () => shouldDefaultThreadToTranslated(messages, resolvedTranslationTargetLanguage),
+        [messages, resolvedTranslationTargetLanguage]
+    );
+    const threadShouldPreferTranslated = threadSupportsTranslatedDefault || inboundForeignCandidates.length >= 2;
     const shouldShowTranslationBanner = translationReadEnabled
         && translationBannerEnabled
         && !translationBannerDismissed
         && inboundForeignCandidates.length >= 2
         && !!onTranslateVisibleThread;
 
-    const handleTranslateVisibleThread = useCallback(async () => {
-        if (!onTranslateVisibleThread || translatingVisibleThread) return;
-        const visibleInboundIds = messages
-            .filter((message) => message.direction === "inbound" && String(message.body || "").trim().length > 0)
-            .map((message) => String(message.id || "").trim())
-            .filter(Boolean);
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        const storageKey = getThreadTranslationPreferenceKey(conversation.id, resolvedTranslationTargetLanguage);
+        const stored = window.localStorage.getItem(storageKey);
+        if (stored === "original" || stored === "translated") {
+            setThreadTranslationMode(stored);
+            return;
+        }
+        setThreadTranslationMode(threadShouldPreferTranslated ? "translated" : "original");
+    }, [conversation.id, resolvedTranslationTargetLanguage, threadShouldPreferTranslated]);
+
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        const storageKey = getThreadTranslationPreferenceKey(conversation.id, resolvedTranslationTargetLanguage);
+        window.localStorage.setItem(storageKey, threadTranslationMode);
+    }, [conversation.id, resolvedTranslationTargetLanguage, threadTranslationMode]);
+
+    const handleTranslateVisibleThread = useCallback(async (options?: { silent?: boolean; auto?: boolean }) => {
+        if (!onTranslateVisibleThread || translatingVisibleThread || autoTranslatingThread) return;
+        const visibleInboundIds = eligibleInboundTranslationIds.length > 0
+            ? eligibleInboundTranslationIds
+            : messages
+                .filter((message) => message.direction === "inbound" && String(message.body || "").trim().length > 0)
+                .map((message) => String(message.id || "").trim())
+                .filter(Boolean);
         if (visibleInboundIds.length === 0) return;
 
-        setTranslatingVisibleThread(true);
+        if (options?.auto) {
+            setAutoTranslatingThread(true);
+        } else {
+            setTranslatingVisibleThread(true);
+        }
         try {
             const result = await onTranslateVisibleThread(
                 visibleInboundIds,
-                conversation.replyLanguageOverride || conversation.locationDefaultReplyLanguage || "en"
+                resolvedTranslationTargetLanguage
             );
             if (!result?.success) {
-                toast.error(result?.error || "Failed to translate visible messages.");
+                if (!options?.silent) {
+                    toast.error(result?.error || "Failed to translate visible messages.");
+                }
                 return;
             }
-            toast.success(`Translated ${Number(result.translatedCount || 0)} messages.`);
+            setThreadTranslationMode("translated");
             setTranslationBannerDismissed(true);
+            if (!options?.silent) {
+                toast.success(`Translated ${Number(result.translatedCount || 0)} messages.`);
+            }
         } finally {
-            setTranslatingVisibleThread(false);
+            if (options?.auto) {
+                setAutoTranslatingThread(false);
+            } else {
+                setTranslatingVisibleThread(false);
+            }
         }
-    }, [conversation.locationDefaultReplyLanguage, conversation.replyLanguageOverride, messages, onTranslateVisibleThread, translatingVisibleThread]);
+    }, [autoTranslatingThread, eligibleInboundTranslationIds, messages, onTranslateVisibleThread, resolvedTranslationTargetLanguage, translatingVisibleThread]);
+
+    useEffect(() => {
+        if (!translationReadEnabled || !onTranslateVisibleThread) return;
+        if (threadTranslationMode !== "translated") return;
+        if (inboundForeignCandidates.length < 2) return;
+        if (eligibleInboundTranslationIds.length === 0) return;
+
+        const autoKey = `${conversation.id}:${resolvedTranslationTargetLanguage}`;
+        if (autoTranslationAttemptedRef.current === autoKey) return;
+        autoTranslationAttemptedRef.current = autoKey;
+        void handleTranslateVisibleThread({ silent: true, auto: true });
+    }, [
+        conversation.id,
+        eligibleInboundTranslationIds.length,
+        handleTranslateVisibleThread,
+        inboundForeignCandidates.length,
+        onTranslateVisibleThread,
+        resolvedTranslationTargetLanguage,
+        threadTranslationMode,
+        translationReadEnabled,
+    ]);
     const previousTailMessageId = previousTailMessageIdRef.current;
     const previousTailIndex = previousTailMessageId
         ? messages.findIndex((message) => message.id === previousTailMessageId)
@@ -1083,6 +1160,43 @@ export function ChatWindow({
                 </div>
             )}
 
+            {translationReadEnabled && inboundForeignCandidates.length >= 2 && (
+                <div className="border-b bg-slate-50 px-4 py-2" data-no-pane-swipe>
+                    <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
+                        <Languages className="h-3.5 w-3.5" />
+                        <span className="font-medium">
+                            {threadTranslationMode === "translated"
+                                ? `Viewing translated to ${resolvedTranslationTargetLanguage}.`
+                                : "Viewing original client text."}
+                        </span>
+                        {(translatingVisibleThread || autoTranslatingThread) && (
+                            <span className="inline-flex items-center gap-1 text-slate-500">
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                                Preparing translation
+                            </span>
+                        )}
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant={threadTranslationMode === "translated" ? "secondary" : "ghost"}
+                            className="h-7 px-2 text-[11px]"
+                            onClick={() => setThreadTranslationMode("translated")}
+                        >
+                            Show translation
+                        </Button>
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant={threadTranslationMode === "original" ? "secondary" : "ghost"}
+                            className="h-7 px-2 text-[11px]"
+                            onClick={() => setThreadTranslationMode("original")}
+                        >
+                            Show original
+                        </Button>
+                    </div>
+                </div>
+            )}
+
             {/* Messages Area */}
             <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 bg-slate-50/50">
                 <div
@@ -1154,6 +1268,7 @@ export function ChatWindow({
                                     enableMountAnimation={enableMountAnimation}
                                     onResendMessage={onResendMessage}
                                     translationReadEnabled={translationReadEnabled}
+                                    threadTranslationMode={threadTranslationMode}
                                     onTranslateMessage={onTranslateMessage}
                                 />
                             </div>
@@ -1187,6 +1302,7 @@ export function ChatWindow({
                 suggestions={suggestions}
                 onModelChange={setSelectedModel}
                 insertDraftSeed={composerInsertSeed}
+                translationTargetLanguageLabel={resolvedTranslationTargetLanguage}
             />
         </div>
     );

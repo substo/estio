@@ -3198,14 +3198,27 @@ export function ConversationInterface({ locationId, initialConversations, initia
             updatedAt: new Date(),
             ...(options?.translationSourceText && String(options.translationSourceText).trim() ? {
                 translation: {
-                    targetLanguage: options.translationTargetLanguage || conversationTarget.replyLanguageOverride || conversationTarget.locationDefaultReplyLanguage || "en",
-                    sourceLanguage: options.translationDetectedSourceLanguage || null,
-                    sourceText: String(options.translationSourceText || "").trim(),
-                    translatedText: text,
-                    status: "completed",
-                    provider: "manual_send_preview",
-                    model: "manual_send_preview",
-                    updatedAt: new Date().toISOString(),
+                    active: {
+                        targetLanguage: options.translationTargetLanguage || conversationTarget.replyLanguageOverride || conversationTarget.locationDefaultReplyLanguage || "en",
+                        sourceLanguage: options.translationDetectedSourceLanguage || null,
+                        sourceText: String(options.translationSourceText || "").trim(),
+                        translatedText: text,
+                        status: "completed",
+                        provider: "manual_send_preview",
+                        model: "manual_send_preview",
+                        updatedAt: new Date().toISOString(),
+                    },
+                    available: [{
+                        targetLanguage: options.translationTargetLanguage || conversationTarget.replyLanguageOverride || conversationTarget.locationDefaultReplyLanguage || "en",
+                        sourceLanguage: options.translationDetectedSourceLanguage || null,
+                        sourceText: String(options.translationSourceText || "").trim(),
+                        translatedText: text,
+                        status: "completed",
+                        provider: "manual_send_preview",
+                        model: "manual_send_preview",
+                        updatedAt: new Date().toISOString(),
+                    }],
+                    viewDefault: "original",
                 },
             } : {}),
         };
@@ -3352,7 +3365,11 @@ export function ConversationInterface({ locationId, initialConversations, initia
             return {
                 ...message,
                 detectedLanguage: result.translation?.sourceLanguage || null,
-                translation: result.translation,
+                translation: {
+                    active: result.translation,
+                    available: result.translation ? [result.translation] : [],
+                    viewDefault: result.translation?.sourceLanguage ? "translated" : "original",
+                },
                 translations: result.translation ? [result.translation] : [],
             };
         }));

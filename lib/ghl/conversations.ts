@@ -26,6 +26,24 @@ export interface Conversation {
     suggestedActions?: string[];
 }
 
+export interface MessageTranslationVariant {
+    id?: string;
+    targetLanguage: string;
+    sourceLanguage?: string | null;
+    sourceText: string;
+    translatedText: string;
+    status: "completed" | "failed";
+    provider?: string | null;
+    model?: string | null;
+    updatedAt?: string | null;
+}
+
+export interface MessageTranslationState {
+    active: MessageTranslationVariant | null;
+    available: MessageTranslationVariant[];
+    viewDefault: "original" | "translated";
+}
+
 export interface Message {
     id: string;
     ghlMessageId?: string;
@@ -108,28 +126,8 @@ export interface Message {
     };
     detectedLanguage?: string | null;
     detectedLanguageConfidence?: number | null;
-    translation?: {
-        id?: string;
-        targetLanguage: string;
-        sourceLanguage?: string | null;
-        sourceText: string;
-        translatedText: string;
-        status: "completed" | "failed";
-        provider?: string | null;
-        model?: string | null;
-        updatedAt?: string | null;
-    } | null;
-    translations?: Array<{
-        id?: string;
-        targetLanguage: string;
-        sourceLanguage?: string | null;
-        sourceText: string;
-        translatedText: string;
-        status: "completed" | "failed";
-        provider?: string | null;
-        model?: string | null;
-        updatedAt?: string | null;
-    }>;
+    translation?: MessageTranslationState | null;
+    translations?: MessageTranslationVariant[];
 }
 
 interface GetConversationsParams {

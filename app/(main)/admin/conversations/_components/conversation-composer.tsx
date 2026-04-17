@@ -75,6 +75,7 @@ interface ConversationComposerProps {
     replyingToLabel?: string;
     onModelChange?: (model: string) => void;
     insertDraftSeed?: { key: string; body: string } | null;
+    translationTargetLanguageLabel?: string | null;
 }
 
 function getInitialChannel(conversation: Conversation | null): ComposerChannel {
@@ -111,6 +112,7 @@ export function ConversationComposer({
     replyingToLabel,
     onModelChange,
     insertDraftSeed,
+    translationTargetLanguageLabel,
 }: ConversationComposerProps) {
     const [draft, setDraft] = useState("");
     const [sending, setSending] = useState(false);
@@ -546,6 +548,11 @@ export function ConversationComposer({
     const selectedReplyLanguageLabel = selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE
         ? "Send: Auto"
         : `Send: ${getReplyLanguageLabel(selectedReplyLanguage) || selectedReplyLanguage}`;
+    const resolvedDraftLanguageLabel = getReplyLanguageLabel(
+        selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE
+            ? (conversation?.locationDefaultReplyLanguage || DEFAULT_REPLY_LANGUAGE)
+            : selectedReplyLanguage
+    ) || translationTargetLanguageLabel || DEFAULT_REPLY_LANGUAGE;
     const replyLanguageSourceHint = selectedReplyLanguage !== REPLY_LANGUAGE_AUTO_VALUE
         ? `Source: Conversation override (${getReplyLanguageLabel(selectedReplyLanguage) || selectedReplyLanguage})`
         : `Source: Location default (${getReplyLanguageLabel(conversation?.locationDefaultReplyLanguage || DEFAULT_REPLY_LANGUAGE) || conversation?.locationDefaultReplyLanguage || DEFAULT_REPLY_LANGUAGE})`;
@@ -697,7 +704,7 @@ export function ConversationComposer({
                                                             onSelect={() => handleReplyLanguageSelect(REPLY_LANGUAGE_AUTO_VALUE)}
                                                         >
                                                             <Check className={cn("mr-2 h-3.5 w-3.5", selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE ? "opacity-100" : "opacity-0")} />
-                                                            Auto (detect from conversation)
+                                                            Auto (location default)
                                                         </CommandItem>
                                                         {REPLY_LANGUAGE_OPTIONS.map((option) => (
                                                             <CommandItem
@@ -819,7 +826,7 @@ export function ConversationComposer({
                 </div>
                 {onGenerateDraft && (
                     <div className="px-1 pt-1 text-[10px] text-slate-500">
-                        {replyLanguageSourceHint}
+                        Drafting in {resolvedDraftLanguageLabel}. {replyLanguageSourceHint}
                     </div>
                 )}
             </div>

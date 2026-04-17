@@ -7,6 +7,7 @@ import { format } from "date-fns";
 import { EmailFrame, type EmailFrameSelection } from "./email-frame";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { LinkifiedText } from "./linkified-text";
+import type { MessageTranslationState, MessageTranslationVariant } from "@/lib/ghl/conversations";
 import {
     MessageSelectionActions,
     type MessageSelectionActionTarget,
@@ -90,17 +91,7 @@ export interface MessageBubbleProps {
         };
         detectedLanguage?: string | null;
         detectedLanguageConfidence?: number | null;
-        translation?: {
-            id?: string;
-            targetLanguage: string;
-            sourceLanguage?: string | null;
-            sourceText: string;
-            translatedText: string;
-            status: "completed" | "failed";
-            provider?: string | null;
-            model?: string | null;
-            updatedAt?: string | null;
-        } | null;
+        translation?: MessageTranslationState | null;
     };
     contactPhone?: string;
     contactEmail?: string;
@@ -125,20 +116,11 @@ export interface MessageBubbleProps {
     onRetryTranscript?: (messageId: string, attachmentId: string) => void | Promise<void>;
     onResendMessage?: (messageId: string) => void | Promise<void>;
     translationReadEnabled?: boolean;
+    threadTranslationMode?: "original" | "translated";
     onTranslateMessage?: (messageId: string, targetLanguage?: string | null) => Promise<{
         success: boolean;
         error?: string;
-        translation?: {
-            id?: string;
-            targetLanguage: string;
-            sourceLanguage?: string | null;
-            sourceText: string;
-            translatedText: string;
-            status: "completed" | "failed";
-            provider?: string | null;
-            model?: string | null;
-            updatedAt?: string | null;
-        } | null;
+        translation?: MessageTranslationVariant | null;
     }>;
 }
 
@@ -159,6 +141,7 @@ export function MessageBubble({
     onRetryTranscript,
     onResendMessage,
     translationReadEnabled = false,
+    threadTranslationMode = "original",
     onTranslateMessage,
 }: MessageBubbleProps) {
     const isOutbound = message.direction === 'outbound';
@@ -172,8 +155,8 @@ export function MessageBubble({
     const [transcriptActionAttachmentId, setTranscriptActionAttachmentId] = useState<string | null>(null);
     const [extractActionAttachmentId, setExtractActionAttachmentId] = useState<string | null>(null);
     const [expandedTranscriptIds, setExpandedTranscriptIds] = useState<Record<string, boolean>>({});
-    const [activeTranslation, setActiveTranslation] = useState<MessageBubbleProps["message"]["translation"] | null>(message.translation || null);
-    const [showOriginalText, setShowOriginalText] = useState(false);
+    const [activeTranslation, setActiveTranslation] = useState<MessageTranslationVariant | null>(message.translation?.active || null);
+    const [translationViewMode, setTranslationViewMode] = useState<"thread" | "original" | "translated">("thread");
     const [isTranslatingMessage, setIsTranslatingMessage] = useState(false);
     const contentRef = useRef<HTMLDivElement>(null);
 
@@ -182,13 +165,13 @@ export function MessageBubble({
         setExpandedTranscriptIds({});
         setTranscriptActionAttachmentId(null);
         setExtractActionAttachmentId(null);
-        setActiveTranslation(message.translation || null);
-        setShowOriginalText(false);
+        setActiveTranslation(message.translation?.active || null);
+        setTranslationViewMode("thread");
         setIsTranslatingMessage(false);
     }, [message.id, isExpanded]);
 
     useEffect(() => {
-        setActiveTranslation(message.translation || null);
+        setActiveTranslation(message.translation?.active || null);
     }, [message.translation]);
 
     // Helper to detect if content is rich HTML (heuristic)
@@ -403,36 +386,54 @@ export function MessageBubble({
             const result = await onTranslateMessage(message.id, null);
             if (!result?.success || !result?.translation) return;
             setActiveTranslation(result.translation);
-            setShowOriginalText(false);
+            setTranslationViewMode("translated");
         } finally {
             setIsTranslatingMessage(false);
         }
     };
 
     const renderMessageBody = () => {
+        const effectiveViewMode = translationViewMode === "thread" ? threadTranslationMode : translationViewMode;
+        const showTranslatedText = !!activeTranslation?.translatedText?.trim() && effectiveViewMode === "translated";
         const translatedText = String(activeTranslation?.translatedText || "").trim();
-        if (translatedText && !showOriginalText) {
+        const sourceText = isOutbound && activeTranslation?.sourceText
+            ? String(activeTranslation.sourceText || "").trim()
+            : "";
+        if (translatedText && showTranslatedText) {
             return (
                 <div className="space-y-1">
                     <div className={cn(
                         "text-[11px] font-medium",
                         isOutbound ? "text-blue-100" : "text-slate-500"
                     )}>
-                        Translated{activeTranslation?.sourceLanguage ? ` from ${activeTranslation.sourceLanguage}` : ""}
+                        {isOutbound ? "Sent to client" : `Translated${activeTranslation?.sourceLanguage ? ` from ${activeTranslation.sourceLanguage}` : ""}`}
                     </div>
                     <LinkifiedText text={translatedText} />
                 </div>
             );
         }
 
-        if (showOriginalText && (isEmail || isRichHtml)) {
+        if (effectiveViewMode !== "translated" && (isEmail || isRichHtml)) {
             return <EmailFrame html={message.body} onSelectionChange={handleEmailSelectionChange} />;
         }
 
         if ((isEmail || isRichHtml) && !activeTranslation) {
             return <EmailFrame html={message.body} onSelectionChange={handleEmailSelectionChange} />;
         }
-        return <LinkifiedText text={message.body} />;
+        if (sourceText) {
+            return (
+                <div className="space-y-1">
+                    <div className={cn(
+                        "text-[11px] font-medium",
+                        isOutbound ? "text-blue-100" : "text-slate-500"
+                    )}>
+                        Internal source
+                    </div>
+                    <LinkifiedText text={sourceText} />
+                </div>
+            );
+        }
+        return <LinkifiedText text={sourceText || message.body} />;
     };
 
     return (
@@ -553,14 +554,23 @@ export function MessageBubble({
                                         type="button"
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            setShowOriginalText((prev) => !prev);
+                                            setTranslationViewMode((current) => {
+                                                const effectiveViewMode = current === "thread" ? threadTranslationMode : current;
+                                                return effectiveViewMode === "translated" ? "original" : "translated";
+                                            });
                                         }}
                                         className={cn(
                                             "rounded px-1.5 py-0.5",
                                             isOutbound ? "text-blue-100 hover:bg-white/20" : "text-slate-600 hover:bg-slate-100"
                                         )}
                                     >
-                                        {showOriginalText ? "Show translation" : "Show original"}
+                                        {(() => {
+                                            const effectiveViewMode = translationViewMode === "thread" ? threadTranslationMode : translationViewMode;
+                                            if (isOutbound) {
+                                                return effectiveViewMode === "translated" ? "Show sent" : "Show source";
+                                            }
+                                            return effectiveViewMode === "translated" ? "Show original" : "Show translation";
+                                        })()}
                                     </button>
                                     {canTranslateMessage && (
                                         <button

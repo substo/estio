@@ -32,6 +32,7 @@ import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-ev
 import { withResilience } from "@/lib/external/resilience";
 import { assembleTimelineEvents } from "@/lib/conversations/timeline-events";
 import { buildMessageCursorFromMessage } from "@/lib/conversations/thread-hydration";
+import { buildMessageTranslationState, getResolvedConversationTranslationLanguage } from "@/lib/conversations/translation-view";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
 import {
@@ -1949,8 +1950,31 @@ export async function fetchMessages(
     const legacyCrmSubjectPatterns = (((legacyCrmSettings as any)?.legacyCrmLeadEmailSubjectPatterns || []) as string[]);
     const transcriptVisibility = await resolveTranscriptVisibilityAccess(location.id);
     const redactTranscriptContent = transcriptVisibility.restrictContent;
+    const resolvedTranslationTargetLanguage = getResolvedConversationTranslationLanguage({
+        replyLanguageOverride: conversation.replyLanguageOverride || null,
+        locationDefaultReplyLanguage: await getLocationDefaultReplyLanguage(location.id, DEFAULT_TRANSLATION_TARGET_LANGUAGE),
+    });
 
-    return messages.map((m: any) => ({
+    return messages.map((m: any) => {
+        const translationEntries = (m.translationCaches || []).map((entry: any) => ({
+            id: entry.id,
+            targetLanguage: entry.targetLanguage,
+            sourceLanguage: entry.detectedSourceLanguage || null,
+            sourceText: entry.sourceText || "",
+            translatedText: entry.translatedText || "",
+            status: String(entry.status || MESSAGE_TRANSLATION_STATUS.completed).toLowerCase() === MESSAGE_TRANSLATION_STATUS.failed
+                ? MESSAGE_TRANSLATION_STATUS.failed
+                : MESSAGE_TRANSLATION_STATUS.completed,
+            provider: entry.provider || null,
+            model: entry.model || null,
+            updatedAt: entry.updatedAt ? new Date(entry.updatedAt).toISOString() : null,
+        }));
+        const detectedLanguage = (m.translationCaches?.[0]?.detectedSourceLanguage || null) || null;
+        const detectedLanguageConfidence = Number.isFinite(Number(m.translationCaches?.[0]?.detectionConfidence))
+            ? Number(m.translationCaches?.[0]?.detectionConfidence)
+            : null;
+
+        return {
         ...(() => {
             if (!includeLegacyEmailMeta) return {};
             const isEmail = String(m.type || '').toUpperCase().includes('EMAIL');
@@ -2033,40 +2057,14 @@ export async function fetchMessages(
         emailFrom: m.emailFrom || undefined,
         emailTo: m.emailTo || undefined,
         source: m.source || undefined,
-        detectedLanguage: (m.translationCaches?.[0]?.detectedSourceLanguage || null) || null,
-        detectedLanguageConfidence: Number.isFinite(Number(m.translationCaches?.[0]?.detectionConfidence))
-            ? Number(m.translationCaches?.[0]?.detectionConfidence)
-            : null,
-        translation: m.translationCaches?.[0]
-            ? {
-                id: m.translationCaches[0].id,
-                targetLanguage: m.translationCaches[0].targetLanguage,
-                sourceLanguage: m.translationCaches[0].detectedSourceLanguage || null,
-                sourceText: m.translationCaches[0].sourceText || "",
-                translatedText: m.translationCaches[0].translatedText || "",
-                status: String(m.translationCaches[0].status || MESSAGE_TRANSLATION_STATUS.completed).toLowerCase() === MESSAGE_TRANSLATION_STATUS.failed
-                    ? MESSAGE_TRANSLATION_STATUS.failed
-                    : MESSAGE_TRANSLATION_STATUS.completed,
-                provider: m.translationCaches[0].provider || null,
-                model: m.translationCaches[0].model || null,
-                updatedAt: m.translationCaches[0].updatedAt
-                    ? new Date(m.translationCaches[0].updatedAt).toISOString()
-                    : null,
-            }
-            : null,
-        translations: (m.translationCaches || []).map((entry: any) => ({
-            id: entry.id,
-            targetLanguage: entry.targetLanguage,
-            sourceLanguage: entry.detectedSourceLanguage || null,
-            sourceText: entry.sourceText || "",
-            translatedText: entry.translatedText || "",
-            status: String(entry.status || MESSAGE_TRANSLATION_STATUS.completed).toLowerCase() === MESSAGE_TRANSLATION_STATUS.failed
-                ? MESSAGE_TRANSLATION_STATUS.failed
-                : MESSAGE_TRANSLATION_STATUS.completed,
-            provider: entry.provider || null,
-            model: entry.model || null,
-            updatedAt: entry.updatedAt ? new Date(entry.updatedAt).toISOString() : null,
-        })),
+        detectedLanguage,
+        detectedLanguageConfidence,
+        translation: buildMessageTranslationState({
+            direction: m.direction as "inbound" | "outbound",
+            detectedLanguage,
+            detectedLanguageConfidence,
+        }, translationEntries, resolvedTranslationTargetLanguage),
+        translations: translationEntries,
         attachments: (m.attachments || []).map((a: any) => ({
             id: a.id,
             url: String(a.url || "").startsWith("r2://")
@@ -2099,7 +2097,8 @@ export async function fetchMessages(
         })),
         // Hydrated fields for UI
         html: m.body?.includes('<') ? m.body : undefined // Simple check
-    }));
+    };
+    });
 }
 
 type ConversationWorkspaceTaskSummary = {

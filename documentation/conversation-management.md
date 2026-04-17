@@ -286,6 +286,8 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
     - inbound message bubbles expose a per-message `Translate` action when enabled
     - translated output renders inline with a `Show original` / `Show translation` toggle
     - translated copies are agent-side overlays and do not mutate canonical message content
+    - when repeated likely foreign-language inbound messages are detected, the thread can default to translated view for the agent while preserving original client text as canonical content
+    - translated/original thread preference is presentation-only and should persist when the thread is reopened
   - Thread assist banner:
     - chats mode can show a lightweight banner when repeated likely foreign-language inbound messages are detected
     - banner CTA translates the currently visible inbound thread window
@@ -293,6 +295,7 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
     - the shared composer supports translation preview before send
     - users can `Send translated` or `Send original`
     - when a translated variant is sent, source/translated pairing is cached for auditability and outbound toggle UX
+    - outbound timeline content remains the exact text sent to the client; internal authored/source text is available through compact internal-only toggles rather than dual rendering by default
   - Persistence:
     - translation cache records are stored in Prisma model `MessageTranslationCache`
     - schema fields:
@@ -334,6 +337,10 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
       - `detectedLanguageConfidence`
       - `translation`
       - `translations`
+    - `translation` should distinguish:
+      - `active`: currently preferred overlay for the resolved target language
+      - `available`: cached variants
+      - `viewDefault`: `original` or `translated`
   - Deployment note:
     - this feature shipped via Prisma migration `20260408120000_message_translation_cache`
     - production applied it with `prisma migrate deploy`; this was not a `prisma db push` rollout
