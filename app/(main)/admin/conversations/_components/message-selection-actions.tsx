@@ -203,6 +203,7 @@ export function MessageSelectionActions({
     const [isSummarizing, setIsSummarizing] = useState(false);
     const [summarySavedEntry, setSummarySavedEntry] = useState("");
     const [summarizeStreamingText, setSummarizeStreamingText] = useState("");
+    const [summarizeStreamingPrefix, setSummarizeStreamingPrefix] = useState("");
     const [summarizeSkipped, setSummarizeSkipped] = useState(false);
     const summarizeAbortRef = useRef<AbortController | null>(null);
 
@@ -367,6 +368,7 @@ export function MessageSelectionActions({
 
         setIsSummarizing(true);
         setSummarizeStreamingText("");
+        setSummarizeStreamingPrefix("");
         setSummarySavedEntry("");
         setSummarizeSkipped(false);
 
@@ -402,6 +404,11 @@ export function MessageSelectionActions({
                 if (!line.trim()) return;
                 let payload: any = null;
                 try { payload = JSON.parse(line); } catch { return; }
+
+                if (payload?.type === "started" && payload.prefix) {
+                    setSummarizeStreamingPrefix(String(payload.prefix));
+                    return;
+                }
 
                 if (payload?.type === "chunk" && typeof payload.text === "string") {
                     accumulated += payload.text;
@@ -490,6 +497,7 @@ export function MessageSelectionActions({
         setSummarizeSelectionText(text);
         setSummarySavedEntry("");
         setSummarizeStreamingText("");
+        setSummarizeStreamingPrefix("");
         setSummarizeSkipped(false);
         setSummarizeOpen(true);
         if (selection?.text?.trim()) onClearSelection();
@@ -1514,6 +1522,7 @@ export function MessageSelectionActions({
                         setIsSummarizing(false);
                         setSummarySavedEntry("");
                         setSummarizeStreamingText("");
+                        setSummarizeStreamingPrefix("");
                         setSummarizeSkipped(false);
                     }
                 }}
@@ -1585,7 +1594,7 @@ export function MessageSelectionActions({
                                     <Loader2 className="h-3 w-3 animate-spin" />
                                     Generating summary...
                                 </div>
-                                <p className="whitespace-pre-wrap">{summarizeStreamingText}</p>
+                                <p className="whitespace-pre-wrap">{summarizeStreamingPrefix}{summarizeStreamingText}</p>
                             </div>
                         ) : null}
 

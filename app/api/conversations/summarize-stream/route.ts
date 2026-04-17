@@ -190,29 +190,35 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: false, error: "Selected text is too short" }, { status: 400 });
     }
 
-    // Resolve conversation
-    const conversation = await db.conversation.findFirst({
-        where: {
-            locationId: location.id,
-            OR: [
-                { id: conversationId },
-                { ghlConversationId: conversationId },
-            ],
-        },
-        select: {
-            id: true,
-            ghlConversationId: true,
-            contactId: true,
-            contact: {
-                select: {
-                    firstName: true,
-                    name: true,
-                    email: true,
-                    phone: true,
+    // Resolve conversation and user concurrently
+    const [conversation, user] = await Promise.all([
+        db.conversation.findFirst({
+            where: {
+                locationId: location.id,
+                OR: [
+                    { id: conversationId },
+                    { ghlConversationId: conversationId },
+                ],
+            },
+            select: {
+                id: true,
+                ghlConversationId: true,
+                contactId: true,
+                contact: {
+                    select: {
+                        firstName: true,
+                        name: true,
+                        email: true,
+                        phone: true,
+                    },
                 },
             },
-        },
-    });
+        }),
+        db.user.findUnique({
+            where: { clerkId: clerkUserId },
+            select: { id: true, firstName: true, name: true, email: true },
+        }),
+    ]);
 
     if (!conversation) {
         return NextResponse.json({ success: false, error: "Conversation not found" }, { status: 404 });
@@ -264,8 +270,12 @@ export async function POST(req: NextRequest) {
                 controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
             };
 
+            const now = new Date();
+            const actorFirstName = user ? (deriveOptionalFirstName(user.firstName, user.name, user.email) || "User") : "User";
+            const generatedPrefix = `${formatLogDate(now)} ${actorFirstName}: `;
+
             try {
-                push({ type: "started", ts: new Date().toISOString() });
+                push({ type: "started", ts: now.toISOString(), prefix: generatedPrefix });
 
                 const genAI = new GoogleGenerativeAI(apiKey);
                 const model = genAI.getGenerativeModel({
@@ -304,11 +314,6 @@ export async function POST(req: NextRequest) {
                 push({ type: "summary_ready", summary });
 
                 // Persist CRM log entry
-                const user = await db.user.findUnique({
-                    where: { clerkId: clerkUserId },
-                    select: { id: true, firstName: true, name: true, email: true },
-                });
-
                 let entry = summary;
                 let skipped = false;
                 let persistError: string | null = null;
@@ -338,10 +343,8 @@ export async function POST(req: NextRequest) {
                         skipped = true;
                         entry = duplicateEntry;
                     } else {
-                        const now = new Date();
-                        const actorFirstName = deriveOptionalFirstName(user.firstName, user.name, user.email) || "User";
                         const normalizedBody = normalizeSingleLine(summary, "Updated conversation notes.");
-                        entry = `${formatLogDate(now)} ${actorFirstName}: ${normalizedBody}`;
+                        entry = `${generatedPrefix}${normalizedBody}`;
 
                         await db.contactHistory.create({
                             data: {
