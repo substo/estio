@@ -233,6 +233,9 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
 
     if (type) {
         where.contactType = type;
+    } else if (q && category !== 'all') {
+        // Implicit Scope Expansion: Bypass the category filter during text searches
+        // so the user can globally find contacts without hidden filter friction.
     } else if (category === 'real_estate') {
         where.contactType = { in: realEstateTypes };
     } else if (category === 'business') {
@@ -366,6 +369,14 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
                     <AddContactDialog locationId={locationId} leadSources={leadSourceNames} />
                 </div>
             </div>
+
+            {q && category !== 'all' && !type && (
+                <div className="bg-blue-50/80 text-blue-800 px-4 py-3 rounded-md mb-4 text-sm flex items-center gap-2 dark:bg-blue-900/30 dark:text-blue-300">
+                    <span>
+                        Searching across <strong>all</strong> contacts. Clear your search to return to {category === 'business' ? 'Business' : 'Real Estate'} contacts.
+                    </span>
+                </div>
+            )}
 
             <ContactFilters leadSources={leadSourceNames} agents={agents} view={view} />
 
