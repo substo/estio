@@ -24,35 +24,31 @@ export async function subscribe(prevState: any, formData: FormData) {
         return { success: false, message: "Failed to save subscription. Please try again." };
     }
 
-    // 2. Sync to GoHighLevel (Side Effect) using OAuth Token
+    // 2. Fire-and-forget: Sync to GoHighLevel in the background
     const ghlLocationId = process.env.NEXT_PUBLIC_GHL_NEWSLETTER_LOCATION_ID;
-
-    if (!ghlLocationId) {
-        console.warn("Missing NEXT_PUBLIC_GHL_NEWSLETTER_LOCATION_ID. Skipping sync.");
-        return { success: true, message: "Successfully subscribed!" };
-    }
-
-    try {
-        // syncContactToGHL now handles token fetching and creating/refreshing internally
-        const contactId = await syncContactToGHL(ghlLocationId, {
-            email,
-            tags: ['subscription-lead'],
-            name: 'Subscriber',
-        });
-
-        if (contactId) {
-            await db.subscriber.update({
-                where: { id: subscriber.id },
-                data: { ghlContactId: contactId, syncedAt: new Date(), syncError: null }
-            });
-        }
-    } catch (error: any) {
-        console.error("GHL Sync Error:", error);
-        // Record error but don't fail the user request
-        await db.subscriber.update({
-            where: { id: subscriber.id },
-            data: { syncError: error.message }
-        });
+    if (ghlLocationId) {
+        const subscriberId = subscriber.id;
+        void (async () => {
+            try {
+                const contactId = await syncContactToGHL(ghlLocationId, {
+                    email,
+                    tags: ['subscription-lead'],
+                    name: 'Subscriber',
+                });
+                if (contactId) {
+                    await db.subscriber.update({
+                        where: { id: subscriberId },
+                        data: { ghlContactId: contactId, syncedAt: new Date(), syncError: null }
+                    });
+                }
+            } catch (error: any) {
+                console.error("[Subscribe] GHL Sync Error:", error);
+                await db.subscriber.update({
+                    where: { id: subscriberId },
+                    data: { syncError: error.message }
+                }).catch(() => {});
+            }
+        })();
     }
 
     return { success: true, message: "Successfully subscribed!" };

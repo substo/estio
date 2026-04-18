@@ -19,7 +19,7 @@ import {
     computeRemovedCloudflareIds,
 } from "@/lib/media/media-assets";
 
-// Helper to handle Contact Role Upsert (Local + GHL)
+// Helper to handle Contact Role Upsert (Local-first + fire-and-forget GHL sync)
 async function upsertContactRole(
     location: any,
     propertyId: string,
@@ -30,33 +30,11 @@ async function upsertContactRole(
 
     console.log(`Processing ${role} contact role: ${data.name}`);
 
-    // 1. Sync to GHL first (to get ID)
-    let ghlId: string | null = null;
-    if (location.ghlRefreshToken && location.ghlLocationId) {
-        try {
-            const tokens = await refreshGhlAccessToken(location);
-            if (tokens.ghlAccessToken) {
-                ghlId = await syncContactToGHL(location.ghlLocationId, {
-                    name: data.name,
-                    email: data.email || undefined,
-                    phone: data.phone || undefined,
-                    tags: [role] // Tag with role (e.g. 'Owner', 'Agent')
-                });
-                console.log(`Synced ${role} to GHL. ID: ${ghlId}`);
-            }
-        } catch (err) {
-            console.error(`Failed to sync ${role} to GHL:`, err);
-        }
-    }
-
-    // 2. Upsert Local Contact
+    // 1. Upsert Local Contact (source of truth — do this first)
     let contact;
-    if (ghlId) {
-        contact = await db.contact.findFirst({ where: { ghlContactId: ghlId } });
-    }
 
-    // Fallback: Find by email if contact
-    if (!contact && data.email) {
+    // Find by email (primary local lookup)
+    if (data.email) {
         contact = await db.contact.findFirst({ where: { email: data.email, locationId: location.id } });
     }
 
@@ -66,11 +44,8 @@ async function upsertContactRole(
             where: { id: contact.id },
             data: {
                 name: data.name,
-                // Only update email/phone if they are missing or if we want to overwrite?
-                // Let's overwrite for now as this is an edit form
                 email: data.email || contact.email,
                 phone: data.phone || contact.phone,
-                ghlContactId: ghlId || contact.ghlContactId,
             }
         });
     } else {
@@ -78,17 +53,15 @@ async function upsertContactRole(
         contact = await db.contact.create({
             data: {
                 locationId: location.id,
-                status: 'NEW', // Default status
+                status: 'NEW',
                 name: data.name,
                 email: data.email,
                 phone: data.phone,
-                ghlContactId: ghlId,
             }
         });
     }
 
-    // 3. Upsert ContactPropertyRole
-    // Check if role exists
+    // 2. Upsert ContactPropertyRole
     const existingRole = await db.contactPropertyRole.findUnique({
         where: {
             contactId_propertyId_role: {
@@ -108,9 +81,34 @@ async function upsertContactRole(
             }
         });
     }
+
+    // 3. Fire-and-forget: Sync to GHL in the background
+    const contactId = contact.id;
+    const existingGhlContactId = contact.ghlContactId || null;
+    if (location.ghlRefreshToken && location.ghlLocationId) {
+        void (async () => {
+            try {
+                const tokens = await refreshGhlAccessToken(location);
+                if (tokens.ghlAccessToken) {
+                    const ghlId = await syncContactToGHL(location.ghlLocationId, {
+                        name: data.name!,
+                        email: data.email || undefined,
+                        phone: data.phone || undefined,
+                        tags: [role]
+                    }, existingGhlContactId);
+                    if (ghlId && !existingGhlContactId) {
+                        await db.contact.update({ where: { id: contactId }, data: { ghlContactId: ghlId } });
+                    }
+                    console.log(`[Background] Synced ${role} to GHL. ID: ${ghlId}`);
+                }
+            } catch (err) {
+                console.error(`[Background] Failed to sync ${role} to GHL:`, err);
+            }
+        })();
+    }
 }
 
-// Helper to handle Company Role Upsert (Local + GHL)
+// Helper to handle Company Role Upsert (Local-first + fire-and-forget GHL sync)
 async function upsertCompanyRole(
     location: any,
     propertyId: string,
@@ -121,36 +119,11 @@ async function upsertCompanyRole(
 
     console.log(`Processing ${role} company role: ${data.name}`);
 
-    // 1. Sync to GHL first (to get ID)
-    let ghlId: string | null = null;
-    if (location.ghlRefreshToken && location.ghlLocationId) {
-        try {
-            const tokens = await refreshGhlAccessToken(location);
-            if (tokens.ghlAccessToken) {
-                ghlId = await syncCompanyToGHL(location.ghlLocationId, {
-                    name: data.name,
-                    email: data.email || undefined,
-                    phone: data.phone || undefined,
-                    website: data.website || undefined,
-                    tags: [role] // Tag with role (e.g. 'Developer')
-                });
-                console.log(`Synced ${role} to GHL. ID: ${ghlId}`);
-            }
-        } catch (err) {
-            console.error(`Failed to sync ${role} to GHL:`, err);
-        }
-    }
-
-    // 2. Upsert Local Company
+    // 1. Upsert Local Company (source of truth — do this first)
     let company;
-    if (ghlId) {
-        company = await db.company.findUnique({ where: { ghlCompanyId: ghlId } });
-    }
 
-    // Fallback: Find by name (Companies are usually unique by name in a location)
-    if (!company) {
-        company = await db.company.findFirst({ where: { name: data.name, locationId: location.id } });
-    }
+    // Find by name (companies are usually unique by name in a location)
+    company = await db.company.findFirst({ where: { name: data.name, locationId: location.id } });
 
     if (company) {
         // Update existing company
@@ -160,7 +133,6 @@ async function upsertCompanyRole(
                 email: data.email || company.email,
                 phone: data.phone || company.phone,
                 website: data.website || company.website,
-                ghlCompanyId: ghlId || company.ghlCompanyId,
             }
         });
     } else {
@@ -172,12 +144,11 @@ async function upsertCompanyRole(
                 email: data.email,
                 phone: data.phone,
                 website: data.website,
-                ghlCompanyId: ghlId,
             }
         });
     }
 
-    // 3. Upsert CompanyPropertyRole
+    // 2. Upsert CompanyPropertyRole
     const existingRole = await db.companyPropertyRole.findUnique({
         where: {
             companyId_propertyId_role: {
@@ -196,6 +167,32 @@ async function upsertCompanyRole(
                 role: role
             }
         });
+    }
+
+    // 3. Fire-and-forget: Sync to GHL in the background
+    const companyId = company.id;
+    const existingGhlCompanyId = company.ghlCompanyId || null;
+    if (location.ghlRefreshToken && location.ghlLocationId) {
+        void (async () => {
+            try {
+                const tokens = await refreshGhlAccessToken(location);
+                if (tokens.ghlAccessToken) {
+                    const ghlId = await syncCompanyToGHL(location.ghlLocationId, {
+                        name: data.name!,
+                        email: data.email || undefined,
+                        phone: data.phone || undefined,
+                        website: data.website || undefined,
+                        tags: [role]
+                    });
+                    if (ghlId && !existingGhlCompanyId) {
+                        await db.company.update({ where: { id: companyId }, data: { ghlCompanyId: ghlId } });
+                    }
+                    console.log(`[Background] Synced ${role} company to GHL. ID: ${ghlId}`);
+                }
+            } catch (err) {
+                console.error(`[Background] Failed to sync ${role} company to GHL:`, err);
+            }
+        })();
     }
 }
 

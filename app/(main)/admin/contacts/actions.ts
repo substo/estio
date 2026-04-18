@@ -790,14 +790,14 @@ export async function createContact(
       }
     }
 
-    // Optional Google auto-sync (opt-in settings)
-    await runGoogleAutoSyncForContact({
+    // Fire-and-forget: Google sync runs in the background (same pattern as tasks)
+    void runGoogleAutoSyncForContact({
       locationId: data.locationId,
       contactId: contact.id,
       source: 'CONTACT_FORM',
       event: 'create',
       preferredUserId: internalUserId
-    });
+    }).catch(err => console.error('[createContact] Google auto-sync error:', err));
 
 
     revalidatePath('/admin/contacts');
@@ -847,7 +847,7 @@ async function updateContactCore(
   // Also verify the contact actually belongs to this location
   const existingContactCheck = await db.contact.findUnique({
     where: { id: data.contactId },
-    select: { locationId: true, contactType: true }
+    select: { locationId: true, contactType: true, ghlContactId: true }
   });
 
   if (!existingContactCheck || existingContactCheck.locationId !== data.locationId) {
@@ -950,49 +950,44 @@ async function updateContactCore(
       await handleContactRoles(tx, data.contactId, data);
     });
 
-    // 3-Way Sync: Estio -> GHL + Google Contacts
-
-    // 1. Sync to GoHighLevel
-    try {
-      const location = await db.location.findUnique({
-        where: { id: data.locationId },
-        select: { ghlAccessToken: true, ghlLocationId: true }
-      });
-
-      if (location?.ghlAccessToken && location?.ghlLocationId) {
-        console.log('[updateContact] Syncing to GoHighLevel...');
-        const ghlId = await syncContactToGHL(location.ghlLocationId, {
-          name: data.name || undefined,
-          email: data.email || undefined,
-          phone: data.phone || undefined,
-        });
-        // Update ghlContactId if it was newly created
-        if (ghlId) {
-          const existingContact = await db.contact.findUnique({
-            where: { id: data.contactId },
-            select: { ghlContactId: true }
+    // Fire-and-forget: GHL + Google sync run in the background (same pattern as tasks)
+    const existingGhlContactId = existingContactCheck?.ghlContactId || null;
+    void Promise.allSettled([
+      // 1. Sync to GoHighLevel
+      (async () => {
+        try {
+          const location = await db.location.findUnique({
+            where: { id: data.locationId },
+            select: { ghlAccessToken: true, ghlLocationId: true }
           });
-          if (!existingContact?.ghlContactId) {
-            await db.contact.update({
-              where: { id: data.contactId },
-              data: { ghlContactId: ghlId }
-            });
+          if (location?.ghlAccessToken && location?.ghlLocationId) {
+            console.log('[updateContact] Syncing to GoHighLevel...');
+            const ghlId = await syncContactToGHL(location.ghlLocationId, {
+              name: data.name || undefined,
+              email: data.email || undefined,
+              phone: data.phone || undefined,
+            }, existingGhlContactId);
+            if (ghlId && !existingGhlContactId) {
+              await db.contact.update({
+                where: { id: data.contactId },
+                data: { ghlContactId: ghlId }
+              });
+            }
+            console.log('[updateContact] GHL Sync complete');
           }
+        } catch (ghlError) {
+          console.error('[updateContact] GHL Sync Failed:', ghlError);
         }
-        console.log('[updateContact] GHL Sync complete');
-      }
-    } catch (ghlError) {
-      console.error('[updateContact] GHL Sync Failed:', ghlError);
-    }
-
-    // 2. Optional Google auto-sync for linked contacts (opt-in settings)
-    await runGoogleAutoSyncForContact({
-      locationId: data.locationId,
-      contactId: data.contactId,
-      source: 'CONTACT_FORM',
-      event: 'update',
-      preferredUserId: internalUserId
-    });
+      })(),
+      // 2. Optional Google auto-sync for linked contacts (opt-in settings)
+      runGoogleAutoSyncForContact({
+        locationId: data.locationId,
+        contactId: data.contactId,
+        source: 'CONTACT_FORM',
+        event: 'update',
+        preferredUserId: internalUserId
+      }),
+    ]).catch(err => console.error('[updateContact] background sync error:', err));
 
     return { success: true, message: 'Contact updated successfully.', contact: savedContactSummary };
 
