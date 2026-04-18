@@ -8,6 +8,7 @@ import { EmailFrame, type EmailFrameSelection } from "./email-frame";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { LinkifiedText } from "./linkified-text";
 import type { MessageTranslationState, MessageTranslationVariant } from "@/lib/ghl/conversations";
+import { selectActiveTranslation } from "@/lib/conversations/translation-view";
 import {
     MessageSelectionActions,
     type MessageSelectionActionTarget,
@@ -117,6 +118,7 @@ export interface MessageBubbleProps {
     onResendMessage?: (messageId: string) => void | Promise<void>;
     translationReadEnabled?: boolean;
     threadTranslationMode?: "original" | "translated";
+    preferredDisplayLanguage?: string | null;
     onTranslateMessage?: (messageId: string, targetLanguage?: string | null) => Promise<{
         success: boolean;
         error?: string;
@@ -142,6 +144,7 @@ export function MessageBubble({
     onResendMessage,
     translationReadEnabled = false,
     threadTranslationMode = "original",
+    preferredDisplayLanguage,
     onTranslateMessage,
 }: MessageBubbleProps) {
     const isOutbound = message.direction === 'outbound';
@@ -155,7 +158,8 @@ export function MessageBubble({
     const [transcriptActionAttachmentId, setTranscriptActionAttachmentId] = useState<string | null>(null);
     const [extractActionAttachmentId, setExtractActionAttachmentId] = useState<string | null>(null);
     const [expandedTranscriptIds, setExpandedTranscriptIds] = useState<Record<string, boolean>>({});
-    const [activeTranslation, setActiveTranslation] = useState<MessageTranslationVariant | null>(message.translation?.active || null);
+    const resolvedMessageTranslation = selectActiveTranslation(message.translations || [], preferredDisplayLanguage || null) || message.translation?.active || null;
+    const [activeTranslation, setActiveTranslation] = useState<MessageTranslationVariant | null>(resolvedMessageTranslation);
     const [translationViewMode, setTranslationViewMode] = useState<"thread" | "original" | "translated">("thread");
     const [isTranslatingMessage, setIsTranslatingMessage] = useState(false);
     const contentRef = useRef<HTMLDivElement>(null);
@@ -165,14 +169,14 @@ export function MessageBubble({
         setExpandedTranscriptIds({});
         setTranscriptActionAttachmentId(null);
         setExtractActionAttachmentId(null);
-        setActiveTranslation(message.translation?.active || null);
+        setActiveTranslation(selectActiveTranslation(message.translations || [], preferredDisplayLanguage || null) || message.translation?.active || null);
         setTranslationViewMode("thread");
         setIsTranslatingMessage(false);
-    }, [message.id, isExpanded]);
+    }, [message.id, isExpanded, message.translation, message.translations, preferredDisplayLanguage]);
 
     useEffect(() => {
-        setActiveTranslation(message.translation?.active || null);
-    }, [message.translation]);
+        setActiveTranslation(selectActiveTranslation(message.translations || [], preferredDisplayLanguage || null) || message.translation?.active || null);
+    }, [message.translation, message.translations, preferredDisplayLanguage]);
 
     // Helper to detect if content is rich HTML (heuristic)
     const isRichHtml = message.body && (message.body.includes('<div') || message.body.includes('<html') || message.body.includes('<table'));
@@ -383,7 +387,7 @@ export function MessageBubble({
         if (!onTranslateMessage || isTranslatingMessage) return;
         setIsTranslatingMessage(true);
         try {
-            const result = await onTranslateMessage(message.id, null);
+            const result = await onTranslateMessage(message.id, preferredDisplayLanguage || null);
             if (!result?.success || !result?.translation) return;
             setActiveTranslation(result.translation);
             setTranslationViewMode("translated");

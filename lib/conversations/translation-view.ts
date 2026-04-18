@@ -1,5 +1,7 @@
 import type { Conversation, Message, MessageTranslationState, MessageTranslationVariant } from "@/lib/ghl/conversations";
 
+const DEFAULT_INTERNAL_LANGUAGE = "en";
+
 function normalizeLanguageTag(language: string | null | undefined) {
     return String(language || "").trim().toLowerCase();
 }
@@ -14,8 +16,13 @@ export function getResolvedConversationTranslationLanguage(conversation: Pick<Co
     return String(
         conversation?.replyLanguageOverride
         || conversation?.locationDefaultReplyLanguage
-        || "en"
+        || DEFAULT_INTERNAL_LANGUAGE
     ).trim();
+}
+
+export function getBrowserLanguage() {
+    if (typeof window === "undefined") return DEFAULT_INTERNAL_LANGUAGE;
+    return normalizeLanguageTag(window.navigator.language || "") || DEFAULT_INTERNAL_LANGUAGE;
 }
 
 export function selectActiveTranslation(

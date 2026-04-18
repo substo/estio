@@ -155,6 +155,12 @@ Canary mode enables the flag only for location IDs listed in `CONVERSATIONS_CANA
 
 ### 2. Formatting & Actions
 
+### 2.1 Language Split
+- **Viewing language** is the internal language used to translate inbound messages for agents in the thread UI.
+- **Reply language** is the outbound target language used when previewing or sending translated replies.
+- Agents can force `Reply language` per conversation even if the lead writes in a different language.
+- A manual reply-language override must persist and must not be replaced just because the latest inbound message is in English or another detected language.
+
 #### Soft Delete (Move to Trash)
 - **Action**: Sets `deletedAt` to current timestamp.
 - **Behavior**: Item disappears from Inbox/Archive and appears in Trash.

@@ -76,6 +76,7 @@ interface ConversationComposerProps {
     onModelChange?: (model: string) => void;
     insertDraftSeed?: { key: string; body: string } | null;
     translationTargetLanguageLabel?: string | null;
+    viewingLanguageLabel?: string | null;
 }
 
 function getInitialChannel(conversation: Conversation | null): ComposerChannel {
@@ -118,6 +119,7 @@ export function ConversationComposer({
     onModelChange,
     insertDraftSeed,
     translationTargetLanguageLabel,
+    viewingLanguageLabel,
 }: ConversationComposerProps) {
     const [draft, setDraft] = useState("");
     const [sending, setSending] = useState(false);
@@ -553,14 +555,15 @@ export function ConversationComposer({
     };
 
     const selectedReplyLanguageLabel = selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE
-        ? "Send: Auto"
-        : `Send: ${getReplyLanguageLabel(selectedReplyLanguage) || selectedReplyLanguage}`;
+        ? "Reply in: Auto"
+        : `Reply in: ${getReplyLanguageLabel(selectedReplyLanguage) || selectedReplyLanguage}`;
     const resolvedDraftLanguageLabel = getReplyLanguageLabel(agentDraftLanguage) || agentDraftLanguage || DEFAULT_REPLY_LANGUAGE;
     const resolvedSendLanguageLabel = getReplyLanguageLabel(
         selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE
             ? (conversation?.locationDefaultReplyLanguage || DEFAULT_REPLY_LANGUAGE)
             : selectedReplyLanguage
     ) || translationTargetLanguageLabel || DEFAULT_REPLY_LANGUAGE;
+    const resolvedViewingLanguageLabel = getReplyLanguageLabel(viewingLanguageLabel || null) || viewingLanguageLabel || DEFAULT_REPLY_LANGUAGE;
     const replyLanguageSourceHint = selectedReplyLanguage !== REPLY_LANGUAGE_AUTO_VALUE
         ? `Source: Conversation override (${getReplyLanguageLabel(selectedReplyLanguage) || selectedReplyLanguage})`
         : `Source: Location default (${getReplyLanguageLabel(conversation?.locationDefaultReplyLanguage || DEFAULT_REPLY_LANGUAGE) || conversation?.locationDefaultReplyLanguage || DEFAULT_REPLY_LANGUAGE})`;
@@ -834,7 +837,7 @@ export function ConversationComposer({
                 </div>
                 {onGenerateDraft && (
                     <div className="px-1 pt-1 text-[10px] text-slate-500">
-                        Drafting in {resolvedDraftLanguageLabel} for review. Send language: {resolvedSendLanguageLabel}. {replyLanguageSourceHint}
+                        Viewing in {resolvedViewingLanguageLabel}. Drafting in {resolvedDraftLanguageLabel} for review. Replying in {resolvedSendLanguageLabel}. {replyLanguageSourceHint}
                     </div>
                 )}
             </div>

@@ -18,6 +18,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ActivityLogEntry } from "./activity-log-entry";
 import { SuggestedResponseQueue, type SuggestedResponseQueueItem } from "./suggested-response-queue";
+import { getReplyLanguageLabel } from "@/lib/ai/reply-language-options";
 
 export interface ActivityLogItem {
     id: string;
@@ -137,9 +138,10 @@ import type { SelectionBatchInput, SelectionBatchItem } from "./message-selectio
 import { ConversationComposer } from "./conversation-composer";
 import { calculatePrependScrollTop } from "@/lib/conversations/thread-hydration";
 import {
-    getResolvedConversationTranslationLanguage,
+    buildMessageTranslationState,
+    getBrowserLanguage,
     isLikelyForeignLanguageMessage,
-    shouldDefaultThreadToTranslated,
+    getResolvedConversationTranslationLanguage,
 } from "@/lib/conversations/translation-view";
 
 type TranscriptSearchResult = Awaited<ReturnType<typeof searchConversationTranscriptMatches>>;
@@ -592,7 +594,12 @@ export function ChatWindow({
     }, [handleTranscriptSearch]);
 
     const batchContextText = useMemo(() => buildBatchContextText(selectionBatch), [selectionBatch]);
-    const resolvedTranslationTargetLanguage = useMemo(
+    const [agentDisplayLanguage, setAgentDisplayLanguage] = useState("en");
+    useEffect(() => {
+        setAgentDisplayLanguage(getBrowserLanguage());
+    }, []);
+    const resolvedTranslationTargetLanguage = agentDisplayLanguage || "en";
+    const resolvedReplyLanguage = useMemo(
         () => getResolvedConversationTranslationLanguage(conversation),
         [conversation.locationDefaultReplyLanguage, conversation.replyLanguageOverride]
     );
@@ -603,16 +610,18 @@ export function ChatWindow({
         return messages
             .filter((message) => {
                 if (!isLikelyForeignLanguageMessage(message, resolvedTranslationTargetLanguage)) return false;
-                return message.translation?.viewDefault !== "translated";
+                return buildMessageTranslationState(message, message.translations || [], resolvedTranslationTargetLanguage).viewDefault !== "translated";
             })
             .map((message) => String(message.id || "").trim())
             .filter(Boolean);
     }, [messages, resolvedTranslationTargetLanguage]);
-    const threadSupportsTranslatedDefault = useMemo(
-        () => shouldDefaultThreadToTranslated(messages, resolvedTranslationTargetLanguage),
-        [messages, resolvedTranslationTargetLanguage]
-    );
+    const threadSupportsTranslatedDefault = useMemo(() => {
+        const inboundForeignCount = messages.filter((message) => isLikelyForeignLanguageMessage(message, resolvedTranslationTargetLanguage)).length;
+        if (inboundForeignCount < 2) return false;
+        return messages.some((message) => buildMessageTranslationState(message, message.translations || [], resolvedTranslationTargetLanguage).viewDefault === "translated");
+    }, [messages, resolvedTranslationTargetLanguage]);
     const threadShouldPreferTranslated = threadSupportsTranslatedDefault || inboundForeignCandidates.length >= 2;
+    const resolvedTranslationTargetLanguageLabel = getReplyLanguageLabel(resolvedTranslationTargetLanguage) || resolvedTranslationTargetLanguage;
     const shouldShowTranslationBanner = translationReadEnabled
         && translationBannerEnabled
         && !translationBannerDismissed
@@ -1166,7 +1175,7 @@ export function ChatWindow({
                         <Languages className="h-3.5 w-3.5" />
                         <span className="font-medium">
                             {threadTranslationMode === "translated"
-                                ? `Viewing translated to ${resolvedTranslationTargetLanguage}.`
+                                ? `Viewing translated to ${resolvedTranslationTargetLanguageLabel}.`
                                 : "Viewing original client text."}
                         </span>
                         {(translatingVisibleThread || autoTranslatingThread) && (
@@ -1269,6 +1278,7 @@ export function ChatWindow({
                                     onResendMessage={onResendMessage}
                                     translationReadEnabled={translationReadEnabled}
                                     threadTranslationMode={threadTranslationMode}
+                                    preferredDisplayLanguage={resolvedTranslationTargetLanguage}
                                     onTranslateMessage={onTranslateMessage}
                                 />
                             </div>
@@ -1302,7 +1312,8 @@ export function ChatWindow({
                 suggestions={suggestions}
                 onModelChange={setSelectedModel}
                 insertDraftSeed={composerInsertSeed}
-                translationTargetLanguageLabel={resolvedTranslationTargetLanguage}
+                translationTargetLanguageLabel={resolvedReplyLanguage}
+                viewingLanguageLabel={resolvedTranslationTargetLanguage}
             />
         </div>
     );
