@@ -34,7 +34,7 @@ interface UnifiedTimelineProps {
     onGenerateDraft?: (
         instruction?: string,
         model?: string,
-        replyLanguage?: string | null,
+        draftLanguage?: string | null,
         onChunk?: (chunk: string) => void
     ) => Promise<string | null>;
     onSetReplyLanguageOverride?: (replyLanguage: string | null) => Promise<{ success: boolean; error?: string; replyLanguageOverride?: string | null }>;

@@ -4417,7 +4417,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         model?: string;
         mode: "chat" | "deal";
         dealId?: string;
-        replyLanguage?: string | null;
+        draftLanguage?: string | null;
         onChunk?: (chunk: string) => void;
     }) => {
         const response = await fetch("/api/conversations/draft-stream", {
@@ -4431,7 +4431,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 options: {
                     mode: args.mode,
                     dealId: args.dealId,
-                    replyLanguage: args.replyLanguage ?? null,
+                    draftLanguage: args.draftLanguage ?? null,
                 },
             }),
         });
@@ -4606,7 +4606,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 onGenerateDraft={async (
                     instruction?: string,
                     model?: string,
-                    replyLanguage?: string | null,
+                    draftLanguage?: string | null,
                     onChunk?: (chunk: string) => void
                 ) => {
                     try {
@@ -4619,7 +4619,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                                     instruction,
                                     model,
                                     mode: "chat",
-                                    replyLanguage,
+                                    draftLanguage,
                                     onChunk,
                                 });
                             } catch (streamError) {
@@ -4633,7 +4633,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                                 activeConversation.contactId,
                                 instruction,
                                 model,
-                                { mode: "chat", replyLanguage }
+                                { mode: "chat", draftLanguage }
                             );
                         }
 
@@ -4693,7 +4693,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 onGenerateDraft={async (
                     instruction?: string,
                     model?: string,
-                    replyLanguage?: string | null,
+                    draftLanguage?: string | null,
                     onChunk?: (chunk: string) => void
                 ) => {
                     if (!selectedDealConversation) return null;
@@ -4708,7 +4708,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                                     model,
                                     mode: "deal",
                                     dealId: activeDealId || undefined,
-                                    replyLanguage,
+                                    draftLanguage,
                                     onChunk,
                                 });
                             } catch (streamError) {
@@ -4722,7 +4722,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                                 selectedDealConversation.contactId,
                                 instruction,
                                 model,
-                                { mode: "deal", dealId: activeDealId, replyLanguage }
+                                { mode: "deal", dealId: activeDealId, draftLanguage }
                             );
                         }
 

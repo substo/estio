@@ -36,6 +36,7 @@ interface CoordinationContext {
     instruction?: string;
     model?: string;
     replyLanguageOverride?: string | null;
+    draftLanguage?: string | null;
     stream?: boolean;
     onToken?: (chunk: string) => void;
 }
@@ -592,9 +593,11 @@ export async function generateDraft(context: CoordinationContext) {
             .map(m => (m.body || "").trim())
             .filter(Boolean)
             .join("\n");
-        const manualReplyLanguage = context.replyLanguageOverride === undefined
-            ? localConversationReplyLanguageOverride
-            : context.replyLanguageOverride;
+        const manualReplyLanguage = context.draftLanguage
+            ? context.draftLanguage
+            : (context.replyLanguageOverride === undefined
+                ? localConversationReplyLanguageOverride
+                : context.replyLanguageOverride);
         const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(context.locationId);
         const languageResolution = resolveCommunicationLanguage({
             manualOverrideLanguage: manualReplyLanguage,

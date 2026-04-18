@@ -6039,7 +6039,7 @@ export async function sendReply(
 type GenerateAIDraftOptions = {
     mode?: "chat" | "deal";
     dealId?: string;
-    replyLanguage?: string | null;
+    draftLanguage?: string | null;
 };
 
 export async function generateAIDraft(
@@ -6116,8 +6116,14 @@ export async function generateAIDraft(
                 contextSummary: [
                     `Mode: ${options?.mode || "chat"}`,
                     options?.dealId ? `Deal: ${options.dealId}` : null,
+                    options?.draftLanguage ? `Draft language for agent review: ${options.draftLanguage}` : null,
                 ].filter(Boolean).join("\n"),
-                extraInstruction: instruction || "Draft the best next response based on current conversation context.",
+                extraInstruction: [
+                    instruction || "Draft the best next response based on current conversation context.",
+                    options?.draftLanguage
+                        ? `Write the draft in ${options.draftLanguage} for internal agent review. Do not translate it to the client's send language yet.`
+                        : null,
+                ].filter(Boolean).join("\n\n"),
                 executeImmediately: true,
             });
 
@@ -6146,7 +6152,7 @@ export async function generateAIDraft(
         model: explicitModel,
         mode: options?.mode || "chat",
         dealId: options?.dealId || undefined,
-        replyLanguageOverride: options?.replyLanguage,
+        draftLanguage: options?.draftLanguage || undefined,
     });
 
     return result;

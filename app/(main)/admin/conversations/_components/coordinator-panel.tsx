@@ -16,6 +16,7 @@ import { DEFAULT_CONTACT_TYPE } from "../../contacts/_components/contact-types";
 import { EditContactDialog } from "../../contacts/_components/edit-contact-dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { DEFAULT_REPLY_LANGUAGE, normalizeReplyLanguage } from "@/lib/ai/reply-language-options";
 import { GroupMembersList } from './group-members-list';
 import { TraceNodeRenderer } from "./trace-node-renderer";
 import { ContactTaskManager } from "@/components/tasks/contact-task-manager";
@@ -70,6 +71,11 @@ interface ThoughtStep {
 
 function normalizeContactValue(value: unknown): string {
     return String(value || "").trim().toLowerCase();
+}
+
+function getBrowserDraftLanguage() {
+    if (typeof window === "undefined") return DEFAULT_REPLY_LANGUAGE;
+    return normalizeReplyLanguage(window.navigator.language || "") || DEFAULT_REPLY_LANGUAGE;
 }
 
 function isMeaningfulRequirementValue(value: unknown): boolean {
@@ -413,7 +419,7 @@ export function CoordinatorPanel({
                     conversation.contactId,
                     undefined,
                     undefined,
-                    { mode: "chat", replyLanguage: conversation.replyLanguageOverride || null }
+                    { mode: "chat", draftLanguage: getBrowserDraftLanguage() }
                 );
                 setReasoning(res.reasoning || "Suggested response queued for review.");
                 onSuggestionsGenerated?.([]);

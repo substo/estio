@@ -77,10 +77,11 @@ It is critical to distinguish between **Content** and **Metadata**:
 - For active back-to-back conversation, drafts should start directly with message intent and avoid repeating the contact's name greeting.
 - A safety post-processor strips a leading name greeting when it violates this rule.
 
-### Communication Policy (Mar 2026)
-- Drafts must use the shared reply-language resolver.
-- Auto-mode precedence is `Conversation.replyLanguageOverride` -> location default reply language -> fallback English (`en`).
-- `Contact.preferredLang` and detected thread language are not used for Auto drafts.
+### Communication Policy (Apr 2026)
+- AI Drafts are generated in the agent's review language so the sender can read and edit them before approval.
+- In the current UI, the review language resolves from the agent's browser/UI language, with English fallback.
+- Thread `Reply language` controls the client-facing send/translation target, not the draft-review language.
+- `Contact.preferredLang` and detected thread language are not used for AI Draft review language.
 - Tone must stay neutral, factual, commercially aware, and non-pushy.
 - Drafts avoid hard authority/finality claims unless confirmed in context.
 - Urgency wording must be evidence-based (for example, confirmed competing offer activity), not pressure language.
@@ -92,7 +93,7 @@ It is critical to distinguish between **Content** and **Metadata**:
 - Options are `Auto` plus a curated searchable language list.
 - `Auto` clears the conversation override and uses the location-level default reply language from AI Settings.
 - The active source is shown in the composer as `Conversation override` or `Location default`.
-- The same language selection is forwarded through manual draft entry points in chats mode, deal mode, and Mission Control quick draft.
+- This control defines the client-facing send language used for translation preview and send-time translation.
 - When an agent is manually typing a reply instead of generating a draft, the same shared composer can now preview a translated send variant; the implementation and persistence details for that workflow live only in [Conversation Management](./conversation-management.md).
 
 ### Timeline Context Rules (Mar 2026)

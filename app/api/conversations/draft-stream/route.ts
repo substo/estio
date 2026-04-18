@@ -17,7 +17,7 @@ type DraftStreamBody = {
     options?: {
         mode?: "chat" | "deal";
         dealId?: string;
-        replyLanguage?: string | null;
+        draftLanguage?: string | null;
     };
 };
 
@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
     const model = sanitizeString(body?.model);
     const mode = body?.options?.mode === "deal" ? "deal" : "chat";
     const dealId = sanitizeString(body?.options?.dealId);
-    const replyLanguage = body?.options?.replyLanguage ?? null;
+    const draftLanguage = body?.options?.draftLanguage ?? null;
 
     if (!conversationId || !contactId) {
         return NextResponse.json({ success: false, error: "conversationId and contactId are required" }, { status: 400 });
@@ -110,7 +110,7 @@ export async function POST(req: NextRequest) {
                     model,
                     mode,
                     dealId,
-                    replyLanguageOverride: replyLanguage,
+                    draftLanguage,
                     stream: true,
                     onToken: (chunk) => {
                         if (!chunk) return;
@@ -143,4 +143,3 @@ export async function POST(req: NextRequest) {
         },
     });
 }
-

@@ -52,7 +52,7 @@ interface ConversationComposerProps {
     onGenerateDraft?: (
         instruction?: string,
         model?: string,
-        replyLanguage?: string | null,
+        draftLanguage?: string | null,
         onChunk?: (chunk: string) => void
     ) => Promise<string | null>;
     onSetReplyLanguageOverride?: (replyLanguage: string | null) => Promise<{ success: boolean; error?: string; replyLanguageOverride?: string | null }>;
@@ -98,6 +98,11 @@ function getFallbackChannelWithoutWhatsApp(conversation: Conversation | null): "
     return getInitialChannel(conversation) === "Email" ? "Email" : "SMS";
 }
 
+function getAgentDraftLanguage() {
+    if (typeof window === "undefined") return DEFAULT_REPLY_LANGUAGE;
+    return normalizeReplyLanguage(window.navigator.language || "") || DEFAULT_REPLY_LANGUAGE;
+}
+
 export function ConversationComposer({
     conversation,
     onSendMessage,
@@ -134,6 +139,7 @@ export function ConversationComposer({
     const [whatsAppEligibility, setWhatsAppEligibility] = useState<WhatsAppEligibilityState>({ status: "checking" });
     const [smsEligibility, setSmsEligibility] = useState<SmsEligibilityState>({ status: "checking" });
     const [isRecording, setIsRecording] = useState(false);
+    const [agentDraftLanguage, setAgentDraftLanguage] = useState<string>(DEFAULT_REPLY_LANGUAGE);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -146,6 +152,10 @@ export function ConversationComposer({
     useEffect(() => {
         onModelChange?.(selectedModel);
     }, [selectedModel, onModelChange]);
+
+    useEffect(() => {
+        setAgentDraftLanguage(getAgentDraftLanguage());
+    }, []);
 
     useEffect(() => {
         if (hasUserSelectedModelRef.current) return;
@@ -493,14 +503,11 @@ export function ConversationComposer({
         try {
             const instruction = instructionOverride || draft.trim();
             const modelOverride = hasUserSelectedModel ? selectedModel : undefined;
-            const replyLanguageOverride = selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE
-                ? null
-                : selectedReplyLanguage;
             let streamedBuffer = "";
             const text = await onGenerateDraft(
                 instruction,
                 modelOverride,
-                replyLanguageOverride,
+                agentDraftLanguage,
                 (chunk) => {
                     if (!chunk) return;
                     streamedBuffer += chunk;
@@ -548,7 +555,8 @@ export function ConversationComposer({
     const selectedReplyLanguageLabel = selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE
         ? "Send: Auto"
         : `Send: ${getReplyLanguageLabel(selectedReplyLanguage) || selectedReplyLanguage}`;
-    const resolvedDraftLanguageLabel = getReplyLanguageLabel(
+    const resolvedDraftLanguageLabel = getReplyLanguageLabel(agentDraftLanguage) || agentDraftLanguage || DEFAULT_REPLY_LANGUAGE;
+    const resolvedSendLanguageLabel = getReplyLanguageLabel(
         selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE
             ? (conversation?.locationDefaultReplyLanguage || DEFAULT_REPLY_LANGUAGE)
             : selectedReplyLanguage
@@ -826,7 +834,7 @@ export function ConversationComposer({
                 </div>
                 {onGenerateDraft && (
                     <div className="px-1 pt-1 text-[10px] text-slate-500">
-                        Drafting in {resolvedDraftLanguageLabel}. {replyLanguageSourceHint}
+                        Drafting in {resolvedDraftLanguageLabel} for review. Send language: {resolvedSendLanguageLabel}. {replyLanguageSourceHint}
                     </div>
                 )}
             </div>
