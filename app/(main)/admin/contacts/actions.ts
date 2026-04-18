@@ -840,15 +840,20 @@ async function updateContactCore(
   data: ValidatedContactData & { contactId: string },
   userId: string
 ): Promise<CreateContactState> {
+  const t0 = performance.now();
+  const log = (label: string) => console.log(`[updateContact:perf] ${label}: ${(performance.now() - t0).toFixed(0)}ms`);
+
   // Resolve internal user ID for history logging
   const dbUser = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } });
   const internalUserId = dbUser?.id || null;
+  log('1_resolveUser');
 
   // Also verify the contact actually belongs to this location
   const existingContactCheck = await db.contact.findUnique({
     where: { id: data.contactId },
     select: { locationId: true, contactType: true, ghlContactId: true }
   });
+  log('2_existingCheck');
 
   if (!existingContactCheck || existingContactCheck.locationId !== data.locationId) {
     return { success: false, message: 'Contact not found or access denied.' };
@@ -882,6 +887,7 @@ async function updateContactCore(
         };
       }
     }
+    log('3_emailDupCheck');
 
     // Check for existing contact with same phone (excluding current contact)
     if (data.phone) {
@@ -890,12 +896,14 @@ async function updateContactCore(
         return buildDuplicatePhoneState(phoneDuplicate.contact);
       }
     }
+    log('4_phoneDupCheck');
 
     let savedContactSummary: CreateContactState["contact"] = undefined;
 
     await db.$transaction(async (tx) => {
       // Fetch current state for diffing
       const currentContact = await tx.contact.findUnique({ where: { id: data.contactId } });
+      log('5_txFetchCurrent');
 
       const contactInput = prepareContactInput(data);
       const updatedContact = await tx.contact.update({
@@ -912,7 +920,7 @@ async function updateContactCore(
         preferredLang: updatedContact.preferredLang || null,
         message: updatedContact.message || null,
       };
-      console.log('[updateContact] Contact updated successfully', data.contactId);
+      log('6_txUpdate');
 
       // Calculate Changes
       const changes: { field: string; old: any; new: any }[] = [];
@@ -935,6 +943,7 @@ async function updateContactCore(
       if (changes.length > 0) {
         // Resolve IDs to human readable values (Properties, Users)
         await enrichChangesWithReadableValues(changes);
+        log('7_txEnrichChanges');
 
         const stageChangeIndex = changes.findIndex(c => c.field === 'leadStage');
         if (stageChangeIndex !== -1) {
@@ -945,10 +954,13 @@ async function updateContactCore(
         if (changes.length > 0) {
           await logContactHistory(tx, data.contactId, internalUserId, 'UPDATED', changes);
         }
+        log('8_txLogHistory');
       }
 
       await handleContactRoles(tx, data.contactId, data);
+      log('9_txHandleRoles');
     });
+    log('10_txComplete');
 
     // Fire-and-forget: GHL + Google sync run in the background (same pattern as tasks)
     const existingGhlContactId = existingContactCheck?.ghlContactId || null;
@@ -989,6 +1001,7 @@ async function updateContactCore(
       }),
     ]).catch(err => console.error('[updateContact] background sync error:', err));
 
+    log('11_returning');
     return { success: true, message: 'Contact updated successfully.', contact: savedContactSummary };
 
   } catch (error: any) {
@@ -1045,6 +1058,9 @@ export async function updateContact(
   prevState: CreateContactState,
   formData: FormData
 ): Promise<CreateContactState> {
+  const t0 = performance.now();
+  const log = (label: string) => console.log(`[updateContact:outer:perf] ${label}: ${(performance.now() - t0).toFixed(0)}ms`);
+
   const rawData: Record<string, any> = {};
   formData.forEach((value, key) => { rawData[key] = value; });
   console.log('[updateContact] RAW FormData:', rawData);
@@ -1107,6 +1123,7 @@ export async function updateContact(
     propertyWonReference: formData.get('propertyWonReference') || undefined,
     propertyWonDate: formData.get('propertyWonDate') || undefined,
   });
+  log('validation');
 
   if (!validatedFields.success) {
     console.log('[updateContact] Validation failed', validatedFields.error.flatten().fieldErrors);
@@ -1124,11 +1141,13 @@ export async function updateContact(
   }
 
   const hasAccess = await verifyUserHasAccessToLocation(userId, data.locationId);
+  log('auth');
   if (!hasAccess) {
     return { success: false, message: 'Unauthorized: You do not have access to this location.' };
   }
 
   const result = await updateContactCore(data, userId);
+  log('core_complete');
 
   return {
     message: result.message || (result.success ? 'Contact updated successfully.' : 'Update failed'),
