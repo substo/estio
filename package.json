@@ -97,6 +97,7 @@
         "isomorphic-fetch": "^3.0.0",
         "jsonwebtoken": "^9.0.2",
         "leaflet": "^1.9.4",
+        "libphonenumber-js": "^1.12.41",
         "lucide-react": "^0.436.0",
         "mini-svg-data-uri": "^1.4.4",
         "next": "^15.2.3",

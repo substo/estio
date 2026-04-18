@@ -372,6 +372,11 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
   - `parseLeadFromText` and `createParsedLead` use read-only location auth (no GHL token refresh on this path).
   - parse input is normalized and capped, and parse output is token-bounded for lower latency.
   - non-critical post-import side effects (Google auto-sync, trace persistence, orchestration trigger) run asynchronously after the import response is returned.
+- **Paste Lead Phone Normalization (Apr 2026)**:
+  - Intelligently reformats irregularly pasted international numbers (standardizing `00` into `+`).
+  - LLM contextualizes ISO country code from text to accurately repair broken local numbers.
+  - Validates and writes fully certified E.164 formats mapped via `libphonenumber-js`.
+  - See [phone-normalization.md](./phone-normalization.md) for full context/implementation guidelines.
 
 ## Deal Mode Reply Routing
 This document is also the source of truth for reply-target behavior in `/admin/conversations?mode=deals`.

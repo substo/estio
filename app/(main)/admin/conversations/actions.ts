@@ -81,6 +81,7 @@ import {
     resolveRelativeViewingDateFromText,
     shiftIsoDate,
 } from "@/lib/viewings/suggestion-parsing";
+import { normalizeInternationalPhone } from "@/lib/utils/phone";
 
 const MAX_SELECTION_TEXT_LENGTH = 12000;
 const MAX_CUSTOM_OUTPUT_LENGTH = 2200;
@@ -9713,6 +9714,7 @@ const LeadParsingSchema = z.object({
         lastName: z.string().nullable().optional(),
         role: z.enum(["Lead", "Owner", "Agent"]).nullable().optional(),
         phone: z.string().nullable().optional(),
+        countryCode: z.string().nullable().optional(),
         email: z.string().nullable().optional(),
     }),
     requirements: z.object({
@@ -11264,9 +11266,10 @@ async function parseLeadFromTextInternal(
             "If fields like Name, Tel, Email, Goal, Source, Notes, Next Action, Ref. No., price, property type, location, area, plot size, bedrooms, or portal URLs are present, treat them as metadata unless there is also a clear customer-written message.",
             "Write internalNotes as a concise CRM-style note with the most important facts an agent should see later.",
             "",
+            "If the phone number lacks a country code, predict the most likely ISO 3166-1 alpha-2 country code (e.g., CY, IL, DE) based on the lead's location, language, or context in the text. If it cannot be reasonably predicted, set countryCode to null.",
             "JSON schema:",
             "{",
-            '  "contact": { "name": string|null, "firstName": string|null, "lastName": string|null, "role": "Lead"|"Owner"|"Agent"|null, "phone": string|null, "email": string|null },',
+            '  "contact": { "name": string|null, "firstName": string|null, "lastName": string|null, "role": "Lead"|"Owner"|"Agent"|null, "phone": string|null, "countryCode": string|null, "email": string|null },',
             '  "requirements": { "budget": string|null, "location": string|null, "type": string|null, "bedrooms": string|null },',
             '  "messageContent": string|null,',
             '  "internalNotes": string|null,',
@@ -11488,6 +11491,13 @@ export async function createParsedLead(
     }
 
     try {
+        if (data.contact && data.contact.phone) {
+            const { formatted } = normalizeInternationalPhone(data.contact.phone, data.contact.countryCode);
+            if (formatted) {
+                data.contact.phone = formatted;
+            }
+        }
+
         // 1. Resolve or Create Contact
         let contactId: string | null = null;
         let isNewContact = false;
