@@ -163,7 +163,7 @@ export function ConversationList({
     }, [effectiveViewMode, hasMore, isLoadingMore, onLoadMore, conversations.length]);
 
     // Unified Header Component - used in both modes
-    const UnifiedHeader = () => {
+    const renderUnifiedHeader = () => {
         const isAllSelected = conversations.length > 0 && selectedIds?.size === conversations.length;
         const isPartiallySelected = selectedIds && selectedIds.size > 0 && selectedIds.size < conversations.length;
         const selectedIdsList = Array.from(selectedIds || []);
@@ -537,7 +537,7 @@ export function ConversationList({
                 <WhatsAppStatus />
 
                 {/* Unified Header */}
-                <UnifiedHeader />
+                {renderUnifiedHeader()}
 
 
                 <div className="flex-1 overflow-y-auto overflow-x-hidden sm:pr-1 [scrollbar-gutter:stable] min-w-0">
@@ -578,7 +578,7 @@ export function ConversationList({
         return (
             <div className="h-full flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden">
                 <WhatsAppStatus />
-                <UnifiedHeader />
+                {renderUnifiedHeader()}
                 <div className="p-8 flex flex-col items-center justify-center text-slate-500">
                     <Loader2 className="w-6 h-6 animate-spin mb-2" />
                     <p className="text-sm">Searching...</p>
@@ -591,7 +591,7 @@ export function ConversationList({
         return (
             <div className="h-full flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden">
                 <WhatsAppStatus />
-                <UnifiedHeader />
+                {renderUnifiedHeader()}
                 <GlobalTaskList
                     selectedConversationId={selectedId}
                     onSelectConversation={onSelect}
@@ -606,7 +606,7 @@ export function ConversationList({
         return (
             <div className="h-full flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden">
                 <WhatsAppStatus />
-                <UnifiedHeader />
+                {renderUnifiedHeader()}
                 <div className="p-4 text-center text-gray-500">No conversations found.</div>
             </div>
         );
@@ -618,7 +618,7 @@ export function ConversationList({
             <WhatsAppStatus />
 
             {/* Unified Header with Mode Toggle + Action Buttons */}
-            <UnifiedHeader />
+            {renderUnifiedHeader()}
 
             <div ref={listScrollRef} className="flex-1 overflow-y-auto overflow-x-hidden sm:pr-1 [scrollbar-gutter:stable] min-w-0">
                 {conversations.map((c) => {
