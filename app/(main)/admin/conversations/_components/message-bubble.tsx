@@ -202,7 +202,7 @@ export function MessageBubble({
     const contentRef = useRef<HTMLDivElement>(null);
     const sharedContacts = parseSharedContactsFromBody(message.body || "");
     const isContactMessage = !!sharedContacts && sharedContacts.length > 0;
-    const [contactSaveStates, setContactSaveStates] = useState<Record<number, { saving?: boolean; saved?: boolean; contactId?: string; isNew?: boolean; error?: string }>>({}); 
+    const [contactSaveStates, setContactSaveStates] = useState<Record<number, { saving?: boolean; saved?: boolean; contactId?: string; conversationId?: string; isNew?: boolean; error?: string }>>({}); 
     const [contactOpenMessageStates, setContactOpenMessageStates] = useState<Record<number, boolean>>({});
     const [isHydratingContactStates, setIsHydratingContactStates] = useState<boolean>(isContactMessage);
     const router = useRouter(); 
@@ -237,7 +237,8 @@ export function MessageBubble({
                             newState[idx] = {
                                 ...newState[idx],
                                 saved: true,
-                                contactId: res.states![c.phoneNumber].contactId
+                                contactId: res.states![c.phoneNumber].contactId,
+                                conversationId: res.states![c.phoneNumber].conversationId
                             };
                         }
                     });
@@ -781,23 +782,39 @@ export function MessageBubble({
                                                         </a>
                                                     )}
                                                     {state.contactId && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                void handleStartMessaging(idx, state.contactId!);
-                                                            }}
-                                                            disabled={contactOpenMessageStates[idx]}
-                                                            className={cn(
-                                                                "inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition-colors",
-                                                                isOutbound
-                                                                    ? "bg-white/20 text-white hover:bg-white/30 disabled:opacity-60"
-                                                                    : "bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-60"
-                                                            )}
-                                                        >
-                                                            <MessageCirclePlus className="h-3 w-3" />
-                                                            {contactOpenMessageStates[idx] ? "Opening..." : "Send Message"}
-                                                        </button>
+                                                        state.conversationId ? (
+                                                            <a
+                                                                href={`/admin/conversations?id=${encodeURIComponent(state.conversationId)}`}
+                                                                onClick={(e) => e.stopPropagation()}
+                                                                className={cn(
+                                                                    "inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition-colors",
+                                                                    isOutbound
+                                                                        ? "bg-white/20 text-white hover:bg-white/30"
+                                                                        : "bg-blue-50 text-blue-700 hover:bg-blue-100"
+                                                                )}
+                                                            >
+                                                                <MessageCirclePlus className="h-3 w-3" />
+                                                                Send Message
+                                                            </a>
+                                                        ) : (
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    void handleStartMessaging(idx, state.contactId!);
+                                                                }}
+                                                                disabled={contactOpenMessageStates[idx]}
+                                                                className={cn(
+                                                                    "inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition-colors",
+                                                                    isOutbound
+                                                                        ? "bg-white/20 text-white hover:bg-white/30 disabled:opacity-60"
+                                                                        : "bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-60"
+                                                                )}
+                                                            >
+                                                                <MessageCirclePlus className="h-3 w-3" />
+                                                                {contactOpenMessageStates[idx] ? "Opening..." : "Send Message"}
+                                                            </button>
+                                                        )
                                                     )}
                                                 </>
                                             ) : state?.error ? (

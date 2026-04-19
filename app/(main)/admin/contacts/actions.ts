@@ -2983,16 +2983,28 @@ export async function checkSharedContactsSavedState(
         locationId: location.id,
         phone: { in: phoneNumbers.map(normalizePhone).filter(Boolean) as string[] }
       },
-      select: { id: true, phone: true }
+      select: { 
+        id: true, 
+        phone: true,
+        conversations: {
+          take: 1,
+          orderBy: { createdAt: 'desc' },
+          select: { ghlConversationId: true }
+        }
+      }
     });
 
-    const finalStates: Record<string, { saved: boolean; contactId: string }> = {};
+    const finalStates: Record<string, { saved: boolean; contactId: string; conversationId?: string }> = {};
     phoneNumbers.forEach(inputPhone => {
       const normalized = normalizePhone(inputPhone);
       if (!normalized) return;
       const matched = existingContacts.find(c => c.phone === normalized);
       if (matched) {
-        finalStates[inputPhone] = { saved: true, contactId: matched.id };
+        finalStates[inputPhone] = { 
+          saved: true, 
+          contactId: matched.id,
+          conversationId: matched.conversations?.[0]?.ghlConversationId 
+        };
       }
     });
 
