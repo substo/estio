@@ -2775,7 +2775,20 @@ export async function saveSharedContact(params: {
       return { success: false, error: 'Unauthorized' };
     }
 
-    const hasAccess = await verifyUserHasAccessToLocation(userId, params.locationId);
+    const location = await db.location.findFirst({
+      where: {
+        OR: [
+          { id: params.locationId },
+          { ghlLocationId: params.locationId }
+        ]
+      }
+    });
+
+    if (!location) {
+      return { success: false, error: 'Location not found' };
+    }
+
+    const hasAccess = await verifyUserHasAccessToLocation(userId, location.id);
     if (!hasAccess) {
       return { success: false, error: 'Unauthorized' };
     }
@@ -2790,7 +2803,7 @@ export async function saveSharedContact(params: {
 
       const candidates = await db.contact.findMany({
         where: {
-          locationId: params.locationId,
+          locationId: location.id,
           phone: { contains: searchSuffix },
         },
         select: { id: true, name: true, phone: true },
@@ -2817,7 +2830,7 @@ export async function saveSharedContact(params: {
     // Check for existing contact by email
     if (normalizedEmail) {
       const emailMatch = await db.contact.findFirst({
-        where: { locationId: params.locationId, email: normalizedEmail },
+        where: { locationId: location.id, email: normalizedEmail },
         select: { id: true, name: true },
       });
 
@@ -2842,7 +2855,7 @@ export async function saveSharedContact(params: {
     const contact = await db.$transaction(async (tx) => {
       const created = await tx.contact.create({
         data: {
-          locationId: params.locationId,
+          locationId: location.id,
           name: params.displayName,
           firstName,
           lastName,
@@ -2867,6 +2880,38 @@ export async function saveSharedContact(params: {
       return created;
     });
 
+    // Fire-and-forget sync to GoHighLevel and Google
+    void Promise.allSettled([
+      (async () => {
+        try {
+          if (location?.ghlAccessToken && location?.ghlLocationId) {
+            const ghlId = await syncContactToGHL(location.ghlLocationId, {
+              name: contact.name || '',
+              firstName: contact.firstName || undefined,
+              lastName: contact.lastName || undefined,
+              phone: contact.phone || undefined,
+              email: contact.email || undefined,
+            }, null);
+            if (ghlId) {
+              await db.contact.update({
+                where: { id: contact.id },
+                data: { ghlContactId: ghlId }
+              });
+            }
+          }
+        } catch (err) {
+          console.error('[saveSharedContact] GHL Sync Failed:', err);
+        }
+      })(),
+      runGoogleAutoSyncForContact({
+        locationId: location.id,
+        contactId: contact.id,
+        source: 'WHATSAPP_CONTACT_SHARE',
+        event: 'create',
+        preferredUserId: dbUser?.id || undefined
+      })
+    ]).catch(err => console.error('[saveSharedContact] background sync error:', err));
+
     return {
       success: true,
       contactId: contact.id,
@@ -2882,7 +2927,7 @@ export async function saveSharedContact(params: {
 
       const existing = await db.contact.findFirst({
         where: {
-          locationId: params.locationId,
+          locationId: location.id,
           ...(isPhone && params.phoneNumber ? { phone: normalizePhone(params.phoneNumber) } : {}),
           ...(isEmail && params.email ? { email: params.email.trim().toLowerCase() } : {}),
         },
