@@ -89,6 +89,19 @@ import {
     getOldCrmImportCapabilityForUser,
 } from "@/lib/crm/old-crm-import";
 
+import {
+    extractPropertyRefsFromLeadText,
+    extractBedroomSummary,
+    abbreviatePropertyType,
+    normalizeWhitespace,
+    splitLeadPersonName,
+    inferLeadContactRole,
+    formatLeadGoalLabel,
+    shouldUseMatchedPropertyTitle,
+    buildStructuredLeadPropertySummary,
+    buildStructuredLeadDisplayName,
+} from "@/lib/contacts/name-builder";
+
 const MAX_SELECTION_TEXT_LENGTH = 12000;
 const MAX_CUSTOM_OUTPUT_LENGTH = 2200;
 const CRM_LOG_DEDUPE_RECENT_LIMIT = 30;
@@ -9387,17 +9400,7 @@ function mergeUniqueText(existing?: string | null, incoming?: string | null): st
     return `${prev}\n${next}`;
 }
 
-function extractPropertyRefsFromLeadText(text: string): string[] {
-    const refs = new Set<string>();
-    const refRegex = /\b(?:ref(?:erence)?[.:#\s-]*)?([A-Z]{1,4}\d{2,6}|[A-Z]{2,6}-\d{2,6})\b/gi;
-    let match: RegExpExecArray | null;
 
-    while ((match = refRegex.exec(text)) !== null) {
-        refs.add(match[1].toUpperCase());
-    }
-
-    return Array.from(refs);
-}
 
 function extractPropertySlugsFromLeadUrls(text: string): string[] {
     const slugs = new Set<string>();
@@ -9489,145 +9492,7 @@ function normalizeRequirementBedrooms(raw?: string | null): string | null {
     return `${count}+ Bedrooms`;
 }
 
-function extractBedroomSummary(raw?: string | null): string | null {
-    if (!raw) return null;
-    const match = raw.match(/\d+\+?/);
-    if (!match) return null;
-    return `${match[0]}Bdr`;
-}
 
-function abbreviatePropertyType(raw?: string | null): string | null {
-    const text = String(raw || "").trim();
-    if (!text) return null;
-    const lower = text.toLowerCase();
-
-    if (lower === "apartment") return "Apt";
-    if (lower === "appartment") return "Apt";
-    if (lower === "apt") return "Apt";
-    if (lower === "bedroom") return "Bdr";
-    if (lower === "bedrooms") return "Bdr";
-    if (lower.includes("apartment")) return text.replace(/apartment/gi, "Apt");
-    if (lower.includes("appartment")) return text.replace(/appartment/gi, "Apt");
-    if (lower.includes("bedroom")) return text.replace(/bedrooms?/gi, "Bdr");
-
-    return text;
-}
-
-function normalizeWhitespace(value?: string | null): string {
-    return String(value || "").replace(/\s+/g, " ").trim();
-}
-
-function splitLeadPersonName(contact: ParsedLeadData["contact"] | undefined) {
-    const explicitFirst = normalizeWhitespace(contact?.firstName);
-    const explicitLast = normalizeWhitespace(contact?.lastName);
-    const fallbackName = normalizeWhitespace(contact?.name);
-
-    if (explicitFirst || explicitLast) {
-        return {
-            firstName: explicitFirst,
-            lastName: explicitLast,
-            fullName: normalizeWhitespace(`${explicitFirst} ${explicitLast}`),
-        };
-    }
-
-    if (!fallbackName) {
-        return { firstName: "", lastName: "", fullName: "" };
-    }
-
-    const parts = fallbackName.split(/\s+/).filter(Boolean);
-    if (parts.length === 1) {
-        return {
-            firstName: parts[0],
-            lastName: "",
-            fullName: parts[0],
-        };
-    }
-
-    return {
-        firstName: parts[0],
-        lastName: parts.slice(1).join(" "),
-        fullName: fallbackName,
-    };
-}
-
-function inferLeadContactRole(rawLeadText: string, parsedRole?: string | null): "Lead" | "Owner" | "Agent" {
-    const normalizedRole = normalizeWhitespace(parsedRole);
-    if (normalizedRole === "Lead" || normalizedRole === "Owner" || normalizedRole === "Agent") {
-        return normalizedRole;
-    }
-
-    const text = rawLeadText.toLowerCase();
-    if (/\bowner\b/.test(text)) return "Owner";
-    if (/\bagent\b/.test(text)) return "Agent";
-    return "Lead";
-}
-
-function formatLeadGoalLabel(status?: "For Rent" | "For Sale" | null): "Rent" | "Sale" | "" {
-    if (status === "For Rent") return "Rent";
-    if (status === "For Sale") return "Sale";
-    return "";
-}
-
-function shouldUseMatchedPropertyTitle(title?: string | null): boolean {
-    const text = normalizeWhitespace(title).toLowerCase();
-    if (!text) return false;
-    return text.includes("#")
-        || text.includes("block")
-        || text.includes("residence")
-        || text.includes("residences");
-}
-
-function buildStructuredLeadPropertySummary(args: {
-    matchedProperty?: ResolvedLeadPropertyMatch;
-    requirements?: ParsedLeadData["requirements"];
-}): string {
-    const matchedProperty = args.matchedProperty || null;
-    if (matchedProperty?.title && shouldUseMatchedPropertyTitle(matchedProperty.title)) {
-        return normalizeWhitespace(matchedProperty.title);
-    }
-
-    const bedrooms = extractBedroomSummary(args.requirements?.bedrooms);
-    const propertyType = abbreviatePropertyType(args.requirements?.type);
-    const location = normalizeWhitespace(
-        matchedProperty?.propertyLocation
-        || matchedProperty?.city
-        || args.requirements?.location
-    );
-
-    return [bedrooms, propertyType, location].filter(Boolean).join(" ").trim();
-}
-
-function buildStructuredLeadDisplayName(args: {
-    contact: ParsedLeadData["contact"];
-    rawLeadText: string;
-    inferredStatus: "For Rent" | "For Sale" | null;
-    matchedProperty?: ResolvedLeadPropertyMatch;
-    requirements?: ParsedLeadData["requirements"];
-}): string {
-    const person = splitLeadPersonName(args.contact);
-    const personName = person.fullName
-        || normalizeWhitespace(args.contact?.name)
-        || normalizeWhitespace(args.contact?.email)
-        || normalizeWhitespace(args.contact?.phone)
-        || "Lead";
-    const refs = extractPropertyRefsFromLeadText(args.rawLeadText);
-
-    if (refs.length > 1) {
-        return normalizeWhitespace(`${personName} ${refs.join(", ")}`);
-    }
-
-    const role = inferLeadContactRole(args.rawLeadText, args.contact?.role);
-    const goal = formatLeadGoalLabel(args.inferredStatus);
-    const singleRef = refs[0] || normalizeWhitespace(args.matchedProperty?.reference);
-    const propertySummary = refs.length <= 1
-        ? buildStructuredLeadPropertySummary({
-            matchedProperty: args.matchedProperty,
-            requirements: args.requirements,
-        })
-        : "";
-
-    return [personName, role, goal, singleRef, propertySummary].filter(Boolean).join(" ").trim();
-}
 
 function inferRequirementStatusFromLead(rawLeadText: string, budgetText?: string | null): "For Rent" | "For Sale" | null {
     const text = `${rawLeadText}\n${budgetText || ""}`.toLowerCase();

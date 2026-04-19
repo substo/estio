@@ -5,6 +5,11 @@ import { getCategoryForSubtype } from '@/lib/properties/constants';
 import { PROPERTY_LOCATIONS } from '@/lib/properties/locations';
 import db from '@/lib/db';
 import { uploadUrlToCloudflare, uploadToCloudflare, getImageDeliveryUrl } from '@/lib/cloudflareImages';
+import { normalizeInternationalPhone } from '@/lib/utils/phone';
+import {
+    buildStructuredLeadDisplayName,
+    splitLeadPersonName,
+} from '@/lib/contacts/name-builder';
 
 export interface PullPropertyFromCrmContext {
     oldPropertyId: string;
@@ -352,26 +357,64 @@ export async function pullPropertyFromCrmWithContext(context: PullPropertyFromCr
             }
         }
 
-        const normalizePhone = (phone: string | null | undefined) => {
-            if (!phone) return null;
-            let cleaned = phone.replace(/[^\d+]/g, '').trim();
-            if (cleaned.startsWith('00')) cleaned = '+' + cleaned.substring(2);
-            return cleaned;
-        };
-
         // --- OWNER LINKING LOGIC ---
         if (extractedData.ownerName) {
             console.log(`[CRM PULL] Processing Owner: ${extractedData.ownerName}`);
 
+            // Normalize phones with shared E.164 normalizer (same as Paste Lead)
             const rawMobile = extractedData.ownerMobile || "";
             const rawPhone = extractedData.ownerPhone || "";
             const bestPhone = rawMobile || rawPhone;
-            const normalizedBestPhone = normalizePhone(bestPhone);
-            const normalizedMobile = normalizePhone(rawMobile);
-            const normalizedPhone = normalizePhone(rawPhone);
+
+            const mobileResult = rawMobile ? normalizeInternationalPhone(rawMobile, 'CY') : null;
+            const phoneResult = rawPhone ? normalizeInternationalPhone(rawPhone, 'CY') : null;
+            const bestPhoneResult = bestPhone ? normalizeInternationalPhone(bestPhone, 'CY') : null;
+
+            const normalizedBestPhone = bestPhoneResult?.formatted || null;
+            const normalizedMobile = mobileResult?.formatted || null;
+            const normalizedPhone = phoneResult?.formatted || null;
 
             if (extractedData.ownerMobile) extractedData.ownerMobile = normalizedMobile || extractedData.ownerMobile;
             if (extractedData.ownerPhone) extractedData.ownerPhone = normalizedPhone || extractedData.ownerPhone;
+
+            // Build structured display name (same convention as Paste Lead)
+            const inferredGoal: "For Rent" | "For Sale" | null =
+                extractedData.rentalPeriod && extractedData.rentalPeriod !== 'n/a'
+                    ? "For Rent"
+                    : "For Sale";
+
+            const ownerPersonName = splitLeadPersonName({ name: extractedData.ownerName });
+            const structuredOwnerName = buildStructuredLeadDisplayName({
+                contact: {
+                    name: extractedData.ownerName,
+                    firstName: ownerPersonName.firstName || null,
+                    lastName: ownerPersonName.lastName || null,
+                    email: extractedData.ownerEmail || null,
+                    phone: normalizedBestPhone || bestPhone || null,
+                    role: "Owner",
+                },
+                rawLeadText: [
+                    extractedData.ownerName,
+                    extractedData.ownerNotes,
+                    extractedData.reference,
+                    extractedData.title,
+                ].filter(Boolean).join(" "),
+                inferredStatus: inferredGoal,
+                matchedProperty: {
+                    title: extractedData.title || null,
+                    reference: extractedData.reference || null,
+                    propertyLocation: extractedData.propertyLocation || null,
+                    city: extractedData.propertyArea || null,
+                },
+                requirements: {
+                    bedrooms: extractedData.bedrooms ? String(extractedData.bedrooms) : null,
+                    type: extractedData.type || null,
+                    location: extractedData.propertyLocation || extractedData.propertyArea || null,
+                },
+            });
+
+            const ownerDisplayName = structuredOwnerName || extractedData.ownerName;
+            console.log(`[CRM PULL] Structured owner name: ${ownerDisplayName}`);
 
             let contact = null;
 
@@ -387,9 +430,8 @@ export async function pullPropertyFromCrmWithContext(context: PullPropertyFromCr
                         locationId,
                         OR: [
                             { phone: normalizedBestPhone },
-                            { phone: bestPhone },
-                            { phone: normalizedMobile || undefined },
-                            { phone: normalizedPhone || undefined }
+                            ...(normalizedMobile ? [{ phone: normalizedMobile }] : []),
+                            ...(normalizedPhone ? [{ phone: normalizedPhone }] : []),
                         ]
                     }
                 });
@@ -411,11 +453,17 @@ export async function pullPropertyFromCrmWithContext(context: PullPropertyFromCr
                     updateData.email = extractedData.ownerEmail;
                 }
 
-                const dbPhoneNormalized = normalizePhone(contact.phone);
+                const dbPhoneResult = contact.phone ? normalizeInternationalPhone(contact.phone, 'CY') : null;
 
-                if (!dbPhoneNormalized && normalizedBestPhone) {
+                if (!dbPhoneResult?.formatted && normalizedBestPhone) {
                     updateData.phone = normalizedBestPhone;
                 }
+
+                // Apply structured name to existing contact
+                updateData.name = ownerDisplayName;
+                if (ownerPersonName.firstName) updateData.firstName = ownerPersonName.firstName;
+                if (ownerPersonName.lastName) updateData.lastName = ownerPersonName.lastName;
+                updateData.contactType = 'Owner';
 
                 const newNote = `Imported from CRM. \nCompany: ${extractedData.ownerCompany || ''}\nNotes: ${extractedData.ownerNotes || ''}`;
                 if (!contact.message && newNote.length > 20) {
@@ -454,12 +502,15 @@ export async function pullPropertyFromCrmWithContext(context: PullPropertyFromCr
                 }
 
             } else {
-                console.log(`[CRM PULL] Creating new contact for owner: ${extractedData.ownerName}`);
+                console.log(`[CRM PULL] Creating new contact for owner: ${ownerDisplayName}`);
                 if (locationId) {
                     const newContact = await db.contact.create({
                         data: {
                             locationId: locationId,
-                            name: extractedData.ownerName,
+                            name: ownerDisplayName,
+                            firstName: ownerPersonName.firstName || undefined,
+                            lastName: ownerPersonName.lastName || undefined,
+                            contactType: 'Owner',
                             email: extractedData.ownerEmail || null,
                             phone: normalizedBestPhone || null,
                             status: 'Lead',
