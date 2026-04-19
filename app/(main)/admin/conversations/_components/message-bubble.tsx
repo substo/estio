@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { cn } from "@/lib/utils";
-import { Mail, Smartphone, Paperclip, ExternalLink, ChevronDown, ChevronUp, ArrowRight, Download, Maximize2, RefreshCw, Clock, Check, CheckCheck, AlertTriangle } from "lucide-react";
+import { Mail, Smartphone, Paperclip, ExternalLink, ChevronDown, ChevronUp, ArrowRight, Download, Maximize2, RefreshCw, Clock, Check, CheckCheck, AlertTriangle, UserPlus, User, Phone as PhoneIcon, Building2, MailIcon, ExternalLink as ExternalLinkIcon } from "lucide-react";
+import { saveSharedContact } from "@/app/(main)/admin/contacts/actions";
+import type { SharedContactInfo } from "@/lib/whatsapp/evolution-media";
 import { format } from "date-fns";
 import { EmailFrame, type EmailFrameSelection } from "./email-frame";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -47,6 +49,38 @@ type MessageAttachment = string | {
         } | null;
     } | null;
 };
+
+const CONTACTS_DATA_SEPARATOR = "\n---CONTACTS_DATA---\n";
+
+/**
+ * Parse shared contact data from a message body that contains the structured separator.
+ * Returns null if the message doesn't contain contact data.
+ */
+function parseSharedContactsFromBody(body: string): SharedContactInfo[] | null {
+    if (!body || !body.includes("---CONTACTS_DATA---")) return null;
+    const separatorIndex = body.indexOf(CONTACTS_DATA_SEPARATOR);
+    if (separatorIndex < 0) return null;
+    const jsonPart = body.slice(separatorIndex + CONTACTS_DATA_SEPARATOR.length).trim();
+    if (!jsonPart) return null;
+    try {
+        const parsed = JSON.parse(jsonPart);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+            return parsed as SharedContactInfo[];
+        }
+    } catch {
+        // Not valid JSON — fallback
+    }
+    return null;
+}
+
+/**
+ * Get the human-readable prefix from a contact message body (before the separator).
+ */
+function getContactBodyReadablePart(body: string): string {
+    if (!body.includes("---CONTACTS_DATA---")) return body;
+    const separatorIndex = body.indexOf(CONTACTS_DATA_SEPARATOR);
+    return separatorIndex >= 0 ? body.slice(0, separatorIndex).trim() : body;
+}
 
 export interface MessageBubbleProps {
     message: {
@@ -94,6 +128,7 @@ export interface MessageBubbleProps {
         detectedLanguageConfidence?: number | null;
         translation?: MessageTranslationState | null;
     };
+    locationId?: string;
     contactPhone?: string;
     contactEmail?: string;
     contactName?: string; // Fallback contact name if message.contactName missing
@@ -128,6 +163,7 @@ export interface MessageBubbleProps {
 
 export function MessageBubble({
     message,
+    locationId,
     contactPhone,
     contactEmail: _contactEmail,
     contactName,
@@ -163,6 +199,9 @@ export function MessageBubble({
     const [translationViewMode, setTranslationViewMode] = useState<"thread" | "original" | "translated">("thread");
     const [isTranslatingMessage, setIsTranslatingMessage] = useState(false);
     const contentRef = useRef<HTMLDivElement>(null);
+    const sharedContacts = parseSharedContactsFromBody(message.body || "");
+    const isContactMessage = !!sharedContacts && sharedContacts.length > 0;
+    const [contactSaveStates, setContactSaveStates] = useState<Record<number, { saving?: boolean; saved?: boolean; contactId?: string; isNew?: boolean; error?: string }>>({}); 
 
     useEffect(() => {
         setSelectionTarget(null);
@@ -215,9 +254,43 @@ export function MessageBubble({
         !imageAttachments.includes(attachment) && !audioAttachments.includes(attachment)
     );
     const selectedImage = selectedImageIndex !== null ? imageAttachments[selectedImageIndex] : null;
-    const hasLikelyMediaPlaceholder = ["[Audio]", "[Image]", "[Media]", "[Document]"].includes(String(message.body || "").trim());
+    const hasLikelyMediaPlaceholder = ["[Audio]", "[Image]", "[Media]", "[Document]", "[Contact]"].includes(String(message.body || "").trim());
     const hasRenderableMediaAttachment = imageAttachments.length > 0 || audioAttachments.length > 0 || fileAttachments.length > 0;
-    const canRefetchMedia = !!onRefetchMedia && isWhatsApp && (hasRenderableMediaAttachment || hasLikelyMediaPlaceholder);
+    const canRefetchMedia = !!onRefetchMedia && isWhatsApp && !isContactMessage && (hasRenderableMediaAttachment || hasLikelyMediaPlaceholder);
+
+    const handleSaveContact = useCallback(async (index: number, contact: SharedContactInfo) => {
+        if (!locationId || contactSaveStates[index]?.saving) return;
+        setContactSaveStates(prev => ({ ...prev, [index]: { saving: true } }));
+        try {
+            const result = await saveSharedContact({
+                locationId,
+                displayName: contact.displayName,
+                phoneNumber: contact.phoneNumber,
+                email: contact.email,
+                organization: contact.organization,
+            });
+            if (result.success) {
+                setContactSaveStates(prev => ({
+                    ...prev,
+                    [index]: {
+                        saved: true,
+                        contactId: result.contactId,
+                        isNew: result.isNew,
+                    },
+                }));
+            } else {
+                setContactSaveStates(prev => ({
+                    ...prev,
+                    [index]: { error: result.error || 'Failed to save' },
+                }));
+            }
+        } catch (err: any) {
+            setContactSaveStates(prev => ({
+                ...prev,
+                [index]: { error: err?.message || 'Failed to save' },
+            }));
+        }
+    }, [locationId, contactSaveStates]);
     const getDownloadUrl = (url: string) => {
         try {
             if (url.includes("/api/media/attachments/")) {
@@ -523,7 +596,144 @@ export function MessageBubble({
                     onMouseUp={handleContentSelection}
                     onKeyUp={handleContentSelection}
                 >
-                    {isEmail && !isExpanded ? (
+                    {isContactMessage && sharedContacts ? (
+                        // Contact Card View
+                        <div className="space-y-2">
+                            {sharedContacts.map((contact, idx) => {
+                                const state = contactSaveStates[idx];
+                                return (
+                                    <div
+                                        key={`contact-${idx}-${contact.displayName}`}
+                                        className={cn(
+                                            "rounded-lg border p-3 space-y-2",
+                                            isOutbound
+                                                ? "border-white/20 bg-white/10"
+                                                : "border-gray-200 bg-gray-50"
+                                        )}
+                                    >
+                                        {/* Contact Header */}
+                                        <div className="flex items-center gap-2">
+                                            <div className={cn(
+                                                "h-8 w-8 rounded-full flex items-center justify-center shrink-0",
+                                                isOutbound ? "bg-white/20" : "bg-blue-100"
+                                            )}>
+                                                <User className={cn(
+                                                    "h-4 w-4",
+                                                    isOutbound ? "text-white" : "text-blue-600"
+                                                )} />
+                                            </div>
+                                            <div className="min-w-0 flex-1">
+                                                <p className={cn(
+                                                    "font-semibold text-sm truncate",
+                                                    isOutbound ? "text-white" : "text-gray-900"
+                                                )}>
+                                                    {contact.displayName}
+                                                </p>
+                                                {contact.organization && (
+                                                    <p className={cn(
+                                                        "text-[11px] truncate flex items-center gap-1",
+                                                        isOutbound ? "text-blue-100" : "text-gray-500"
+                                                    )}>
+                                                        <Building2 className="h-3 w-3 shrink-0" />
+                                                        {contact.organization}
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* Contact Details */}
+                                        <div className="space-y-1">
+                                            {contact.phoneNumber && (
+                                                <a
+                                                    href={`tel:${contact.phoneNumber}`}
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    className={cn(
+                                                        "flex items-center gap-2 text-xs rounded px-2 py-1 transition-colors",
+                                                        isOutbound
+                                                            ? "text-blue-100 hover:bg-white/10"
+                                                            : "text-gray-600 hover:bg-gray-100"
+                                                    )}
+                                                >
+                                                    <PhoneIcon className="h-3 w-3 shrink-0" />
+                                                    <span className="truncate">{contact.phoneNumber}</span>
+                                                </a>
+                                            )}
+                                            {contact.email && (
+                                                <a
+                                                    href={`mailto:${contact.email}`}
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    className={cn(
+                                                        "flex items-center gap-2 text-xs rounded px-2 py-1 transition-colors",
+                                                        isOutbound
+                                                            ? "text-blue-100 hover:bg-white/10"
+                                                            : "text-gray-600 hover:bg-gray-100"
+                                                    )}
+                                                >
+                                                    <MailIcon className="h-3 w-3 shrink-0" />
+                                                    <span className="truncate">{contact.email}</span>
+                                                </a>
+                                            )}
+                                        </div>
+
+                                        {/* Actions */}
+                                        <div className="flex items-center gap-2 pt-1">
+                                            {state?.saved ? (
+                                                <>
+                                                    <span className={cn(
+                                                        "flex items-center gap-1 text-[11px] font-medium",
+                                                        isOutbound ? "text-emerald-200" : "text-emerald-600"
+                                                    )}>
+                                                        <Check className="h-3 w-3" />
+                                                        {state.isNew ? "Saved" : "Already exists"}
+                                                    </span>
+                                                    {state.contactId && (
+                                                        <a
+                                                            href={`/admin/contacts/${state.contactId}/view`}
+                                                            onClick={(e) => e.stopPropagation()}
+                                                            className={cn(
+                                                                "inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition-colors",
+                                                                isOutbound
+                                                                    ? "bg-white/20 text-white hover:bg-white/30"
+                                                                    : "bg-blue-50 text-blue-700 hover:bg-blue-100"
+                                                            )}
+                                                        >
+                                                            <ExternalLinkIcon className="h-3 w-3" />
+                                                            Open Contact
+                                                        </a>
+                                                    )}
+                                                </>
+                                            ) : state?.error ? (
+                                                <span className={cn(
+                                                    "text-[11px]",
+                                                    isOutbound ? "text-red-200" : "text-red-600"
+                                                )}>
+                                                    {state.error}
+                                                </span>
+                                            ) : (
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        void handleSaveContact(idx, contact);
+                                                    }}
+                                                    disabled={state?.saving || !locationId}
+                                                    className={cn(
+                                                        "inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-[11px] font-medium transition-colors",
+                                                        isOutbound
+                                                            ? "bg-white/20 text-white hover:bg-white/30 disabled:opacity-60"
+                                                            : "bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+                                                    )}
+                                                >
+                                                    <UserPlus className="h-3 w-3" />
+                                                    {state?.saving ? "Saving..." : "Save to Contacts"}
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    ) : isEmail && !isExpanded ? (
                         // Snippet View
                         <div className="text-gray-500 text-sm italic">
                             {snippet || "Click to view email content..."}

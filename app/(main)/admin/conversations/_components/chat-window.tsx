@@ -1262,6 +1262,7 @@ export function ChatWindow({
                             >
                                 <MessageBubble
                                     message={m}
+                                    locationId={conversation.locationId}
                                     contactPhone={conversation.contactPhone}
                                     contactEmail={conversation.contactEmail}
                                     contactName={conversation.contactName}

@@ -2751,3 +2751,155 @@ export async function updateContactStage(contactId: string, newStage: string) {
   revalidatePath('/admin/contacts');
   return { success: true };
 }
+
+/**
+ * Save a contact from a shared WhatsApp contact card into the CRM.
+ * If a contact with a matching phone already exists, returns the existing contact.
+ */
+export async function saveSharedContact(params: {
+  locationId: string;
+  displayName: string;
+  phoneNumber?: string | null;
+  email?: string | null;
+  organization?: string | null;
+}): Promise<{
+  success: boolean;
+  contactId?: string;
+  isNew?: boolean;
+  name?: string;
+  error?: string;
+}> {
+  try {
+    const { userId } = await auth();
+    if (!userId) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    const hasAccess = await verifyUserHasAccessToLocation(userId, params.locationId);
+    if (!hasAccess) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    const normalizedPhone = normalizePhone(params.phoneNumber);
+    const normalizedEmail = (params.email || '').trim().toLowerCase() || null;
+
+    // Check for existing contact by phone
+    if (normalizedPhone) {
+      const rawDigits = normalizedPhone.replace(/\D/g, '');
+      const searchSuffix = rawDigits.length > 7 ? rawDigits.slice(-7) : rawDigits;
+
+      const candidates = await db.contact.findMany({
+        where: {
+          locationId: params.locationId,
+          phone: { contains: searchSuffix },
+        },
+        select: { id: true, name: true, phone: true },
+      });
+
+      const exactMatch = candidates.find(c => {
+        if (!c.phone) return false;
+        const dbDigits = c.phone.replace(/\D/g, '');
+        return dbDigits === rawDigits
+          || (dbDigits.endsWith(rawDigits) && rawDigits.length >= 9)
+          || (rawDigits.endsWith(dbDigits) && dbDigits.length >= 9);
+      });
+
+      if (exactMatch) {
+        return {
+          success: true,
+          contactId: exactMatch.id,
+          isNew: false,
+          name: exactMatch.name || params.displayName,
+        };
+      }
+    }
+
+    // Check for existing contact by email
+    if (normalizedEmail) {
+      const emailMatch = await db.contact.findFirst({
+        where: { locationId: params.locationId, email: normalizedEmail },
+        select: { id: true, name: true },
+      });
+
+      if (emailMatch) {
+        return {
+          success: true,
+          contactId: emailMatch.id,
+          isNew: false,
+          name: emailMatch.name || params.displayName,
+        };
+      }
+    }
+
+    // Parse display name into first/last
+    const nameParts = params.displayName.trim().split(/\s+/);
+    const firstName = nameParts[0] || params.displayName;
+    const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : undefined;
+
+    // Resolve internal user ID for history logging
+    const dbUser = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } });
+
+    const contact = await db.$transaction(async (tx) => {
+      const created = await tx.contact.create({
+        data: {
+          locationId: params.locationId,
+          name: params.displayName,
+          firstName,
+          lastName,
+          phone: normalizedPhone,
+          email: normalizedEmail,
+          contactType: 'Lead',
+          status: 'new',
+          leadSource: 'WhatsApp Contact Share',
+          leadStage: 'Unassigned',
+          leadPriority: 'Medium',
+        },
+      });
+
+      await logContactHistory(tx, created.id, dbUser?.id || null, 'CREATED', {
+        source: 'whatsapp_contact_share',
+        sharedName: params.displayName,
+        sharedPhone: normalizedPhone,
+        sharedEmail: normalizedEmail,
+        sharedOrganization: params.organization,
+      });
+
+      return created;
+    });
+
+    return {
+      success: true,
+      contactId: contact.id,
+      isNew: true,
+      name: contact.name || params.displayName,
+    };
+  } catch (error: any) {
+    // Handle unique constraint violation (phone/email already exists from concurrent request)
+    if (String(error?.code) === 'P2002') {
+      const field = String(error?.meta?.target || '');
+      const isPhone = field.includes('phone');
+      const isEmail = field.includes('email');
+
+      const existing = await db.contact.findFirst({
+        where: {
+          locationId: params.locationId,
+          ...(isPhone && params.phoneNumber ? { phone: normalizePhone(params.phoneNumber) } : {}),
+          ...(isEmail && params.email ? { email: params.email.trim().toLowerCase() } : {}),
+        },
+        select: { id: true, name: true },
+      });
+
+      if (existing) {
+        return {
+          success: true,
+          contactId: existing.id,
+          isNew: false,
+          name: existing.name || params.displayName,
+        };
+      }
+    }
+
+    console.error('[saveSharedContact] Error:', error);
+    return { success: false, error: error?.message || 'Failed to save contact' };
+  }
+}

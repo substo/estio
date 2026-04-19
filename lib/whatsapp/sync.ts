@@ -16,7 +16,7 @@ export interface NormalizedMessage {
     locationId: string;
     from: string; // E.164 phone number (Sender)
     to: string;   // E.164 phone number (Recipient)
-    type: "text" | "image" | "document" | "audio" | "video" | "sticker" | "reaction" | "other";
+    type: "text" | "image" | "document" | "audio" | "video" | "sticker" | "reaction" | "contact" | "other";
     body: string;
     wamId: string; // Unique Message ID
     timestamp: Date;

@@ -1,5 +1,5 @@
 # WhatsApp Integration: Custom Channel ("Linked Device")
-**Last Updated:** 2026-03-25
+**Last Updated:** 2026-04-19
 **Related:** [Legacy Integration](whatsapp-integration-legacy.md)
 
 ## Overview
@@ -21,6 +21,7 @@ We use a **Hybrid Approach**:
 3.  **Correct Type**: Messages appear as "WhatsApp Linked" (or Custom SMS) rather than generic "SMS".
 4.  **Private Media Storage**: WhatsApp media received/sent through the App UI (Evolution path) is stored privately in Cloudflare R2 and exposed only via short-lived signed URLs.
 5.  **Durable Delivery Path**: App outbound sends are persisted first (`Message` + `WhatsAppOutboundOutbox`) and dispatched asynchronously, so UI ack is immediate and retries are resilient.
+6.  **Rich Message Types**: Supports structured contact card sharing (vCard) natively within the chat UI.
 
 ### Message Flow
 
@@ -223,14 +224,26 @@ To prevent emoji reactions/stickers from being mislabeled as generic media (`[Me
 - **Emoji-only text messages** stay plain text (e.g. `👍`, `🔥🔥`).
 - **Reactions** (`reactionMessage`) are stored as readable text, e.g. `Reaction: 👍` or `[Reaction removed]`.
 - **Stickers** (`stickerMessage`) are stored as `Sticker: 😀` when WhatsApp includes a linked emoji, otherwise `[Sticker]`.
-- **Media ingestion supports image, audio, and document types** (reactions/stickers are not ingested as attachments).
+- **Contact Cards** (`contactMessage` & `contactsArrayMessage`) are stored using the `"contact"` type and preserved as a readable text body appending the backend vCard JSON data (see Section 8).
+- **Media ingestion supports image, audio, and document types** (reactions/stickers/contacts are not ingested as file attachments).
 
 #### Why this matters
-- GHL custom channels do not have native reaction objects, so we keep a human-readable text fallback for CRM sync.
+- GHL custom channels do not have native reaction/contact objects, so we keep a human-readable text fallback for CRM sync.
 - Using one parser in all sync paths prevents webhook/history mismatches (the most common cause of "`[Media]` for emoji" regressions).
 - The parser preserves UTF-8 emoji content as text instead of coercing it into media placeholders.
 
-### 8. New Conversation / Paste Lead Channel Detection (Feb 24, 2026)
+### 8. Contact Sharing (vCard) Support (Apr 19, 2026)
+
+To fully support receiving shared contacts via WhatsApp, the integration handles incoming `contactMessage` and `contactsArrayMessage` payloads instead of treating them as generic `[Media]`.
+
+- **Inline Parser**: `parseEvolutionMessageContent(...)` includes a specialized zero-dependency vCard 3.0 parser extracting `FN`, `TEL`, `ORG`, and `EMAIL`.
+- **Dual Representation (`sync.ts`)**: 
+  - The DB stores a human-readable representation designed for external CRMs (e.g. `📇 Contact: John Doe (+355...)`).
+  - To enable rich UI cards, the raw contact JSON is implicitly mapped at the end of the `Message.body` separated by `\n---CONTACTS_DATA---\n`.
+- **UI & CRM Action**: `MessageBubble` dynamically intercepts the payload and renders rich functional Contact Cards. From this card, users can click **"Save to Contacts"**.
+- **Server Action**: Initiates `saveSharedContact(...)` which protects against duplicate leads directly searching by `LocationId` and exact `phone/email` matches. If a match is found, it renders a deep link **"Open Contact"** directly to the existing stakeholder view.
+
+### 9. New Conversation / Paste Lead Channel Detection (Feb 24, 2026)
 
 To avoid defaulting every manually-created lead/thread to WhatsApp when the number is not actually registered, the app now performs an Evolution API lookup before deciding the conversation channel default:
 
@@ -244,7 +257,7 @@ To avoid defaulting every manually-created lead/thread to WhatsApp when the numb
 
 This only affects the **default channel selection** for newly created/imported conversations; it does not force-convert established email threads.
 
-### 9. Live Inbox + Unread Behavior in Conversations UI (Feb 27, 2026)
+### 10. Live Inbox + Unread Behavior in Conversations UI (Feb 27, 2026)
 
 To improve operational responsiveness during active WhatsApp handling in `/admin/conversations`, the chat UI now updates without page refresh:
 
@@ -257,28 +270,28 @@ To improve operational responsiveness during active WhatsApp handling in `/admin
 - **Live Active Thread Refresh**: If the selected conversation summary changes (`lastMessageDate`/`lastMessageBody`), the message timeline is re-fetched silently.
 - **Auto-scroll to Latest**: `ChatWindow` already auto-scrolls to bottom on message updates, so live inbound messages remain visible in the active thread.
 
-### 10. Outbound Reconciliation + Realtime Status Fast Path (Mar 24, 2026)
+### 11. Outbound Reconciliation + Realtime Status Fast Path (Mar 24, 2026)
 
 This rollout removed "queued then disappears" races and made outbound status updates deterministic for WhatsApp via Evolution.
 
-#### 10.1 Deterministic Correlation Keys
+#### 11.1 Deterministic Correlation Keys
 - Message payloads now include:
   - `messageId` (internal `Message.id`)
   - `clientMessageId` (stable client-generated correlation ID)
   - `wamId` (Evolution/WhatsApp message ID when available)
 - UI and server reconciliation both key on `messageId` / `clientMessageId` / `wamId`, not body-text matching.
 
-#### 10.2 Non-Disappearing Optimistic UI
+#### 11.2 Non-Disappearing Optimistic UI
 - The conversations UI keeps a per-conversation pending map for unresolved outbound messages.
 - Incoming workspace snapshots are merged with pending locals (not full-overwritten), so active poll/realtime refresh cannot remove optimistic bubbles.
 - Pending detection uses outbox/send states (`pending|processing|failed` outbox; `queued|sending|retrying` sendState).
 
-#### 10.3 Incremental Realtime Patching (No forced full refresh)
+#### 11.3 Incremental Realtime Patching (No forced full refresh)
 - SSE `message.status` and `message.outbound` events are applied as in-memory targeted patches when correlation keys match.
 - Full-thread refresh is now fallback-only for unknown IDs / consistency repair cases.
 - Delivery lifecycle (`sent -> delivered -> read`) appears immediately without waiting for polling.
 
-#### 10.4 Webhook/Outbox Idempotency Hardening
+#### 11.4 Webhook/Outbox Idempotency Hardening
 - For outbound webhooks (`fromMe`), sync attempts to reconcile to an existing pending app-originated message before creating a new row.
 - Heuristic adopt path updates existing local message (`wamId`, `status`) and marks its outbox row `completed`.
 - Duplicate unique-key conflicts (`P2002`) on `wamId` are treated as success paths (no user-visible failure).
@@ -287,7 +300,7 @@ Related hardening in same rollout:
 - Earlier realtime publish for inbound/outbound local writes (`processNormalizedMessage(...)`) before slower downstream side effects.
 - Verbose webhook payload logs are now gated behind `WHATSAPP_WEBHOOK_VERBOSE_LOGGING=true`.
 
-#### 10.5 Key Files (Outbound Durability + Reconciliation)
+#### 11.5 Key Files (Outbound Durability + Reconciliation)
 
 | File | Role |
 |------|------|

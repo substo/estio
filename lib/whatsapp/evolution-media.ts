@@ -6,8 +6,16 @@ import {
     sanitizeWhatsAppMediaFilename,
 } from "@/lib/whatsapp/media-r2";
 
+export type SharedContactInfo = {
+    displayName: string;
+    phoneNumber?: string;
+    organization?: string;
+    email?: string;
+    rawVcard?: string;
+};
+
 export type ParsedEvolutionMessageContent = {
-    type: "text" | "image" | "document" | "audio" | "video" | "sticker" | "reaction" | "other";
+    type: "text" | "image" | "document" | "audio" | "video" | "sticker" | "reaction" | "contact" | "other";
     body: string;
     media?: {
         kind: "image" | "audio" | "document";
@@ -33,6 +41,7 @@ export type ParsedEvolutionMessageContent = {
         fileLength?: number;
         isAnimated?: boolean;
     };
+    contacts?: SharedContactInfo[];
 };
 
 function unwrapMessageContent(message: any) {
@@ -71,6 +80,114 @@ function pickFirstNonEmptyString(...values: unknown[]) {
         if (trimmed) return value;
     }
     return "";
+}
+
+/**
+ * Lightweight vCard 3.0 parser — extracts key fields from a vCard string.
+ * Handles the line-based format without requiring an npm dependency.
+ */
+function parseVcard(vcard: string): SharedContactInfo {
+    const lines = vcard.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+    let displayName = "";
+    let phoneNumber: string | undefined;
+    let organization: string | undefined;
+    let email: string | undefined;
+
+    for (const line of lines) {
+        const upper = line.toUpperCase();
+
+        // Full Name (FN:John Doe)
+        if (upper.startsWith("FN:") || upper.startsWith("FN;")) {
+            displayName = line.slice(line.indexOf(":") + 1).trim();
+        }
+        // Telephone (TEL;TYPE=CELL:5511888888888 or TEL:...)
+        else if (upper.startsWith("TEL") && line.includes(":")) {
+            const raw = line.slice(line.indexOf(":") + 1).trim();
+            if (raw && !phoneNumber) {
+                // Normalize: keep digits and leading +
+                phoneNumber = raw.replace(/[^\d+]/g, "");
+                if (phoneNumber && !phoneNumber.startsWith("+")) {
+                    phoneNumber = `+${phoneNumber}`;
+                }
+            }
+        }
+        // Organization (ORG:Company Name; or ORG:Company)
+        else if (upper.startsWith("ORG:") || upper.startsWith("ORG;")) {
+            organization = line.slice(line.indexOf(":") + 1).replace(/;+$/, "").trim() || undefined;
+        }
+        // Email (EMAIL:..., EMAIL;TYPE=INTERNET:...)
+        else if (upper.startsWith("EMAIL") && line.includes(":")) {
+            const raw = line.slice(line.indexOf(":") + 1).trim();
+            if (raw && !email) {
+                email = raw;
+            }
+        }
+    }
+
+    // Fallback: if FN was empty, try N field
+    if (!displayName) {
+        for (const line of lines) {
+            if (line.toUpperCase().startsWith("N:") || line.toUpperCase().startsWith("N;")) {
+                const parts = line.slice(line.indexOf(":") + 1).split(";").map(s => s.trim()).filter(Boolean);
+                displayName = parts.join(" ");
+                break;
+            }
+        }
+    }
+
+    return {
+        displayName: displayName || "Unknown Contact",
+        phoneNumber: phoneNumber || undefined,
+        organization: organization || undefined,
+        email: email || undefined,
+        rawVcard: vcard,
+    };
+}
+
+/**
+ * Parse a single contactMessage payload into a SharedContactInfo.
+ */
+function parseContactMessage(contactMsg: any): SharedContactInfo | null {
+    if (!contactMsg) return null;
+
+    const vcard = typeof contactMsg.vcard === "string" ? contactMsg.vcard : "";
+    const displayName = typeof contactMsg.displayName === "string" ? contactMsg.displayName.trim() : "";
+
+    if (vcard) {
+        const parsed = parseVcard(vcard);
+        // Prefer displayName from the contactMessage over vCard FN
+        if (displayName) parsed.displayName = displayName;
+        return parsed;
+    }
+
+    if (displayName) {
+        return { displayName };
+    }
+
+    return null;
+}
+
+/**
+ * Build a human-readable body and structured data suffix for contact messages.
+ * Format: "📇 Contact: Name (+phone)\n---CONTACTS_DATA---\n[{...}]"
+ */
+function buildContactMessageBody(contacts: SharedContactInfo[]): string {
+    if (contacts.length === 0) return "[Contact]";
+
+    // Human-readable prefix
+    let readable: string;
+    if (contacts.length === 1) {
+        const c = contacts[0];
+        const phonePart = c.phoneNumber ? ` (${c.phoneNumber})` : "";
+        readable = `📇 Contact: ${c.displayName}${phonePart}`;
+    } else {
+        const names = contacts.map(c => c.displayName).join(", ");
+        readable = `📇 ${contacts.length} Contacts: ${names}`;
+    }
+
+    // Strip rawVcard from the serialized data to keep body size reasonable
+    const serializable = contacts.map(({ rawVcard: _rv, ...rest }) => rest);
+    return `${readable}\n---CONTACTS_DATA---\n${JSON.stringify(serializable)}`;
 }
 
 export function parseEvolutionMessageContent(message: any): ParsedEvolutionMessageContent {
@@ -173,6 +290,39 @@ export function parseEvolutionMessageContent(message: any): ParsedEvolutionMessa
     // Some versions/features may only expose the encrypted reaction wrapper.
     if (content.encReactionMessage) {
         return { type: "reaction", body: "[Reaction]" };
+    }
+
+    // --- Contact Message (single vCard) ---
+    if (content.contactMessage) {
+        const parsed = parseContactMessage(content.contactMessage);
+        if (parsed) {
+            const contacts = [parsed];
+            return {
+                type: "contact",
+                body: buildContactMessageBody(contacts),
+                contacts,
+            };
+        }
+    }
+
+    // --- Contact Array Message (multiple vCards) ---
+    if (content.contactsArrayMessage) {
+        const arr = content.contactsArrayMessage;
+        const rawContacts: any[] = Array.isArray(arr.contacts) ? arr.contacts : [];
+        const contacts: SharedContactInfo[] = [];
+
+        for (const entry of rawContacts) {
+            const parsed = parseContactMessage(entry);
+            if (parsed) contacts.push(parsed);
+        }
+
+        if (contacts.length > 0) {
+            return {
+                type: "contact",
+                body: buildContactMessageBody(contacts),
+                contacts,
+            };
+        }
     }
 
     if (text) {
