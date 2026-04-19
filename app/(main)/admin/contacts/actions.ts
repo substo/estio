@@ -4,6 +4,7 @@ import { z } from 'zod';
 import db from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import { auth } from '@clerk/nextjs/server';
+import { after } from 'next/server';
 import { verifyUserHasAccessToLocation } from '@/lib/auth/permissions';
 import {
   LEAD_GOALS, LEAD_PRIORITIES, LEAD_STAGES, LEAD_SOURCES,
@@ -2880,37 +2881,39 @@ export async function saveSharedContact(params: {
       return created;
     });
 
-    // Fire-and-forget sync to GoHighLevel and Google
-    void Promise.allSettled([
-      (async () => {
-        try {
-          if (location?.ghlAccessToken && location?.ghlLocationId) {
-            const ghlId = await syncContactToGHL(location.ghlLocationId, {
-              name: contact.name || '',
-              firstName: contact.firstName || undefined,
-              lastName: contact.lastName || undefined,
-              phone: contact.phone || undefined,
-              email: contact.email || undefined,
-            }, null);
-            if (ghlId) {
-              await db.contact.update({
-                where: { id: contact.id },
-                data: { ghlContactId: ghlId }
-              });
+    // Fire-and-forget sync to GoHighLevel and Google (run after HTTP response)
+    after(() => {
+      void Promise.allSettled([
+        (async () => {
+          try {
+            if (location?.ghlAccessToken && location?.ghlLocationId) {
+              const ghlId = await syncContactToGHL(location.ghlLocationId, {
+                name: contact.name || '',
+                firstName: contact.firstName || undefined,
+                lastName: contact.lastName || undefined,
+                phone: contact.phone || undefined,
+                email: contact.email || undefined,
+              }, null);
+              if (ghlId) {
+                await db.contact.update({
+                  where: { id: contact.id },
+                  data: { ghlContactId: ghlId }
+                });
+              }
             }
+          } catch (err) {
+            console.error('[saveSharedContact] GHL Sync Failed:', err);
           }
-        } catch (err) {
-          console.error('[saveSharedContact] GHL Sync Failed:', err);
-        }
-      })(),
-      runGoogleAutoSyncForContact({
-        locationId: location.id,
-        contactId: contact.id,
-        source: 'WHATSAPP_CONTACT_SHARE',
-        event: 'create',
-        preferredUserId: dbUser?.id || undefined
-      })
-    ]).catch(err => console.error('[saveSharedContact] background sync error:', err));
+        })(),
+        runGoogleAutoSyncForContact({
+          locationId: location.id,
+          contactId: contact.id,
+          source: 'WHATSAPP_CONTACT_SHARE',
+          event: 'create',
+          preferredUserId: dbUser?.id || undefined
+        })
+      ]).catch(err => console.error('[saveSharedContact] background sync error:', err));
+    });
 
     return {
       success: true,

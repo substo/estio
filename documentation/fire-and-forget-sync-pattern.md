@@ -160,6 +160,7 @@ return { success: true };
 | `contacts/actions.ts` | `createContact` → GHL sync | `.then().catch()` (fire-and-forget) |
 | `contacts/actions.ts` | `createContact` → Google sync | `void fn().catch()` |
 | `contacts/actions.ts` | `updateContactCore` → GHL + Google sync | `void Promise.allSettled([...]).catch()` |
+| `contacts/actions.ts` | `saveSharedContact` → GHL + Google sync | `void Promise.allSettled([...]).catch()` |
 | `conversations/actions.ts` | New conversation → Google auto-sync | `runDetachedTask(...)` wrapper |
 | `conversations/actions.ts` | Paste lead → Google auto-sync | `runDetachedTask(...)` wrapper |
 | `properties/actions.ts` | Property save → embedding update | `fn().catch()` (fire-and-forget) |

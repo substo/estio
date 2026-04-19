@@ -241,7 +241,9 @@ To fully support receiving shared contacts via WhatsApp, the integration handles
   - The DB stores a human-readable representation designed for external CRMs (e.g. `📇 Contact: John Doe (+355...)`).
   - To enable rich UI cards, the raw contact JSON is implicitly mapped at the end of the `Message.body` separated by `\n---CONTACTS_DATA---\n`.
 - **UI & CRM Action**: `MessageBubble` dynamically intercepts the payload and renders rich functional Contact Cards. From this card, users can click **"Save to Contacts"**.
-- **Server Action**: Initiates `saveSharedContact(...)` which protects against duplicate leads directly searching by `LocationId` and exact `phone/email` matches. If a match is found, it renders a deep link **"Open Contact"** directly to the existing stakeholder view.
+- **Server Action**: Initiates `saveSharedContact(...)` which protects against duplicate leads directly searching exact `phone/email` matches. If a match is found, it renders a deep link **"Open Contact"** directly to the existing stakeholder view.
+  - **Location Scoping**: To securely authorize the save action while bridging frontend/legacy states, `saveSharedContact` transparently accepts EITHER the `Location.id` (internal UUID) or the `ghlLocationId`, automatically resolving the core internal representation before saving.
+  - **Tier 2 Sync**: Completes via a highly rigid "Fire-And-Forget" synchronization cycle (`Promise.allSettled`). After creating the local database record synchronously, it non-blockingly pushes the contacts to GoHighLevel and the user's active Google Contacts connection, delivering an instantaneous UX without breaking downstream tracking.
 
 ### 9. New Conversation / Paste Lead Channel Detection (Feb 24, 2026)
 

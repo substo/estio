@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { Mail, Smartphone, Paperclip, ExternalLink, ChevronDown, ChevronUp, ArrowRight, Download, Maximize2, RefreshCw, Clock, Check, CheckCheck, AlertTriangle, UserPlus, User, Phone as PhoneIcon, Building2, MailIcon, ExternalLink as ExternalLinkIcon } from "lucide-react";
-import { saveSharedContact } from "@/app/(main)/admin/contacts/actions";
+import { Mail, Smartphone, Paperclip, ExternalLink, ChevronDown, ChevronUp, ArrowRight, Download, Maximize2, RefreshCw, Clock, Check, CheckCheck, AlertTriangle, UserPlus, User, Phone as PhoneIcon, Building2, MailIcon, ExternalLink as ExternalLinkIcon, MessageCirclePlus } from "lucide-react";
+import { saveSharedContact, openOrStartConversationForContact } from "@/app/(main)/admin/contacts/actions";
 import type { SharedContactInfo } from "@/lib/whatsapp/evolution-media";
 import { format } from "date-fns";
 import { EmailFrame, type EmailFrameSelection } from "./email-frame";
@@ -202,6 +203,8 @@ export function MessageBubble({
     const sharedContacts = parseSharedContactsFromBody(message.body || "");
     const isContactMessage = !!sharedContacts && sharedContacts.length > 0;
     const [contactSaveStates, setContactSaveStates] = useState<Record<number, { saving?: boolean; saved?: boolean; contactId?: string; isNew?: boolean; error?: string }>>({}); 
+    const [contactOpenMessageStates, setContactOpenMessageStates] = useState<Record<number, boolean>>({});
+    const router = useRouter(); 
 
     useEffect(() => {
         setSelectionTarget(null);
@@ -291,6 +294,31 @@ export function MessageBubble({
             }));
         }
     }, [locationId, contactSaveStates]);
+
+    const handleStartMessaging = useCallback(async (index: number, contactId: string) => {
+        if (contactOpenMessageStates[index]) return;
+        setContactOpenMessageStates(prev => ({ ...prev, [index]: true }));
+        try {
+            const res = await openOrStartConversationForContact(contactId);
+            if (res?.success && res.conversationId) {
+                router.push(`/admin/conversations?id=${encodeURIComponent(res.conversationId)}`);
+                router.refresh();
+            } else {
+                setContactSaveStates(prev => ({
+                    ...prev,
+                    [index]: { ...prev[index], error: res?.error || 'Failed to open message' }
+                }));
+            }
+        } catch (err: any) {
+            setContactSaveStates(prev => ({
+                ...prev,
+                [index]: { ...prev[index], error: err.message || 'Error occurred' }
+            }));
+        } finally {
+            setContactOpenMessageStates(prev => ({ ...prev, [index]: false }));
+        }
+    }, [contactOpenMessageStates, router]);
+
     const getDownloadUrl = (url: string) => {
         try {
             if (url.includes("/api/media/attachments/")) {
@@ -700,6 +728,25 @@ export function MessageBubble({
                                                             <ExternalLinkIcon className="h-3 w-3" />
                                                             Open Contact
                                                         </a>
+                                                    )}
+                                                    {state.contactId && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                void handleStartMessaging(idx, state.contactId!);
+                                                            }}
+                                                            disabled={contactOpenMessageStates[idx]}
+                                                            className={cn(
+                                                                "inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition-colors",
+                                                                isOutbound
+                                                                    ? "bg-white/20 text-white hover:bg-white/30 disabled:opacity-60"
+                                                                    : "bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-60"
+                                                            )}
+                                                        >
+                                                            <MessageCirclePlus className="h-3 w-3" />
+                                                            {contactOpenMessageStates[idx] ? "Opening..." : "Send Message"}
+                                                        </button>
                                                     )}
                                                 </>
                                             ) : state?.error ? (
