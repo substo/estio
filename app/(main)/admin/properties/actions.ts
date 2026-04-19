@@ -3,198 +3,16 @@
 import db from "@/lib/db";
 import { MediaKind, PropertyStatus, PublicationStatus } from "@prisma/client";
 import { updatePropertyEmbedding } from "@/lib/ai/search/property-embeddings";
-import { getLocationById, refreshGhlAccessToken } from "@/lib/location";
-import { syncToGHL } from "@/lib/properties/repository";
+import { getLocationById } from "@/lib/location";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { syncContactToGHL, syncCompanyToGHL } from "@/lib/ghl/stakeholders";
 import { currentUser } from "@clerk/nextjs/server";
 import { ensureUserExists } from "@/lib/auth/sync-user";
 import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
 import { parsePropertyImagePromptProfileUpsertsJson } from "@/lib/ai/property-image-prompt-profiles";
-import {
-    ensureMediaAssets,
-    softDeleteOrphanedAssets,
-    computeRemovedCloudflareIds,
-} from "@/lib/media/media-assets";
-
-// Helper to handle Contact Role Upsert (Local-first + fire-and-forget GHL sync)
-async function upsertContactRole(
-    location: any,
-    propertyId: string,
-    role: string,
-    data: { name?: string | null, email?: string | null, phone?: string | null }
-) {
-    if (!data.name) return; // Name is required
-
-    console.log(`Processing ${role} contact role: ${data.name}`);
-
-    // 1. Upsert Local Contact (source of truth — do this first)
-    let contact;
-
-    // Find by email (primary local lookup)
-    if (data.email) {
-        contact = await db.contact.findFirst({ where: { email: data.email, locationId: location.id } });
-    }
-
-    if (contact) {
-        // Update existing contact
-        contact = await db.contact.update({
-            where: { id: contact.id },
-            data: {
-                name: data.name,
-                email: data.email || contact.email,
-                phone: data.phone || contact.phone,
-            }
-        });
-    } else {
-        // Create new contact
-        contact = await db.contact.create({
-            data: {
-                locationId: location.id,
-                status: 'NEW',
-                name: data.name,
-                email: data.email,
-                phone: data.phone,
-            }
-        });
-    }
-
-    // 2. Upsert ContactPropertyRole
-    const existingRole = await db.contactPropertyRole.findUnique({
-        where: {
-            contactId_propertyId_role: {
-                contactId: contact.id,
-                propertyId: propertyId,
-                role: role
-            }
-        }
-    });
-
-    if (!existingRole) {
-        await db.contactPropertyRole.create({
-            data: {
-                contactId: contact.id,
-                propertyId: propertyId,
-                role: role
-            }
-        });
-    }
-
-    // 3. Fire-and-forget: Sync to GHL in the background
-    const contactId = contact.id;
-    const existingGhlContactId = contact.ghlContactId || null;
-    if (location.ghlRefreshToken && location.ghlLocationId) {
-        void (async () => {
-            try {
-                const tokens = await refreshGhlAccessToken(location);
-                if (tokens.ghlAccessToken) {
-                    const ghlId = await syncContactToGHL(location.ghlLocationId, {
-                        name: data.name!,
-                        email: data.email || undefined,
-                        phone: data.phone || undefined,
-                        tags: [role]
-                    }, existingGhlContactId);
-                    if (ghlId && !existingGhlContactId) {
-                        await db.contact.update({ where: { id: contactId }, data: { ghlContactId: ghlId } });
-                    }
-                    console.log(`[Background] Synced ${role} to GHL. ID: ${ghlId}`);
-                }
-            } catch (err) {
-                console.error(`[Background] Failed to sync ${role} to GHL:`, err);
-            }
-        })();
-    }
-}
-
-// Helper to handle Company Role Upsert (Local-first + fire-and-forget GHL sync)
-async function upsertCompanyRole(
-    location: any,
-    propertyId: string,
-    role: string,
-    data: { name?: string | null, email?: string | null, phone?: string | null, website?: string | null }
-) {
-    if (!data.name) return; // Name is required
-
-    console.log(`Processing ${role} company role: ${data.name}`);
-
-    // 1. Upsert Local Company (source of truth — do this first)
-    let company;
-
-    // Find by name (companies are usually unique by name in a location)
-    company = await db.company.findFirst({ where: { name: data.name, locationId: location.id } });
-
-    if (company) {
-        // Update existing company
-        company = await db.company.update({
-            where: { id: company.id },
-            data: {
-                email: data.email || company.email,
-                phone: data.phone || company.phone,
-                website: data.website || company.website,
-            }
-        });
-    } else {
-        // Create new company
-        company = await db.company.create({
-            data: {
-                locationId: location.id,
-                name: data.name,
-                email: data.email,
-                phone: data.phone,
-                website: data.website,
-            }
-        });
-    }
-
-    // 2. Upsert CompanyPropertyRole
-    const existingRole = await db.companyPropertyRole.findUnique({
-        where: {
-            companyId_propertyId_role: {
-                companyId: company.id,
-                propertyId: propertyId,
-                role: role
-            }
-        }
-    });
-
-    if (!existingRole) {
-        await db.companyPropertyRole.create({
-            data: {
-                companyId: company.id,
-                propertyId: propertyId,
-                role: role
-            }
-        });
-    }
-
-    // 3. Fire-and-forget: Sync to GHL in the background
-    const companyId = company.id;
-    const existingGhlCompanyId = company.ghlCompanyId || null;
-    if (location.ghlRefreshToken && location.ghlLocationId) {
-        void (async () => {
-            try {
-                const tokens = await refreshGhlAccessToken(location);
-                if (tokens.ghlAccessToken) {
-                    const ghlId = await syncCompanyToGHL(location.ghlLocationId, {
-                        name: data.name!,
-                        email: data.email || undefined,
-                        phone: data.phone || undefined,
-                        website: data.website || undefined,
-                        tags: [role]
-                    });
-                    if (ghlId && !existingGhlCompanyId) {
-                        await db.company.update({ where: { id: companyId }, data: { ghlCompanyId: ghlId } });
-                    }
-                    console.log(`[Background] Synced ${role} company to GHL. ID: ${ghlId}`);
-                }
-            } catch (err) {
-                console.error(`[Background] Failed to sync ${role} company to GHL:`, err);
-            }
-        })();
-    }
-}
+import { softDeleteOrphanedAssets } from "@/lib/media/media-assets";
+import { savePropertyRecord } from "@/lib/properties/save-property-record";
 
 const propertySchema = z.object({
     title: z.string().min(1),
@@ -461,30 +279,6 @@ export async function upsertProperty(formData: FormData) {
         const validated = propertySchema.parse(rawData);
 
         console.log('Validated data:', validated);
-
-        // Handle Management Company Name lookup
-        if (validated.managementCompanyId) {
-            const mgmtCo = await db.company.findUnique({
-                where: { id: validated.managementCompanyId },
-                select: { name: true }
-            });
-            if (mgmtCo) {
-                (validated as any).managementCompany = mgmtCo.name;
-            }
-        }
-
-        // Handle Project Name lookup
-        if (validated.projectId) {
-            const project = await db.project.findUnique({
-                where: { id: validated.projectId },
-                select: { name: true }
-            });
-            if (project) {
-                (validated as any).projectName = project.name;
-            }
-        }
-
-        const slug = validated.slug || validated.title.toLowerCase().replace(/ /g, "-") + "-" + Date.now();
         const promptProfileUpserts = parsePropertyImagePromptProfileUpsertsJson(validated.imagePromptProfilesUpsertsJson);
 
         const mediaItems: { url: string; kind: MediaKind; sortOrder: number; cloudflareImageId?: string; metadata?: unknown }[] = [];
@@ -532,348 +326,43 @@ export async function upsertProperty(formData: FormData) {
             });
         }
 
-        const data = {
-            ...validated,
-            slug,
-            locationId,
-        };
+        const propertyData = { ...validated };
+        delete (propertyData as any).mediaUrls;
+        delete (propertyData as any).videoUrls;
+        delete (propertyData as any).documentUrls;
+        delete (propertyData as any).mediaJson;
+        delete (propertyData as any).imagePromptProfilesUpsertsJson;
 
-        // Remove non-model fields
-        delete (data as any).mediaUrls;
-        delete (data as any).videoUrls;
-        delete (data as any).documentUrls;
-        delete (data as any).mediaJson; // Remove if added to Zod, though not yet added
-        delete (data as any).imagePromptProfilesUpsertsJson;
-
-        // ... (rest of deletion logic matches original)
-
-        // Remove role fields from property data
-        delete (data as any).ownerId;
-        delete (data as any).ownerName;
-        delete (data as any).ownerEmail;
-        delete (data as any).ownerPhone;
-        delete (data as any).developerId;
-        delete (data as any).developerName;
-        delete (data as any).developerEmail;
-        delete (data as any).developerPhone;
-        delete (data as any).developerWebsite;
-        delete (data as any).agentId;
-        delete (data as any).agentName;
-        delete (data as any).agentEmail;
-        delete (data as any).agentPhone;
-        delete (data as any).agentPhone;
-        delete (data as any).managementCompanyId;
-        delete (data as any).maintenanceIds;
-
-        // Remove ID fields that cause issues if passed during update (Prisma strictness)
-        delete (data as any).locationId;
-        delete (data as any).projectId;
-
-        // Check if we can link to an existing user based on the original email
-        let finalCreatedById = (data as any)['createdById']; // Default to current user for new properties (set below) or ignored for updates
-
-        if (id === "new" || !id) {
-            finalCreatedById = dbUser?.id;
-
-            // Auto-link logic (Find OR Create)
-            if (rawData.originalCreatorEmail) {
-                const email = rawData.originalCreatorEmail as string;
-                let existingUser = await db.user.findUnique({
-                    where: { email }
-                });
-
-                if (!existingUser) {
-                    // Create placeholder if missing so we can link immediately
-                    console.log(`[Upsert] Creating placeholder user for ${email}`);
-                    existingUser = await db.user.create({
-                        data: {
-                            email,
-                            name: (rawData.originalCreatorName as string) || email.split('@')[0],
-                        }
-                    });
-                }
-
-                if (existingUser) {
-                    finalCreatedById = existingUser.id;
-                    console.log(`[Upsert] Linked property to user ${existingUser.id} (${existingUser.email})`);
-                }
-            }
-        }
-
-        const propertyData = {
-            ...data,
-            // Use the calculated ID
-            createdById: (id === "new" || !id) ? finalCreatedById : undefined, // Only set on create
-            updatedById: dbUser?.id, // Always update updater to current user
-
-            // Import Metadata (Ensure raw values are passed even if validation stripped them?)
-            // Validation schema has them, so 'validated' has them.
-            // But we explicitly set them just in case logic above mutated 'data'
-        };
-
-        let property;
-        if (id && id !== "new") {
-            // Update
-            console.log('Updating property:', id);
-            property = await db.property.update({
-                where: { id, locationId },
-                data: propertyData,
-            });
-
-            // ── Media Asset Reference Counting ──
-            // 1. Capture old Cloudflare IDs before wiping PropertyMedia rows
-            const oldMedia = await db.propertyMedia.findMany({
-                where: { propertyId: id, kind: 'IMAGE' },
-                select: { cloudflareImageId: true },
-            });
-
-            // 2. Delete all and recreate (existing strategy for reordering)
-            await db.propertyMedia.deleteMany({ where: { propertyId: id } });
-            if (mediaItems.length > 0) {
-                await db.propertyMedia.createMany({
-                    data: mediaItems.map(item => ({
-                        propertyId: id,
-                        url: item.url,
-                        kind: item.kind,
-                        sortOrder: item.sortOrder,
-                        cloudflareImageId: item.cloudflareImageId,
-                        metadata: item.metadata as any,
-                    })),
-                });
-            }
-
-            // 3. Register new assets & soft-delete orphaned ones
-            await ensureMediaAssets(mediaItems);
-            const removedCfIds = computeRemovedCloudflareIds(oldMedia, mediaItems);
-            if (removedCfIds.length > 0) {
-                await softDeleteOrphanedAssets(removedCfIds);
-            }
-
-        } else {
-            // Create New Property
-            // Check for duplicate slug (Import overwrite scenario)
-            const existing = await db.property.findUnique({
-                where: { slug: propertyData.slug }
-            });
-
-            if (existing) {
-                console.log(`[Upsert] Duplicate slug found (${propertyData.slug}). Overwriting property ${existing.id}...`);
-
-                // DATA PRESERVATION LOGIC:
-                // If we are overwriting, we don't want to lose manually entered creator info
-                // just because the CRM doesn't provide it.
-
-                const mergedData = {
-                    ...propertyData,
-                    // Preserve original creator email if not provided in new payload
-                    originalCreatorEmail: propertyData.originalCreatorEmail || existing.originalCreatorEmail,
-
-                    // Preserve original creator name if not provided
-                    originalCreatorName: propertyData.originalCreatorName || existing.originalCreatorName,
-
-                    // Preserve the linked user (createdById) if it exists on the old record.
-                    // The 'propertyData.createdById' might be the current admin (updater) because 
-                    // auto-link failed due to missing email in payload.
-                    // We prioritize the EXISTING link if the new one is just the current user (fallback).
-                    createdById: existing.createdById || propertyData.createdById
-                };
-
-                // Switch to Update Logic using existing ID
-                property = await db.property.update({
-                    where: { id: existing.id },
-                    data: mergedData,
-                });
-
-                // ── Media Asset Reference Counting (overwrite path) ──
-                const oldOverwriteMedia = await db.propertyMedia.findMany({
-                    where: { propertyId: existing.id, kind: 'IMAGE' },
-                    select: { cloudflareImageId: true },
-                });
-
-                // Re-create media for the overwritten property
-                await db.propertyMedia.deleteMany({ where: { propertyId: existing.id } });
-
-                // Use createMany for efficiency
-                if (mediaItems.length > 0) {
-                    await db.propertyMedia.createMany({
-                        data: mediaItems.map(item => ({
-                            propertyId: existing.id,
-                            url: item.url,
-                            kind: item.kind,
-                            sortOrder: item.sortOrder,
-                            cloudflareImageId: item.cloudflareImageId,
-                            metadata: item.metadata as any,
-                        })),
-                    });
-                }
-
-                // Register new assets & soft-delete orphaned ones
-                await ensureMediaAssets(mediaItems);
-                const removedOverwriteCfIds = computeRemovedCloudflareIds(oldOverwriteMedia, mediaItems);
-                if (removedOverwriteCfIds.length > 0) {
-                    await softDeleteOrphanedAssets(removedOverwriteCfIds);
-                }
-
-            } else {
-                // Truly New Property
-                console.log('Creating new property');
-                property = await db.property.create({
-                    data: {
-                        ...propertyData,
-                        locationId,
-                        media: {
-                            create: mediaItems.map(item => ({
-                                url: item.url,
-                                kind: item.kind,
-                                sortOrder: item.sortOrder,
-                                cloudflareImageId: item.cloudflareImageId,
-                                metadata: item.metadata as any,
-                            })),
-                        },
-                    },
-                });
-
-                // Register new assets in the centralized media library
-                await ensureMediaAssets(mediaItems);
-            }
-        }
+        const property = await savePropertyRecord({
+            id,
+            location,
+            actorUserId: dbUser?.id || null,
+            propertyData,
+            mediaItems,
+            stakeholders: {
+                ownerId: validated.ownerId,
+                ownerName: validated.ownerName,
+                ownerEmail: validated.ownerEmail,
+                ownerPhone: validated.ownerPhone,
+                developerId: validated.developerId,
+                developerName: validated.developerName,
+                developerEmail: validated.developerEmail,
+                developerPhone: validated.developerPhone,
+                developerWebsite: validated.developerWebsite,
+                agentId: validated.agentId,
+                agentName: validated.agentName,
+                agentEmail: validated.agentEmail,
+                agentPhone: validated.agentPhone,
+                managementCompanyId: validated.managementCompanyId,
+                maintenanceIds: validated.maintenanceIds,
+            },
+            promptProfileUpserts,
+        });
 
         // ── AI: Update Property Embedding (fire-and-forget) ──
         updatePropertyEmbedding(property.id).catch(err =>
             console.error(`Background embedding update failed for ${property.id}:`, err)
         );
-
-        if (promptProfileUpserts.length > 0) {
-            for (const upsert of promptProfileUpserts) {
-                await (db as any).propertyImagePromptProfile.upsert({
-                    where: {
-                        propertyId_roomTypeKey: {
-                            propertyId: property.id,
-                            roomTypeKey: upsert.roomTypeKey,
-                        },
-                    },
-                    create: {
-                        propertyId: property.id,
-                        roomTypeKey: upsert.roomTypeKey,
-                        roomTypeLabel: upsert.roomTypeLabel,
-                        promptContext: upsert.promptContext,
-                        analysisData: (upsert.analysisData as any) || null,
-                        updatedById: dbUser?.id || null,
-                    },
-                    update: {
-                        roomTypeLabel: upsert.roomTypeLabel,
-                        promptContext: upsert.promptContext,
-                        analysisData: (upsert.analysisData as any) || null,
-                        updatedById: dbUser?.id || null,
-                    },
-                });
-            }
-        }
-
-        // Process Stakeholders (Contact/Company Roles)
-
-        // Helper to update role by ID
-        const updatePropertyRole = async (propertyId: string, role: string, entityId: string | null | undefined, type: 'contact' | 'company') => {
-            if (entityId === undefined) return; // Not present in form, skip
-
-            // 1. Remove existing roles of this type for this property
-            // We assume one Owner/Developer/Agent per property for this form context
-            if (type === 'contact') {
-                await db.contactPropertyRole.deleteMany({
-                    where: { propertyId, role }
-                });
-                if (entityId) {
-                    await db.contactPropertyRole.create({
-                        data: { contactId: entityId, propertyId, role }
-                    });
-                }
-            } else {
-                await db.companyPropertyRole.deleteMany({
-                    where: { propertyId, role }
-                });
-                if (entityId) {
-                    await db.companyPropertyRole.create({
-                        data: { companyId: entityId, propertyId, role }
-                    });
-                }
-            }
-        };
-
-        const syncPropertyContactRoles = async (propertyId: string, role: string, contactIds: string[] | null | undefined) => {
-            if (contactIds === undefined) return;
-            const uniqueIds = Array.from(new Set((contactIds || []).filter(Boolean)));
-            await db.contactPropertyRole.deleteMany({
-                where: { propertyId, role }
-            });
-            if (uniqueIds.length === 0) return;
-            await db.contactPropertyRole.createMany({
-                data: uniqueIds.map(contactId => ({ contactId, propertyId, role })),
-                skipDuplicates: true
-            });
-        };
-
-        // Handle ID-based updates first (Selection from UI)
-        await updatePropertyRole(property.id, 'owner', validated.ownerId, 'contact');
-        await updatePropertyRole(property.id, 'agent', validated.agentId, 'contact');
-        await updatePropertyRole(property.id, 'developer', validated.developerId, 'company');
-        await updatePropertyRole(property.id, 'management company', validated.managementCompanyId, 'company');
-        await syncPropertyContactRoles(property.id, 'maintenance', validated.maintenanceIds);
-
-        // Handle Legacy/Create New inputs (if IDs are not provided but names are)
-        // Only if ID is NOT provided, otherwise ID takes precedence
-        if (!validated.ownerId && validated.ownerName) {
-            await upsertContactRole(location, property.id, 'owner', {
-                name: validated.ownerName,
-                email: validated.ownerEmail,
-                phone: validated.ownerPhone
-            });
-        }
-
-        if (!validated.agentId && validated.agentName) {
-            await upsertContactRole(location, property.id, 'agent', {
-                name: validated.agentName,
-                email: validated.agentEmail,
-                phone: validated.agentPhone
-            });
-        }
-
-        if (!validated.developerId && validated.developerName) {
-            await upsertCompanyRole(location, property.id, 'developer', {
-                name: validated.developerName,
-                email: validated.developerEmail,
-                phone: validated.developerPhone,
-                website: validated.developerWebsite
-            });
-        }
-
-        console.log('Property saved:', property.id);
-
-        // Sync to GHL
-        try {
-            if (location.ghlRefreshToken) {
-                console.log('Syncing to GHL...');
-                const refreshed = await refreshGhlAccessToken(location);
-                if (refreshed.ghlAccessToken) {
-                    await syncToGHL(
-                        refreshed.ghlAccessToken,
-                        {
-                            ...data,
-                            features: data.features as string[],
-                        } as any,
-                        // If we have a GHL ID stored (not currently in schema but maybe in future), pass it.
-                        // For now, syncToGHL handles lookup by slug/reference.
-                        // Ideally we should store the GHL ID in the property record if we want robust updates by ID.
-                        // But repository.ts syncToGHL handles lookup by slug.
-                    );
-                    console.log('Synced to GHL successfully');
-                }
-            } else {
-                console.log('No GHL Refresh Token, skipping sync');
-            }
-        } catch (error) {
-            console.error('Failed to sync to GHL:', error);
-            // We don't throw here to avoid failing the local save
-        }
 
         revalidatePath("/admin/properties");
         revalidatePath(`/admin/properties/${property.id}`);

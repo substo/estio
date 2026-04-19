@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { MessageCirclePlus, Loader2, Phone, Users, Search, CheckCircle2, MessageCircle, ArrowRight } from 'lucide-react';
-import { fetchEvolutionChats, startNewConversation, parseLeadFromText, createParsedLead, importLeadFromText, type ParsedLeadData } from '../actions';
+import { fetchEvolutionChats, startNewConversation, parseLeadFromText, createParsedLead, importLeadFromText, getPasteLeadImportCapability, type ParsedLeadData } from '../actions';
 import { cn } from '@/lib/utils';
 import { Textarea } from '@/components/ui/textarea';
 import { Card } from '@/components/ui/card';
@@ -48,6 +48,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
     const [leadText, setLeadText] = useState('');
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [parsedLead, setParsedLead] = useState<ParsedLeadData | null>(null);
+    const [pasteLeadCanImportOldCrmProperties, setPasteLeadCanImportOldCrmProperties] = useState(false);
 
     // Google Contacts State
     const [googleSearch, setGoogleSearch] = useState('');
@@ -198,6 +199,25 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
 
         return () => window.clearTimeout(timer);
     }, [open, leadText, parsedLead, requestLeadPreview]);
+
+    useEffect(() => {
+        if (!open) return;
+        let cancelled = false;
+
+        void getPasteLeadImportCapability()
+            .then((res) => {
+                if (cancelled) return;
+                setPasteLeadCanImportOldCrmProperties(Boolean(res.success && res.capability?.canImportOldCrmProperties));
+            })
+            .catch(() => {
+                if (cancelled) return;
+                setPasteLeadCanImportOldCrmProperties(false);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [open]);
 
     // Filter chats by search
     const filteredChats = chats.filter(c =>
@@ -516,7 +536,12 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                     disabled={isAnalyzing}
                                 />
                                 <div className="flex justify-between items-center text-xs text-gray-500 px-1">
-                                    <span>AI will extract contact & requirements</span>
+                                    <span>
+                                        AI will extract contact & requirements
+                                        {pasteLeadCanImportOldCrmProperties
+                                            ? " and queue Downtown Cyprus property import in background"
+                                            : ""}
+                                    </span>
                                     <Button
                                         size="sm"
                                         onClick={async () => {

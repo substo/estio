@@ -6,6 +6,16 @@ import { PROPERTY_LOCATIONS } from '@/lib/properties/locations';
 import db from '@/lib/db';
 import { uploadUrlToCloudflare, uploadToCloudflare, getImageDeliveryUrl } from '@/lib/cloudflareImages';
 
+export interface PullPropertyFromCrmContext {
+    oldPropertyId: string;
+    locationId: string;
+    crmUrl: string;
+    crmUsername: string;
+    crmPassword: string;
+    crmEditUrlPattern?: string | null;
+    actorUserId?: string | null;
+}
+
 export async function pullPropertyFromCrm(oldPropertyId: string, userId: string) {
     console.log(`[CRM PULL] Starting for old property ID ${oldPropertyId} by user ${userId}`);
 
@@ -16,18 +26,38 @@ export async function pullPropertyFromCrm(oldPropertyId: string, userId: string)
 
     if (!user) throw new Error("User not found");
 
-    // Get location config
     const location = user.locations[0];
     const crmUrl = location?.crmUrl;
     const crmEditUrlPattern = location?.crmEditUrlPattern;
 
-    if (!crmUrl || !user.crmUsername || !user.crmPassword) {
+    if (!location?.id || !crmUrl || !user.crmUsername || !user.crmPassword) {
         throw new Error("Missing CRM configuration. Check location URL and user credentials.");
     }
 
+    return pullPropertyFromCrmWithContext({
+        oldPropertyId,
+        locationId: location.id,
+        crmUrl,
+        crmUsername: user.crmUsername,
+        crmPassword: user.crmPassword,
+        crmEditUrlPattern,
+        actorUserId: user.id,
+    });
+}
+
+export async function pullPropertyFromCrmWithContext(context: PullPropertyFromCrmContext) {
+    const {
+        oldPropertyId,
+        locationId,
+        crmUrl,
+        crmUsername,
+        crmPassword,
+        crmEditUrlPattern,
+    } = context;
+
     try {
         await puppeteerService.init();
-        await puppeteerService.login(crmUrl, user.crmUsername, user.crmPassword);
+        await puppeteerService.login(crmUrl, crmUsername, crmPassword);
 
         const page = await puppeteerService.getPage();
 
@@ -347,14 +377,14 @@ export async function pullPropertyFromCrm(oldPropertyId: string, userId: string)
 
             if (extractedData.ownerEmail) {
                 contact = await db.contact.findFirst({
-                    where: { email: extractedData.ownerEmail, locationId: user.locations[0]?.id }
+                    where: { email: extractedData.ownerEmail, locationId }
                 });
             }
 
             if (!contact && normalizedBestPhone) {
                 contact = await db.contact.findFirst({
                     where: {
-                        locationId: user.locations[0]?.id,
+                        locationId,
                         OR: [
                             { phone: normalizedBestPhone },
                             { phone: bestPhone },
@@ -367,7 +397,7 @@ export async function pullPropertyFromCrm(oldPropertyId: string, userId: string)
 
             if (!contact && extractedData.ownerName) {
                 contact = await db.contact.findFirst({
-                    where: { name: extractedData.ownerName, locationId: user.locations[0]?.id }
+                    where: { name: extractedData.ownerName, locationId }
                 });
             }
 
@@ -425,13 +455,6 @@ export async function pullPropertyFromCrm(oldPropertyId: string, userId: string)
 
             } else {
                 console.log(`[CRM PULL] Creating new contact for owner: ${extractedData.ownerName}`);
-                const userWithLoc = await db.user.findUnique({
-                    where: { id: user.id },
-                    include: { locations: true }
-                });
-
-                const locationId = userWithLoc?.locations[0]?.id;
-
                 if (locationId) {
                     const newContact = await db.contact.create({
                         data: {
@@ -460,7 +483,6 @@ export async function pullPropertyFromCrm(oldPropertyId: string, userId: string)
         // --- PROJECT LINKING LOGIC ---
         if (extractedData.projectName) {
             console.log(`[CRM PULL] Processing Project: ${extractedData.projectName}`);
-            const locationId = user.locations[0]?.id;
             if (locationId) {
                 let project = await db.project.findFirst({
                     where: { name: extractedData.projectName, locationId }

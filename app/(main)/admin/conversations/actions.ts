@@ -82,6 +82,12 @@ import {
     shiftIsoDate,
 } from "@/lib/viewings/suggestion-parsing";
 import { normalizeInternationalPhone } from "@/lib/utils/phone";
+import { applyPropertyInterestToContact } from "@/lib/leads/contact-property-interest";
+import { enqueuePasteLeadPropertyImport } from "@/lib/queue/paste-lead-property-import";
+import {
+    extractLegacyCrmRefCandidates,
+    getOldCrmImportCapabilityForUser,
+} from "@/lib/crm/old-crm-import";
 
 const MAX_SELECTION_TEXT_LENGTH = 12000;
 const MAX_CUSTOM_OUTPUT_LENGTH = 2200;
@@ -9646,20 +9652,6 @@ function inferRequirementStatusFromLead(rawLeadText: string, budgetText?: string
     return null;
 }
 
-function inferRequirementStatusFromMatchedProperty(property: {
-    goal?: string | null;
-    title?: string | null;
-    slug?: string | null;
-}): "For Rent" | "For Sale" | null {
-    const text = `${property.title || ""} ${property.slug || ""}`.toLowerCase();
-    if (text.includes("for-rent") || text.includes("for rent") || text.includes("rent")) return "For Rent";
-    if (text.includes("for-sale") || text.includes("for sale") || text.includes("sale")) return "For Sale";
-
-    if (property.goal === "RENT") return "For Rent";
-    if (property.goal === "SALE") return "For Sale";
-    return null;
-}
-
 async function resolveLeadPropertyMatch(locationId: string, rawLeadText: string) {
     const refs = extractPropertyRefsFromLeadText(rawLeadText);
     const slugs = extractPropertySlugsFromLeadUrls(rawLeadText);
@@ -11377,48 +11369,10 @@ async function applyMatchedPropertyToContact(args: {
     matchedProperty: NonNullable<ResolvedLeadPropertyMatch>;
     inferredStatus: "For Rent" | "For Sale" | null;
 }) {
-    const { contactId, matchedProperty, inferredStatus } = args;
-    const contactForProperty = await db.contact.findUnique({
-        where: { id: contactId },
-        select: {
-            propertiesInterested: true,
-            requirementStatus: true,
-            requirementDistrict: true,
-            requirementPropertyLocations: true
-        }
-    });
-
-    const nextInterested = Array.from(new Set([
-        ...(contactForProperty?.propertiesInterested || []),
-        matchedProperty.id
-    ]));
-
-    const statusFromProperty = inferRequirementStatusFromMatchedProperty(matchedProperty);
-    const derivedStatus = inferredStatus || statusFromProperty;
-    const propertyDistrict = normalizeRequirementDistrict(matchedProperty.propertyLocation || matchedProperty.city || null);
-
-    const propertyPatch: any = {
-        propertiesInterested: nextInterested
-    };
-
-    if (derivedStatus) {
-        propertyPatch.requirementStatus = derivedStatus;
-    }
-
-    if ((!contactForProperty?.requirementDistrict || contactForProperty.requirementDistrict === "Any District") && propertyDistrict) {
-        propertyPatch.requirementDistrict = propertyDistrict;
-    }
-
-    if (propertyDistrict) {
-        propertyPatch.requirementPropertyLocations = Array.from(new Set([
-            ...(contactForProperty?.requirementPropertyLocations || []),
-            propertyDistrict
-        ]));
-    }
-
-    await db.contact.update({
-        where: { id: contactId },
-        data: propertyPatch
+    await applyPropertyInterestToContact({
+        contactId: args.contactId,
+        property: args.matchedProperty,
+        inferredStatus: args.inferredStatus,
     });
 }
 
@@ -11432,6 +11386,35 @@ export async function parseLeadFromText(text: string, modelOverride?: string) {
         data: parsed.data,
         telemetry: parsed.telemetry,
     };
+}
+
+export async function getPasteLeadImportCapability() {
+    try {
+        const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+        const { userId: clerkUserId } = await auth();
+        const currentUser = clerkUserId
+            ? await db.user.findUnique({ where: { clerkId: clerkUserId }, select: { id: true } })
+            : null;
+
+        if (!currentUser?.id) {
+            return { success: false as const, error: "Unauthorized" };
+        }
+
+        const capability = await getOldCrmImportCapabilityForUser({
+            locationId: location.id,
+            userId: currentUser.id,
+        });
+
+        return {
+            success: true as const,
+            capability,
+        };
+    } catch (error: any) {
+        return {
+            success: false as const,
+            error: error?.message || "Failed to resolve Paste Lead import capability.",
+        };
+    }
 }
 
 export async function importLeadFromText(text: string, modelOverride?: string) {
@@ -11481,6 +11464,7 @@ export async function createParsedLead(
     const location = options?.locationOverride || await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const importStartedAt = Date.now();
     const backgroundJobsQueued: string[] = [];
+    const backgroundJobsSkipped: string[] = [];
 
     let preferredUserId: string | null = options?.preferredUserIdOverride ?? null;
     if (!options?.skipAuthUserLookup && preferredUserId == null) {
@@ -11751,8 +11735,26 @@ export async function createParsedLead(
 
         if (contactId) {
             const parseTrace = options?.parseTrace;
+            const legacyCrmRefCandidates = extractLegacyCrmRefCandidates(leadResolutionText);
+            const legacyImportActorUserId = preferredUserId;
+            const legacyCrmCapability = legacyCrmRefCandidates.length > 0 && legacyImportActorUserId
+                ? await getOldCrmImportCapabilityForUser({
+                    locationId: location.id,
+                    userId: legacyImportActorUserId,
+                })
+                : null;
             if (parseTrace) backgroundJobsQueued.push("tracePersistence");
             backgroundJobsQueued.push("propertyEnrichment");
+            if (legacyCrmRefCandidates.length > 0) {
+                backgroundJobsQueued.push(`legacyPropertyRefs:${legacyCrmRefCandidates.length}`);
+                if (!legacyImportActorUserId) {
+                    backgroundJobsSkipped.push("legacyPropertyImport:no_actor_user");
+                } else if (!legacyCrmCapability?.canImportOldCrmProperties) {
+                    backgroundJobsSkipped.push("legacyPropertyImport:capability_unavailable");
+                } else {
+                    backgroundJobsQueued.push(`legacyPropertyImportQueue:${legacyCrmRefCandidates.length}`);
+                }
+            }
             runDetachedTask(`paste_lead_post_import:${conversation.id}`, async () => {
                 const matchedProperty = matchedPropertyForName || await resolveLeadPropertyMatch(location.id, leadResolutionText);
                 if (matchedProperty) {
@@ -11770,6 +11772,79 @@ export async function createParsedLead(
                         trace: parseTrace,
                         matchedProperty,
                     });
+                }
+
+                if (legacyCrmRefCandidates.length > 0) {
+                    const refs = legacyCrmRefCandidates.map((candidate) => candidate.publicReference);
+                    const existingProperties = await db.property.findMany({
+                        where: {
+                            locationId: location.id,
+                            reference: { in: refs },
+                        },
+                        select: {
+                            id: true,
+                            reference: true,
+                            goal: true,
+                            title: true,
+                            slug: true,
+                            propertyLocation: true,
+                            city: true,
+                        },
+                    });
+
+                    const existingByRef = new Map(
+                        existingProperties
+                            .filter((property) => property.reference)
+                            .map((property) => [String(property.reference).toUpperCase(), property])
+                    );
+
+                    for (const property of existingProperties) {
+                        await applyPropertyInterestToContact({
+                            contactId: contactId!,
+                            property,
+                            inferredStatus,
+                        });
+                    }
+
+                    const missingCandidates = legacyCrmRefCandidates.filter(
+                        (candidate) => !existingByRef.has(candidate.publicReference.toUpperCase())
+                    );
+
+                    if (missingCandidates.length > 0) {
+                        if (!legacyImportActorUserId) {
+                            console.warn("[PasteLeadFastPath] Skipping legacy property import queue; no actor user id available", {
+                                conversationId: conversation.id,
+                                refs: missingCandidates.map((candidate) => candidate.publicReference),
+                            });
+                        } else if (!legacyCrmCapability?.canImportOldCrmProperties) {
+                            console.log("[PasteLeadFastPath] Skipping legacy property import queue; capability unavailable", {
+                                conversationId: conversation.id,
+                                refs: missingCandidates.map((candidate) => candidate.publicReference),
+                                missing: legacyCrmCapability?.missing || [],
+                            });
+                        } else {
+                            for (const candidate of missingCandidates) {
+                                const enqueueResult = await enqueuePasteLeadPropertyImport({
+                                    locationId: location.id,
+                                    conversationId: conversation.id,
+                                    contactId: contactId!,
+                                    actorUserId: legacyImportActorUserId,
+                                    publicReference: candidate.publicReference,
+                                    oldCrmPropertyId: candidate.oldCrmPropertyId,
+                                    source: candidate.source,
+                                });
+
+                                if (!enqueueResult.accepted) {
+                                    console.warn("[PasteLeadFastPath] Legacy property import queue rejected job", {
+                                        conversationId: conversation.id,
+                                        reference: candidate.publicReference,
+                                        mode: enqueueResult.mode,
+                                        error: enqueueResult.error || null,
+                                    });
+                                }
+                            }
+                        }
+                    }
                 }
 
                 console.log("[PasteLeadFastPath] Background post-import complete", JSON.stringify({
@@ -11817,6 +11892,7 @@ export async function createParsedLead(
                 contactId,
                 importLatencyMs,
                 backgroundJobsQueued,
+                backgroundJobsSkipped,
             }));
 
             return {
@@ -11826,6 +11902,7 @@ export async function createParsedLead(
                 contactId,
                 action: 'replied',
                 backgroundJobsQueued,
+                backgroundJobsSkipped,
             };
         } else {
             // NO MESSAGE (Just Notes)
@@ -11856,6 +11933,7 @@ export async function createParsedLead(
                 contactId,
                 importLatencyMs,
                 backgroundJobsQueued,
+                backgroundJobsSkipped,
             }));
 
             return {
@@ -11865,6 +11943,7 @@ export async function createParsedLead(
                 contactId,
                 action: 'imported',
                 backgroundJobsQueued,
+                backgroundJobsSkipped,
             };
         }
     } catch (e: any) {
