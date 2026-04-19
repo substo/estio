@@ -175,6 +175,42 @@ export async function savePropertyPrintDraft(input: z.infer<typeof saveDraftSche
     return draft;
 }
 
+export async function duplicatePropertyPrintDraft(input: {
+    draftId: string;
+    propertyId: string;
+    locationId: string;
+}) {
+    const draftId = String(input.draftId || "").trim();
+    const propertyId = String(input.propertyId || "").trim();
+    const locationId = String(input.locationId || "").trim();
+    await requirePropertyAccess(locationId);
+
+    const draft = await db.propertyPrintDraft.findFirst({
+        where: {
+            id: draftId,
+            propertyId,
+            property: { locationId },
+        },
+    });
+    
+    if (!draft) {
+        throw new Error("Draft not found.");
+    }
+
+    const { id: _oldId, createdAt: _ca, updatedAt: _ua, isDefault: _id, ...restProps } = draft;
+
+    const duplicated = await db.propertyPrintDraft.create({
+        data: {
+            ...restProps,
+            name: `${draft.name} (Copy)`,
+            isDefault: false,
+        },
+    });
+
+    revalidatePropertyPrintPaths(propertyId, duplicated.id);
+    return duplicated;
+}
+
 export async function deletePropertyPrintDraft(input: {
     draftId: string;
     propertyId: string;

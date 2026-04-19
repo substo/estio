@@ -17,7 +17,7 @@ import {
     useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { FileDown, GripVertical, Languages, Loader2, Plus, Printer, Save, Sparkles, Star, Trash2, Image as ImageIcon, PanelLeftClose, PanelLeft, Building } from "lucide-react";
+import { FileDown, GripVertical, Languages, Loader2, Plus, Printer, Save, Sparkles, Star, Trash2, Image as ImageIcon, PanelLeftClose, PanelLeft, Building, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -48,6 +48,7 @@ import { useAiModelCatalog } from "@/components/ai/use-ai-model-catalog";
 import {
     createPropertyPrintDraft,
     deletePropertyPrintDraft,
+    duplicatePropertyPrintDraft,
     generatePropertyPrintDraftCopy,
     savePropertyPrintDraft,
     setDefaultPropertyPrintDraft,
@@ -446,6 +447,31 @@ export function PropertyPrintDesignerDialog({
         });
     };
 
+    const handleDuplicateDraft = () => {
+        if (!selectedDraft) return;
+        startTransition(async () => {
+            try {
+                const duplicated = normalizeDraft(await duplicatePropertyPrintDraft({
+                    draftId: selectedDraft.id,
+                    propertyId,
+                    locationId
+                }));
+                // Insert the duplicated draft right after the currently selected one, or just prepend it.
+                setDrafts((current) => {
+                    const index = current.findIndex(d => d.id === selectedDraft.id);
+                    if (index >= 0) {
+                        return [...current.slice(0, index + 1), duplicated, ...current.slice(index + 1)];
+                    }
+                    return [duplicated, ...current];
+                });
+                setSelectedDraftId(duplicated.id);
+                toast.success("Print draft duplicated");
+            } catch (error: any) {
+                toast.error(error?.message || "Failed to duplicate print draft");
+            }
+        });
+    };
+
     const handleDelete = () => {
         if (!selectedDraft) return;
         startTransition(async () => {
@@ -480,8 +506,15 @@ export function PropertyPrintDesignerDialog({
         if (!selectedDraft) return;
         updateCurrentDraft((draft) => {
             const current = new Set(draft.languages);
-            if (current.has(code)) current.delete(code);
-            else if (current.size < 2) current.add(code);
+            if (current.has(code)) {
+                current.delete(code);
+            } else {
+                if (current.size >= 2) {
+                    const first = Array.from(current)[0];
+                    current.delete(first);
+                }
+                current.add(code);
+            }
             return { ...draft, languages: Array.from(current) };
         });
     };
@@ -758,6 +791,10 @@ export function PropertyPrintDesignerDialog({
                                                     <FileDown className="mr-1.5 h-3.5 w-3.5" />
                                                     PDF
                                                 </a>
+                                            </Button>
+                                            <Button type="button" size="sm" variant="outline" onClick={handleDuplicateDraft} disabled={isPending}>
+                                                <Copy className="mr-1.5 h-3.5 w-3.5" />
+                                                Duplicate
                                             </Button>
                                             <Button type="button" size="sm" variant="outline" onClick={handleMakeDefault} disabled={isPending || selectedDraft.isDefault}>
                                                 <Star className="mr-1.5 h-3.5 w-3.5" />

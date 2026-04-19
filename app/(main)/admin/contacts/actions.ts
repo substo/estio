@@ -2960,7 +2960,7 @@ export async function checkSharedContactsSavedState(
   phoneNumbers: string[]
 ) {
   try {
-    const { userId } = auth();
+    const { userId } = await auth();
     if (!userId) return { success: false, error: 'Unauthorized' };
 
     // Resolve internal location ID
@@ -2969,12 +2969,14 @@ export async function checkSharedContactsSavedState(
         OR: [
           { id: locationId },
           { ghlLocationId: locationId }
-        ],
-        users: { some: { userId } }
+        ]
       },
       select: { id: true }
     });
-    if (!location) return { success: false, error: 'Location not found or unauthorized' };
+
+    if (!location || !(await verifyUserHasAccessToLocation(userId, location.id))) {
+       return { success: false, error: 'Location not found or unauthorized' };
+    }
 
     const existingContacts = await db.contact.findMany({
       where: {

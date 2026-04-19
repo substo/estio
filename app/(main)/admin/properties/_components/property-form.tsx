@@ -66,6 +66,7 @@ import {
     revertAiGeneratedReplacement,
 } from "@/lib/properties/property-media-ai";
 import { PropertyAiUsageBadge } from "./property-ai-usage-badge";
+import { PropertyTranslationPanel } from "./property-translation-panel";
 
 interface SortableImageProps {
     id: string;
@@ -148,6 +149,7 @@ export default function PropertyForm({
     const property = pulledData || initialProperty;
     // Key to force re-mounting of uncontrolled components when data changes
     const [formVersion, setFormVersion] = useState(0);
+    const [activeLanguage, setActiveLanguage] = useState("en");
 
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [selectedCategory, setSelectedCategory] = useState<string>(property?.category || "");
@@ -610,8 +612,8 @@ export default function PropertyForm({
             )}
 
             <Tabs defaultValue="details" className="flex-1 flex flex-col overflow-hidden">
-                <div className="px-1 pt-1">
-                    <TabsList className="grid w-full grid-cols-8">
+                <div className="px-1 pt-1 flex items-center justify-between gap-4">
+                    <TabsList className="grid flex-1 grid-cols-8">
                         <TabsTrigger value="details">Details</TabsTrigger>
                         <TabsTrigger value="pricing">Pricing</TabsTrigger>
                         <TabsTrigger value="location">Location</TabsTrigger>
@@ -621,12 +623,41 @@ export default function PropertyForm({
                         <TabsTrigger value="stakeholders">Stakeholders</TabsTrigger>
                         <TabsTrigger value="notes">Notes</TabsTrigger>
                     </TabsList>
+                    
+                    <div className="flex items-center gap-2 mr-2">
+                        <Label className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">Editing:</Label>
+                        <Select value={activeLanguage} onValueChange={setActiveLanguage}>
+                            <SelectTrigger className="w-[140px] h-8 text-xs font-semibold bg-blue-50 border-blue-200">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="en">🇬🇧 English</SelectItem>
+                                <SelectItem value="el">🇬🇷 Greek (EL)</SelectItem>
+                                <SelectItem value="ru">🇷🇺 Russian (RU)</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
                 </div>
 
                 <div className="flex-1 overflow-y-auto px-1">
                     <TabsContent value="details" className="space-y-4 py-4 data-[state=inactive]:hidden" forceMount={true}>
+                        
+                        {activeLanguage !== "en" && (
+                            <div className="mb-6">
+                                <PropertyTranslationPanel 
+                                    propertyId={property?.id}
+                                    locationId={locationId}
+                                    language={activeLanguage}
+                                    sourceTitle={property?.title || ""}
+                                    sourceDescription={description || ""}
+                                    sourceMetaTitle={property?.metaTitle || ""}
+                                    sourceMetaDescription={property?.metaDescription || ""}
+                                />
+                            </div>
+                        )}
+
                         <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2 col-span-2">
+                            <div className={`space-y-2 col-span-2 ${activeLanguage !== 'en' ? 'hidden' : ''}`}>
                                 <Label htmlFor="title">Property Title</Label>
                                 <Input id="title" name="title" defaultValue={property?.title} required />
                             </div>
@@ -772,7 +803,7 @@ export default function PropertyForm({
                             </div>
                         </div>
 
-                        <div className="space-y-2">
+                        <div className={`space-y-2 ${activeLanguage !== 'en' ? 'hidden' : ''}`}>
                             <Label htmlFor="description">Description</Label>
                             <RichTextEditor
                                 content={description}
@@ -1009,7 +1040,7 @@ export default function PropertyForm({
                                 <Label htmlFor="slug">Slug (URL Path)</Label>
                                 <Input id="slug" name="slug" defaultValue={property?.slug || ""} placeholder="auto-generated-if-empty" />
                             </div>
-                            <div className="space-y-2">
+                            <div className={`space-y-2 ${activeLanguage !== 'en' ? 'hidden' : ''}`}>
                                 <Label htmlFor="metaTitle">Meta Title</Label>
                                 <Input id="metaTitle" name="metaTitle" defaultValue={property?.metaTitle || ""} />
                             </div>
@@ -1017,7 +1048,7 @@ export default function PropertyForm({
                                 <Label htmlFor="metaKeywords">Meta Keywords</Label>
                                 <Input id="metaKeywords" name="metaKeywords" defaultValue={property?.metaKeywords || ""} placeholder="comma, separated, keywords" />
                             </div>
-                            <div className="space-y-2">
+                            <div className={`space-y-2 ${activeLanguage !== 'en' ? 'hidden' : ''}`}>
                                 <Label htmlFor="metaDescription">Meta Description</Label>
                                 <Textarea id="metaDescription" name="metaDescription" defaultValue={property?.metaDescription || ""} />
                             </div>

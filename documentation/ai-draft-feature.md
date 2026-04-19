@@ -15,7 +15,7 @@ Source of truth: [AI Communication Policy](./ai-communication-policy.md).
 
 As of Mar 10, 2026, manual draft generation also supports an explicit **reply language override** at the conversation level plus a persistent contact-level default. The policy and precedence rules remain documented only in [AI Communication Policy](./ai-communication-policy.md).
 
-As of Apr 8, 2026, the shared composer also supports a separate **manual translation preview** flow for typed outbound sends. That send-time translation UX is not part of AI draft generation and is documented in [Conversation Management](./conversation-management.md).
+As of Apr 2026, the shared composer also supports a separate **conversation translation** flow for inbound reading and typed outbound sends. That translation UX is not part of AI draft generation and is documented in [Conversation Translation](./conversation-translation.md).
 
 ## 2. Architecture: Local-First Hybrid
 To ensure resilience, speed, and compatibility with both "Synced" (GHL) and "Shadow" (WhatsApp-only) conversations, we use a **Local-First** architecture.
@@ -82,6 +82,7 @@ It is critical to distinguish between **Content** and **Metadata**:
 - In the current UI, the review language resolves from the agent's browser/UI language, with English fallback.
 - Thread `Reply language` controls the client-facing send/translation target, not the draft-review language.
 - `Contact.preferredLang` and detected thread language are not used for AI Draft review language.
+- Full thread/view/send translation behavior is documented in [Conversation Translation](./conversation-translation.md).
 - Tone must stay neutral, factual, commercially aware, and non-pushy.
 - Drafts avoid hard authority/finality claims unless confirmed in context.
 - Urgency wording must be evidence-based (for example, confirmed competing offer activity), not pressure language.
@@ -94,7 +95,7 @@ It is critical to distinguish between **Content** and **Metadata**:
 - `Auto` clears the conversation override and uses the location-level default reply language from AI Settings.
 - The active source is shown in the composer as `Conversation override` or `Location default`.
 - This control defines the client-facing send language used for translation preview and send-time translation.
-- When an agent is manually typing a reply instead of generating a draft, the same shared composer can now preview a translated send variant; the implementation and persistence details for that workflow live only in [Conversation Management](./conversation-management.md).
+- When an agent is manually typing a reply instead of generating a draft, the same shared composer can preview a translated send variant; the implementation and persistence details for that workflow live in [Conversation Translation](./conversation-translation.md).
 
 ### Timeline Context Rules (Mar 2026)
 - Suggestion bubbles and explicit `AI Draft` actions both flow through the same draft generator and therefore use the same timeline-parity context rules.

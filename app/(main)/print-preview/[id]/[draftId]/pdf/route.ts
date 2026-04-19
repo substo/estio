@@ -1,8 +1,8 @@
 import { currentUser } from "@clerk/nextjs/server";
+import { cookies } from "next/headers";
 import db from "@/lib/db";
 import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
-import { buildPropertyPrintPreviewData, getLocationPrintBranding } from "@/lib/properties/print-preview";
-import { generatePropertyPrintPdf } from "@/lib/properties/print-pdf";
+import { generatePdfViaPuppeteer } from "@/lib/properties/print-puppeteer";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 
 export async function GET(
@@ -37,15 +37,29 @@ export async function GET(
     const draft = await db.propertyPrintDraft.findFirst({
         where: { id: draftId, propertyId: property.id },
     });
+    
     if (!draft) {
         return new Response("Print draft not found", { status: 404 });
     }
 
-    const branding = await getLocationPrintBranding(property.locationId);
-    const data = buildPropertyPrintPreviewData({ property, draft, branding });
-
     try {
-        const pdfBytes = await generatePropertyPrintPdf(data);
+        const incomingHost = _request.headers.get("x-forwarded-host") || _request.headers.get("host");
+        const proto = _request.headers.get("x-forwarded-proto") || (_request.url.startsWith("https") ? "https" : "http");
+        const parsedUrl = new URL(_request.url);
+        const pathname = parsedUrl.pathname.replace(/\/pdf$/, "");
+        
+        let targetUrl = incomingHost 
+            ? `${proto}://${incomingHost}${pathname}${parsedUrl.search}`
+            : _request.url.replace(/\/pdf(\?.*)?$/, "");
+            
+        // Final sanity check: if somehow it resulted in https://localhost, forcefully demote to http
+        if (targetUrl.startsWith("https://localhost")) {
+            targetUrl = targetUrl.replace("https://localhost", "http://localhost");
+        }
+
+        const requestCookies = (await cookies()).getAll();
+        
+        const pdfBytes = await generatePdfViaPuppeteer(targetUrl, requestCookies);
 
         void securelyRecordAiUsage({
             locationId: property.locationId,
@@ -54,7 +68,7 @@ export async function GET(
             featureArea: "property_printing",
             action: "generate_pdf",
             provider: "system",
-            model: String((draft.generationMetadata as any)?.model || "pdf-lib"),
+            model: "puppeteer-headless",
             metadata: {
                 draftId: draft.id,
                 templateId: draft.templateId,
@@ -67,8 +81,8 @@ export async function GET(
                 "Content-Disposition": `inline; filename="${property.slug || property.id}-${draft.id}.pdf"`,
             },
         });
-    } catch (error) {
+    } catch (error: any) {
         console.error("[print-pdf-route] PDF generation failed:", error);
-        return new Response("Failed to generate PDF. Please try again or use browser print.", { status: 500 });
+        return new Response(`Failed to generate PDF. Error: ${error.message || String(error)}\nPlease try again or use browser print.`, { status: 500 });
     }
 }

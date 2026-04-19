@@ -16,13 +16,15 @@ export function PrintPreviewViewer({
     const [isZoomed, setIsZoomed] = useState(false);
 
     return (
-        <div className="flex h-screen flex-col overflow-hidden bg-stone-200">
-            <PropertyPrintPreviewActions 
-                pdfHref={pdfHref} 
-                isZoomed={isZoomed}
-                onToggleZoom={() => setIsZoomed(!isZoomed)}
-            />
-            <div className={`flex flex-1 overflow-auto ${isZoomed ? "p-8" : "p-4"}`}>
+        <div className="flex h-screen flex-col overflow-hidden bg-stone-200 print:h-auto print:bg-white print:overflow-visible print:block">
+            <div className="print:hidden">
+                <PropertyPrintPreviewActions 
+                    pdfHref={pdfHref} 
+                    isZoomed={isZoomed}
+                    onToggleZoom={() => setIsZoomed(!isZoomed)}
+                />
+            </div>
+            <div className={`flex flex-1 overflow-auto print:overflow-visible print:p-0 print:block ${isZoomed ? "p-8" : "p-4"}`}>
                 <PropertyPrintPreview 
                     data={data} 
                     embedded={false} 
