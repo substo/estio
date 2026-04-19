@@ -2951,3 +2951,52 @@ export async function saveSharedContact(params: {
     return { success: false, error: error?.message || 'Failed to save contact' };
   }
 }
+
+/**
+ * Resolves the saved state of multiple contact phone numbers to hydrate message interfaces.
+ */
+export async function checkSharedContactsSavedState(
+  locationId: string,
+  phoneNumbers: string[]
+) {
+  try {
+    const { userId } = auth();
+    if (!userId) return { success: false, error: 'Unauthorized' };
+
+    // Resolve internal location ID
+    const location = await db.location.findFirst({
+      where: {
+        OR: [
+          { id: locationId },
+          { ghlLocationId: locationId }
+        ],
+        users: { some: { userId } }
+      },
+      select: { id: true }
+    });
+    if (!location) return { success: false, error: 'Location not found or unauthorized' };
+
+    const existingContacts = await db.contact.findMany({
+      where: {
+        locationId: location.id,
+        phone: { in: phoneNumbers.map(normalizePhone).filter(Boolean) as string[] }
+      },
+      select: { id: true, phone: true }
+    });
+
+    const finalStates: Record<string, { saved: boolean; contactId: string }> = {};
+    phoneNumbers.forEach(inputPhone => {
+      const normalized = normalizePhone(inputPhone);
+      if (!normalized) return;
+      const matched = existingContacts.find(c => c.phone === normalized);
+      if (matched) {
+        finalStates[inputPhone] = { saved: true, contactId: matched.id };
+      }
+    });
+
+    return { success: true, states: finalStates };
+  } catch (error: any) {
+    console.error('[checkSharedContactsSavedState] Error:', error);
+    return { success: false, error: error?.message || 'Failed to check contacts' };
+  }
+}

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Mail, Smartphone, Paperclip, ExternalLink, ChevronDown, ChevronUp, ArrowRight, Download, Maximize2, RefreshCw, Clock, Check, CheckCheck, AlertTriangle, UserPlus, User, Phone as PhoneIcon, Building2, MailIcon, ExternalLink as ExternalLinkIcon, MessageCirclePlus } from "lucide-react";
-import { saveSharedContact, openOrStartConversationForContact } from "@/app/(main)/admin/contacts/actions";
+import { saveSharedContact, openOrStartConversationForContact, checkSharedContactsSavedState } from "@/app/(main)/admin/contacts/actions";
 import type { SharedContactInfo } from "@/lib/whatsapp/evolution-media";
 import { format } from "date-fns";
 import { EmailFrame, type EmailFrameSelection } from "./email-frame";
@@ -204,7 +204,53 @@ export function MessageBubble({
     const isContactMessage = !!sharedContacts && sharedContacts.length > 0;
     const [contactSaveStates, setContactSaveStates] = useState<Record<number, { saving?: boolean; saved?: boolean; contactId?: string; isNew?: boolean; error?: string }>>({}); 
     const [contactOpenMessageStates, setContactOpenMessageStates] = useState<Record<number, boolean>>({});
+    const [isHydratingContactStates, setIsHydratingContactStates] = useState<boolean>(isContactMessage);
     const router = useRouter(); 
+
+    useEffect(() => {
+        if (!isContactMessage || !locationId || !message.body) {
+            setIsHydratingContactStates(false);
+            return;
+        }
+
+        const parsedContacts = parseSharedContactsFromBody(message.body);
+        if (!parsedContacts || parsedContacts.length === 0) {
+            setIsHydratingContactStates(false);
+            return;
+        }
+        
+        const phoneNumbers = parsedContacts.map(c => c.phoneNumber).filter(Boolean) as string[];
+        if (phoneNumbers.length === 0) {
+            setIsHydratingContactStates(false);
+            return;
+        }
+
+        let isMounted = true;
+        setIsHydratingContactStates(true);
+        void checkSharedContactsSavedState(locationId, phoneNumbers).then(res => {
+            if (!isMounted) return;
+            if (res.success && res.states) {
+                setContactSaveStates(prev => {
+                    const newState = { ...prev };
+                    parsedContacts.forEach((c, idx) => {
+                        if (c.phoneNumber && res.states![c.phoneNumber]?.saved) {
+                            newState[idx] = {
+                                ...newState[idx],
+                                saved: true,
+                                contactId: res.states![c.phoneNumber].contactId
+                            };
+                        }
+                    });
+                    return newState;
+                });
+            }
+            setIsHydratingContactStates(false);
+        }).catch(() => {
+            if (isMounted) setIsHydratingContactStates(false);
+        });
+
+        return () => { isMounted = false; };
+    }, [isContactMessage, locationId, message.body]);
 
     useEffect(() => {
         setSelectionTarget(null);
@@ -705,7 +751,12 @@ export function MessageBubble({
 
                                         {/* Actions */}
                                         <div className="flex items-center gap-2 pt-1">
-                                            {state?.saved ? (
+                                            {isHydratingContactStates ? (
+                                                <div className={cn("flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium", isOutbound ? "text-white/70" : "text-muted-foreground")}>
+                                                    <RefreshCw className="h-3 w-3 animate-spin" />
+                                                    Checking...
+                                                </div>
+                                            ) : state?.saved ? (
                                                 <>
                                                     <span className={cn(
                                                         "flex items-center gap-1 text-[11px] font-medium",
