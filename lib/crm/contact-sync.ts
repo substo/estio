@@ -158,18 +158,13 @@ export async function ensureRemoteContact(contactId: string, ghlLocationId: stri
                 dateOfBirth: contact.dateOfBirth?.toISOString().split('T')[0]
             };
 
-            // Use explicit First/Last Name if available, otherwise fallback to splitting name
-            if (contact.firstName || contact.lastName) {
+            // Use the full formatted name as the primary name if available to preserve context
+            if (contact.name) {
+                payload.firstName = contact.name;
+                payload.lastName = "";
+            } else if (contact.firstName || contact.lastName) {
                 payload.firstName = contact.firstName || "";
                 payload.lastName = contact.lastName || "";
-            } else if (contact.name) {
-                const parts = contact.name.trim().split(' ');
-                if (parts.length > 1) {
-                    payload.firstName = parts[0];
-                    payload.lastName = parts.slice(1).join(' ');
-                } else {
-                    payload.firstName = contact.name;
-                }
             }
 
             const createRes = await ghlFetch<{ contact: { id: string } }>(`/contacts/`, accessToken, {

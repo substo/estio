@@ -65,18 +65,16 @@ export async function syncContactToGoogle(userId: string, contactId: string) {
         ].join('\n');
 
         const names = [];
-        if (contact.firstName || contact.lastName) {
+        if (contact.name) {
+            names.push({
+                givenName: contact.name,
+                displayName: contact.name
+            });
+        } else if (contact.firstName || contact.lastName) {
             names.push({
                 givenName: contact.firstName || '',
                 familyName: contact.lastName || '',
-                displayName: contact.name || `${contact.firstName || ''} ${contact.lastName || ''}`.trim()
-            });
-        } else if (contact.name) {
-            const parts = contact.name.split(' ');
-            names.push({
-                givenName: parts[0],
-                familyName: parts.slice(1).join(' '),
-                displayName: contact.name
+                displayName: `${contact.firstName || ''} ${contact.lastName || ''}`.trim()
             });
         }
 
