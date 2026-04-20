@@ -8,6 +8,7 @@ import { Pencil, UserPlus, Home, Merge, Import, NotebookPen, HelpCircle, Languag
 import { cn } from '@/lib/utils';
 import { useEffect, useMemo, useState } from 'react';
 import { formatViewingDateTimeWithTimeZoneLabel } from '@/lib/viewings/datetime';
+import { LinkifiedText } from './linkified-text';
 
 interface ActivityLogEntryProps {
     item: {
@@ -286,7 +287,7 @@ export function ActivityLogEntry({ item, contactName }: ActivityLogEntryProps) {
                 <div className="mt-2 max-w-[80%] mx-auto relative z-10 w-full animate-in fade-in slide-in-from-top-2 duration-200 text-sm bg-white border border-slate-200 shadow-sm rounded-lg px-3 py-2">
                     {description && isManualEntry && (
                         <div className="text-slate-700 text-xs whitespace-pre-wrap leading-relaxed py-0.5">
-                            {description}
+                            <LinkifiedText text={description} />
                         </div>
                     )}
                     
