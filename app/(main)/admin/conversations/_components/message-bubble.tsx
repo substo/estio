@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { Mail, Smartphone, Paperclip, ExternalLink, ChevronDown, ChevronUp, ArrowRight, Download, Maximize2, RefreshCw, Clock, Check, CheckCheck, AlertTriangle, UserPlus, User, Phone as PhoneIcon, Building2, MailIcon, ExternalLink as ExternalLinkIcon, MessageCirclePlus, MoreHorizontal, Clipboard, Search, FileText, Wand2, ListPlus, ListTodo, Sparkles, Home } from "lucide-react";
+import { Mail, Smartphone, Paperclip, ExternalLink, ChevronDown, ChevronUp, ArrowRight, Download, Maximize2, RefreshCw, Clock, Check, CheckCheck, AlertTriangle, UserPlus, User, Phone as PhoneIcon, Building2, MailIcon, ExternalLink as ExternalLinkIcon, MessageCirclePlus, MoreHorizontal, Clipboard, Search, FileText, Wand2, ListPlus, ListTodo, Sparkles, Home, Languages } from "lucide-react";
 import { saveSharedContact, openOrStartConversationForContact, checkSharedContactsSavedState } from "@/app/(main)/admin/contacts/actions";
 import type { SharedContactInfo } from "@/lib/whatsapp/evolution-media";
 import { format } from "date-fns";
@@ -680,6 +680,15 @@ export function MessageBubble({
                                     <Search className="h-3.5 w-3.5" />
                                     Find Contact
                                 </DropdownMenuItem>
+                                {!!onTranslateMessage && (
+                                    <>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem onClick={() => handleTranslateMessage()} className="gap-2 text-xs text-blue-600 focus:text-blue-700">
+                                            <Languages className="h-3.5 w-3.5" />
+                                            Translate Message
+                                        </DropdownMenuItem>
+                                    </>
+                                )}
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem
                                     onClick={() => handleContextMenuAction("summarize")}

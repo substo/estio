@@ -23,7 +23,7 @@ import {
     CommandItem,
     CommandList,
 } from "@/components/ui/command";
-import { Loader2, Search, Clipboard, MessageCircle, BadgeAlert, AlertTriangle, User, Phone, Mail, ExternalLink, FileText, Wand2, ListPlus, Trash2, ListTodo, Sparkles, Home } from "lucide-react";
+import { Loader2, Search, Clipboard, MessageCircle, BadgeAlert, AlertTriangle, User, Phone, Mail, ExternalLink, FileText, Wand2, ListPlus, Trash2, ListTodo, Sparkles, Home, Languages } from "lucide-react";
 import { toast } from "sonner";
 import {
     applySuggestedTasksFromSelection,
@@ -37,6 +37,7 @@ import {
     type ParsedLeadData,
     type SelectionTaskSuggestion,
     suggestViewingsFromSelection,
+    translateSelectedText,
 } from "@/app/(main)/admin/conversations/actions";
 import { openOrStartConversationForContact, searchContactsAction } from "@/app/(main)/admin/contacts/actions";
 import { createContactTask, listTaskAssignableUsers } from "@/app/(main)/admin/tasks/actions";
@@ -224,12 +225,17 @@ export function MessageSelectionActions({
     const [isRunningCustom, setIsRunningCustom] = useState(false);
     const [isSavingCustom, setIsSavingCustom] = useState(false);
     const [customSavedEntry, setCustomSavedEntry] = useState("");
+    const [translateOpen, setTranslateOpen] = useState(false);
+    const [translateSelectionText, setTranslateSelectionText] = useState("");
+    const [translatedOutput, setTranslatedOutput] = useState("");
+    const [isTranslating, setIsTranslating] = useState(false);
+
     const activeAiModel = typeof aiModel === "string" && aiModel.trim() ? aiModel.trim() : undefined;
     const hasBatchSelections = selectionBatch.length > 0;
     const batchContextText = hasBatchSelections ? buildBatchContextText(selectionBatch) : "";
     const selectedSuggestionCount = taskSuggestions.filter((item) => item.selected).length;
 
-    const selectionVisible = !!selection && !triggerAction && !pasteLeadOpen && !findContactOpen && !createTaskOpen && !suggestTasksOpen && !summarizeOpen && !customOpen;
+    const selectionVisible = !!selection && !triggerAction && !pasteLeadOpen && !findContactOpen && !createTaskOpen && !suggestTasksOpen && !summarizeOpen && !customOpen && !translateOpen;
 
     useEffect(() => {
         let cancelled = false;
@@ -293,6 +299,7 @@ export function MessageSelectionActions({
             case "suggestViewings": openSuggestViewingsDialog(); break;
             case "summarize": openSummarizeDialog(); break;
             case "custom": openCustomDialog(); break;
+            case "translate": openTranslateDialog(); break;
             case "addBatch": handleAddSelectionToBatch(); break;
         }
         onTriggerActionHandled?.();
@@ -593,6 +600,35 @@ export function MessageSelectionActions({
         setCustomSavedEntry("");
         setCustomOpen(true);
         if (selection?.text?.trim()) onClearSelection();
+    };
+
+    const openTranslateDialog = () => {
+        const text = hasBatchSelections
+            ? batchContextText
+            : String(selection?.text || "").trim();
+        if (!text) return;
+        setTranslateSelectionText(text);
+        setTranslatedOutput("");
+        setTranslateOpen(true);
+        if (selection?.text?.trim()) onClearSelection();
+        void handleTranslateSelection(text);
+    };
+
+    const handleTranslateSelection = async (text: string) => {
+        if (!conversationId || !text.trim()) return;
+        setIsTranslating(true);
+        try {
+            const res = await translateSelectedText(conversationId, text, null);
+            if (!res?.success || !res?.translatedText) {
+                toast.error(res?.error || "Failed to translate selection.");
+                return;
+            }
+            setTranslatedOutput(res.translatedText);
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to translate selection.");
+        } finally {
+            setIsTranslating(false);
+        }
     };
 
     const handleAddSelectionToBatch = () => {
@@ -1017,6 +1053,19 @@ export function MessageSelectionActions({
                     >
                         <FileText className="h-3.5 w-3.5" />
                         Summarize
+                    </Button>
+                    <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 gap-1.5 px-2 text-xs"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={openTranslateDialog}
+                        disabled={!conversationId}
+                        title={conversationId ? "Translate selected text" : "Open a conversation to translate"}
+                    >
+                        <Languages className="h-3.5 w-3.5" />
+                        Translate
                     </Button>
                     <Button
                         type="button"
@@ -1871,6 +1920,58 @@ export function MessageSelectionActions({
                     </div>
                 </DialogContent>
             </Dialog >
+
+            <Dialog
+                open={translateOpen}
+                onOpenChange={(open) => {
+                    setTranslateOpen(open);
+                    if (!open) {
+                        setTranslateSelectionText("");
+                        setTranslatedOutput("");
+                    }
+                }}
+            >
+                <DialogContent className="sm:max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Languages className="h-4 w-4 text-emerald-600" />
+                            Translate Selection
+                        </DialogTitle>
+                        <DialogDescription>
+                            See the translation of the selected text snippet.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-4">
+                        <div className="space-y-2">
+                            <label className="text-xs font-semibold text-slate-700">Source Text</label>
+                            <div className="rounded-md border bg-slate-50 p-2 text-xs text-slate-600 max-h-32 overflow-y-auto whitespace-pre-wrap">
+                                {translateSelectionText}
+                            </div>
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-xs font-semibold text-slate-700">Translation</label>
+                            {isTranslating ? (
+                                <div className="flex h-24 items-center justify-center rounded-md border border-dashed border-slate-200 bg-slate-50 text-slate-400">
+                                    <div className="flex flex-col items-center gap-2">
+                                        <Loader2 className="h-5 w-5 animate-spin" />
+                                        <span className="text-xs">Translating...</span>
+                                    </div>
+                                </div>
+                            ) : translatedOutput ? (
+                                <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 whitespace-pre-wrap max-h-60 overflow-y-auto">
+                                    {translatedOutput}
+                                </div>
+                            ) : (
+                                <div className="flex h-24 items-center justify-center rounded-md border border-dashed border-red-200 bg-red-50 text-red-400">
+                                    <span className="text-xs">Translation unavailable.</span>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
 
             <ViewingsSuggestionDialog
                 open={suggestViewingsOpen}

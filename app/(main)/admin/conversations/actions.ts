@@ -6296,6 +6296,61 @@ export async function previewTranslatedReply(
     }
 }
 
+export async function translateSelectedText(
+    conversationId: string,
+    text: string,
+    targetLanguage?: string | null
+) {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const trimmedConversationId = String(conversationId || "").trim();
+    const sourceText = String(text || "").trim();
+
+    if (!trimmedConversationId) {
+        return { success: false as const, error: "Missing conversation ID." };
+    }
+    if (!sourceText) {
+        return { success: false as const, error: "No text provided to translate." };
+    }
+
+    const conversation = await db.conversation.findFirst({
+        where: {
+            locationId: location.id,
+            OR: [
+                { id: trimmedConversationId },
+                { ghlConversationId: trimmedConversationId },
+            ],
+        },
+        select: { id: true, replyLanguageOverride: true },
+    });
+
+    if (!conversation) {
+        return { success: false as const, error: "Conversation not found." };
+    }
+
+    const resolvedTargetLanguage = normalizeTranslationTargetLanguage(
+        targetLanguage || conversation.replyLanguageOverride || await getLocationDefaultReplyLanguage(location.id, DEFAULT_TRANSLATION_TARGET_LANGUAGE)
+    );
+
+    try {
+        const translation = await runMessageTranslationLLM({
+            sourceText,
+            targetLanguage: resolvedTargetLanguage,
+        });
+
+        return {
+            success: true as const,
+            translatedText: translation.translatedText,
+            detectedSourceLanguage: translation.detectedSourceLanguage,
+            targetLanguage: resolvedTargetLanguage,
+        };
+    } catch (error: any) {
+        return {
+            success: false as const,
+            error: String(error?.message || "Translation failed."),
+        };
+    }
+}
+
 export async function translateConversationMessage(
     messageId: string,
     targetLanguage?: string | null
