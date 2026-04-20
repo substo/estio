@@ -305,6 +305,8 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
   - `Summarize` to generate and save a CRM log note into contact history.
   - `Custom` to run a user-provided prompt against selected text and optionally save the output to CRM log.
 - **Viewing Suggestion Reference**: Relative-date anchoring, exact property auto-match, and timezone-safe `scheduledAtIso` apply behavior are documented in [viewing-creation-architecture.md](/Users/martingreen/Projects/IDX/documentation/viewing-creation-architecture.md).
+- **Selection Trigger Strategy (Apr 2026)**: Selection detection uses `document.addEventListener('selectionchange')` with 200ms debounce instead of per-element `onMouseUp`/`onKeyUp`. This approach works universally on desktop (mouse drag) and mobile (touch selection handles). Each `MessageBubble` checks `range.intersectsNode()` against its content ref to claim ownership of the selection.
+- **Per-Message Context Menu (Apr 2026)**: Every message bubble has a three-dot (⋯) context menu providing direct access to all selection actions (Paste Lead, Find Contact, Summarize, Custom, Create Task, AI Tasks, Suggest Viewings, Add to Batch) without requiring text selection. When no text is selected, the full message body is used as action input. The menu is always visible on mobile and hover-revealed on desktop (`sm:opacity-0 sm:group-hover:opacity-100`). This resolves the issue where structured content (VCard contact cards, media messages) couldn't trigger the selection toolbar since they don't produce browser text selections.
 - **Cross-Message Selection (Phase 1 Quick Win)**: Drag-selection can span multiple message bubbles/email blocks in the visible chat window; the toolbar accepts the combined selection text.
 - **Batch Selection Flow (Phase 2)**:
   - The batch is conversation-scoped and dedupes repeated snippet adds from the same message/selection hash.
@@ -327,6 +329,11 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
   - LLM contextualizes ISO country code from text to accurately repair broken local numbers.
   - Validates and writes fully certified E.164 formats mapped via `libphonenumber-js`.
   - See [phone-normalization.md](./phone-normalization.md) for full context/implementation guidelines.
+- **Paste Lead Legacy Property Import Queue (Apr 19, 2026)**:
+  - Adds a capability-gated, durable background import path for Down Town Cyprus (`DT`) property refs inside Paste Lead.
+  - Automatically extracts deterministic `DT` property references from explicit text or public URLs and normalizes them.
+  - Unblocks the core lead import by linking already-existing local properties immediately, and enqueuing missing ones for robust background syncing.
+  - The queue is idempotent, uses a centralized property import service sharing identical conflict-resolution with the manual Add Property flow, and ties executions safely to the initiating user's context.
 
 ## Deal Mode Reply Routing
 This document is also the source of truth for reply-target behavior in `/admin/conversations?mode=deals`.

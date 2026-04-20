@@ -98,6 +98,10 @@ interface MessageSelectionActionsProps {
     onAddSelectionToBatch?: (item: SelectionBatchInput) => { added: boolean; total: number } | void;
     onRemoveSelectionBatchItem?: (id: string) => void;
     onClearSelectionBatch?: () => void;
+    /** When set (e.g. from a per-message context menu), auto-opens the named dialog using the current selection text. */
+    triggerAction?: string | null;
+    /** Called after the triggered action has been handled so the parent can reset its state. */
+    onTriggerActionHandled?: () => void;
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -162,6 +166,8 @@ export function MessageSelectionActions({
     onAddSelectionToBatch,
     onRemoveSelectionBatchItem,
     onClearSelectionBatch,
+    triggerAction,
+    onTriggerActionHandled,
 }: MessageSelectionActionsProps) {
     const router = useRouter();
     const toolbarRef = useRef<HTMLDivElement>(null);
@@ -223,7 +229,7 @@ export function MessageSelectionActions({
     const batchContextText = hasBatchSelections ? buildBatchContextText(selectionBatch) : "";
     const selectedSuggestionCount = taskSuggestions.filter((item) => item.selected).length;
 
-    const selectionVisible = !!selection && !pasteLeadOpen && !findContactOpen && !createTaskOpen && !suggestTasksOpen && !summarizeOpen && !customOpen;
+    const selectionVisible = !!selection && !triggerAction && !pasteLeadOpen && !findContactOpen && !createTaskOpen && !suggestTasksOpen && !summarizeOpen && !customOpen;
 
     useEffect(() => {
         let cancelled = false;
@@ -273,6 +279,25 @@ export function MessageSelectionActions({
             window.removeEventListener("scroll", clear, true);
         };
     }, [selectionVisible, onClearSelection]);
+
+    // Strategy B: Handle context-menu triggered actions.
+    // When triggerAction transitions from null to a valid action name,
+    // auto-open the corresponding dialog using the current selection text.
+    useEffect(() => {
+        if (!triggerAction) return;
+        switch (triggerAction) {
+            case "pasteLead": openPasteLeadDialog(); break;
+            case "findContact": openFindContactDialog(); break;
+            case "createTask": openCreateTaskDialog(); break;
+            case "suggestTasks": openSuggestTasksDialog(); break;
+            case "suggestViewings": openSuggestViewingsDialog(); break;
+            case "summarize": openSummarizeDialog(); break;
+            case "custom": openCustomDialog(); break;
+            case "addBatch": handleAddSelectionToBatch(); break;
+        }
+        onTriggerActionHandled?.();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [triggerAction]);
 
     useEffect(() => {
         if (!findContactOpen) return;
