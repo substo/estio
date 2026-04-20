@@ -18,7 +18,7 @@ import { getLocationDefaultReplyLanguage } from "@/lib/ai/location-reply-languag
 import { z } from "zod";
 import { getModelForTask } from "@/lib/ai/model-router";
 import { callLLM, callLLMWithMetadata } from "@/lib/ai/llm";
-import { GEMINI_DRAFT_FAST_DEFAULT } from "@/lib/ai/models";
+import { GEMINI_DRAFT_FAST_DEFAULT, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 import { auth } from "@clerk/nextjs/server";
 import { Prisma } from "@prisma/client";
 import { revalidatePath, revalidateTag, unstable_cache } from "next/cache";
@@ -11200,26 +11200,73 @@ async function parseLeadFromTextInternal(
             '"""',
         ].join("\n");
 
-        const modelId = resolveLeadParserModelId(modelOverride);
-        const start = Date.now();
-        const { text: jsonStr, usage } = await callLLMWithMetadata(modelId, prompt, undefined, {
-            jsonMode: true,
-            temperature: 0,
-            maxOutputTokens: LEAD_PARSE_MAX_OUTPUT_TOKENS,
-            thinkingBudget: LEAD_PARSE_THINKING_BUDGET,
-        });
-        const end = Date.now();
-        const costEstimate = calculateRunCostFromUsage(modelId, {
-            promptTokens: usage.promptTokens,
-            completionTokens: usage.completionTokens,
-            totalTokens: usage.totalTokens,
-            thoughtsTokens: usage.thoughtsTokens,
-            toolUsePromptTokens: usage.toolUsePromptTokens
+        const initialModelId = resolveLeadParserModelId(modelOverride);
+        const modelsToTry = [
+            initialModelId,
+            GEMINI_FLASH_STABLE_FALLBACK,
+            "gemini-2.5-pro"
+        ];
+
+        let finalModelId = initialModelId;
+        let finalJsonStr = "";
+        let finalUsage: any = null;
+        let finalParsed: any = null;
+        let finalResult: z.infer<typeof LeadParsingSchema> | null = null;
+        let lastError: Error | null = null;
+        
+        let start = Date.now();
+        let end = Date.now();
+
+        for (let i = 0; i < modelsToTry.length; i++) {
+            const currentModelId = modelsToTry[i] || GEMINI_FLASH_STABLE_FALLBACK;
+            finalModelId = currentModelId;
+            
+            try {
+                start = Date.now();
+                const { text: jsonStr, usage } = await callLLMWithMetadata(currentModelId, prompt, undefined, {
+                    jsonMode: true,
+                    temperature: 0,
+                    maxOutputTokens: LEAD_PARSE_MAX_OUTPUT_TOKENS,
+                    thinkingBudget: LEAD_PARSE_THINKING_BUDGET,
+                });
+                end = Date.now();
+
+                finalJsonStr = jsonStr;
+                finalUsage = usage;
+
+                finalParsed = parseJsonObjectFromModelOutput(jsonStr);
+                finalResult = LeadParsingSchema.parse(finalParsed);
+
+                // If successful, break
+                break;
+            } catch (error: any) {
+                lastError = error;
+                console.warn(`[Lead Parser] Attempt ${i + 1} failed with model ${currentModelId}:`, error?.message || error);
+                
+                if (i < modelsToTry.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Incremental backoff
+                }
+            }
+        }
+
+        if (!finalResult || !finalUsage) {
+            throw lastError || new Error("Lead parsing failed after multiple attempts.");
+        }
+
+        const costEstimate = calculateRunCostFromUsage(finalModelId, {
+            promptTokens: finalUsage.promptTokens,
+            completionTokens: finalUsage.completionTokens,
+            totalTokens: finalUsage.totalTokens,
+            thoughtsTokens: finalUsage.thoughtsTokens,
+            toolUsePromptTokens: finalUsage.toolUsePromptTokens
         });
 
-        const cleanJson = jsonStr.replace(/```json/gi, "").replace(/```/g, "").trim();
-        const parsed = parseJsonObjectFromModelOutput(jsonStr);
-        const result = LeadParsingSchema.parse(parsed);
+        const cleanJson = finalJsonStr.replace(/```json/gi, "").replace(/```/g, "").trim();
+        const parsed = finalParsed;
+        const result = finalResult;
+        const jsonStr = finalJsonStr;
+        const usage = finalUsage;
+        const modelId = finalModelId;
         const traceId = `trace_${Date.now()}`;
         const trace: LeadAnalysisTrace = {
             traceId,
