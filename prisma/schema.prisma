@@ -518,6 +518,8 @@ model Contact {
   maybeCount          Int      @default(0)
   notCount            Int      @default(0)
   heatScore           Int      @default(0)
+  legacyCrmOwnerId    String?
+  legacyCrmOwnerLabel String?
   payload             Json?
   status              String
   contactType         String   @default("Lead") // Lead, Agent, Partner, Owner, Associate, Maintenance, Contact, Tenant
@@ -599,9 +601,11 @@ model Contact {
   whatsappOutboundOutboxJobs WhatsAppOutboundOutbox[]
 
   @@unique([locationId, email])
+  @@unique([locationId, legacyCrmOwnerId])
   @@unique([locationId, phone])
   @@index([locationId])
   @@index([email])
+  @@index([legacyCrmOwnerId])
   @@index([phone])
   @@index([lid])
 }
@@ -617,11 +621,16 @@ model Company {
   website       String?
   type          String?
   ghlCompanyId  String?               @unique
+  legacyCrmOwnerId    String?
+  legacyCrmOwnerLabel String?
   location      Location              @relation(fields: [locationId], references: [id])
   propertyRoles CompanyPropertyRole[]
   contactRoles  ContactCompanyRole[]
 
   feeds PropertyFeed[]
+
+  @@unique([locationId, legacyCrmOwnerId])
+  @@index([legacyCrmOwnerId])
 }
 
 model ContactPropertyRole {

@@ -41,6 +41,7 @@ const propertySchema = z.object({
 
     // Owner Details
     ownerId: z.string().optional().nullable(),
+    ownerCompanyId: z.string().optional().nullable(),
     ownerName: z.string().optional().nullable(),
     ownerEmail: z.string().optional().nullable(),
     ownerPhone: z.string().optional().nullable(),
@@ -198,6 +199,7 @@ export async function upsertProperty(formData: FormData) {
 
             // Owner/Developer/Agent fields
             ownerId: emptyToNull(formData.get("ownerId")),
+            ownerCompanyId: emptyToNull(formData.get("ownerCompanyId")),
             ownerName: formData.get("ownerName"),
             ownerEmail: formData.get("ownerEmail"),
             ownerPhone: formData.get("ownerPhone"),
@@ -341,6 +343,7 @@ export async function upsertProperty(formData: FormData) {
             mediaItems,
             stakeholders: {
                 ownerId: validated.ownerId,
+                ownerCompanyId: validated.ownerCompanyId,
                 ownerName: validated.ownerName,
                 ownerEmail: validated.ownerEmail,
                 ownerPhone: validated.ownerPhone,

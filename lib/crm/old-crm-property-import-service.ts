@@ -40,18 +40,25 @@ export async function importOldCrmPropertyToLocalDb(args: ImportOldCrmPropertyAr
         select: { id: true },
     });
 
-    const mediaItems: PropertyMediaInput[] = Array.isArray(pulled.media)
-        ? pulled.media.map((item: any, index: number) => ({
+    const pulledMedia = Array.isArray(pulled.media) ? pulled.media : (Array.isArray(pulled.images) ? pulled.images : []);
+    const mediaItems: PropertyMediaInput[] = pulledMedia
+        .map((item: any, index: number) => ({
             url: String(item?.url || ""),
             kind: (item?.kind || MediaKind.IMAGE) as MediaKind,
             sortOrder: Number.isFinite(item?.sortOrder) ? item.sortOrder : index,
             cloudflareImageId: item?.cloudflareImageId || undefined,
             metadata: item?.metadata,
         })).filter((item) => item.url)
-        : [];
+        ;
+
+    const ownerContactId = pulled.ownerContactId || null;
+    const ownerCompanyId = pulled.ownerCompanyId || null;
+    const ownerEntityType = pulled.ownerEntityType || null;
 
     delete pulled.media;
+    delete pulled.images;
     delete pulled.ownerContactId;
+    delete pulled.ownerCompanyId;
     delete pulled.project;
 
     const propertyData = {
@@ -84,7 +91,9 @@ export async function importOldCrmPropertyToLocalDb(args: ImportOldCrmPropertyAr
         propertyData,
         mediaItems,
         stakeholders: {
-            ownerId: pulled.ownerContactId || null,
+            ownerId: ownerContactId,
+            ownerCompanyId: ownerCompanyId,
+            ownerEntityType: ownerEntityType,
             ownerName: pulled.ownerName || null,
             ownerEmail: pulled.ownerEmail || null,
             ownerPhone: pulled.ownerMobile || pulled.ownerPhone || null,

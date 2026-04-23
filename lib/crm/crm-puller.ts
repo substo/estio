@@ -6,10 +6,7 @@ import { PROPERTY_LOCATIONS } from '@/lib/properties/locations';
 import db from '@/lib/db';
 import { uploadUrlToCloudflare, uploadToCloudflare, getImageDeliveryUrl } from '@/lib/cloudflareImages';
 import { normalizeInternationalPhone } from '@/lib/utils/phone';
-import {
-    buildStructuredLeadDisplayName,
-    splitLeadPersonName,
-} from '@/lib/contacts/name-builder';
+import { resolveImportedOwner } from '@/lib/crm/owner-import';
 
 export interface PullPropertyFromCrmContext {
     oldPropertyId: string;
@@ -142,6 +139,31 @@ export async function pullPropertyFromCrmWithContext(context: PullPropertyFromCr
 
         const extractedData: any = {};
         const warnings: string[] = [];
+
+        const legacyOwnerSelection = await page.evaluate(() => {
+            const ownerSelect = document.querySelector('#owner_id') as HTMLSelectElement | null;
+            if (!ownerSelect) {
+                return {
+                    legacyOwnerId: null,
+                    legacyOwnerLabel: null,
+                    legacyOwnerSelectionMode: null,
+                };
+            }
+
+            const selectedOption = ownerSelect.options[ownerSelect.selectedIndex] || null;
+            const selectedValue = selectedOption?.value?.trim() || ownerSelect.value?.trim() || "";
+            const selectedLabel = selectedOption?.text?.trim() || null;
+
+            return {
+                legacyOwnerId: selectedValue && selectedValue !== "add" ? selectedValue : null,
+                legacyOwnerLabel: selectedLabel,
+                legacyOwnerSelectionMode: selectedValue === "add" ? "add" : "existing",
+            };
+        });
+
+        extractedData.legacyOwnerId = legacyOwnerSelection.legacyOwnerId;
+        extractedData.legacyOwnerLabel = legacyOwnerSelection.legacyOwnerLabel;
+        extractedData.legacyOwnerSelectionMode = legacyOwnerSelection.legacyOwnerSelectionMode;
 
         // Helper to get value
         const getValue = async (selector: string, type: string) => {
@@ -358,8 +380,8 @@ export async function pullPropertyFromCrmWithContext(context: PullPropertyFromCr
         }
 
         // --- OWNER LINKING LOGIC ---
-        if (extractedData.ownerName) {
-            console.log(`[CRM PULL] Processing Owner: ${extractedData.ownerName}`);
+        if (extractedData.ownerName || extractedData.ownerCompany || extractedData.legacyOwnerId) {
+            console.log(`[CRM PULL] Processing Owner: ${extractedData.ownerName || extractedData.ownerCompany || extractedData.legacyOwnerLabel || extractedData.legacyOwnerId}`);
 
             // Normalize phones with shared E.164 normalizer (same as Paste Lead)
             const rawMobile = extractedData.ownerMobile || "";
@@ -376,159 +398,30 @@ export async function pullPropertyFromCrmWithContext(context: PullPropertyFromCr
 
             if (extractedData.ownerMobile) extractedData.ownerMobile = normalizedMobile || extractedData.ownerMobile;
             if (extractedData.ownerPhone) extractedData.ownerPhone = normalizedPhone || extractedData.ownerPhone;
-
-            // Build structured display name (same convention as Paste Lead)
-            const inferredGoal: "For Rent" | "For Sale" | null =
-                extractedData.rentalPeriod && extractedData.rentalPeriod !== 'n/a'
-                    ? "For Rent"
-                    : "For Sale";
-
-            const ownerPersonName = splitLeadPersonName({ name: extractedData.ownerName });
-            const structuredOwnerName = buildStructuredLeadDisplayName({
-                contact: {
-                    name: extractedData.ownerName,
-                    firstName: ownerPersonName.firstName || null,
-                    lastName: ownerPersonName.lastName || null,
-                    email: extractedData.ownerEmail || null,
-                    phone: normalizedBestPhone || bestPhone || null,
-                    role: "Owner",
-                },
-                rawLeadText: [
-                    extractedData.ownerName,
-                    extractedData.ownerNotes,
-                    extractedData.reference,
-                    extractedData.title,
-                ].filter(Boolean).join(" "),
-                inferredStatus: inferredGoal,
-                matchedProperty: {
-                    title: extractedData.title || null,
-                    reference: extractedData.reference || null,
-                    propertyLocation: extractedData.propertyLocation || null,
-                    city: extractedData.propertyArea || null,
-                },
-                requirements: {
-                    bedrooms: extractedData.bedrooms ? String(extractedData.bedrooms) : null,
-                    type: extractedData.type || null,
-                    location: extractedData.propertyLocation || extractedData.propertyArea || null,
-                },
+            const resolvedOwner = await resolveImportedOwner({
+                locationId,
+                ownerName: extractedData.ownerName,
+                ownerCompany: extractedData.ownerCompany,
+                ownerEmail: extractedData.ownerEmail,
+                ownerPhone: normalizedPhone || extractedData.ownerPhone,
+                ownerMobile: normalizedMobile || extractedData.ownerMobile,
+                ownerFax: extractedData.ownerFax,
+                ownerWebsite: extractedData.ownerWebsite,
+                ownerAddress: extractedData.ownerAddress,
+                ownerBirthday: extractedData.ownerBirthday,
+                ownerViewingNotification: extractedData.ownerViewingNotification,
+                ownerNotes: extractedData.ownerNotes,
+                legacyOwnerId: extractedData.legacyOwnerId,
+                legacyOwnerLabel: extractedData.legacyOwnerLabel,
+                legacyOwnerSelectionMode: extractedData.legacyOwnerSelectionMode,
             });
 
-            const ownerDisplayName = structuredOwnerName || extractedData.ownerName;
-            console.log(`[CRM PULL] Structured owner name: ${ownerDisplayName}`);
+            extractedData.ownerContactId = resolvedOwner.ownerContactId;
+            extractedData.ownerCompanyId = resolvedOwner.ownerCompanyId;
+            extractedData.ownerEntityType = resolvedOwner.ownerEntityType;
+            extractedData.ownerMatchSource = resolvedOwner.ownerMatchSource;
 
-            let contact = null;
-
-            if (extractedData.ownerEmail) {
-                contact = await db.contact.findFirst({
-                    where: { email: extractedData.ownerEmail, locationId }
-                });
-            }
-
-            if (!contact && normalizedBestPhone) {
-                contact = await db.contact.findFirst({
-                    where: {
-                        locationId,
-                        OR: [
-                            { phone: normalizedBestPhone },
-                            ...(normalizedMobile ? [{ phone: normalizedMobile }] : []),
-                            ...(normalizedPhone ? [{ phone: normalizedPhone }] : []),
-                        ]
-                    }
-                });
-            }
-
-            if (!contact && extractedData.ownerName) {
-                contact = await db.contact.findFirst({
-                    where: { name: extractedData.ownerName, locationId }
-                });
-            }
-
-            if (contact) {
-                console.log(`[CRM PULL] Found existing contact for owner: ${contact.id}`);
-                extractedData.ownerContactId = contact.id;
-
-                const updateData: any = {};
-
-                if (!contact.email && extractedData.ownerEmail) {
-                    updateData.email = extractedData.ownerEmail;
-                }
-
-                const dbPhoneResult = contact.phone ? normalizeInternationalPhone(contact.phone, 'CY') : null;
-
-                if (!dbPhoneResult?.formatted && normalizedBestPhone) {
-                    updateData.phone = normalizedBestPhone;
-                }
-
-                // Apply structured name to existing contact
-                updateData.name = ownerDisplayName;
-                if (ownerPersonName.firstName) updateData.firstName = ownerPersonName.firstName;
-                if (ownerPersonName.lastName) updateData.lastName = ownerPersonName.lastName;
-                updateData.contactType = 'Owner';
-
-                const newNote = `Imported from CRM. \nCompany: ${extractedData.ownerCompany || ''}\nNotes: ${extractedData.ownerNotes || ''}`;
-                if (!contact.message && newNote.length > 20) {
-                    updateData.message = newNote;
-                }
-
-                const currentPayload = (contact.payload as any) || {};
-                let payloadChanged = false;
-
-                const payloadFields = {
-                    company: extractedData.ownerCompany,
-                    fax: extractedData.ownerFax,
-                    birthday: extractedData.ownerBirthday,
-                    website: extractedData.ownerWebsite,
-                    address: extractedData.ownerAddress,
-                    viewingNotification: extractedData.ownerViewingNotification,
-                    notes: extractedData.ownerNotes
-                };
-
-                for (const [key, val] of Object.entries(payloadFields)) {
-                    if (val && !currentPayload[key]) {
-                        currentPayload[key] = val;
-                        payloadChanged = true;
-                    }
-                }
-
-                if (payloadChanged) {
-                    updateData.payload = currentPayload;
-                }
-
-                if (Object.keys(updateData).length > 0) {
-                    await db.contact.update({
-                        where: { id: contact.id },
-                        data: updateData
-                    });
-                }
-
-            } else {
-                console.log(`[CRM PULL] Creating new contact for owner: ${ownerDisplayName}`);
-                if (locationId) {
-                    const newContact = await db.contact.create({
-                        data: {
-                            locationId: locationId,
-                            name: ownerDisplayName,
-                            firstName: ownerPersonName.firstName || undefined,
-                            lastName: ownerPersonName.lastName || undefined,
-                            contactType: 'Owner',
-                            email: extractedData.ownerEmail || null,
-                            phone: normalizedBestPhone || null,
-                            status: 'Lead',
-                            message: `Imported from CRM. \nCompany: ${extractedData.ownerCompany || ''}\nNotes: ${extractedData.ownerNotes || ''}`,
-                            payload: {
-                                company: extractedData.ownerCompany,
-                                fax: extractedData.ownerFax,
-                                birthday: extractedData.ownerBirthday,
-                                website: extractedData.ownerWebsite,
-                                address: extractedData.ownerAddress,
-                                viewingNotification: extractedData.ownerViewingNotification,
-                                notes: extractedData.ownerNotes
-                            }
-                        }
-                    });
-                    extractedData.ownerContactId = newContact.id;
-                }
-            }
+            console.log(`[CRM PULL] Resolved owner contact=${resolvedOwner.ownerContactId || 'none'} company=${resolvedOwner.ownerCompanyId || 'none'} source=${resolvedOwner.ownerMatchSource}`);
         }
 
         // --- PROJECT LINKING LOGIC ---

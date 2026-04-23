@@ -170,6 +170,9 @@ export default function PropertyForm({
     const [selectedOwnerId, setSelectedOwnerId] = useState<string>(
         property?.contactRoles?.find((r: any) => r.role.toLowerCase() === 'owner')?.contact?.id || ""
     );
+    const [selectedOwnerCompanyId, setSelectedOwnerCompanyId] = useState<string>(
+        property?.companyRoles?.find((r: any) => r.role.toLowerCase() === 'owner')?.company?.id || ""
+    );
     const [selectedDeveloperId, setSelectedDeveloperId] = useState<string>(
         property?.companyRoles?.find((r: any) => r.role.toLowerCase() === 'developer')?.company?.id || ""
     );
@@ -512,6 +515,9 @@ export default function PropertyForm({
                     }
                 });
                 setSelectedOwnerId(data.ownerContactId);
+            }
+            if (data.ownerCompanyId) {
+                setSelectedOwnerCompanyId(data.ownerCompanyId);
             }
 
             if (data.projectId && data.project) {
@@ -1398,6 +1404,7 @@ export default function PropertyForm({
                             <div className="space-y-4 pt-4 border-t">
                                 <Label className="text-lg font-semibold">Documents</Label>
                                 <input type="hidden" name="documentUrls" value={documentUrls.join('\n')} />
+                                <input type="hidden" name="ownerCompanyId" value={selectedOwnerCompanyId} />
 
                                 <div className="space-y-2 mb-4">
                                     {documentUrls.map((url, index) => (

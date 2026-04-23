@@ -36,6 +36,8 @@ export type SavePropertyRecordInput = {
     mediaItems: PropertyMediaInput[];
     stakeholders?: {
         ownerId?: string | null;
+        ownerCompanyId?: string | null;
+        ownerEntityType?: string | null;
         ownerName?: string | null;
         ownerEmail?: string | null;
         ownerPhone?: string | null;
@@ -241,9 +243,23 @@ export async function savePropertyRecord(input: SavePropertyRecordInput) {
     propertyData.slug = slug;
 
     delete propertyData.ownerId;
+    delete propertyData.ownerCompanyId;
+    delete propertyData.ownerEntityType;
     delete propertyData.ownerName;
     delete propertyData.ownerEmail;
     delete propertyData.ownerPhone;
+    delete propertyData.ownerMobile;
+    delete propertyData.ownerCompany;
+    delete propertyData.ownerFax;
+    delete propertyData.ownerBirthday;
+    delete propertyData.ownerWebsite;
+    delete propertyData.ownerAddress;
+    delete propertyData.ownerViewingNotification;
+    delete propertyData.ownerNotes;
+    delete propertyData.ownerMatchSource;
+    delete propertyData.legacyOwnerId;
+    delete propertyData.legacyOwnerLabel;
+    delete propertyData.legacyOwnerSelectionMode;
     delete propertyData.developerId;
     delete propertyData.developerName;
     delete propertyData.developerEmail;
@@ -405,12 +421,13 @@ export async function savePropertyRecord(input: SavePropertyRecordInput) {
     };
 
     await updatePropertyRole(property.id, "owner", stakeholders.ownerId, "contact");
+    await updatePropertyRole(property.id, "owner", stakeholders.ownerCompanyId, "company");
     await updatePropertyRole(property.id, "agent", stakeholders.agentId, "contact");
     await updatePropertyRole(property.id, "developer", stakeholders.developerId, "company");
     await updatePropertyRole(property.id, "management company", stakeholders.managementCompanyId, "company");
     await syncPropertyContactRoles(property.id, "maintenance", stakeholders.maintenanceIds);
 
-    if (!stakeholders.ownerId && stakeholders.ownerName) {
+    if (!stakeholders.ownerId && !stakeholders.ownerCompanyId && stakeholders.ownerName) {
         await upsertContactRole(input.location, property.id, "owner", {
             name: stakeholders.ownerName,
             email: stakeholders.ownerEmail,
