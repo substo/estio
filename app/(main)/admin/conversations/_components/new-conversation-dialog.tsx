@@ -102,6 +102,20 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
         return promise;
     }, [selectedPasteLeadModel]);
 
+    const importLeadUsingPreviewCache = useCallback(async (text: string) => {
+        const key = text.trim();
+        const cached = leadParseCacheRef.current;
+
+        if (cached.key === key) {
+            const parsed = cached.result || (cached.promise ? await cached.promise : null);
+            if (parsed?.success && parsed.data) {
+                return createParsedLead(parsed.data, key);
+            }
+        }
+
+        return importLeadFromText(key, selectedPasteLeadModel || undefined);
+    }, [selectedPasteLeadModel]);
+
     // Load chats when "Pick from WhatsApp" tab is activated
     const handleTabChange = async (tab: string) => {
         if (tab === 'pick' && !chatsLoaded) {
@@ -598,7 +612,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                         setCreating(true);
                                         setError(null);
                                         try {
-                                            const res = await importLeadFromText(leadText, selectedPasteLeadModel || undefined);
+                                            const res = await importLeadUsingPreviewCache(leadText);
                                             if (res.success && res.conversationId) {
                                                 toast({
                                                     title: "Lead imported",

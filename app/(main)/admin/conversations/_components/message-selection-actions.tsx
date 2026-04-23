@@ -390,6 +390,20 @@ export function MessageSelectionActions({
         return promise;
     }, [selectedLeadModel]);
 
+    const importLeadUsingPreviewCache = useCallback(async (text: string) => {
+        const key = text.trim();
+        const cached = leadParseCacheRef.current;
+
+        if (cached.key === key) {
+            const parsed = cached.result || (cached.promise ? await cached.promise : null);
+            if (parsed?.success && parsed.data) {
+                return createParsedLead(parsed.data, key);
+            }
+        }
+
+        return importLeadFromText(key, selectedLeadModel || undefined);
+    }, [selectedLeadModel]);
+
     useEffect(() => {
         if (!pasteLeadOpen || parsedLead) return;
         const text = leadText.trim();
@@ -1178,7 +1192,7 @@ export function MessageSelectionActions({
                                     if (!leadText.trim()) return;
                                     setIsImportingLead(true);
                                     try {
-                                        const res = await importLeadFromText(leadText, selectedLeadModel || undefined);
+                                        const res = await importLeadUsingPreviewCache(leadText);
                                         if (!res.success || !res.conversationId) {
                                             toast.error(res.error || "Failed to import lead");
                                             return;
