@@ -8,6 +8,7 @@ export type ImportedOwnerEntityType = "person" | "organization";
 export type ImportedOwnerInput = {
     locationId: string;
     ownerName?: NullableString;
+    ownerDisplayName?: NullableString;
     ownerCompany?: NullableString;
     ownerEmail?: NullableString;
     ownerPhone?: NullableString;
@@ -228,6 +229,23 @@ async function findContactByNameFallback(locationId: string, ownerName: string |
     });
 }
 
+async function findContactByPossibleNames(locationId: string, ownerNames: string[]) {
+    const uniqueNames = Array.from(new Set(ownerNames.map((value) => normalizeText(value)).filter(Boolean) as string[]))
+        .filter((value) => !isLikelyAutomatedOwnerName(value));
+    if (uniqueNames.length === 0) return null;
+    return db.contact.findFirst({
+        where: {
+            locationId,
+            OR: uniqueNames.map((name) => ({
+                name: {
+                    equals: name,
+                    mode: "insensitive",
+                },
+            })),
+        },
+    });
+}
+
 async function findCompanyByNameFallback(locationId: string, companyName: string | null) {
     if (!companyName) return null;
     return db.company.findFirst({
@@ -243,6 +261,7 @@ async function findCompanyByNameFallback(locationId: string, companyName: string
 
 async function upsertResolvedContact(input: ImportedOwnerInput, entityType: ImportedOwnerEntityType, matchSource: ImportedOwnerResolution["ownerMatchSource"]) {
     const ownerName = normalizeText(input.ownerName);
+    const ownerDisplayName = normalizeText(input.ownerDisplayName) || ownerName;
     const ownerEmail = normalizeEmail(input.ownerEmail);
     const ownerPhone = normalizeText(input.ownerMobile) || normalizeText(input.ownerPhone);
     const legacyOwnerId = normalizeText(input.legacyOwnerId);
@@ -254,7 +273,7 @@ async function upsertResolvedContact(input: ImportedOwnerInput, entityType: Impo
         await findContactByLegacyOwnerId(input.locationId, legacyOwnerId) ||
         await findContactByEmail(input.locationId, ownerEmail) ||
         await findContactByPhone(input.locationId, uniqueStrings([ownerPhone, input.ownerMobile, input.ownerPhone])) ||
-        await findContactByNameFallback(input.locationId, ownerName);
+        await findContactByPossibleNames(input.locationId, [ownerName, ownerDisplayName]);
 
     if (existing) {
         const updateData: Record<string, unknown> = {};
@@ -265,8 +284,8 @@ async function upsertResolvedContact(input: ImportedOwnerInput, entityType: Impo
         if (!existing.phone && ownerPhone) updateData.phone = ownerPhone;
         if (!existing.message && message) updateData.message = message;
         if (!existing.notes && payloadNotes) updateData.notes = payloadNotes;
-        if (entityType === "person" && shouldUseImportedName(existing.name, ownerName)) {
-            updateData.name = ownerName;
+        if (entityType === "person" && shouldUseImportedName(existing.name, ownerDisplayName)) {
+            updateData.name = ownerDisplayName;
         }
         if (!existing.contactType || existing.contactType === "Lead") {
             updateData.contactType = "Owner";
@@ -293,7 +312,7 @@ async function upsertResolvedContact(input: ImportedOwnerInput, entityType: Impo
     return db.contact.create({
         data: {
             locationId: input.locationId,
-            name: ownerName,
+            name: ownerDisplayName,
             email: ownerEmail,
             phone: ownerPhone,
             message,
@@ -360,6 +379,7 @@ async function upsertResolvedCompany(input: ImportedOwnerInput, companyName: str
 
 export async function resolveImportedOwner(input: ImportedOwnerInput): Promise<ImportedOwnerResolution> {
     const ownerName = normalizeText(input.ownerName);
+    const ownerDisplayName = normalizeText(input.ownerDisplayName) || ownerName;
     const companyName = hasMeaningfulCompanyName(input.ownerCompany, input.ownerName)
         ? normalizeText(input.ownerCompany)
         : null;
@@ -411,7 +431,7 @@ export async function resolveImportedOwner(input: ImportedOwnerInput): Promise<I
         ownerCompanyId,
         ownerEntityType: entityType,
         ownerMatchSource: matchSource,
-        ownerDisplayName: ownerName,
+        ownerDisplayName,
         ownerCompanyName: companyName,
     };
 }

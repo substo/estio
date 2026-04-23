@@ -6,6 +6,7 @@ import { PROPERTY_LOCATIONS } from '@/lib/properties/locations';
 import db from '@/lib/db';
 import { uploadUrlToCloudflare, uploadToCloudflare, getImageDeliveryUrl } from '@/lib/cloudflareImages';
 import { normalizeInternationalPhone } from '@/lib/utils/phone';
+import { buildStructuredLeadDisplayName } from '@/lib/contacts/name-builder';
 import { resolveImportedOwner } from '@/lib/crm/owner-import';
 
 export interface PullPropertyFromCrmContext {
@@ -398,9 +399,45 @@ export async function pullPropertyFromCrmWithContext(context: PullPropertyFromCr
 
             if (extractedData.ownerMobile) extractedData.ownerMobile = normalizedMobile || extractedData.ownerMobile;
             if (extractedData.ownerPhone) extractedData.ownerPhone = normalizedPhone || extractedData.ownerPhone;
+
+            const inferredGoal: "For Rent" | "For Sale" | null =
+                extractedData.rentalPeriod && extractedData.rentalPeriod !== 'n/a'
+                    ? "For Rent"
+                    : "For Sale";
+
+            const structuredPrivateOwnerName = extractedData.ownerName
+                ? buildStructuredLeadDisplayName({
+                    contact: {
+                        name: extractedData.ownerName,
+                        email: extractedData.ownerEmail || null,
+                        phone: normalizedBestPhone || bestPhone || null,
+                        role: "Owner",
+                    },
+                    rawLeadText: [
+                        extractedData.ownerName,
+                        extractedData.ownerNotes,
+                        extractedData.reference,
+                        extractedData.title,
+                    ].filter(Boolean).join(" "),
+                    inferredStatus: inferredGoal,
+                    matchedProperty: {
+                        title: extractedData.title || null,
+                        reference: extractedData.reference || null,
+                        propertyLocation: extractedData.propertyLocation || null,
+                        city: extractedData.propertyArea || null,
+                    },
+                    requirements: {
+                        bedrooms: extractedData.bedrooms ? String(extractedData.bedrooms) : null,
+                        type: extractedData.type || null,
+                        location: extractedData.propertyLocation || extractedData.propertyArea || null,
+                    },
+                })
+                : null;
+
             const resolvedOwner = await resolveImportedOwner({
                 locationId,
                 ownerName: extractedData.ownerName,
+                ownerDisplayName: structuredPrivateOwnerName,
                 ownerCompany: extractedData.ownerCompany,
                 ownerEmail: extractedData.ownerEmail,
                 ownerPhone: normalizedPhone || extractedData.ownerPhone,
@@ -420,6 +457,9 @@ export async function pullPropertyFromCrmWithContext(context: PullPropertyFromCr
             extractedData.ownerCompanyId = resolvedOwner.ownerCompanyId;
             extractedData.ownerEntityType = resolvedOwner.ownerEntityType;
             extractedData.ownerMatchSource = resolvedOwner.ownerMatchSource;
+            if (resolvedOwner.ownerEntityType === "person" && resolvedOwner.ownerDisplayName) {
+                extractedData.ownerName = resolvedOwner.ownerDisplayName;
+            }
 
             console.log(`[CRM PULL] Resolved owner contact=${resolvedOwner.ownerContactId || 'none'} company=${resolvedOwner.ownerCompanyId || 'none'} source=${resolvedOwner.ownerMatchSource}`);
         }
