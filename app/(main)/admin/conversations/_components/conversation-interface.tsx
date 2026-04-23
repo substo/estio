@@ -239,6 +239,15 @@ type WorkspaceCoreSnapshot = {
     hydration: WorkspaceHydrationState;
 };
 
+type ActivityTimelineItem = {
+    id: string;
+    type: 'activity';
+    createdAt: string | Date;
+    action: string;
+    changes?: any;
+    user?: { name: string | null; email: string | null } | null;
+};
+
 type DealWorkspaceHydrationState = {
     status: WorkspaceHydrationStatus;
     oldestCursor: string | null;
@@ -932,6 +941,55 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
         setLoadedChatId(conversationId);
     }, [mergeSnapshotPreservingPending]);
+
+    const mergeActivityTimelineEntries = useCallback((
+        currentEntries: ActivityTimelineItem[],
+        incomingEntry: ActivityTimelineItem
+    ): ActivityTimelineItem[] => {
+        const nextEntries = [...(Array.isArray(currentEntries) ? currentEntries : [])];
+        const existingIndex = nextEntries.findIndex((item) => item?.id === incomingEntry.id);
+
+        if (existingIndex >= 0) {
+            nextEntries[existingIndex] = {
+                ...nextEntries[existingIndex],
+                ...incomingEntry,
+            };
+        } else {
+            nextEntries.push(incomingEntry);
+        }
+
+        nextEntries.sort((left, right) => {
+            const leftTs = new Date(left.createdAt).getTime();
+            const rightTs = new Date(right.createdAt).getTime();
+            if (leftTs === rightTs) return String(left.id || "").localeCompare(String(right.id || ""));
+            return leftTs - rightTs;
+        });
+
+        return nextEntries;
+    }, []);
+
+    const upsertActivityEntryInWorkspace = useCallback((
+        conversationId: string | null | undefined,
+        activityEntry: ActivityTimelineItem | null | undefined
+    ) => {
+        const normalizedConversationId = String(conversationId || "").trim();
+        if (!normalizedConversationId || !activityEntry?.id) return;
+
+        if (activeIdRef.current === normalizedConversationId) {
+            setActivityLog((prev) => mergeActivityTimelineEntries(prev as ActivityTimelineItem[], activityEntry));
+        }
+
+        const cached = getCachedWorkspaceCoreSnapshot(normalizedConversationId);
+        if (cached) {
+            cacheWorkspaceCoreSnapshot(normalizedConversationId, {
+                ...cached,
+                activityTimeline: mergeActivityTimelineEntries(
+                    (cached.activityTimeline || []) as ActivityTimelineItem[],
+                    activityEntry
+                ),
+            });
+        }
+    }, [cacheWorkspaceCoreSnapshot, getCachedWorkspaceCoreSnapshot, mergeActivityTimelineEntries]);
 
     const isDealWorkspaceHydrationBusy = useCallback((dealId?: string | null) => {
         const key = String(dealId || "");
@@ -2587,6 +2645,23 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     return;
                 }
 
+                if (viewMode === "chats" && conversationId && eventType === "activity.created") {
+                    const payload = event?.payload && typeof event.payload === "object"
+                        ? event.payload as Record<string, unknown>
+                        : {};
+                    const activityEntry = payload?.activityEntry && typeof payload.activityEntry === "object"
+                        ? payload.activityEntry as ActivityTimelineItem
+                        : null;
+
+                    if (activityEntry?.id) {
+                        upsertActivityEntryInWorkspace(conversationId, activityEntry);
+                        return;
+                    }
+
+                    runRealtimeRefresh(conversationId);
+                    return;
+                }
+
                 // ── Optimistic inbound message insertion ──
                 // When the SSE carries an enriched message.inbound event we can
                 // render the bubble immediately without a server round-trip.
@@ -2719,6 +2794,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         refreshActiveDealWorkspace,
         runRealtimeRefresh,
         trackClientRequest,
+        upsertActivityEntryInWorkspace,
         viewFilter,
         viewMode,
     ]);
@@ -4248,6 +4324,37 @@ export function ConversationInterface({ locationId, initialConversations, initia
         setComposerInsertSeed(null);
     }, [viewMode, activeId, activeDealId]);
 
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const globalWindow = window as any;
+        globalWindow.__ESTIO_INSERT_COMPOSER_DRAFT__ = (payload: {
+            key?: string;
+            body?: string;
+            conversationId?: string | null;
+        }) => {
+            const body = String(payload?.body || "").trim();
+            if (!body) return false;
+
+            const targetConversationId = String(payload?.conversationId || "").trim();
+            const activeConversationId = String(activeIdRef.current || "").trim();
+            if (targetConversationId && activeConversationId && targetConversationId !== activeConversationId) {
+                return false;
+            }
+
+            setComposerInsertSeed({
+                key: String(payload?.key || `${Date.now()}`),
+                body,
+            });
+            return true;
+        };
+
+        return () => {
+            if (globalWindow.__ESTIO_INSERT_COMPOSER_DRAFT__) {
+                delete globalWindow.__ESTIO_INSERT_COMPOSER_DRAFT__;
+            }
+        };
+    }, []);
+
     const suggestedResponseQueueConversationId = viewMode === 'chats' ? String(activeId || "").trim() : "";
     const suggestedResponseQueueDealId = viewMode === 'deals' ? String(activeDealId || "").trim() : "";
     const suggestedResponseQueueScopeKey = suggestedResponseQueueConversationId
@@ -4571,10 +4678,21 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 transcriptOnDemandEnabled={transcriptOnDemandEnabled}
                 onSync={handleSync}
                 onAddActivityEntry={async (entryText: string, dateIso: string) => {
-                    await addConversationActivityEntry(activeConversation.id, entryText, dateIso);
-                    // Refresh the activity log after adding
-                    const log = await fetchConversationActivityLog(activeConversation.id);
-                    setActivityLog(log);
+                    const clientMutationId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+                        ? crypto.randomUUID()
+                        : `activity-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+                    const result = await addConversationActivityEntry(
+                        activeConversation.id,
+                        entryText,
+                        dateIso,
+                        clientMutationId
+                    );
+                    if (result?.activityEntry) {
+                        upsertActivityEntryInWorkspace(
+                            activeConversation.id,
+                            result.activityEntry as ActivityTimelineItem
+                        );
+                    }
                 }}
                 onFetchHistory={async () => {
                     setLoadingMessages(true);

@@ -1621,13 +1621,16 @@ function buildConversationDeltaCursorFromRows(rows: Array<{ id: string; updatedA
     return encodeConversationDeltaCursor(latest);
 }
 
-function invalidateConversationReadCaches(conversationGhlId?: string | null) {
+function invalidateConversationReadCaches(
+    conversationGhlId?: string | null,
+    options?: { skipPath?: boolean }
+) {
     revalidateTag("conversations:list");
     revalidateTag("conversations:workspace");
     revalidateTag("conversations:workspace:core");
     revalidateTag("conversations:workspace:sidebar");
     revalidateTag("conversations:transcript-eligibility");
-    if (conversationGhlId) {
+    if (conversationGhlId && !options?.skipPath) {
         revalidatePath(`/admin/conversations?id=${encodeURIComponent(conversationGhlId)}`);
     }
 }
@@ -13422,9 +13425,17 @@ export async function getDropdownsForViewingsSuggestion() {
     }
 }
 
-export async function fetchConversationActivityLog(conversationId: string) {
+export async function fetchConversationActivityLog(
+    conversationId: string,
+    options?: { limit?: number; beforeCursor?: string | null }
+) {
     const location = await getAuthenticatedLocationReadOnly();
     if (!location?.id) return [];
+
+    const limit = Math.min(
+        Math.max(Number(options?.limit || DEFAULT_WORKSPACE_ACTIVITY_LIMIT), 1),
+        MAX_WORKSPACE_ACTIVITY_LIMIT
+    );
 
     const timeline = await assembleTimelineEvents({
         mode: "chat",
@@ -13432,6 +13443,8 @@ export async function fetchConversationActivityLog(conversationId: string) {
         conversationId,
         includeMessages: false,
         includeActivities: true,
+        take: limit,
+        beforeCursor: options?.beforeCursor || null,
     });
 
     return timeline.events
@@ -13446,36 +13459,41 @@ export async function fetchConversationActivityLog(conversationId: string) {
     }));
 }
 
-export async function addConversationActivityEntry(conversationId: string, entryText: string, dateIso: string) {
+export async function addConversationActivityEntry(
+    conversationId: string,
+    entryText: string,
+    dateIso: string,
+    clientMutationId?: string
+) {
     const { userId: clerkUserId } = await auth();
     if (!clerkUserId) throw new Error("Unauthorized");
 
     const location = await getAuthenticatedLocationReadOnly();
-
-    const user = await db.user.findUnique({
-        where: { clerkId: clerkUserId },
-        select: { id: true, firstName: true, name: true, email: true }
-    });
+    const [user, conversation] = await Promise.all([
+        db.user.findUnique({
+            where: { clerkId: clerkUserId },
+            select: { id: true, firstName: true, name: true, email: true }
+        }),
+        db.conversation.findFirst({
+            where: {
+                locationId: location.id,
+                OR: [
+                    { id: conversationId },
+                    { ghlConversationId: conversationId },
+                ]
+            },
+            select: { id: true, contactId: true, ghlConversationId: true }
+        }),
+    ]);
 
     if (!user) throw new Error("User not found");
-
-    const conversation = await db.conversation.findFirst({
-        where: {
-            locationId: location.id,
-            OR: [
-                { id: conversationId },
-                { ghlConversationId: conversationId },
-            ]
-        },
-        select: { id: true, contactId: true, ghlConversationId: true }
-    });
-
     if (!conversation?.contactId) throw new Error("Conversation not found");
 
     const actorFirstName = deriveFirstName(user.firstName, user.name, user.email);
     const entry = formatCrmLogEntry(actorFirstName, entryText, new Date(dateIso));
+    const normalizedClientMutationId = String(clientMutationId || "").trim() || null;
 
-    await db.contactHistory.create({
+    const createdHistory = await db.contactHistory.create({
         data: {
             contactId: conversation.contactId,
             userId: user.id,
@@ -13484,19 +13502,44 @@ export async function addConversationActivityEntry(conversationId: string, entry
                 date: dateIso,
                 entry
             }
-        }
+        },
+        select: {
+            id: true,
+            createdAt: true,
+        },
     });
 
     revalidatePath(`/admin/contacts/${conversation.contactId}/view`);
-    revalidatePath(`/admin/conversations?id=${encodeURIComponent(conversation.ghlConversationId)}`);
-    invalidateConversationReadCaches(conversation.ghlConversationId);
+    invalidateConversationReadCaches(conversation.ghlConversationId, { skipPath: true });
+    const activityEntry = {
+        id: `history:${createdHistory.id}`,
+        type: 'activity' as const,
+        createdAt: createdHistory.createdAt.toISOString(),
+        action: 'MANUAL_ENTRY',
+        changes: {
+            date: dateIso,
+            entry,
+        },
+        user: {
+            name: user.name || null,
+            email: user.email || null,
+        },
+    };
     emitConversationRealtimeEvent({
         locationId: location.id,
         conversationId: conversation.ghlConversationId,
         type: "activity.created",
+        payload: {
+            activityEntry,
+            clientMutationId: normalizedClientMutationId,
+        },
     });
 
-    return { success: true };
+    return {
+        success: true,
+        activityEntry,
+        clientMutationId: normalizedClientMutationId,
+    };
 }
 
 type ListSuggestedResponsesInput = {
