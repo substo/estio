@@ -75,7 +75,10 @@ export async function processPasteLeadPropertyImportJob(job: PasteLeadPropertyIm
     const existingProperty = await db.property.findFirst({
         where: {
             locationId: job.locationId,
-            reference: job.publicReference,
+            reference: {
+                equals: job.publicReference,
+                mode: "insensitive",
+            },
         },
         select: {
             id: true,

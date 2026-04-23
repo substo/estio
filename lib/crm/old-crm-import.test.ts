@@ -44,6 +44,24 @@ test("extractLegacyCrmRefCandidates parses explicit DT references", () => {
     );
 });
 
+test("extractLegacyCrmRefCandidates parses bare DT references without a ref label", () => {
+    assert.deepEqual(
+        extractLegacyCrmRefCandidates("Customer asked about DT4039 and DT4040"),
+        [
+            {
+                publicReference: "DT4039",
+                oldCrmPropertyId: "3039",
+                source: "explicit_ref",
+            },
+            {
+                publicReference: "DT4040",
+                oldCrmPropertyId: "3040",
+                source: "explicit_ref",
+            },
+        ]
+    );
+});
+
 test("extractLegacyCrmRefCandidates parses Downtown Cyprus public URLs", () => {
     const [candidate] = extractLegacyCrmRefCandidates("https://www.downtowncyprus.com/properties/apartment-for-sale-in-anavargos-paphos-ref-dt3327");
     assert.equal(candidate?.publicReference, "DT3327");

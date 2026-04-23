@@ -11749,7 +11749,12 @@ export async function createParsedLead(
                     const existingProperties = await db.property.findMany({
                         where: {
                             locationId: location.id,
-                            reference: { in: refs },
+                            OR: refs.map((reference) => ({
+                                reference: {
+                                    equals: reference,
+                                    mode: "insensitive",
+                                },
+                            })),
                         },
                         select: {
                             id: true,

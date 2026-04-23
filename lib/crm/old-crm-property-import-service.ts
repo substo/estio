@@ -35,7 +35,10 @@ export async function importOldCrmPropertyToLocalDb(args: ImportOldCrmPropertyAr
     const existingByReference = await db.property.findFirst({
         where: {
             locationId: args.locationId,
-            reference: args.publicReference,
+            reference: {
+                equals: args.publicReference,
+                mode: "insensitive",
+            },
         },
         select: { id: true },
     });

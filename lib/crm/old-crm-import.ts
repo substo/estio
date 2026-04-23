@@ -149,6 +149,21 @@ export function extractLegacyCrmRefCandidates(text: string): LegacyCrmRefCandida
         });
     }
 
+    const bareDtRegex = /\b(DT\d{2,6})\b/gi;
+    let bareMatch: RegExpExecArray | null;
+    while ((bareMatch = bareDtRegex.exec(input)) !== null) {
+        const publicReference = normalizeDtRefToken(bareMatch[1]);
+        const oldCrmPropertyId = publicReference ? convertDtReferenceToOldCrmPropertyId(publicReference) : null;
+        if (!publicReference || !oldCrmPropertyId) continue;
+        if (!candidates.has(publicReference)) {
+            candidates.set(publicReference, {
+                publicReference,
+                oldCrmPropertyId,
+                source: "explicit_ref",
+            });
+        }
+    }
+
     const urlRegex = /https?:\/\/[^\s]+/gi;
     const urlMatches = input.match(urlRegex) || [];
     for (const rawUrl of urlMatches) {
