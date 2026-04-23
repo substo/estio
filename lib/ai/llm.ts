@@ -29,7 +29,7 @@ function buildGenerationConfig(options: CallLLMOptions): Record<string, unknown>
     if (
         typeof options.thinkingBudget === "number"
         && Number.isFinite(options.thinkingBudget)
-        && options.thinkingBudget >= 0
+        && options.thinkingBudget > 0
     ) {
         generationConfig.thinkingConfig = {
             thinkingBudget: Math.floor(options.thinkingBudget),

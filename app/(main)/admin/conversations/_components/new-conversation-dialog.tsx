@@ -14,6 +14,8 @@ import { Card } from '@/components/ui/card';
 import { Clipboard, BadgeAlert, Sparkles, AlertTriangle } from 'lucide-react';
 import { searchGoogleContactsAction, importNewGoogleContactAction } from '@/app/(main)/admin/contacts/actions';
 import { useToast } from '@/components/ui/use-toast';
+import { AiModelSelect } from '@/components/ai/ai-model-select';
+import { useAiModelCatalog } from '@/components/ai/use-ai-model-catalog';
 
 
 interface EvolutionChat {
@@ -34,6 +36,7 @@ interface NewConversationDialogProps {
 
 export function NewConversationDialog({ open, onOpenChange, onConversationCreated, locationId }: NewConversationDialogProps) {
     const { toast } = useToast();
+    const { models: availableModels, resolveModelForKind } = useAiModelCatalog();
     const [phoneInput, setPhoneInput] = useState('');
     const [search, setSearch] = useState('');
     const [creating, setCreating] = useState(false);
@@ -49,6 +52,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [parsedLead, setParsedLead] = useState<ParsedLeadData | null>(null);
     const [pasteLeadCanImportOldCrmProperties, setPasteLeadCanImportOldCrmProperties] = useState(false);
+    const [selectedPasteLeadModel, setSelectedPasteLeadModel] = useState('');
 
     // Google Contacts State
     const [googleSearch, setGoogleSearch] = useState('');
@@ -74,7 +78,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
             if (cached.promise) return cached.promise;
         }
 
-        const promise = parseLeadFromText(key)
+        const promise = parseLeadFromText(key, selectedPasteLeadModel || undefined)
             .then((res) => {
                 if (leadParseCacheRef.current.key === key) {
                     leadParseCacheRef.current.result = res;
@@ -96,7 +100,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
         };
 
         return promise;
-    }, []);
+    }, [selectedPasteLeadModel]);
 
     // Load chats when "Pick from WhatsApp" tab is activated
     const handleTabChange = async (tab: string) => {
@@ -169,6 +173,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
         setLeadText('');
 
         setParsedLead(null);
+        setSelectedPasteLeadModel('');
         setGoogleSearch('');
         setGoogleResults([]);
         setGoogleNotConnected(false);
@@ -187,6 +192,13 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
             setGoogleResults([]);
         }
     }, [open]);
+
+    useEffect(() => {
+        if (selectedPasteLeadModel) return;
+        const preferredModel = resolveModelForKind('extraction') || resolveModelForKind('general') || resolveModelForKind('draft');
+        if (!preferredModel) return;
+        setSelectedPasteLeadModel(preferredModel);
+    }, [resolveModelForKind, selectedPasteLeadModel]);
 
     useEffect(() => {
         if (!open || parsedLead) return;
@@ -528,6 +540,22 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                     <TabsContent value="paste" className="mt-4 space-y-4">
                         {!parsedLead ? (
                             <div className="space-y-3">
+                                <div className="space-y-1">
+                                    <label className="block text-sm font-medium text-gray-700">AI Model</label>
+                                    <AiModelSelect
+                                        value={selectedPasteLeadModel}
+                                        onValueChange={(value) => {
+                                            setSelectedPasteLeadModel(value);
+                                            setParsedLead(null);
+                                            leadParseCacheRef.current = { key: '', result: null, promise: null };
+                                        }}
+                                        disabled={isAnalyzing || creating}
+                                        models={availableModels}
+                                        triggerClassName="w-full"
+                                        itemClassName="text-xs"
+                                        placeholder="Select model"
+                                    />
+                                </div>
                                 <Textarea
                                     placeholder="Paste lead details here (e.g. from Bazaraki, Facebook, WhatsApp)..."
                                     className="min-h-[150px] font-mono text-sm"
@@ -570,7 +598,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                         setCreating(true);
                                         setError(null);
                                         try {
-                                            const res = await importLeadFromText(leadText);
+                                            const res = await importLeadFromText(leadText, selectedPasteLeadModel || undefined);
                                             if (res.success && res.conversationId) {
                                                 toast({
                                                     title: "Lead imported",

@@ -45,6 +45,8 @@ import { convertDateTimeLocalToIso, formatDateTimeLocalValue } from "@/lib/tasks
 import { cn } from "@/lib/utils";
 import { TaskSuggestionFunnelMetrics } from "./task-suggestion-funnel-metrics";
 import { ViewingsSuggestionDialog } from "./viewings-suggestion-dialog";
+import { AiModelSelect } from "@/components/ai/ai-model-select";
+import { useAiModelCatalog } from "@/components/ai/use-ai-model-catalog";
 
 export type MessageSelectionActionTarget = {
     text: string;
@@ -171,6 +173,7 @@ export function MessageSelectionActions({
     onTriggerActionHandled,
 }: MessageSelectionActionsProps) {
     const router = useRouter();
+    const { models: availableModels, resolveModelForKind } = useAiModelCatalog();
     const toolbarRef = useRef<HTMLDivElement>(null);
     const suggestGenerationRunIdRef = useRef(0);
     const leadParseCacheRef = useRef<{
@@ -186,6 +189,7 @@ export function MessageSelectionActions({
     const [isAnalyzingLead, setIsAnalyzingLead] = useState(false);
     const [isImportingLead, setIsImportingLead] = useState(false);
     const [parsedLead, setParsedLead] = useState<ParsedLeadData | null>(null);
+    const [selectedLeadModel, setSelectedLeadModel] = useState("");
 
     const [contactQuery, setContactQuery] = useState("");
     const [findContactSelectionPreview, setFindContactSelectionPreview] = useState("");
@@ -236,6 +240,16 @@ export function MessageSelectionActions({
     const selectedSuggestionCount = taskSuggestions.filter((item) => item.selected).length;
 
     const selectionVisible = !!selection && !triggerAction && !pasteLeadOpen && !findContactOpen && !createTaskOpen && !suggestTasksOpen && !summarizeOpen && !customOpen && !translateOpen;
+
+    useEffect(() => {
+        if (selectedLeadModel) return;
+        const preferredModel = activeAiModel
+            || resolveModelForKind("extraction")
+            || resolveModelForKind("general")
+            || resolveModelForKind("draft");
+        if (!preferredModel) return;
+        setSelectedLeadModel(preferredModel);
+    }, [activeAiModel, resolveModelForKind, selectedLeadModel]);
 
     useEffect(() => {
         let cancelled = false;
@@ -352,7 +366,7 @@ export function MessageSelectionActions({
             if (cached.promise) return cached.promise;
         }
 
-        const promise = parseLeadFromText(key, activeAiModel)
+        const promise = parseLeadFromText(key, selectedLeadModel || undefined)
             .then((res) => {
                 if (leadParseCacheRef.current.key === key) {
                     leadParseCacheRef.current.result = res;
@@ -374,7 +388,7 @@ export function MessageSelectionActions({
         };
 
         return promise;
-    }, [activeAiModel]);
+    }, [selectedLeadModel]);
 
     useEffect(() => {
         if (!pasteLeadOpen || parsedLead) return;
@@ -392,6 +406,7 @@ export function MessageSelectionActions({
         if (!selection?.text?.trim()) return;
         setLeadText(selection.text.trim());
         setParsedLead(null);
+        setSelectedLeadModel(activeAiModel || "");
         leadParseCacheRef.current = { key: "", result: null, promise: null };
         setPasteLeadOpen(true);
         onClearSelection();
@@ -1097,6 +1112,7 @@ export function MessageSelectionActions({
                     if (!open) {
                         setIsAnalyzingLead(false);
                         setIsImportingLead(false);
+                        setSelectedLeadModel(activeAiModel || "");
                         leadParseCacheRef.current = { key: "", result: null, promise: null };
                     }
                 }}
@@ -1114,6 +1130,22 @@ export function MessageSelectionActions({
 
                     {!parsedLead ? (
                         <div className="space-y-3">
+                            <div className="space-y-1">
+                                <label className="block text-sm font-medium text-slate-700">AI Model</label>
+                                <AiModelSelect
+                                    value={selectedLeadModel}
+                                    onValueChange={(value) => {
+                                        setSelectedLeadModel(value);
+                                        setParsedLead(null);
+                                        leadParseCacheRef.current = { key: "", result: null, promise: null };
+                                    }}
+                                    disabled={isAnalyzingLead || isImportingLead}
+                                    models={availableModels}
+                                    triggerClassName="w-full"
+                                    itemClassName="text-xs"
+                                    placeholder="Select model"
+                                />
+                            </div>
                             <div className="rounded-md border bg-slate-50 p-2 text-xs text-slate-600">
                                 <span className="font-medium text-slate-800">Selection:</span>{" "}
                                 {getSelectionPreview(leadText)}
@@ -1146,7 +1178,7 @@ export function MessageSelectionActions({
                                     if (!leadText.trim()) return;
                                     setIsImportingLead(true);
                                     try {
-                                        const res = await importLeadFromText(leadText, activeAiModel);
+                                        const res = await importLeadFromText(leadText, selectedLeadModel || undefined);
                                         if (!res.success || !res.conversationId) {
                                             toast.error(res.error || "Failed to import lead");
                                             return;
