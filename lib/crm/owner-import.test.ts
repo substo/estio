@@ -35,3 +35,14 @@ test("isLikelyAutomatedOwnerName catches feed-style placeholders", () => {
     assert.equal(isLikelyAutomatedOwnerName("Automated XML Import Owner Sale DT3327"), true);
     assert.equal(isLikelyAutomatedOwnerName("Maria Ioannou"), false);
 });
+
+test("classifyImportedOwnerEntity does not treat dropdown labels with phone suffix as organizations", () => {
+    assert.equal(
+        classifyImportedOwnerEntity({
+            ownerName: "Olga",
+            legacyOwnerLabel: "Olga m: +357 99 247036",
+            ownerCompany: null,
+        }),
+        "person"
+    );
+});

@@ -56,8 +56,19 @@ export function isLikelyAutomatedOwnerName(value: NullableString): boolean {
     const normalized = normalizeComparableName(value);
     if (!normalized) return false;
     if (/(automated|xml|feed|import owner|feed owner|owner rent|owner sale)/i.test(normalized)) return true;
-    const digitCount = normalized.replace(/\D/g, "").length;
-    return digitCount >= 4;
+    if (/\bdt\d{2,6}\b/i.test(normalized)) return true;
+    if (/\b\d+\s*bdr\b/i.test(normalized) || /\b0bdr\b/i.test(normalized)) return true;
+    return false;
+}
+
+function stripOwnerContactDecorators(value: NullableString): string | null {
+    const normalized = normalizeText(value);
+    if (!normalized) return null;
+    return normalized
+        .replace(/\b[mt]:\s*\+?[0-9()\s-]{6,}\b/gi, "")
+        .replace(/\b(?:mobile|mob|tel|phone):\s*\+?[0-9()\s-]{6,}\b/gi, "")
+        .replace(/\s+/g, " ")
+        .trim();
 }
 
 function looksLikeHumanName(value: NullableString): boolean {
@@ -85,7 +96,7 @@ export function classifyImportedOwnerEntity(input: {
     legacyOwnerLabel?: NullableString;
 }): ImportedOwnerEntityType {
     const normalizedOwnerName = normalizeText(input.ownerName);
-    const normalizedLegacyLabel = normalizeText(input.legacyOwnerLabel);
+    const normalizedLegacyLabel = stripOwnerContactDecorators(input.legacyOwnerLabel);
 
     if (isLikelyAutomatedOwnerName(normalizedOwnerName) || isLikelyAutomatedOwnerName(normalizedLegacyLabel)) {
         return "organization";
