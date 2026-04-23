@@ -8,6 +8,7 @@ import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DeleteCompanyDialog } from "../../_components/delete-company-dialog";
 
 export const dynamic = "force-dynamic";
 
@@ -94,7 +95,21 @@ export default async function CompanyViewPage(props: {
                         Back to Companies
                     </Link>
                 </Button>
-                <Badge variant="outline">{company.type || "Company"}</Badge>
+                <div className="flex items-center gap-2">
+                    <Badge variant="outline">{company.type || "Company"}</Badge>
+                    <DeleteCompanyDialog
+                        triggerVariant="button"
+                        company={{
+                            id: company.id,
+                            name: company.name,
+                            locationId: company.locationId,
+                            propertyRoleCount: company.propertyRoles.length,
+                            contactRoleCount: company.contactRoles.length,
+                            feedCount: company.feeds.length,
+                        }}
+                        redirectTo={`/admin/companies?locationId=${encodeURIComponent(company.locationId)}`}
+                    />
+                </div>
             </div>
 
             <Card>

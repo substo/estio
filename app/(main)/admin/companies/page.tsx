@@ -7,6 +7,7 @@ import { getLocationContext } from "@/lib/auth/location-context";
 import { redirect } from "next/navigation";
 
 import { AddCompanyDialog, AddDeveloperCompanyDialog } from "./_components/add-company-dialog";
+import { DeleteCompanyDialog } from "./_components/delete-company-dialog";
 import { EditCompanyDialog } from "./_components/edit-company-dialog";
 import { CompanyFilters } from "./_components/company-filters";
 import { listCompanies } from "@/lib/companies/repository";
@@ -146,7 +147,19 @@ export default async function CompaniesPage(props: { searchParams: Promise<{ loc
                                     </div>
                                 </td>
                                 <td className="p-4">
-                                    <EditCompanyDialog company={company} />
+                                    <div className="flex items-center gap-1">
+                                        <EditCompanyDialog company={company} />
+                                        <DeleteCompanyDialog
+                                            company={{
+                                                id: company.id,
+                                                name: company.name,
+                                                locationId: company.locationId,
+                                                propertyRoleCount: company.propertyRoles.length,
+                                                contactRoleCount: company.contactRoles.length,
+                                                feedCount: company.feeds.length,
+                                            }}
+                                        />
+                                    </div>
                                 </td>
                             </tr>
                         ))}
@@ -156,4 +169,3 @@ export default async function CompaniesPage(props: { searchParams: Promise<{ loc
         </div>
     );
 }
-

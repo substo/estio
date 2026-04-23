@@ -30,6 +30,18 @@ export type CompanyFormState = {
     company?: { id: string; name: string };
 };
 
+export type DeleteCompanyState = {
+    success?: boolean;
+    message?: string;
+    errors?: {
+        companyId?: string[];
+        locationId?: string[];
+        confirmationName?: string[];
+        _form?: string[];
+    };
+    deletedCompanyId?: string;
+};
+
 export async function createCompany(
     prevState: CompanyFormState,
     formData: FormData
@@ -166,6 +178,103 @@ export async function updateCompany(
         return {
             message: 'Database Error: Failed to Update Company.',
             success: false,
+        };
+    }
+}
+
+const deleteCompanySchema = z.object({
+    companyId: z.string().min(1, 'Company ID is required'),
+    locationId: z.string().min(1, 'Location ID is required'),
+    confirmationName: z.string().min(1, 'Please type the company name to confirm deletion'),
+});
+
+export async function deleteCompany(
+    prevState: DeleteCompanyState,
+    formData: FormData
+): Promise<DeleteCompanyState> {
+    const validatedFields = deleteCompanySchema.safeParse({
+        companyId: formData.get('companyId'),
+        locationId: formData.get('locationId'),
+        confirmationName: formData.get('confirmationName'),
+    });
+
+    if (!validatedFields.success) {
+        return {
+            errors: validatedFields.error.flatten().fieldErrors,
+            message: 'Missing fields. Failed to delete company.',
+            success: false,
+        };
+    }
+
+    const { companyId, locationId, confirmationName } = validatedFields.data;
+
+    const { userId } = await auth();
+    if (!userId) {
+        return { success: false, message: 'Unauthorized' };
+    }
+
+    const hasAccess = await verifyUserHasAccessToLocation(userId, locationId);
+    if (!hasAccess) {
+        return { success: false, message: 'Unauthorized: You do not have access to this location.' };
+    }
+
+    const existingCompany = await db.company.findFirst({
+        where: {
+            id: companyId,
+            locationId,
+        },
+        select: {
+            id: true,
+            name: true,
+        },
+    });
+
+    if (!existingCompany) {
+        return { success: false, message: 'Company not found or access denied.' };
+    }
+
+    if (existingCompany.name !== confirmationName.trim()) {
+        return {
+            success: false,
+            errors: {
+                confirmationName: ['Entered name does not match the company name.'],
+            },
+            message: 'Confirmation name does not match.',
+        };
+    }
+
+    try {
+        await db.$transaction(async (tx) => {
+            await tx.companyPropertyRole.deleteMany({
+                where: { companyId },
+            });
+
+            await tx.contactCompanyRole.deleteMany({
+                where: { companyId },
+            });
+
+            await tx.propertyFeed.deleteMany({
+                where: { companyId },
+            });
+
+            await tx.company.delete({
+                where: { id: companyId },
+            });
+        });
+
+        revalidatePath('/admin/companies');
+        revalidatePath(`/admin/companies/${companyId}/view`);
+
+        return {
+            success: true,
+            message: 'Company deleted successfully.',
+            deletedCompanyId: companyId,
+        };
+    } catch (error) {
+        console.error('[deleteCompany] Database Error:', error);
+        return {
+            success: false,
+            message: 'Database Error: Failed to delete company.',
         };
     }
 }
