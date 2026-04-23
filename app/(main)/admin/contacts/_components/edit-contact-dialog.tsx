@@ -1,5 +1,6 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { useState, useEffect } from 'react';
 import { Pencil, Trash, RefreshCw, UploadCloud } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -17,36 +18,35 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from '@/components/ui/select';
 import { TabsContent, TabsTrigger } from "@/components/ui/tabs";
-import { createViewing, updateViewing, deleteViewing, checkPropertyOwnerEmail, deleteContact, updateContactAction } from '../actions';
+import { updateContactAction } from '../actions';
 import { useToast } from '@/components/ui/use-toast';
-import { getPropertiesForSelect, getUsersForSelect, getContactViewings, getContactHistory } from '../fetch-helpers';
-
-import { SearchableSelect } from './searchable-select';
+import { getContactHistory } from '../fetch-helpers';
 import { HistoryTab } from './history-tab';
 import { DeleteContactDialog } from './delete-contact-dialog';
 
 import { ContactForm, type ContactData, type ContactIdentityPatch } from './contact-form';
 import { CONTACT_TYPE_CONFIG, DEFAULT_CONTACT_TYPE, isKnownContactType, type ContactType } from './contact-types';
 import { MergeContactDialog } from './merge-contact-dialog';
-import { ContactTaskManager } from '@/components/tasks/contact-task-manager';
-import { ContactViewingManager } from '@/components/tasks/contact-viewing-manager';
+
+const ContactTaskManager = dynamic(
+    () => import('@/components/tasks/contact-task-manager').then((mod) => mod.ContactTaskManager),
+    {
+        loading: () => <div className="h-24 rounded-xl bg-slate-100 animate-pulse" />,
+    }
+);
+
+const ContactViewingManager = dynamic(
+    () => import('@/components/tasks/contact-viewing-manager').then((mod) => mod.ContactViewingManager),
+    {
+        loading: () => <div className="h-24 rounded-xl bg-slate-100 animate-pulse" />,
+    }
+);
 
 export function EditContactForm({ contact, onSuccess, onDelete, onContactSaved, onMergeSuccess, leadSources, initialMode = 'edit', isOutlookConnected = false, isGoogleConnected = false, isGhlConnected = false, skipRouterRefresh = false }: { contact: ContactData; onSuccess?: () => void; onDelete?: () => void; onContactSaved?: (patch: ContactIdentityPatch) => void; onMergeSuccess?: (targetContactId: string, targetConversationId?: string | null) => void; leadSources: string[]; initialMode?: 'view' | 'edit' | 'create'; isOutlookConnected?: boolean; isGoogleConnected?: boolean; isGhlConnected?: boolean; skipRouterRefresh?: boolean }) {
     const { toast } = useToast();
-    const [isDeleting, setIsDeleting] = useState(false);
-
-    // Viewings State (Now handled largely by ContactViewingManager, keeping only what's needed for other tabs)
-    const [properties, setProperties] = useState<{ id: string; title: string }[]>([]);
-    const [loadingData, setLoadingData] = useState(false);
-
+    const [activeTab, setActiveTab] = useState('details');
+    const [loadingHistory, setLoadingHistory] = useState(false);
     const [history, setHistory] = useState<any[]>([]);
 
     // CRM Pull State
@@ -58,27 +58,38 @@ export function EditContactForm({ contact, onSuccess, onDelete, onContactSaved, 
     const [mergeContactDialogOpen, setMergeContactDialogOpen] = useState(false);
     const [deleteContactDialogOpen, setDeleteContactDialogOpen] = useState(false);
 
-    // Fetch data for Viewings and Modal
     useEffect(() => {
-        const fetchData = async () => {
-            setLoadingData(true);
+        setActiveTab('details');
+        setHistory([]);
+        setLoadingHistory(false);
+    }, [contact.id]);
+
+    useEffect(() => {
+        if (activeTab !== 'history') return;
+        let cancelled = false;
+
+        const fetchHistory = async () => {
+            setLoadingHistory(true);
             try {
-                const [props, hist] = await Promise.all([
-                    getPropertiesForSelect(contact.locationId),
-                    getContactHistory(contact.id)
-                ]);
-                setProperties(props);
-                setHistory(hist);
+                const hist = await getContactHistory(contact.id);
+                if (!cancelled) {
+                    setHistory(hist);
+                }
             } catch (e) {
-                console.error("Error fetching data", e);
+                console.error("Error fetching contact history", e);
             } finally {
-                setLoadingData(false);
+                if (!cancelled) {
+                    setLoadingHistory(false);
+                }
             }
         };
-        fetchData();
-    }, [contact.locationId, contact.id]);
 
+        void fetchHistory();
 
+        return () => {
+            cancelled = true;
+        };
+    }, [activeTab, contact.id]);
 
     const handlePullFromCrm = async () => {
         if (!crmLeadId) {
@@ -105,7 +116,7 @@ export function EditContactForm({ contact, onSuccess, onDelete, onContactSaved, 
 
     const handleMergeConfirm = async (mergedData: any) => {
         setMergeModalOpen(false);
-        const toastId = toast({ title: "Updating contact...", description: "Saving merged data." });
+        toast({ title: "Updating contact...", description: "Saving merged data." });
 
         try {
             const res = await updateContactAction(contact.id, mergedData);
@@ -148,6 +159,7 @@ export function EditContactForm({ contact, onSuccess, onDelete, onContactSaved, 
                 leadSources={leadSources}
                 isOutlookConnected={isOutlookConnected}
                 skipRouterRefresh={skipRouterRefresh}
+                onTabChange={setActiveTab}
                 additionalTabCount={showViewings ? 3 : 2}
                 additionalTabs={
                     <>
@@ -159,7 +171,7 @@ export function EditContactForm({ contact, onSuccess, onDelete, onContactSaved, 
                 additionalTabContent={(isEditing) => (
                     <>
                         {showViewings ? (
-                            <TabsContent value="viewings" forceMount={true} className="space-y-4 pt-4 data-[state=inactive]:hidden">
+                            <TabsContent value="viewings" className="space-y-4 pt-4">
                                 <ContactViewingManager
                                     contactId={contact.id}
                                     locationId={contact.locationId}
@@ -168,17 +180,17 @@ export function EditContactForm({ contact, onSuccess, onDelete, onContactSaved, 
                             </TabsContent>
                         ) : null}
 
-                        <TabsContent value="tasks" forceMount={true} className="space-y-4 pt-4 data-[state=inactive]:hidden">
+                        <TabsContent value="tasks" className="space-y-4 pt-4">
                             <div className="space-y-4">
                                 <h3 className="font-semibold">Tasks</h3>
                                 <ContactTaskManager contactId={contact.id} compact={!isEditing} />
                             </div>
                         </TabsContent>
 
-                        <TabsContent value="history" forceMount={true} className="space-y-4 pt-4 data-[state=inactive]:hidden">
+                        <TabsContent value="history" className="space-y-4 pt-4">
                             <div className="space-y-4">
                                 <h3 className="font-semibold">Audit History</h3>
-                                <HistoryTab history={history} loading={loadingData} contact={contact} />
+                                <HistoryTab history={history} loading={loadingHistory} contact={contact} />
                             </div>
                         </TabsContent>
                     </>

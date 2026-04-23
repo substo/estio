@@ -1,3 +1,4 @@
+import dynamic from "next/dynamic";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Conversation } from "@/lib/ghl/conversations";
 import { generateAIDraft, generateMultiContextDraftAction, getContactContext, generatePlanAction, executeNextTaskAction, getAgentPlan, getAgentExecutions, getTraceTreeAction, getContactInsightsAction, orchestrateAction, getConversationTranscriptUsage } from "../actions";
@@ -13,15 +14,33 @@ import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { DEFAULT_CONTACT_TYPE } from "../../contacts/_components/contact-types";
-import { EditContactDialog } from "../../contacts/_components/edit-contact-dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { DEFAULT_REPLY_LANGUAGE, normalizeReplyLanguage } from "@/lib/ai/reply-language-options";
 import { GroupMembersList } from './group-members-list';
 import { TraceNodeRenderer } from "./trace-node-renderer";
-import { ContactTaskManager } from "@/components/tasks/contact-task-manager";
-import { ContactViewingManager } from "@/components/tasks/contact-viewing-manager";
 import type { ContactIdentityPatch } from "../../contacts/_components/contact-form";
+
+const EditContactDialog = dynamic(
+    () => import("../../contacts/_components/edit-contact-dialog").then((mod) => mod.EditContactDialog),
+    {
+        loading: () => <div className="h-10 rounded-md bg-slate-100 animate-pulse" />,
+    }
+);
+
+const ContactTaskManager = dynamic(
+    () => import("@/components/tasks/contact-task-manager").then((mod) => mod.ContactTaskManager),
+    {
+        loading: () => <div className="h-32 rounded-xl bg-slate-100 animate-pulse" />,
+    }
+);
+
+const ContactViewingManager = dynamic(
+    () => import("@/components/tasks/contact-viewing-manager").then((mod) => mod.ContactViewingManager),
+    {
+        loading: () => <div className="h-32 rounded-xl bg-slate-100 animate-pulse" />,
+    }
+);
 
 interface CoordinatorPanelProps {
     locationId: string;

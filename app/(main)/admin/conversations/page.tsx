@@ -75,17 +75,22 @@ export default async function ConversationsPage({ searchParams }: { searchParams
     const initialViewFilterParam = Array.isArray(resolvedSearchParams?.view)
         ? resolvedSearchParams.view[0]
         : resolvedSearchParams?.view;
+    const initialViewModeParam = Array.isArray(resolvedSearchParams?.mode)
+        ? resolvedSearchParams.mode[0]
+        : resolvedSearchParams?.mode;
     const initialConversationStatus = (initialViewFilterParam === 'archived' || initialViewFilterParam === 'trash' || initialViewFilterParam === 'tasks')
         ? initialViewFilterParam
         : 'active';
+    const initialViewMode = initialViewModeParam === 'deals' ? 'deals' : 'chats';
 
-    // Initial Fetch on Server (include deep-linked conversation even if not in the top-50 window)
+    // Keep first paint focused on the active conversations path.
+    // Deal data is only preloaded when the user lands directly in deal mode.
     const [initialConversationsData, initialDealsData] = await Promise.all([
         fetchConversations(
             initialConversationStatus === 'tasks' ? 'active' : initialConversationStatus,
             selectedConversationId
         ),
-        getDealContexts()
+        initialViewMode === 'deals' ? getDealContexts() : Promise.resolve([])
     ]);
     const featureFlags = getConversationFeatureFlags(location.id);
 

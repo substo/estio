@@ -1,5 +1,6 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { useState, useEffect, useCallback, useRef, type TouchEvent as ReactTouchEvent, type ReactNode } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { Conversation, Message } from '@/lib/ghl/conversations';
@@ -69,7 +70,6 @@ import { buildTimelineCursorFromEvent } from '@/lib/conversations/timeline-event
 import { UnifiedTimeline } from './unified-timeline';
 import { ConversationList } from './conversation-list';
 import { ChatWindow } from './chat-window';
-import { CoordinatorPanel } from './coordinator-panel';
 import { UndoToast } from './undo-toast';
 import { WhatsAppImportModal } from './whatsapp-import-modal';
 import { CreateDealDialog } from './create-deal-dialog';
@@ -88,6 +88,13 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
 import type { ConversationFeatureFlags } from '@/lib/feature-flags';
+
+const CoordinatorPanel = dynamic(
+    () => import('./coordinator-panel').then((mod) => mod.CoordinatorPanel),
+    {
+        loading: () => <div className="h-full animate-pulse bg-slate-50" />,
+    }
+);
 
 
 interface ConversationInterfaceProps {

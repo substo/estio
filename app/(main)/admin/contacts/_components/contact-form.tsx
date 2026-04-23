@@ -200,6 +200,7 @@ interface ContactFormProps {
     initialData?: Partial<ContactData>;
     onContactSaved?: (patch: ContactIdentityPatch) => void;
     skipRouterRefresh?: boolean;
+    onTabChange?: (value: string) => void;
 }
 
 function SubmitButton({ isEditing, isCreating, toggler }: { isEditing: boolean, isCreating: boolean, toggler: (e: React.MouseEvent) => void }) {
@@ -230,7 +231,7 @@ function formatDate(date: Date | string | null | undefined) {
     }
 }
 
-export function ContactForm({ initialMode = 'create', contact: initialContact, locationId, onSuccess, additionalTabs, additionalTabContent, editActionsMenuItems, additionalTabCount = 0, leadSources = [], isOutlookConnected = false, initialData, onContactSaved, skipRouterRefresh = false }: ContactFormProps) {
+export function ContactForm({ initialMode = 'create', contact: initialContact, locationId, onSuccess, additionalTabs, additionalTabContent, editActionsMenuItems, additionalTabCount = 0, leadSources = [], isOutlookConnected = false, initialData, onContactSaved, skipRouterRefresh = false, onTabChange }: ContactFormProps) {
     // For initialization, merge passed contact with initialData (prefill)
     const baseContact = { ...initialData, ...initialContact } as ContactData | undefined;
 
@@ -241,6 +242,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
     const [conversationError, setConversationError] = useState<string | null>(null);
     const [contactPatch, setContactPatch] = useState<Partial<ContactData>>({});
     const [formRenderKey, setFormRenderKey] = useState(0);
+    const [activeTab, setActiveTab] = useState<string>('details');
     const contact = baseContact ? ({ ...baseContact, ...contactPatch } as ContactData) : undefined;
     const [preferredLangSelection, setPreferredLangSelection] = useState<string>(
         contact?.preferredLang || REPLY_LANGUAGE_AUTO_VALUE
@@ -268,6 +270,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
     useEffect(() => {
         setContactPatch({});
         setFormRenderKey(0);
+        setActiveTab('details');
     }, [initialContact?.id]);
 
     useEffect(() => {
@@ -322,6 +325,10 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
     useEffect(() => {
         onContactSavedRef.current = onContactSaved;
     }, [onContactSaved]);
+
+    useEffect(() => {
+        onTabChange?.(activeTab);
+    }, [activeTab, onTabChange]);
 
     const toggleEdit = (e?: React.MouseEvent) => {
         if (e) {
@@ -609,7 +616,12 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                     </div>
                 </RenderField>
 
-                <Tabs key={formRenderKey} defaultValue="details" className="w-full">
+                <Tabs
+                    key={formRenderKey}
+                    value={activeTab}
+                    onValueChange={setActiveTab}
+                    className="w-full"
+                >
                     <TabsList className={`w-full grid ${gridCols[visibleTabCount] || 'grid-cols-4'}`}>
                         {currentConfig.visibleTabs.includes('details') && (
                             <TabsTrigger value="details">Details</TabsTrigger>
