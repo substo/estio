@@ -316,20 +316,57 @@ export function ConversationComposer({
         if (isUnavailable || isRecording || !draft.trim()) return;
 
         const sourceText = draft.trim();
-        const textToSend = mode === "translated" && translationPreviewText.trim()
-            ? translationPreviewText.trim()
-            : sourceText;
-        const shouldAttachTranslationMeta = mode === "translated" && translationPreviewText.trim() && sourceText !== textToSend;
+        let textToSend = sourceText;
+        let translationMeta: {
+            translationSourceText: string;
+            translationTargetLanguage: string | null;
+            translationDetectedSourceLanguage: string | null;
+        } | undefined;
 
-        setSending(true);
-        try {
-            await Promise.resolve(onSendMessage(textToSend, selectedChannel, shouldAttachTranslationMeta
-                ? {
+        if (mode === "translated" && translationPreviewText.trim()) {
+            // User explicitly clicked "Send Translated" with an active preview
+            textToSend = translationPreviewText.trim();
+            if (sourceText !== textToSend) {
+                translationMeta = {
                     translationSourceText: sourceText,
                     translationTargetLanguage: translationPreviewLanguage || (selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE ? null : selectedReplyLanguage),
                     translationDetectedSourceLanguage: translationPreviewDetectedSource || null,
+                };
+            }
+        } else if (
+            mode === "original" &&
+            selectedReplyLanguage !== REPLY_LANGUAGE_AUTO_VALUE &&
+            canUseWriteTranslation &&
+            onPreviewTranslatedReply
+        ) {
+            // Auto-translate on send: reply language is explicitly set, seamlessly translate
+            // before sending (enterprise best practice — matches Intercom/Zendesk behavior).
+            // This catches both AI-drafted and manually-typed messages.
+            setSending(true);
+            try {
+                const result = await onPreviewTranslatedReply(sourceText, selectedChannel, selectedReplyLanguage);
+                if (result?.success && result.translatedText?.trim()) {
+                    const translated = result.translatedText.trim();
+                    if (translated !== sourceText) {
+                        textToSend = translated;
+                        translationMeta = {
+                            translationSourceText: sourceText,
+                            translationTargetLanguage: result.targetLanguage || selectedReplyLanguage,
+                            translationDetectedSourceLanguage: result.detectedSourceLanguage || null,
+                        };
+                    }
                 }
-                : undefined));
+            } catch (autoTranslateError) {
+                // Graceful degradation: send original if auto-translate fails
+                console.warn("[Composer] Auto-translate on send failed, sending original:", autoTranslateError);
+            } finally {
+                setSending(false);
+            }
+        }
+
+        setSending(true);
+        try {
+            await Promise.resolve(onSendMessage(textToSend, selectedChannel, translationMeta));
             setDraft("");
             setTranslationPreviewText("");
             setTranslationPreviewLanguage(null);
@@ -505,11 +542,16 @@ export function ConversationComposer({
         try {
             const instruction = instructionOverride || draft.trim();
             const modelOverride = hasUserSelectedModel ? selectedModel : undefined;
+            // When a reply language is explicitly set, draft in that language directly.
+            // Otherwise fall back to the agent's browser locale for review.
+            const resolvedDraftLanguage = selectedReplyLanguage !== REPLY_LANGUAGE_AUTO_VALUE
+                ? selectedReplyLanguage
+                : agentDraftLanguage;
             let streamedBuffer = "";
             const text = await onGenerateDraft(
                 instruction,
                 modelOverride,
-                agentDraftLanguage,
+                resolvedDraftLanguage,
                 (chunk) => {
                     if (!chunk) return;
                     streamedBuffer += chunk;
@@ -557,7 +599,9 @@ export function ConversationComposer({
     const selectedReplyLanguageLabel = selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE
         ? "Reply in: Auto"
         : `Reply in: ${getReplyLanguageLabel(selectedReplyLanguage) || selectedReplyLanguage}`;
-    const resolvedDraftLanguageLabel = getReplyLanguageLabel(agentDraftLanguage) || agentDraftLanguage || DEFAULT_REPLY_LANGUAGE;
+    const resolvedDraftLanguageLabel = getReplyLanguageLabel(
+        selectedReplyLanguage !== REPLY_LANGUAGE_AUTO_VALUE ? selectedReplyLanguage : agentDraftLanguage
+    ) || agentDraftLanguage || DEFAULT_REPLY_LANGUAGE;
     const resolvedSendLanguageLabel = getReplyLanguageLabel(
         selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE
             ? (conversation?.locationDefaultReplyLanguage || DEFAULT_REPLY_LANGUAGE)
