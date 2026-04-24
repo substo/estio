@@ -1,8 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
-import { Loader2, Plus, Trash2, CheckCircle2, Clock3, AlertCircle, Ban, Pencil, Minus, Wand2, Radio } from 'lucide-react';
+import { Loader2, Plus, Trash2, CheckCircle2, Clock3, AlertCircle, Ban, Pencil, Minus, Wand2, Radio, MessageSquareText, Navigation, Copy, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -36,6 +37,9 @@ import {
     createViewing,
     updateViewing,
     deleteViewing,
+    generateViewingReminderDraftAction,
+    queueViewingLeadRemindersAction,
+    openOrStartConversationForContact,
 } from '@/app/(main)/admin/contacts/actions';
 import { createViewingSession } from '@/app/(main)/admin/viewings/sessions/actions';
 import { improveInternalNoteText } from '@/app/(main)/admin/conversations/actions';
@@ -62,6 +66,19 @@ type SyncRecord = { provider: string; status?: string | null; lastSyncedAt?: str
 type OutboxJob = { provider: string; status?: string | null; operation?: string | null; attemptCount?: number | null; scheduledAt?: string | Date | null; lastError?: string | null; createdAt?: string | Date | null };
 type ProviderSyncStatus = 'synced' | 'error' | 'pending' | 'processing' | 'retrying' | 'dead' | 'disabled';
 type ProviderBadge = { provider: string; key: string; status: ProviderSyncStatus; attemptsText?: string; title?: string };
+type ReminderPreviewState = {
+    audience: 'lead' | 'owner';
+    body: string;
+    conversationId: string | null;
+    contactId: string | null;
+    targetName: string | null;
+    canAutoSend: boolean;
+    scheduledLabel: string;
+    directionsUrl: string | null;
+    propertyLabel: string;
+    locationLabel: string | null;
+    fallbackHint?: string | null;
+};
 
 const PROVIDER_ICON_SOURCES: Record<string, { src: string; alt: string }> = {
     ghl: { src: 'https://www.gohighlevel.com/favicon.ico', alt: 'GoHighLevel' },
@@ -230,6 +247,7 @@ export function ContactViewingManager({
     title?: string | null;
     isEditing?: boolean;
 }) {
+    const router = useRouter();
     const [viewings, setViewings] = useState<any[]>([]);
     const [properties, setProperties] = useState<{ id: string; title: string; unitNumber?: string | null }[]>([]);
     const [users, setUsers] = useState<{ id: string; name: string | null; email: string; ghlCalendarId?: string | null; timeZone?: string | null; effectiveTimeZone?: string | null }[]>([]);
@@ -255,6 +273,9 @@ export function ContactViewingManager({
     // Deletion Modal
     const [viewingToDeleteId, setViewingToDeleteId] = useState<string | null>(null);
     const [startingLiveViewingId, setStartingLiveViewingId] = useState<string | null>(null);
+    const [draftingViewingKey, setDraftingViewingKey] = useState<string | null>(null);
+    const [queueingViewingId, setQueueingViewingId] = useState<string | null>(null);
+    const [reminderPreview, setReminderPreview] = useState<ReminderPreviewState | null>(null);
     const [newSessionShare, setNewSessionShare] = useState<null | {
         sessionId: string;
         mode: string;
@@ -517,6 +538,110 @@ export function ContactViewingManager({
         }
     };
 
+    const copyReminderDraft = async () => {
+        if (!reminderPreview?.body) return;
+        try {
+            await navigator.clipboard.writeText(reminderPreview.body);
+            toast.success("Reminder draft copied");
+        } catch {
+            toast.error("Could not copy reminder draft");
+        }
+    };
+
+    const tryInsertReminderIntoComposer = useCallback((preview: ReminderPreviewState) => {
+        if (preview.audience !== 'lead') return false;
+        if (typeof window === 'undefined') return false;
+        const insert = (window as any).__ESTIO_INSERT_COMPOSER_DRAFT__;
+        if (typeof insert !== 'function') return false;
+        try {
+            return Boolean(insert({
+                key: `viewing-reminder:${Date.now()}`,
+                body: preview.body,
+                conversationId: preview.conversationId || null,
+            }));
+        } catch {
+            return false;
+        }
+    }, []);
+
+    const handleGenerateReminderDraft = async (viewingId: string, audience: 'lead' | 'owner') => {
+        const draftKey = `${viewingId}:${audience}`;
+        if (draftingViewingKey === draftKey) return;
+        setDraftingViewingKey(draftKey);
+        setError(null);
+        try {
+            const result = await generateViewingReminderDraftAction(viewingId, audience);
+            if (!result.success) {
+                setError(result.error || 'Failed to generate reminder draft.');
+                return;
+            }
+
+            const preview: ReminderPreviewState = {
+                audience,
+                body: result.body,
+                conversationId: result.conversationId,
+                contactId: result.contactId,
+                targetName: result.targetName,
+                canAutoSend: result.canAutoSend,
+                scheduledLabel: result.scheduledLabel,
+                directionsUrl: result.directionsUrl,
+                propertyLabel: result.propertyLabel,
+                locationLabel: result.locationLabel,
+                fallbackHint: result.fallbackHint,
+            };
+
+            if (audience === 'lead' && tryInsertReminderIntoComposer(preview)) {
+                toast.success('Lead reminder inserted into the composer');
+                return;
+            }
+
+            setReminderPreview(preview);
+        } catch (draftError: any) {
+            setError(draftError?.message || 'Failed to generate reminder draft.');
+        } finally {
+            setDraftingViewingKey(null);
+        }
+    };
+
+    const handleQueueLeadReminders = async (viewingId: string) => {
+        if (queueingViewingId === viewingId) return;
+        setQueueingViewingId(viewingId);
+        setError(null);
+        try {
+            const result = await queueViewingLeadRemindersAction(viewingId);
+            if (!result.success) {
+                setError((result as any).error || 'Failed to queue lead reminders.');
+                return;
+            }
+            const queuedCount = (result.results || []).filter((item: any) => item.status === 'pending').length;
+            const skippedCount = (result.results || []).filter((item: any) => item.status === 'skipped').length;
+            if (queuedCount > 0) {
+                toast.success(`Queued ${queuedCount} lead reminder${queuedCount > 1 ? 's' : ''}`);
+            } else if (skippedCount > 0) {
+                toast.message('Lead reminders were already past due for this viewing');
+            }
+            void loadData({ silent: true });
+        } catch (queueError: any) {
+            setError(queueError?.message || 'Failed to queue lead reminders.');
+        } finally {
+            setQueueingViewingId(null);
+        }
+    };
+
+    const handleOpenReminderConversation = async () => {
+        if (!reminderPreview?.contactId) return;
+        try {
+            const result = await openOrStartConversationForContact(reminderPreview.contactId);
+            if (!result?.success || !result?.conversationId) {
+                toast.error(result?.error || 'Could not open a conversation for this contact.');
+                return;
+            }
+            router.push(`/admin/conversations?id=${encodeURIComponent(result.conversationId)}`);
+        } catch (conversationError: any) {
+            toast.error(conversationError?.message || 'Could not open a conversation for this contact.');
+        }
+    };
+
     return (
         <div className={cn('space-y-3', className)}>
             {title && (
@@ -599,6 +724,45 @@ export function ContactViewingManager({
                                                 className="h-6 px-2 text-[10px]"
                                                 icon="mic"
                                             />
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-6 px-2 text-[10px]"
+                                                onClick={() => handleGenerateReminderDraft(viewing.id, 'lead')}
+                                                disabled={draftingViewingKey === `${viewing.id}:lead`}
+                                            >
+                                                {draftingViewingKey === `${viewing.id}:lead`
+                                                    ? <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                                    : <MessageSquareText className="mr-1 h-3 w-3" />}
+                                                Lead Draft
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-6 px-2 text-[10px]"
+                                                onClick={() => handleGenerateReminderDraft(viewing.id, 'owner')}
+                                                disabled={draftingViewingKey === `${viewing.id}:owner`}
+                                            >
+                                                {draftingViewingKey === `${viewing.id}:owner`
+                                                    ? <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                                    : <Navigation className="mr-1 h-3 w-3" />}
+                                                Owner Draft
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-6 px-2 text-[10px]"
+                                                onClick={() => handleQueueLeadReminders(viewing.id)}
+                                                disabled={queueingViewingId === viewing.id}
+                                            >
+                                                {queueingViewingId === viewing.id
+                                                    ? <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                                    : <Clock3 className="mr-1 h-3 w-3" />}
+                                                Queue Lead
+                                            </Button>
                                             <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={() => handleEdit(viewing)}>
                                                 <Pencil className="h-3.5 w-3.5" />
                                             </Button>
@@ -843,6 +1007,69 @@ export function ContactViewingManager({
                         >
                             Open Agent Cockpit
                         </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={!!reminderPreview} onOpenChange={(open) => !open && setReminderPreview(null)}>
+                <DialogContent className="sm:max-w-[620px]">
+                    <DialogHeader>
+                        <DialogTitle>{reminderPreview?.audience === 'owner' ? 'Owner Reminder Draft' : 'Lead Reminder Draft'}</DialogTitle>
+                        <DialogDescription>
+                            Review the generated reminder message before sending it.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                        <div className="rounded-md border bg-slate-50 p-3 text-xs text-slate-700">
+                            <div><span className="font-medium">Property:</span> {reminderPreview?.propertyLabel}</div>
+                            <div><span className="font-medium">Viewing:</span> {reminderPreview?.scheduledLabel}</div>
+                            {reminderPreview?.locationLabel ? (
+                                <div><span className="font-medium">Location:</span> {reminderPreview.locationLabel}</div>
+                            ) : null}
+                            {reminderPreview?.fallbackHint ? (
+                                <div><span className="font-medium">Fallback hint:</span> {reminderPreview.fallbackHint}</div>
+                            ) : null}
+                        </div>
+                        <textarea
+                            readOnly
+                            className="flex min-h-[220px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                            value={reminderPreview?.body || ''}
+                        />
+                    </div>
+                    <DialogFooter className="gap-2 sm:justify-between">
+                        <div className="flex gap-2">
+                            <Button type="button" variant="outline" onClick={copyReminderDraft}>
+                                <Copy className="mr-2 h-4 w-4" />
+                                Copy
+                            </Button>
+                            {reminderPreview?.audience === 'lead' ? (
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => {
+                                        if (!reminderPreview) return;
+                                        if (tryInsertReminderIntoComposer(reminderPreview)) {
+                                            toast.success('Lead reminder inserted into the composer');
+                                            setReminderPreview(null);
+                                        } else {
+                                            toast.message('Open the conversation composer for this contact to insert the draft directly.');
+                                        }
+                                    }}
+                                >
+                                    <MessageSquareText className="mr-2 h-4 w-4" />
+                                    Insert to Composer
+                                </Button>
+                            ) : null}
+                        </div>
+                        <div className="flex gap-2">
+                            {reminderPreview?.contactId ? (
+                                <Button type="button" variant="outline" onClick={handleOpenReminderConversation}>
+                                    <ExternalLink className="mr-2 h-4 w-4" />
+                                    Open Conversation
+                                </Button>
+                            ) : null}
+                            <Button type="button" onClick={() => setReminderPreview(null)}>Close</Button>
+                        </div>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

@@ -21,6 +21,12 @@ import {
   parseViewingDateTimeInput,
   ViewingDateTimeValidationError,
 } from '@/lib/viewings/datetime';
+import {
+  generateViewingReminderDraft,
+  getViewingReminderContext,
+  queueDefaultViewingLeadReminders,
+  type ViewingReminderAudience,
+} from '@/lib/viewings/reminders';
 
 async function resolvePreferredChannelTypeForPhone(
   location: { evolutionInstanceId?: string | null },
@@ -2139,6 +2145,77 @@ export async function deleteViewing(viewingId: string) {
     return { success: true, message: 'Viewing deleted.' };
   } catch (e) {
     return { success: false, message: 'Failed to delete viewing.' };
+  }
+}
+
+async function verifyViewingReminderAccess(viewingId: string) {
+  const { userId } = await auth();
+  if (!userId) {
+    return { ok: false as const, error: 'Unauthorized' };
+  }
+
+  const context = await getViewingReminderContext(viewingId);
+  if (!context) {
+    return { ok: false as const, error: 'Viewing not found' };
+  }
+
+  if (!context.locationId) {
+    return { ok: false as const, error: 'Viewing location context is missing' };
+  }
+
+  const hasAccess = await verifyUserHasAccessToLocation(userId, context.locationId);
+  if (!hasAccess) {
+    return { ok: false as const, error: 'Unauthorized' };
+  }
+
+  return { ok: true as const, context };
+}
+
+export async function generateViewingReminderDraftAction(
+  viewingId: string,
+  audience: ViewingReminderAudience
+) {
+  const access = await verifyViewingReminderAccess(viewingId);
+  if (!access.ok) {
+    return { success: false as const, error: access.error };
+  }
+
+  try {
+    const result = await generateViewingReminderDraft({
+      viewingId,
+      audience,
+      context: access.context,
+      markGenerated: true,
+    });
+
+    revalidatePath('/admin/contacts');
+    return {
+      success: true as const,
+      ...result,
+    };
+  } catch (error: any) {
+    return {
+      success: false as const,
+      error: error?.message || 'Failed to generate viewing reminder draft.',
+    };
+  }
+}
+
+export async function queueViewingLeadRemindersAction(viewingId: string) {
+  const access = await verifyViewingReminderAccess(viewingId);
+  if (!access.ok) {
+    return { success: false as const, error: access.error };
+  }
+
+  try {
+    const result = await queueDefaultViewingLeadReminders(viewingId);
+    revalidatePath('/admin/contacts');
+    return result;
+  } catch (error: any) {
+    return {
+      success: false as const,
+      error: error?.message || 'Failed to queue viewing lead reminders.',
+    };
   }
 }
 
