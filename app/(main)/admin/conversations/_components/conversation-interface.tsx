@@ -587,15 +587,6 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const dealWorkspaceSidebarInFlightRef = useRef<Set<string>>(new Set());
     const activeDealIdRef = useRef<string | null>(null);
 
-    useEffect(() => {
-        setConversations(initialConversations);
-        conversationsRef.current = initialConversations;
-        setConversationListHasMore(!!initialConversationListPageInfo?.hasMore);
-        setConversationListNextCursor(initialConversationListPageInfo?.nextCursor || null);
-        setConversationDeltaCursor(initialConversationListPageInfo?.deltaCursor || null);
-        conversationDeltaCursorRef.current = initialConversationListPageInfo?.deltaCursor || null;
-    }, [initialConversations, initialConversationListPageInfo?.hasMore, initialConversationListPageInfo?.nextCursor, initialConversationListPageInfo?.deltaCursor]);
-
     // Global Search Effect
     useEffect(() => {
         if (!searchQuery.trim()) {
@@ -1685,9 +1676,10 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 .filter((item: any) => item && item.matchesFilter === false && item.id)
                 .map((item: any) => item.id)
         );
-        if (activeIdRef.current && removedIds.has(activeIdRef.current)) {
-            setActiveId(null);
-        }
+
+        // We DO NOT call setActiveId(null) here even if the active conversation is in removedIds.
+        // If a user clicks an archived conversation from the search results while on the 'active' tab,
+        // it will naturally not match the filter, but we should not kick them out of the chat window.
 
         setConversations((prev) => {
             const withoutRemoved = removedIds.size > 0
@@ -1784,9 +1776,6 @@ export function ConversationInterface({ locationId, initialConversations, initia
         fetchConversations(viewFilter, activeIdRef.current || undefined)
             .then(data => {
                 replaceConversationListFromResponse(data);
-                setActiveId(null); // Deselect when switching views manually
-                setMessages([]);
-                setActivityLog([]);
             })
             .catch((err: any) => {
                 console.error("Failed to fetch conversations:", err);
