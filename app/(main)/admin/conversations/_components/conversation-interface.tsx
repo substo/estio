@@ -923,6 +923,12 @@ export function ConversationInterface({ locationId, initialConversations, initia
     }, [cacheWorkspaceCoreSnapshot, getCachedWorkspaceCoreSnapshot, syncPendingMessagesForConversation]);
 
     const applyWorkspaceCoreSnapshot = useCallback((conversationId: string, snapshot: WorkspaceCoreSnapshot) => {
+        // Guard: prevent stale writes when rapidly switching conversations.
+        // Even though callers check `cancelled`, this is a safety net against
+        // race conditions where the ref updates between the caller's check and
+        // the actual state mutation.
+        if (activeIdRef.current !== conversationId) return;
+
         const nextMessages = mergeSnapshotPreservingPending(
             conversationId,
             Array.isArray(snapshot.messages) ? snapshot.messages : []
@@ -1989,49 +1995,57 @@ export function ConversationInterface({ locationId, initialConversations, initia
         }
 
         if (!featureFlags.workspaceV2) {
-            trackClientRequest("legacy_selection_load", { conversationId: selectedConversationId });
-            Promise.all([
-                fetchMessages(selectedConversationId),
-                fetchConversationActivityLog(selectedConversationId),
-                refreshConversation(selectedConversationId),
-            ])
-                .then(([nextMessages, nextActivity, freshConversation]) => {
-                    if (cancelled || activeIdRef.current !== selectedConversationId) return;
-                    setMessages(nextMessages || []);
-                    messageSignatureRef.current = getMessageSignature(nextMessages || []);
-                    setActivityLog(nextActivity || []);
-                    cacheWorkspaceCoreSnapshot(selectedConversationId, createWorkspaceCoreSnapshot({
-                        conversationHeader: freshConversation as Conversation | null,
-                        messages: nextMessages || [],
-                        activityTimeline: nextActivity || [],
-                        transcriptOnDemandEnabled: false,
-                        hydration: createWorkspaceHydrationState({
-                            status: 'full',
+            // Debounce network requests to prevent request stampede during rapid
+            // conversation switching. Cached conversations render instantly above;
+            // only the network fetch is delayed so intermediate clicks never fire.
+            const LEGACY_DEBOUNCE_MS = cachedSnapshot ? 0 : 150;
+            const legacyDebounceTimer = setTimeout(() => {
+                if (cancelled || activeIdRef.current !== selectedConversationId) return;
+                trackClientRequest("legacy_selection_load", { conversationId: selectedConversationId });
+                Promise.all([
+                    fetchMessages(selectedConversationId),
+                    fetchConversationActivityLog(selectedConversationId),
+                    refreshConversation(selectedConversationId),
+                ])
+                    .then(([nextMessages, nextActivity, freshConversation]) => {
+                        if (cancelled || activeIdRef.current !== selectedConversationId) return;
+                        setMessages(nextMessages || []);
+                        messageSignatureRef.current = getMessageSignature(nextMessages || []);
+                        setActivityLog(nextActivity || []);
+                        cacheWorkspaceCoreSnapshot(selectedConversationId, createWorkspaceCoreSnapshot({
+                            conversationHeader: freshConversation as Conversation | null,
                             messages: nextMessages || [],
-                            initialCount: (nextMessages || []).length,
-                            targetCount: THREAD_TARGET_MESSAGE_COUNT,
-                            requestedLimit: (nextMessages || []).length || THREAD_INITIAL_FALLBACK_MESSAGES,
-                        }),
-                    }));
-                    initialWorkspaceLoadedAtRef.current[selectedConversationId] = Date.now();
-                    if (freshConversation) {
-                        setConversations((prev) => prev.map((item) =>
-                            item.id === selectedConversationId ? { ...item, ...(freshConversation as any) } : item
-                        ));
-                    }
-                    void markConversationReadInUi(selectedConversationId);
-                })
-                .catch((err) => {
-                    if (cancelled) return;
-                    console.error("Legacy selection load failed:", err);
-                    toast({ title: "Error", description: "Failed to load conversation.", variant: "destructive" });
-                })
-                .finally(() => {
-                    if (!cancelled) setLoadingMessages(false);
-                });
+                            activityTimeline: nextActivity || [],
+                            transcriptOnDemandEnabled: false,
+                            hydration: createWorkspaceHydrationState({
+                                status: 'full',
+                                messages: nextMessages || [],
+                                initialCount: (nextMessages || []).length,
+                                targetCount: THREAD_TARGET_MESSAGE_COUNT,
+                                requestedLimit: (nextMessages || []).length || THREAD_INITIAL_FALLBACK_MESSAGES,
+                            }),
+                        }));
+                        initialWorkspaceLoadedAtRef.current[selectedConversationId] = Date.now();
+                        if (freshConversation) {
+                            setConversations((prev) => prev.map((item) =>
+                                item.id === selectedConversationId ? { ...item, ...(freshConversation as any) } : item
+                            ));
+                        }
+                        void markConversationReadInUi(selectedConversationId);
+                    })
+                    .catch((err) => {
+                        if (cancelled) return;
+                        console.error("Legacy selection load failed:", err);
+                        toast({ title: "Error", description: "Failed to load conversation.", variant: "destructive" });
+                    })
+                    .finally(() => {
+                        if (!cancelled) setLoadingMessages(false);
+                    });
+            }, LEGACY_DEBOUNCE_MS);
 
             return () => {
                 cancelled = true;
+                clearTimeout(legacyDebounceTimer);
             };
         }
 
@@ -2331,8 +2345,17 @@ export function ConversationInterface({ locationId, initialConversations, initia
             }
         };
 
-        void loadWorkspaceCore();
-        void loadWorkspaceSidebar();
+        // Debounce network requests to prevent request stampede during rapid
+        // conversation switching. When clicking through 5 conversations in
+        // quick succession, only the final one fires server requests.
+        // Cached conversations skip the debounce (instant render above, then
+        // immediate background refresh here).
+        const WORKSPACE_NETWORK_DEBOUNCE_MS = cachedSnapshot ? 0 : 150;
+        const networkDebounceTimer = setTimeout(() => {
+            if (cancelled || activeIdRef.current !== selectedConversationId) return;
+            void loadWorkspaceCore();
+            void loadWorkspaceSidebar();
+        }, WORKSPACE_NETWORK_DEBOUNCE_MS);
 
         const workspaceInitialHydrationInFlight = workspaceInitialHydrationInFlightRef.current;
         const workspaceBackfillInFlight = workspaceBackfillInFlightRef.current;
@@ -2340,6 +2363,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
         return () => {
             cancelled = true;
+            clearTimeout(networkDebounceTimer);
             clearDeferredHydrationTimer();
             workspaceInitialHydrationInFlight.delete(selectedConversationId);
             workspaceBackfillInFlight.delete(selectedConversationId);
