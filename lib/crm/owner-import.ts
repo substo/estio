@@ -270,6 +270,24 @@ async function findCompanyByNameFallback(locationId: string, companyName: string
     });
 }
 
+/**
+ * Check whether a unique-constrained field value is already claimed by a
+ * *different* contact in the same location.  Returns `true` when it is safe
+ * to write the value (no conflict), `false` when another contact owns it.
+ */
+async function isContactFieldAvailable(
+    locationId: string,
+    field: "phone" | "email" | "legacyCrmOwnerId",
+    value: string | null | undefined,
+    excludeContactId?: string,
+): Promise<boolean> {
+    if (!value) return true; // nothing to write → no conflict
+    const where: Record<string, unknown> = { locationId, [field]: value };
+    if (excludeContactId) where.id = { not: excludeContactId };
+    const clash = await db.contact.findFirst({ where, select: { id: true } });
+    return !clash;
+}
+
 async function upsertResolvedContact(input: ImportedOwnerInput, entityType: ImportedOwnerEntityType, matchSource: ImportedOwnerResolution["ownerMatchSource"]) {
     const ownerName = normalizeText(input.ownerName);
     const ownerDisplayName = normalizeText(input.ownerDisplayName) || ownerName;
@@ -289,10 +307,29 @@ async function upsertResolvedContact(input: ImportedOwnerInput, entityType: Impo
     if (existing) {
         const updateData: Record<string, unknown> = {};
 
-        if (!existing.legacyCrmOwnerId && legacyOwnerId) updateData.legacyCrmOwnerId = legacyOwnerId;
+        // Guard every unique-constrained field against conflicts with other contacts
+        if (!existing.legacyCrmOwnerId && legacyOwnerId) {
+            if (await isContactFieldAvailable(input.locationId, "legacyCrmOwnerId", legacyOwnerId, existing.id)) {
+                updateData.legacyCrmOwnerId = legacyOwnerId;
+            } else {
+                console.warn(`[OWNER IMPORT] Skipping legacyCrmOwnerId=${legacyOwnerId} for contact ${existing.id} – already claimed by another contact`);
+            }
+        }
         if (!existing.legacyCrmOwnerLabel && legacyOwnerLabel) updateData.legacyCrmOwnerLabel = legacyOwnerLabel;
-        if (!existing.email && ownerEmail) updateData.email = ownerEmail;
-        if (!existing.phone && ownerPhone) updateData.phone = ownerPhone;
+        if (!existing.email && ownerEmail) {
+            if (await isContactFieldAvailable(input.locationId, "email", ownerEmail, existing.id)) {
+                updateData.email = ownerEmail;
+            } else {
+                console.warn(`[OWNER IMPORT] Skipping email=${ownerEmail} for contact ${existing.id} – already claimed by another contact`);
+            }
+        }
+        if (!existing.phone && ownerPhone) {
+            if (await isContactFieldAvailable(input.locationId, "phone", ownerPhone, existing.id)) {
+                updateData.phone = ownerPhone;
+            } else {
+                console.warn(`[OWNER IMPORT] Skipping phone=${ownerPhone} for contact ${existing.id} – already claimed by another contact`);
+            }
+        }
         if (!existing.message && message) updateData.message = message;
         if (!existing.notes && payloadNotes) updateData.notes = payloadNotes;
         if (entityType === "person" && shouldUseImportedName(existing.name, ownerDisplayName)) {
@@ -320,17 +357,28 @@ async function upsertResolvedContact(input: ImportedOwnerInput, entityType: Impo
         return existing;
     }
 
+    // CREATE path: verify unique fields aren't already taken before inserting
+    const [phoneOk, emailOk, legacyIdOk] = await Promise.all([
+        isContactFieldAvailable(input.locationId, "phone", ownerPhone),
+        isContactFieldAvailable(input.locationId, "email", ownerEmail),
+        isContactFieldAvailable(input.locationId, "legacyCrmOwnerId", legacyOwnerId),
+    ]);
+
+    if (!phoneOk) console.warn(`[OWNER IMPORT] Nullifying phone=${ownerPhone} on new contact – already claimed by another contact`);
+    if (!emailOk) console.warn(`[OWNER IMPORT] Nullifying email=${ownerEmail} on new contact – already claimed by another contact`);
+    if (!legacyIdOk) console.warn(`[OWNER IMPORT] Nullifying legacyCrmOwnerId=${legacyOwnerId} on new contact – already claimed by another contact`);
+
     return db.contact.create({
         data: {
             locationId: input.locationId,
             name: ownerDisplayName,
-            email: ownerEmail,
-            phone: ownerPhone,
+            email: emailOk ? ownerEmail : null,
+            phone: phoneOk ? ownerPhone : null,
             message,
             notes: payloadNotes,
             status: "Lead",
             contactType: "Owner",
-            legacyCrmOwnerId: legacyOwnerId,
+            legacyCrmOwnerId: legacyIdOk ? legacyOwnerId : null,
             legacyCrmOwnerLabel: legacyOwnerLabel,
             payload: {
                 legacyCrm: buildLegacyMatchMetadata(input, matchSource),
