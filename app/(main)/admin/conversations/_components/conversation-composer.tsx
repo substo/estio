@@ -542,16 +542,11 @@ export function ConversationComposer({
         try {
             const instruction = instructionOverride || draft.trim();
             const modelOverride = hasUserSelectedModel ? selectedModel : undefined;
-            // When a reply language is explicitly set, draft in that language directly.
-            // Otherwise fall back to the agent's browser locale for review.
-            const resolvedDraftLanguage = selectedReplyLanguage !== REPLY_LANGUAGE_AUTO_VALUE
-                ? selectedReplyLanguage
-                : agentDraftLanguage;
             let streamedBuffer = "";
             const text = await onGenerateDraft(
                 instruction,
                 modelOverride,
-                resolvedDraftLanguage,
+                agentDraftLanguage,
                 (chunk) => {
                     if (!chunk) return;
                     streamedBuffer += chunk;
@@ -599,9 +594,9 @@ export function ConversationComposer({
     const selectedReplyLanguageLabel = selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE
         ? "Reply in: Auto"
         : `Reply in: ${getReplyLanguageLabel(selectedReplyLanguage) || selectedReplyLanguage}`;
-    const resolvedDraftLanguageLabel = getReplyLanguageLabel(
-        selectedReplyLanguage !== REPLY_LANGUAGE_AUTO_VALUE ? selectedReplyLanguage : agentDraftLanguage
-    ) || agentDraftLanguage || DEFAULT_REPLY_LANGUAGE;
+    const resolvedDraftLanguageLabel = getReplyLanguageLabel(agentDraftLanguage) || agentDraftLanguage || DEFAULT_REPLY_LANGUAGE;
+    const willAutoTranslate = selectedReplyLanguage !== REPLY_LANGUAGE_AUTO_VALUE && canUseWriteTranslation && !!onPreviewTranslatedReply;
+    const autoTranslateTargetLabel = getReplyLanguageLabel(selectedReplyLanguage) || selectedReplyLanguage;
     const resolvedSendLanguageLabel = getReplyLanguageLabel(
         selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE
             ? (conversation?.locationDefaultReplyLanguage || DEFAULT_REPLY_LANGUAGE)
@@ -863,6 +858,20 @@ export function ConversationComposer({
                                         <span className="ml-1 text-[11px]">Send translated</span>
                                     </Button>
                                 </>
+                            ) : willAutoTranslate ? (
+                                <Button
+                                    size="sm"
+                                    className={cn(
+                                        "h-7 rounded-lg px-3 transition-all duration-150 gap-1",
+                                        draft.trim() ? "bg-blue-600 hover:bg-blue-700" : "bg-slate-100 text-slate-400 hover:bg-slate-200"
+                                    )}
+                                    onClick={() => handleSend("original")}
+                                    disabled={isUnavailable || sending || isRecording || !draft.trim()}
+                                    title={`Message will be auto-translated to ${autoTranslateTargetLabel} before sending`}
+                                >
+                                    {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                                    <span className="text-[11px]">in {autoTranslateTargetLabel}</span>
+                                </Button>
                             ) : (
                                 <Button
                                     size="sm"
@@ -881,7 +890,10 @@ export function ConversationComposer({
                 </div>
                 {onGenerateDraft && (
                     <div className="px-1 pt-1 text-[10px] text-slate-500">
-                        Viewing in {resolvedViewingLanguageLabel}. Drafting in {resolvedDraftLanguageLabel} for review. Replying in {resolvedSendLanguageLabel}. {replyLanguageSourceHint}
+                        {willAutoTranslate
+                            ? `Draft in ${resolvedDraftLanguageLabel} · Auto-translates to ${autoTranslateTargetLabel} on send · ${replyLanguageSourceHint}`
+                            : `Viewing in ${resolvedViewingLanguageLabel}. Drafting in ${resolvedDraftLanguageLabel}. ${replyLanguageSourceHint}`
+                        }
                     </div>
                 )}
             </div>
