@@ -271,8 +271,13 @@ export function CoordinatorPanel({
         setTraceTree(null);
         setGoal("Qualify the lead and book a viewing"); // Reset to default goal
 
-        if (conversation.id) {
+        if (!conversation.id) return;
+
+        let cancelled = false;
+        const fetchTimer = setTimeout(() => {
+            if (cancelled) return;
             getAgentPlan(conversation.id).then((res: any) => {
+                if (cancelled) return;
                 if (res) {
                     if (res.plan) setPlan(res.plan);
                     if (res.usage) setConversationUsage(res.usage);
@@ -283,21 +288,38 @@ export function CoordinatorPanel({
 
             // Pull latest execution summary to hydrate Mission Control context.
             getAgentExecutions(conversation.id).then(history => {
+                if (cancelled) return;
                 if (history && history.length > 0) {
                     const latest = history[0];
                     if (latest?.thoughtSummary) setReasoning(latest.thoughtSummary);
                 }
             });
-        }
+        }, 150);
+
+        return () => {
+            cancelled = true;
+            clearTimeout(fetchTimer);
+        };
     }, [conversation.id]);
 
     // Fetch transcript usage for this conversation
     useEffect(() => {
-        if (conversation.id) {
+        if (!conversation.id) return;
+
+        let cancelled = false;
+        const fetchTimer = setTimeout(() => {
+            if (cancelled) return;
             getConversationTranscriptUsage(conversation.id)
-                .then(setTranscriptUsage)
+                .then((res) => {
+                    if (!cancelled) setTranscriptUsage(res);
+                })
                 .catch(() => { });
-        }
+        }, 150);
+
+        return () => {
+            cancelled = true;
+            clearTimeout(fetchTimer);
+        };
     }, [conversation.id]);
 
     const handleSelectTrace = useCallback(async (trace: any) => {
@@ -379,11 +401,25 @@ export function CoordinatorPanel({
 
         // Clear previous state explicitly when changing contacts
         setContactContext(null);
-        setLoadingContext(true);
-        getContactContext(conversation.contactId, { refreshExternal: false })
-            .then(data => setContactContext(data))
-            .catch(err => console.error("Failed to load context", err))
-            .finally(() => setLoadingContext(false));
+        
+        let cancelled = false;
+        const fetchTimer = setTimeout(() => {
+            if (cancelled) return;
+            setLoadingContext(true);
+            getContactContext(conversation.contactId, { refreshExternal: false })
+                .then(data => {
+                    if (!cancelled) setContactContext(data);
+                })
+                .catch(err => console.error("Failed to load context", err))
+                .finally(() => {
+                    if (!cancelled) setLoadingContext(false);
+                });
+        }, 150);
+
+        return () => {
+            cancelled = true;
+            clearTimeout(fetchTimer);
+        };
     }, [conversation.contactId, initialContactContext]);
 
     const handleOrchestrate = async () => {
