@@ -47,6 +47,7 @@ import { TaskSuggestionFunnelMetrics } from "./task-suggestion-funnel-metrics";
 import { ViewingsSuggestionDialog } from "./viewings-suggestion-dialog";
 import { AiModelSelect } from "@/components/ai/ai-model-select";
 import { useAiModelCatalog } from "@/components/ai/use-ai-model-catalog";
+import { GEMINI_FLASH_LATEST_ALIAS } from "@/lib/ai/models";
 
 export type MessageSelectionActionTarget = {
     text: string;
@@ -243,13 +244,8 @@ export function MessageSelectionActions({
 
     useEffect(() => {
         if (selectedLeadModel) return;
-        const preferredModel = activeAiModel
-            || resolveModelForKind("extraction")
-            || resolveModelForKind("general")
-            || resolveModelForKind("draft");
-        if (!preferredModel) return;
-        setSelectedLeadModel(preferredModel);
-    }, [activeAiModel, resolveModelForKind, selectedLeadModel]);
+        setSelectedLeadModel(activeAiModel || GEMINI_FLASH_LATEST_ALIAS);
+    }, [activeAiModel, selectedLeadModel]);
 
     useEffect(() => {
         let cancelled = false;

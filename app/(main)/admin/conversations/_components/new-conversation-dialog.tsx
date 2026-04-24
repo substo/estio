@@ -16,6 +16,7 @@ import { searchGoogleContactsAction, importNewGoogleContactAction } from '@/app/
 import { useToast } from '@/components/ui/use-toast';
 import { AiModelSelect } from '@/components/ai/ai-model-select';
 import { useAiModelCatalog } from '@/components/ai/use-ai-model-catalog';
+import { GEMINI_FLASH_LATEST_ALIAS } from '@/lib/ai/models';
 
 
 interface EvolutionChat {
@@ -209,10 +210,8 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
 
     useEffect(() => {
         if (selectedPasteLeadModel) return;
-        const preferredModel = resolveModelForKind('extraction') || resolveModelForKind('general') || resolveModelForKind('draft');
-        if (!preferredModel) return;
-        setSelectedPasteLeadModel(preferredModel);
-    }, [resolveModelForKind, selectedPasteLeadModel]);
+        setSelectedPasteLeadModel(GEMINI_FLASH_LATEST_ALIAS);
+    }, [selectedPasteLeadModel]);
 
     useEffect(() => {
         if (!open || parsedLead) return;
