@@ -26,6 +26,16 @@ test("classifyImportedOwnerEntity keeps simple person names as people", () => {
     );
 });
 
+test("classifyImportedOwnerEntity treats company-backed brand names as organizations", () => {
+    assert.equal(
+        classifyImportedOwnerEntity({
+            ownerName: "Korantina",
+            ownerCompany: "Korantina Homes",
+        }),
+        "organization"
+    );
+});
+
 test("hasMeaningfulCompanyName ignores duplicated owner/company names", () => {
     assert.equal(hasMeaningfulCompanyName("Andreas Nicolaou", "Andreas Nicolaou"), false);
     assert.equal(hasMeaningfulCompanyName("Downtown Estates", "Andreas Nicolaou"), true);

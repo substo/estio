@@ -81,6 +81,19 @@ function looksLikeHumanName(value: NullableString): boolean {
     return parts.every((part) => /^[A-Za-z.'-]+$/.test(part));
 }
 
+function looksStronglyHumanName(value: NullableString): boolean {
+    const normalized = normalizeText(value);
+    if (!normalized || !looksLikeHumanName(normalized)) return false;
+    const parts = normalized.split(/\s+/).filter(Boolean);
+    return parts.length >= 2;
+}
+
+function isLikelyBusinessName(value: NullableString): boolean {
+    const normalized = normalizeComparableName(value);
+    if (!normalized) return false;
+    return /\b(real estate|properties|property|homes|developers?|development|management|agency|estates|holdings|group|ltd|limited)\b/i.test(normalized);
+}
+
 export function hasMeaningfulCompanyName(companyName: NullableString, ownerName?: NullableString): boolean {
     const normalizedCompany = normalizeText(companyName);
     if (!normalizedCompany) return false;
@@ -103,7 +116,11 @@ export function classifyImportedOwnerEntity(input: {
     }
 
     if (hasMeaningfulCompanyName(input.ownerCompany, input.ownerName)) {
-        if (!looksLikeHumanName(normalizedOwnerName)) return "organization";
+        if (looksStronglyHumanName(normalizedOwnerName) && !isLikelyBusinessName(input.ownerName)) {
+            return "person";
+        }
+        if (isLikelyBusinessName(input.ownerCompany) || isLikelyBusinessName(input.ownerName)) return "organization";
+        if (!looksStronglyHumanName(normalizedOwnerName)) return "organization";
     }
 
     return looksLikeHumanName(normalizedOwnerName) ? "person" : "organization";
@@ -471,11 +488,11 @@ export async function resolveImportedOwner(input: ImportedOwnerInput): Promise<I
         const company = await upsertResolvedCompany(input, canonicalCompanyName, matchSource);
         ownerCompanyId = company.id;
 
-        if (normalizedEmail || normalizedPhone || looksLikeHumanName(ownerName)) {
+        if (normalizedEmail || normalizedPhone || looksStronglyHumanName(ownerName)) {
             const contact = await upsertResolvedContact(
                 {
                     ...input,
-                    ownerName: looksLikeHumanName(ownerName) ? ownerName : (normalizeText(input.legacyOwnerLabel) || canonicalCompanyName),
+                    ownerName: looksStronglyHumanName(ownerName) ? ownerName : canonicalCompanyName,
                 },
                 "organization",
                 matchSource
