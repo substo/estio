@@ -9,6 +9,18 @@ import { normalizeInternationalPhone } from '@/lib/utils/phone';
 import { buildStructuredLeadDisplayName } from '@/lib/contacts/name-builder';
 import { resolveImportedOwner } from '@/lib/crm/owner-import';
 
+function getLocationLabels(areaKey: string | null | undefined, districtKey: string | null | undefined) {
+    const district = PROPERTY_LOCATIONS.find((item) => item.district_key === districtKey) || null;
+    const area = district?.locations.find((item) => item.key === areaKey)
+        || PROPERTY_LOCATIONS.flatMap((item) => item.locations).find((item) => item.key === areaKey)
+        || null;
+
+    return {
+        propertyAreaLabel: area?.label || null,
+        propertyLocationLabel: district?.district_label || null,
+    };
+}
+
 export interface PullPropertyFromCrmContext {
     oldPropertyId: string;
     locationId: string;
@@ -313,8 +325,13 @@ export async function pullPropertyFromCrmWithContext(context: PullPropertyFromCr
                     if (validKey) {
                         finalVal = validKey;
                         const district = PROPERTY_LOCATIONS.find(d => d.locations.some(l => l.key === validKey));
+                        const area = district?.locations.find((l) => l.key === validKey) || null;
                         if (district) {
                             extractedData.propertyLocation = district.district_key;
+                            extractedData.propertyLocationLabel = district.district_label;
+                        }
+                        if (area) {
+                            extractedData.propertyAreaLabel = area.label;
                         }
                     } else {
                         warnings.push(`Location '${finalVal}' (Text: ${textVal || 'N/A'}) could not be mapped to a known area`);
@@ -371,11 +388,6 @@ export async function pullPropertyFromCrmWithContext(context: PullPropertyFromCr
                         finalVal = map.valueMap[stringVal];
                     }
                 }
-
-                if (map.transform) {
-                    finalVal = map.transform(finalVal);
-                }
-
                 extractedData[map.dbField] = finalVal;
             }
         }
@@ -404,6 +416,7 @@ export async function pullPropertyFromCrmWithContext(context: PullPropertyFromCr
                 extractedData.rentalPeriod && extractedData.rentalPeriod !== 'n/a'
                     ? "For Rent"
                     : "For Sale";
+            const locationLabels = getLocationLabels(extractedData.propertyArea, extractedData.propertyLocation);
 
             const structuredPrivateOwnerName = extractedData.ownerName
                 ? buildStructuredLeadDisplayName({
@@ -423,13 +436,19 @@ export async function pullPropertyFromCrmWithContext(context: PullPropertyFromCr
                     matchedProperty: {
                         title: extractedData.title || null,
                         reference: extractedData.reference || null,
-                        propertyLocation: extractedData.propertyLocation || null,
-                        city: extractedData.propertyArea || null,
+                        propertyLocation: locationLabels.propertyLocationLabel || extractedData.propertyLocationLabel || extractedData.propertyLocation || null,
+                        city: locationLabels.propertyAreaLabel || extractedData.propertyAreaLabel || extractedData.propertyArea || null,
                     },
                     requirements: {
                         bedrooms: extractedData.bedrooms ? String(extractedData.bedrooms) : null,
                         type: extractedData.type || null,
-                        location: extractedData.propertyLocation || extractedData.propertyArea || null,
+                        location: locationLabels.propertyAreaLabel
+                            || locationLabels.propertyLocationLabel
+                            || extractedData.propertyAreaLabel
+                            || extractedData.propertyLocationLabel
+                            || extractedData.propertyArea
+                            || extractedData.propertyLocation
+                            || null,
                     },
                 })
                 : null;
