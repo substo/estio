@@ -39,6 +39,9 @@ type SmsEligibilityState =
 
 interface ConversationComposerProps {
     conversation: Conversation | null;
+    draft: string;
+    onDraftChange: (draft: string) => void;
+    onDraftClear: () => void;
     onSendMessage: (
         text: string,
         type: ComposerChannel,
@@ -106,6 +109,9 @@ function getAgentDraftLanguage() {
 
 export function ConversationComposer({
     conversation,
+    draft,
+    onDraftChange,
+    onDraftClear,
     onSendMessage,
     onSendMedia,
     onGenerateDraft,
@@ -121,7 +127,6 @@ export function ConversationComposer({
     translationTargetLanguageLabel,
     viewingLanguageLabel,
 }: ConversationComposerProps) {
-    const [draft, setDraft] = useState("");
     const [sending, setSending] = useState(false);
     const [generatingDraft, setGeneratingDraft] = useState(false);
     const [selectedChannel, setSelectedChannel] = useState<ComposerChannel>(getInitialChannel(conversation));
@@ -148,6 +153,7 @@ export function ConversationComposer({
     const mediaStreamRef = useRef<MediaStream | null>(null);
     const mediaChunksRef = useRef<Blob[]>([]);
     const hasUserSelectedModelRef = useRef(false);
+    const appliedInsertDraftSeedKeyRef = useRef<string | null>(null);
 
     const isUnavailable = disabled || !conversation;
 
@@ -168,7 +174,6 @@ export function ConversationComposer({
 
     useEffect(() => {
         setSelectedChannel(getInitialChannel(conversation));
-        setDraft("");
         setIsRecording(false);
         setSelectedReplyLanguage(conversation?.replyLanguageOverride || REPLY_LANGUAGE_AUTO_VALUE);
         setTranslationPreviewText("");
@@ -179,9 +184,11 @@ export function ConversationComposer({
 
     useEffect(() => {
         if (!insertDraftSeed?.key) return;
+        if (appliedInsertDraftSeedKeyRef.current === insertDraftSeed.key) return;
+        appliedInsertDraftSeedKeyRef.current = insertDraftSeed.key;
         const nextBody = String(insertDraftSeed.body || "");
-        setDraft(nextBody);
-    }, [insertDraftSeed?.key, insertDraftSeed?.body]);
+        onDraftChange(nextBody);
+    }, [insertDraftSeed?.key, insertDraftSeed?.body, onDraftChange]);
 
     useEffect(() => {
         setSelectedReplyLanguage(conversation?.replyLanguageOverride || REPLY_LANGUAGE_AUTO_VALUE);
@@ -367,11 +374,13 @@ export function ConversationComposer({
         setSending(true);
         try {
             await Promise.resolve(onSendMessage(textToSend, selectedChannel, translationMeta));
-            setDraft("");
+            onDraftClear();
             setTranslationPreviewText("");
             setTranslationPreviewLanguage(null);
             setTranslationPreviewDetectedSource(null);
             setTranslationPreviewSourceText("");
+        } catch (err) {
+            console.error("Message send failed", err);
         } finally {
             setSending(false);
         }
@@ -411,7 +420,7 @@ export function ConversationComposer({
         setSending(true);
         try {
             await Promise.resolve(onSendMedia(file, draft));
-            setDraft("");
+            onDraftClear();
         } catch (err) {
             console.error("Media send failed", err);
             toast.error("Failed to send media");
@@ -550,13 +559,13 @@ export function ConversationComposer({
                 (chunk) => {
                     if (!chunk) return;
                     streamedBuffer += chunk;
-                    setDraft(streamedBuffer);
+                    onDraftChange(streamedBuffer);
                 }
             );
             if (text) {
-                setDraft(text);
+                onDraftChange(text);
             } else if (streamedBuffer) {
-                setDraft(streamedBuffer);
+                onDraftChange(streamedBuffer);
             }
         } catch (e) {
             console.error("Draft generation failed", e);
@@ -595,6 +604,7 @@ export function ConversationComposer({
         ? "Reply in: Auto"
         : `Reply in: ${getReplyLanguageLabel(selectedReplyLanguage) || selectedReplyLanguage}`;
     const resolvedDraftLanguageLabel = getReplyLanguageLabel(agentDraftLanguage) || agentDraftLanguage || DEFAULT_REPLY_LANGUAGE;
+    const canUseWriteTranslation = translationWriteEnabled && !!onPreviewTranslatedReply;
     const willAutoTranslate = selectedReplyLanguage !== REPLY_LANGUAGE_AUTO_VALUE && canUseWriteTranslation && !!onPreviewTranslatedReply;
     const autoTranslateTargetLabel = getReplyLanguageLabel(selectedReplyLanguage) || selectedReplyLanguage;
     const resolvedSendLanguageLabel = getReplyLanguageLabel(
@@ -615,7 +625,6 @@ export function ConversationComposer({
             : isWhatsAppDisabled
                 ? (whatsAppEligibility.reason || "WhatsApp not available for this contact")
                 : undefined;
-    const canUseWriteTranslation = translationWriteEnabled && !!onPreviewTranslatedReply;
     const hasTranslationPreview = !!translationPreviewText.trim();
 
     return (
@@ -649,7 +658,7 @@ export function ConversationComposer({
                 <div className="relative rounded-xl border bg-white shadow-sm focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-300 transition-all min-w-0">
                     <Textarea
                         value={draft}
-                        onChange={(e) => setDraft(e.target.value)}
+                        onChange={(e) => onDraftChange(e.target.value)}
                         placeholder={getPlaceholderText(selectedChannel)}
                         className="min-h-[36px] max-h-[200px] w-full resize-none border-0 focus-visible:ring-0 bg-transparent py-2.5 px-3 text-sm"
                         style={{ height: draft ? "auto" : "36px" }}

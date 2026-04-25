@@ -111,6 +111,9 @@ interface ChatWindowProps {
     suggestedResponseQueueLoading?: boolean;
     onAcceptSuggestedResponse?: (id: string, mode: "insertOnly" | "sendNow") => Promise<void>;
     onRejectSuggestedResponse?: (id: string, reason?: string | null) => Promise<void>;
+    composerDraft: string;
+    onComposerDraftChange: (draft: string) => void;
+    onComposerDraftClear: () => void;
     composerInsertSeed?: { key: string; body: string } | null;
     onResendMessage?: (messageId: string) => void | Promise<void>;
 }
@@ -215,6 +218,9 @@ export function ChatWindow({
     suggestedResponseQueueLoading = false,
     onAcceptSuggestedResponse,
     onRejectSuggestedResponse,
+    composerDraft,
+    onComposerDraftChange,
+    onComposerDraftClear,
     composerInsertSeed,
     suggestions = [],
     onResendMessage,
@@ -1304,6 +1310,9 @@ export function ChatWindow({
 
             <ConversationComposer
                 conversation={conversation}
+                draft={composerDraft}
+                onDraftChange={onComposerDraftChange}
+                onDraftClear={onComposerDraftClear}
                 onSendMessage={onSendMessage}
                 onSendMedia={onSendMedia}
                 onGenerateDraft={onGenerateDraft}

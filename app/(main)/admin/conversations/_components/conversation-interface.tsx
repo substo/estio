@@ -277,6 +277,7 @@ type DealWorkspaceCoreSnapshot = {
 const WORKSPACE_CACHE_LIMIT = 30;
 const WORKSPACE_ACTIVITY_LIMIT = 180;
 const ACTIVE_POLL_GRACE_MS = 2500;
+const COMPOSER_DRAFTS_SESSION_KEY = "estio:conversation-composer-drafts:v1";
 
 type WorkspaceMessageWindowLike = {
     oldestCursor?: string | null;
@@ -473,6 +474,8 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();
+    const searchParamsString = searchParams?.toString() || "";
+    const getSearchParam = (key: string) => searchParams?.get(key) || null;
     const [isMobileViewport, setIsMobileViewport] = useState(false);
     const [mobilePane, setMobilePane] = useState<MobilePane>('list');
     const hasInitializedMobilePaneRef = useRef(false);
@@ -482,14 +485,14 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
     const updateUrl = useCallback((updates: Record<string, string | null>) => {
         let params: URLSearchParams;
-        let nextPathname = pathname;
+        let nextPathname = pathname || '/admin/conversations';
 
         if (typeof window !== 'undefined') {
             const currentUrl = new URL(window.location.href);
             params = new URLSearchParams(currentUrl.search);
             nextPathname = currentUrl.pathname;
         } else {
-            params = new URLSearchParams(searchParams.toString());
+            params = new URLSearchParams(searchParamsString);
         }
 
         Object.entries(updates).forEach(([key, value]) => {
@@ -509,12 +512,12 @@ export function ConversationInterface({ locationId, initialConversations, initia
         }
 
         router.replace(nextHref, { scroll: false });
-    }, [featureFlags.shallowUrlSync, pathname, router, searchParams]);
+    }, [featureFlags.shallowUrlSync, pathname, router, searchParamsString]);
 
     // Initialize state from URL or props
     // Map URL 'inbox' to internal 'active' if needed, but 'active' is the internal string. 
     // Let's support 'inbox' in URL for user friendliness
-    const urlView = searchParams.get('view');
+    const urlView = getSearchParam('view');
     const normalizedViewFilter = (urlView === 'inbox' ? 'active' : urlView) as 'active' | 'archived' | 'trash' | 'tasks' || 'active';
 
     const [conversations, setConversations] = useState<Conversation[]>(initialConversations);
@@ -553,10 +556,15 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const realtimeRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const readResetInFlightRef = useRef<Set<string>>(new Set());
     const pendingOutboundByConversationRef = useRef<Map<string, Map<string, Message>>>(new Map());
+    const selectedConversationCacheRef = useRef<Map<string, Conversation>>(
+        new Map(initialConversations.filter((conversation) => !!conversation?.id).map((conversation) => [conversation.id, conversation]))
+    );
+    const hasSkippedInitialDraftPersistRef = useRef(false);
+    const [composerDrafts, setComposerDrafts] = useState<Record<string, string>>({});
 
     // Initialize Active ID from URL
-    const initialActiveId = searchParams.get('id') || (initialConversations.length > 0 ? initialConversations[0].id : null);
-    const initialTaskId = searchParams.get('task');
+    const initialActiveId = getSearchParam('id') || (initialConversations.length > 0 ? initialConversations[0].id : null);
+    const initialTaskId = getSearchParam('task');
     const [activeId, setActiveId] = useState<string | null>(initialActiveId);
     const activeIdRef = useRef<string | null>(initialActiveId);
     const [selectedTaskId, setSelectedTaskId] = useState<string | null>(initialTaskId);
@@ -565,7 +573,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const [viewFilter, setViewFilter] = useState<'active' | 'archived' | 'trash' | 'tasks'>(normalizedViewFilter);
 
     // Deal Mode State
-    const initialViewMode = (searchParams.get('mode') as 'chats' | 'deals') || 'chats';
+    const initialViewMode = (getSearchParam('mode') as 'chats' | 'deals') || 'chats';
     const [viewMode, setViewMode] = useState<'chats' | 'deals'>(initialViewMode);
 
     const [searchQuery, setSearchQuery] = useState('');
@@ -622,8 +630,8 @@ export function ConversationInterface({ locationId, initialConversations, initia
         };
     }, [searchQuery]);
 
-    const initialDealId = searchParams.get('dealId');
-    const initialUrlConversationId = searchParams.get('id');
+    const initialDealId = getSearchParam('dealId');
+    const initialUrlConversationId = getSearchParam('id');
     const [urlConversationId, setUrlConversationId] = useState<string | null>(initialUrlConversationId);
     const urlConversationIdRef = useRef<string | null>(urlConversationId);
     
@@ -752,9 +760,95 @@ export function ConversationInterface({ locationId, initialConversations, initia
         conversationsRef.current = conversations;
     }, [conversations]);
 
+    const cacheSelectedConversations = useCallback((items: Conversation[]) => {
+        for (const item of items) {
+            if (!item?.id) continue;
+            selectedConversationCacheRef.current.set(item.id, item);
+        }
+    }, []);
+
+    useEffect(() => {
+        cacheSelectedConversations(conversations);
+    }, [cacheSelectedConversations, conversations]);
+
+    useEffect(() => {
+        cacheSelectedConversations(searchResults);
+    }, [cacheSelectedConversations, searchResults]);
+
+    useEffect(() => {
+        cacheSelectedConversations(activeDealParticipants);
+    }, [activeDealParticipants, cacheSelectedConversations]);
+
     useEffect(() => {
         messagesRef.current = messages;
     }, [messages]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        try {
+            const rawDrafts = window.sessionStorage.getItem(COMPOSER_DRAFTS_SESSION_KEY);
+            if (!rawDrafts) return;
+            const parsed = JSON.parse(rawDrafts);
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+            const restored: Record<string, string> = {};
+            for (const [conversationId, draft] of Object.entries(parsed)) {
+                const normalizedId = String(conversationId || "").trim();
+                const normalizedDraft = String(draft || "");
+                if (normalizedId && normalizedDraft) {
+                    restored[normalizedId] = normalizedDraft;
+                }
+            }
+            if (Object.keys(restored).length > 0) {
+                setComposerDrafts(restored);
+            }
+        } catch (error) {
+            console.warn("Failed to restore conversation drafts:", error);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        if (!hasSkippedInitialDraftPersistRef.current) {
+            hasSkippedInitialDraftPersistRef.current = true;
+            return;
+        }
+        try {
+            const entries = Object.entries(composerDrafts).filter(([, draft]) => String(draft || "").length > 0);
+            if (entries.length === 0) {
+                window.sessionStorage.removeItem(COMPOSER_DRAFTS_SESSION_KEY);
+                return;
+            }
+            window.sessionStorage.setItem(COMPOSER_DRAFTS_SESSION_KEY, JSON.stringify(Object.fromEntries(entries)));
+        } catch (error) {
+            console.warn("Failed to persist conversation drafts:", error);
+        }
+    }, [composerDrafts]);
+
+    const getComposerDraft = useCallback((conversationId?: string | null) => {
+        const normalizedId = String(conversationId || "").trim();
+        if (!normalizedId) return "";
+        return composerDrafts[normalizedId] || "";
+    }, [composerDrafts]);
+
+    const setComposerDraftForConversation = useCallback((conversationId: string | null | undefined, draft: string) => {
+        const normalizedId = String(conversationId || "").trim();
+        if (!normalizedId) return;
+        const nextDraft = String(draft || "");
+        setComposerDrafts((prev) => {
+            if (nextDraft) {
+                if (prev[normalizedId] === nextDraft) return prev;
+                return { ...prev, [normalizedId]: nextDraft };
+            }
+            if (!(normalizedId in prev)) return prev;
+            const next = { ...prev };
+            delete next[normalizedId];
+            return next;
+        });
+    }, []);
+
+    const clearComposerDraftForConversation = useCallback((conversationId?: string | null) => {
+        setComposerDraftForConversation(conversationId, "");
+    }, [setComposerDraftForConversation]);
 
     useEffect(() => {
         conversationDeltaCursorRef.current = conversationDeltaCursor;
@@ -1937,7 +2031,14 @@ export function ConversationInterface({ locationId, initialConversations, initia
     };
 
     // Derived State
-    const activeConversation = conversations.find(c => c.id === activeId);
+    const activeConversation = activeId
+        ? (
+            conversations.find(c => c.id === activeId)
+            || searchResults.find(c => c.id === activeId)
+            || selectedConversationCacheRef.current.get(activeId)
+            || null
+        )
+        : null;
     const selectedConversations = conversations.filter(c => selectedIds.has(c.id));
     const selectedDealConversation = activeDealParticipants.find((conversation) => conversation.id === activeId) || null;
     const activeDealListEntry = deals.find((deal) => deal?.id === activeDealId) || null;
@@ -2893,6 +2994,20 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
     // Handle clicking a conversation in the list
     const handleSelect = (id: string) => {
+        const selectedConversation =
+            conversationsRef.current.find((conversation) => conversation.id === id)
+            || searchResults.find((conversation) => conversation.id === id)
+            || selectedConversationCacheRef.current.get(id)
+            || null;
+        if (selectedConversation) {
+            selectedConversationCacheRef.current.set(id, selectedConversation);
+            setConversations((prev) => {
+                if (prev.some((conversation) => conversation.id === id)) {
+                    return prev.map((conversation) => conversation.id === id ? { ...conversation, ...selectedConversation } : conversation);
+                }
+                return [selectedConversation, ...prev];
+            });
+        }
         setActiveId(id);
         setSelectedTaskId(null);
         markConversationReadInUi(id);
@@ -3327,115 +3442,110 @@ export function ConversationInterface({ locationId, initialConversations, initia
             });
         }
 
-        // Fire-and-forget: do NOT await the server action.
-        // The UI is free immediately — user can keep typing / sending.
-        // Reconciliation happens in background callbacks.
         const capturedConversationId = conversationTarget.id;
         const capturedContactId = conversationTarget.contactId;
 
-        sendReply(capturedConversationId, capturedContactId, text, type, {
-            clientMessageId: optimisticClientMessageId,
-            translationSourceText: options?.translationSourceText || null,
-            translationTargetLanguage: options?.translationTargetLanguage || null,
-            translationDetectedSourceLanguage: options?.translationDetectedSourceLanguage || null,
-        })
-            .then(async (res) => {
-                if (!res.success) {
-                    // Mark optimistic message as failed (if still viewing this conversation)
-                    if (viewMode === 'chats' && activeIdRef.current === capturedConversationId) {
-                        setMessages((prev) => {
-                            const next = prev.map((m) =>
-                                m.id === optimisticMessageId
-                                    ? { ...m, status: 'failed', sendState: 'failed', outboxState: { ...(m as any).outboxState, status: 'dead' } }
-                                    : m
-                            );
-                            syncPendingMessagesForConversation(capturedConversationId, next);
-                            return next;
+        const markOptimisticMessageFailed = () => {
+            if (viewMode !== 'chats' || activeIdRef.current !== capturedConversationId) return;
+            setMessages((prev) => {
+                const next = prev.map((m) =>
+                    m.id === optimisticMessageId
+                        ? { ...m, status: 'failed', sendState: 'failed', outboxState: { ...(m as any).outboxState, status: 'dead' } }
+                        : m
+                );
+                syncPendingMessagesForConversation(capturedConversationId, next);
+                return next;
+            });
+        };
+
+        let sendFailureToastShown = false;
+        try {
+            const res = await sendReply(capturedConversationId, capturedContactId, text, type, {
+                clientMessageId: optimisticClientMessageId,
+                translationSourceText: options?.translationSourceText || null,
+                translationTargetLanguage: options?.translationTargetLanguage || null,
+                translationDetectedSourceLanguage: options?.translationDetectedSourceLanguage || null,
+            });
+
+            if (!res.success) {
+                markOptimisticMessageFailed();
+                const description = typeof res.error === 'string' ? res.error : 'Unknown error occurred';
+                toast({
+                    title: 'Failed to send message',
+                    description,
+                    variant: 'destructive',
+                });
+                sendFailureToastShown = true;
+                throw new Error(description);
+            }
+
+            // Deal mode: refresh deal workspace in background
+            if (viewMode === 'deals' && activeDealIdRef.current) {
+                void refreshActiveDealWorkspace(activeDealIdRef.current, {
+                    reason: "send_message",
+                    refreshSidebar: false,
+                });
+            }
+
+            if (viewMode === 'chats' && activeIdRef.current === capturedConversationId) {
+                const ackMessageId = String((res as any).messageId || "").trim();
+                const ackClientMessageId = String((res as any).clientMessageId || optimisticClientMessageId).trim();
+                const outboxJobId = String((res as any).outboxJobId || "").trim();
+                const queued = !!(res as any).queued;
+                const queueAccepted = (res as any).queueAccepted !== false;
+                const dispatchMode = String((res as any).dispatchMode || "queued").trim();
+                const fallbackSent = dispatchMode === "inline_fallback_sent";
+                const degradedDelivery = !queueAccepted && queued && !fallbackSent;
+                const warning = String((res as any).warning || "").trim();
+
+                setMessages((prev) => {
+                    const next = prev.map((message) => {
+                        const isTarget = matchesByCorrelation(message as any, {
+                            messageId: optimisticMessageId,
+                            clientMessageId: optimisticClientMessageId,
                         });
-                    }
+                        if (!isTarget) return message;
+
+                        return {
+                            ...message,
+                            ...(ackMessageId ? { id: ackMessageId } : {}),
+                            clientMessageId: ackClientMessageId,
+                            status: fallbackSent ? 'sent' : (queued ? 'sending' : 'sent'),
+                            sendState: fallbackSent ? 'sent' : (degradedDelivery ? 'retrying' : (queued ? 'queued' : 'sent')),
+                            outboxState: {
+                                id: outboxJobId || (message as any)?.outboxState?.id || null,
+                                status: fallbackSent ? 'completed' : (degradedDelivery ? 'failed' : (queued ? 'pending' : 'completed')),
+                            },
+                        } as Message;
+                    });
+
+                    syncPendingMessagesForConversation(capturedConversationId, next);
+                    return next;
+                });
+
+                if (warning) {
                     toast({
-                        title: 'Failed to send message',
-                        description: typeof res.error === 'string' ? res.error : 'Unknown error occurred',
-                        variant: 'destructive',
+                        title: 'WhatsApp delivery degraded',
+                        description: warning,
                     });
-                    return;
-                }
-
-                // Deal mode: refresh deal workspace in background
-                if (viewMode === 'deals' && activeDealIdRef.current) {
-                    void refreshActiveDealWorkspace(activeDealIdRef.current, {
-                        reason: "send_message",
-                        refreshSidebar: false,
+                } else if (degradedDelivery) {
+                    toast({
+                        title: 'WhatsApp delivery degraded',
+                        description: 'Queue enqueue failed. Durable auto-recovery is active for this message.',
                     });
                 }
-
-                if (viewMode === 'chats' && activeIdRef.current === capturedConversationId) {
-                    const ackMessageId = String((res as any).messageId || "").trim();
-                    const ackClientMessageId = String((res as any).clientMessageId || optimisticClientMessageId).trim();
-                    const outboxJobId = String((res as any).outboxJobId || "").trim();
-                    const queued = !!(res as any).queued;
-                    const queueAccepted = (res as any).queueAccepted !== false;
-                    const dispatchMode = String((res as any).dispatchMode || "queued").trim();
-                    const fallbackSent = dispatchMode === "inline_fallback_sent";
-                    const degradedDelivery = !queueAccepted && queued && !fallbackSent;
-                    const warning = String((res as any).warning || "").trim();
-
-                    setMessages((prev) => {
-                        const next = prev.map((message) => {
-                            const isTarget = matchesByCorrelation(message as any, {
-                                messageId: optimisticMessageId,
-                                clientMessageId: optimisticClientMessageId,
-                            });
-                            if (!isTarget) return message;
-
-                            return {
-                                ...message,
-                                ...(ackMessageId ? { id: ackMessageId } : {}),
-                                clientMessageId: ackClientMessageId,
-                                status: fallbackSent ? 'sent' : (queued ? 'sending' : 'sent'),
-                                sendState: fallbackSent ? 'sent' : (degradedDelivery ? 'retrying' : (queued ? 'queued' : 'sent')),
-                                outboxState: {
-                                    id: outboxJobId || (message as any)?.outboxState?.id || null,
-                                    status: fallbackSent ? 'completed' : (degradedDelivery ? 'failed' : (queued ? 'pending' : 'completed')),
-                                },
-                            } as Message;
-                        });
-
-                        syncPendingMessagesForConversation(capturedConversationId, next);
-                        return next;
-                    });
-
-                    if (warning) {
-                        toast({
-                            title: 'WhatsApp delivery degraded',
-                            description: warning,
-                        });
-                    } else if (degradedDelivery) {
-                        toast({
-                            title: 'WhatsApp delivery degraded',
-                            description: 'Queue enqueue failed. Durable auto-recovery is active for this message.',
-                        });
-                    }
-                }
-            })
-            .catch((e: any) => {
-                if (viewMode === 'chats' && activeIdRef.current === capturedConversationId) {
-                    setMessages((prev) => {
-                        const next = prev.map((m) =>
-                            m.id === optimisticMessageId
-                                ? { ...m, status: 'failed', sendState: 'failed', outboxState: { ...(m as any).outboxState, status: 'dead' } }
-                                : m
-                        );
-                        syncPendingMessagesForConversation(capturedConversationId, next);
-                        return next;
-                    });
-                }
+            }
+        } catch (e: any) {
+            markOptimisticMessageFailed();
+            if (!sendFailureToastShown) {
                 toast({
                     title: 'Failed to send message',
                     description: e?.message || 'Unknown error occurred',
                     variant: 'destructive',
                 });
-            });
+            }
+            throw e;
+        }
     };
 
     const handleTranslateMessage = useCallback(async (messageId: string, targetLanguage?: string | null) => {
@@ -4682,6 +4792,9 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 onBack={isMobileViewport ? handleBackToList : undefined}
                 onOpenMissionControl={isMobileViewport ? handleOpenMissionControl : undefined}
                 onSendMessage={handleSendMessage}
+                composerDraft={getComposerDraft(activeConversation.id)}
+                onComposerDraftChange={(draft) => setComposerDraftForConversation(activeConversation.id, draft)}
+                onComposerDraftClear={() => clearComposerDraftForConversation(activeConversation.id)}
                 onTranslateMessage={handleTranslateMessage}
                 onTranslateVisibleThread={handleTranslateVisibleThread}
                 onPreviewTranslatedReply={handlePreviewTranslatedReply}
@@ -4819,6 +4932,9 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     }
                 }}
                 onSendMessage={(text, type, options) => handleSendMessage(text, type, options, selectedDealConversation || undefined)}
+                composerDraft={getComposerDraft(selectedDealConversation?.id)}
+                onComposerDraftChange={(draft) => setComposerDraftForConversation(selectedDealConversation?.id, draft)}
+                onComposerDraftClear={() => clearComposerDraftForConversation(selectedDealConversation?.id)}
                 onResendMessage={handleResendMessage}
                 onSendMedia={(file, caption) => handleSendMedia(file, caption, selectedDealConversation || undefined)}
                 onPreviewTranslatedReply={async (sourceText, channel, targetLanguage) => {

@@ -59,6 +59,9 @@ interface UnifiedTimelineProps {
     suggestedResponseQueueLoading?: boolean;
     onAcceptSuggestedResponse?: (id: string, mode: "insertOnly" | "sendNow") => Promise<void>;
     onRejectSuggestedResponse?: (id: string, reason?: string | null) => Promise<void>;
+    composerDraft: string;
+    onComposerDraftChange: (draft: string) => void;
+    onComposerDraftClear: () => void;
     composerInsertSeed?: { key: string; body: string } | null;
     onResendMessage?: (messageId: string) => void | Promise<void>;
 }
@@ -87,6 +90,9 @@ export function UnifiedTimeline({
     suggestedResponseQueueLoading = false,
     onAcceptSuggestedResponse,
     onRejectSuggestedResponse,
+    composerDraft,
+    onComposerDraftChange,
+    onComposerDraftClear,
     composerInsertSeed,
     onResendMessage,
 }: UnifiedTimelineProps) {
@@ -340,6 +346,9 @@ export function UnifiedTimeline({
 
             <ConversationComposer
                 conversation={composerConversation}
+                draft={composerDraft}
+                onDraftChange={onComposerDraftChange}
+                onDraftClear={onComposerDraftClear}
                 onSendMessage={(text, type, options) => Promise.resolve(onSendMessage?.(text, type, options))}
                 onSendMedia={onSendMedia}
                 onGenerateDraft={onGenerateDraft}
