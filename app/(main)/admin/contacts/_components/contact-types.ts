@@ -171,7 +171,7 @@ export interface ContactTypeConfig {
  * - Lead: Property buyers/renters - shows all fields, optional property assignment
  * - Agent: Real estate agents - can be assigned to property or company
  * - Partner: Business partners - can be assigned to property or company
- * - Owner: Property owners - requires property assignment
+ * - Owner: Property owners - can optionally be assigned to properties
  * - Associate: Business associates - can be assigned to property or company
  * - Maintenance: Handyman / property maintenance - assigned to properties
  * - Contact: Converted customer (renting/bought) - optional property, no lead fields
@@ -213,7 +213,7 @@ export const CONTACT_TYPE_CONFIG: Record<ContactType, ContactTypeConfig> = {
         showLeadFields: false,
         impliedRole: 'owner',
         entityType: 'property',
-        entityRequired: true,
+        entityRequired: false,
         entityLabel: 'Owns Properties',
         multiEntity: true,
     },
