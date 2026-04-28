@@ -1,4 +1,5 @@
-import { parsePhoneNumberFromString, CountryCode } from 'libphonenumber-js';
+import { parsePhoneNumberFromString, type CountryCode } from 'libphonenumber-js/core';
+import metadata from 'libphonenumber-js/metadata.min.json';
 
 // Define the fallback country if one is not provided.
 const FALLBACK_COUNTRY_CODE: CountryCode = 'CY';
@@ -29,18 +30,27 @@ export function normalizeInternationalPhone(
 
     // 2. Parse using libphonenumber-js
     const countryContext = (inferredCountry?.toUpperCase() as CountryCode) || FALLBACK_COUNTRY_CODE;
-    
+
     try {
-        const phoneNumber = parsePhoneNumberFromString(processingStr, countryContext);
-        
-        // Ensure parsing succeeded and validates correctly against carrier data
-        if (phoneNumber && phoneNumber.isValid()) {
-            return {
-                original,
-                formatted: phoneNumber.format('E.164'),
-                isValid: true,
-                country: phoneNumber.country || null
-            };
+        const digitsOnly = processingStr.replace(/\D/g, '');
+        const candidates = !processingStr.startsWith('+') && digitsOnly
+            ? [`+${digitsOnly}`, processingStr]
+            : [processingStr];
+
+        for (const candidate of candidates) {
+            const phoneNumber = candidate.startsWith('+')
+                ? parsePhoneNumberFromString(candidate, metadata)
+                : parsePhoneNumberFromString(candidate, countryContext, metadata);
+
+            // Ensure parsing succeeded and validates correctly against carrier data
+            if (phoneNumber && phoneNumber.isValid()) {
+                return {
+                    original,
+                    formatted: phoneNumber.format('E.164'),
+                    isValid: true,
+                    country: phoneNumber.country || null
+                };
+            }
         }
     } catch (e) {
         // Suppress parsing errors and fallback to invalid state
