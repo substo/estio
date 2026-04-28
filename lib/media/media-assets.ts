@@ -53,6 +53,42 @@ export async function ensureMediaAssets(
   }
 }
 
+/**
+ * Registers Cloudflare images that were uploaded for a draft/import preview but
+ * are not yet attached to a saved property. A later property save will call
+ * ensureMediaAssets and reactivate them; abandoned previews stay eligible for
+ * the normal media trash purge.
+ */
+export async function registerTemporaryMediaAssets(
+  mediaItems: { url: string; cloudflareImageId?: string | null }[]
+): Promise<void> {
+  const cfIds = mediaItems
+    .map((m) => m.cloudflareImageId)
+    .filter((id): id is string => !!id);
+
+  if (cfIds.length === 0) return;
+
+  for (const cfId of cfIds) {
+    const matchingItem = mediaItems.find(
+      (m) => m.cloudflareImageId === cfId
+    );
+    await db.mediaAsset.upsert({
+      where: { cloudflareImageId: cfId },
+      create: {
+        cloudflareImageId: cfId,
+        url: matchingItem?.url ?? "",
+        status: MediaAssetStatus.SOFT_DELETED,
+        deletedAt: new Date(),
+      },
+      update: {
+        url: matchingItem?.url ?? "",
+        status: MediaAssetStatus.SOFT_DELETED,
+        deletedAt: new Date(),
+      },
+    });
+  }
+}
+
 // ────────────────────  Soft-Delete Orphaned Assets  ─────────────
 
 /**

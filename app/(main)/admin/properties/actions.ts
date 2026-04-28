@@ -12,7 +12,7 @@ import { ensureUserExists } from "@/lib/auth/sync-user";
 import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
 import { parsePropertyImagePromptProfileUpsertsJson } from "@/lib/ai/property-image-prompt-profiles";
 import { softDeleteOrphanedAssets } from "@/lib/media/media-assets";
-import { savePropertyRecord } from "@/lib/properties/save-property-record";
+import { DuplicatePropertyReferenceError, savePropertyRecord } from "@/lib/properties/save-property-record";
 
 const propertySchema = z.object({
     title: z.string().min(1),
@@ -379,6 +379,13 @@ export async function upsertProperty(formData: FormData) {
         if (error.issues) {
             console.error('Zod issues:', JSON.stringify(error.issues, null, 2));
         }
+        if (error instanceof DuplicatePropertyReferenceError) {
+            throw new Error(`DUPLICATE_PROPERTY_REFERENCE::${JSON.stringify({
+                reference: error.reference,
+                propertyId: error.propertyId,
+                url: `/admin/properties/${error.propertyId}/view`,
+            })}`);
+        }
         throw error;
     }
 }
@@ -547,7 +554,44 @@ export async function pullFromOldCrm(oldPropertyId: string) {
     const user = await currentUser();
     if (!user) throw new Error("Unauthorized");
 
-    return await pullPropertyFromCrm(oldPropertyId, user.id);
+    const result = await pullPropertyFromCrm(oldPropertyId, user.id);
+    if (!result.success || !result.data?.reference) {
+        return result;
+    }
+
+    const dbUser = await db.user.findUnique({
+        where: { clerkId: user.id },
+        include: { locations: { select: { id: true } } },
+    });
+    const locationId = dbUser?.locations[0]?.id;
+    if (!locationId) {
+        return result;
+    }
+
+    const existing = await db.property.findFirst({
+        where: {
+            locationId,
+            reference: {
+                equals: String(result.data.reference),
+                mode: "insensitive",
+            },
+        },
+        select: { id: true, reference: true, title: true },
+    });
+
+    if (!existing) {
+        return result;
+    }
+
+    return {
+        ...result,
+        duplicateProperty: {
+            id: existing.id,
+            reference: existing.reference,
+            title: existing.title,
+            url: `/admin/properties/${existing.id}/view`,
+        },
+    };
 }
 
 export async function linkPropertyCreator(propertyId: string, email: string) {

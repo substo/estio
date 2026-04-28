@@ -57,6 +57,18 @@ export type SavePropertyRecordInput = {
     shouldSyncToGhl?: boolean;
 };
 
+export class DuplicatePropertyReferenceError extends Error {
+    readonly reference: string;
+    readonly propertyId: string;
+
+    constructor(reference: string, propertyId: string) {
+        super(`Property with reference "${reference}" already exists.`);
+        this.name = "DuplicatePropertyReferenceError";
+        this.reference = reference;
+        this.propertyId = propertyId;
+    }
+}
+
 async function upsertContactRole(
     location: SavePropertyRecordInput["location"],
     propertyId: string,
@@ -213,11 +225,33 @@ async function upsertCompanyRole(
 
 export async function savePropertyRecord(input: SavePropertyRecordInput) {
     const normalizedId = input.id && input.id !== "new" ? input.id : null;
-    const propertyData = { ...input.propertyData, locationId: input.location.id };
+    const propertyData: Record<string, any> = { ...input.propertyData, locationId: input.location.id };
     const actorUserId = input.actorUserId || null;
     const stakeholders = input.stakeholders || {};
     const promptProfileUpserts = input.promptProfileUpserts || [];
     const shouldSyncToGhl = input.shouldSyncToGhl !== false;
+
+    const normalizedReference = typeof propertyData.reference === "string"
+        ? propertyData.reference.trim()
+        : propertyData.reference;
+    propertyData.reference = normalizedReference || null;
+
+    if (propertyData.reference) {
+        const existingByReference = await db.property.findFirst({
+            where: {
+                reference: {
+                    equals: propertyData.reference,
+                    mode: "insensitive",
+                },
+                ...(normalizedId ? { id: { not: normalizedId } } : {}),
+            },
+            select: { id: true },
+        });
+
+        if (existingByReference) {
+            throw new DuplicatePropertyReferenceError(propertyData.reference, existingByReference.id);
+        }
+    }
 
     if (stakeholders.managementCompanyId) {
         const mgmtCo = await db.company.findUnique({
@@ -291,7 +325,7 @@ export async function savePropertyRecord(input: SavePropertyRecordInput) {
         }
     }
 
-    const propertyPayload = {
+    const propertyPayload: Record<string, any> = {
         ...propertyData,
         createdById: normalizedId ? undefined : finalCreatedById,
         updatedById: actorUserId,
@@ -383,7 +417,7 @@ export async function savePropertyRecord(input: SavePropertyRecordInput) {
                             metadata: item.metadata as any,
                         })),
                     },
-                },
+                } as any,
             });
 
             await ensureMediaAssets(input.mediaItems);

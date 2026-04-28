@@ -367,7 +367,28 @@ export default function PropertyForm({
             }
         } catch (error) {
             console.error("Failed to save property:", error);
-            // Handle error (e.g., show toast)
+            const message = error instanceof Error ? error.message : "Unknown error";
+            const duplicateMarker = "DUPLICATE_PROPERTY_REFERENCE::";
+            if (message.includes(duplicateMarker)) {
+                try {
+                    const payload = JSON.parse(message.slice(message.indexOf(duplicateMarker) + duplicateMarker.length));
+                    toast.error(`Property with ref ${payload.reference} already exists`, {
+                        description: "Open the existing property instead of saving a duplicate.",
+                        duration: 10000,
+                        action: payload.url ? {
+                            label: "Open Property",
+                            onClick: () => window.open(payload.url, "_blank"),
+                        } : undefined,
+                    });
+                } catch {
+                    toast.error("Property already exists", { description: message, duration: 8000 });
+                }
+            } else {
+                toast.error("Save Failed", {
+                    description: message,
+                    duration: 8000,
+                });
+            }
         } finally {
             setIsSubmitting(false);
         }
@@ -548,7 +569,17 @@ export default function PropertyForm({
 
             setFormVersion(v => v + 1);
 
-            if (res.warnings && res.warnings.length > 0) {
+            if ((res as any).duplicateProperty) {
+                const duplicate = (res as any).duplicateProperty;
+                toast.warning(`Property with ref ${duplicate.reference || data.reference} already exists`, {
+                    description: duplicate.title || "Open the existing property before saving a duplicate.",
+                    duration: 10000,
+                    action: duplicate.url ? {
+                        label: "Open Property",
+                        onClick: () => window.open(duplicate.url, "_blank"),
+                    } : undefined,
+                });
+            } else if (res.warnings && res.warnings.length > 0) {
                 toast.warning("Data Pulled with Warnings", {
                     description: (
                         <div className="flex flex-col gap-1">

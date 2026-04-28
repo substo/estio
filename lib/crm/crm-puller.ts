@@ -8,6 +8,7 @@ import { uploadUrlToCloudflare, uploadToCloudflare, getImageDeliveryUrl } from '
 import { normalizeInternationalPhone } from '@/lib/utils/phone';
 import { buildStructuredLeadDisplayName } from '@/lib/contacts/name-builder';
 import { resolveImportedOwner } from '@/lib/crm/owner-import';
+import { registerTemporaryMediaAssets } from '@/lib/media/media-assets';
 
 function getLocationLabels(areaKey: string | null | undefined, districtKey: string | null | undefined) {
     const district = PROPERTY_LOCATIONS.find((item) => item.district_key === districtKey) || null;
@@ -579,6 +580,7 @@ export async function pullPropertyFromCrmWithContext(context: PullPropertyFromCr
         }
 
         extractedData.images = processedImages;
+        await registerTemporaryMediaAssets(processedImages);
 
         // Clean up text
         if (extractedData.title) extractedData.title = extractedData.title.trim();

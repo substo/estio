@@ -305,6 +305,18 @@ async function isContactFieldAvailable(
     return !clash;
 }
 
+async function isCompanyLegacyOwnerIdAvailable(
+    locationId: string,
+    legacyOwnerId: string | null | undefined,
+    excludeCompanyId?: string,
+): Promise<boolean> {
+    if (!legacyOwnerId) return true;
+    const where: Record<string, unknown> = { locationId, legacyCrmOwnerId: legacyOwnerId };
+    if (excludeCompanyId) where.id = { not: excludeCompanyId };
+    const clash = await db.company.findFirst({ where, select: { id: true } });
+    return !clash;
+}
+
 async function upsertResolvedContact(input: ImportedOwnerInput, entityType: ImportedOwnerEntityType, matchSource: ImportedOwnerResolution["ownerMatchSource"]) {
     const ownerName = normalizeText(input.ownerName);
     const ownerDisplayName = normalizeText(input.ownerDisplayName) || ownerName;
@@ -319,7 +331,7 @@ async function upsertResolvedContact(input: ImportedOwnerInput, entityType: Impo
         await findContactByLegacyOwnerId(input.locationId, legacyOwnerId) ||
         await findContactByEmail(input.locationId, ownerEmail) ||
         await findContactByPhone(input.locationId, uniqueStrings([ownerPhone, input.ownerMobile, input.ownerPhone])) ||
-        await findContactByPossibleNames(input.locationId, [ownerName, ownerDisplayName]);
+        await findContactByPossibleNames(input.locationId, uniqueStrings([ownerName, ownerDisplayName]));
 
     if (existing) {
         const updateData: Record<string, unknown> = {};
@@ -425,7 +437,13 @@ async function upsertResolvedCompany(input: ImportedOwnerInput, companyName: str
 
     if (existing) {
         const updateData: Record<string, unknown> = {};
-        if (!existing.legacyCrmOwnerId && legacyOwnerId) updateData.legacyCrmOwnerId = legacyOwnerId;
+        if (!existing.legacyCrmOwnerId && legacyOwnerId) {
+            if (await isCompanyLegacyOwnerIdAvailable(input.locationId, legacyOwnerId, existing.id)) {
+                updateData.legacyCrmOwnerId = legacyOwnerId;
+            } else {
+                console.warn(`[OWNER IMPORT] Skipping company legacyCrmOwnerId=${legacyOwnerId} for company ${existing.id} – already claimed by another company`);
+            }
+        }
         if (!existing.legacyCrmOwnerLabel && legacyOwnerLabel) updateData.legacyCrmOwnerLabel = legacyOwnerLabel;
         if (!existing.email && ownerEmail) updateData.email = ownerEmail;
         if (!existing.phone && phones[0]) updateData.phone = phones[0];
@@ -439,6 +457,9 @@ async function upsertResolvedCompany(input: ImportedOwnerInput, companyName: str
         return existing;
     }
 
+    const legacyIdOk = await isCompanyLegacyOwnerIdAvailable(input.locationId, legacyOwnerId);
+    if (!legacyIdOk) console.warn(`[OWNER IMPORT] Nullifying company legacyCrmOwnerId=${legacyOwnerId} on new company – already claimed by another company`);
+
     return db.company.create({
         data: {
             locationId: input.locationId,
@@ -447,7 +468,7 @@ async function upsertResolvedCompany(input: ImportedOwnerInput, companyName: str
             phone: phones[0] || null,
             website: normalizeText(input.ownerWebsite),
             type: "owner",
-            legacyCrmOwnerId: legacyOwnerId,
+            legacyCrmOwnerId: legacyIdOk ? legacyOwnerId : null,
             legacyCrmOwnerLabel: legacyOwnerLabel,
         },
     });
