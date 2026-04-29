@@ -9481,6 +9481,23 @@ function extractPropertySlugsFromLeadUrls(text: string): string[] {
     return Array.from(slugs);
 }
 
+function mergeConversationSuggestedActions(existing: string[] | null | undefined, incoming: string | null) {
+    const normalizedIncoming = String(incoming || "").trim();
+    const current = Array.isArray(existing) ? existing.filter((item) => String(item || "").trim()) : [];
+    if (!normalizedIncoming) return current;
+    if (current.some((item) => item.trim().toLowerCase() === normalizedIncoming.toLowerCase())) {
+        return current;
+    }
+    return [normalizedIncoming, ...current].slice(0, 3);
+}
+
+const PASTE_LEAD_FIRST_OUTREACH_SUGGESTION = [
+    "Draft a first outreach message for this pasted lead.",
+    "Use the lead note and conversation timeline as context.",
+    "If the note references one or more properties, acknowledge the enquiry and reference the relevant property URL from the note if present.",
+    "Ask whether they need more details or would like to arrange a viewing, say I am here to help with any questions, and do not mention import/internal notes.",
+].join(" ");
+
 function parseNumericToken(token: string): number | null {
     const cleaned = token.replace(/[, ]/g, "").toLowerCase();
     if (!cleaned) return null;
@@ -11545,7 +11562,6 @@ export async function createParsedLead(
             matchedProperty: matchedPropertyForName,
             requirements: data.requirements,
         });
-
         if (data.requirements) {
             if (normalizedMinPrice) contactData.requirementMinPrice = normalizedMinPrice;
             if (normalizedMaxPrice) contactData.requirementMaxPrice = normalizedMaxPrice;
@@ -11674,19 +11690,30 @@ export async function createParsedLead(
                     status: 'open',
                     lastMessageAt: new Date(),
                     lastMessageType: preferredChannelType,
-                    unreadCount: 0
+                    unreadCount: 0,
+                    suggestedActions: mergeConversationSuggestedActions([], PASTE_LEAD_FIRST_OUTREACH_SUGGESTION),
                 }
             });
             conversationWasCreated = true;
-        } else if (
-            preferredChannelType === 'TYPE_WHATSAPP' &&
-            (!conversation.lastMessageType || String(conversation.lastMessageType).toUpperCase().includes('SMS'))
-        ) {
+        } else {
             // Upgrade default composer channel for imported leads without overriding email threads.
-            conversation = await db.conversation.update({
-                where: { id: conversation.id },
-                data: { lastMessageType: preferredChannelType }
-            });
+            const conversationUpdateData: Prisma.ConversationUpdateInput = {};
+            if (
+                preferredChannelType === 'TYPE_WHATSAPP' &&
+                (!conversation.lastMessageType || String(conversation.lastMessageType).toUpperCase().includes('SMS'))
+            ) {
+                conversationUpdateData.lastMessageType = preferredChannelType;
+            }
+            conversationUpdateData.suggestedActions = mergeConversationSuggestedActions(
+                conversation.suggestedActions,
+                PASTE_LEAD_FIRST_OUTREACH_SUGGESTION
+            );
+            if (Object.keys(conversationUpdateData).length > 0) {
+                conversation = await db.conversation.update({
+                    where: { id: conversation.id },
+                    data: conversationUpdateData,
+                });
+            }
         }
 
         if (data.contact?.phone && preferredChannelType === 'TYPE_WHATSAPP') {
