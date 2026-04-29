@@ -1990,7 +1990,9 @@ export function ConversationInterface({ locationId, initialConversations, initia
         setCreatingDeal(true);
         try {
             const ids = Array.from(selectedIds);
-            const selectedConversationsForDeal = conversationsRef.current.filter((conversation) => ids.includes(conversation.id));
+            const selectedConversationsForDeal = ids
+                .map((id) => selectedConversationCacheRef.current.get(id) || conversationsRef.current.find((conversation) => conversation.id === id))
+                .filter((conversation): conversation is Conversation => !!conversation);
             const newDeal = await createPersistentDeal(title, ids);
 
             cacheDealWorkspaceCoreSnapshot(newDeal.id, createDealWorkspaceCoreSnapshot({
@@ -2039,7 +2041,9 @@ export function ConversationInterface({ locationId, initialConversations, initia
             || null
         )
         : null;
-    const selectedConversations = conversations.filter(c => selectedIds.has(c.id));
+    const selectedConversations = Array.from(selectedIds)
+        .map((id) => selectedConversationCacheRef.current.get(id) || conversations.find((conversation) => conversation.id === id))
+        .filter((conversation): conversation is Conversation => !!conversation);
     const selectedDealConversation = activeDealParticipants.find((conversation) => conversation.id === activeId) || null;
     const activeDealListEntry = deals.find((deal) => deal?.id === activeDealId) || null;
     const activeDealSnapshot = activeDealId ? getCachedDealWorkspaceCoreSnapshot(activeDealId) : null;
@@ -4754,11 +4758,16 @@ export function ConversationInterface({ locationId, initialConversations, initia
             onDelete={handleDelete}
             selectedTaskId={selectedTaskId}
             onSelectTask={handleSelectTask}
-            onSelectAll={(select) => {
+            onSelectAll={(select, ids) => {
+                const visibleIds = ids && ids.length > 0 ? ids : conversations.map(c => c.id);
                 if (select) {
-                    setSelectedIds(new Set(conversations.map(c => c.id)));
+                    setSelectedIds((prev) => new Set([...Array.from(prev), ...visibleIds]));
                 } else {
-                    setSelectedIds(new Set());
+                    setSelectedIds((prev) => {
+                        const next = new Set(prev);
+                        visibleIds.forEach((id) => next.delete(id));
+                        return next;
+                    });
                 }
             }}
 

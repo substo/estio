@@ -27,7 +27,7 @@ interface ConversationListProps {
     onToggleSelectionMode?: (enabled: boolean) => void;
     selectedIds?: Set<string>;
     onToggleSelect?: (id: string, checked: boolean) => void;
-    onSelectAll?: (select: boolean) => void;
+    onSelectAll?: (select: boolean, ids?: string[]) => void;
     onDelete?: (ids: string[]) => void;
 
     // Deals Mode Props
@@ -164,25 +164,36 @@ export function ConversationList({
 
     // Unified Header Component - used in both modes
     const renderUnifiedHeader = () => {
-        const isAllSelected = conversations.length > 0 && selectedIds?.size === conversations.length;
-        const isPartiallySelected = selectedIds && selectedIds.size > 0 && selectedIds.size < conversations.length;
+        const visibleSelectedCount = conversations.filter((conversation) => selectedIds?.has(conversation.id)).length;
+        const isAllSelected = conversations.length > 0 && visibleSelectedCount === conversations.length;
+        const isPartiallySelected = visibleSelectedCount > 0 && visibleSelectedCount < conversations.length;
         const selectedIdsList = Array.from(selectedIds || []);
         const showSearch = effectiveViewMode === 'chats' && onSearchChange !== undefined;
         const showActiveInboxActions = viewFilter === 'active';
 
         if (isSelectionMode && effectiveViewMode === 'chats') {
+            const visibleConversationIds = conversations.map((conversation) => conversation.id);
+            const hasActiveSearch = !!searchQuery.trim();
+
             return (
-                <div className="border-b bg-indigo-50/50 p-2 min-w-0">
+                <div className="border-b bg-indigo-50/50 p-2 min-w-0 space-y-2">
                     <div className="flex items-center justify-between gap-2 min-w-0">
                         <div className="flex items-center gap-2 min-w-0">
                             <Checkbox
                                 id="select-all"
                                 checked={isAllSelected || (isPartiallySelected ? "indeterminate" : false)}
-                                onCheckedChange={(checked) => onSelectAll?.(checked === true)}
+                                onCheckedChange={(checked) => onSelectAll?.(checked === true, visibleConversationIds)}
                             />
-                            <span className="truncate text-xs font-medium text-indigo-900">
-                                {selectedIds?.size || 0} selected
-                            </span>
+                            <div className="min-w-0">
+                                <div className="truncate text-xs font-medium text-indigo-900">
+                                    {selectedIds?.size || 0} selected
+                                </div>
+                                {hasActiveSearch && (
+                                    <div className="truncate text-[10px] text-indigo-700/70">
+                                        Showing {conversations.length} search result{conversations.length === 1 ? "" : "s"}
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
                         <div className="flex items-center gap-1 shrink-0">
@@ -296,6 +307,46 @@ export function ConversationList({
                             </Button>
                         </div>
                     </div>
+
+                    {showSearch && (
+                        <div className="relative" data-no-pane-swipe>
+                            <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none">
+                                {isSearching ? (
+                                    <Loader2 className="h-3 w-3 animate-spin text-indigo-500" />
+                                ) : (
+                                    <Search className="h-3 w-3 text-indigo-400" />
+                                )}
+                            </div>
+                            <input
+                                type="text"
+                                placeholder="Search contacts to add..."
+                                className="block w-full pl-7 pr-8 py-1.5 text-xs border border-indigo-200 rounded-md leading-5 bg-white text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+                                value={localQuery}
+                                onChange={(e) => setLocalQuery(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        onSearchChange?.(localQuery);
+                                    } else if (e.key === 'Escape') {
+                                        setLocalQuery("");
+                                        onSearchChange?.("");
+                                    }
+                                }}
+                            />
+                            <button
+                                type="button"
+                                className="absolute inset-y-0 right-0 pr-2 flex items-center text-slate-400 hover:text-slate-600"
+                                onClick={() => {
+                                    if (localQuery || searchQuery) {
+                                        setLocalQuery("");
+                                        onSearchChange?.("");
+                                    }
+                                }}
+                                aria-label="Clear contact search"
+                            >
+                                <X className="h-3 w-3" />
+                            </button>
+                        </div>
+                    )}
                 </div>
             );
         }
