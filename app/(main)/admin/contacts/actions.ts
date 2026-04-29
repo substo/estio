@@ -607,6 +607,48 @@ async function checkPhoneDuplicate(locationId: string, phone: string | null | un
   return null;
 }
 
+async function findExistingContactForGoogleImport(
+  locationId: string,
+  googleData: { phone?: string | null; email?: string | null },
+  resourceName: string
+) {
+  const existingSync = await db.contact.findFirst({
+    where: { locationId, googleContactId: resourceName },
+    select: { id: true, name: true, email: true, phone: true, googleContactId: true },
+  });
+  if (existingSync) return existingSync;
+
+  if (googleData.email) {
+    const existingEmail = await db.contact.findFirst({
+      where: {
+        locationId,
+        email: { equals: googleData.email, mode: 'insensitive' },
+      },
+      select: { id: true, name: true, email: true, phone: true, googleContactId: true },
+    });
+    if (existingEmail) return existingEmail;
+  }
+
+  const rawDigits = String(googleData.phone || '').replace(/\D/g, '');
+  if (rawDigits.length < 7) return null;
+
+  const searchSuffix = rawDigits.length > 2 ? rawDigits.slice(-2) : rawDigits;
+  const candidates = await db.contact.findMany({
+    where: {
+      locationId,
+      phone: { contains: searchSuffix },
+    },
+    select: { id: true, name: true, email: true, phone: true, googleContactId: true },
+  });
+
+  return candidates.find((candidate) => {
+    const candidateDigits = String(candidate.phone || '').replace(/\D/g, '');
+    return candidateDigits === rawDigits
+      || (candidateDigits.endsWith(rawDigits) && rawDigits.length >= 7)
+      || (rawDigits.endsWith(candidateDigits) && candidateDigits.length >= 7);
+  }) || null;
+}
+
 // Logs history to the database
 async function logContactHistory(tx: any, contactId: string, userId: string | null, action: string, changes: any = null) {
   try {
@@ -1321,34 +1363,52 @@ export async function importNewGoogleContactAction(resourceName: string, expecte
       return { success: false, message: 'Google contact must have at least a name, email, or phone number.' };
     }
 
-    // Before creating, make sure this exact googleContactId doesn't already exist in this location
-    const existingSync = await db.contact.findFirst({
-      where: { locationId: expectedLocationId, googleContactId: resourceName }
-    });
-
-    if (existingSync) {
-      return { success: false, message: 'This Google contact is already imported/linked to an existing contact.', contactId: existingSync.id };
-    }
-
-    // Check for duplicate phone/email to prevent errors during creation
-    if (googleData.email) {
-      const existingEmail = await db.contact.findFirst({
-        where: { locationId: expectedLocationId, email: googleData.email },
-      });
-      if (existingEmail) {
-        return { success: false, message: 'A contact with this email already exists localy. Try searching and linking from the Google Sync Manager instead.' };
-      }
-    }
-
-    if (googleData.phone) {
-      const phoneDuplicate = await checkPhoneDuplicate(expectedLocationId, googleData.phone);
-      if (phoneDuplicate?.type === 'Exact') {
-        return { success: false, message: 'A contact with this phone already exists locally. Try searching and linking from the Google Sync Manager instead.' };
-      }
-    }
-
     const dbUser = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } });
     const internalUserId = dbUser?.id || null;
+
+    const existingContact = await findExistingContactForGoogleImport(expectedLocationId, googleData, resourceName);
+    if (existingContact) {
+      if (!existingContact.googleContactId) {
+        const updates: any = {
+          googleContactId: resourceName,
+          googleContactUpdatedAt: googleData.updateTime,
+          lastGoogleSync: new Date(),
+        };
+        if (!existingContact.name && googleData.name) updates.name = googleData.name;
+        if (!existingContact.email && googleData.email) updates.email = googleData.email;
+        if (!existingContact.phone && googleData.phone) updates.phone = googleData.phone;
+
+        await db.$transaction(async (tx) => {
+          await tx.contact.update({
+            where: { id: existingContact.id },
+            data: updates,
+          });
+          await logContactHistory(tx, existingContact.id, internalUserId, 'LINKED_TO_GOOGLE', {
+            googleContactId: resourceName,
+            matchedBy: existingContact.email && googleData.email ? 'email' : 'phone',
+          });
+        });
+
+        revalidatePath('/admin/contacts');
+        return {
+          success: true,
+          message: 'Existing contact linked to Google.',
+          contactId: existingContact.id,
+          existing: true,
+          linked: true,
+        };
+      }
+
+      return {
+        success: true,
+        message: existingContact.googleContactId === resourceName
+          ? 'Google contact is already linked. Opening existing contact.'
+          : 'Existing local contact found. Google link left unchanged.',
+        contactId: existingContact.id,
+        existing: true,
+        linked: existingContact.googleContactId === resourceName,
+      };
+    }
 
     // Transaction to create contact cleanly
     const contact = await db.$transaction(async (tx) => {

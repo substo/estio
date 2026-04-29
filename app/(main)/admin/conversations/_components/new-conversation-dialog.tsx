@@ -12,7 +12,7 @@ import { cn } from '@/lib/utils';
 import { Textarea } from '@/components/ui/textarea';
 import { Card } from '@/components/ui/card';
 import { Clipboard, BadgeAlert, Sparkles, AlertTriangle } from 'lucide-react';
-import { searchGoogleContactsAction, importNewGoogleContactAction } from '@/app/(main)/admin/contacts/actions';
+import { searchGoogleContactsAction, importNewGoogleContactAction, openOrStartConversationForContact } from '@/app/(main)/admin/contacts/actions';
 import { useToast } from '@/components/ui/use-toast';
 import { AiModelSelect } from '@/components/ai/ai-model-select';
 import { useAiModelCatalog } from '@/components/ai/use-ai-model-catalog';
@@ -517,17 +517,16 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                                     try {
                                                         const res = await importNewGoogleContactAction(contact.resourceName, locationId!);
                                                         if (res.success && res.contactId) {
-                                                            // We successfully imported, now start conversation
-                                                            // We know they have a phone number since button is disabled without it
-                                                            const startRes = await startNewConversation(contact.phone);
+                                                            const startRes = await openOrStartConversationForContact(res.contactId);
                                                             if (startRes.success && startRes.conversationId) {
-                                                                toast({ title: "Imported & Messaging", description: "Contact created successfully." });
+                                                                toast({
+                                                                    title: startRes.isNew ? "Conversation created" : "Conversation opened",
+                                                                    description: res.message || "Using the existing contact record.",
+                                                                });
                                                                 onConversationCreated?.(startRes.conversationId);
                                                                 handleClose();
                                                             } else {
-                                                                toast({ title: "Imported, but chat failed", description: startRes.error, variant: "destructive" });
-                                                                // You could redirect to contact view here, but we are inside a dialog. Let's just close it.
-                                                                handleClose();
+                                                                toast({ title: "Contact ready, but chat failed", description: startRes.error, variant: "destructive" });
                                                             }
                                                         } else {
                                                             setError(res.message || 'Failed to import Google contact');
