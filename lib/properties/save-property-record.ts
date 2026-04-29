@@ -279,6 +279,8 @@ export async function savePropertyRecord(input: SavePropertyRecordInput) {
     delete propertyData.ownerId;
     delete propertyData.ownerCompanyId;
     delete propertyData.ownerEntityType;
+    delete propertyData.ownerEntityPath;
+    delete propertyData.ownerBusinessSubtype;
     delete propertyData.ownerName;
     delete propertyData.ownerEmail;
     delete propertyData.ownerPhone;

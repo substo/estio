@@ -476,6 +476,8 @@ export async function pullPropertyFromCrmWithContext(context: PullPropertyFromCr
             extractedData.ownerContactId = resolvedOwner.ownerContactId;
             extractedData.ownerCompanyId = resolvedOwner.ownerCompanyId;
             extractedData.ownerEntityType = resolvedOwner.ownerEntityType;
+            extractedData.ownerEntityPath = resolvedOwner.ownerEntityPath;
+            extractedData.ownerBusinessSubtype = resolvedOwner.ownerBusinessSubtype;
             extractedData.ownerMatchSource = resolvedOwner.ownerMatchSource;
             if (resolvedOwner.ownerEntityType === "person" && resolvedOwner.ownerDisplayName) {
                 extractedData.ownerName = resolvedOwner.ownerDisplayName;

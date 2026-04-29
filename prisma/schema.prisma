@@ -620,6 +620,7 @@ model Company {
   phone         String?
   website       String?
   type          String?
+  payload       Json?
   ghlCompanyId  String?               @unique
   legacyCrmOwnerId    String?
   legacyCrmOwnerLabel String?
