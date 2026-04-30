@@ -398,3 +398,12 @@ Access to Contact data is strictly controlled based on the User's relationship t
     5.  Unlinks **SwipeSessions** (sets `contactId` to null).
     6.  Deletes the **Contact**.
     This approach ensures that deleting a contact never leaves orphaned records or violates foreign key constraints.
+
+### 4. Enterprise-Grade Contact Merging
+The system implements a robust merge process (`mergeContacts` action) to safely combine duplicate records without data loss:
+-   **Role Preservation**: `ContactPropertyRole`, `ContactCompanyRole`, `Viewings`, and `PropertySwipe` records are moved from the source contact to the target contact. Duplicate role assignments are gracefully skipped to respect database unique constraints.
+-   **Data Enrichment (Gap Filling)**: Any empty scalar fields (like `phone`, `email`, `leadSource`, `address`) or array fields (`tags`, `propertiesInterested`, etc.) on the target contact are automatically populated with data from the source contact.
+-   **Ghost Record Cleanup**: After the local database transaction completes, a non-blocking background task (using Next.js `after()`) asynchronously deletes the source "ghost" contact from external systems (Google Contacts and GoHighLevel).
+-   **Target Synchronization**: The newly enriched target contact is immediately re-synced to GoHighLevel and Google to ensure external systems reflect the merged state.
+-   **Enhanced Audit Trail**: The target's `ContactHistory` receives a detailed `MERGED_FROM` log explicitly tracking transferred roles, newly filled fields, and the unlinked external IDs of the source contact.
+
