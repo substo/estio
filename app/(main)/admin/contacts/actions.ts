@@ -2760,37 +2760,48 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
   const { userId } = await auth();
   if (!userId) return { success: false, message: "Unauthorized" };
 
-  // Resolve internal user ID
-  const dbUser = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } });
+  // Resolve internal user ID & Google sync capability
+  const dbUser = await db.user.findUnique({
+    where: { clerkId: userId },
+    select: { id: true, googleSyncEnabled: true }
+  });
   const internalUserId = dbUser?.id || null;
 
   let targetConversationId: string | null = null;
 
+  // Pre-transaction: Read source + target with all external IDs for post-merge cleanup
+  const source = await db.contact.findUnique({ where: { id: sourceContactId } });
+  const target = await db.contact.findUnique({ where: { id: targetContactId } });
+
+  if (!source) {
+    // Check if already merged
+    const mergeHistory = await db.contactHistory.findFirst({
+      where: {
+        action: "MERGED_FROM",
+        changes: { string_contains: sourceContactId }
+      },
+      select: { contactId: true },
+      orderBy: { createdAt: 'desc' }
+    }).catch(() => null);
+
+    return {
+      success: false,
+      message: mergeHistory
+        ? `already_merged:${mergeHistory.contactId}`
+        : "Contact not found"
+    };
+  }
+  if (!target) return { success: false, message: "Contact not found" };
+
+  // Resolve location for GHL operations
+  const location = await db.location.findUnique({
+    where: { id: source.locationId },
+    select: { id: true, ghlLocationId: true, ghlAccessToken: true }
+  });
+
   try {
     await db.$transaction(async (tx) => {
-      // 1. Get Source Contact Data
-      const source = await tx.contact.findUnique({ where: { id: sourceContactId } });
-      const target = await tx.contact.findUnique({ where: { id: targetContactId } });
-
-      if (!source) {
-        // Check if this contact was already merged in the background
-        const mergeHistory = await tx.contactHistory.findFirst({
-          where: {
-            action: "MERGED_FROM",
-            changes: { string_contains: sourceContactId }
-          },
-          select: { contactId: true },
-          orderBy: { createdAt: 'desc' }
-        }).catch(() => null);
-
-        throw new Error(mergeHistory
-          ? `already_merged:${mergeHistory.contactId}`
-          : "Contact not found"
-        );
-      }
-      if (!target) throw new Error("Contact not found");
-
-      // 2. Transfer LID if target doesn't have one
+      // 1. Transfer LID if target doesn't have one
       if (source.lid && !target.lid) {
         await tx.contact.update({
           where: { id: targetContactId },
@@ -2798,11 +2809,10 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
         });
       }
 
-      // 3. Handle Conversations (Move or Merge)
+      // 2. Handle Conversations (Move or Merge)
       const sourceConvs = await tx.conversation.findMany({ where: { contactId: sourceContactId } });
 
       for (const sourceConv of sourceConvs) {
-        // Check if target has conv in same location
         const targetConv = await tx.conversation.findUnique({
           where: {
             locationId_contactId: {
@@ -2814,18 +2824,14 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
 
         if (targetConv) {
           console.log(`[Merge] Merging conversation ${sourceConv.id} into ${targetConv.id}`);
-          // Move messages
           await tx.message.updateMany({
             where: { conversationId: sourceConv.id },
             data: { conversationId: targetConv.id }
           });
-          // Delete source conv
           await tx.conversation.delete({ where: { id: sourceConv.id } });
-          // Track the target conversation for post-merge navigation
           targetConversationId = targetConv.id;
         } else {
           console.log(`[Merge] Moving conversation ${sourceConv.id} to contact ${targetContactId}`);
-          // Move conv — the source conv is now the target's conv
           await tx.conversation.update({
             where: { id: sourceConv.id },
             data: { contactId: targetContactId }
@@ -2834,7 +2840,6 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
         }
       }
 
-      // If source had no conversations, look up target's existing conversation
       if (!targetConversationId) {
         const existingTargetConv = await tx.conversation.findFirst({
           where: { contactId: targetContactId },
@@ -2844,11 +2849,210 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
         targetConversationId = existingTargetConv?.id || null;
       }
 
-      // 4. Delete Source Contact
+      // 3. Transfer Property Roles (skip duplicates due to unique constraint)
+      const sourcePropertyRoles = await tx.contactPropertyRole.findMany({
+        where: { contactId: sourceContactId }
+      });
+      for (const role of sourcePropertyRoles) {
+        const existsOnTarget = await tx.contactPropertyRole.findUnique({
+          where: {
+            contactId_propertyId_role: {
+              contactId: targetContactId,
+              propertyId: role.propertyId,
+              role: role.role
+            }
+          }
+        });
+        if (existsOnTarget) {
+          // Target already has this role — delete the source's duplicate
+          await tx.contactPropertyRole.delete({ where: { id: role.id } });
+        } else {
+          await tx.contactPropertyRole.update({
+            where: { id: role.id },
+            data: { contactId: targetContactId }
+          });
+        }
+      }
+
+      // 4. Transfer Company Roles (skip duplicates)
+      const sourceCompanyRoles = await tx.contactCompanyRole.findMany({
+        where: { contactId: sourceContactId }
+      });
+      for (const role of sourceCompanyRoles) {
+        const existsOnTarget = await tx.contactCompanyRole.findUnique({
+          where: {
+            contactId_companyId_role: {
+              contactId: targetContactId,
+              companyId: role.companyId,
+              role: role.role
+            }
+          }
+        });
+        if (existsOnTarget) {
+          await tx.contactCompanyRole.delete({ where: { id: role.id } });
+        } else {
+          await tx.contactCompanyRole.update({
+            where: { id: role.id },
+            data: { contactId: targetContactId }
+          });
+        }
+      }
+
+      // 5. Transfer Viewings
+      await tx.viewing.updateMany({
+        where: { contactId: sourceContactId },
+        data: { contactId: targetContactId }
+      });
+
+      // 6. Transfer Swipes
+      await tx.propertySwipe.updateMany({
+        where: { contactId: sourceContactId },
+        data: { contactId: targetContactId }
+      });
+
+      // Unlink SwipeSessions (can't move due to potential uniqueness)
+      await tx.swipeSession.updateMany({
+        where: { contactId: sourceContactId },
+        data: { contactId: null }
+      });
+
+      // 7. Fill blank fields on target from source ("fill the gaps")
+      const fillData: Record<string, any> = {};
+      const scalarFields = [
+        'email', 'phone', 'firstName', 'lastName', 'name',
+        'address1', 'city', 'state', 'postalCode', 'country',
+        'dateOfBirth', 'leadSource', 'leadPriority', 'leadGoal',
+        'contactType', 'notes', 'preferredLang', 'message',
+        'outlookContactId',
+      ] as const;
+      for (const field of scalarFields) {
+        if (!(target as any)[field] && (source as any)[field]) {
+          fillData[field] = (source as any)[field];
+        }
+      }
+
+      // Merge tags (additive, deduplicated)
+      const mergedTags = [...new Set([
+        ...(target.tags || []),
+        ...(source.tags || [])
+      ])];
+      if (mergedTags.length > (target.tags?.length || 0)) {
+        fillData.tags = mergedTags;
+      }
+
+      // Merge property arrays (additive, deduplicated)
+      const arrayFields = [
+        'propertiesInterested', 'propertiesInspected',
+        'propertiesEmailed', 'propertiesMatched'
+      ] as const;
+      for (const field of arrayFields) {
+        const merged = [...new Set([
+          ...((target as any)[field] || []),
+          ...((source as any)[field] || [])
+        ])];
+        if (merged.length > ((target as any)[field]?.length || 0)) {
+          fillData[field] = merged;
+        }
+      }
+
+      if (Object.keys(fillData).length > 0) {
+        await tx.contact.update({
+          where: { id: targetContactId },
+          data: fillData
+        });
+      }
+
+      // 8. Delete Source Contact
       await tx.contact.delete({ where: { id: sourceContactId } });
 
-      // Log History
-      await logContactHistory(tx, targetContactId, internalUserId, "MERGED_FROM", { sourceId: sourceContactId, sourceName: source.name });
+      // 9. Enhanced Audit Log
+      await logContactHistory(tx, targetContactId, internalUserId, "MERGED_FROM", {
+        sourceId: sourceContactId,
+        sourceName: source.name,
+        sourcePhone: source.phone,
+        sourceEmail: source.email,
+        sourceLid: source.lid,
+        sourceGhlContactId: source.ghlContactId,
+        sourceGoogleContactId: source.googleContactId,
+        sourceOutlookContactId: source.outlookContactId,
+        fieldsFilled: Object.keys(fillData),
+        rolesTransferred: {
+          propertyRoles: sourcePropertyRoles.length,
+          companyRoles: sourceCompanyRoles.length,
+        },
+      });
+    });
+
+    // Post-transaction: External system cleanup (fire-and-forget via after())
+    after(() => {
+      void Promise.allSettled([
+        // A. Delete source from Google Contacts
+        (async () => {
+          if (source.googleContactId && dbUser?.id && dbUser.googleSyncEnabled) {
+            try {
+              const { deleteContactFromGoogle } = await import('@/lib/google/people');
+              const deleted = await deleteContactFromGoogle(dbUser.id, source.googleContactId);
+              console.log(`[Merge] ${deleted ? 'Deleted' : 'Failed to delete'} source Google contact ${source.googleContactId}`);
+            } catch (err) {
+              console.error('[Merge] Google delete failed:', err);
+            }
+          }
+        })(),
+
+        // B. Delete source from GHL
+        (async () => {
+          if (source.ghlContactId && location?.ghlLocationId) {
+            try {
+              const { deleteContactFromGHL } = await import('@/lib/ghl/stakeholders');
+              const deleted = await deleteContactFromGHL(location.ghlLocationId, source.ghlContactId);
+              console.log(`[Merge] ${deleted ? 'Deleted' : 'Failed to delete'} source GHL contact ${source.ghlContactId}`);
+            } catch (err) {
+              console.error('[Merge] GHL delete failed:', err);
+            }
+          }
+        })(),
+
+        // C. Sync target to Google with merged data
+        (async () => {
+          if (dbUser?.id) {
+            try {
+              await runGoogleAutoSyncForContact({
+                locationId: target.locationId,
+                contactId: targetContactId,
+                source: 'CONTACT_MERGE',
+                event: 'update',
+                preferredUserId: dbUser.id,
+              });
+            } catch (err) {
+              console.error('[Merge] Google sync of target failed:', err);
+            }
+          }
+        })(),
+
+        // D. Sync target to GHL with merged data
+        (async () => {
+          if (location?.ghlLocationId && location?.ghlAccessToken) {
+            try {
+              const updatedTarget = await db.contact.findUnique({ where: { id: targetContactId } });
+              if (updatedTarget) {
+                const ghlId = await syncContactToGHL(location.ghlLocationId, {
+                  name: updatedTarget.name || '',
+                  phone: updatedTarget.phone || undefined,
+                  email: updatedTarget.email || undefined,
+                }, updatedTarget.ghlContactId);
+                if (ghlId && !updatedTarget.ghlContactId) {
+                  await db.contact.update({
+                    where: { id: targetContactId },
+                    data: { ghlContactId: ghlId }
+                  });
+                }
+              }
+            } catch (err) {
+              console.error('[Merge] GHL sync of target failed:', err);
+            }
+          }
+        })(),
+      ]).catch(err => console.error('[Merge] External cleanup error:', err));
     });
 
     revalidatePath('/admin/contacts');
