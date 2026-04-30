@@ -246,6 +246,13 @@ type WorkspaceCoreSnapshot = {
     hydration: WorkspaceHydrationState;
 };
 
+type WorkspaceSidebarSnapshot = {
+    contactContext: any;
+    taskSummary: any;
+    viewingSummary: any;
+    agentSummary: any;
+};
+
 type ActivityTimelineItem = {
     id: string;
     type: 'activity';
@@ -275,6 +282,8 @@ type DealWorkspaceCoreSnapshot = {
 };
 
 const WORKSPACE_CACHE_LIMIT = 30;
+const WORKSPACE_CORE_CACHE_TTL_MS = 2 * 60 * 1000;
+const WORKSPACE_SIDEBAR_CACHE_TTL_MS = 5 * 60 * 1000;
 const WORKSPACE_ACTIVITY_LIMIT = 180;
 const ACTIVE_POLL_GRACE_MS = 2500;
 const COMPOSER_DRAFTS_SESSION_KEY = "estio:conversation-composer-drafts:v1";
@@ -470,6 +479,32 @@ function buildDealContactOptions(participants: Conversation[]): DealContactOptio
     return Array.from(byContact.values()).sort((a, b) => b.lastMessageDate - a.lastMessageDate);
 }
 
+function buildContactContextShell(conversation: Conversation | null | undefined, appLocationId: string): any | null {
+    if (!conversation?.contactId) return null;
+    return {
+        contact: {
+            id: conversation.contactId,
+            name: conversation.contactName || "Unknown Contact",
+            email: conversation.contactEmail || null,
+            phone: conversation.contactPhone || null,
+            preferredLang: conversation.contactPreferredLanguage || null,
+            locationId: appLocationId,
+            contactType: "Lead",
+            propertyRoles: [],
+            companyRoles: [],
+            viewings: [],
+            interestedProperties: [],
+            inspectedProperties: [],
+            propertiesInterested: [],
+            propertiesInspected: [],
+            propertiesEmailed: [],
+            propertiesMatched: [],
+        },
+        leadSources: [],
+        shell: true,
+    };
+}
+
 export function ConversationInterface({ locationId, initialConversations, initialConversationListPageInfo, initialDeals, featureFlags }: ConversationInterfaceProps) {
     const router = useRouter();
     const pathname = usePathname();
@@ -542,8 +577,10 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const [workspaceViewingSummary, setWorkspaceViewingSummary] = useState<any>(null);
     const [workspaceAgentSummary, setWorkspaceAgentSummary] = useState<any>(null);
     const clientRequestCountRef = useRef<Record<string, number>>({});
-    const workspaceCoreCacheRef = useRef<Map<string, WorkspaceCoreSnapshot>>(new Map());
+    const workspaceCoreCacheRef = useRef<Map<string, any>>(new Map());
+    const workspaceSidebarCacheRef = useRef<Map<string, any>>(new Map());
     const workspaceCoreInFlightRef = useRef<Set<string>>(new Set());
+    const workspaceSidebarInFlightRef = useRef<Set<string>>(new Set());
     const workspaceInitialHydrationInFlightRef = useRef<Set<string>>(new Set());
     const workspaceBackfillInFlightRef = useRef<Set<string>>(new Set());
     const workspaceActivityHydrationInFlightRef = useRef<Set<string>>(new Set());
@@ -563,7 +600,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const [composerDrafts, setComposerDrafts] = useState<Record<string, string>>({});
 
     // Initialize Active ID from URL
-    const initialActiveId = getSearchParam('id') || (initialConversations.length > 0 ? initialConversations[0].id : null);
+    const initialActiveId = getSearchParam('id');
     const initialTaskId = getSearchParam('task');
     const [activeId, setActiveId] = useState<string | null>(initialActiveId);
     const activeIdRef = useRef<string | null>(initialActiveId);
@@ -588,7 +625,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const [activeDealMetadata, setActiveDealMetadata] = useState<any>(null);
     const [dealTimelineHydrationStatus, setDealTimelineHydrationStatus] = useState<WorkspaceHydrationStatus>('full');
     const [dealTimelineInitialPainted, setDealTimelineInitialPainted] = useState(false);
-    const dealWorkspaceCoreCacheRef = useRef<Map<string, DealWorkspaceCoreSnapshot>>(new Map());
+    const dealWorkspaceCoreCacheRef = useRef<Map<string, any>>(new Map());
     const dealWorkspaceCoreInFlightRef = useRef<Set<string>>(new Set());
     const dealWorkspaceInitialHydrationInFlightRef = useRef<Set<string>>(new Set());
     const dealWorkspaceBackfillInFlightRef = useRef<Set<string>>(new Set());
@@ -873,6 +910,31 @@ export function ConversationInterface({ locationId, initialConversations, initia
         }));
     }, []);
 
+    const trackClientMetric = useCallback((kind: string, valueMs: number, metadata?: Record<string, unknown>) => {
+        const roundedValue = Math.max(0, Math.round(Number(valueMs) || 0));
+        console.log("[perf:conversations.client_metric]", JSON.stringify({
+            kind,
+            value_ms: roundedValue,
+            ts: new Date().toISOString(),
+            ...(metadata || {}),
+        }));
+    }, []);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        let cancelled = false;
+        requestAnimationFrame(() => {
+            if (cancelled) return;
+            trackClientMetric("conversation_list_first_paint_ms", performance.now(), {
+                initial_count: initialConversations.length,
+                has_selected_id: !!initialActiveId,
+            });
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [initialActiveId, initialConversations.length, trackClientMetric]);
+
     const isWorkspaceHydrationBusy = useCallback((conversationId?: string | null) => {
         const key = String(conversationId || "");
         if (!key) return false;
@@ -888,12 +950,27 @@ export function ConversationInterface({ locationId, initialConversations, initia
             workspaceCoreCacheRef.current,
             conversationId,
             snapshot,
-            WORKSPACE_CACHE_LIMIT
+            WORKSPACE_CACHE_LIMIT,
+            WORKSPACE_CORE_CACHE_TTL_MS
         );
     }, []);
 
     const getCachedWorkspaceCoreSnapshot = useCallback((conversationId: string): WorkspaceCoreSnapshot | null => {
         return getWorkspaceCoreCacheEntry(workspaceCoreCacheRef.current, conversationId);
+    }, []);
+
+    const cacheWorkspaceSidebarSnapshot = useCallback((conversationId: string, snapshot: WorkspaceSidebarSnapshot) => {
+        setWorkspaceCoreCacheEntry(
+            workspaceSidebarCacheRef.current,
+            conversationId,
+            snapshot,
+            WORKSPACE_CACHE_LIMIT,
+            WORKSPACE_SIDEBAR_CACHE_TTL_MS
+        );
+    }, []);
+
+    const getCachedWorkspaceSidebarSnapshot = useCallback((conversationId: string): WorkspaceSidebarSnapshot | null => {
+        return getWorkspaceCoreCacheEntry(workspaceSidebarCacheRef.current, conversationId);
     }, []);
 
     const getPendingMessageKey = useCallback((message: Partial<Message> | null | undefined): string | null => {
@@ -1103,7 +1180,8 @@ export function ConversationInterface({ locationId, initialConversations, initia
             dealWorkspaceCoreCacheRef.current,
             dealId,
             snapshot,
-            WORKSPACE_CACHE_LIMIT
+            WORKSPACE_CACHE_LIMIT,
+            WORKSPACE_CORE_CACHE_TTL_MS
         );
     }, []);
 
@@ -1192,6 +1270,30 @@ export function ConversationInterface({ locationId, initialConversations, initia
             workspaceCoreInFlightRef.current.delete(conversationId);
         }
     }, [cacheWorkspaceCoreSnapshot, trackClientRequest]);
+
+    const prefetchWorkspaceSidebar = useCallback(async (conversationId: string) => {
+        const normalizedConversationId = String(conversationId || "").trim();
+        if (!normalizedConversationId) return;
+        if (getCachedWorkspaceSidebarSnapshot(normalizedConversationId)) return;
+        if (workspaceSidebarInFlightRef.current.has(normalizedConversationId)) return;
+
+        workspaceSidebarInFlightRef.current.add(normalizedConversationId);
+        try {
+            trackClientRequest("workspace_sidebar_prefetch", { conversationId: normalizedConversationId });
+            const sidebar = await getConversationWorkspaceSidebar(normalizedConversationId);
+            if (!sidebar?.success) return;
+            cacheWorkspaceSidebarSnapshot(normalizedConversationId, {
+                contactContext: sidebar.contactContext || null,
+                taskSummary: sidebar.taskSummary || null,
+                viewingSummary: sidebar.viewingSummary || null,
+                agentSummary: sidebar.agentSummary || null,
+            });
+        } catch (error) {
+            console.error("Workspace sidebar prefetch failed:", error);
+        } finally {
+            workspaceSidebarInFlightRef.current.delete(normalizedConversationId);
+        }
+    }, [cacheWorkspaceSidebarSnapshot, getCachedWorkspaceSidebarSnapshot, trackClientRequest]);
 
     const prefetchDealWorkspaceCore = useCallback(async (dealId: string) => {
         if (!dealId) return;
@@ -2071,15 +2173,28 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
         let cancelled = false;
         const selectedConversationId = activeId;
-        setWorkspaceContactContext(null);
-        setWorkspaceTaskSummary(null);
-        setWorkspaceViewingSummary(null);
-        setWorkspaceAgentSummary(null);
         initialWorkspaceLoadedAtRef.current[selectedConversationId] = 0;
 
         const cachedSnapshot = getCachedWorkspaceCoreSnapshot(selectedConversationId);
+        const cachedSidebarSnapshot = getCachedWorkspaceSidebarSnapshot(selectedConversationId);
+        if (cachedSidebarSnapshot) {
+            setWorkspaceContactContext(cachedSidebarSnapshot.contactContext || null);
+            setWorkspaceTaskSummary(cachedSidebarSnapshot.taskSummary || null);
+            setWorkspaceViewingSummary(cachedSidebarSnapshot.viewingSummary || null);
+            setWorkspaceAgentSummary(cachedSidebarSnapshot.agentSummary || null);
+        } else {
+            const shellConversation =
+                selectedConversationCacheRef.current.get(selectedConversationId)
+                || conversationsRef.current.find((conversation) => conversation.id === selectedConversationId)
+                || null;
+            setWorkspaceContactContext(buildContactContextShell(shellConversation, locationId));
+            setWorkspaceTaskSummary(null);
+            setWorkspaceViewingSummary(null);
+            setWorkspaceAgentSummary(null);
+        }
         if (cachedSnapshot) {
             applyWorkspaceCoreSnapshot(selectedConversationId, cachedSnapshot);
+            initialWorkspaceLoadedAtRef.current[selectedConversationId] = Date.now();
             setLoadingMessages(false);
         } else {
             setMessages([]);
@@ -2422,20 +2537,36 @@ export function ConversationInterface({ locationId, initialConversations, initia
         };
 
         const loadWorkspaceSidebar = async () => {
+            if (workspaceSidebarInFlightRef.current.has(selectedConversationId)) return;
+            const sidebarStartedAtMs = Date.now();
+            workspaceSidebarInFlightRef.current.add(selectedConversationId);
             trackClientRequest("workspace_sidebar_load", { conversationId: selectedConversationId });
             try {
                 const sidebar = await getConversationWorkspaceSidebar(selectedConversationId);
                 if (cancelled || activeIdRef.current !== selectedConversationId) return;
                 if (!sidebar?.success) return;
 
+                const sidebarSnapshot: WorkspaceSidebarSnapshot = {
+                    contactContext: sidebar?.contactContext || null,
+                    taskSummary: sidebar?.taskSummary || null,
+                    viewingSummary: sidebar?.viewingSummary || null,
+                    agentSummary: sidebar?.agentSummary || null,
+                };
+                cacheWorkspaceSidebarSnapshot(selectedConversationId, sidebarSnapshot);
                 setWorkspaceContactContext(sidebar?.contactContext || null);
                 setWorkspaceTaskSummary(sidebar?.taskSummary || null);
                 setWorkspaceViewingSummary(sidebar?.viewingSummary || null);
                 setWorkspaceAgentSummary(sidebar?.agentSummary || null);
+                trackClientMetric("sidebar_contact_ready_ms", Date.now() - sidebarStartedAtMs, {
+                    conversationId: selectedConversationId,
+                    cache_hit: false,
+                });
             } catch (err) {
                 if (!cancelled) {
                     console.error("Failed to load conversation workspace sidebar:", err);
                 }
+            } finally {
+                workspaceSidebarInFlightRef.current.delete(selectedConversationId);
             }
         };
 
@@ -2448,12 +2579,20 @@ export function ConversationInterface({ locationId, initialConversations, initia
         const networkDebounceTimer = setTimeout(() => {
             if (cancelled || activeIdRef.current !== selectedConversationId) return;
             void loadWorkspaceCore();
-            void loadWorkspaceSidebar();
+            if (cachedSidebarSnapshot) {
+                trackClientMetric("sidebar_contact_ready_ms", 0, {
+                    conversationId: selectedConversationId,
+                    cache_hit: true,
+                });
+            } else {
+                void loadWorkspaceSidebar();
+            }
         }, WORKSPACE_NETWORK_DEBOUNCE_MS);
 
         const workspaceInitialHydrationInFlight = workspaceInitialHydrationInFlightRef.current;
         const workspaceBackfillInFlight = workspaceBackfillInFlightRef.current;
         const workspaceActivityHydrationInFlight = workspaceActivityHydrationInFlightRef.current;
+        const workspaceSidebarInFlight = workspaceSidebarInFlightRef.current;
 
         return () => {
             cancelled = true;
@@ -2462,6 +2601,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             workspaceInitialHydrationInFlight.delete(selectedConversationId);
             workspaceBackfillInFlight.delete(selectedConversationId);
             workspaceActivityHydrationInFlight.delete(selectedConversationId);
+            workspaceSidebarInFlight.delete(selectedConversationId);
         };
     }, [
         viewMode,
@@ -2469,9 +2609,13 @@ export function ConversationInterface({ locationId, initialConversations, initia
         markConversationReadInUi,
         featureFlags.workspaceV2,
         trackClientRequest,
+        trackClientMetric,
         getCachedWorkspaceCoreSnapshot,
+        getCachedWorkspaceSidebarSnapshot,
         applyWorkspaceCoreSnapshot,
         cacheWorkspaceCoreSnapshot,
+        cacheWorkspaceSidebarSnapshot,
+        locationId,
     ]);
 
     useEffect(() => {
@@ -2942,6 +3086,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             if (cancelled) return;
             for (const conversationId of candidateIds) {
                 void prefetchWorkspaceCore(conversationId);
+                void prefetchWorkspaceSidebar(conversationId);
             }
         };
 
@@ -2958,7 +3103,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 (window as any).cancelIdleCallback(idleHandle);
             }
         };
-    }, [viewMode, activeId, conversations, prefetchWorkspaceCore]);
+    }, [viewMode, activeId, conversations, prefetchWorkspaceCore, prefetchWorkspaceSidebar]);
 
     useEffect(() => {
         if (viewMode !== 'deals') return;
@@ -2998,6 +3143,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
     // Handle clicking a conversation in the list
     const handleSelect = (id: string) => {
+        const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
         const selectedConversation =
             conversationsRef.current.find((conversation) => conversation.id === id)
             || searchResults.find((conversation) => conversation.id === id)
@@ -3012,6 +3158,24 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 return [selectedConversation, ...prev];
             });
         }
+        const cachedSidebar = getCachedWorkspaceSidebarSnapshot(id);
+        if (cachedSidebar) {
+            setWorkspaceContactContext(cachedSidebar.contactContext || null);
+            setWorkspaceTaskSummary(cachedSidebar.taskSummary || null);
+            setWorkspaceViewingSummary(cachedSidebar.viewingSummary || null);
+            setWorkspaceAgentSummary(cachedSidebar.agentSummary || null);
+        } else if (selectedConversation) {
+            setWorkspaceContactContext(buildContactContextShell(selectedConversation, locationId));
+            setWorkspaceTaskSummary(null);
+            setWorkspaceViewingSummary(null);
+            setWorkspaceAgentSummary(null);
+        }
+        setLoadedChatId(id);
+        trackClientMetric("thread_shell_paint_ms", (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt, {
+            conversationId: id,
+            cache_hit: !!getCachedWorkspaceCoreSnapshot(id),
+            sidebar_cache_hit: !!cachedSidebar,
+        });
         setActiveId(id);
         setSelectedTaskId(null);
         markConversationReadInUi(id);
@@ -4745,7 +4909,10 @@ export function ConversationInterface({ locationId, initialConversations, initia
             conversations={searchQuery.trim() ? searchResults : conversations}
             selectedId={viewMode === 'chats' ? activeId : activeDealId}
             onSelect={handleSelect}
-            onHoverConversation={viewMode === 'chats' ? prefetchWorkspaceCore : undefined}
+            onHoverConversation={viewMode === 'chats' ? (conversationId) => {
+                void prefetchWorkspaceCore(conversationId);
+                void prefetchWorkspaceSidebar(conversationId);
+            } : undefined}
             hasMore={viewMode === 'chats' ? conversationListHasMore : false}
             isLoadingMore={viewMode === 'chats' ? loadingMoreConversations : false}
             onLoadMore={viewMode === 'chats' ? loadMoreConversations : undefined}
@@ -4916,6 +5083,12 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 onInitialPaintReady={() => {
                     if (activeIdRef.current === activeConversation.id) {
                         setChatTimelineInitialPainted(true);
+                        const loadedAt = initialWorkspaceLoadedAtRef.current[activeConversation.id] || 0;
+                        trackClientMetric("thread_messages_ready_ms", loadedAt ? Date.now() - loadedAt : 0, {
+                            conversationId: activeConversation.id,
+                            message_count: messages.length,
+                            cache_hit: !!getCachedWorkspaceCoreSnapshot(activeConversation.id),
+                        });
                     }
                 }}
             />

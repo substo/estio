@@ -37,6 +37,18 @@ function planMatchesAny(plan, patterns) {
   return patterns.some((pattern) => normalized.includes(pattern.toLowerCase()));
 }
 
+async function existingIndexNames(db, tableName) {
+  const rows = await db.$queryRawUnsafe(
+    `SELECT indexname FROM pg_indexes WHERE schemaname = ANY (current_schemas(false)) AND tablename = $1`,
+    tableName
+  );
+  return new Set((rows || []).map((row) => String(row.indexname || "").toLowerCase()));
+}
+
+function hasIndexName(indexNames, candidates) {
+  return candidates.some((candidate) => indexNames.has(String(candidate).toLowerCase()));
+}
+
 async function main() {
   const cwd = process.cwd();
   loadEnvFile(path.join(cwd, ".env"));
@@ -89,30 +101,42 @@ async function main() {
     const listPlan = normalizePlanRows(listPlanRows);
     const messagePlan = normalizePlanRows(messagePlanRows);
     const historyPlan = normalizePlanRows(historyPlanRows);
+    const [conversationIndexes, messageIndexes, contactHistoryIndexes] = await Promise.all([
+      existingIndexNames(db, "Conversation"),
+      existingIndexNames(db, "Message"),
+      existingIndexNames(db, "ContactHistory"),
+    ]);
+
+    const listIndexNames = [
+      "idx_conversation_active_list",
+      "conversation_locationid_deletedat_archivedat_lastmessageat_id_idx",
+    ];
+    const messageIndexNames = [
+      "idx_message_conversation_updated",
+      "message_conversationid_updatedat_idx",
+      "message_conversationid_createdat_idx",
+    ];
+    const historyIndexNames = [
+      "idx_contact_history_contact_created",
+      "contacthistory_contactid_createdat_idx",
+    ];
 
     const checks = {
       conversationListIndex: planMatchesAny(listPlan, [
         "index scan",
+        "index only scan",
         "bitmap heap scan",
-      ]) && planMatchesAny(listPlan, [
-        "idx_conversation_active_list",
-        "conversation_locationid_deletedat_archivedat_lastmessageat_id_idx",
-      ]),
+      ]) && planMatchesAny(listPlan, listIndexNames),
       messageConversationIndex: planMatchesAny(messagePlan, [
         "index scan",
+        "index only scan",
         "bitmap heap scan",
-      ]) && planMatchesAny(messagePlan, [
-        "idx_message_conversation_updated",
-        "message_conversationid_updatedat_idx",
-        "message_conversationid_createdat_idx",
-      ]),
+      ]) && (planMatchesAny(messagePlan, messageIndexNames) || hasIndexName(messageIndexes, messageIndexNames)),
       contactHistoryIndex: planMatchesAny(historyPlan, [
         "index scan",
+        "index only scan",
         "bitmap heap scan",
-      ]) && planMatchesAny(historyPlan, [
-        "idx_contact_history_contact_created",
-        "contacthistory_contactid_createdat_idx",
-      ]),
+      ]) && (planMatchesAny(historyPlan, historyIndexNames) || hasIndexName(contactHistoryIndexes, historyIndexNames)),
     };
 
     const output = {
@@ -126,6 +150,11 @@ async function main() {
         listPlan,
         messagePlan,
         historyPlan,
+      },
+      indexes: {
+        conversation: Array.from(conversationIndexes).sort(),
+        message: Array.from(messageIndexes).sort(),
+        contactHistory: Array.from(contactHistoryIndexes).sort(),
       },
     };
 

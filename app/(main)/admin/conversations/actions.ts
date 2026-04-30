@@ -2326,6 +2326,22 @@ async function enrichContactContextContact(contact: any, locationId: string) {
     };
 }
 
+const getCachedActiveLeadSourceNames = unstable_cache(
+    async (locationId: string) => {
+        const leadSources = await db.leadSource.findMany({
+            where: { locationId, isActive: true },
+            select: { name: true },
+            orderBy: { name: "asc" },
+        });
+        return leadSources.map((source) => source.name);
+    },
+    ["contacts:active-lead-source-names:v1"],
+    {
+        revalidate: 60,
+        tags: ["contacts:lead-sources"],
+    }
+);
+
 async function getConversationContactContextSnapshot(locationId: string, contactId: string) {
     const [contact, leadSources] = await Promise.all([
         db.contact.findFirst({
@@ -2335,18 +2351,14 @@ async function getConversationContactContextSnapshot(locationId: string, contact
             },
             include: getContactContextInclude(),
         }),
-        db.leadSource.findMany({
-            where: { locationId, isActive: true },
-            select: { name: true },
-            orderBy: { name: "asc" },
-        }),
+        getCachedActiveLeadSourceNames(locationId),
     ]);
 
     const hydratedContact = await enrichContactContextContact(contact, locationId);
 
     return {
         contact: hydratedContact,
-        leadSources: leadSources.map((source) => source.name),
+        leadSources,
     };
 }
 
@@ -6866,19 +6878,14 @@ export async function getContactContext(contactId: string, options?: { refreshEx
         }
     }
 
-    // Fetch Lead Sources for the Edit Form
-    const leadSources = await db.leadSource.findMany({
-        where: { locationId: location.id, isActive: true },
-        select: { name: true },
-        orderBy: { name: 'asc' }
-    });
+    const leadSources = await getCachedActiveLeadSourceNames(location.id);
 
 
     const hydratedContact = await enrichContactContextContact(contact, location.id);
 
     return {
         contact: hydratedContact,
-        leadSources: leadSources.map((s: any) => s.name)
+        leadSources
     };
 }
 

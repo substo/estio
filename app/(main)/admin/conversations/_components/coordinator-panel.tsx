@@ -737,7 +737,7 @@ export function CoordinatorPanel({
                     <CardHeader className="p-3 pb-1.5">
                         <div className="flex justify-between items-center pr-4">
                             <CardTitle className="text-xs font-semibold">Details</CardTitle>
-                            {contactContext?.contact && (
+                            {contactContext?.contact && !contactContext?.shell && (
                                 <EditContactDialog
                                     contact={contactContext.contact}
                                     leadSources={contactContext.leadSources || []}
@@ -753,14 +753,18 @@ export function CoordinatorPanel({
                             <>
                                 <div className="flex flex-col gap-0.5">
                                     <div className="font-medium text-sm text-primary hover:underline cursor-pointer">
-                                        <EditContactDialog
-                                            contact={contactContext.contact}
-                                            leadSources={contactContext.leadSources || []}
-                                            trigger={<span>{contactContext.contact.name || "Unnamed Contact"}</span>}
-                                            onContactSaved={handleContactSaved}
-                                            onMergeSuccess={onContactMerged}
-                                            skipRouterRefresh
-                                        />
+                                        {!contactContext?.shell ? (
+                                            <EditContactDialog
+                                                contact={contactContext.contact}
+                                                leadSources={contactContext.leadSources || []}
+                                                trigger={<span>{contactContext.contact.name || "Unnamed Contact"}</span>}
+                                                onContactSaved={handleContactSaved}
+                                                onMergeSuccess={onContactMerged}
+                                                skipRouterRefresh
+                                            />
+                                        ) : (
+                                            <span>{contactContext.contact.name || "Unnamed Contact"}</span>
+                                        )}
                                     </div>
                                     <div className="text-muted-foreground text-[11px] flex flex-col gap-0.5">
                                         {contactContext.contact.email && (

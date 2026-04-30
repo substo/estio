@@ -162,6 +162,35 @@ export function ConversationList({
         return () => observer.disconnect();
     }, [effectiveViewMode, hasMore, isLoadingMore, onLoadMore, conversations.length]);
 
+    useEffect(() => {
+        if (effectiveViewMode !== 'chats') return;
+        if (!onHoverConversation) return;
+        if (!listScrollRef.current) return;
+
+        const seen = new Set<string>();
+        const root = listScrollRef.current;
+        const observer = new IntersectionObserver(
+            (entries) => {
+                for (const entry of entries) {
+                    if (!entry.isIntersecting) continue;
+                    const id = (entry.target as HTMLElement).getAttribute('data-conversation-id');
+                    if (!id || seen.has(id)) continue;
+                    seen.add(id);
+                    onHoverConversation(id);
+                }
+            },
+            {
+                root,
+                rootMargin: '600px 0px',
+                threshold: 0.01,
+            }
+        );
+
+        const rows = Array.from(root.querySelectorAll<HTMLElement>('[data-conversation-id]')).slice(0, 20);
+        rows.forEach((row) => observer.observe(row));
+        return () => observer.disconnect();
+    }, [effectiveViewMode, conversations, onHoverConversation]);
+
     // Unified Header Component - used in both modes
     const renderUnifiedHeader = () => {
         const visibleSelectedCount = conversations.filter((conversation) => selectedIds?.has(conversation.id)).length;

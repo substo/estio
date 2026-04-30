@@ -201,6 +201,7 @@ interface ContactFormProps {
     onContactSaved?: (patch: ContactIdentityPatch) => void;
     skipRouterRefresh?: boolean;
     onTabChange?: (value: string) => void;
+    onShellReady?: () => void;
 }
 
 function SubmitButton({ isEditing, isCreating, toggler }: { isEditing: boolean, isCreating: boolean, toggler: (e: React.MouseEvent) => void }) {
@@ -231,7 +232,7 @@ function formatDate(date: Date | string | null | undefined) {
     }
 }
 
-export function ContactForm({ initialMode = 'create', contact: initialContact, locationId, onSuccess, additionalTabs, additionalTabContent, editActionsMenuItems, additionalTabCount = 0, leadSources = [], isOutlookConnected = false, initialData, onContactSaved, skipRouterRefresh = false, onTabChange }: ContactFormProps) {
+export function ContactForm({ initialMode = 'create', contact: initialContact, locationId, onSuccess, additionalTabs, additionalTabContent, editActionsMenuItems, additionalTabCount = 0, leadSources = [], isOutlookConnected = false, initialData, onContactSaved, skipRouterRefresh = false, onTabChange, onShellReady }: ContactFormProps) {
     // For initialization, merge passed contact with initialData (prefill)
     const baseContact = { ...initialData, ...initialContact } as ContactData | undefined;
 
@@ -329,6 +330,12 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
     useEffect(() => {
         onTabChange?.(activeTab);
     }, [activeTab, onTabChange]);
+
+    useEffect(() => {
+        if (!contact?.id) return;
+        const rafId = requestAnimationFrame(() => onShellReady?.());
+        return () => cancelAnimationFrame(rafId);
+    }, [contact?.id, onShellReady]);
 
     const toggleEdit = (e?: React.MouseEvent) => {
         if (e) {
@@ -541,20 +548,64 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
     const needsCompanies = currentConfig.entityType === 'company' || currentConfig.entityType === 'either';
 
     useEffect(() => {
-        setLoadingData(true);
-        const promises: Promise<any>[] = [getUsersForSelect(locationId)];
-        if (needsProperties) promises.push(getPropertiesForSelect(locationId));
-        if (needsCompanies) promises.push(getCompaniesForSelect(locationId));
+        const shouldLoadSelectData = isEditing
+            || activeTab === 'details'
+            || activeTab === 'properties'
+            || activeTab === 'matching';
+        if (!shouldLoadSelectData) return;
+        if (users.length > 0 && (!needsProperties || properties.length > 0) && (!needsCompanies || companies.length > 0)) return;
 
-        Promise.all(promises).then((results) => {
-            setUsers(results[0]);
-            let idx = 1;
-            if (needsProperties) setProperties(results[idx++] || []);
-            if (needsCompanies) setCompanies(results[idx++] || []);
-        }).finally(() => {
-            setLoadingData(false);
-        });
-    }, [locationId, needsProperties, needsCompanies]);
+        let cancelled = false;
+        let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+        let idleHandle: number | null = null;
+
+        const loadSelectData = () => {
+            if (cancelled) return;
+            setLoadingData(true);
+            const promises: Promise<any>[] = [
+                users.length > 0 ? Promise.resolve(users) : getUsersForSelect(locationId),
+            ];
+            if (needsProperties) {
+                promises.push(properties.length > 0 ? Promise.resolve(properties) : getPropertiesForSelect(locationId));
+            }
+            if (needsCompanies) {
+                promises.push(companies.length > 0 ? Promise.resolve(companies) : getCompaniesForSelect(locationId));
+            }
+
+            Promise.all(promises).then((results) => {
+                if (cancelled) return;
+                setUsers(results[0]);
+                let idx = 1;
+                if (needsProperties) setProperties(results[idx++] || []);
+                if (needsCompanies) setCompanies(results[idx++] || []);
+            }).finally(() => {
+                if (!cancelled) setLoadingData(false);
+            });
+        };
+
+        if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+            idleHandle = (window as any).requestIdleCallback(loadSelectData, { timeout: 600 });
+        } else {
+            timeoutHandle = setTimeout(loadSelectData, 120);
+        }
+
+        return () => {
+            cancelled = true;
+            if (timeoutHandle) clearTimeout(timeoutHandle);
+            if (idleHandle !== null && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+                (window as any).cancelIdleCallback(idleHandle);
+            }
+        };
+    }, [
+        activeTab,
+        companies.length,
+        isEditing,
+        locationId,
+        needsCompanies,
+        needsProperties,
+        properties.length,
+        users.length,
+    ]);
 
     // leadSources are passed as props
 

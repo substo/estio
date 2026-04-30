@@ -1,7 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Pencil, Trash, RefreshCw, UploadCloud } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { previewLeadAction } from '@/app/(main)/admin/settings/crm/actions';
@@ -43,7 +43,7 @@ const ContactViewingManager = dynamic(
     }
 );
 
-export function EditContactForm({ contact, onSuccess, onDelete, onContactSaved, onMergeSuccess, leadSources, initialMode = 'edit', isOutlookConnected = false, isGoogleConnected = false, isGhlConnected = false, skipRouterRefresh = false }: { contact: ContactData; onSuccess?: () => void; onDelete?: () => void; onContactSaved?: (patch: ContactIdentityPatch) => void; onMergeSuccess?: (targetContactId: string, targetConversationId?: string | null) => void; leadSources: string[]; initialMode?: 'view' | 'edit' | 'create'; isOutlookConnected?: boolean; isGoogleConnected?: boolean; isGhlConnected?: boolean; skipRouterRefresh?: boolean }) {
+export function EditContactForm({ contact, onSuccess, onDelete, onContactSaved, onMergeSuccess, leadSources, initialMode = 'edit', isOutlookConnected = false, isGoogleConnected = false, isGhlConnected = false, skipRouterRefresh = false, onShellReady }: { contact: ContactData; onSuccess?: () => void; onDelete?: () => void; onContactSaved?: (patch: ContactIdentityPatch) => void; onMergeSuccess?: (targetContactId: string, targetConversationId?: string | null) => void; leadSources: string[]; initialMode?: 'view' | 'edit' | 'create'; isOutlookConnected?: boolean; isGoogleConnected?: boolean; isGhlConnected?: boolean; skipRouterRefresh?: boolean; onShellReady?: () => void }) {
     const { toast } = useToast();
     const [activeTab, setActiveTab] = useState('details');
     const [loadingHistory, setLoadingHistory] = useState(false);
@@ -160,6 +160,7 @@ export function EditContactForm({ contact, onSuccess, onDelete, onContactSaved, 
                 isOutlookConnected={isOutlookConnected}
                 skipRouterRefresh={skipRouterRefresh}
                 onTabChange={setActiveTab}
+                onShellReady={onShellReady}
                 additionalTabCount={showViewings ? 3 : 2}
                 additionalTabs={
                     <>
@@ -281,22 +282,40 @@ export function EditContactForm({ contact, onSuccess, onDelete, onContactSaved, 
 
 export function EditContactDialog({ contact, leadSources = [], trigger, isOutlookConnected = false, isGoogleConnected = false, isGhlConnected = false, onContactSaved, onMergeSuccess, skipRouterRefresh = false }: { contact: ContactData; leadSources?: string[]; trigger?: React.ReactNode; isOutlookConnected?: boolean; isGoogleConnected?: boolean; isGhlConnected?: boolean; onContactSaved?: (patch: ContactIdentityPatch) => void; onMergeSuccess?: (targetContactId: string, targetConversationId?: string | null) => void; skipRouterRefresh?: boolean }) {
     const [open, setOpen] = useState(false);
+    const openedAtRef = useRef<number | null>(null);
     const normalizedContact: ContactData = {
         ...contact,
         leadOtherDetails: contact.leadOtherDetails ?? contact.notes ?? undefined,
     };
 
+    const handleOpenChange = (nextOpen: boolean) => {
+        if (nextOpen) {
+            openedAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        } else {
+            openedAtRef.current = null;
+        }
+        setOpen(nextOpen);
+    };
+
     return (
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog open={open} onOpenChange={handleOpenChange}>
             <DialogTrigger asChild>
-                {trigger ? trigger : (
-                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                {trigger ? (
+                    <span data-contact-edit-trigger="true">
+                        {trigger}
+                    </span>
+                ) : (
+                    <Button variant="ghost" size="icon" className="h-8 w-8" data-contact-edit-trigger="true">
                         <Pencil className="h-4 w-4" />
                         <span className="sr-only">Edit</span>
                     </Button>
                 )}
             </DialogTrigger>
-            <DialogContent className="sm:max-w-[700px] max-h-[90vh] flex flex-col">
+            <DialogContent
+                className="sm:max-w-[700px] max-h-[90vh] flex flex-col"
+                data-contact-edit-dialog="true"
+                data-contact-edit-shell-ready="true"
+            >
                 <DialogHeader>
                     <DialogTitle>Edit Contact</DialogTitle>
                     <DialogDescription>
@@ -313,6 +332,19 @@ export function EditContactDialog({ contact, leadSources = [], trigger, isOutloo
                     isGoogleConnected={isGoogleConnected}
                     isGhlConnected={isGhlConnected}
                     skipRouterRefresh={skipRouterRefresh}
+                    onShellReady={() => {
+                        const startedAt = openedAtRef.current;
+                        if (startedAt === null) return;
+                        const elapsed = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+                        console.log("[perf:conversations.client_metric]", JSON.stringify({
+                            kind: "contact_edit_open_ms",
+                            value_ms: Math.max(0, Math.round(elapsed)),
+                            contactId: normalizedContact.id,
+                            cache_hit: true,
+                            ts: new Date().toISOString(),
+                        }));
+                        openedAtRef.current = null;
+                    }}
                 />
             </DialogContent>
         </Dialog>

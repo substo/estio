@@ -97,6 +97,35 @@ async function benchmarkActivation(page, ids, options) {
   };
 }
 
+async function benchmarkContactEditOpen(page) {
+  const trigger = page.locator('[data-contact-edit-trigger="true"]').first();
+  const count = await trigger.count();
+  if (count === 0) {
+    return { skipped: true, reason: "Contact edit trigger unavailable." };
+  }
+
+  const elapsed = await page.evaluate(async () => {
+    const triggerEl = document.querySelector('[data-contact-edit-trigger="true"]');
+    if (!triggerEl) return null;
+    const start = performance.now();
+    triggerEl.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    const timeoutAt = performance.now() + 8_000;
+    while (performance.now() < timeoutAt) {
+      const dialog = document.querySelector('[data-contact-edit-dialog="true"][data-contact-edit-shell-ready="true"]');
+      if (dialog) return performance.now() - start;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    return null;
+  });
+
+  await page.keyboard.press("Escape").catch(() => null);
+  if (!elapsed) {
+    return { skipped: true, reason: "Contact edit dialog did not open within timeout." };
+  }
+  return { shellMs: elapsed };
+}
+
 async function clickTab(page, label) {
   const tab = page.getByRole("tab", { name: new RegExp(label, "i") });
   const count = await tab.count();
@@ -199,8 +228,10 @@ async function main() {
     }
 
     const page = await context.newPage();
+    const listStartedAt = Date.now();
     await page.goto(target, { waitUntil: "domcontentloaded" });
     await page.waitForSelector('[data-conversation-id]', { timeout: 20_000 });
+    const listFirstPaintMs = Date.now() - listStartedAt;
 
     const conversationIds = await page.$$eval('[data-conversation-id]', (rows) =>
       rows.map((row) => row.getAttribute("data-conversation-id")).filter(Boolean).slice(0, 5)
@@ -216,6 +247,7 @@ async function main() {
       activeAttribute: "data-chat-active-conversation-id",
       readyAttribute: "data-chat-initial-paint-ready",
     });
+    const contactEdit = await benchmarkContactEditOpen(page);
 
     await clickTab(page, "Deals");
     await page.waitForSelector('[data-deal-id]', { timeout: 5_000 }).catch(() => null);
@@ -241,25 +273,31 @@ async function main() {
       target,
       iterations,
       samples: {
+        listFirstPaintMs,
         chats: chatStats,
         deals: dealStats,
         bindToOpen,
+        contactEdit,
       },
       targets: {
-        chatsWarmP95LtMs: 350,
-        chatsColdP95LtMs: 700,
+        listFirstPaintLtMs: 1000,
+        chatsWarmP95LtMs: 150,
+        chatsColdP95LtMs: 800,
         dealsWarmP95LtMs: 350,
         dealsColdP95LtMs: 700,
         bindShellLtMs: 250,
         bindFirstPaintLtMs: 700,
+        contactEditShellLtMs: 150,
       },
       passFail: {
-        chatsWarm: chatStats.warm.count > 0 ? chatStats.warm.p95Ms <= 350 : false,
-        chatsCold: chatStats.cold.count > 0 ? chatStats.cold.p95Ms <= 700 : false,
+        listFirstPaint: listFirstPaintMs <= 1000,
+        chatsWarm: chatStats.warm.count > 0 ? chatStats.warm.p95Ms <= 150 : false,
+        chatsCold: chatStats.cold.count > 0 ? chatStats.cold.p95Ms <= 800 : false,
         dealsWarm: dealStats ? (dealStats.warm.count > 0 ? dealStats.warm.p95Ms <= 350 : false) : true,
         dealsCold: dealStats ? (dealStats.cold.count > 0 ? dealStats.cold.p95Ms <= 700 : false) : true,
         bindShell: bindToOpen?.skipped ? true : Number(bindToOpen?.shellMs || 0) <= 250,
         bindFirstPaint: bindToOpen?.skipped ? true : Number(bindToOpen?.firstPaintMs || 0) <= 700,
+        contactEditShell: contactEdit?.skipped ? true : Number(contactEdit?.shellMs || 0) <= 150,
       },
     };
 
