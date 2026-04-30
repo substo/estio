@@ -811,42 +811,41 @@ export async function createContact(
       return contact;
     });
 
-    // Fetch location to get token and GHL Location ID
-    const location = await db.location.findUnique({ where: { id: data.locationId }, select: { ghlAccessToken: true, ghlLocationId: true } });
-    if (location?.ghlAccessToken && location?.ghlLocationId) {
-      // Fire and forget or await? Usually await to catch errors, but don't block UI if non-critical.
-      // We will try/catch and log error but not fail the action
-      try {
-        console.log('[createContact] Syncing to GHL...');
-        // Create in GHL (Fire & Forget)
-        syncContactToGHL(
-          location.ghlLocationId,
-          {
-            name: contact.name || undefined,
-            email: contact.email || undefined,
-            phone: contact.phone || undefined
-          },
-          contact.ghlContactId
-        ).then(async (ghlId) => {
-          if (ghlId) {
-            await db.contact.update({ where: { id: contact.id }, data: { ghlContactId: ghlId } });
+    // Fire-and-forget: GHL + Google sync run in the background
+    after(() => {
+      // 1. GHL Sync
+      (async () => {
+        const location = await db.location.findUnique({ where: { id: data.locationId }, select: { ghlAccessToken: true, ghlLocationId: true } });
+        if (location?.ghlAccessToken && location?.ghlLocationId) {
+          try {
+            console.log('[createContact] Syncing to GHL...');
+            const ghlId = await syncContactToGHL(
+              location.ghlLocationId,
+              {
+                name: contact.name || undefined,
+                email: contact.email || undefined,
+                phone: contact.phone || undefined
+              },
+              contact.ghlContactId
+            );
+            if (ghlId) {
+              await db.contact.update({ where: { id: contact.id }, data: { ghlContactId: ghlId } });
+            }
+          } catch (e) {
+            console.error('[createContact] GHL Sync Failed:', e);
           }
-        }).catch(e => {
-          console.error('[createContact] GHL Sync Failed (async):', e);
-        });
-      } catch (e) {
-        console.error('[createContact] GHL Sync Failed (sync):', e);
-      }
-    }
+        }
+      })();
 
-    // Fire-and-forget: Google sync runs in the background (same pattern as tasks)
-    void runGoogleAutoSyncForContact({
-      locationId: data.locationId,
-      contactId: contact.id,
-      source: 'CONTACT_FORM',
-      event: 'create',
-      preferredUserId: internalUserId
-    }).catch(err => console.error('[createContact] Google auto-sync error:', err));
+      // 2. Google Auto-Sync
+      runGoogleAutoSyncForContact({
+        locationId: data.locationId,
+        contactId: contact.id,
+        source: 'CONTACT_FORM',
+        event: 'create',
+        preferredUserId: internalUserId
+      }).catch(err => console.error('[createContact] Google auto-sync error:', err));
+    });
 
 
     revalidatePath('/admin/contacts');
@@ -1013,42 +1012,44 @@ async function updateContactCore(
 
     // Fire-and-forget: GHL + Google sync run in the background (same pattern as tasks)
     const existingGhlContactId = existingContactCheck?.ghlContactId || null;
-    void Promise.allSettled([
-      // 1. Sync to GoHighLevel
-      (async () => {
-        try {
-          const location = await db.location.findUnique({
-            where: { id: data.locationId },
-            select: { ghlAccessToken: true, ghlLocationId: true }
-          });
-          if (location?.ghlAccessToken && location?.ghlLocationId) {
-            console.log('[updateContact] Syncing to GoHighLevel...');
-            const ghlId = await syncContactToGHL(location.ghlLocationId, {
-              name: data.name || undefined,
-              email: data.email || undefined,
-              phone: data.phone || undefined,
-            }, existingGhlContactId);
-            if (ghlId && !existingGhlContactId) {
-              await db.contact.update({
-                where: { id: data.contactId },
-                data: { ghlContactId: ghlId }
-              });
+    after(() => {
+      void Promise.allSettled([
+        // 1. Sync to GoHighLevel
+        (async () => {
+          try {
+            const location = await db.location.findUnique({
+              where: { id: data.locationId },
+              select: { ghlAccessToken: true, ghlLocationId: true }
+            });
+            if (location?.ghlAccessToken && location?.ghlLocationId) {
+              console.log('[updateContact] Syncing to GoHighLevel...');
+              const ghlId = await syncContactToGHL(location.ghlLocationId, {
+                name: data.name || undefined,
+                email: data.email || undefined,
+                phone: data.phone || undefined,
+              }, existingGhlContactId);
+              if (ghlId && !existingGhlContactId) {
+                await db.contact.update({
+                  where: { id: data.contactId },
+                  data: { ghlContactId: ghlId }
+                });
+              }
+              console.log('[updateContact] GHL Sync complete');
             }
-            console.log('[updateContact] GHL Sync complete');
+          } catch (ghlError) {
+            console.error('[updateContact] GHL Sync Failed:', ghlError);
           }
-        } catch (ghlError) {
-          console.error('[updateContact] GHL Sync Failed:', ghlError);
-        }
-      })(),
-      // 2. Optional Google auto-sync for linked contacts (opt-in settings)
-      runGoogleAutoSyncForContact({
-        locationId: data.locationId,
-        contactId: data.contactId,
-        source: 'CONTACT_FORM',
-        event: 'update',
-        preferredUserId: internalUserId
-      }),
-    ]).catch(err => console.error('[updateContact] background sync error:', err));
+        })(),
+        // 2. Optional Google auto-sync for linked contacts (opt-in settings)
+        runGoogleAutoSyncForContact({
+          locationId: data.locationId,
+          contactId: data.contactId,
+          source: 'CONTACT_FORM',
+          event: 'update',
+          preferredUserId: internalUserId
+        }),
+      ]).catch(err => console.error('[updateContact] background sync error:', err));
+    });
 
     log('11_returning');
     return { success: true, message: 'Contact updated successfully.', contact: savedContactSummary };
