@@ -9502,7 +9502,8 @@ const PASTE_LEAD_FIRST_OUTREACH_SUGGESTION = [
     "Draft a first outreach message for this pasted lead.",
     "Use the lead note and conversation timeline as context.",
     "If the note references one or more properties, acknowledge the enquiry and reference the relevant property URL from the note if present.",
-    "Ask whether they need more details or would like to arrange a viewing, say I am here to help with any questions, and do not mention import/internal notes.",
+    "If the note describes search criteria rather than a specific property, acknowledge what they are looking for and say I will send them suitable options from our currently available inventory.",
+    "Ask whether they need more details or would like to arrange a viewing only when that fits the lead context, say I am here to help with any questions, and do not mention import/internal notes.",
 ].join(" ");
 
 function parseNumericToken(token: string): number | null {
