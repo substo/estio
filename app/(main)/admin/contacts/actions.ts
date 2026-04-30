@@ -12,6 +12,8 @@ import {
 } from '@/app/(main)/admin/contacts/_components/contact-types';
 import { syncContactToGHL } from '@/lib/ghl/stakeholders';
 import { runGoogleAutoSyncForContact } from '@/lib/google/automation';
+import { enqueueContactSync } from '@/lib/contacts/sync-engine';
+import { Prisma } from '@prisma/client';
 import { getLocationContext } from '@/lib/auth/location-context';
 import { parseEvolutionMessageContent } from '@/lib/whatsapp/evolution-media';
 import { seedConversationFromContactLeadText } from '@/lib/conversations/bootstrap';
@@ -808,45 +810,15 @@ export async function createContact(
       // Log Creation
       await logContactHistory(tx, contact.id, internalUserId, 'CREATED');
 
+      await enqueueContactSync(tx as Prisma.TransactionClient, {
+        contactId: contact.id,
+        locationId: data.locationId,
+        operation: 'create',
+        payload: { preferredUserId: internalUserId }
+      });
+
       return contact;
     });
-
-    // Fire-and-forget: GHL + Google sync run in the background
-    after(() => {
-      // 1. GHL Sync
-      (async () => {
-        const location = await db.location.findUnique({ where: { id: data.locationId }, select: { ghlAccessToken: true, ghlLocationId: true } });
-        if (location?.ghlAccessToken && location?.ghlLocationId) {
-          try {
-            console.log('[createContact] Syncing to GHL...');
-            const ghlId = await syncContactToGHL(
-              location.ghlLocationId,
-              {
-                name: contact.name || undefined,
-                email: contact.email || undefined,
-                phone: contact.phone || undefined
-              },
-              contact.ghlContactId
-            );
-            if (ghlId) {
-              await db.contact.update({ where: { id: contact.id }, data: { ghlContactId: ghlId } });
-            }
-          } catch (e) {
-            console.error('[createContact] GHL Sync Failed:', e);
-          }
-        }
-      })();
-
-      // 2. Google Auto-Sync
-      runGoogleAutoSyncForContact({
-        locationId: data.locationId,
-        contactId: contact.id,
-        source: 'CONTACT_FORM',
-        event: 'create',
-        preferredUserId: internalUserId
-      }).catch(err => console.error('[createContact] Google auto-sync error:', err));
-    });
-
 
     revalidatePath('/admin/contacts');
     return {
@@ -1007,49 +979,15 @@ async function updateContactCore(
 
       await handleContactRoles(tx, data.contactId, data);
       log('9_txHandleRoles');
+
+      await enqueueContactSync(tx as Prisma.TransactionClient, {
+        contactId: data.contactId,
+        locationId: data.locationId,
+        operation: 'update',
+        payload: { preferredUserId: internalUserId }
+      });
     });
     log('10_txComplete');
-
-    // Fire-and-forget: GHL + Google sync run in the background (same pattern as tasks)
-    const existingGhlContactId = existingContactCheck?.ghlContactId || null;
-    after(() => {
-      void Promise.allSettled([
-        // 1. Sync to GoHighLevel
-        (async () => {
-          try {
-            const location = await db.location.findUnique({
-              where: { id: data.locationId },
-              select: { ghlAccessToken: true, ghlLocationId: true }
-            });
-            if (location?.ghlAccessToken && location?.ghlLocationId) {
-              console.log('[updateContact] Syncing to GoHighLevel...');
-              const ghlId = await syncContactToGHL(location.ghlLocationId, {
-                name: data.name || undefined,
-                email: data.email || undefined,
-                phone: data.phone || undefined,
-              }, existingGhlContactId);
-              if (ghlId && !existingGhlContactId) {
-                await db.contact.update({
-                  where: { id: data.contactId },
-                  data: { ghlContactId: ghlId }
-                });
-              }
-              console.log('[updateContact] GHL Sync complete');
-            }
-          } catch (ghlError) {
-            console.error('[updateContact] GHL Sync Failed:', ghlError);
-          }
-        })(),
-        // 2. Optional Google auto-sync for linked contacts (opt-in settings)
-        runGoogleAutoSyncForContact({
-          locationId: data.locationId,
-          contactId: data.contactId,
-          source: 'CONTACT_FORM',
-          event: 'update',
-          preferredUserId: internalUserId
-        }),
-      ]).catch(err => console.error('[updateContact] background sync error:', err));
-    });
 
     log('11_returning');
     return { success: true, message: 'Contact updated successfully.', contact: savedContactSummary };
@@ -1439,34 +1377,18 @@ export async function importNewGoogleContactAction(resourceName: string, expecte
         }
       });
 
-      // Log Creation
       await logContactHistory(tx, createdContact.id, internalUserId, 'CREATED_FROM_GOOGLE');
+
+      await enqueueContactSync(tx as Prisma.TransactionClient, {
+        contactId: createdContact.id,
+        locationId: expectedLocationId,
+        operation: 'create',
+        payload: { preferredUserId: internalUserId },
+        providers: ['ghl']
+      });
 
       return createdContact;
     });
-
-    // Fire & Forget sync to GHL
-    const location = await db.location.findUnique({ where: { id: expectedLocationId }, select: { ghlAccessToken: true, ghlLocationId: true } });
-    if (location?.ghlAccessToken && location?.ghlLocationId) {
-      try {
-        console.log('[importNewGoogleContactAction] Syncing new Google import to GHL...');
-        syncContactToGHL(
-          location.ghlLocationId,
-          {
-            name: contact.name || undefined,
-            email: contact.email || undefined,
-            phone: contact.phone || undefined
-          },
-          contact.ghlContactId
-        ).then(async (ghlId) => {
-          if (ghlId) {
-            await db.contact.update({ where: { id: contact.id }, data: { ghlContactId: ghlId } });
-          }
-        }).catch(e => console.error('[importNewGoogleContactAction] GHL Sync Failed (async):', e));
-      } catch (e) {
-        console.error('[importNewGoogleContactAction] GHL Sync Failed (sync):', e);
-      }
-    }
 
     revalidatePath('/admin/contacts');
     return { success: true, message: 'Contact imported successfully.', contactId: contact.id };
@@ -2982,6 +2904,13 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
           companyRoles: sourceCompanyRoles.length,
         },
       });
+
+      await enqueueContactSync(tx as Prisma.TransactionClient, {
+        contactId: targetContactId,
+        locationId: target.locationId,
+        operation: 'update',
+        payload: { preferredUserId: dbUser?.id }
+      });
     });
 
     // Post-transaction: External system cleanup (fire-and-forget via after())
@@ -3009,47 +2938,6 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
               console.log(`[Merge] ${deleted ? 'Deleted' : 'Failed to delete'} source GHL contact ${source.ghlContactId}`);
             } catch (err) {
               console.error('[Merge] GHL delete failed:', err);
-            }
-          }
-        })(),
-
-        // C. Sync target to Google with merged data
-        (async () => {
-          if (dbUser?.id) {
-            try {
-              await runGoogleAutoSyncForContact({
-                locationId: target.locationId,
-                contactId: targetContactId,
-                source: 'CONTACT_MERGE',
-                event: 'update',
-                preferredUserId: dbUser.id,
-              });
-            } catch (err) {
-              console.error('[Merge] Google sync of target failed:', err);
-            }
-          }
-        })(),
-
-        // D. Sync target to GHL with merged data
-        (async () => {
-          if (location?.ghlLocationId && location?.ghlAccessToken) {
-            try {
-              const updatedTarget = await db.contact.findUnique({ where: { id: targetContactId } });
-              if (updatedTarget) {
-                const ghlId = await syncContactToGHL(location.ghlLocationId, {
-                  name: updatedTarget.name || '',
-                  phone: updatedTarget.phone || undefined,
-                  email: updatedTarget.email || undefined,
-                }, updatedTarget.ghlContactId);
-                if (ghlId && !updatedTarget.ghlContactId) {
-                  await db.contact.update({
-                    where: { id: targetContactId },
-                    data: { ghlContactId: ghlId }
-                  });
-                }
-              }
-            } catch (err) {
-              console.error('[Merge] GHL sync of target failed:', err);
             }
           }
         })(),
@@ -3220,41 +3108,14 @@ export async function saveSharedContact(params: {
         sharedOrganization: params.organization,
       });
 
-      return created;
-    });
+      await enqueueContactSync(tx as Prisma.TransactionClient, {
+        contactId: created.id,
+        locationId: params.locationId,
+        operation: 'create',
+        payload: { preferredUserId: dbUser?.id }
+      });
 
-    // Fire-and-forget sync to GoHighLevel and Google (run after HTTP response)
-    after(() => {
-      void Promise.allSettled([
-        (async () => {
-          try {
-            if (location?.ghlAccessToken && location?.ghlLocationId) {
-              const ghlId = await syncContactToGHL(location.ghlLocationId, {
-                name: contact.name || '',
-                firstName: contact.firstName || undefined,
-                lastName: contact.lastName || undefined,
-                phone: contact.phone || undefined,
-                email: contact.email || undefined,
-              }, null);
-              if (ghlId) {
-                await db.contact.update({
-                  where: { id: contact.id },
-                  data: { ghlContactId: ghlId }
-                });
-              }
-            }
-          } catch (err) {
-            console.error('[saveSharedContact] GHL Sync Failed:', err);
-          }
-        })(),
-        runGoogleAutoSyncForContact({
-          locationId: location.id,
-          contactId: contact.id,
-          source: 'WHATSAPP_CONTACT_SHARE',
-          event: 'create',
-          preferredUserId: dbUser?.id || undefined
-        })
-      ]).catch(err => console.error('[saveSharedContact] background sync error:', err));
+      return created;
     });
 
     return {

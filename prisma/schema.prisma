@@ -40,6 +40,7 @@ model Location {
   conversations                 Conversation[]
   contactTasks                  ContactTask[]
   contactTaskOutboxJobs         ContactTaskOutbox[]
+  contactOutboxJobs             ContactOutbox[]
   aiAutomationSchedules         AiAutomationSchedule[]
   prospectLeads                 ProspectLead[]
   aiAutomationJobs              AiAutomationJob[]
@@ -599,6 +600,8 @@ model Contact {
   aiDecisions                AiDecision[]
   aiSuggestedResponses       AiSuggestedResponse[]
   whatsappOutboundOutboxJobs WhatsAppOutboundOutbox[]
+  syncRecords                ContactSync[]
+  outboxJobs                 ContactOutbox[]
 
   @@unique([locationId, email])
   @@unique([locationId, legacyCrmOwnerId])
@@ -1613,6 +1616,59 @@ model ContactTaskOutbox {
   @@index([provider, status, scheduledAt])
   @@index([locationId, status, scheduledAt])
   @@index([taskId, status, scheduledAt])
+}
+
+model ContactSync {
+  id                  String   @id @default(cuid())
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  contactId           String
+  provider            String   // 'ghl' | 'google'
+  providerAccountId   String   @default("default")
+  providerContactId   String?  
+
+  status              String   @default("pending") // pending, synced, error, disabled
+  remoteUpdatedAt     DateTime?
+  etag                String?
+  lastSyncedAt        DateTime?
+  lastAttemptAt       DateTime?
+  attemptCount        Int      @default(0)
+  lastError           String?  @db.Text
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([contactId, provider, providerAccountId])
+  @@index([provider, status, lastSyncedAt])
+}
+
+model ContactOutbox {
+  id             String   @id @default(cuid())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  contactId      String
+  locationId     String
+  provider       String   // 'ghl' | 'google'
+  operation      String   // 'create' | 'update' | 'delete'
+  payload        Json?    
+
+  status         String   @default("pending") // pending, processing, completed, failed, dead
+  scheduledAt    DateTime @default(now())
+  lockedAt       DateTime?
+  lockedBy       String?
+  processedAt    DateTime?
+  attemptCount   Int      @default(0)
+  lastError      String?  @db.Text
+
+  idempotencyKey String   @unique
+
+  contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@index([provider, status, scheduledAt])
+  @@index([locationId, status, scheduledAt])
+  @@index([contactId, status, scheduledAt])
 }
 
 model TaskReminderJob {
