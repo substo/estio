@@ -13,6 +13,7 @@ import {
 import { syncContactToGHL } from '@/lib/ghl/stakeholders';
 import { runGoogleAutoSyncForContact } from '@/lib/google/automation';
 import { enqueueContactSync } from '@/lib/contacts/sync-engine';
+import { enqueueGhlContactSync, enqueueGoogleContactSync } from '@/lib/integrations/provider-outbox-enqueue';
 import { Prisma } from '@prisma/client';
 import { getLocationContext } from '@/lib/auth/location-context';
 import { parseEvolutionMessageContent } from '@/lib/whatsapp/evolution-media';
@@ -48,6 +49,31 @@ async function resolvePreferredChannelTypeForPhone(
   }
 
   return 'TYPE_SMS';
+}
+
+function enqueueProviderContactMirrorsAfterResponse(args: {
+  locationId: string;
+  contactId: string;
+  userId?: string | null;
+  reason: string;
+}) {
+  after(async () => {
+    try {
+      await enqueueGhlContactSync({
+        locationId: args.locationId,
+        contactId: args.contactId,
+        payload: { reason: args.reason },
+      });
+      await enqueueGoogleContactSync({
+        locationId: args.locationId,
+        contactId: args.contactId,
+        userId: args.userId,
+        payload: { reason: args.reason },
+      });
+    } catch (error) {
+      console.error('[ProviderOutbox] Failed to enqueue contact mirrors:', error);
+    }
+  });
 }
 
 // --- Helpers & Zod Transforms ---
@@ -822,6 +848,13 @@ export async function createContact(
       return contact;
     });
 
+    enqueueProviderContactMirrorsAfterResponse({
+      locationId: data.locationId,
+      contactId: contact.id,
+      userId: internalUserId,
+      reason: 'contact_create',
+    });
+
     revalidatePath('/admin/contacts');
     return {
       message: 'Contact created successfully.',
@@ -990,6 +1023,13 @@ async function updateContactCore(
       });
     });
     log('10_txComplete');
+
+    enqueueProviderContactMirrorsAfterResponse({
+      locationId: data.locationId,
+      contactId: data.contactId,
+      userId: internalUserId,
+      reason: 'contact_update',
+    });
 
     log('11_returning');
     return { success: true, message: 'Contact updated successfully.', contact: savedContactSummary };

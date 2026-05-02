@@ -3,8 +3,7 @@ import { evolutionClient } from "@/lib/evolution/client";
 import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-events";
 import { createWhatsAppMediaReadUrl } from "@/lib/whatsapp/media-r2";
 import { updateConversationLastMessage } from "@/lib/conversations/update";
-import { enqueueProviderOutboxJob } from "@/lib/integrations/provider-outbox";
-import { enqueueProviderOutboxQueueJob } from "@/lib/queue/provider-outbox";
+import { enqueueGhlMessageMirror } from "@/lib/integrations/provider-outbox-enqueue";
 import { Prisma } from "@prisma/client";
 
 const MAX_OUTBOX_ATTEMPTS = Math.max(Number(process.env.WHATSAPP_OUTBOX_MAX_ATTEMPTS || 6), 1);
@@ -68,21 +67,14 @@ async function queueSuccessfulOutboundProviderMirrors(args: {
     messageId: string;
     contactId: string;
     body: string;
-    providerAccountId?: string | null;
 }) {
     try {
-        const outbox = await enqueueProviderOutboxJob({
+        await enqueueGhlMessageMirror({
             locationId: args.locationId,
-            provider: "ghl",
-            providerAccountId: args.providerAccountId || "default",
-            operation: "mirror_message",
             conversationId: args.conversationId,
             messageId: args.messageId,
             contactId: args.contactId,
             payload: { body: args.body, source: "whatsapp_outbound" },
-        });
-        await enqueueProviderOutboxQueueJob({
-            outboxId: String(outbox.id),
         });
     } catch (error) {
         console.error("[WhatsApp Outbox] Failed to enqueue provider mirror:", error);
@@ -285,7 +277,6 @@ export async function processWhatsAppOutboundOutboxJob(args: {
             messageId: row.messageId,
             contactId: row.contactId,
             body: String(row.message?.body || ""),
-            providerAccountId: row.location?.ghlLocationId || "default",
         });
 
         const outboundPayload = {

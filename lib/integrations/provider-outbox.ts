@@ -40,7 +40,7 @@ function isRetryableProviderError(error: unknown): boolean {
     return status <= 0;
 }
 
-function operationCapability(operation: string): keyof ReturnType<typeof getProviderCapabilities> | null {
+export function operationCapability(operation: string): keyof ReturnType<typeof getProviderCapabilities> | null {
     if (operation === "mirror_conversation") return "canMirrorOutbound";
     if (operation === "mirror_message") return "canMirrorOutbound";
     if (operation === "sync_contact") return "canSyncContacts";
@@ -93,6 +93,141 @@ export async function enqueueProviderOutboxJob(args: {
     });
 }
 
+function getProviderAccountId(row: any): string {
+    if (row.provider === "ghl") return String(row.location?.ghlLocationId || row.providerAccountId || "default");
+    return String(row.providerAccountId || "default");
+}
+
+async function upsertContactSync(args: {
+    contactId: string;
+    provider: string;
+    providerAccountId: string;
+    providerContactId?: string | null;
+    status?: string;
+    remoteUpdatedAt?: Date | null;
+    lastError?: string | null;
+}) {
+    const now = new Date();
+    await (db as any).contactSync.upsert({
+        where: {
+            contactId_provider_providerAccountId: {
+                contactId: args.contactId,
+                provider: args.provider,
+                providerAccountId: args.providerAccountId,
+            },
+        },
+        create: {
+            contactId: args.contactId,
+            provider: args.provider,
+            providerAccountId: args.providerAccountId,
+            providerContactId: args.providerContactId || null,
+            status: args.status || "synced",
+            remoteUpdatedAt: args.remoteUpdatedAt || undefined,
+            lastSyncedAt: now,
+            lastAttemptAt: now,
+            attemptCount: 1,
+            lastError: args.lastError || null,
+        },
+        update: {
+            providerContactId: args.providerContactId || undefined,
+            status: args.status || "synced",
+            remoteUpdatedAt: args.remoteUpdatedAt || undefined,
+            lastSyncedAt: now,
+            lastAttemptAt: now,
+            lastError: args.lastError || null,
+        },
+    });
+}
+
+async function upsertConversationSync(args: {
+    conversationId: string;
+    locationId: string;
+    provider: string;
+    providerAccountId: string;
+    providerConversationId?: string | null;
+    providerThreadId?: string | null;
+    status?: string;
+    metadata?: Prisma.InputJsonValue | null;
+}) {
+    const now = new Date();
+    await (db as any).conversationSync.upsert({
+        where: {
+            conversationId_provider_providerAccountId: {
+                conversationId: args.conversationId,
+                provider: args.provider,
+                providerAccountId: args.providerAccountId,
+            },
+        },
+        create: {
+            conversationId: args.conversationId,
+            locationId: args.locationId,
+            provider: args.provider,
+            providerAccountId: args.providerAccountId,
+            providerConversationId: args.providerConversationId || null,
+            providerThreadId: args.providerThreadId || args.providerConversationId || null,
+            status: args.status || "synced",
+            lastSyncedAt: now,
+            lastAttemptAt: now,
+            metadata: args.metadata || undefined,
+            lastError: null,
+        },
+        update: {
+            providerConversationId: args.providerConversationId || undefined,
+            providerThreadId: args.providerThreadId || args.providerConversationId || undefined,
+            status: args.status || "synced",
+            lastSyncedAt: now,
+            lastAttemptAt: now,
+            metadata: args.metadata || undefined,
+            lastError: null,
+        },
+    });
+}
+
+async function upsertMessageSync(args: {
+    messageId: string;
+    conversationId: string;
+    locationId: string;
+    provider: string;
+    providerAccountId: string;
+    providerMessageId?: string | null;
+    providerThreadId?: string | null;
+    status?: string;
+}) {
+    const now = new Date();
+    await (db as any).messageSync.upsert({
+        where: {
+            messageId_provider_providerAccountId: {
+                messageId: args.messageId,
+                provider: args.provider,
+                providerAccountId: args.providerAccountId,
+            },
+        },
+        create: {
+            messageId: args.messageId,
+            conversationId: args.conversationId,
+            locationId: args.locationId,
+            provider: args.provider,
+            providerAccountId: args.providerAccountId,
+            providerMessageId: args.providerMessageId || null,
+            providerThreadId: args.providerThreadId || null,
+            status: args.status || "synced",
+            remoteUpdatedAt: now,
+            lastSyncedAt: now,
+            lastAttemptAt: now,
+            lastError: null,
+        },
+        update: {
+            providerMessageId: args.providerMessageId || undefined,
+            providerThreadId: args.providerThreadId || undefined,
+            status: args.status || "synced",
+            remoteUpdatedAt: now,
+            lastSyncedAt: now,
+            lastAttemptAt: now,
+            lastError: null,
+        },
+    });
+}
+
 async function markProviderOutboxDisabled(row: any, reason: string, attemptCount: number): Promise<ProviderOutboxProcessResult> {
     await (db as any).providerOutbox.update({
         where: { id: row.id },
@@ -108,29 +243,71 @@ async function markProviderOutboxDisabled(row: any, reason: string, attemptCount
     return { outcome: "disabled", error: reason };
 }
 
-async function processGhlProviderOutbox(row: any) {
+async function resolveGhlRemoteContact(row: any): Promise<{ remoteContactId?: string; disabled?: string; providerAccountId: string }> {
     const location = row.location;
+    const providerAccountId = getProviderAccountId(row);
     if (!location?.ghlAccessToken) {
-        return { disabled: "GHL is not connected for this location." };
+        return { disabled: "GHL is not connected for this location.", providerAccountId };
     }
 
     const contactId = row.contactId || row.conversation?.contactId || row.message?.contactId;
     if (!contactId) {
-        return { disabled: "No contact is associated with this provider mirror job." };
+        return { disabled: "No contact is associated with this provider mirror job.", providerAccountId };
     }
 
     const { ensureRemoteContact } = await import("@/lib/crm/contact-sync");
     const remoteContactId = await ensureRemoteContact(contactId, location.ghlLocationId || "", location.ghlAccessToken);
     if (!remoteContactId) {
-        return { disabled: "Could not resolve a GHL contact for this job." };
+        return { disabled: "Could not resolve a GHL contact for this job.", providerAccountId };
     }
 
-    if (row.operation === "sync_contact" || row.operation === "mirror_conversation") {
-        return { completed: true };
+    await upsertContactSync({
+        contactId,
+        provider: "ghl",
+        providerAccountId,
+        providerContactId: remoteContactId,
+        status: "synced",
+    });
+
+    return { remoteContactId, providerAccountId };
+}
+
+async function processGhlSyncContact(row: any) {
+    const resolved = await resolveGhlRemoteContact(row);
+    if (resolved.disabled) return { disabled: resolved.disabled };
+    return { completed: true };
+}
+
+async function processGhlMirrorConversation(row: any) {
+    const resolved = await resolveGhlRemoteContact(row);
+    if (resolved.disabled) return { disabled: resolved.disabled };
+
+    if (!row.conversationId) {
+        return { disabled: "No conversation is associated with this provider mirror job." };
     }
 
-    if (row.operation !== "mirror_message") {
-        return { disabled: `Unsupported GHL provider outbox operation: ${row.operation}` };
+    await upsertConversationSync({
+        conversationId: row.conversationId,
+        locationId: row.locationId,
+        provider: "ghl",
+        providerAccountId: resolved.providerAccountId,
+        status: "synced",
+        metadata: {
+            source: (row.payload as any)?.source || "provider_outbox",
+            remoteContactId: resolved.remoteContactId,
+            remoteThreadState: "contact_ready_no_remote_thread",
+        },
+    });
+
+    return { completed: true };
+}
+
+async function processGhlMirrorMessage(row: any) {
+    const resolved = await resolveGhlRemoteContact(row);
+    if (resolved.disabled) return { disabled: resolved.disabled };
+
+    if (!row.conversationId) {
+        return { disabled: "No conversation is associated with this provider mirror job." };
     }
 
     const message = row.message;
@@ -146,7 +323,7 @@ async function processGhlProviderOutbox(row: any) {
     const { sendMessage } = await import("@/lib/ghl/conversations");
     const customProviderId = process.env.GHL_CUSTOM_PROVIDER_ID;
     const payload: any = {
-        contactId: remoteContactId,
+        contactId: resolved.remoteContactId,
         type: customProviderId ? "Custom" : "WhatsApp",
         message: body,
     };
@@ -157,70 +334,122 @@ async function processGhlProviderOutbox(row: any) {
     const providerConversationId = String(res?.conversationId || res?.conversation?.id || "").trim() || null;
 
     if (providerConversationId && row.conversationId) {
-        await (db as any).conversationSync.upsert({
-            where: {
-                conversationId_provider_providerAccountId: {
-                    conversationId: row.conversationId,
-                    provider: "ghl",
-                    providerAccountId: location.ghlLocationId || row.providerAccountId || "default",
-                },
+        await upsertConversationSync({
+            conversationId: row.conversationId,
+            locationId: row.locationId,
+            provider: "ghl",
+            providerAccountId: resolved.providerAccountId,
+            providerConversationId,
+            providerThreadId: providerConversationId,
+            status: "synced",
+            metadata: {
+                source: (row.payload as any)?.source || "provider_outbox",
+                remoteContactId: resolved.remoteContactId,
             },
-            create: {
-                conversationId: row.conversationId,
-                locationId: row.locationId,
-                provider: "ghl",
-                providerAccountId: location.ghlLocationId || row.providerAccountId || "default",
-                providerConversationId,
-                status: "synced",
-                remoteUpdatedAt: new Date(),
-                lastSyncedAt: new Date(),
-            },
-            update: {
-                providerConversationId,
-                status: "synced",
-                remoteUpdatedAt: new Date(),
-                lastSyncedAt: new Date(),
-                lastError: null,
+        });
+    } else if (row.conversationId) {
+        await upsertConversationSync({
+            conversationId: row.conversationId,
+            locationId: row.locationId,
+            provider: "ghl",
+            providerAccountId: resolved.providerAccountId,
+            status: "synced",
+            metadata: {
+                source: (row.payload as any)?.source || "provider_outbox",
+                remoteContactId: resolved.remoteContactId,
+                remoteThreadState: "message_sent_without_returned_thread",
             },
         });
     }
 
     if (providerMessageId && row.messageId && row.conversationId) {
-        await (db as any).messageSync.upsert({
-            where: {
-                messageId_provider_providerAccountId: {
-                    messageId: row.messageId,
-                    provider: "ghl",
-                    providerAccountId: location.ghlLocationId || row.providerAccountId || "default",
-                },
-            },
-            create: {
-                messageId: row.messageId,
-                conversationId: row.conversationId,
-                locationId: row.locationId,
-                provider: "ghl",
-                providerAccountId: location.ghlLocationId || row.providerAccountId || "default",
-                providerMessageId,
-                providerThreadId: providerConversationId,
-                status: "synced",
-                remoteUpdatedAt: new Date(),
-                lastSyncedAt: new Date(),
-            },
-            update: {
-                providerMessageId,
-                providerThreadId: providerConversationId,
-                status: "synced",
-                remoteUpdatedAt: new Date(),
-                lastSyncedAt: new Date(),
-                lastError: null,
-            },
+        await upsertMessageSync({
+            messageId: row.messageId,
+            conversationId: row.conversationId,
+            locationId: row.locationId,
+            provider: "ghl",
+            providerAccountId: resolved.providerAccountId,
+            providerMessageId,
+            providerThreadId: providerConversationId,
+            status: "synced",
         });
     }
 
     return { completed: true };
 }
 
+async function processGhlProviderOutbox(row: any) {
+    if (row.operation === "sync_contact") return processGhlSyncContact(row);
+    if (row.operation === "mirror_conversation") return processGhlMirrorConversation(row);
+    if (row.operation === "mirror_message") return processGhlMirrorMessage(row);
+    if (row.operation === "sync_status") {
+        return { disabled: "GHL status sync is intentionally not enabled; Estio owns conversation status." };
+    }
+    return { disabled: `Unsupported GHL provider outbox operation: ${row.operation}` };
+}
+
+async function processGoogleProviderOutbox(row: any) {
+    if (row.operation !== "sync_contact") {
+        return { disabled: `Google provider outbox only supports sync_contact in this wave.` };
+    }
+
+    const contactId = row.contactId || row.conversation?.contactId || row.message?.contactId;
+    if (!contactId) {
+        return { disabled: "No contact is associated with this Google sync job." };
+    }
+
+    const providerAccountId = String(row.providerAccountId || "").trim();
+    if (!providerAccountId || providerAccountId === "default") {
+        return { disabled: "Google contact sync requires providerAccountId to be the connected user id." };
+    }
+
+    const user = await db.user.findFirst({
+        where: {
+            id: providerAccountId,
+            googleSyncEnabled: true,
+            locations: { some: { id: row.locationId } },
+        },
+        select: { id: true },
+    });
+    if (!user) {
+        return { disabled: "Google is not connected/enabled for this user and location." };
+    }
+
+    const { syncContactToGoogle } = await import("@/lib/google/people");
+    await syncContactToGoogle(user.id, contactId);
+
+    const contact = await db.contact.findUnique({
+        where: { id: contactId },
+        select: {
+            googleContactId: true,
+            googleContactUpdatedAt: true,
+            lastGoogleSync: true,
+        },
+    });
+    if (!contact) {
+        return { disabled: "Contact was deleted before it could be synced to Google." };
+    }
+    if (!contact.googleContactId) {
+        return { disabled: "Could not resolve a Google contact id after sync." };
+    }
+
+    await upsertContactSync({
+        contactId,
+        provider: "google",
+        providerAccountId: user.id,
+        providerContactId: contact.googleContactId,
+        remoteUpdatedAt: contact.googleContactUpdatedAt || undefined,
+        status: "synced",
+    });
+
+    return { completed: true };
+}
+
 async function executeProviderOutbox(row: any) {
+    if (row.provider === "outlook") {
+        return { disabled: "Outlook provider outbox is intentionally disabled; this app does not use Outlook." };
+    }
+
     const capability = operationCapability(String(row.operation || ""));
     const caps = getProviderCapabilities(row.provider);
     if (!capability || !caps[capability]) {
@@ -228,6 +457,7 @@ async function executeProviderOutbox(row: any) {
     }
 
     if (row.provider === "ghl") return processGhlProviderOutbox(row);
+    if (row.provider === "google") return processGoogleProviderOutbox(row);
     return { disabled: `${row.provider} mirror worker is not connected for ${row.operation} yet.` };
 }
 

@@ -75,6 +75,11 @@ import {
     enqueueWhatsAppAudioExtraction,
     initWhatsAppAudioExtractionWorker,
 } from "@/lib/queue/whatsapp-audio-extraction";
+import {
+    enqueueGhlContactSync,
+    enqueueGhlConversationMirror,
+    enqueueGoogleContactSync,
+} from "@/lib/integrations/provider-outbox-enqueue";
 import type { ViewingSyncProviderDecision } from "@/lib/viewings/sync-engine";
 import {
     extractClockTimeFromText,
@@ -9314,6 +9319,19 @@ export async function startNewConversation(phone: string) {
                     preferredUserId
                 });
             });
+            runDetachedTask(`new_conversation_provider_contact_sync:${contact.id}`, async () => {
+                await enqueueGhlContactSync({
+                    locationId: location.id,
+                    contactId: contact.id,
+                    payload: { reason: "new_conversation_contact" },
+                });
+                await enqueueGoogleContactSync({
+                    locationId: location.id,
+                    contactId: contact.id,
+                    userId: preferredUserId,
+                    payload: { reason: "new_conversation_contact" },
+                });
+            });
         }
 
         // 2. Check if conversation already exists for this contact
@@ -9438,6 +9456,14 @@ export async function startNewConversation(phone: string) {
         });
 
         console.log(`[NewConversation] Created Estio conversation: ${conversation.id}`);
+        runDetachedTask(`new_conversation_provider_mirror:${conversation.id}`, async () => {
+            await enqueueGhlConversationMirror({
+                locationId: location.id,
+                conversationId: conversation.id,
+                contactId: contact.id,
+                payload: { source: "new_conversation" },
+            });
+        });
 
         // 4. Try to backfill history from Evolution
         let messagesImported = 0;
