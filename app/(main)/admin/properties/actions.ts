@@ -1,7 +1,5 @@
 "use server";
 
-import { isRedirectError } from "next/dist/client/components/redirect";
-
 import db from "@/lib/db";
 import { MediaKind, PropertyStatus, PublicationStatus } from "@prisma/client";
 import { updatePropertyEmbedding } from "@/lib/ai/search/property-embeddings";
@@ -377,7 +375,8 @@ export async function upsertProperty(formData: FormData) {
         }
         return { success: true, data: property };
     } catch (error: any) {
-        if (isRedirectError(error)) {
+        const isRedirectError = error?.message === "NEXT_REDIRECT" || error?.digest?.startsWith("NEXT_REDIRECT");
+        if (isRedirectError) {
             throw error;
         }
         console.error('Error in upsertProperty:', error);

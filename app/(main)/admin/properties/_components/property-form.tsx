@@ -8,7 +8,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { upsertProperty, pushToOldCrm, pullFromOldCrm, linkPropertyCreator } from "../actions";
-import { isRedirectError } from "next/dist/client/components/redirect";
 import { useEffect, useMemo, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -390,7 +389,8 @@ export default function PropertyForm({
                 onSuccess(result?.data);
             }
         } catch (error: any) {
-            if (isRedirectError(error)) {
+            const isRedirect = error?.message === "NEXT_REDIRECT" || error?.digest?.startsWith("NEXT_REDIRECT");
+            if (isRedirect) {
                 throw error;
             }
             console.error("Failed to save property:", error);
