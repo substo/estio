@@ -361,7 +361,8 @@ export async function openOrStartConversationForContact(contactId: string) {
 
       return {
         success: true,
-        conversationId: existingConversation.ghlConversationId,
+        conversationId: existingConversation.id,
+        legacyConversationId: existingConversation.ghlConversationId || null,
         isNew: false
       };
     }
@@ -374,7 +375,7 @@ export async function openOrStartConversationForContact(contactId: string) {
 
     const conversation = await db.conversation.create({
       data: {
-        ghlConversationId: `wa_${Date.now()}_${contact.id}`,
+        ghlConversationId: null,
         locationId: location.id,
         contactId: contact.id,
         lastMessageBody: null,
@@ -434,12 +435,13 @@ export async function openOrStartConversationForContact(contactId: string) {
       source: 'contact_bootstrap'
     });
     if (seedResult.seeded) {
-      console.log(`[Contacts] Seeded new conversation ${conversation.ghlConversationId} from contact.message`);
+      console.log(`[Contacts] Seeded new conversation ${conversation.id} from contact.message`);
     }
 
     return {
       success: true,
-      conversationId: conversation.ghlConversationId,
+      conversationId: conversation.id,
+      legacyConversationId: conversation.ghlConversationId || null,
       isNew: true,
       messagesImported
     };
@@ -450,10 +452,10 @@ export async function openOrStartConversationForContact(contactId: string) {
       if (location?.id) {
         const existingConversation = await db.conversation.findFirst({
           where: { locationId: location.id, contactId },
-          select: { ghlConversationId: true }
+          select: { id: true, ghlConversationId: true }
         });
         if (existingConversation) {
-          return { success: true, conversationId: existingConversation.ghlConversationId, isNew: false };
+          return { success: true, conversationId: existingConversation.id, legacyConversationId: existingConversation.ghlConversationId || null, isNew: false };
         }
       }
     }

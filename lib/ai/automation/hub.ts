@@ -42,7 +42,7 @@ export type AiAutomationCronStats = {
 
 type CandidateJobInput = {
   conversationId: string;
-  conversationGhlId: string;
+  conversationGhlId: string | null;
   contactId: string;
   dealId: string | null;
   contextSummary: string;
@@ -100,6 +100,7 @@ async function buildDealConversationMap(locationId: string): Promise<Map<string,
     select: {
       id: true,
       conversationIds: true,
+      conversationLinks: { select: { conversationId: true, legacyConversationRef: true } },
     },
   });
 
@@ -110,6 +111,10 @@ async function buildDealConversationMap(locationId: string): Promise<Map<string,
       if (!map.has(conversationGhlId)) {
         map.set(String(conversationGhlId), deal.id);
       }
+    }
+    for (const link of (deal as any).conversationLinks || []) {
+      if (link.conversationId && !map.has(link.conversationId)) map.set(link.conversationId, deal.id);
+      if (link.legacyConversationRef && !map.has(link.legacyConversationRef)) map.set(link.legacyConversationRef, deal.id);
     }
   }
 
@@ -200,7 +205,7 @@ async function collectPostViewingCandidates(args: {
   const candidates: CandidateJobInput[] = [];
   for (const row of rows) {
     const conversation = row.contact.conversations[0];
-    if (!conversation?.id || !conversation.ghlConversationId) continue;
+    if (!conversation?.id) continue;
 
     const hoursAgo = row.scheduledAt
       ? Math.max(minHoursSinceViewing, Math.round((args.now.getTime() - row.scheduledAt.getTime()) / (60 * 60 * 1000)))
@@ -208,9 +213,9 @@ async function collectPostViewingCandidates(args: {
 
     candidates.push({
       conversationId: conversation.id,
-      conversationGhlId: conversation.ghlConversationId,
+      conversationGhlId: conversation.ghlConversationId || null,
       contactId: row.contact.id,
-      dealId: args.dealMap.get(conversation.ghlConversationId) || null,
+      dealId: args.dealMap.get(conversation.id) || (conversation.ghlConversationId ? args.dealMap.get(conversation.ghlConversationId) : null) || null,
       contextSummary: toConversationContextSummary({
         templateKey: "post_viewing_follow_up",
         contactName: row.contact.name,
@@ -257,13 +262,13 @@ async function collectInactiveLeadCandidates(args: {
   const candidates: CandidateJobInput[] = [];
   for (const contact of contacts) {
     const conversation = contact.conversations[0];
-    if (!conversation?.id || !conversation.ghlConversationId) continue;
+    if (!conversation?.id) continue;
 
     candidates.push({
       conversationId: conversation.id,
-      conversationGhlId: conversation.ghlConversationId,
+      conversationGhlId: conversation.ghlConversationId || null,
       contactId: contact.id,
-      dealId: args.dealMap.get(conversation.ghlConversationId) || null,
+      dealId: args.dealMap.get(conversation.id) || (conversation.ghlConversationId ? args.dealMap.get(conversation.ghlConversationId) : null) || null,
       contextSummary: toConversationContextSummary({
         templateKey: "inactive_lead_reengagement",
         contactName: contact.name,
@@ -304,12 +309,11 @@ async function collectReEngagementCandidates(args: {
   });
 
   return conversations
-    .filter((conversation) => !!conversation.ghlConversationId)
     .map((conversation) => ({
       conversationId: conversation.id,
-      conversationGhlId: conversation.ghlConversationId,
+      conversationGhlId: conversation.ghlConversationId || null,
       contactId: conversation.contactId,
-      dealId: args.dealMap.get(conversation.ghlConversationId) || null,
+      dealId: args.dealMap.get(conversation.id) || (conversation.ghlConversationId ? args.dealMap.get(conversation.ghlConversationId) : null) || null,
       contextSummary: toConversationContextSummary({
         templateKey: "re_engagement",
         contactName: conversation.contact?.name,
@@ -386,13 +390,13 @@ async function collectListingAlertCandidates(args: {
   const candidates: CandidateJobInput[] = [];
   for (const entry of bestPerContact.values()) {
     const conversation = entry.contact.conversations[0];
-    if (!conversation?.id || !conversation.ghlConversationId) continue;
+    if (!conversation?.id) continue;
 
     candidates.push({
       conversationId: conversation.id,
-      conversationGhlId: conversation.ghlConversationId,
+      conversationGhlId: conversation.ghlConversationId || null,
       contactId: entry.contact.id,
-      dealId: args.dealMap.get(conversation.ghlConversationId) || null,
+      dealId: args.dealMap.get(conversation.id) || (conversation.ghlConversationId ? args.dealMap.get(conversation.ghlConversationId) : null) || null,
       contextSummary: toConversationContextSummary({
         templateKey: "listing_alert",
         contactName: entry.contact.name,
@@ -432,6 +436,7 @@ async function collectCustomFollowUpCandidates(args: {
         OR: [
           { id: { in: conversationIds } },
           { ghlConversationId: { in: conversationIds } },
+          { syncRecords: { some: { providerConversationId: { in: conversationIds } } } },
         ],
       },
       select: {
@@ -444,12 +449,11 @@ async function collectCustomFollowUpCandidates(args: {
     });
 
     for (const conversation of conversations) {
-      if (!conversation.ghlConversationId) continue;
       candidates.push({
         conversationId: conversation.id,
-        conversationGhlId: conversation.ghlConversationId,
+        conversationGhlId: conversation.ghlConversationId || null,
         contactId: conversation.contactId,
-        dealId: args.dealMap.get(conversation.ghlConversationId) || null,
+        dealId: args.dealMap.get(conversation.id) || (conversation.ghlConversationId ? args.dealMap.get(conversation.ghlConversationId) : null) || null,
         contextSummary: toConversationContextSummary({
           templateKey: "custom_follow_up",
           contactName: conversation.contact?.name,
@@ -483,12 +487,12 @@ async function collectCustomFollowUpCandidates(args: {
 
     for (const contact of contacts) {
       const conversation = contact.conversations[0];
-      if (!conversation?.id || !conversation.ghlConversationId) continue;
+      if (!conversation?.id) continue;
       candidates.push({
         conversationId: conversation.id,
-        conversationGhlId: conversation.ghlConversationId,
+        conversationGhlId: conversation.ghlConversationId || null,
         contactId: contact.id,
-        dealId: args.dealMap.get(conversation.ghlConversationId) || null,
+        dealId: args.dealMap.get(conversation.id) || (conversation.ghlConversationId ? args.dealMap.get(conversation.ghlConversationId) : null) || null,
         contextSummary: toConversationContextSummary({
           templateKey: "custom_follow_up",
           contactName: contact.name,

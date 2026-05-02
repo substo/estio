@@ -6,6 +6,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { getModelForTask } from "@/lib/ai/model-router";
 import { calculateRunCostFromUsage } from "@/lib/ai/pricing";
 import { revalidatePath } from "next/cache";
+import { buildConversationReferenceWhere } from "@/lib/conversations/identity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -193,13 +194,7 @@ export async function POST(req: NextRequest) {
     // Resolve conversation and user concurrently
     const [conversation, user] = await Promise.all([
         db.conversation.findFirst({
-            where: {
-                locationId: location.id,
-                OR: [
-                    { id: conversationId },
-                    { ghlConversationId: conversationId },
-                ],
-            },
+            where: buildConversationReferenceWhere(location.id, conversationId),
             select: {
                 id: true,
                 ghlConversationId: true,

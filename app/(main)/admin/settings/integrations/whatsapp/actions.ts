@@ -513,7 +513,7 @@ export async function syncEvolutionChats(locationId?: string | null) {
                         locationId: location.id,
                         contactId: contact.id,
                         status: "open",
-                        ghlConversationId: `wa_${Date.now()}_${contact.id}`,
+                        ghlConversationId: null,
                         lastMessageType: "TYPE_WHATSAPP"
                     }
                 });

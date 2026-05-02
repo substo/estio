@@ -13,6 +13,7 @@ import {
     initDealEnrichmentWorker,
 } from "@/lib/queue/deal-enrichment";
 import { DealAgent } from "@/lib/ai/agent";
+import { resolveDealConversationRefs, syncDealConversationLinks } from "@/lib/deals/conversation-links";
 
 type DealTimelineWindow = {
     oldestCursor: string | null;
@@ -23,14 +24,16 @@ type DealTimelineWindow = {
 
 async function getAuthenticatedLocation() {
     const location = await getLocationContext();
-    if (!location?.ghlAccessToken) throw new Error("Unauthorized or GHL not connected");
+    if (!location?.id) throw new Error("Unauthorized");
     return location;
 }
 
 function mapDealConversationRowToUi(row: any, ghlLocationId: string | null): Conversation {
     const lastMessageAtMs = Number(new Date(row.lastMessageAt || 0).getTime());
     return {
-        id: row.ghlConversationId,
+        id: row.id,
+        legacyConversationId: row.ghlConversationId || null,
+        ghlConversationId: row.ghlConversationId || null,
         contactId: row.contact?.ghlContactId || row.contactId,
         contactName: row.contact?.name || "Unknown Contact",
         contactEmail: row.contact?.email || undefined,
@@ -64,10 +67,20 @@ async function queryDealParticipants(dealId: string, locationId: string, ghlLoca
 
     if (!deal) return null;
 
+    const linkedConversationIds = await (db as any).dealConversationLink.findMany({
+        where: { dealId: deal.id },
+        select: { conversationId: true },
+    });
+    const legacyRefs = deal.conversationIds || [];
     const conversations = await db.conversation.findMany({
         where: {
-            ghlConversationId: { in: deal.conversationIds },
             locationId,
+            OR: [
+                { id: { in: linkedConversationIds.map((row: any) => row.conversationId) } },
+                { id: { in: legacyRefs } },
+                { ghlConversationId: { in: legacyRefs } },
+                { syncRecords: { some: { providerConversationId: { in: legacyRefs } } } },
+            ],
         },
         include: {
             contact: {
@@ -135,22 +148,32 @@ export async function getDealContext(id: string) {
 
 export async function findExistingDeal(conversationIds: string[]) {
     const location = await getAuthenticatedLocation();
+    const resolved = await resolveDealConversationRefs(db as any, location.id, conversationIds);
+    const resolvedConversationIds = resolved.map((item) => item.conversationId);
+    const refs = Array.from(new Set([...conversationIds, ...resolvedConversationIds].filter(Boolean)));
 
     // Find any active deal that contains ANY of the selected conversations
     const deals = await db.dealContext.findMany({
         where: {
             locationId: location.id,
             stage: 'ACTIVE',
-            conversationIds: { hasSome: conversationIds }
-        }
+            OR: [
+                { conversationLinks: { some: { conversationId: { in: resolvedConversationIds } } } },
+                { conversationIds: { hasSome: refs } },
+            ],
+        },
+        include: { conversationLinks: true },
     });
 
     // Sort by relevance (most overlapping IDs) could be done in memory
     return deals.map(d => ({
         id: d.id,
         title: d.title,
-        matchedCount: d.conversationIds.filter(id => conversationIds.includes(id)).length,
-        totalCount: d.conversationIds.length
+        matchedCount: Math.max(
+            d.conversationIds.filter(id => refs.includes(id)).length,
+            (d as any).conversationLinks.filter((link: any) => resolvedConversationIds.includes(link.conversationId)).length
+        ),
+        totalCount: Math.max(d.conversationIds.length, (d as any).conversationLinks.length)
     })).sort((a, b) => b.matchedCount - a.matchedCount);
 }
 
@@ -167,12 +190,18 @@ export async function createPersistentDeal(title: string, conversationIds: strin
         throw new Error("Select at least one conversation.");
     }
 
+    const resolved = await resolveDealConversationRefs(db as any, location.id, normalizedConversationIds);
+    if (resolved.length === 0) {
+        throw new Error("No valid conversations were found for this deal.");
+    }
+
+    const canonicalConversationIds = resolved.map((item) => item.conversationId);
     const queuedAt = new Date().toISOString();
     const dealContext = await db.dealContext.create({
         data: {
             title: normalizedTitle,
             locationId: location.id,
-            conversationIds: normalizedConversationIds,
+            conversationIds: canonicalConversationIds,
             propertyIds: [],
             stage: 'ACTIVE',
             lastActivityAt: new Date(),
@@ -181,6 +210,11 @@ export async function createPersistentDeal(title: string, conversationIds: strin
                 queuedAt,
             }),
         },
+    });
+    await syncDealConversationLinks(db as any, {
+        dealId: dealContext.id,
+        locationId: location.id,
+        conversationRefs: normalizedConversationIds,
     });
 
     void initDealEnrichmentWorker().catch((error) => {
@@ -330,12 +364,26 @@ export async function removeConversationFromDeal(dealId: string, conversationId:
 
     if (!deal) throw new Error("Deal not found");
 
-    const newIds = deal.conversationIds.filter(id => id !== conversationId);
+    const resolved = await resolveDealConversationRefs(db as any, location.id, [conversationId]);
+    const resolvedIds = new Set(resolved.map((item) => item.conversationId));
+    const refsToRemove = new Set([conversationId, ...resolved.map((item) => item.legacyConversationRef).filter(Boolean) as string[]]);
+    const newIds = deal.conversationIds.filter(id => !refsToRemove.has(id) && !resolvedIds.has(id));
 
-    await db.dealContext.update({
-        where: { id: dealId },
-        data: { conversationIds: newIds }
-    });
+    await db.$transaction([
+        db.dealContext.update({
+            where: { id: dealId },
+            data: { conversationIds: newIds }
+        }),
+        (db as any).dealConversationLink.deleteMany({
+            where: {
+                dealId,
+                OR: [
+                    { conversationId: { in: Array.from(resolvedIds) } },
+                    { legacyConversationRef: { in: Array.from(refsToRemove) } },
+                ],
+            },
+        }),
+    ]);
 
     return { success: true };
 }

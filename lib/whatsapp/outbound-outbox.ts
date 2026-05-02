@@ -3,6 +3,8 @@ import { evolutionClient } from "@/lib/evolution/client";
 import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-events";
 import { createWhatsAppMediaReadUrl } from "@/lib/whatsapp/media-r2";
 import { updateConversationLastMessage } from "@/lib/conversations/update";
+import { enqueueProviderOutboxJob } from "@/lib/integrations/provider-outbox";
+import { enqueueProviderOutboxQueueJob } from "@/lib/queue/provider-outbox";
 import { Prisma } from "@prisma/client";
 
 const MAX_OUTBOX_ATTEMPTS = Math.max(Number(process.env.WHATSAPP_OUTBOX_MAX_ATTEMPTS || 6), 1);
@@ -60,51 +62,30 @@ function isUniqueConstraintError(error: unknown): boolean {
     return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 }
 
-async function syncSuccessfulOutboundToGhl(args: {
+async function queueSuccessfulOutboundProviderMirrors(args: {
     locationId: string;
+    conversationId: string;
+    messageId: string;
     contactId: string;
     body: string;
+    providerAccountId?: string | null;
 }) {
     try {
-        const location = await db.location.findUnique({
-            where: { id: args.locationId },
-            select: {
-                ghlAccessToken: true,
-                ghlLocationId: true,
-            },
+        const outbox = await enqueueProviderOutboxJob({
+            locationId: args.locationId,
+            provider: "ghl",
+            providerAccountId: args.providerAccountId || "default",
+            operation: "mirror_message",
+            conversationId: args.conversationId,
+            messageId: args.messageId,
+            contactId: args.contactId,
+            payload: { body: args.body, source: "whatsapp_outbound" },
         });
-        if (!location?.ghlAccessToken) return;
-
-        const contact = await db.contact.findUnique({
-            where: { id: args.contactId },
-            select: {
-                id: true,
-                ghlContactId: true,
-            },
+        await enqueueProviderOutboxQueueJob({
+            outboxId: String(outbox.id),
         });
-        if (!contact) return;
-
-        let remoteContactId = contact.ghlContactId;
-        if (!remoteContactId && location.ghlLocationId) {
-            const { ensureRemoteContact } = await import("@/lib/crm/contact-sync");
-            remoteContactId = await ensureRemoteContact(contact.id, location.ghlLocationId, location.ghlAccessToken);
-        }
-        if (!remoteContactId) return;
-
-        const { sendMessage } = await import("@/lib/ghl/conversations");
-        const customProviderId = process.env.GHL_CUSTOM_PROVIDER_ID;
-        const payload: any = {
-            contactId: remoteContactId,
-            type: customProviderId ? "Custom" : "WhatsApp",
-            message: args.body,
-        };
-        if (customProviderId) {
-            payload.conversationProviderId = customProviderId;
-        }
-
-        await sendMessage(location.ghlAccessToken, payload);
     } catch (error) {
-        console.error("[WhatsApp Outbox] Post-send GHL sync failed:", error);
+        console.error("[WhatsApp Outbox] Failed to enqueue provider mirror:", error);
     }
 }
 
@@ -298,10 +279,13 @@ export async function processWhatsAppOutboundOutboxJob(args: {
             console.error("[WhatsApp Outbox] Failed to update conversation summary:", err);
         });
 
-        void syncSuccessfulOutboundToGhl({
+        void queueSuccessfulOutboundProviderMirrors({
             locationId: row.locationId,
+            conversationId: row.conversationId,
+            messageId: row.messageId,
             contactId: row.contactId,
             body: String(row.message?.body || ""),
+            providerAccountId: row.location?.ghlLocationId || "default",
         });
 
         const outboundPayload = {
@@ -322,7 +306,7 @@ export async function processWhatsAppOutboundOutboxJob(args: {
 
         void publishConversationRealtimeEvent({
             locationId: row.locationId,
-            conversationId: row.conversation?.ghlConversationId || null,
+            conversationId: row.conversationId || null,
             type: "message.status",
             payload: outboundPayload,
         });

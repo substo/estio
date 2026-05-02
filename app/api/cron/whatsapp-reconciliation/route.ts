@@ -108,7 +108,7 @@ export async function GET(req: NextRequest) {
                 // Trigger live UI update
                 publishConversationRealtimeEvent({
                     locationId: location.id,
-                    conversationId: msg.conversation.ghlConversationId,
+                    conversationId: msg.conversationId,
                     type: "message.outbound",
                     payload: { channel: "whatsapp", mode: "text" }, // dummy mode for trigger
                 });

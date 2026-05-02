@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 import db from '@/lib/db';
 import { getLocationContext } from '@/lib/auth/location-context';
 import { parseWhatsAppExport, ParsedMessage } from '@/lib/whatsapp/import-parser';
+import { buildConversationReferenceWhere } from '@/lib/conversations/identity';
 
 // Helper to get location
 async function getLocation() {
@@ -205,16 +206,28 @@ export async function executeImport(sessionId: string) {
             });
 
             if (!conversation) {
-                // Create a new conversation with a generated ghlConversationId for imported chats
+                // Create a local Estio conversation; legacy import aliases are resolved through ConversationSync.
                 conversation = await db.conversation.create({
                     data: {
                         locationId: location.id,
                         contactId: contactId,
-                        ghlConversationId: `wa_import_${sessionId}_${contactId}`,
+                        ghlConversationId: null,
                         status: 'open',
                         lastMessageType: 'TYPE_WHATSAPP'
                     }
                 });
+                await (db as any).conversationSync.create({
+                    data: {
+                        conversationId: conversation.id,
+                        locationId: location.id,
+                        provider: 'estio_legacy_alias',
+                        providerAccountId: 'local',
+                        providerConversationId: `wa_import_${sessionId}_${contactId}`,
+                        status: 'synced',
+                        lastSyncedAt: new Date(),
+                        metadata: { source: 'whatsapp_import_session', sessionId },
+                    }
+                }).catch(() => undefined);
                 conversationsCreated++;
             }
 
@@ -300,7 +313,7 @@ export async function getImportSessions() {
 /**
  * Execute a direct import into a specific conversation (for modal-based import)
  * 
- * @param conversationId - The GHL conversation ID to import into
+ * @param conversationId - The Estio, legacy, or provider conversation ID to import into
  * @param fileContent - The raw .txt file content
  * @param ownerAuthor - Which author in the file is "me" (outbound messages)
  */
@@ -313,10 +326,7 @@ export async function executeDirectImport(
 
     // 1. Find the conversation and its contact
     const conversation = await db.conversation.findFirst({
-        where: {
-            ghlConversationId: conversationId,
-            locationId: location.id
-        },
+        where: buildConversationReferenceWhere(location.id, conversationId),
         include: {
             contact: true
         }

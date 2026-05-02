@@ -32,8 +32,52 @@ export function buildConversationReferenceWhere(
                     },
                 },
             },
+            {
+                syncRecords: {
+                    some: {
+                        providerThreadId: ref,
+                    },
+                },
+            },
         ],
     };
+}
+
+export type ConversationReferenceResolution = {
+    id: string;
+    locationId: string;
+    contactId?: string | null;
+    ghlConversationId?: string | null;
+};
+
+export async function resolveConversationReference<T extends {
+    conversation: {
+        findFirst(args: {
+            where: Prisma.ConversationWhereInput;
+            select: {
+                id: true;
+                locationId: true;
+                contactId: true;
+                ghlConversationId: true;
+            };
+        }): Promise<ConversationReferenceResolution | null>;
+    };
+}>(
+    db: T,
+    locationId: string,
+    conversationRef: string
+): Promise<ConversationReferenceResolution | null> {
+    const ref = String(conversationRef || "").trim();
+    if (!locationId || !ref) return null;
+    return db.conversation.findFirst({
+        where: buildConversationReferenceWhere(locationId, ref),
+        select: {
+            id: true,
+            locationId: true,
+            contactId: true,
+            ghlConversationId: true,
+        },
+    });
 }
 
 export function getCanonicalConversationId(

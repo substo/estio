@@ -11,6 +11,7 @@ import { normalizeReminderOffsets } from '@/lib/tasks/reminder-config';
 import { rebuildTaskReminderJobs } from '@/lib/tasks/reminders';
 import { enqueueTaskSyncJobs } from '@/lib/tasks/sync-engine';
 import { parseViewingDateTimeInput } from '@/lib/viewings/datetime';
+import { buildConversationReferenceWhere } from '@/lib/conversations/identity';
 
 const statusFilterSchema = z.enum(['open', 'completed', 'all']).default('all');
 const reminderModeSchema = z.enum(['default', 'custom', 'off']).default('default');
@@ -84,10 +85,7 @@ async function resolveConversationId(locationId: string, conversationId?: string
   if (!conversationId) return null;
 
   const conversation = await db.conversation.findFirst({
-    where: {
-      locationId,
-      OR: [{ id: conversationId }, { ghlConversationId: conversationId }],
-    },
+    where: buildConversationReferenceWhere(locationId, conversationId),
     select: { id: true },
   });
 

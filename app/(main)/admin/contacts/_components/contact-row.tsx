@@ -26,7 +26,8 @@ interface ContactRowProps {
         lastGoogleSync?: Date | null;
         error?: string | null;
         conversations?: Array<{
-            ghlConversationId: string;
+            id: string;
+            ghlConversationId?: string | null;
             unreadCount: number;
             deletedAt?: Date | null;
             archivedAt?: Date | null;
@@ -59,11 +60,11 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
     const isLinked = !!contact.googleContactId;
     const hasError = !!contact.error;
     const conversation = contact.conversations?.[0];
-    const hasConversation = !!conversation?.ghlConversationId;
+    const hasConversation = !!conversation?.id;
     const canStartConversation = !!contact.phone;
-    const getConversationHref = (ghlConversationId: string) => {
+    const getConversationHref = (conversationId: string) => {
         const params = new URLSearchParams({
-            id: ghlConversationId,
+            id: conversationId,
         });
 
         if (conversation?.deletedAt) {
@@ -82,8 +83,8 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
         e.stopPropagation();
         setConversationError(null);
 
-        if (hasConversation && conversation?.ghlConversationId) {
-            router.push(getConversationHref(conversation.ghlConversationId));
+        if (hasConversation && conversation?.id) {
+            router.push(getConversationHref(conversation.id));
             return;
         }
 
@@ -226,7 +227,7 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
                         </TooltipProvider>
                         {hasConversation ? (
                             <Link
-                                href={getConversationHref(conversation!.ghlConversationId)}
+                                href={getConversationHref(conversation!.id)}
                                 className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
                                 onClick={(e) => e.stopPropagation()}
                             >

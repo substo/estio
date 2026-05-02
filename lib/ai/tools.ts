@@ -8,6 +8,7 @@ import {
     parseViewingDateTimeInput,
     ViewingDateTimeValidationError,
 } from "@/lib/viewings/datetime";
+import { buildConversationReferenceWhere } from "@/lib/conversations/identity";
 
 type GoogleMapsLinkResult = {
     url: string | null;
@@ -349,10 +350,9 @@ async function resolveContactForViewingContext(params: {
 
     if (params.conversationId) {
         const conversation = await db.conversation.findFirst({
-            where: {
-                ...locationFilter,
-                OR: [{ id: params.conversationId }, { ghlConversationId: params.conversationId }]
-            },
+            where: params.locationId
+                ? buildConversationReferenceWhere(params.locationId, params.conversationId)
+                : { OR: [{ id: params.conversationId }, { ghlConversationId: params.conversationId }] },
             select: { contactId: true }
         });
         if (conversation?.contactId) {
@@ -640,10 +640,9 @@ export async function resolveViewingPropertyContext(params: {
 
     if (params.conversationId) {
         const conversation = await db.conversation.findFirst({
-            where: {
-                ...(params.locationId ? { locationId: params.locationId } : {}),
-                OR: [{ id: params.conversationId }, { ghlConversationId: params.conversationId }]
-            },
+            where: params.locationId
+                ? buildConversationReferenceWhere(params.locationId, params.conversationId)
+                : { OR: [{ id: params.conversationId }, { ghlConversationId: params.conversationId }] },
             select: { id: true }
         });
         const resolvedConversationId = conversation?.id || params.conversationId;

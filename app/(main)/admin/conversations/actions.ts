@@ -37,7 +37,9 @@ import {
     buildConversationReferenceWhere,
     getLegacyConversationAlias,
     isLikelyGhlConversationId,
+    resolveConversationReference,
 } from "@/lib/conversations/identity";
+import { syncDealConversationLinks } from "@/lib/deals/conversation-links";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
 import {
@@ -1016,13 +1018,7 @@ async function findRecentDuplicateManualEntry(contactId: string, candidateBody: 
 
 async function resolveConversationForCrmLog(locationId: string, conversationId: string) {
     return db.conversation.findFirst({
-        where: {
-            locationId,
-            OR: [
-                { id: conversationId },
-                { ghlConversationId: conversationId },
-            ]
-        },
+        where: buildConversationReferenceWhere(locationId, conversationId),
         select: {
             id: true,
             ghlConversationId: true,
@@ -1100,8 +1096,8 @@ async function persistSelectionLogEntry(args: {
     });
 
     revalidatePath(`/admin/contacts/${conversation.contactId}/view`);
-    revalidatePath(`/admin/conversations?id=${encodeURIComponent(conversation.ghlConversationId)}`);
-    invalidateConversationReadCaches(conversation.ghlConversationId);
+    revalidatePath(`/admin/conversations?id=${encodeURIComponent(conversation.id)}`);
+    invalidateConversationReadCaches(conversation.id);
 
     return {
         success: true as const,
@@ -2402,6 +2398,7 @@ async function queryConversationWorkspaceCoreMetadata(args: {
     });
 
     if (!conversation) return null;
+    const conversationRefs = [conversation.id, conversation.ghlConversationId].filter(Boolean) as string[];
 
     const [activeDealRows, latestMessage, latestActivity] = await Promise.all([
         db.dealContext.findMany({
@@ -2409,8 +2406,8 @@ async function queryConversationWorkspaceCoreMetadata(args: {
                 locationId: args.locationId,
                 stage: "ACTIVE",
                 OR: [
-                    { conversationIds: { has: conversation.id } },
-                    { conversationIds: { has: conversation.ghlConversationId } },
+                    { conversationLinks: { some: { conversationId: conversation.id } } },
+                    { conversationIds: { hasSome: conversationRefs } },
                 ],
             },
             select: { id: true, title: true },
@@ -2431,7 +2428,9 @@ async function queryConversationWorkspaceCoreMetadata(args: {
     const dealMap = new Map<string, { id: string; title: string }>();
     for (const row of activeDealRows) {
         dealMap.set(conversation.id, { id: row.id, title: row.title });
-        dealMap.set(conversation.ghlConversationId, { id: row.id, title: row.title });
+        if (conversation.ghlConversationId) {
+            dealMap.set(conversation.ghlConversationId, { id: row.id, title: row.title });
+        }
     }
     const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(args.locationId);
 
@@ -2480,6 +2479,7 @@ async function queryConversationWorkspaceMetadata(args: {
     });
 
     if (!conversation) return null;
+    const conversationRefs = [conversation.id, conversation.ghlConversationId].filter(Boolean) as string[];
 
     const [activeDealRows, contactContext, taskMetrics, viewingMetrics, latestExecution, latestMessage, latestActivity] = await Promise.all([
         db.dealContext.findMany({
@@ -2487,8 +2487,8 @@ async function queryConversationWorkspaceMetadata(args: {
                 locationId: args.locationId,
                 stage: "ACTIVE",
                 OR: [
-                    { conversationIds: { has: conversation.id } },
-                    { conversationIds: { has: conversation.ghlConversationId } },
+                    { conversationLinks: { some: { conversationId: conversation.id } } },
+                    { conversationIds: { hasSome: conversationRefs } },
                 ],
             },
             select: { id: true, title: true },
@@ -2624,7 +2624,10 @@ async function queryConversationWorkspaceMetadata(args: {
 
     const dealMap = new Map<string, { id: string; title: string }>();
     for (const row of activeDealRows) {
-        dealMap.set(conversation.ghlConversationId, { id: row.id, title: row.title });
+        dealMap.set(conversation.id, { id: row.id, title: row.title });
+        if (conversation.ghlConversationId) {
+            dealMap.set(conversation.ghlConversationId, { id: row.id, title: row.title });
+        }
     }
     const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(args.locationId);
 
@@ -3274,8 +3277,8 @@ export async function searchConversationTranscriptMatches(
 
     try {
         const location = await getAuthenticatedLocation();
-        const conversation = await db.conversation.findUnique({
-            where: { ghlConversationId: String(conversationId || "").trim() },
+        const conversation = await db.conversation.findFirst({
+            where: buildConversationReferenceWhere(location.id, String(conversationId || "").trim()),
             select: { id: true, locationId: true },
         });
 
@@ -4011,8 +4014,8 @@ export async function refetchWhatsAppMediaAttachment(
         return { success: false as const, error: "WhatsApp (Evolution) is not connected." };
     }
 
-    const conversation = await db.conversation.findUnique({
-        where: { ghlConversationId: conversationId },
+    const conversation = await db.conversation.findFirst({
+        where: buildConversationReferenceWhere(location.id, conversationId),
         include: {
             contact: {
                 select: {
@@ -4165,8 +4168,8 @@ export async function refetchWhatsAppMediaAttachment(
 async function queryTranscriptOnDemandEligibilityBase(locationId: string, conversationId: string) {
     const [enabled, conversation] = await Promise.all([
         isWhatsAppTranscriptOnDemandEnabledForLocation(locationId),
-        db.conversation.findUnique({
-            where: { ghlConversationId: conversationId },
+        db.conversation.findFirst({
+            where: buildConversationReferenceWhere(locationId, conversationId),
             select: {
                 id: true,
                 locationId: true,
@@ -4525,8 +4528,8 @@ export async function bulkRequestWhatsAppAudioTranscripts(
             };
         }
 
-        const conversation = await db.conversation.findUnique({
-            where: { ghlConversationId: conversationId },
+        const conversation = await db.conversation.findFirst({
+            where: buildConversationReferenceWhere(location.id, conversationId),
             select: {
                 id: true,
                 locationId: true,
@@ -5156,10 +5159,7 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
 
     const conversation = await db.conversation.findFirst({
-        where: {
-            ghlConversationId: conversationId,
-            locationId: location.id,
-        },
+        where: buildConversationReferenceWhere(location.id, conversationId),
         include: { contact: true }
     });
 
@@ -5485,8 +5485,8 @@ async function resolveOwnedConversationAudioAttachment(args: {
     messageId: string;
     attachmentId: string;
 }) {
-    const conversation = await db.conversation.findUnique({
-        where: { ghlConversationId: args.conversationId },
+    const conversation = await db.conversation.findFirst({
+        where: buildConversationReferenceWhere(args.locationId, args.conversationId),
         select: {
             id: true,
             locationId: true,
@@ -5581,8 +5581,8 @@ export async function createWhatsAppMediaUploadUrl(
         return { success: false, error: `${kindLabel} is too large. Max size is ${Math.floor(maxSize / (1024 * 1024))}MB.` };
     }
 
-    const conversation = await db.conversation.findUnique({
-        where: { ghlConversationId: conversationId },
+    const conversation = await db.conversation.findFirst({
+        where: buildConversationReferenceWhere(location.id, conversationId),
         select: { id: true, locationId: true, contactId: true }
     });
 
@@ -6217,8 +6217,7 @@ export async function generateAIDraft(
 
     const conversationRecord = await db.conversation.findFirst({
         where: {
-            locationId: location.id,
-            OR: [{ id: conversationId }, { ghlConversationId: conversationId }],
+            ...buildConversationReferenceWhere(location.id, conversationId),
         },
         select: {
             id: true,
@@ -6302,13 +6301,7 @@ export async function setConversationReplyLanguageOverride(
         return { success: false as const, error: "Invalid language code." };
     }
     const conversation = await db.conversation.findFirst({
-        where: {
-            locationId: location.id,
-            OR: [
-                { id: trimmedConversationId },
-                { ghlConversationId: trimmedConversationId },
-            ],
-        },
+        where: buildConversationReferenceWhere(location.id, trimmedConversationId),
         select: { id: true, ghlConversationId: true },
     });
 
@@ -6331,7 +6324,7 @@ export async function setConversationReplyLanguageOverride(
 
     return {
         success: true as const,
-        conversationId: conversation.ghlConversationId,
+        conversationId: conversation.id,
         replyLanguageOverride: normalizedReplyLanguage,
     };
 }
@@ -6355,13 +6348,7 @@ export async function previewTranslatedReply(
     }
 
     const conversation = await db.conversation.findFirst({
-        where: {
-            locationId: location.id,
-            OR: [
-                { id: trimmedConversationId },
-                { ghlConversationId: trimmedConversationId },
-            ],
-        },
+        where: buildConversationReferenceWhere(location.id, trimmedConversationId),
         include: {
             contact: {
                 select: { preferredLang: true },
@@ -6421,13 +6408,7 @@ export async function translateSelectedText(
     }
 
     const conversation = await db.conversation.findFirst({
-        where: {
-            locationId: location.id,
-            OR: [
-                { id: trimmedConversationId },
-                { ghlConversationId: trimmedConversationId },
-            ],
-        },
+        where: buildConversationReferenceWhere(location.id, trimmedConversationId),
         select: { id: true, replyLanguageOverride: true },
     });
 
@@ -6513,7 +6494,7 @@ export async function translateConversationMessage(
     if (existing) {
         return {
             success: true as const,
-            conversationId: message.conversation.ghlConversationId,
+            conversationId: message.conversation.id,
             messageId: message.id,
             translation: {
                 id: existing.id,
@@ -6553,10 +6534,10 @@ export async function translateConversationMessage(
             },
         });
 
-        invalidateConversationReadCaches(message.conversation.ghlConversationId);
+        invalidateConversationReadCaches(message.conversation.id);
         emitConversationRealtimeEvent({
             locationId: location.id,
-            conversationId: message.conversation.ghlConversationId,
+            conversationId: message.conversation.id,
             type: "conversation.message_translation.created",
             payload: {
                 messageId: message.id,
@@ -6567,7 +6548,7 @@ export async function translateConversationMessage(
 
         return {
             success: true as const,
-            conversationId: message.conversation.ghlConversationId,
+            conversationId: message.conversation.id,
             messageId: message.id,
             translation: {
                 id: stored.id,
@@ -6605,7 +6586,7 @@ export async function translateConversationMessage(
             success: false as const,
             error: messageText,
             messageId: message.id,
-            conversationId: message.conversation.ghlConversationId,
+            conversationId: message.conversation.id,
         };
     }
 }
@@ -6622,13 +6603,7 @@ export async function translateConversationThread(
     }
 
     const conversation = await db.conversation.findFirst({
-        where: {
-            locationId: location.id,
-            OR: [
-                { id: trimmedConversationId },
-                { ghlConversationId: trimmedConversationId },
-            ],
-        },
+        where: buildConversationReferenceWhere(location.id, trimmedConversationId),
         include: {
             contact: { select: { preferredLang: true } },
         },
@@ -6677,7 +6652,7 @@ export async function translateConversationThread(
 
     emitConversationRealtimeEvent({
         locationId: location.id,
-        conversationId: conversation.ghlConversationId,
+        conversationId: conversation.id,
         type: "conversation.thread_translation.created",
         payload: {
             targetLanguage: resolvedTargetLanguage,
@@ -6689,7 +6664,7 @@ export async function translateConversationThread(
 
     return {
         success: true as const,
-        conversationId: conversation.ghlConversationId,
+        conversationId: conversation.id,
         targetLanguage: resolvedTargetLanguage,
         translatedCount,
         cachedCount,
@@ -7176,10 +7151,7 @@ export async function getSmsChannelEligibility(conversationId: string) {
         const location = await getBasicLocationContext();
 
         const conversation = await db.conversation.findFirst({
-            where: {
-                ghlConversationId: conversationId,
-                locationId: location.id,
-            },
+            where: buildConversationReferenceWhere(location.id, conversationId),
             select: {
                 contact: {
                     select: {
@@ -7235,10 +7207,7 @@ export async function getWhatsAppChannelEligibility(conversationId: string) {
         const location = await getBasicLocationContext();
 
         const conversation = await db.conversation.findFirst({
-            where: {
-                ghlConversationId: conversationId,
-                locationId: location.id,
-            },
+            where: buildConversationReferenceWhere(location.id, conversationId),
             select: {
                 contact: {
                     select: {
@@ -7515,7 +7484,7 @@ export async function generatePlanAction(conversationId: string, contactId: stri
 
     // 1. Fetch History
     const conversation = await db.conversation.findFirst({
-        where: { ghlConversationId: conversationId, locationId: location.id },
+        where: buildConversationReferenceWhere(location.id, conversationId),
         include: { messages: { orderBy: { createdAt: 'asc' }, take: 30 } }
     });
 
@@ -7761,7 +7730,7 @@ export async function executeNextTaskAction(conversationId: string, contactId: s
 export async function getAgentPlan(conversationId: string) {
     const location = await getAuthenticatedLocation();
     const conversation = await db.conversation.findFirst({
-        where: { ghlConversationId: conversationId, locationId: location.id },
+            where: buildConversationReferenceWhere(location.id, conversationId),
         select: {
             agentPlan: true,
             promptTokens: true,
@@ -7786,7 +7755,7 @@ export async function getAgentPlan(conversationId: string) {
 export async function getAgentExecutions(conversationId: string) {
     const location = await getAuthenticatedLocation();
     const conversation = await db.conversation.findFirst({
-        where: { ghlConversationId: conversationId, locationId: location.id },
+        where: buildConversationReferenceWhere(location.id, conversationId),
         select: { id: true }
     });
 
@@ -8154,7 +8123,7 @@ export async function getAggregateAIUsage() {
         if (topConversationRows.length === 0) {
             topConversationRows = topConversations.map((conversation) => ({
                 id: conversation.id,
-                conversationId: conversation.ghlConversationId,
+                conversationId: conversation.id,
                 contactName: conversation.contact?.name || "Unknown",
                 contactEmail: conversation.contact?.email || null,
                 totalTokens: Number(conversation.totalTokens || 0),
@@ -8324,8 +8293,7 @@ export async function getConversationTranscriptUsage(conversationId: string) {
 
         const conversation = await db.conversation.findFirst({
             where: {
-                OR: [{ id: conversationId }, { ghlConversationId: conversationId }],
-                locationId: location.id
+                ...buildConversationReferenceWhere(location.id, conversationId)
             },
             select: { id: true }
         });
@@ -8697,13 +8665,7 @@ export async function getConversationParticipants(conversationId: string) {
         if (!location) throw new Error("Unauthorized");
 
         const conversation = await db.conversation.findFirst({
-            where: {
-                OR: [
-                    { id: conversationId },
-                    { ghlConversationId: conversationId }
-                ],
-                locationId: location.id
-            }
+            where: buildConversationReferenceWhere(location.id, conversationId)
         });
 
         if (!conversation) return { success: false, error: "Conversation not found" };
@@ -9462,10 +9424,9 @@ export async function startNewConversation(phone: string) {
         }
 
         // 3. Create new conversation
-        const syntheticId = `wa_${Date.now()}_${contact.id}`;
         const conversation = await db.conversation.create({
             data: {
-                ghlConversationId: syntheticId,
+                ghlConversationId: null,
                 locationId: location.id,
                 contactId: contact.id,
                 lastMessageBody: null,
@@ -9476,22 +9437,7 @@ export async function startNewConversation(phone: string) {
             }
         });
 
-        await (db as any).conversationSync.create({
-            data: {
-                conversationId: conversation.id,
-                locationId: location.id,
-                provider: "estio_legacy_alias",
-                providerAccountId: "local",
-                providerConversationId: syntheticId,
-                status: "synced",
-                lastSyncedAt: new Date(),
-                metadata: { source: "startNewConversation" },
-            },
-        }).catch((error: any) => {
-            console.warn("[NewConversation] Failed to persist local alias sync record:", error?.message || error);
-        });
-
-        console.log(`[NewConversation] Created conversation: ${conversation.ghlConversationId}`);
+        console.log(`[NewConversation] Created Estio conversation: ${conversation.id}`);
 
         // 4. Try to backfill history from Evolution
         let messagesImported = 0;
@@ -9511,7 +9457,7 @@ export async function startNewConversation(phone: string) {
                     },
                     limit: 30,
                     offset: 0,
-                    logPrefix: `[NewConversation][new:${conversation.ghlConversationId}]`,
+                    logPrefix: `[NewConversation][new:${conversation.id}]`,
                 });
                 console.log(
                     `[NewConversation] New convo history candidates: ${candidates.join(", ") || "(none)"}; fetchedFrom=${fetchedFrom.join(", ") || "none"}; primary=${remoteJid || "none"}; found=${messages.length}`
@@ -9577,13 +9523,13 @@ export async function startNewConversation(phone: string) {
             source: "contact_bootstrap"
         });
         if (seedResult.seeded) {
-            console.log(`[NewConversation] Seeded new conversation ${conversation.ghlConversationId} from contact.message`);
+            console.log(`[NewConversation] Seeded new conversation ${conversation.id} from contact.message`);
         }
 
         return {
             success: true,
             conversationId: conversation.id,
-            legacyConversationId: conversation.ghlConversationId,
+            legacyConversationId: conversation.ghlConversationId || null,
             isNew: true,
             contactName: contact.name,
             messagesImported
@@ -12038,8 +11984,8 @@ export async function createParsedLead(
 
             // Trigger AI in background so import/save returns immediately.
             backgroundJobsQueued.push("orchestration");
-            runDetachedTask(`paste_lead_orchestrate:${conversation.ghlConversationId}`, async () => {
-                await orchestrateAction(conversation.ghlConversationId, contactId!);
+            runDetachedTask(`paste_lead_orchestrate:${conversation.id}`, async () => {
+                await orchestrateAction(conversation.id, contactId!);
             });
 
             const importLatencyMs = Date.now() - importStartedAt;
@@ -12054,7 +12000,7 @@ export async function createParsedLead(
 
             return {
                 success: true,
-                conversationId: conversation.ghlConversationId,
+                conversationId: conversation.id,
                 internalConversationId: conversation.id,
                 contactId,
                 action: 'replied',
@@ -12095,7 +12041,7 @@ export async function createParsedLead(
 
             return {
                 success: true,
-                conversationId: conversation.ghlConversationId,
+                conversationId: conversation.id,
                 internalConversationId: conversation.id,
                 contactId,
                 action: 'imported',
@@ -13662,13 +13608,7 @@ export async function addConversationActivityEntry(
             select: { id: true, firstName: true, name: true, email: true }
         }),
         db.conversation.findFirst({
-            where: {
-                locationId: location.id,
-                OR: [
-                    { id: conversationId },
-                    { ghlConversationId: conversationId },
-                ]
-            },
+            where: buildConversationReferenceWhere(location.id, conversationId),
             select: { id: true, contactId: true, ghlConversationId: true }
         }),
     ]);
@@ -13697,7 +13637,7 @@ export async function addConversationActivityEntry(
     });
 
     revalidatePath(`/admin/contacts/${conversation.contactId}/view`);
-    invalidateConversationReadCaches(conversation.ghlConversationId, { skipPath: true });
+    invalidateConversationReadCaches(conversation.id, { skipPath: true });
     const activityEntry = {
         id: `history:${createdHistory.id}`,
         type: 'activity' as const,
@@ -13714,7 +13654,7 @@ export async function addConversationActivityEntry(
     };
     emitConversationRealtimeEvent({
         locationId: location.id,
-        conversationId: conversation.ghlConversationId,
+        conversationId: conversation.id,
         type: "activity.created",
         payload: {
             activityEntry,
@@ -13933,14 +13873,14 @@ export async function acceptSuggestedResponse(
     }
 
     if (mode === "sendNow") {
-        if (!suggestion.conversation?.ghlConversationId) {
+        if (!suggestion.conversation?.id) {
             return { success: false as const, error: "Suggestion is not linked to an active conversation." };
         }
 
         const sendType = getComposerChannelFromMessageType(suggestion.conversation.lastMessageType);
         const targetContactId = suggestion.contactId || suggestion.conversation.contactId;
         const sendResult = await sendReply(
-            suggestion.conversation.ghlConversationId,
+            suggestion.conversation.id,
             targetContactId,
             suggestion.body,
             sendType
@@ -13964,11 +13904,11 @@ export async function acceptSuggestedResponse(
         });
     }
 
-    if (suggestion.conversation?.ghlConversationId) {
-        invalidateConversationReadCaches(suggestion.conversation.ghlConversationId);
+    if (suggestion.conversation?.id) {
+        invalidateConversationReadCaches(suggestion.conversation.id);
         emitConversationRealtimeEvent({
             locationId: location.id,
-            conversationId: suggestion.conversation.ghlConversationId,
+            conversationId: suggestion.conversation.id,
             type: "suggested_response.accepted",
             payload: { id: suggestion.id, mode },
         });
@@ -14003,6 +13943,7 @@ export async function rejectSuggestedResponse(id: string, reason?: string | null
         include: {
             conversation: {
                 select: {
+                    id: true,
                     ghlConversationId: true,
                 },
             },
@@ -14025,11 +13966,11 @@ export async function rejectSuggestedResponse(id: string, reason?: string | null
         },
     });
 
-    if (suggestion.conversation?.ghlConversationId) {
-        invalidateConversationReadCaches(suggestion.conversation.ghlConversationId);
+    if (suggestion.conversation?.id) {
+        invalidateConversationReadCaches(suggestion.conversation.id);
         emitConversationRealtimeEvent({
             locationId: location.id,
-            conversationId: suggestion.conversation.ghlConversationId,
+            conversationId: suggestion.conversation.id,
             type: "suggested_response.rejected",
             payload: { id: suggestion.id },
         });
@@ -14322,10 +14263,7 @@ export async function listAiDecisions(input?: ListAiDecisionsInput) {
     let conversationId: string | null = null;
     if (conversationIdRaw) {
         const conversation = await db.conversation.findFirst({
-            where: {
-                locationId: targetLocationId,
-                OR: [{ id: conversationIdRaw }, { ghlConversationId: conversationIdRaw }],
-            },
+            where: buildConversationReferenceWhere(targetLocationId, conversationIdRaw),
             select: { id: true },
         });
         conversationId = conversation?.id || null;

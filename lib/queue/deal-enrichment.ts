@@ -104,9 +104,14 @@ export async function processDealEnrichment(dealId: string): Promise<void> {
         const localConversations = await db.conversation.findMany({
             where: {
                 locationId: deal.locationId,
-                ghlConversationId: { in: deal.conversationIds },
+                OR: [
+                    { id: { in: deal.conversationIds } },
+                    { ghlConversationId: { in: deal.conversationIds } },
+                    { syncRecords: { some: { providerConversationId: { in: deal.conversationIds } } } },
+                ],
             },
             select: {
+                id: true,
                 ghlConversationId: true,
                 contactId: true,
                 contact: {
@@ -131,9 +136,11 @@ export async function processDealEnrichment(dealId: string): Promise<void> {
         const accessToken = String(deal.location?.ghlAccessToken || "").trim();
         if (accessToken) {
             const unresolvedConversationIds = deal.conversationIds.filter((conversationId) => {
-                const localConversation = localConversations.find((conversation) => conversation.ghlConversationId === conversationId);
+                const localConversation = localConversations.find((conversation) =>
+                    conversation.id === conversationId || conversation.ghlConversationId === conversationId
+                );
                 return !localConversation?.contact?.ghlContactId;
-            });
+            }).filter((conversationId) => /^[A-Za-z0-9]{20,}$/.test(String(conversationId || "")));
 
             const conversationIdsToResolve = unresolvedConversationIds.length > 0
                 ? unresolvedConversationIds

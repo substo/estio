@@ -919,7 +919,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     if (!conversation) {
         conversation = await db.conversation.create({
             data: {
-                ghlConversationId: `wa_${contact.id}`,
+                ghlConversationId: null,
                 locationId,
                 contactId: contact.id,
                 lastMessageBody: body,
@@ -932,6 +932,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         console.log(`[WhatsApp Sync] Created conversation ${conversation.id} for contact ${contact.id}`);
     }
 
+    const evolutionThreadId = msg.remoteJid || msg.chatId || msg.from || conversation.ghlConversationId || conversation.id;
     await (db as any).conversationSync.upsert({
         where: {
             conversationId_provider_providerAccountId: {
@@ -945,13 +946,13 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
             locationId,
             provider: "evolution",
             providerAccountId: locationDef?.evolutionInstanceId || "default",
-            providerConversationId: conversation.ghlConversationId,
+            providerConversationId: evolutionThreadId,
             status: "synced",
             lastSyncedAt: new Date(),
             metadata: { source: "whatsapp_sync" },
         },
         update: {
-            providerConversationId: conversation.ghlConversationId,
+            providerConversationId: evolutionThreadId,
             status: "synced",
             lastSyncedAt: new Date(),
             lastError: null,
@@ -964,7 +965,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         const reconciled = await tryReconcileOutboundWebhookToPendingMessage({
             locationId,
             conversationId: conversation.id,
-            conversationGhlId: conversation.ghlConversationId,
+            conversationGhlId: conversation.ghlConversationId || conversation.id,
             wamId,
             timestamp,
         });
@@ -1038,14 +1039,14 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
             provider: "evolution",
             providerAccountId: locationDef?.evolutionInstanceId || "default",
             providerMessageId: wamId,
-            providerThreadId: conversation.ghlConversationId,
+            providerThreadId: evolutionThreadId,
             status: "synced",
             remoteUpdatedAt: timestamp,
             lastSyncedAt: new Date(),
         },
         update: {
             providerMessageId: wamId,
-            providerThreadId: conversation.ghlConversationId,
+            providerThreadId: evolutionThreadId,
             status: "synced",
             remoteUpdatedAt: timestamp,
             lastSyncedAt: new Date(),

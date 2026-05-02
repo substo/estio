@@ -3,7 +3,7 @@ import { getMessages, getConversations, getConversation } from "./conversations"
 import { ensureLocalContactSynced } from "@/lib/crm/contact-sync";
 import { Prisma } from "@prisma/client";
 import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-events";
-import { isLikelyGhlConversationId } from "@/lib/conversations/identity";
+import { buildConversationReferenceWhere, isLikelyGhlConversationId } from "@/lib/conversations/identity";
 
 function isLocalSyntheticConversationId(id: string | null | undefined) {
     const value = String(id || "").trim();
@@ -430,26 +430,69 @@ export async function upsertConversationFromGHL(conv: any, internalLocationId: s
         if (!contact) return;
     }
 
-    return await db.conversation.upsert({
-        where: { ghlConversationId: conv.id },
-        update: {
-            lastMessageBody: conv.lastMessageBody,
-            lastMessageAt: conv.lastMessageDate ? new Date(conv.lastMessageDate < 10000000000 ? conv.lastMessageDate * 1000 : conv.lastMessageDate) : new Date(),
-            lastMessageType: conv.lastMessageType || conv.type,
-            unreadCount: conv.unreadCount || 0,
-            status: conv.status || 'open'
+    const existing = await db.conversation.findFirst({
+        where: buildConversationReferenceWhere(internalLocationId, conv.id),
+        select: { id: true },
+    });
+
+    const conversation = existing
+        ? await db.conversation.update({
+            where: { id: existing.id },
+            data: {
+                lastMessageBody: conv.lastMessageBody,
+                lastMessageAt: conv.lastMessageDate ? new Date(conv.lastMessageDate < 10000000000 ? conv.lastMessageDate * 1000 : conv.lastMessageDate) : new Date(),
+                lastMessageType: conv.lastMessageType || conv.type,
+                unreadCount: conv.unreadCount || 0,
+                status: conv.status || 'open'
+            },
+        })
+        : await db.conversation.create({
+            data: {
+                ghlConversationId: conv.id,
+                locationId: internalLocationId,
+                contactId: contact.id,
+                lastMessageBody: conv.lastMessageBody,
+                lastMessageAt: conv.lastMessageDate ? new Date(conv.lastMessageDate < 10000000000 ? conv.lastMessageDate * 1000 : conv.lastMessageDate) : new Date(),
+                lastMessageType: conv.lastMessageType || conv.type,
+                unreadCount: conv.unreadCount || 0,
+                status: conv.status || 'open'
+            },
+        });
+
+    const location = await db.location.findUnique({
+        where: { id: internalLocationId },
+        select: { ghlLocationId: true },
+    });
+    await (db as any).conversationSync.upsert({
+        where: {
+            conversationId_provider_providerAccountId: {
+                conversationId: conversation.id,
+                provider: "ghl",
+                providerAccountId: location?.ghlLocationId || "default",
+            },
         },
         create: {
-            ghlConversationId: conv.id,
+            conversationId: conversation.id,
             locationId: internalLocationId,
-            contactId: contact.id,
-            lastMessageBody: conv.lastMessageBody,
-            lastMessageAt: conv.lastMessageDate ? new Date(conv.lastMessageDate < 10000000000 ? conv.lastMessageDate * 1000 : conv.lastMessageDate) : new Date(),
-            lastMessageType: conv.lastMessageType || conv.type,
-            unreadCount: conv.unreadCount || 0,
-            status: conv.status || 'open'
-        }
+            provider: "ghl",
+            providerAccountId: location?.ghlLocationId || "default",
+            providerConversationId: conv.id,
+            status: "synced",
+            remoteUpdatedAt: new Date(),
+            lastSyncedAt: new Date(),
+        },
+        update: {
+            providerConversationId: conv.id,
+            status: "synced",
+            remoteUpdatedAt: new Date(),
+            lastSyncedAt: new Date(),
+            lastError: null,
+        },
+    }).catch((error: any) => {
+        console.warn("[GHL Sync] Failed to persist conversation sync:", error?.message || error);
     });
+
+    return conversation;
 }
 
 function parseMessageDate(payload: any): { date: Date, isFallback: boolean } {

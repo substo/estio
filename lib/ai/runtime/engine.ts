@@ -4,6 +4,7 @@ import db from "@/lib/db";
 import { orchestrate } from "@/lib/ai/orchestrator";
 import { SkillLoader } from "@/lib/ai/skills/loader";
 import { getTimeZoneDayKey, isWithinQuietHours } from "@/lib/ai/automation/config";
+import { buildConversationReferenceWhere } from "@/lib/conversations/identity";
 import {
   AiSkillPolicyConfig,
   AiSkillPolicySchema,
@@ -503,6 +504,7 @@ async function collectDealProgressCandidates(args: {
       id: true,
       stage: true,
       conversationIds: true,
+      conversationLinks: { select: { conversationId: true } },
       lastActivityAt: true,
     },
     orderBy: { lastActivityAt: "asc" },
@@ -510,13 +512,20 @@ async function collectDealProgressCandidates(args: {
   });
 
   if (!deals.length) return [];
-  const convoGhlIds = Array.from(new Set(deals.flatMap((deal) => deal.conversationIds || []).filter(Boolean)));
-  if (!convoGhlIds.length) return [];
+  const conversationRefs = Array.from(new Set(deals.flatMap((deal) => [
+    ...((deal as any).conversationLinks || []).map((link: any) => link.conversationId),
+    ...(deal.conversationIds || []),
+  ]).filter(Boolean)));
+  if (!conversationRefs.length) return [];
 
   const conversations = await db.conversation.findMany({
     where: {
       locationId: args.locationId,
-      ghlConversationId: { in: convoGhlIds },
+      OR: [
+        { id: { in: conversationRefs } },
+        { ghlConversationId: { in: conversationRefs } },
+        { syncRecords: { some: { providerConversationId: { in: conversationRefs } } } },
+      ],
       deletedAt: null,
       archivedAt: null,
     },
@@ -531,11 +540,19 @@ async function collectDealProgressCandidates(args: {
     take: 350,
   });
 
-  const byGhlId = new Map(conversations.map((conversation) => [conversation.ghlConversationId, conversation]));
+  const byRef = new Map<string, typeof conversations[number]>();
+  for (const conversation of conversations) {
+    byRef.set(conversation.id, conversation);
+    if (conversation.ghlConversationId) byRef.set(conversation.ghlConversationId, conversation);
+  }
   const candidates: RuntimeCandidate[] = [];
   for (const deal of deals) {
-    const selected = (deal.conversationIds || [])
-      .map((id) => byGhlId.get(id))
+    const refs = [
+      ...(((deal as any).conversationLinks || []).map((link: any) => link.conversationId)),
+      ...(deal.conversationIds || []),
+    ];
+    const selected = refs
+      .map((id) => byRef.get(id))
       .find(Boolean);
     if (!selected?.id) continue;
 
@@ -1404,10 +1421,7 @@ export async function simulateSkillDecision(args: {
 
   const conversation = args.conversationId
     ? await db.conversation.findFirst({
-      where: {
-        locationId,
-        OR: [{ id: String(args.conversationId).trim() }, { ghlConversationId: String(args.conversationId).trim() }],
-      },
+      where: buildConversationReferenceWhere(locationId, String(args.conversationId).trim()),
       select: {
         id: true,
         contactId: true,

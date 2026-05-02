@@ -17,6 +17,7 @@ import {
 } from "@/lib/conversations/timeline-events";
 import { getDraftModelWithCachedContext } from "@/lib/ai/draft-context-cache";
 import { getLocationDefaultReplyLanguage } from "@/lib/ai/location-reply-language";
+import { buildConversationReferenceWhere } from "@/lib/conversations/identity";
 import {
     buildDealProtectiveCommunicationContract,
     detectLanguageFromText,
@@ -438,8 +439,8 @@ export async function generateDraft(context: CoordinationContext) {
 
             if (!localConversation) {
                 // Try looking up by GHL ID (as UI often passes this)
-                localConversation = await db.conversation.findUnique({
-                    where: { ghlConversationId: context.conversationId },
+                localConversation = await db.conversation.findFirst({
+                    where: buildConversationReferenceWhere(context.locationId, context.conversationId),
                     include: { messages: { orderBy: { createdAt: 'desc' }, take: 20 } }
                 });
             }
@@ -964,16 +965,10 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
 
         // 6. Persist to DB
         // Determine DB conversation ID (internal) — try both ghlConversationId and local id
-        let dbConversation = await db.conversation.findUnique({
-            where: { ghlConversationId: context.conversationId },
+        let dbConversation = await db.conversation.findFirst({
+            where: buildConversationReferenceWhere(context.locationId, context.conversationId),
             select: { id: true }
         });
-        if (!dbConversation) {
-            dbConversation = await db.conversation.findUnique({
-                where: { id: context.conversationId },
-                select: { id: true }
-            });
-        }
 
         if (dbConversation) {
             // Log Execution
@@ -1063,16 +1058,10 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
 
         // Persist error to AgentExecution so it shows in Thinking Trace & Usage Dashboard
         try {
-            let errorDbConversation = await db.conversation.findUnique({
-                where: { ghlConversationId: context.conversationId },
+            let errorDbConversation = await db.conversation.findFirst({
+                where: buildConversationReferenceWhere(context.locationId, context.conversationId),
                 select: { id: true }
             });
-            if (!errorDbConversation) {
-                errorDbConversation = await db.conversation.findUnique({
-                    where: { id: context.conversationId },
-                    select: { id: true }
-                });
-            }
             if (errorDbConversation) {
                 const errorCost = calculateRunCost(
                     telemetry.model.actual,

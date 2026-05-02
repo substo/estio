@@ -1421,12 +1421,30 @@ model DealContext {
   commission       Float?
   offers           Offer[]
   documents        DealDocument[]
+  conversationLinks DealConversationLink[]
 
   location    Location     @relation(fields: [locationId], references: [id], onDelete: Cascade)
   aiDecisions AiDecision[]
 
   @@index([locationId])
   @@index([lastActivityAt])
+}
+
+model DealConversationLink {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  dealId                String
+  conversationId        String
+  legacyConversationRef String?
+
+  deal         DealContext  @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([dealId, conversationId])
+  @@index([conversationId])
+  @@index([legacyConversationRef])
 }
 
 model Offer {
@@ -1464,7 +1482,7 @@ model Conversation {
   id                String @id @default(cuid())
   locationId        String
   contactId         String
-  ghlConversationId String @unique
+  ghlConversationId String? @unique
 
   status           String   @default("open")
   lastMessageBody  String?  @db.Text
@@ -1514,6 +1532,7 @@ model Conversation {
   messageSyncRecords         MessageSync[]
   providerOutboxJobs         ProviderOutbox[]
   messageTranslationCaches   MessageTranslationCache[]
+  dealLinks                  DealConversationLink[]
 
   @@unique([locationId, contactId])
   @@index([locationId])

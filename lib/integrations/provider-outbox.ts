@@ -1,0 +1,350 @@
+import { randomUUID } from "crypto";
+import { Prisma } from "@prisma/client";
+import db from "@/lib/db";
+import { getProviderCapabilities } from "@/lib/integrations/provider-capabilities";
+import { buildProviderOutboxIdempotencyKey } from "@/lib/integrations/provider-outbox-keys";
+
+const MAX_PROVIDER_OUTBOX_ATTEMPTS = Math.max(Number(process.env.PROVIDER_OUTBOX_MAX_ATTEMPTS || 6), 1);
+const STALE_PROVIDER_OUTBOX_LOCK_MS = Math.max(Number(process.env.PROVIDER_OUTBOX_STALE_LOCK_MS || 5 * 60 * 1000), 60_000);
+
+export type ProviderOutboxProcessOutcome = "success" | "failed" | "dead" | "disabled" | "skipped";
+
+export type ProviderOutboxProcessResult = {
+    outcome: ProviderOutboxProcessOutcome;
+    requeueDelayMs?: number;
+    error?: string;
+};
+
+function normalizeError(error: unknown): string {
+    if (error instanceof Error) return error.message;
+    try {
+        return JSON.stringify(error);
+    } catch {
+        return String(error);
+    }
+}
+
+function computeBackoffMs(attemptCount: number): number {
+    const exponent = Math.max(0, attemptCount - 1);
+    const baseSeconds = Math.min(30 * 60, Math.pow(2, exponent) * 15);
+    const jitter = 0.85 + (Math.random() * 0.3);
+    return Math.round(baseSeconds * 1000 * jitter);
+}
+
+function isRetryableProviderError(error: unknown): boolean {
+    const status = Number((error as any)?.response?.status || (error as any)?.status || 0);
+    if (status === 408 || status === 409 || status === 425 || status === 429 || status >= 500) return true;
+    if (status >= 400 && status < 500) return false;
+    const code = String((error as any)?.code || (error as any)?.cause?.code || "");
+    if (["ECONNABORTED", "ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "ENOTFOUND", "EAI_AGAIN"].includes(code)) return true;
+    return status <= 0;
+}
+
+function operationCapability(operation: string): keyof ReturnType<typeof getProviderCapabilities> | null {
+    if (operation === "mirror_conversation") return "canMirrorOutbound";
+    if (operation === "mirror_message") return "canMirrorOutbound";
+    if (operation === "sync_contact") return "canSyncContacts";
+    if (operation === "sync_status") return "canUpdateStatus";
+    return null;
+}
+
+export async function enqueueProviderOutboxJob(args: {
+    locationId: string;
+    provider: "ghl" | "google" | "outlook";
+    operation: "mirror_conversation" | "mirror_message" | "sync_contact" | "sync_status";
+    providerAccountId?: string | null;
+    conversationId?: string | null;
+    messageId?: string | null;
+    contactId?: string | null;
+    payload?: Prisma.InputJsonValue | null;
+    scheduledAt?: Date;
+}) {
+    const providerAccountId = String(args.providerAccountId || "default").trim() || "default";
+    const idempotencyKey = buildProviderOutboxIdempotencyKey({
+        provider: args.provider,
+        providerAccountId,
+        operation: args.operation,
+        locationId: args.locationId,
+        conversationId: args.conversationId,
+        messageId: args.messageId,
+        contactId: args.contactId,
+    });
+
+    return (db as any).providerOutbox.upsert({
+        where: { idempotencyKey },
+        create: {
+            locationId: args.locationId,
+            provider: args.provider,
+            providerAccountId,
+            operation: args.operation,
+            conversationId: args.conversationId || null,
+            messageId: args.messageId || null,
+            contactId: args.contactId || null,
+            payload: args.payload || undefined,
+            scheduledAt: args.scheduledAt || new Date(),
+            idempotencyKey,
+        },
+        update: {
+            scheduledAt: args.scheduledAt || new Date(),
+            payload: args.payload || undefined,
+            status: "pending",
+            lastError: null,
+        },
+    });
+}
+
+async function markProviderOutboxDisabled(row: any, reason: string, attemptCount: number): Promise<ProviderOutboxProcessResult> {
+    await (db as any).providerOutbox.update({
+        where: { id: row.id },
+        data: {
+            status: "disabled",
+            processedAt: new Date(),
+            attemptCount,
+            lastError: reason,
+            lockedAt: null,
+            lockedBy: null,
+        },
+    });
+    return { outcome: "disabled", error: reason };
+}
+
+async function processGhlProviderOutbox(row: any) {
+    const location = row.location;
+    if (!location?.ghlAccessToken) {
+        return { disabled: "GHL is not connected for this location." };
+    }
+
+    const contactId = row.contactId || row.conversation?.contactId || row.message?.contactId;
+    if (!contactId) {
+        return { disabled: "No contact is associated with this provider mirror job." };
+    }
+
+    const { ensureRemoteContact } = await import("@/lib/crm/contact-sync");
+    const remoteContactId = await ensureRemoteContact(contactId, location.ghlLocationId || "", location.ghlAccessToken);
+    if (!remoteContactId) {
+        return { disabled: "Could not resolve a GHL contact for this job." };
+    }
+
+    if (row.operation === "sync_contact" || row.operation === "mirror_conversation") {
+        return { completed: true };
+    }
+
+    if (row.operation !== "mirror_message") {
+        return { disabled: `Unsupported GHL provider outbox operation: ${row.operation}` };
+    }
+
+    const message = row.message;
+    if (!message?.id) {
+        return { disabled: "Message was deleted before it could be mirrored." };
+    }
+
+    const body = String((row.payload as any)?.body || message.body || "").trim();
+    if (!body) {
+        return { disabled: "Message body is empty; nothing to mirror." };
+    }
+
+    const { sendMessage } = await import("@/lib/ghl/conversations");
+    const customProviderId = process.env.GHL_CUSTOM_PROVIDER_ID;
+    const payload: any = {
+        contactId: remoteContactId,
+        type: customProviderId ? "Custom" : "WhatsApp",
+        message: body,
+    };
+    if (customProviderId) payload.conversationProviderId = customProviderId;
+
+    const res = await sendMessage(location.ghlAccessToken, payload);
+    const providerMessageId = String(res?.messageId || res?.message?.id || "").trim() || null;
+    const providerConversationId = String(res?.conversationId || res?.conversation?.id || "").trim() || null;
+
+    if (providerConversationId && row.conversationId) {
+        await (db as any).conversationSync.upsert({
+            where: {
+                conversationId_provider_providerAccountId: {
+                    conversationId: row.conversationId,
+                    provider: "ghl",
+                    providerAccountId: location.ghlLocationId || row.providerAccountId || "default",
+                },
+            },
+            create: {
+                conversationId: row.conversationId,
+                locationId: row.locationId,
+                provider: "ghl",
+                providerAccountId: location.ghlLocationId || row.providerAccountId || "default",
+                providerConversationId,
+                status: "synced",
+                remoteUpdatedAt: new Date(),
+                lastSyncedAt: new Date(),
+            },
+            update: {
+                providerConversationId,
+                status: "synced",
+                remoteUpdatedAt: new Date(),
+                lastSyncedAt: new Date(),
+                lastError: null,
+            },
+        });
+    }
+
+    if (providerMessageId && row.messageId && row.conversationId) {
+        await (db as any).messageSync.upsert({
+            where: {
+                messageId_provider_providerAccountId: {
+                    messageId: row.messageId,
+                    provider: "ghl",
+                    providerAccountId: location.ghlLocationId || row.providerAccountId || "default",
+                },
+            },
+            create: {
+                messageId: row.messageId,
+                conversationId: row.conversationId,
+                locationId: row.locationId,
+                provider: "ghl",
+                providerAccountId: location.ghlLocationId || row.providerAccountId || "default",
+                providerMessageId,
+                providerThreadId: providerConversationId,
+                status: "synced",
+                remoteUpdatedAt: new Date(),
+                lastSyncedAt: new Date(),
+            },
+            update: {
+                providerMessageId,
+                providerThreadId: providerConversationId,
+                status: "synced",
+                remoteUpdatedAt: new Date(),
+                lastSyncedAt: new Date(),
+                lastError: null,
+            },
+        });
+    }
+
+    return { completed: true };
+}
+
+async function executeProviderOutbox(row: any) {
+    const capability = operationCapability(String(row.operation || ""));
+    const caps = getProviderCapabilities(row.provider);
+    if (!capability || !caps[capability]) {
+        return { disabled: `Provider ${row.provider} cannot perform ${row.operation}.` };
+    }
+
+    if (row.provider === "ghl") return processGhlProviderOutbox(row);
+    return { disabled: `${row.provider} mirror worker is not connected for ${row.operation} yet.` };
+}
+
+export async function processProviderOutboxJob(args: {
+    outboxId: string;
+    workerId?: string;
+}): Promise<ProviderOutboxProcessResult> {
+    const outboxId = String(args.outboxId || "").trim();
+    if (!outboxId) return { outcome: "skipped", error: "Missing outbox id." };
+
+    const now = new Date();
+    const workerId = args.workerId || `provider-outbox:${randomUUID()}`;
+    const lockClaim = await (db as any).providerOutbox.updateMany({
+        where: {
+            id: outboxId,
+            status: { in: ["pending", "failed"] },
+            scheduledAt: { lte: now },
+        },
+        data: {
+            status: "processing",
+            lockedAt: now,
+            lockedBy: workerId,
+        },
+    });
+    if (!Number(lockClaim?.count || 0)) return { outcome: "skipped" };
+
+    const row = await (db as any).providerOutbox.findUnique({
+        where: { id: outboxId },
+        include: {
+            location: true,
+            conversation: true,
+            message: true,
+            contact: true,
+        },
+    });
+    if (!row) return { outcome: "skipped", error: "Outbox row no longer exists." };
+
+    const attemptCount = Number(row.attemptCount || 0) + 1;
+    try {
+        const result = await executeProviderOutbox(row);
+        if ((result as any)?.disabled) {
+            return markProviderOutboxDisabled(row, String((result as any).disabled), attemptCount);
+        }
+
+        await (db as any).providerOutbox.update({
+            where: { id: row.id },
+            data: {
+                status: "completed",
+                processedAt: new Date(),
+                attemptCount,
+                lastError: null,
+                lockedAt: null,
+                lockedBy: null,
+            },
+        });
+        return { outcome: "success" };
+    } catch (error) {
+        const message = normalizeError(error);
+        const canRetry = isRetryableProviderError(error) && attemptCount < MAX_PROVIDER_OUTBOX_ATTEMPTS;
+        if (canRetry) {
+            const backoffMs = computeBackoffMs(attemptCount);
+            await (db as any).providerOutbox.update({
+                where: { id: row.id },
+                data: {
+                    status: "failed",
+                    attemptCount,
+                    lastError: message,
+                    scheduledAt: new Date(Date.now() + backoffMs),
+                    lockedAt: null,
+                    lockedBy: null,
+                },
+            });
+            return { outcome: "failed", requeueDelayMs: backoffMs, error: message };
+        }
+
+        await (db as any).providerOutbox.update({
+            where: { id: row.id },
+            data: {
+                status: "dead",
+                processedAt: new Date(),
+                attemptCount,
+                lastError: message,
+                lockedAt: null,
+                lockedBy: null,
+            },
+        });
+        return { outcome: "dead", error: message };
+    }
+}
+
+export async function recoverStaleProviderOutboxLocks() {
+    const staleBefore = new Date(Date.now() - STALE_PROVIDER_OUTBOX_LOCK_MS);
+    const recovered = await (db as any).providerOutbox.updateMany({
+        where: {
+            status: "processing",
+            lockedAt: { lt: staleBefore },
+        },
+        data: {
+            status: "failed",
+            lockedAt: null,
+            lockedBy: null,
+            scheduledAt: new Date(),
+            lastError: "Recovered stale processing lock; re-queued.",
+        },
+    });
+    return Number(recovered?.count || 0);
+}
+
+export async function listDueProviderOutboxIds(limit = 200): Promise<string[]> {
+    const rows = await (db as any).providerOutbox.findMany({
+        where: {
+            status: { in: ["pending", "failed"] },
+            scheduledAt: { lte: new Date() },
+        },
+        orderBy: [{ scheduledAt: "asc" }, { createdAt: "asc" }],
+        take: Math.max(1, Math.min(Number(limit || 200), 1000)),
+        select: { id: true },
+    });
+    return rows.map((row: any) => String(row.id));
+}
