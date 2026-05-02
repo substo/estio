@@ -11715,7 +11715,7 @@ export async function createParsedLead(
         if (inferredStatus) contactData.requirementStatus = inferredStatus;
         if (data.goal) contactData.leadGoal = data.goal;
         if (data.internalNotes) contactData.requirementOtherDetails = data.internalNotes;
-        if (data.internalNotes) contactData.leadOtherDetails = data.internalNotes;
+        if (data.internalNotes) contactData.notes = data.internalNotes;
 
         const loadExistingContactForMerge = async (id: string) => {
             existingContactForMerge = await db.contact.findUnique({
