@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { upsertProperty, pushToOldCrm, pullFromOldCrm, linkPropertyCreator } from "../actions";
+import { isRedirectError } from "next/dist/client/components/redirect";
 import { useEffect, useMemo, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -389,6 +390,9 @@ export default function PropertyForm({
                 onSuccess(result?.data);
             }
         } catch (error: any) {
+            if (isRedirectError(error)) {
+                throw error;
+            }
             console.error("Failed to save property:", error);
             const message = error instanceof Error ? error.message : "Unknown error";
             const duplicateMarker = "DUPLICATE_PROPERTY_REFERENCE::";
