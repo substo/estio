@@ -307,7 +307,10 @@ async function resolveConversations(options: AssembleTimelineOptions): Promise<R
     const rows = await db.conversation.findMany({
         where: {
             locationId: options.locationId,
-            ghlConversationId: { in: deal.conversationIds },
+            OR: [
+                { id: { in: deal.conversationIds } },
+                { ghlConversationId: { in: deal.conversationIds } },
+            ],
         },
         select: {
             id: true,

@@ -932,6 +932,34 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         console.log(`[WhatsApp Sync] Created conversation ${conversation.id} for contact ${contact.id}`);
     }
 
+    await (db as any).conversationSync.upsert({
+        where: {
+            conversationId_provider_providerAccountId: {
+                conversationId: conversation.id,
+                provider: "evolution",
+                providerAccountId: locationDef?.evolutionInstanceId || "default",
+            },
+        },
+        create: {
+            conversationId: conversation.id,
+            locationId,
+            provider: "evolution",
+            providerAccountId: locationDef?.evolutionInstanceId || "default",
+            providerConversationId: conversation.ghlConversationId,
+            status: "synced",
+            lastSyncedAt: new Date(),
+            metadata: { source: "whatsapp_sync" },
+        },
+        update: {
+            providerConversationId: conversation.ghlConversationId,
+            status: "synced",
+            lastSyncedAt: new Date(),
+            lastError: null,
+        },
+    }).catch((error: any) => {
+        console.warn("[WhatsApp Sync] Failed to persist Evolution conversation sync:", error?.message || error);
+    });
+
     if (direction === "outbound") {
         const reconciled = await tryReconcileOutboundWebhookToPendingMessage({
             locationId,
@@ -995,6 +1023,38 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
 
     console.log(`[WhatsApp Sync] Created message ${wamId} for conversation ${conversation.id}`);
 
+    await (db as any).messageSync.upsert({
+        where: {
+            messageId_provider_providerAccountId: {
+                messageId: newMessage.id,
+                provider: "evolution",
+                providerAccountId: locationDef?.evolutionInstanceId || "default",
+            },
+        },
+        create: {
+            messageId: newMessage.id,
+            conversationId: conversation.id,
+            locationId,
+            provider: "evolution",
+            providerAccountId: locationDef?.evolutionInstanceId || "default",
+            providerMessageId: wamId,
+            providerThreadId: conversation.ghlConversationId,
+            status: "synced",
+            remoteUpdatedAt: timestamp,
+            lastSyncedAt: new Date(),
+        },
+        update: {
+            providerMessageId: wamId,
+            providerThreadId: conversation.ghlConversationId,
+            status: "synced",
+            remoteUpdatedAt: timestamp,
+            lastSyncedAt: new Date(),
+            lastError: null,
+        },
+    }).catch((error: any) => {
+        console.warn("[WhatsApp Sync] Failed to persist Evolution message sync:", error?.message || error);
+    });
+
     // Unified Update Logic
     const { updateConversationLastMessage } = await import('@/lib/conversations/update');
     await updateConversationLastMessage({
@@ -1012,7 +1072,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     // frontend can optimistically render the bubble without a server round-trip.
     void publishConversationRealtimeEvent({
         locationId,
-        conversationId: conversation.ghlConversationId,
+        conversationId: conversation.id,
         type: direction === "inbound" ? "message.inbound" : "message.outbound",
         payload: {
             direction,

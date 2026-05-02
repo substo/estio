@@ -2,7 +2,12 @@ import { ghlFetch } from "./client";
 
 export interface Conversation {
     id: string;
+    legacyConversationId?: string | null;
+    providerConversationId?: string | null;
+    ghlConversationId?: string | null;
     contactId: string;
+    legacyContactId?: string | null;
+    providerContactId?: string | null;
     locationId: string;
     lastMessageBody: string;
     lastMessageDate: number;

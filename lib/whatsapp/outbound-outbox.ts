@@ -256,6 +256,38 @@ export async function processWhatsAppOutboundOutboxJob(args: {
             },
         });
 
+        await (db as any).messageSync.upsert({
+            where: {
+                messageId_provider_providerAccountId: {
+                    messageId: row.messageId,
+                    provider: "evolution",
+                    providerAccountId: instanceId || "default",
+                },
+            },
+            create: {
+                messageId: row.messageId,
+                conversationId: row.conversationId,
+                locationId: row.locationId,
+                provider: "evolution",
+                providerAccountId: instanceId || "default",
+                providerMessageId: wamId,
+                providerThreadId: row.conversation?.ghlConversationId || row.conversationId,
+                status: "synced",
+                remoteUpdatedAt: new Date(),
+                lastSyncedAt: new Date(),
+            },
+            update: {
+                providerMessageId: wamId,
+                providerThreadId: row.conversation?.ghlConversationId || row.conversationId,
+                status: "synced",
+                remoteUpdatedAt: new Date(),
+                lastSyncedAt: new Date(),
+                lastError: null,
+            },
+        }).catch((err: any) => {
+            console.error("[WhatsApp Outbox] Failed to persist Evolution message sync:", err);
+        });
+
         await updateConversationLastMessage({
             conversationId: row.conversationId,
             messageBody: String(row.message?.body || ""),
@@ -283,7 +315,7 @@ export async function processWhatsAppOutboundOutboxJob(args: {
 
         void publishConversationRealtimeEvent({
             locationId: row.locationId,
-            conversationId: row.conversation?.ghlConversationId || null,
+            conversationId: row.conversationId || null,
             type: "message.outbound",
             payload: outboundPayload,
         });

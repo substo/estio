@@ -33,6 +33,11 @@ import { withResilience } from "@/lib/external/resilience";
 import { assembleTimelineEvents } from "@/lib/conversations/timeline-events";
 import { buildMessageCursorFromMessage } from "@/lib/conversations/thread-hydration";
 import { buildMessageTranslationState, getResolvedConversationTranslationLanguage } from "@/lib/conversations/translation-view";
+import {
+    buildConversationReferenceWhere,
+    getLegacyConversationAlias,
+    isLikelyGhlConversationId,
+} from "@/lib/conversations/identity";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
 import {
@@ -1470,7 +1475,7 @@ async function persistTranscriptManualAuditEvent(args: {
 }
 
 async function getAuthenticatedLocationReadOnly(options?: { requireGhlToken?: boolean }) {
-    const requireGhlToken = options?.requireGhlToken !== false;
+    const requireGhlToken = options?.requireGhlToken === true;
     const location = await getLocationContext();
     if (!location) {
         throw new Error("Unauthorized");
@@ -1498,13 +1503,18 @@ async function getAuthenticatedLocation() {
 
 function mapConversationRowToUi(
     c: any,
-    location: { ghlLocationId?: string | null },
+    location: { id?: string | null; ghlLocationId?: string | null },
     dealMap?: Map<string, { id: string; title: string }>,
     locationDefaultReplyLanguage?: string | null,
 ) {
     return {
-        id: c.ghlConversationId,
-        contactId: c.contact?.ghlContactId || c.contactId,
+        id: c.id,
+        legacyConversationId: c.ghlConversationId || null,
+        providerConversationId: isLikelyGhlConversationId(c.ghlConversationId) ? c.ghlConversationId : null,
+        ghlConversationId: isLikelyGhlConversationId(c.ghlConversationId) ? c.ghlConversationId : null,
+        contactId: c.contactId,
+        legacyContactId: c.contact?.ghlContactId || null,
+        providerContactId: c.contact?.ghlContactId || null,
         contactName: c.contact?.name || "Unknown",
         contactPhone: c.contact?.phone || undefined,
         contactEmail: c.contact?.email || undefined,
@@ -1521,9 +1531,9 @@ function mapConversationRowToUi(
         status: c.status as any,
         type: c.lastMessageType || 'TYPE_SMS',
         lastMessageType: c.lastMessageType || undefined,
-        locationId: location.ghlLocationId || "",
-        activeDealId: dealMap?.get(c.ghlConversationId)?.id,
-        activeDealTitle: dealMap?.get(c.ghlConversationId)?.title,
+        locationId: location.id || location.ghlLocationId || "",
+        activeDealId: dealMap?.get(c.id)?.id || dealMap?.get(c.ghlConversationId)?.id,
+        activeDealTitle: dealMap?.get(c.id)?.title || dealMap?.get(c.ghlConversationId)?.title,
         suggestedActions: c.suggestedActions || [],
     } satisfies Conversation;
 }
@@ -1622,7 +1632,7 @@ function buildConversationDeltaCursorFromRows(rows: Array<{ id: string; updatedA
 }
 
 function invalidateConversationReadCaches(
-    conversationGhlId?: string | null,
+    conversationId?: string | null,
     options?: { skipPath?: boolean }
 ) {
     revalidateTag("conversations:list");
@@ -1630,8 +1640,8 @@ function invalidateConversationReadCaches(
     revalidateTag("conversations:workspace:core");
     revalidateTag("conversations:workspace:sidebar");
     revalidateTag("conversations:transcript-eligibility");
-    if (conversationGhlId && !options?.skipPath) {
-        revalidatePath(`/admin/conversations?id=${encodeURIComponent(conversationGhlId)}`);
+    if (conversationId && !options?.skipPath) {
+        revalidatePath(`/admin/conversations?id=${encodeURIComponent(conversationId)}`);
     }
 }
 
@@ -1690,13 +1700,10 @@ async function queryConversationListSnapshot(args: {
     if (
         !args.cursor &&
         args.selectedConversationId &&
-        !rows.some((item: any) => item.ghlConversationId === args.selectedConversationId)
+        !rows.some((item: any) => item.id === args.selectedConversationId || item.ghlConversationId === args.selectedConversationId)
     ) {
         const selectedConversation = await db.conversation.findFirst({
-            where: {
-                locationId: args.locationId,
-                ghlConversationId: args.selectedConversationId,
-            },
+            where: buildConversationReferenceWhere(args.locationId, args.selectedConversationId),
             include: { contact: { select: { name: true, email: true, phone: true, ghlContactId: true, preferredLang: true } } },
         });
         if (selectedConversation) {
@@ -1704,11 +1711,12 @@ async function queryConversationListSnapshot(args: {
         }
     }
 
+    const rowConversationRefs = Array.from(new Set(rows.flatMap((item: any) => [item.id, item.ghlConversationId].filter(Boolean))));
     const activeDeals = await db.dealContext.findMany({
         where: {
             locationId: args.locationId,
             stage: "ACTIVE",
-            conversationIds: { hasSome: rows.map((item: any) => item.ghlConversationId) },
+            conversationIds: { hasSome: rowConversationRefs },
         },
         select: { id: true, title: true, conversationIds: true },
     });
@@ -1852,10 +1860,7 @@ export async function fetchMessages(
         : await getAuthenticatedLocationReadOnly();
 
     const conversation = await db.conversation.findFirst({
-        where: {
-            ghlConversationId: conversationId,
-            locationId: location.id,
-        },
+        where: buildConversationReferenceWhere(location.id, conversationId),
         include: { contact: true }
     });
 
@@ -2381,10 +2386,7 @@ async function queryConversationWorkspaceCoreMetadata(args: {
     conversationId: string;
 }) {
     const conversation = await db.conversation.findFirst({
-        where: {
-            locationId: args.locationId,
-            ghlConversationId: args.conversationId,
-        },
+        where: buildConversationReferenceWhere(args.locationId, args.conversationId),
         include: {
             contact: {
                 select: {
@@ -2406,7 +2408,10 @@ async function queryConversationWorkspaceCoreMetadata(args: {
             where: {
                 locationId: args.locationId,
                 stage: "ACTIVE",
-                conversationIds: { has: conversation.ghlConversationId },
+                OR: [
+                    { conversationIds: { has: conversation.id } },
+                    { conversationIds: { has: conversation.ghlConversationId } },
+                ],
             },
             select: { id: true, title: true },
             take: 1,
@@ -2425,6 +2430,7 @@ async function queryConversationWorkspaceCoreMetadata(args: {
 
     const dealMap = new Map<string, { id: string; title: string }>();
     for (const row of activeDealRows) {
+        dealMap.set(conversation.id, { id: row.id, title: row.title });
         dealMap.set(conversation.ghlConversationId, { id: row.id, title: row.title });
     }
     const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(args.locationId);
@@ -2458,10 +2464,7 @@ async function queryConversationWorkspaceMetadata(args: {
     conversationId: string;
 }) {
     const conversation = await db.conversation.findFirst({
-        where: {
-            locationId: args.locationId,
-            ghlConversationId: args.conversationId,
-        },
+        where: buildConversationReferenceWhere(args.locationId, args.conversationId),
         include: {
             contact: {
                 select: {
@@ -2483,7 +2486,10 @@ async function queryConversationWorkspaceMetadata(args: {
             where: {
                 locationId: args.locationId,
                 stage: "ACTIVE",
-                conversationIds: { has: conversation.ghlConversationId },
+                OR: [
+                    { conversationIds: { has: conversation.id } },
+                    { conversationIds: { has: conversation.ghlConversationId } },
+                ],
             },
             select: { id: true, title: true },
             take: 1,
@@ -2992,12 +2998,13 @@ export async function getConversationListDelta(
                 };
             }
 
+            const rowConversationRefs = Array.from(new Set(rows.flatMap((item) => [item.id, item.ghlConversationId].filter(Boolean))));
             const activeDeals = await db.dealContext.findMany({
                 where: {
                     locationId: location.id,
                     stage: "ACTIVE",
                     conversationIds: {
-                        hasSome: rows.map((item) => item.ghlConversationId),
+                        hasSome: rowConversationRefs,
                     },
                 },
                 select: { id: true, title: true, conversationIds: true },
@@ -3014,7 +3021,8 @@ export async function getConversationListDelta(
             const deltas = rows.map((row) => {
                 const matchesFilter = doesConversationMatchStatus(normalizedStatus, row);
                 return {
-                    id: row.ghlConversationId,
+                    id: row.id,
+                    legacyConversationId: row.ghlConversationId,
                     matchesFilter,
                     unreadCount: row.unreadCount,
                     lastMessageBody: row.lastMessageBody || "",
@@ -5673,8 +5681,8 @@ export async function sendWhatsAppMediaReply(
                     ? (cleanCaption || "[Document]")
                     : (cleanCaption || "[Image]");
 
-        const conversation = await db.conversation.findUnique({
-            where: { ghlConversationId: conversationId },
+        const conversation = await db.conversation.findFirst({
+            where: buildConversationReferenceWhere(location.id, conversationId),
             select: { id: true, locationId: true, contactId: true }
         });
         if (!conversation || conversation.locationId !== location.id) {
@@ -5743,7 +5751,7 @@ export async function sendWhatsAppMediaReply(
         const enqueueResult = await enqueueWhatsAppOutbound({
             locationId: location.id,
             conversationInternalId: conversation.id,
-            conversationGhlId: conversationId,
+            conversationGhlId: conversation.id,
             contactId: contact.id,
             body: previewBody,
             kind: mediaKind,
@@ -5758,10 +5766,10 @@ export async function sendWhatsAppMediaReply(
             },
         });
 
-        invalidateConversationReadCaches(conversationId);
+        invalidateConversationReadCaches(conversation.id);
         emitConversationRealtimeEvent({
             locationId: location.id,
-            conversationId,
+            conversationId: conversation.id,
             type: "message.outbound",
             payload: {
                 channel: "whatsapp",
@@ -5827,9 +5835,9 @@ export async function sendReply(
                 return { success: false, error: "Message body cannot be empty." };
             }
 
-            const conversation = await db.conversation.findUnique({
-                where: { ghlConversationId: conversationId },
-                select: { id: true, locationId: true, contactId: true },
+            const conversation = await db.conversation.findFirst({
+                where: buildConversationReferenceWhere(location.id, conversationId),
+                select: { id: true, locationId: true, contactId: true, ghlConversationId: true },
             });
             if (!conversation || conversation.locationId !== location.id) {
                 return { success: false, error: "Conversation not found." };
@@ -5874,7 +5882,7 @@ export async function sendReply(
             const enqueueResult = await enqueueWhatsAppOutbound({
                 locationId: location.id,
                 conversationInternalId: conversation.id,
-                conversationGhlId: conversationId,
+                conversationGhlId: conversation.id,
                 contactId: contact.id,
                 body: normalizedBody,
                 kind: "text",
@@ -5906,10 +5914,10 @@ export async function sendReply(
                 });
             }
 
-            invalidateConversationReadCaches(conversationId);
+            invalidateConversationReadCaches(conversation.id);
             emitConversationRealtimeEvent({
                 locationId: location.id,
-                conversationId,
+                conversationId: conversation.id,
                 type: "message.outbound",
                 payload: {
                     channel: "whatsapp",
@@ -5941,31 +5949,63 @@ export async function sendReply(
             throw new Error("Unauthorized");
         }
 
-        if (type === "SMS") {
-            const contact = await db.contact.findFirst({
+        const localConversation = await db.conversation.findFirst({
+            where: buildConversationReferenceWhere(location.id, conversationId),
+            include: {
+                contact: {
+                    select: {
+                        id: true,
+                        name: true,
+                        phone: true,
+                        email: true,
+                        ghlContactId: true,
+                    },
+                },
+            },
+        });
+        if (!localConversation) {
+            return { success: false, error: "Conversation not found." };
+        }
+
+        const localContact = localConversation.contact?.id === contactId || localConversation.contact?.ghlContactId === contactId
+            ? localConversation.contact
+            : await db.contact.findFirst({
                 where: {
                     OR: [
                         { ghlContactId: contactId },
-                        { id: contactId }
+                        { id: contactId },
                     ],
-                    locationId: location.id
+                    locationId: location.id,
                 },
-                select: { name: true, phone: true }
+                select: { id: true, name: true, phone: true, email: true, ghlContactId: true },
             });
 
-            if (!contact) {
-                return { success: false, error: "Contact not found in database." };
-            }
+        if (!localContact) {
+            return { success: false, error: "Contact not found in database." };
+        }
+        if (localConversation.contactId !== localContact.id) {
+            return { success: false, error: "Conversation/contact mismatch." };
+        }
 
+        let remoteContactId = localContact.ghlContactId || null;
+        if (!remoteContactId && location.ghlLocationId) {
+            const { ensureRemoteContact } = await import("@/lib/crm/contact-sync");
+            remoteContactId = await ensureRemoteContact(localContact.id, location.ghlLocationId, location.ghlAccessToken);
+        }
+        if (!remoteContactId) {
+            return { success: false, error: "Contact is not connected to GHL and could not be mirrored." };
+        }
+
+        if (type === "SMS") {
             const smsEligibility = await checkSmsPhoneEligibility(
                 {
                     id: location.id,
                     ghlAccessToken: location.ghlAccessToken,
                     ghlLocationId: location.ghlLocationId,
                 },
-                contact.phone,
+                localContact.phone,
                 {
-                    contactName: contact.name,
+                    contactName: localContact.name,
                 }
             );
 
@@ -5975,7 +6015,7 @@ export async function sendReply(
         }
 
         const payload: any = {
-            contactId,
+            contactId: remoteContactId,
             type,
         };
 
@@ -5992,50 +6032,111 @@ export async function sendReply(
 
         const res = await sendMessage(location.ghlAccessToken, payload);
 
+        let localMessageId: string | null = null;
         if (res?.messageId) {
             const messageId = res.messageId;
-            const msgData = {
-                messageId,
-                ghlMessageId: messageId,
-                id: messageId,
-                conversationId,
-                contactId,
-                body: type === "Email" ? payload.html : payload.message,
-                type: type === "Email" ? "TYPE_EMAIL" : "TYPE_SMS",
+            const remoteConversationId = String(res.conversationId || localConversation.ghlConversationId || "").trim() || null;
+            const createdAt = new Date();
+            const storedMessage = await db.message.upsert({
+                where: { ghlMessageId: messageId },
+                create: {
+                    conversationId: localConversation.id,
+                    ghlMessageId: messageId,
+                    body: type === "Email" ? payload.html : payload.message,
+                    type: type === "Email" ? "TYPE_EMAIL" : "TYPE_SMS",
+                    direction: "outbound",
+                    status: "sent",
+                    source: "ghl",
+                    createdAt,
+                    updatedAt: createdAt,
+                },
+                update: {
+                    conversationId: localConversation.id,
+                    body: type === "Email" ? payload.html : payload.message,
+                    type: type === "Email" ? "TYPE_EMAIL" : "TYPE_SMS",
+                    direction: "outbound",
+                    status: "sent",
+                    source: "ghl",
+                },
+                select: { id: true },
+            });
+            localMessageId = storedMessage.id;
+
+            await updateConversationLastMessage({
+                conversationId: localConversation.id,
+                messageBody: type === "Email" ? payload.html : payload.message,
+                messageType: type === "Email" ? "TYPE_EMAIL" : "TYPE_SMS",
+                messageDate: createdAt,
                 direction: "outbound",
-                status: "sent",
-                dateAdded: new Date(),
-                locationId: location.ghlLocationId,
-            };
-            await syncMessageFromWebhook(msgData);
+            });
+
+            if (remoteConversationId && isLikelyGhlConversationId(remoteConversationId)) {
+                await (db as any).conversationSync.upsert({
+                    where: {
+                        conversationId_provider_providerAccountId: {
+                            conversationId: localConversation.id,
+                            provider: "ghl",
+                            providerAccountId: location.ghlLocationId || "default",
+                        },
+                    },
+                    create: {
+                        conversationId: localConversation.id,
+                        locationId: location.id,
+                        provider: "ghl",
+                        providerAccountId: location.ghlLocationId || "default",
+                        providerConversationId: remoteConversationId,
+                        status: "synced",
+                        lastSyncedAt: new Date(),
+                    },
+                    update: {
+                        providerConversationId: remoteConversationId,
+                        status: "synced",
+                        lastSyncedAt: new Date(),
+                        lastError: null,
+                    },
+                }).catch((error: any) => {
+                    console.warn("[sendReply] Failed to persist GHL conversation sync:", error?.message || error);
+                });
+            }
+
+            await (db as any).messageSync.upsert({
+                where: {
+                    messageId_provider_providerAccountId: {
+                        messageId: storedMessage.id,
+                        provider: "ghl",
+                        providerAccountId: location.ghlLocationId || "default",
+                    },
+                },
+                create: {
+                    messageId: storedMessage.id,
+                    conversationId: localConversation.id,
+                    locationId: location.id,
+                    provider: "ghl",
+                    providerAccountId: location.ghlLocationId || "default",
+                    providerMessageId: messageId,
+                    providerThreadId: remoteConversationId,
+                    status: "synced",
+                    lastSyncedAt: new Date(),
+                },
+                update: {
+                    providerMessageId: messageId,
+                    providerThreadId: remoteConversationId,
+                    status: "synced",
+                    lastSyncedAt: new Date(),
+                    lastError: null,
+                },
+            }).catch((error: any) => {
+                console.warn("[sendReply] Failed to persist GHL message sync:", error?.message || error);
+            });
 
             const translationSourceText = String(options?.translationSourceText || "").trim();
             const translationTargetLanguage = normalizeTranslationTargetLanguage(options?.translationTargetLanguage || null);
             if (translationSourceText && translationSourceText !== messageBody) {
-                const localConversation = await db.conversation.findFirst({
-                    where: {
-                        ghlConversationId: conversationId,
-                        locationId: location.id,
-                    },
-                    select: { id: true },
-                });
-                if (localConversation) {
-                    const localMessage = await db.message.findFirst({
-                        where: {
-                            conversationId: localConversation.id,
-                            OR: [
-                                { ghlMessageId: messageId },
-                                { id: messageId },
-                            ],
-                        },
-                        select: { id: true },
-                    });
-
-                    if (localMessage?.id) {
+                if (localMessageId) {
                         const sourceHash = buildTranslationSourceHash(translationSourceText);
                         await (db as any).messageTranslationCache.create({
                             data: {
-                                messageId: localMessage.id,
+                                messageId: localMessageId,
                                 conversationId: localConversation.id,
                                 locationId: location.id,
                                 targetLanguage: translationTargetLanguage,
@@ -6051,15 +6152,14 @@ export async function sendReply(
                         }).catch((error: any) => {
                             console.warn("[sendReply] Failed to persist outbound translation cache:", error?.message || error);
                         });
-                    }
                 }
             }
         }
 
-        invalidateConversationReadCaches(conversationId);
+        invalidateConversationReadCaches(localConversation.id);
         emitConversationRealtimeEvent({
             locationId: location.id,
-            conversationId,
+            conversationId: localConversation.id,
             type: "message.outbound",
             payload: { channel: type.toLowerCase() },
         });
@@ -6083,14 +6183,7 @@ export async function generateAIDraft(
     model?: string,
     options?: GenerateAIDraftOptions
 ) {
-    const location = await getAuthenticatedLocation();
-    if (!location?.ghlAccessToken) {
-        throw new Error("Unauthorized");
-    }
-
-    if (!location.ghlLocationId) {
-        throw new Error("Misconfigured: Location has no GHL Location ID");
-    }
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
 
     const explicitModel = typeof model === "string" && model.trim() ? model.trim() : undefined;
 
@@ -6101,9 +6194,9 @@ export async function generateAIDraft(
         select: { ghlContactId: true }
     });
 
-    if (existingContact?.ghlContactId) {
+    if (location.ghlAccessToken && existingContact?.ghlContactId) {
         await ensureLocalContactSynced(existingContact.ghlContactId, location.id, location.ghlAccessToken);
-    } else if (!existingContact) {
+    } else if (location.ghlAccessToken && !existingContact) {
         // Assume it's a GHL ID and try to sync
         await ensureLocalContactSynced(contactId, location.id, location.ghlAccessToken);
     }
@@ -6176,10 +6269,10 @@ export async function generateAIDraft(
 
     // Use internal location.id (for SiteConfig lookup), not ghlLocationId (external GHL ID)
     const result = await generateDraft({
-        conversationId,
+        conversationId: conversationRecord?.id || conversationId,
         contactId,
         locationId: location.id, // CRITICAL: SiteConfig uses internal Location.id
-        accessToken: location.ghlAccessToken,
+        accessToken: location.ghlAccessToken || "",
         agentName,
         businessName: location.name || undefined,
         instruction,
@@ -6228,10 +6321,10 @@ export async function setConversationReplyLanguageOverride(
         data: { replyLanguageOverride: normalizedReplyLanguage },
     });
 
-    invalidateConversationReadCaches(conversation.ghlConversationId);
+    invalidateConversationReadCaches(conversation.id);
     emitConversationRealtimeEvent({
         locationId: location.id,
-        conversationId: conversation.ghlConversationId,
+        conversationId: conversation.id,
         type: "conversation.reply_language_override.updated",
         payload: { replyLanguageOverride: normalizedReplyLanguage },
     });
@@ -6761,45 +6854,44 @@ export async function orchestrateAction(conversationId: string, contactId: strin
 }
 
 export async function createDealContext(title: string, conversationIds: string[]) {
-    const location = await getAuthenticatedLocation();
-    const accessToken = location.ghlAccessToken!;
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const normalizedRefs = Array.from(new Set((conversationIds || []).map((id) => String(id || "").trim()).filter(Boolean)));
 
     // Auto-detect properties from the contacts involved
     let propertyIds: string[] = [];
+    let canonicalConversationIds: string[] = [];
     try {
-        // [JIT Sync] & Fetch Details
-        // We sync ALL contacts in the deal to ensure we have their full data
-        const conversations = await Promise.all(
-            conversationIds.map(id => getConversation(accessToken, id))
-        );
-
-        const ghlContactIds = conversations
-            .map(c => c.conversation?.contactId)
-            .filter(Boolean) as string[];
-
-        // Run Sync in Parallel
-        await Promise.all(
-            ghlContactIds.map(cid => ensureLocalContactSynced(cid, location.id, accessToken))
-        );
-
-        // 2. Find local Contacts and their Property Roles
-        if (ghlContactIds.length > 0) {
-            const contacts = await db.contact.findMany({
-                where: {
-                    ghlContactId: { in: ghlContactIds },
-                    locationId: location.id
+        const conversations = await db.conversation.findMany({
+            where: {
+                locationId: location.id,
+                OR: [
+                    { id: { in: normalizedRefs } },
+                    { ghlConversationId: { in: normalizedRefs } },
+                    {
+                        syncRecords: {
+                            some: {
+                                providerConversationId: { in: normalizedRefs },
+                            },
+                        },
+                    },
+                ],
+            },
+            include: {
+                contact: {
+                    include: {
+                        propertyRoles: {
+                            select: { propertyId: true },
+                        },
+                    },
                 },
-                include: {
-                    propertyRoles: {
-                        select: { propertyId: true }
-                    }
-                }
-            });
+            },
+        });
 
-            // 3. Extract unique Property IDs
-            const allPropIds = contacts.flatMap((c: any) => c.propertyRoles.map((r: any) => r.propertyId));
-            propertyIds = Array.from(new Set(allPropIds));
-        }
+        canonicalConversationIds = conversations.map((conversation) => conversation.id);
+        const allPropIds = conversations.flatMap((conversation: any) =>
+            (conversation.contact?.propertyRoles || []).map((role: any) => role.propertyId)
+        );
+        propertyIds = Array.from(new Set(allPropIds));
     } catch (e) {
         console.warn("Failed to auto-detect properties for Deal Context", e);
         // non-fatal, proceed with empty properties
@@ -6810,7 +6902,7 @@ export async function createDealContext(title: string, conversationIds: string[]
         data: {
             title,
             locationId: location.id,
-            conversationIds,
+            conversationIds: canonicalConversationIds.length > 0 ? canonicalConversationIds : normalizedRefs,
             propertyIds, // Auto-populated
             stage: 'ACTIVE'
         }
@@ -8271,8 +8363,8 @@ export async function refreshConversation(conversationId: string) {
     const location = await getAuthenticatedLocationReadOnly();
 
     // Fetch from DB to get latest fields like suggestedActions
-    const conversation = await db.conversation.findUnique({
-        where: { ghlConversationId: conversationId },
+    const conversation = await db.conversation.findFirst({
+        where: buildConversationReferenceWhere(location.id, conversationId),
         include: { contact: true }
     });
 
@@ -8280,8 +8372,13 @@ export async function refreshConversation(conversationId: string) {
 
     // Map to UI format (Conversation interface)
     return {
-        id: conversation.ghlConversationId,
-        contactId: conversation.contact.ghlContactId || conversation.contactId,
+        id: conversation.id,
+        legacyConversationId: conversation.ghlConversationId || null,
+        providerConversationId: isLikelyGhlConversationId(conversation.ghlConversationId) ? conversation.ghlConversationId : null,
+        ghlConversationId: isLikelyGhlConversationId(conversation.ghlConversationId) ? conversation.ghlConversationId : null,
+        contactId: conversation.contactId,
+        legacyContactId: conversation.contact.ghlContactId || null,
+        providerContactId: conversation.contact.ghlContactId || null,
         contactName: conversation.contact.name || "Unknown",
         contactPhone: conversation.contact.phone || undefined,
         contactEmail: conversation.contact.email || undefined,
@@ -8294,7 +8391,7 @@ export async function refreshConversation(conversationId: string) {
         status: conversation.status as any,
         type: conversation.lastMessageType || 'TYPE_SMS',
         lastMessageType: conversation.lastMessageType || undefined,
-        locationId: location.ghlLocationId || "",
+        locationId: location.id || "",
         suggestedActions: conversation.suggestedActions || []
     };
 }
@@ -8307,9 +8404,17 @@ export async function markConversationAsRead(conversationId: string) {
     }
 
     try {
+        const conversation = await db.conversation.findFirst({
+            where: buildConversationReferenceWhere(location.id, conversationId),
+            select: { id: true },
+        });
+        if (!conversation) {
+            return { success: false, error: "Conversation not found" };
+        }
+
         const result = await db.conversation.updateMany({
             where: {
-                ghlConversationId: conversationId,
+                id: conversation.id,
                 locationId: location.id,
                 unreadCount: { gt: 0 },
             },
@@ -8319,10 +8424,10 @@ export async function markConversationAsRead(conversationId: string) {
         });
 
         if (result.count > 0) {
-            invalidateConversationReadCaches(conversationId);
+            invalidateConversationReadCaches(conversation.id);
             emitConversationRealtimeEvent({
                 locationId: location.id,
-                conversationId,
+                conversationId: conversation.id,
                 type: "conversation.read_reset",
                 payload: { unreadCount: 0 },
             });
@@ -8343,11 +8448,16 @@ export async function deleteConversations(conversationIds: string[]) {
     }
 
     try {
+        const refs = conversationIds.map((id) => String(id || "").trim()).filter(Boolean);
         // Soft Delete: Mark conversations as deleted instead of removing them
         // This allows users to restore them from the trash within 30 days
         const result = await db.conversation.updateMany({
             where: {
-                ghlConversationId: { in: conversationIds },
+                OR: [
+                    { id: { in: refs } },
+                    { ghlConversationId: { in: refs } },
+                    { syncRecords: { some: { providerConversationId: { in: refs } } } },
+                ],
                 locationId: location.id, // Security check to ensure ownership
                 deletedAt: null // Only delete non-deleted conversations (prevent double-delete)
             },
@@ -8383,10 +8493,15 @@ export async function restoreConversations(conversationIds: string[]) {
     }
 
     try {
+        const refs = conversationIds.map((id) => String(id || "").trim()).filter(Boolean);
         // Restore: Remove deletedAt timestamp to bring back from trash
         const result = await db.conversation.updateMany({
             where: {
-                ghlConversationId: { in: conversationIds },
+                OR: [
+                    { id: { in: refs } },
+                    { ghlConversationId: { in: refs } },
+                    { syncRecords: { some: { providerConversationId: { in: refs } } } },
+                ],
                 locationId: location.id,
                 deletedAt: { not: null } // Only restore deleted conversations
             },
@@ -8421,11 +8536,16 @@ export async function permanentlyDeleteConversations(conversationIds: string[]) 
     }
 
     try {
+        const refs = conversationIds.map((id) => String(id || "").trim()).filter(Boolean);
         // Hard Delete: Permanently remove from database
         // Can only delete conversations that are already in trash (have deletedAt)
         const result = await db.conversation.deleteMany({
             where: {
-                ghlConversationId: { in: conversationIds },
+                OR: [
+                    { id: { in: refs } },
+                    { ghlConversationId: { in: refs } },
+                    { syncRecords: { some: { providerConversationId: { in: refs } } } },
+                ],
                 locationId: location.id,
                 deletedAt: { not: null } // Security: Only allow permanent deletion of trashed items
             }
@@ -8456,10 +8576,15 @@ export async function archiveConversations(conversationIds: string[]) {
     }
 
     try {
+        const refs = conversationIds.map((id) => String(id || "").trim()).filter(Boolean);
         // Archive: Hide from inbox without deleting
         const result = await db.conversation.updateMany({
             where: {
-                ghlConversationId: { in: conversationIds },
+                OR: [
+                    { id: { in: refs } },
+                    { ghlConversationId: { in: refs } },
+                    { syncRecords: { some: { providerConversationId: { in: refs } } } },
+                ],
                 locationId: location.id,
                 archivedAt: null, // Only archive non-archived conversations
                 deletedAt: null // Don't archive deleted conversations
@@ -8494,10 +8619,15 @@ export async function unarchiveConversations(conversationIds: string[]) {
     }
 
     try {
+        const refs = conversationIds.map((id) => String(id || "").trim()).filter(Boolean);
         // Unarchive: Return to inbox
         const result = await db.conversation.updateMany({
             where: {
-                ghlConversationId: { in: conversationIds },
+                OR: [
+                    { id: { in: refs } },
+                    { ghlConversationId: { in: refs } },
+                    { syncRecords: { some: { providerConversationId: { in: refs } } } },
+                ],
                 locationId: location.id,
                 archivedAt: { not: null } // Only unarchive archived conversations
             },
@@ -8533,7 +8663,7 @@ export async function emptyTrash() {
                 locationId: location.id,
                 deletedAt: { not: null }
             },
-            select: { ghlConversationId: true },
+            select: { id: true },
         });
 
         const result = await db.conversation.deleteMany({
@@ -8548,7 +8678,7 @@ export async function emptyTrash() {
         deletedRows.forEach((row) => {
             emitConversationRealtimeEvent({
                 locationId: location.id,
-                conversationId: row.ghlConversationId,
+                conversationId: row.id,
                 type: "conversation.deleted_hard",
                 payload: { source: "empty_trash" },
             });
@@ -9324,7 +9454,8 @@ export async function startNewConversation(phone: string) {
 
             return {
                 success: true,
-                conversationId: existingConv.ghlConversationId,
+                conversationId: existingConv.id,
+                legacyConversationId: existingConv.ghlConversationId,
                 isNew: false,
                 contactName: contact.name
             };
@@ -9343,6 +9474,21 @@ export async function startNewConversation(phone: string) {
                 unreadCount: 0,
                 status: 'open'
             }
+        });
+
+        await (db as any).conversationSync.create({
+            data: {
+                conversationId: conversation.id,
+                locationId: location.id,
+                provider: "estio_legacy_alias",
+                providerAccountId: "local",
+                providerConversationId: syntheticId,
+                status: "synced",
+                lastSyncedAt: new Date(),
+                metadata: { source: "startNewConversation" },
+            },
+        }).catch((error: any) => {
+            console.warn("[NewConversation] Failed to persist local alias sync record:", error?.message || error);
         });
 
         console.log(`[NewConversation] Created conversation: ${conversation.ghlConversationId}`);
@@ -9436,7 +9582,8 @@ export async function startNewConversation(phone: string) {
 
         return {
             success: true,
-            conversationId: conversation.ghlConversationId,
+            conversationId: conversation.id,
+            legacyConversationId: conversation.ghlConversationId,
             isNew: true,
             contactName: contact.name,
             messagesImported

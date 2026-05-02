@@ -600,7 +600,15 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const [composerDrafts, setComposerDrafts] = useState<Record<string, string>>({});
 
     // Initialize Active ID from URL
-    const initialActiveId = getSearchParam('id');
+    const requestedInitialActiveId = getSearchParam('id');
+    const initialActiveId = requestedInitialActiveId
+        ? (initialConversations.find((conversation: any) =>
+            conversation.id === requestedInitialActiveId
+            || conversation.legacyConversationId === requestedInitialActiveId
+            || conversation.ghlConversationId === requestedInitialActiveId
+            || conversation.providerConversationId === requestedInitialActiveId
+        )?.id || requestedInitialActiveId)
+        : null;
     const initialTaskId = getSearchParam('task');
     const [activeId, setActiveId] = useState<string | null>(initialActiveId);
     const activeIdRef = useRef<string | null>(initialActiveId);

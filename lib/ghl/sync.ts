@@ -3,6 +3,7 @@ import { getMessages, getConversations, getConversation } from "./conversations"
 import { ensureLocalContactSynced } from "@/lib/crm/contact-sync";
 import { Prisma } from "@prisma/client";
 import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-events";
+import { isLikelyGhlConversationId } from "@/lib/conversations/identity";
 
 function isLocalSyntheticConversationId(id: string | null | undefined) {
     const value = String(id || "").trim();
@@ -101,8 +102,22 @@ export async function syncMessageFromWebhook(payload: any) {
     // We need to fetch first to check timestamps to prevent older messages (e.g. from history syncs)
     // from overwriting the 'lastMessageAt' of the conversation.
 
-    const existingConversation = await db.conversation.findUnique({
-        where: { ghlConversationId: ghlConversationId }
+    const existingConversationSync = await (db as any).conversationSync.findFirst({
+        where: {
+            provider: "ghl",
+            providerConversationId: ghlConversationId,
+            locationId: location.id,
+        },
+        include: { conversation: true },
+    }).catch(() => null);
+    const existingConversation = existingConversationSync?.conversation || await db.conversation.findFirst({
+        where: {
+            locationId: location.id,
+            OR: [
+                { id: ghlConversationId },
+                { ghlConversationId: ghlConversationId },
+            ],
+        },
     });
 
     // Unified Update Logic
@@ -140,9 +155,38 @@ export async function syncMessageFromWebhook(payload: any) {
         });
     }
 
+    if (isLikelyGhlConversationId(ghlConversationId)) {
+        await (db as any).conversationSync.upsert({
+            where: {
+                conversationId_provider_providerAccountId: {
+                    conversationId: conversation.id,
+                    provider: "ghl",
+                    providerAccountId: location.ghlLocationId || "default",
+                },
+            },
+            create: {
+                conversationId: conversation.id,
+                locationId: location.id,
+                provider: "ghl",
+                providerAccountId: location.ghlLocationId || "default",
+                providerConversationId: ghlConversationId,
+                status: "synced",
+                lastSyncedAt: new Date(),
+            },
+            update: {
+                providerConversationId: ghlConversationId,
+                status: "synced",
+                lastSyncedAt: new Date(),
+                lastError: null,
+            },
+        }).catch((error: any) => {
+            console.warn("[syncMessageFromWebhook] Failed to persist GHL conversation sync:", error?.message || error);
+        });
+    }
+
     // 3. Upsert Message
 
-    await db.message.upsert({
+    const syncedMessage = await db.message.upsert({
         where: { ghlMessageId: ghlMessageId },
         update: {
             status: payload.status,
@@ -166,9 +210,41 @@ export async function syncMessageFromWebhook(payload: any) {
         }
     });
 
+    await (db as any).messageSync.upsert({
+        where: {
+            messageId_provider_providerAccountId: {
+                messageId: syncedMessage.id,
+                provider: "ghl",
+                providerAccountId: location.ghlLocationId || "default",
+            },
+        },
+        create: {
+            messageId: syncedMessage.id,
+            conversationId: conversation.id,
+            locationId: location.id,
+            provider: "ghl",
+            providerAccountId: location.ghlLocationId || "default",
+            providerMessageId: ghlMessageId,
+            providerThreadId: ghlConversationId,
+            status: "synced",
+            remoteUpdatedAt: dateAdded,
+            lastSyncedAt: new Date(),
+        },
+        update: {
+            providerMessageId: ghlMessageId,
+            providerThreadId: ghlConversationId,
+            status: "synced",
+            remoteUpdatedAt: dateAdded,
+            lastSyncedAt: new Date(),
+            lastError: null,
+        },
+    }).catch((error: any) => {
+        console.warn("[syncMessageFromWebhook] Failed to persist GHL message sync:", error?.message || error);
+    });
+
     void publishConversationRealtimeEvent({
         locationId: location.id,
-        conversationId: conversation.ghlConversationId,
+        conversationId: conversation.id,
         type: direction === "inbound" ? "message.inbound" : "message.outbound",
         payload: {
             messageId: ghlMessageId,

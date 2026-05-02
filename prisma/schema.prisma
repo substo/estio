@@ -57,6 +57,9 @@ model Location {
   deepScrapeRunStages           DeepScrapeRunStage[]
   agentExecutions               AgentExecution[]
   whatsappOutboundOutboxJobs    WhatsAppOutboundOutbox[]
+  conversationSyncRecords       ConversationSync[]
+  messageSyncRecords            MessageSync[]
+  providerOutboxJobs            ProviderOutbox[]
   viewingSessions               ViewingSession[]
   viewingSessionEvents          ViewingSessionEvent[]
   viewingSessionUsages          ViewingSessionUsage[]
@@ -602,6 +605,7 @@ model Contact {
   whatsappOutboundOutboxJobs WhatsAppOutboundOutbox[]
   syncRecords                ContactSync[]
   outboxJobs                 ContactOutbox[]
+  providerOutboxJobs         ProviderOutbox[]
 
   @@unique([locationId, email])
   @@unique([locationId, legacyCrmOwnerId])
@@ -1506,6 +1510,9 @@ model Conversation {
   aiDecisions                AiDecision[]
   aiSuggestedResponses       AiSuggestedResponse[]
   whatsappOutboundOutboxJobs WhatsAppOutboundOutbox[]
+  syncRecords                ConversationSync[]
+  messageSyncRecords         MessageSync[]
+  providerOutboxJobs         ProviderOutbox[]
   messageTranslationCaches   MessageTranslationCache[]
 
   @@unique([locationId, contactId])
@@ -2118,6 +2125,8 @@ model Message {
   translationCaches            MessageTranslationCache[]
   legacyCrmLeadEmailProcessing LegacyCrmLeadEmailProcessing?
   outboundWhatsAppOutbox       WhatsAppOutboundOutbox?
+  providerOutboxJobs           ProviderOutbox[]
+  syncRecords                  MessageSync[]
 
   // WhatsApp Integration
   wamId String? @unique // WhatsApp Message ID (for dedup)
@@ -2126,6 +2135,108 @@ model Message {
   @@index([createdAt])
   @@index([conversationId, updatedAt(sort: Desc)])
   @@index([emailThreadId])
+}
+
+model ConversationSync {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  conversationId String
+  locationId     String
+
+  provider            String // ghl | google | outlook | evolution
+  providerAccountId   String  @default("default")
+  providerConversationId String?
+  providerThreadId       String?
+
+  status          String    @default("pending") // pending | synced | stale | error | disabled
+  remoteUpdatedAt DateTime?
+  syncCursor      String?   @db.Text
+  syncToken       String?   @db.Text
+  etag            String?
+  lastSyncedAt    DateTime?
+  lastAttemptAt   DateTime?
+  attemptCount    Int       @default(0)
+  lastError       String?   @db.Text
+  metadata        Json?
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  location     Location     @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, provider, providerAccountId])
+  @@unique([provider, providerAccountId, providerConversationId])
+  @@index([locationId, provider, status, lastSyncedAt])
+  @@index([provider, status, lastAttemptAt])
+}
+
+model MessageSync {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messageId      String
+  conversationId String
+  locationId     String
+
+  provider          String // ghl | google | outlook | evolution
+  providerAccountId String @default("default")
+  providerMessageId String?
+  providerThreadId  String?
+
+  status          String    @default("pending") // pending | synced | stale | error | disabled
+  remoteUpdatedAt DateTime?
+  etag            String?
+  lastSyncedAt    DateTime?
+  lastAttemptAt   DateTime?
+  attemptCount    Int       @default(0)
+  lastError       String?   @db.Text
+  metadata        Json?
+
+  message      Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  location     Location     @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, provider, providerAccountId])
+  @@unique([provider, providerAccountId, providerMessageId])
+  @@index([conversationId, provider, status])
+  @@index([locationId, provider, status, lastSyncedAt])
+}
+
+model ProviderOutbox {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId     String
+  conversationId String?
+  messageId      String?
+  contactId      String?
+
+  provider          String // ghl | google | outlook
+  providerAccountId String @default("default")
+  operation         String // mirror_message | mirror_conversation | sync_contact | sync_status
+  payload           Json?
+
+  status       String    @default("pending") // pending | processing | completed | failed | dead | disabled
+  scheduledAt  DateTime  @default(now())
+  lockedAt     DateTime?
+  lockedBy     String?
+  processedAt  DateTime?
+  attemptCount Int       @default(0)
+  lastError    String?   @db.Text
+
+  idempotencyKey String @unique
+
+  location     Location      @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message      Message?      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  contact      Contact?      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([provider, status, scheduledAt])
+  @@index([locationId, provider, status, scheduledAt])
+  @@index([conversationId, provider, status])
+  @@index([messageId, provider, status])
 }
 
 model MessageTranslationCache {
