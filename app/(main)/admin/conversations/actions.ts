@@ -9762,8 +9762,9 @@ const LeadParsingSchema = z.object({
         type: z.string().nullable().optional(),
         bedrooms: z.string().nullable().optional(),
     }),
+    goal: z.enum(["To Buy", "To Rent", "To List", "To Sell"]).nullable().optional().describe("The lead's goal: To Buy, To Rent, To List (owner listing a property), or To Sell. Infer from text context — price level, property type, and language used. A €150K property is a sale, not a rental. When ambiguous, prefer To Buy for high-value properties."),
     messageContent: z.string().nullable().optional().describe("The actual message text written by the lead. Null if only metadata/notes/summary."),
-    internalNotes: z.string().nullable().optional().describe("Summary of the lead request or context if no direct message."),
+    internalNotes: z.string().nullable().optional().describe("CRM activity note summarizing ALL useful context from the pasted text: property details, goal, source, price, area, bedrooms, plot size, reference numbers, URLs, next action, etc. This note appears on the conversation timeline. Always include property details even when a direct message exists."),
     source: z.string().nullable().optional().describe("Inferred source e.g. Bazaraki, Facebook, WhatsApp")
 });
 
@@ -11289,27 +11290,51 @@ async function parseLeadFromTextInternal(
 
     try {
         const prompt = [
-            "You are an expert real estate lead parser.",
+            "You are an expert real estate lead parser for a Cyprus property agency.",
             "Extract structured lead data from the input text.",
             "Return a JSON object only (no markdown, no prose).",
-            "Separate direct lead message content from operator/internal notes.",
+            "",
+            "## Goal Classification (CRITICAL)",
+            "You MUST classify the lead's goal as exactly one of: 'To Buy', 'To Rent', 'To List', or 'To Sell'.",
+            "Use the TEXT CONTENT to determine the goal, not URLs — agents sometimes copy wrong URLs when duplicating properties in the CRM.",
+            "Key signals for goal classification:",
+            "- Price above €10,000 strongly indicates 'To Buy' (purchase), NOT 'To Rent'",
+            "- Phrases like 'for sale', 'to buy', 'purchase', 'asking price' → 'To Buy'",
+            "- Phrases like 'for rent', 'to rent', 'per month', '/month', 'monthly rent', 'unfurnished' → 'To Rent'",
+            "- If the lead is an owner wanting to list their property for sale → 'To Sell'",
+            "- If the lead is an owner wanting to list their property for rent → 'To List'",
+            "- When the goal field in the original text explicitly says 'To Buy' or 'To Rent', trust it",
+            "- When ambiguous on a high-value property (>€10K), default to 'To Buy'",
+            "Set goal to null ONLY if there is truly no signal at all.",
+            "",
+            "## Contact Extraction",
             "Extract the person's real first name and last name when available.",
             "For contact.name, return only the person's plain real name when available.",
             "Do not return a structured CRM display name in the name fields.",
             "Set contact.role to exactly one of Lead, Owner, or Agent when inferable; otherwise default to Lead.",
-            "Never drop useful lead context.",
-            "If the pasted text is mainly CRM metadata, property portal data, listing details, lead overview fields, or agent instructions, do not treat it as a direct customer message.",
-            "When there is no clear customer-written message, set messageContent to null and summarize the useful context in internalNotes.",
-            "internalNotes must preserve any useful lead context such as goal, source, next action, property reference numbers, property type, area/city, price, plot size, bedrooms, and URLs when relevant.",
-            "If multiple properties are mentioned, keep the property references in internalNotes even if property details are not repeated.",
-            "If fields like Name, Tel, Email, Goal, Source, Notes, Next Action, Ref. No., price, property type, location, area, plot size, bedrooms, or portal URLs are present, treat them as metadata unless there is also a clear customer-written message.",
-            "Write internalNotes as a concise CRM-style note with the most important facts an agent should see later.",
             "",
+            "## Message vs Notes Separation",
+            "Separate direct lead message content from operator/internal notes.",
+            "If the pasted text is mainly CRM metadata, property portal data, listing details, lead overview fields, or agent instructions, do not treat it as a direct customer message.",
+            "When there is no clear customer-written message, set messageContent to null.",
+            "",
+            "## Internal Notes (IMPORTANT — always populate when there is useful context)",
+            "internalNotes is a CRM activity note that appears on the conversation timeline for the agent.",
+            "ALWAYS populate internalNotes with property details, even when a direct message also exists.",
+            "internalNotes must preserve ALL useful lead context: goal, source, next action, property reference numbers (e.g. DT1234), property type, area/city, price, covered area, plot size, bedrooms, and URLs.",
+            "If multiple properties are mentioned, keep ALL property references in internalNotes.",
+            "Write internalNotes as a concise CRM-style note with the most important facts an agent should see.",
+            "Example: 'Goal: To Buy. Interested in Ref. No. DT3144: 1-bed Town House in Paphos. Price: €150,000. Source: Bazaraki.'",
+            "The goal stated in internalNotes MUST match the goal field exactly.",
+            "",
+            "## Phone Number",
             "If the phone number lacks a country code, predict the most likely ISO 3166-1 alpha-2 country code (e.g., CY, IL, DE) based on the lead's location, language, or context in the text. If it cannot be reasonably predicted, set countryCode to null.",
+            "",
             "JSON schema:",
             "{",
             '  "contact": { "name": string|null, "firstName": string|null, "lastName": string|null, "role": "Lead"|"Owner"|"Agent"|null, "phone": string|null, "countryCode": string|null, "email": string|null },',
             '  "requirements": { "budget": string|null, "location": string|null, "type": string|null, "bedrooms": string|null },',
+            '  "goal": "To Buy"|"To Rent"|"To List"|"To Sell"|null,',
             '  "messageContent": string|null,',
             '  "internalNotes": string|null,',
             '  "source": string|null',
@@ -11588,9 +11613,12 @@ export async function createParsedLead(
             requirementStatus: string;
         } | null = null;
 
+        // Build lead resolution text from original input + AI-extracted structured fields.
+        // IMPORTANT: Do NOT include data.internalNotes here — it's AI-generated and may
+        // contain hallucinations that would corrupt downstream inference (e.g. wrong goal).
+        // The AI's goal classification is used directly via data.goal instead.
         const leadResolutionText = [
             originalText,
-            data.internalNotes,
             data.messageContent,
             data.requirements?.location,
             data.requirements?.budget,
@@ -11652,7 +11680,15 @@ export async function createParsedLead(
         const parsedBudget = parseBudgetRange(data.requirements?.budget);
         const normalizedMinPrice = mapToMinPriceOption(parsedBudget.min);
         const normalizedMaxPrice = mapToMaxPriceOption(parsedBudget.max);
-        const inferredStatus = inferRequirementStatusFromLead(leadResolutionText, data.requirements?.budget);
+        // Use AI's explicit goal classification first; fall back to regex on original text only.
+        const aiGoalToStatus: Record<string, "For Rent" | "For Sale"> = {
+            "To Buy": "For Sale",
+            "To Rent": "For Rent",
+            "To Sell": "For Sale",
+            "To List": "For Rent",
+        };
+        const inferredStatus = (data.goal && aiGoalToStatus[data.goal])
+            || inferRequirementStatusFromLead(originalText, data.requirements?.budget);
         const matchedPropertyForName = await resolveLeadPropertyMatch(location.id, leadResolutionText);
         const parsedPersonName = splitLeadPersonName(data.contact);
         const inferredRole = inferLeadContactRole(leadResolutionText, data.contact?.role);
@@ -11676,7 +11712,9 @@ export async function createParsedLead(
         contactData.contactType = inferredRole;
         if (normalizedDistrict) contactData.requirementPropertyLocations = [normalizedDistrict];
         if (inferredStatus) contactData.requirementStatus = inferredStatus;
+        if (data.goal) contactData.leadGoal = data.goal;
         if (data.internalNotes) contactData.requirementOtherDetails = data.internalNotes;
+        if (data.internalNotes) contactData.leadOtherDetails = data.internalNotes;
 
         const loadExistingContactForMerge = async (id: string) => {
             existingContactForMerge = await db.contact.findUnique({
@@ -11958,7 +11996,25 @@ export async function createParsedLead(
             });
         }
 
-        // 3. Handle Message & Orchestration
+        // 3. Always create an activity note on the timeline when there is useful context.
+        // Property details, lead metadata, and CRM notes should never be lost — even when
+        // a direct customer message also exists.
+        const activityNoteBody = data.internalNotes?.trim();
+        if (activityNoteBody) {
+            await db.message.create({
+                data: {
+                    conversationId: conversation.id,
+                    body: `[Lead Imported] Source: ${data.source || 'Manual'}\nNotes: ${activityNoteBody}`,
+                    direction: 'system',
+                    type: 'TYPE_NOTE',
+                    status: 'read',
+                    createdAt: new Date(),
+                    source: 'system'
+                }
+            });
+        }
+
+        // 4. Handle Message & Orchestration
         if (data.messageContent) {
             // USER SENT A MESSAGE
             const messageCreatedAt = new Date();
@@ -12008,19 +12064,21 @@ export async function createParsedLead(
                 backgroundJobsSkipped,
             };
         } else {
-            // NO MESSAGE (Just Notes)
-            // Create a System Note in the thread
-            await db.message.create({
-                data: {
-                    conversationId: conversation.id,
-                    body: `[Lead Imported] Source: ${data.source || 'Manual'}\nNotes: ${data.internalNotes || originalText}`,
-                    direction: 'system', // Use reserved direction specific to internal/system
-                    type: 'TYPE_NOTE',
-                    status: 'read', // Internal
-                    createdAt: new Date(),
-                    source: 'system'
-                }
-            });
+            // NO MESSAGE (Just Notes) — activity note already created above;
+            // create a fallback note only if internalNotes was empty.
+            if (!activityNoteBody) {
+                await db.message.create({
+                    data: {
+                        conversationId: conversation.id,
+                        body: `[Lead Imported] Source: ${data.source || 'Manual'}\nNotes: ${originalText}`,
+                        direction: 'system',
+                        type: 'TYPE_NOTE',
+                        status: 'read',
+                        createdAt: new Date(),
+                        source: 'system'
+                    }
+                });
+            }
 
             if (conversationWasCreated && preferredChannelType === 'TYPE_WHATSAPP' && conversation.lastMessageType !== 'TYPE_WHATSAPP') {
                 await db.conversation.update({
