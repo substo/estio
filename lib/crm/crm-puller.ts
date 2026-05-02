@@ -382,6 +382,30 @@ export async function pullPropertyFromCrmWithContext(context: PullPropertyFromCr
                     else if (val === 'pending' || val === '2') finalVal = 'PENDING';
                     else finalVal = 'DRAFT';
                 }
+                else if (map.dbField === 'originalCreatedAt' || map.dbField === 'originalUpdatedAt') {
+                    if (finalVal && typeof finalVal === 'string') {
+                        const [datePart, timePart] = finalVal.split(' ');
+                        if (datePart) {
+                            const [day, month, year] = datePart.split('/');
+                            if (day && month && year) {
+                                const iso = `${year}-${month}-${day}T${timePart || '00:00'}:00`;
+                                const d = new Date(iso);
+                                if (!isNaN(d.getTime())) {
+                                    finalVal = d.toISOString();
+                                } else {
+                                    finalVal = null;
+                                    warnings.push(`Invalid date format for ${map.dbField}: '${rawVal}'`);
+                                }
+                            } else {
+                                finalVal = null;
+                            }
+                        } else {
+                            finalVal = null;
+                        }
+                    } else {
+                        finalVal = null;
+                    }
+                }
 
                 if (map.valueMap && finalVal) {
                     const stringVal = finalVal.toString();
