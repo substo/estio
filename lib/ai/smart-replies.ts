@@ -93,6 +93,7 @@ export async function generateSmartReplies(conversationId: string) {
         - Keep labels neutral, factual, and commercially aware.
         - Avoid pressure language and emotional sales wording.
         - Examples: "Confirm Viewing", "Send Price List", "Ask for Budget", "Say Thanks", "Schedule Call".
+        - If the contact asks for the exact location of a plot or land, your suggestions MUST include options to either accept and share the Google Maps URL (e.g., "Share exact location") OR deny due to internal procedures and offer an in-person viewing (e.g., "Decline & offer in-person viewing").
         - The intent will be used to generate a full draft later.
         - Output format: JSON array of strings. Example: ["Intent 1", "Intent 2", "Intent 3"]
         - Do not output markdown code blocks. Just the raw JSON.
