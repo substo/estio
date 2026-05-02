@@ -1,5 +1,7 @@
 "use server";
 
+import { isRedirectError } from "next/dist/client/components/redirect";
+
 import db from "@/lib/db";
 import { MediaKind, PropertyStatus, PublicationStatus } from "@prisma/client";
 import { updatePropertyEmbedding } from "@/lib/ai/search/property-embeddings";
@@ -105,7 +107,7 @@ const propertySchema = z.object({
     // Agency Agreement
     agencyAgreement: z.string().optional().nullable(),
     commission: z.string().optional().nullable(),
-    agreementDate: z.preprocess((val) => (val === "" ? null : val), z.coerce.date().optional().nullable()),
+    agreementDate: z.preprocess((val) => (val === "" || val === "null" || val === "undefined" ? null : val), z.coerce.date().optional().nullable()),
     agreementNotes: z.string().optional().nullable(),
 
     // New Fields
@@ -117,8 +119,8 @@ const propertySchema = z.object({
     // Import Metadata
     originalCreatorName: z.string().optional().nullable(),
     originalCreatorEmail: z.string().optional().nullable(),
-    originalCreatedAt: z.preprocess((val) => (val === "" ? null : val), z.coerce.date().optional().nullable()),
-    originalUpdatedAt: z.preprocess((val) => (val === "" ? null : val), z.coerce.date().optional().nullable()),
+    originalCreatedAt: z.preprocess((val) => (val === "" || val === "null" || val === "undefined" ? null : val), z.coerce.date().optional().nullable()),
+    originalUpdatedAt: z.preprocess((val) => (val === "" || val === "null" || val === "undefined" ? null : val), z.coerce.date().optional().nullable()),
 });
 
 function parseIdArray(val: unknown): string[] | undefined {
@@ -373,20 +375,28 @@ export async function upsertProperty(formData: FormData) {
         if (id === "new") {
             redirect(`/admin/properties/${property.id}/view`);
         }
+        return { success: true, data: property };
     } catch (error: any) {
+        if (isRedirectError(error)) {
+            throw error;
+        }
         console.error('Error in upsertProperty:', error);
+        
+        let errorMessage = error.message || "Unknown error";
+        
         // If it's a Zod error, log the details
         if (error.issues) {
             console.error('Zod issues:', JSON.stringify(error.issues, null, 2));
-        }
-        if (error instanceof DuplicatePropertyReferenceError) {
-            throw new Error(`DUPLICATE_PROPERTY_REFERENCE::${JSON.stringify({
+            errorMessage = `Validation failed: ${error.issues.map((i: any) => `${i.path.join('.')}: ${i.message}`).join(', ')}`;
+        } else if (error instanceof DuplicatePropertyReferenceError) {
+            errorMessage = `DUPLICATE_PROPERTY_REFERENCE::${JSON.stringify({
                 reference: error.reference,
                 propertyId: error.propertyId,
                 url: `/admin/properties/${error.propertyId}/view`,
-            })}`);
+            })}`;
         }
-        throw error;
+        
+        return { success: false, error: errorMessage };
     }
 }
 

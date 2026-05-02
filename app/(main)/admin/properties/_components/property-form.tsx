@@ -356,16 +356,39 @@ export default function PropertyForm({
     async function handleSubmit(formData: FormData) {
         setIsSubmitting(true);
         try {
-            const savedProperty = await upsertProperty(formData);
+            const result = await upsertProperty(formData);
 
-            // If we are in "new" mode, we won't have an ID to push until after redirect.
-            // But if we are editing, we can push.
-            // For now, let's keep it simple: Save first, then user can push.
+            if (result && result.success === false) {
+                const message = result.error || "Unknown error";
+                const duplicateMarker = "DUPLICATE_PROPERTY_REFERENCE::";
+                if (message.includes(duplicateMarker)) {
+                    try {
+                        const payload = JSON.parse(message.slice(message.indexOf(duplicateMarker) + duplicateMarker.length));
+                        toast.error(`Property with ref ${payload.reference} already exists`, {
+                            description: "Open the existing property instead of saving a duplicate.",
+                            duration: 10000,
+                            action: payload.url ? {
+                                label: "Open Property",
+                                onClick: () => window.open(payload.url, "_blank"),
+                            } : undefined,
+                        });
+                    } catch {
+                        toast.error("Property already exists", { description: message, duration: 8000 });
+                    }
+                } else {
+                    toast.error("Save Failed", {
+                        description: message,
+                        duration: 8000,
+                    });
+                }
+                setIsSubmitting(false);
+                return;
+            }
 
             if (onSuccess) {
-                onSuccess(savedProperty);
+                onSuccess(result?.data);
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error("Failed to save property:", error);
             const message = error instanceof Error ? error.message : "Unknown error";
             const duplicateMarker = "DUPLICATE_PROPERTY_REFERENCE::";
