@@ -11,7 +11,7 @@ import {
 test("classifyImportedOwnerEntity treats automated XML owners as organizations", () => {
     assert.equal(
         classifyImportedOwnerEntity({
-            ownerName: "Automated XML Import Owner Rent DT2288 0Bdr 32 paphos",
+            ownerName: "Automated XML Import Owner Rent DT2288 32 paphos",
             ownerCompany: null,
         }),
         "organization"

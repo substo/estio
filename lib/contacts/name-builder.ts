@@ -37,7 +37,7 @@ export function extractPropertyRefsFromLeadText(text: string): string[] {
 export function extractBedroomSummary(raw?: string | null): string | null {
     if (!raw) return null;
     const match = raw.match(/\d+\+?/);
-    if (!match) return null;
+    if (!match || parseInt(match[0], 10) === 0) return null;
     return `${match[0]}Bdr`;
 }
 
@@ -174,19 +174,21 @@ export function buildStructuredLeadDisplayName(args: {
     
     const refs = extractPropertyRefsFromLeadText(args.rawLeadText);
 
-    if (refs.length > 1) {
-        return normalizeWhitespace(`${personName} ${refs.join(", ")}`);
-    }
-
     const role = inferLeadContactRole(args.rawLeadText, args.contact?.role);
     const goal = formatLeadGoalLabel(args.inferredStatus);
     const singleRef = refs[0] || normalizeWhitespace(args.matchedProperty?.reference);
-    const propertySummary = refs.length <= 1
-        ? buildStructuredLeadPropertySummary({
-            matchedProperty: args.matchedProperty,
-            requirements: args.requirements,
-        })
-        : "";
+
+    if (refs.length > 1) {
+        // Multiple refs: [Name] [Role] [Goal] [Ref1], [Ref2]
+        return normalizeWhitespace(
+            [personName, role, goal, refs.join(", ")].filter(Boolean).join(" ")
+        );
+    }
+
+    const propertySummary = buildStructuredLeadPropertySummary({
+        matchedProperty: args.matchedProperty,
+        requirements: args.requirements,
+    });
 
     return [personName, role, goal, singleRef, propertySummary].filter(Boolean).join(" ").trim();
 }

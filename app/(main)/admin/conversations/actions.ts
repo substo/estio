@@ -9791,7 +9791,8 @@ const LeadParsingSchema = z.object({
     goal: z.enum(["To Buy", "To Rent", "To List", "To Sell"]).nullable().optional().describe("The lead's goal: To Buy, To Rent, To List (owner listing a property), or To Sell. Infer from text context — price level, property type, and language used. A €150K property is a sale, not a rental. When ambiguous, prefer To Buy for high-value properties."),
     messageContent: z.string().nullable().optional().describe("The actual message text written by the lead. Null if only metadata/notes/summary."),
     internalNotes: z.string().nullable().optional().describe("CRM activity note summarizing ALL useful context from the pasted text: property details, goal, source, price, area, bedrooms, plot size, reference numbers, URLs, next action, etc. This note appears on the conversation timeline. Always include property details even when a direct message exists."),
-    source: z.string().nullable().optional().describe("Inferred source e.g. Bazaraki, Facebook, WhatsApp")
+    source: z.string().nullable().optional().describe("Inferred source e.g. Bazaraki, Facebook, WhatsApp"),
+    structuredContactName: z.string().nullable().optional().describe("The strictly formatted CRM display name for this contact"),
 });
 
 export type ParsedLeadData = z.infer<typeof LeadParsingSchema>;
@@ -11357,6 +11358,24 @@ async function parseLeadFromTextInternal(
             "## Phone Number",
             "If the phone number lacks a country code, predict the most likely ISO 3166-1 alpha-2 country code (e.g., CY, IL, DE) based on the lead's location, language, or context in the text. If it cannot be reasonably predicted, set countryCode to null.",
             "",
+            "## Contact Name Generation (CRITICAL FORMATTING)",
+            "You must generate a `structuredContactName` using EXACTLY this formula:",
+            "[Person Name] [Role] [Goal] [Property Ref] [Bedrooms]Bdr [Property Type] [Location]",
+            "",
+            "Rules for name generation:",
+            "1. Role: Must be exactly \"Lead\", \"Owner\", or \"Agent\".",
+            "2. Goal: Must be exactly \"Sale\" or \"Rent\" (Do not use \"To Buy\" or \"To Rent\" here).",
+            "3. Multiple Properties: If the lead inquires about multiple properties (e.g. multiple Ref numbers), OMIT the property specifications (Bedrooms, Type, Location). Instead, the name MUST be: [Person Name] [Role] [Goal] [Ref1], [Ref2], etc. (Example: \"Vladimir Simic Lead Sale DT4670, REF123\").",
+            "4. Bedrooms: If 0 bedrooms (e.g., Studio, Land), OMIT the bedroom count entirely. Otherwise, append \"Bdr\" without a space (e.g., \"3Bdr\").",
+            "5. Property Type Abbreviations:",
+            "   - Apartment -> Apt",
+            "   - Penthouse -> PH",
+            "   - Detached Villa -> Villa",
+            "   - Studio -> Studio",
+            "6. Single Property Example: \"Vladimir Simic Lead Sale DT4670 Studio Paphos\"",
+            "7. Single Property Example 2: \"Rafaela Hadid Owner Rent REF123 3Bdr Apt Limassol\"",
+            "8. If a field is missing from the input, just skip it and preserve the single spaces between the remaining items.",
+            "",
             "JSON schema:",
             "{",
             '  "contact": { "name": string|null, "firstName": string|null, "lastName": string|null, "role": "Lead"|"Owner"|"Agent"|null, "phone": string|null, "countryCode": string|null, "email": string|null },',
@@ -11364,7 +11383,8 @@ async function parseLeadFromTextInternal(
             '  "goal": "To Buy"|"To Rent"|"To List"|"To Sell"|null,',
             '  "messageContent": string|null,',
             '  "internalNotes": string|null,',
-            '  "source": string|null',
+            '  "source": string|null,',
+            '  "structuredContactName": string|null',
             "}",
             "",
             "Input text:",
@@ -11719,7 +11739,7 @@ export async function createParsedLead(
         const matchedPropertyForName = await resolveLeadPropertyMatch(location.id, leadResolutionText);
         const parsedPersonName = splitLeadPersonName(data.contact);
         const inferredRole = inferLeadContactRole(leadResolutionText, data.contact?.role);
-        const structuredDisplayName = buildStructuredLeadDisplayName({
+        const structuredDisplayName = data.structuredContactName || buildStructuredLeadDisplayName({
             contact: data.contact,
             rawLeadText: leadResolutionText,
             inferredStatus,
