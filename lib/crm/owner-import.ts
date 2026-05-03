@@ -423,7 +423,6 @@ async function findCompanyByNormalizedName(locationId: string, companyName: stri
     const companies = await db.company.findMany({
         where: {
             locationId,
-            name: { not: null },
         },
         select: {
             id: true,
