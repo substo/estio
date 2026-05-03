@@ -10,7 +10,7 @@ interface ApiService {
     suspend fun pairDevice(@Body request: PairRequest): Response<PairResponse>
 
     @GET("/api/sms-relay/gateway/jobs")
-    suspend fun getJobs(): Response<JobsResponse>
+    suspend fun getJobs(): Response<List<Job>>
 
     @POST("/api/sms-relay/gateway/job-result")
     suspend fun reportJobResult(@Body request: JobResultRequest): Response<Void>

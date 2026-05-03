@@ -94,7 +94,7 @@ class MainActivity : AppCompatActivity() {
                 val response = ApiClient.api.pairDevice(req)
                 withContext(Dispatchers.Main) {
                     if (response.isSuccessful && response.body() != null) {
-                        val token = response.body()!!.token
+                        val token = response.body()!!.device_api_token
                         val prefs = getSharedPreferences("estio_prefs", Context.MODE_PRIVATE)
                         prefs.edit().putString("device_token", token).apply()
                         ApiClient.initToken(token)

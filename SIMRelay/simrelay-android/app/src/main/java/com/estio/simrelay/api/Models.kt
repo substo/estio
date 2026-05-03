@@ -1,22 +1,20 @@
 package com.estio.simrelay.api
 
 data class PairRequest(
-    val pairingCode: String
+    val pair_code: String
 )
 
 data class PairResponse(
-    val token: String,
-    val deviceId: String
+    val device_api_token: String,
+    val device_id: String
 )
 
 data class Job(
-    val id: String,
-    val destinationNumber: String,
-    val messageBody: String
-)
-
-data class JobsResponse(
-    val jobs: List<Job>
+    val job_id: String,
+    val to: String,
+    val body: String,
+    val conversation_id: String,
+    val message_id: String
 )
 
 data class JobResultRequest(
@@ -26,7 +24,8 @@ data class JobResultRequest(
 )
 
 data class InboundSmsRequest(
-    val senderNumber: String,
-    val messageBody: String,
-    val timestamp: Long
+    val from: String,
+    val body: String,
+    val received_at_ms: Long,
+    val to: String? = null
 )

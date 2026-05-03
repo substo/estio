@@ -28,7 +28,7 @@ class InboundSmsReceiver : BroadcastReceiver() {
                             val token = prefs.getString("device_token", null)
                             if (token != null) {
                                 ApiClient.initToken(token)
-                                val req = InboundSmsRequest(sender, body, timestamp)
+                                val req = InboundSmsRequest(from = sender, body = body, received_at_ms = timestamp)
                                 ApiClient.api.reportInboundSms(req)
                             }
                         } catch (e: Exception) {

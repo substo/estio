@@ -51,9 +51,9 @@ class RelayForegroundService : Service() {
                     // Poll Jobs
                     val response = ApiClient.api.getJobs()
                     if (response.isSuccessful && response.body() != null) {
-                        val jobs = response.body()!!.jobs
+                        val jobs = response.body()!!
                         for (job in jobs) {
-                            sendSms(job.id, job.destinationNumber, job.messageBody)
+                            sendSms(job.job_id, job.to, job.body)
                         }
                     }
 
