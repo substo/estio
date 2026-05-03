@@ -320,6 +320,56 @@ async function processGhlMirrorMessage(row: any) {
         return { disabled: "Message body is empty; nothing to mirror." };
     }
 
+    const messageType = String((row.payload as any)?.type || message.type || "").toLowerCase();
+    if (messageType === "email") {
+        const { createInboundMessage } = await import("@/lib/ghl/conversations");
+        const res = await createInboundMessage(row.location.ghlAccessToken, {
+            type: "Email",
+            contactId: resolved.remoteContactId!,
+            direction: String((row.payload as any)?.direction || message.direction || "inbound"),
+            status: String((row.payload as any)?.status || message.status || "delivered"),
+            subject: (row.payload as any)?.subject || message.subject || undefined,
+            html: body,
+            emailFrom: (row.payload as any)?.emailFrom || message.emailFrom || undefined,
+            emailTo: (row.payload as any)?.emailTo || message.emailTo || undefined,
+            dateAdded: (row.payload as any)?.dateAdded || message.createdAt?.getTime?.() || Date.now(),
+            threadId: (row.payload as any)?.threadId || message.emailThreadId || undefined,
+        });
+
+        const providerMessageId = String(res?.messageId || res?.message?.id || "").trim() || null;
+        const providerConversationId = String(res?.conversationId || res?.conversation?.id || "").trim() || null;
+
+        await upsertConversationSync({
+            conversationId: row.conversationId,
+            locationId: row.locationId,
+            provider: "ghl",
+            providerAccountId: resolved.providerAccountId,
+            providerConversationId,
+            providerThreadId: providerConversationId || undefined,
+            status: "synced",
+            metadata: {
+                source: (row.payload as any)?.source || "gmail_sync",
+                remoteContactId: resolved.remoteContactId,
+                remoteThreadState: providerConversationId ? "email_logged" : "email_logged_without_returned_thread",
+            },
+        });
+
+        if (providerMessageId && row.messageId) {
+            await upsertMessageSync({
+                messageId: row.messageId,
+                conversationId: row.conversationId,
+                locationId: row.locationId,
+                provider: "ghl",
+                providerAccountId: resolved.providerAccountId,
+                providerMessageId,
+                providerThreadId: providerConversationId,
+                status: "synced",
+            });
+        }
+
+        return { completed: true };
+    }
+
     const { sendMessage } = await import("@/lib/ghl/conversations");
     const customProviderId = process.env.GHL_CUSTOM_PROVIDER_ID;
     const payload: any = {

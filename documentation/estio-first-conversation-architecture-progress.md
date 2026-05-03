@@ -8,7 +8,7 @@ Make Estio the canonical system of record for conversations, messages, contacts,
 
 ## Current Status
 
-Status: **Core migration deployed; GHL/Google contact provider-outbox wave implemented locally.**
+Status: **Core migration deployed; Gmail-native inbound queue wave implemented locally.**
 
 The critical conversation path is now Estio-first:
 
@@ -43,6 +43,12 @@ The critical conversation path is now Estio-first:
   - GHL `mirror_message` sync-row completion
   - Google `sync_contact`
   - Outlook intentionally disabled
+- Refactored Gmail as a native Estio inbound provider:
+  - Gmail webhooks enqueue sync work instead of awaiting full sync
+  - Gmail cron queues sync/watch-renewal jobs
+  - Gmail messages upsert Google `ConversationSync` and `MessageSync` aliases
+  - Gmail-created conversations keep `ghlConversationId = null`
+  - GHL email logging is queued through `ProviderOutbox` instead of called inline
 - Added provider outbox cron script and installed production cron entry.
 - Repaired production Prisma migration history for `20260423120000_legacy_crm_owner_identity`.
 - Marked previously db-pushed migrations as applied where production schema already matched.
@@ -52,7 +58,7 @@ The critical conversation path is now Estio-first:
 
 - `npx prisma validate`
 - `npx prisma generate`
-- `npx tsx --test lib/integrations/provider-outbox.test.ts`
+- `npx tsx --test lib/integrations/provider-outbox.test.ts lib/google/gmail-sync-outbox.test.ts`
 - `npx prisma migrate status --schema prisma/schema.prisma`
 - Targeted tests: `19/19` passing
 - Local production build: `npm run build`
@@ -68,10 +74,13 @@ Notes:
 
 ### Wave 3: Provider Sync Completion
 
-- Finish Google provider handlers behind `ProviderOutbox`:
-  - Gmail message/thread mirroring
-  - Calendar/task sync where applicable
-  - history ID / sync token stale handling mapped into sync records
+- Finish operational hardening for Gmail-native inbound:
+  - deploy/apply `GmailSyncOutbox` migration
+  - install or confirm Gmail cron dispatch in production
+  - smoke Gmail webhook queueing and provider-outbox GHL email mirror
+- Audit calendar/task frontend flows for blocking provider sync:
+  - keep `ViewingOutbox` and `ContactTaskOutbox` as the domain outboxes
+  - only change UI/server actions if a blocking sync path is found
 - Keep Outlook out of scope unless the product decision changes.
 - Finish GHL provider operations that need explicit API/product policy:
   - `sync_status`

@@ -1,7 +1,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
-import { syncRecentMessages } from '@/lib/google/gmail-sync';
 import db from '@/lib/db';
+import { enqueueGmailSyncOutboxJob } from '@/lib/google/gmail-sync-outbox';
+import { enqueueGmailSyncQueueJob, initGmailSyncWorker } from '@/lib/queue/gmail-sync';
 
 // Public Route for Google Pub/Sub
 // Note: Real-world security requires verifying the JWT token sent by Google in Authorization header
@@ -45,12 +46,25 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ status: 'ignored' });
         }
 
-        console.log(`[Gmail Webhook] Triggering sync for user ${syncState.userId} (History: ${event.historyId})`);
+        console.log(`[Gmail Webhook] Queueing sync for user ${syncState.userId} (History: ${event.historyId})`);
 
-        // Trigger Sync (await to avoid background task being dropped on serverless shutdown)
-        await syncRecentMessages(syncState.userId);
+        const outbox = await enqueueGmailSyncOutboxJob({
+            userId: syncState.userId,
+            operation: 'sync_user_gmail',
+            payload: {
+                source: 'gmail_webhook',
+                eventHistoryId: event.historyId ? String(event.historyId) : undefined,
+                emailAddress: event.emailAddress || undefined,
+            },
+        });
 
-        return NextResponse.json({ status: 'processed' });
+        initGmailSyncWorker()
+            .then(() => enqueueGmailSyncQueueJob({ outboxId: String(outbox.id) }))
+            .catch((error) => {
+                console.error('[Gmail Webhook] Failed to dispatch Gmail sync queue job; cron will retry:', error);
+            });
+
+        return NextResponse.json({ status: 'queued', outboxId: outbox.id });
     } catch (error) {
         console.error('[Gmail Webhook] Error:', error);
         return NextResponse.json({ error: 'Internal Error' }, { status: 500 });

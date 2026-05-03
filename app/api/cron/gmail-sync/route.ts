@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import db from '@/lib/db';
-import { syncRecentMessages, watchGmail } from '@/lib/google/gmail-sync';
-import { syncContactsFromGoogle } from '@/lib/google/people';
+import { enqueueGmailSyncOutboxJob } from '@/lib/google/gmail-sync-outbox';
+import { enqueueDueGmailSyncJobs, enqueueGmailSyncQueueJob, initGmailSyncWorker } from '@/lib/queue/gmail-sync';
 import { CronGuard } from '@/lib/cron/guard';
 import { verifyCronAuthorization } from '@/lib/cron/auth';
 
@@ -17,7 +17,7 @@ import { verifyCronAuthorization } from '@/lib/cron/auth';
  * 
  * Security: Uses a simple bearer token check. Set CRON_SECRET in env.
  * 
- * Now also performs bidirectional contact sync (Google → Estio).
+ * This route only enqueues Gmail sync work. The worker owns Gmail API processing.
  */
 
 export const dynamic = 'force-dynamic';
@@ -48,7 +48,6 @@ export async function GET(request: NextRequest) {
         const users = await db.user.findMany({
             where: {
                 googleSyncEnabled: true,
-                googleRefreshToken: { not: null }
             },
             select: {
                 id: true,
@@ -62,52 +61,65 @@ export async function GET(request: NextRequest) {
 
         console.log(`[Cron Gmail] Found ${users.length} users with Gmail sync enabled`);
 
-        let synced = 0;
+        let enqueued = 0;
         let errors = 0;
-        let contactsStats = { synced: 0, created: 0, skipped: 0 };
-        const results: { userId: string; status: string; error?: string; contacts?: any }[] = [];
+        const results: { userId: string; status: string; error?: string; outboxIds?: string[] }[] = [];
 
         for (const user of users) {
             try {
                 // Check if watch needs renewal (expires every 7 days)
                 const watchExpiration = user.gmailSyncState?.watchExpiration;
                 const now = new Date();
+                const outboxIds: string[] = [];
 
                 if (!watchExpiration || watchExpiration < now) {
-                    console.log(`[Cron Gmail] Renewing watch for user ${user.id}`);
-                    await watchGmail(user.id);
+                    console.log(`[Cron Gmail] Queueing watch renewal for user ${user.id}`);
+                    const watchOutbox = await enqueueGmailSyncOutboxJob({
+                        userId: user.id,
+                        operation: 'renew_watch',
+                        payload: { source: 'gmail_cron', reason: 'watch_expired_or_missing' },
+                    });
+                    outboxIds.push(String(watchOutbox.id));
                 }
 
-                // Run Gmail delta sync
-                await syncRecentMessages(user.id);
+                const syncOutbox = await enqueueGmailSyncOutboxJob({
+                    userId: user.id,
+                    operation: 'sync_user_gmail',
+                    payload: { source: 'gmail_cron' },
+                });
+                outboxIds.push(String(syncOutbox.id));
 
-                // DISABLED: Inbound sync removed. Use Google Sync Manager for manual sync.
-                // Run inbound contact sync (Google → Estio) for bidirectional sync
-                let userContactStats = { synced: 0, created: 0, skipped: 0 };
-                // if (user.locations?.[0]?.id) {
-                //     userContactStats = await syncContactsFromGoogle(user.id, user.locations[0].id);
-                //     contactsStats.synced += userContactStats.synced;
-                //     contactsStats.created += userContactStats.created;
-                //     contactsStats.skipped += userContactStats.skipped;
-                // }
-
-                synced++;
-                results.push({ userId: user.id, status: 'synced', contacts: userContactStats });
+                enqueued += outboxIds.length;
+                results.push({ userId: user.id, status: 'queued', outboxIds });
 
             } catch (err: any) {
-                console.error(`[Cron Gmail] Error syncing user ${user.id}:`, err.message);
+                console.error(`[Cron Gmail] Error queueing user ${user.id}:`, err.message);
                 errors++;
                 results.push({ userId: user.id, status: 'error', error: err.message });
             }
         }
 
-        console.log(`[Cron Gmail] Job complete. Synced: ${synced}, Errors: ${errors}, Contacts: ${JSON.stringify(contactsStats)}`);
+        await initGmailSyncWorker().catch((error) => {
+            console.error('[Cron Gmail] Failed to initialize Gmail sync worker:', error);
+        });
+
+        for (const result of results) {
+            for (const outboxId of result.outboxIds || []) {
+                await enqueueGmailSyncQueueJob({ outboxId }).catch((error) => {
+                    console.error('[Cron Gmail] Failed to dispatch Gmail sync queue job:', outboxId, error);
+                });
+            }
+        }
+
+        const dueStats = await enqueueDueGmailSyncJobs({ limit: 200 });
+
+        console.log(`[Cron Gmail] Job complete. Enqueued: ${enqueued}, Errors: ${errors}, Due: ${JSON.stringify(dueStats)}`);
 
         return NextResponse.json({
             success: true,
-            synced,
+            enqueued,
             errors,
-            contactsStats,
+            dueStats,
             results
         });
 

@@ -2,7 +2,7 @@ import { google, gmail_v1 } from 'googleapis';
 import { Prisma } from '@prisma/client';
 import { getValidAccessToken } from './auth';
 import db from '@/lib/db';
-import { createInboundMessage } from '@/lib/ghl/conversations';
+import { enqueueGhlMessageMirror } from '@/lib/integrations/provider-outbox-enqueue';
 
 /**
  * Core Engine for Native Gmail Sync
@@ -23,6 +23,13 @@ interface SyncRecentOptions {
 interface ProcessMessageOptions {
     countUnread?: boolean;
 }
+
+export type GmailProcessMessageResult = {
+    conversationId: string | null;
+    messageId: string | null;
+    isNewMessage: boolean;
+    threadId: string | null;
+};
 
 // Helper to parse header values
 function getHeader(headers: gmail_v1.Schema$MessagePartHeader[] | undefined, name: string): string | null {
@@ -69,21 +76,117 @@ function isHistoryTooOldError(error: unknown): boolean {
     return status === 404 && (message.includes('historyid') || message.includes('starthistoryid'));
 }
 
-async function persistSyncState(userId: string, emailAddress: string | null | undefined, historyId: string | null | undefined) {
-    if (!historyId) return;
-
+async function persistSyncState(userId: string, emailAddress: string | null | undefined, historyId: string | null | undefined, data?: {
+    status?: string;
+    lastError?: string | null;
+}) {
     await db.gmailSyncState.upsert({
         where: { userId },
         create: {
             userId,
-            historyId,
+            historyId: historyId || undefined,
             emailAddress: emailAddress || undefined,
+            status: data?.status || 'synced',
+            lastAttemptAt: new Date(),
+            lastSuccessAt: data?.status === 'error' ? undefined : new Date(),
+            lastError: data?.lastError || null,
             lastSyncedAt: new Date(),
         },
         update: {
-            historyId,
+            historyId: historyId || undefined,
             emailAddress: emailAddress || undefined,
+            status: data?.status || 'synced',
+            lastAttemptAt: new Date(),
+            lastSuccessAt: data?.status === 'error' ? undefined : new Date(),
+            lastError: data?.lastError || null,
             lastSyncedAt: new Date(),
+        },
+    });
+}
+
+async function markGmailSyncStateStale(userId: string, emailAddress: string | null | undefined, error: unknown) {
+    await persistSyncState(userId, emailAddress, null, {
+        status: 'stale',
+        lastError: error instanceof Error ? error.message : String(error),
+    });
+}
+
+async function upsertGoogleConversationSync(args: {
+    conversationId: string;
+    locationId: string;
+    userId: string;
+    threadId?: string | null;
+    metadata?: Prisma.InputJsonValue;
+}) {
+    await (db as any).conversationSync.upsert({
+        where: {
+            conversationId_provider_providerAccountId: {
+                conversationId: args.conversationId,
+                provider: 'google',
+                providerAccountId: args.userId,
+            },
+        },
+        create: {
+            conversationId: args.conversationId,
+            locationId: args.locationId,
+            provider: 'google',
+            providerAccountId: args.userId,
+            providerConversationId: args.threadId || null,
+            providerThreadId: args.threadId || null,
+            status: 'synced',
+            lastSyncedAt: new Date(),
+            lastAttemptAt: new Date(),
+            metadata: args.metadata || undefined,
+        },
+        update: {
+            providerConversationId: args.threadId || undefined,
+            providerThreadId: args.threadId || undefined,
+            status: 'synced',
+            lastSyncedAt: new Date(),
+            lastAttemptAt: new Date(),
+            lastError: null,
+            metadata: args.metadata || undefined,
+        },
+    });
+}
+
+async function upsertGoogleMessageSync(args: {
+    conversationId: string;
+    messageId: string;
+    locationId: string;
+    userId: string;
+    gmailMessageId: string;
+    threadId?: string | null;
+}) {
+    await (db as any).messageSync.upsert({
+        where: {
+            messageId_provider_providerAccountId: {
+                messageId: args.messageId,
+                provider: 'google',
+                providerAccountId: args.userId,
+            },
+        },
+        create: {
+            messageId: args.messageId,
+            conversationId: args.conversationId,
+            locationId: args.locationId,
+            provider: 'google',
+            providerAccountId: args.userId,
+            providerMessageId: args.gmailMessageId,
+            providerThreadId: args.threadId || null,
+            status: 'synced',
+            remoteUpdatedAt: new Date(),
+            lastSyncedAt: new Date(),
+            lastAttemptAt: new Date(),
+        },
+        update: {
+            providerMessageId: args.gmailMessageId,
+            providerThreadId: args.threadId || undefined,
+            status: 'synced',
+            remoteUpdatedAt: new Date(),
+            lastSyncedAt: new Date(),
+            lastAttemptAt: new Date(),
+            lastError: null,
         },
     });
 }
@@ -172,6 +275,7 @@ export async function syncRecentMessages(userId: string, options: SyncRecentOpti
         } catch (error) {
             if (isHistoryTooOldError(error)) {
                 console.warn(`[Gmail Sync] historyId invalid/stale for ${userId}; falling back to bootstrap.`);
+                await markGmailSyncStateStale(userId, myEmail, error);
                 processed = await bootstrapRecentMessages(gmail, userId, myEmail);
             } else {
                 throw error;
@@ -212,6 +316,9 @@ export async function watchGmail(userId: string) {
             data: {
                 historyId: res.data.historyId,
                 watchExpiration: res.data.expiration ? new Date(parseInt(res.data.expiration, 10)) : undefined,
+                status: 'synced',
+                lastAttemptAt: new Date(),
+                lastError: null,
             },
         });
     }
@@ -249,7 +356,7 @@ export async function processMessage(
 
         let conversationId: string | undefined;
         let locationId: string | undefined;
-        let contact: { id: string; ghlContactId: string | null } | null = null;
+        let contact: { id: string } | null = null;
 
         if (targetEmail) {
             let localContact = await db.contact.findFirst({
@@ -304,7 +411,7 @@ export async function processMessage(
 
             if (localContact) {
                 locationId = localContact.locationId;
-                contact = { id: localContact.id, ghlContactId: localContact.ghlContactId ?? null };
+                contact = { id: localContact.id };
 
                 try {
                     const conversation = await db.conversation.upsert({
@@ -317,7 +424,7 @@ export async function processMessage(
                         create: {
                             contactId: localContact.id,
                             locationId: localContact.locationId,
-                            ghlConversationId: `native-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+                            ghlConversationId: null,
                             status: 'open',
                             lastMessageType: 'TYPE_EMAIL',
                         },
@@ -336,12 +443,13 @@ export async function processMessage(
 
         if (!conversationId) {
             console.log(`[Gmail Sync] Skipped message ${messageId}: No matching contact found for ${targetEmail}`);
-            return;
+            return { conversationId: null, messageId: null, isNewMessage: false, threadId: data.threadId || null };
         }
 
         let isNewMessage = false;
+        let localMessageId: string | null = null;
         try {
-            await db.message.create({
+            const createdMessage = await db.message.create({
                 data: {
                     conversationId,
                     emailMessageId: messageId,
@@ -357,54 +465,44 @@ export async function processMessage(
                     source: 'GMAIL_SYNC',
                 },
             });
+            localMessageId = createdMessage.id;
             isNewMessage = true;
         } catch (error) {
             if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
                 isNewMessage = false;
+                const existingMessage = await db.message.findUnique({
+                    where: { emailMessageId: messageId },
+                    select: { id: true },
+                });
+                localMessageId = existingMessage?.id || null;
             } else {
                 throw error;
             }
         }
 
-        if (!isNewMessage) {
-            console.log(`[Gmail Sync] Duplicate message ${messageId}; skipping side effects.`);
-            return;
+        if (locationId) {
+            await upsertGoogleConversationSync({
+                conversationId,
+                locationId,
+                userId,
+                threadId: data.threadId || null,
+                metadata: { source: 'gmail_sync', email: myEmail },
+            });
+            if (localMessageId) {
+                await upsertGoogleMessageSync({
+                    conversationId,
+                    messageId: localMessageId,
+                    locationId,
+                    userId,
+                    gmailMessageId: messageId,
+                    threadId: data.threadId || null,
+                });
+            }
         }
 
-        if (locationId && contact) {
-            const location = await db.location.findUnique({ where: { id: locationId } });
-
-            if (location?.ghlAccessToken && location?.ghlLocationId) {
-                let ghlContactId = contact.ghlContactId;
-                if (!ghlContactId) {
-                    try {
-                        const { ensureRemoteContact } = await import('@/lib/crm/contact-sync');
-                        ghlContactId = await ensureRemoteContact(contact.id, location.ghlLocationId, location.ghlAccessToken);
-                        if (ghlContactId) {
-                            console.log(`[Gmail Sync] Created/linked GHL contact: ${ghlContactId}`);
-                        }
-                    } catch (e) {
-                        console.warn(`[Gmail Sync] Could not ensure remote contact for ${contact.id}:`, e);
-                    }
-                }
-
-                if (ghlContactId) {
-                    await createInboundMessage(location.ghlAccessToken, {
-                        type: 'Email',
-                        contactId: ghlContactId,
-                        direction,
-                        status: 'delivered',
-                        subject,
-                        html: body,
-                        emailFrom: extractEmail(from) || undefined,
-                        emailTo: extractEmail(to) || undefined,
-                        dateAdded: internalDate,
-                        threadId: data.threadId || undefined,
-                    }).catch((e) => console.error('Failed to log to GHL:', e));
-                } else {
-                    console.log(`[Gmail Sync] Skipping GHL logging for ${targetEmail}: No GHL contact ID available`);
-                }
-            }
+        if (!isNewMessage) {
+            console.log(`[Gmail Sync] Duplicate message ${messageId}; skipping side effects.`);
+            return { conversationId, messageId: localMessageId, isNewMessage: false, threadId: data.threadId || null };
         }
 
         const { updateConversationLastMessage } = await import('@/lib/conversations/update');
@@ -422,9 +520,34 @@ export async function processMessage(
             unreadCountIncrement: shouldIncrementUnread ? 1 : 0,
         });
 
+        if (locationId && contact && localMessageId) {
+            await enqueueGhlMessageMirror({
+                locationId,
+                conversationId,
+                messageId: localMessageId,
+                contactId: contact.id,
+                payload: {
+                    type: 'Email',
+                    body,
+                    direction,
+                    status: 'delivered',
+                    subject,
+                    emailFrom: extractEmail(from) || from || undefined,
+                    emailTo: extractEmail(to) || to || undefined,
+                    dateAdded: internalDate,
+                    threadId: data.threadId || undefined,
+                    source: 'gmail_sync',
+                },
+            }).catch((error) => {
+                console.error(`[Gmail Sync] Failed to enqueue GHL mirror for Gmail message ${messageId}:`, error);
+            });
+        }
+
         console.log(`[Gmail Sync] Synced message ${messageId} for contact ${targetEmail}`);
+        return { conversationId, messageId: localMessageId, isNewMessage, threadId: data.threadId || null };
     } catch (error) {
         console.error(`[Gmail Sync] Error processing message ${messageId}:`, error);
+        return { conversationId: null, messageId: null, isNewMessage: false, threadId: null };
     }
 }
 

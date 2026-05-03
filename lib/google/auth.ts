@@ -145,13 +145,23 @@ export async function handleGoogleCallback(code: string, userId: string, baseUrl
     // Assuming circular dep might exist if gmail-sync imports auth. 
     // Let's retry lazy import.
     try {
-        const { watchGmail, syncRecentMessages } = await import('./gmail-sync');
-        // Run initial sync to populate historyId and Email Address
-        await syncRecentMessages(userId);
-        // Then Start Watch
-        await watchGmail(userId);
+        const { enqueueGmailSyncOutboxJob } = await import('./gmail-sync-outbox');
+        const { enqueueGmailSyncQueueJob, initGmailSyncWorker } = await import('@/lib/queue/gmail-sync');
+        const bootstrapOutbox = await enqueueGmailSyncOutboxJob({
+            userId,
+            operation: 'bootstrap_user_gmail',
+            payload: { source: 'google_oauth_callback' },
+        });
+        const watchOutbox = await enqueueGmailSyncOutboxJob({
+            userId,
+            operation: 'renew_watch',
+            payload: { source: 'google_oauth_callback' },
+        });
+        await initGmailSyncWorker();
+        await enqueueGmailSyncQueueJob({ outboxId: String(bootstrapOutbox.id) });
+        await enqueueGmailSyncQueueJob({ outboxId: String(watchOutbox.id) });
     } catch (e) {
-        console.error("Failed to initialize Gmail Sync on callback:", e);
+        console.error("Failed to queue Gmail Sync on callback:", e);
     }
 
     return tokens;

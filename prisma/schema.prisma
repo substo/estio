@@ -220,6 +220,7 @@ model User {
   googleCalendarId              String? // Preferred Google Calendar id for viewing sync-out
   googleCalendarTitle           String? // Cached display name for preferred Google Calendar
   gmailSyncState                GmailSyncState?
+  gmailSyncOutboxJobs           GmailSyncOutbox[]
 
   // Outlook / Microsoft Sync Credentials (OAuth method)
   outlookAccessToken        String?           @db.Text
@@ -2358,10 +2359,40 @@ model GmailSyncState {
   userId          String    @unique
   emailAddress    String?   @unique // The Gmail address being synced (for webhook lookup)
   historyId       String?
+  status          String    @default("synced") // synced | stale | error | disabled
+  lastAttemptAt   DateTime?
+  lastSuccessAt   DateTime?
+  lastError       String?   @db.Text
   lastSyncedAt    DateTime  @default(now())
   watchExpiration DateTime? // When the push notification subscription expires
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model GmailSyncOutbox {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId    String
+  operation String // sync_user_gmail | renew_watch | bootstrap_user_gmail
+  payload   Json?
+
+  status       String    @default("pending") // pending | processing | completed | failed | dead | disabled
+  scheduledAt  DateTime  @default(now())
+  lockedAt     DateTime?
+  lockedBy     String?
+  processedAt  DateTime?
+  attemptCount Int       @default(0)
+  lastError    String?   @db.Text
+
+  idempotencyKey String @unique
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, scheduledAt])
+  @@index([userId, status, scheduledAt])
+  @@index([operation, status, scheduledAt])
 }
 
 model OutlookSyncState {
