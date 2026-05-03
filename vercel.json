@@ -15,6 +15,10 @@
     {
       "path": "/api/cron/contact-sync",
       "schedule": "*/1 * * * *"
+    },
+    {
+      "path": "/api/cron/sms-relay-outbox",
+      "schedule": "*/1 * * * *"
     }
   ]
 }

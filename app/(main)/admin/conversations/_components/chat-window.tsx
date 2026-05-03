@@ -116,6 +116,7 @@ interface ChatWindowProps {
     onComposerDraftClear: () => void;
     composerInsertSeed?: { key: string; body: string } | null;
     onResendMessage?: (messageId: string) => void | Promise<void>;
+    smsRelayEnabled?: boolean;
 }
 
 /**
@@ -224,6 +225,7 @@ export function ChatWindow({
     composerInsertSeed,
     suggestions = [],
     onResendMessage,
+    smsRelayEnabled,
 }: ChatWindowProps & { suggestions?: string[] }) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const timelineContentRef = useRef<HTMLDivElement>(null);
@@ -1324,6 +1326,7 @@ export function ChatWindow({
                 insertDraftSeed={composerInsertSeed}
                 translationTargetLanguageLabel={resolvedReplyLanguage}
                 viewingLanguageLabel={resolvedTranslationTargetLanguage}
+                smsRelayEnabled={smsRelayEnabled}
             />
         </div>
     );

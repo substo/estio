@@ -3551,7 +3551,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
     const handleSendMessage = async (
         text: string,
-        type: 'SMS' | 'Email' | 'WhatsApp',
+        type: 'SMS' | 'Email' | 'WhatsApp' | 'SMS_RELAY',
         options?: {
             translationSourceText?: string | null;
             translationTargetLanguage?: string | null;
@@ -3636,7 +3636,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
         let sendFailureToastShown = false;
         try {
-            const res = await sendReply(capturedConversationId, capturedContactId, text, type, {
+            const res = await sendReply(capturedConversationId, capturedContactId, text, type as 'SMS' | 'Email' | 'WhatsApp' | 'SMS_RELAY', {
                 clientMessageId: optimisticClientMessageId,
                 translationSourceText: options?.translationSourceText || null,
                 translationTargetLanguage: options?.translationTargetLanguage || null,
@@ -4255,7 +4255,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                   conversationTarget.id,
                   conversationTarget.contactId,
                   originalMsg.body,
-                  originalMsg.type as 'SMS'|'Email'|'WhatsApp',
+                  originalMsg.type as 'SMS'|'Email'|'WhatsApp'|'SMS_RELAY',
                   { clientMessageId: resendClientMessageId }
               );
 
@@ -4985,6 +4985,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 translationReadEnabled={featureFlags.conversationTranslationRead}
                 translationWriteEnabled={featureFlags.conversationTranslationWrite}
                 translationBannerEnabled={featureFlags.conversationTranslationBanner}
+                smsRelayEnabled={featureFlags.smsRelayEnabled}
                 onResendMessage={handleResendMessage}
                 onSendMedia={handleSendMedia}
                 onRefetchMedia={handleRefetchMedia}

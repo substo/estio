@@ -52,6 +52,26 @@ export default function IntegrationsPage() {
                     </div>
                 </Link>
 
+                {/* SIM Relay Integration Card */}
+                <Link href="/admin/settings/integrations/sms-relay" className="group block h-full">
+                    <div className="flex h-full flex-col justify-between rounded-lg border p-6 transition-colors hover:border-primary hover:bg-muted/50">
+                        <div className="space-y-4">
+                            <div className="flex items-center space-x-3">
+                                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-100 text-orange-600 dark:bg-orange-900/20 dark:text-orange-400">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-smartphone"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
+                                </div>
+                                <h3 className="font-semibold text-lg">SIM Relay</h3>
+                            </div>
+                            <p className="text-sm text-muted-foreground">
+                                Connect physical Android phones as native SMS gateways using the Estio Companion app.
+                            </p>
+                        </div>
+                        <div className="mt-6 flex items-center text-sm font-medium text-primary group-hover:underline">
+                            Configure Integration &rarr;
+                        </div>
+                    </div>
+                </Link>
+
                 {/* Google Contacts Integration Card */}
                 <Link href="/admin/settings/integrations/google" className="group block h-full">
 

@@ -1429,7 +1429,7 @@ export function MessageBubble({
                 
                 {isOutbound && (isSMS || isWhatsApp) && (
                     <span className="flex items-center gap-1 shrink-0 ml-2">
-                        {message.status === 'sending' && (
+                        {(message.status === 'sending' || message.status === 'pending') && (
                             (String(message.sendState || "").toLowerCase() === "retrying"
                                 || String(message.outboxState?.status || "").toLowerCase() === "failed")
                                 ? (

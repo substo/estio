@@ -5820,7 +5820,7 @@ export async function sendReply(
     conversationId: string,
     contactId: string,
     messageBody: string,
-    type: 'SMS' | 'Email' | 'WhatsApp',
+    type: 'SMS' | 'Email' | 'WhatsApp' | 'SMS_RELAY',
     options?: {
         clientMessageId?: string;
         translationSourceText?: string | null;
@@ -5947,6 +5947,84 @@ export async function sendReply(
                 warning: enqueueResult.warning,
                 errorCode: enqueueResult.errorCode,
             };
+        }
+
+        if (type === "SMS_RELAY") {
+            const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+            
+            const conversation = await db.conversation.findFirst({
+                where: buildConversationReferenceWhere(location.id, conversationId),
+                select: { id: true, locationId: true, contactId: true },
+            });
+            if (!conversation || conversation.locationId !== location.id) {
+                return { success: false, error: "Conversation not found." };
+            }
+
+            const contact = await db.contact.findFirst({
+                where: {
+                    OR: [
+                        { ghlContactId: contactId },
+                        { id: contactId },
+                    ],
+                    locationId: location.id,
+                },
+                select: { id: true, phone: true, name: true },
+            });
+            if (!contact) return { success: false, error: "Contact not found." };
+            if (!contact.phone) return { success: false, error: "Contact does not have a phone number." };
+            
+            // Pick a paired device (Option A: first active one)
+            const device = await (db as any).smsRelayDevice.findFirst({
+                where: { locationId: location.id, paired: true },
+                orderBy: { lastSeenAt: 'desc' },
+                select: { id: true }
+            });
+            
+            if (!device) return { success: false, error: "No paired SIM Relay device found." };
+
+            const normalizedBody = String(messageBody || "").trim();
+            if (!normalizedBody) return { success: false, error: "Message body cannot be empty." };
+
+            // Create local message record directly (optimistic pending)
+            const localMessage = await db.message.create({
+                data: {
+                    conversationId: conversation.id,
+                    body: normalizedBody,
+                    type: "TYPE_SMS",
+                    direction: "outbound",
+                    status: "pending",
+                    source: "sms_relay",
+                }
+            });
+
+            await updateConversationLastMessage({
+                conversationId: conversation.id,
+                messageBody: normalizedBody,
+                messageType: "TYPE_SMS",
+                messageDate: new Date(),
+                direction: "outbound",
+            });
+
+            // Enqueue the outbox job
+            const { enqueueSmsRelayOutbox } = await import("@/lib/sms-relay/outbox");
+            await enqueueSmsRelayOutbox({
+                locationId: location.id,
+                conversationId: conversation.id,
+                messageId: localMessage.id,
+                deviceId: device.id,
+                toNumber: contact.phone,
+                body: normalizedBody,
+            });
+
+            invalidateConversationReadCaches(conversation.id);
+            emitConversationRealtimeEvent({
+                locationId: location.id,
+                conversationId: conversation.id,
+                type: "message.outbound",
+                payload: { channel: "sms_relay" },
+            });
+            
+            return { success: true as const, messageId: localMessage.id };
         }
 
         const location = await getAuthenticatedLocation();
@@ -7474,6 +7552,48 @@ export async function resendMessage(messageId: string) {
             }
         } catch (err: any) {
             console.error("Resend failed:", err);
+            return { success: false, error: err.message };
+        }
+    }
+
+    if (message.type === 'TYPE_SMS' && message.source === 'sms_relay') {
+        try {
+            // Re-enqueue the outbox job
+            const outboxJob = await (db as any).smsRelayOutbox.findFirst({
+                where: { messageId: message.id },
+                orderBy: { createdAt: 'desc' }
+            });
+
+            if (outboxJob) {
+                // Reset the existing job
+                await (db as any).smsRelayOutbox.update({
+                    where: { id: outboxJob.id },
+                    data: {
+                        status: 'pending',
+                        attemptCount: 0,
+                        lastError: null,
+                        scheduledAt: new Date(),
+                    }
+                });
+            } else {
+                // If it doesn't exist for some reason, we'd need to create one, 
+                // but we might not have the device ID handy here easily.
+                // Just error out if we can't find the outbox record.
+                return { success: false, error: "Original outbox job not found for resend." };
+            }
+
+            // Update message status to pending
+            await db.message.update({
+                where: { id: message.id },
+                data: {
+                    status: 'pending',
+                    updatedAt: new Date(),
+                }
+            });
+
+            return { success: true };
+        } catch (err: any) {
+            console.error("SMS Relay Resend failed:", err);
             return { success: false, error: err.message };
         }
     }

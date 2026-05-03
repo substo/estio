@@ -23,7 +23,7 @@ import {
 import { useAiModelCatalog } from "@/components/ai/use-ai-model-catalog";
 import { toast } from "sonner";
 
-type ComposerChannel = "SMS" | "Email" | "WhatsApp";
+type ComposerChannel = "SMS" | "Email" | "WhatsApp" | "SMS_RELAY";
 
 type WhatsAppEligibilityState =
     | { status: "checking" }
@@ -80,6 +80,7 @@ interface ConversationComposerProps {
     insertDraftSeed?: { key: string; body: string } | null;
     translationTargetLanguageLabel?: string | null;
     viewingLanguageLabel?: string | null;
+    smsRelayEnabled?: boolean;
 }
 
 function getInitialChannel(conversation: Conversation | null): ComposerChannel {
@@ -94,6 +95,7 @@ function getPlaceholderText(channel: ComposerChannel): string {
         WhatsApp: "Message or AI instruction...",
         Email: "Email or AI instruction...",
         SMS: "Text or AI instruction...",
+        SMS_RELAY: "Android SMS or AI instruction...",
     };
     return channelHints[channel] || channelHints.SMS;
 }
@@ -126,6 +128,7 @@ export function ConversationComposer({
     insertDraftSeed,
     translationTargetLanguageLabel,
     viewingLanguageLabel,
+    smsRelayEnabled = false,
 }: ConversationComposerProps) {
     const [sending, setSending] = useState(false);
     const [generatingDraft, setGeneratingDraft] = useState(false);
@@ -716,6 +719,9 @@ export function ConversationComposer({
                                 </SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="SMS" className="text-xs" disabled={isSmsDisabled}>SMS</SelectItem>
+                                    {smsRelayEnabled && (
+                                        <SelectItem value="SMS_RELAY" className="text-xs">Android SMS</SelectItem>
+                                    )}
                                     <SelectItem value="Email" className="text-xs">Email</SelectItem>
                                     <SelectItem value="WhatsApp" className="text-xs" disabled={isWhatsAppDisabled}>WhatsApp</SelectItem>
                                 </SelectContent>

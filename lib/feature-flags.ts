@@ -11,6 +11,7 @@ export type ConversationFeatureFlags = {
     conversationTranslationWrite: boolean;
     conversationTranslationBanner: boolean;
     canaryMatch: boolean;
+    smsRelayEnabled: boolean;
 };
 
 function parseMode(value: string | undefined, fallback: FeatureFlagMode): FeatureFlagMode {
@@ -94,6 +95,11 @@ export function getConversationFeatureFlags(locationId?: string | null): Convers
         "off"
     );
 
+    const smsRelayMode = parseMode(
+        readEnv("SMS_RELAY_ENABLED", "sms_relay_enabled"),
+        "off"
+    );
+
     return {
         workspaceV2: evaluateMode(workspaceMode, isCanaryLocation),
         balancedPolling: evaluateMode(pollingMode, isCanaryLocation),
@@ -105,5 +111,6 @@ export function getConversationFeatureFlags(locationId?: string | null): Convers
         conversationTranslationWrite: evaluateMode(translationWriteMode, isCanaryLocation),
         conversationTranslationBanner: evaluateMode(translationBannerMode, isCanaryLocation),
         canaryMatch: isCanaryLocation,
+        smsRelayEnabled: evaluateMode(smsRelayMode, isCanaryLocation),
     };
 }

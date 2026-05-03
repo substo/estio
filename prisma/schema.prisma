@@ -66,6 +66,9 @@ model Location {
   aiUsages                      AiUsage[]
   messageTranslationCaches      MessageTranslationCache[]
 
+  // SIM Relay (Android SMS Gateway)
+  smsRelayEnabled Boolean @default(false)
+
   // WhatsApp Integration (Native)
   whatsappBusinessAccountId String?
   whatsappPhoneNumberId     String?
@@ -83,6 +86,10 @@ model Location {
   evolutionConnectionStatus String? // "open", "connecting", "close"
 
   whatsappImportSessions WhatsAppImportSession[]
+
+  // SIM Relay
+  smsRelayDevices    SmsRelayDevice[]
+  smsRelayOutboxJobs SmsRelayOutbox[]
 
   // CRM Integration (Location-wide settings)
   crmUrl            String?
@@ -1534,6 +1541,7 @@ model Conversation {
   providerOutboxJobs         ProviderOutbox[]
   messageTranslationCaches   MessageTranslationCache[]
   dealLinks                  DealConversationLink[]
+  smsRelayOutboxJobs         SmsRelayOutbox[]
 
   @@unique([locationId, contactId])
   @@index([locationId])
@@ -2147,6 +2155,7 @@ model Message {
   outboundWhatsAppOutbox       WhatsAppOutboundOutbox?
   providerOutboxJobs           ProviderOutbox[]
   syncRecords                  MessageSync[]
+  smsRelayOutboxJobs           SmsRelayOutbox[]
 
   // WhatsApp Integration
   wamId String? @unique // WhatsApp Message ID (for dedup)
@@ -2862,4 +2871,63 @@ model MediaAsset {
 enum MediaAssetStatus {
   ACTIVE
   SOFT_DELETED
+}
+
+// ---------------------------------------------------------------------------
+// SIM Relay — Android SMS Gateway
+// ---------------------------------------------------------------------------
+
+model SmsRelayDevice {
+  id              String    @id @default(cuid())
+  locationId      String
+  label           String    // e.g. "Limassol Office Android"
+  phoneNumber     String?   // E.164 of the SIM, e.g. "+35799123456"
+  platform        String    @default("android") // android | ios (future)
+  status          String    @default("offline") // online | offline | error
+  pairTokenHash   String?   // SHA-256 of temporary 6-char pair code
+  paired          Boolean   @default(false)
+  deviceApiTokenHash String? @db.Text // SHA-256 hash of the issued long-lived JWT
+  devicePushToken String?   // FCM token for push notifications (optional)
+  lastSeenAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  location   Location         @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  outboxJobs SmsRelayOutbox[]
+
+  @@index([locationId, status])
+  @@index([locationId, paired])
+  @@index([pairTokenHash])
+}
+
+model SmsRelayOutbox {
+  id             String   @id @default(cuid())
+  locationId     String
+  conversationId String
+  messageId      String
+  deviceId       String
+  toNumber       String   // E.164 recipient number
+  body           String   @db.Text
+
+  // status: pending | processing | sent | failed | dead | cancelled
+  status         String   @default("pending")
+  scheduledAt    DateTime @default(now())
+  lockedAt       DateTime?
+  lockedBy       String?  // worker ID
+  processedAt    DateTime?
+  attemptCount   Int      @default(0)
+  lastError      String?  @db.Text
+
+  // Deduplication key: <locationId>:<messageId>
+  idempotencyKey String   @unique
+
+  location     Location       @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  device       SmsRelayDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  message      Message        @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  conversation Conversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([status, scheduledAt])
+  @@index([deviceId, status])
+  @@index([locationId, status, scheduledAt])
+  @@index([messageId])
 }
