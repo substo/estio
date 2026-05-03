@@ -231,7 +231,8 @@ export async function POST(req: NextRequest) {
         "Rules:",
         "- Return exactly one plain-text sentence.",
         "- Keep it factual and action-oriented.",
-        "- Include key entities (person/property/reference/price/date) only if present in the source text.",
+        "- Include key entities (person/property/reference/price/date/specific requirements) only if present in the source text.",
+        "- Accurately capture specific property preferences or criteria mentioned by the lead (e.g., plot type, potential, condition, location nuances).",
         contactFirstName
             ? `- Refer to the person as ${contactFirstName} (first name only) when mentioning the contact.`
             : "- If a contact name is present, refer to the person by first name only.",
