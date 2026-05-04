@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
     }
 
-    const flags = getConversationFeatureFlags(location.id);
+    const flags = getConversationFeatureFlags(location.id, { locationSmsRelayEnabled: !!(location as any).smsRelayEnabled });
     if (!flags.realtimeSse) {
         return NextResponse.json({ success: false, error: "Realtime disabled by feature flag" }, { status: 503 });
     }

@@ -1767,7 +1767,7 @@ export async function fetchConversations(
         );
         const cursor = decodeConversationCursor(options?.cursor);
         const location = await getAuthenticatedLocationReadOnly();
-        const flags = getConversationFeatureFlags(location.id);
+        const flags = getConversationFeatureFlags(location.id, { locationSmsRelayEnabled: !!(location as any).smsRelayEnabled });
 
         return await withServerTiming("conversations.fetch_list", {
             traceId,
@@ -2711,7 +2711,7 @@ export async function getConversationWorkspaceCore(
 
     try {
         const location = await getAuthenticatedLocationReadOnly();
-        const flags = getConversationFeatureFlags(location.id);
+        const flags = getConversationFeatureFlags(location.id, { locationSmsRelayEnabled: !!(location as any).smsRelayEnabled });
 
         const includeMessages = options?.includeMessages !== false;
         const includeActivity = options?.includeActivity !== false;
@@ -2836,7 +2836,7 @@ export async function getConversationWorkspaceSidebar(conversationId: string) {
 
     try {
         const location = await getAuthenticatedLocationReadOnly();
-        const flags = getConversationFeatureFlags(location.id);
+        const flags = getConversationFeatureFlags(location.id, { locationSmsRelayEnabled: !!(location as any).smsRelayEnabled });
 
         return await withServerTiming("conversations.workspace_sidebar", {
             traceId,

@@ -191,7 +191,7 @@ export async function getSmsRelayStats(): Promise<SmsRelayStats> {
             where: {
                 locationId: location.id,
                 status: { in: ["dead", "failed"] },
-                updatedAt: { gte: since },
+                processedAt: { gte: since },
             },
         }),
         (db as any).smsRelayOutbox.count({
@@ -203,4 +203,39 @@ export async function getSmsRelayStats(): Promise<SmsRelayStats> {
     ]);
 
     return { sent7d, received7d, failed7d, pending };
+}
+
+// ---------------------------------------------------------------------------
+// Toggle SIM Relay enabled/disabled for the current location
+// ---------------------------------------------------------------------------
+
+export async function getSmsRelayToggle(): Promise<boolean> {
+    const { userId } = await auth();
+    if (!userId) throw new Error("Unauthorized");
+
+    const location = await getLocationContext();
+    if (!location) return false;
+
+    const loc = await db.location.findUnique({
+        where: { id: location.id },
+        select: { smsRelayEnabled: true },
+    });
+
+    return loc?.smsRelayEnabled ?? false;
+}
+
+export async function toggleSmsRelay(enabled: boolean): Promise<boolean> {
+    const { userId } = await auth();
+    if (!userId) throw new Error("Unauthorized");
+
+    const location = await getLocationContext();
+    if (!location) throw new Error("No location found");
+
+    const updated = await db.location.update({
+        where: { id: location.id },
+        data: { smsRelayEnabled: enabled },
+        select: { smsRelayEnabled: true },
+    });
+
+    return updated.smsRelayEnabled;
 }

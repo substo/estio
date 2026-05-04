@@ -106,7 +106,7 @@ export async function listDueSmsRelayOutboxIds(limit = 200): Promise<string[]> {
             status: { in: ["pending", "failed"] },
             scheduledAt: { lte: new Date() },
         },
-        orderBy: [{ scheduledAt: "asc" }, { createdAt: "asc" }],
+        orderBy: [{ scheduledAt: "asc" }],
         take: Math.max(1, Math.min(Number(limit), 500)),
         select: { id: true },
     });

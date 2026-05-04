@@ -8,10 +8,23 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+    AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import QRCode from "qrcode";
 import {
     getSmsRelayDevices,
     getSmsRelayStats,
+    getSmsRelayToggle,
+    toggleSmsRelay,
     initiatePairing,
     unlinkDevice,
     updateDevice,
@@ -250,7 +263,7 @@ function DeviceRow({
                             style={styles.input}
                             value={phone}
                             onChange={(e) => setPhone(e.target.value)}
-                            placeholder="Phone number (E.164)"
+                            placeholder="e.g. +35799123456"
                         />
                     </div>
                 ) : (
@@ -279,12 +292,25 @@ function DeviceRow({
                         <button style={styles.btnSm.ghost} onClick={() => setEditing(true)}>
                             Edit
                         </button>
-                        <button
-                            style={styles.btnSm.danger}
-                            onClick={() => onUnlink(device.id)}
-                        >
-                            Unlink
-                        </button>
+                        <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                                <button style={styles.btnSm.danger}>Unlink</button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                                <AlertDialogHeader>
+                                    <AlertDialogTitle>Unlink this device?</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                        All pending SMS jobs will be cancelled.
+                                    </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction onClick={() => onUnlink(device.id)}>
+                                        OK
+                                    </AlertDialogAction>
+                                </AlertDialogFooter>
+                            </AlertDialogContent>
+                        </AlertDialog>
                     </>
                 )}
             </div>
@@ -324,21 +350,37 @@ export default function SmsRelaySettingsPage() {
     const [stats, setStats] = useState<SmsRelayStats | null>(null);
     const [loading, setLoading] = useState(true);
     const [showPairing, setShowPairing] = useState(false);
+    const [enabled, setEnabled] = useState(false);
+    const [togglingEnabled, setTogglingEnabled] = useState(false);
     const [, startTransition] = useTransition();
 
     const reload = useCallback(() => {
         startTransition(async () => {
-            const [devs, st] = await Promise.all([getSmsRelayDevices(), getSmsRelayStats()]);
+            const [devs, st, isEnabled] = await Promise.all([
+                getSmsRelayDevices(),
+                getSmsRelayStats(),
+                getSmsRelayToggle(),
+            ]);
             setDevices(devs);
             setStats(st);
+            setEnabled(isEnabled);
             setLoading(false);
         });
     }, []);
 
     useEffect(() => { reload(); }, [reload]);
 
+    const handleToggle = () => {
+        const next = !enabled;
+        setTogglingEnabled(true);
+        startTransition(async () => {
+            const result = await toggleSmsRelay(next);
+            setEnabled(result);
+            setTogglingEnabled(false);
+        });
+    };
+
     const handleUnlink = (deviceId: string) => {
-        if (!confirm("Unlink this device? All pending SMS jobs will be cancelled.")) return;
         startTransition(async () => {
             await unlinkDevice(deviceId);
             reload();
@@ -359,9 +401,38 @@ export default function SmsRelaySettingsPage() {
                         </p>
                     </div>
                 </div>
-                <button style={styles.btnPrimary.default} onClick={() => setShowPairing(true)}>
-                    + Pair Device
-                </button>
+                <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                    {/* Enable/Disable Toggle */}
+                    <div style={styles.toggleContainer}>
+                        <span style={styles.toggleLabel}>
+                            {enabled ? "Enabled" : "Disabled"}
+                        </span>
+                        <button
+                            role="switch"
+                            aria-checked={enabled}
+                            onClick={handleToggle}
+                            disabled={togglingEnabled}
+                            style={{
+                                ...styles.toggleTrack,
+                                background: enabled
+                                    ? "linear-gradient(135deg, #22c55e 0%, #16a34a 100%)"
+                                    : "#cbd5e1",
+                                opacity: togglingEnabled ? 0.6 : 1,
+                                cursor: togglingEnabled ? "not-allowed" : "pointer",
+                            }}
+                        >
+                            <span
+                                style={{
+                                    ...styles.toggleThumb,
+                                    transform: enabled ? "translateX(20px)" : "translateX(2px)",
+                                }}
+                            />
+                        </button>
+                    </div>
+                    <button style={styles.btnPrimary.default} onClick={() => setShowPairing(true)}>
+                        + Pair Device
+                    </button>
+                </div>
             </div>
 
             {/* How it works */}
@@ -679,4 +750,37 @@ const styles = {
         animation: "spin 0.8s linear infinite",
     },
     waitingText: { fontSize: 13, color: "#64748b" },
+
+    // Toggle switch
+    toggleContainer: {
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+    } as React.CSSProperties,
+    toggleLabel: {
+        fontSize: 13,
+        fontWeight: 600,
+        color: "#475569",
+        userSelect: "none",
+    } as React.CSSProperties,
+    toggleTrack: {
+        position: "relative" as const,
+        width: 44,
+        height: 24,
+        borderRadius: 12,
+        border: "none",
+        padding: 0,
+        transition: "background 0.2s, opacity 0.2s",
+        flexShrink: 0,
+    } as React.CSSProperties,
+    toggleThumb: {
+        position: "absolute" as const,
+        top: 2,
+        width: 20,
+        height: 20,
+        borderRadius: "50%",
+        background: "#fff",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+        transition: "transform 0.2s ease",
+    } as React.CSSProperties,
 } as const;

@@ -52,7 +52,7 @@ function readEnv(...keys: string[]): string | undefined {
  * - If set to canary, the flag is enabled only for location IDs listed in CONVERSATIONS_CANARY_LOCATIONS.
  * - Defaults are on to keep the optimized path active unless explicitly disabled.
  */
-export function getConversationFeatureFlags(locationId?: string | null): ConversationFeatureFlags {
+export function getConversationFeatureFlags(locationId?: string | null, opts?: { locationSmsRelayEnabled?: boolean }): ConversationFeatureFlags {
     const canaryLocations = parseLocationList(
         readEnv("CONVERSATIONS_CANARY_LOCATIONS", "CONVERSATIONS_CANARY_LOCATION_IDS", "conversations_canary_locations")
     );
@@ -111,6 +111,6 @@ export function getConversationFeatureFlags(locationId?: string | null): Convers
         conversationTranslationWrite: evaluateMode(translationWriteMode, isCanaryLocation),
         conversationTranslationBanner: evaluateMode(translationBannerMode, isCanaryLocation),
         canaryMatch: isCanaryLocation,
-        smsRelayEnabled: evaluateMode(smsRelayMode, isCanaryLocation),
+        smsRelayEnabled: evaluateMode(smsRelayMode, isCanaryLocation) && (opts?.locationSmsRelayEnabled ?? false),
     };
 }

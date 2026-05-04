@@ -42,7 +42,7 @@ export default async function ConversationsPage({ searchParams }: { searchParams
         ),
         initialViewMode === 'deals' ? getDealContexts() : Promise.resolve([])
     ]);
-    const featureFlags = getConversationFeatureFlags(location.id);
+    const featureFlags = getConversationFeatureFlags(location.id, { locationSmsRelayEnabled: !!(location as any).smsRelayEnabled });
 
     return (
         <div className="h-[calc(100dvh-56px)] lg:h-[calc(100dvh-55px)] w-full max-w-full min-w-0 overflow-hidden flex flex-col">
