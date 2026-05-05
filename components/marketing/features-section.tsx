@@ -1,4 +1,4 @@
-import { Database, Globe, Layers, Zap, Sparkles, Wand2, PenTool } from "lucide-react";
+import { Database, Layers, Zap, Sparkles, Wand2, PenTool, Smartphone } from "lucide-react";
 
 export function FeaturesSection() {
     const features = [
@@ -26,6 +26,11 @@ export function FeaturesSection() {
             title: "Brand Voice Cloning",
             description: "The AI learns your writing style and generates listing descriptions that sound just like you.",
             icon: PenTool,
+        },
+        {
+            title: "SIM Relay",
+            description: "Send and receive CRM SMS through your own Android phone and SIM card to reduce gateway fees.",
+            icon: Smartphone,
         },
         {
             title: "High Performance",

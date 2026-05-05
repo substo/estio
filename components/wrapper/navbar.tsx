@@ -30,6 +30,11 @@ const components: { title: string; href: string; description: string }[] = [
         description: "Review and triage discovered prospects before CRM entry.",
     },
     {
+        title: "SIM Relay",
+        href: "/sim-relay",
+        description: "Use an Android phone and SIM card as a lower-cost SMS channel in Estio.",
+    },
+    {
         title: "Site Settings",
         href: "/admin/site-settings",
         description: "Customize your public-facing website with your own branding.",
@@ -97,6 +102,11 @@ export default function NavBar({ logoUrl, lightUrl }: NavBarProps) {
                             <DialogClose asChild>
                                 <Link href="/admin/leads/inbox">
                                     <Button variant="outline" className="w-full">Lead Inbox</Button>
+                                </Link>
+                            </DialogClose>
+                            <DialogClose asChild>
+                                <Link href="/sim-relay">
+                                    <Button variant="outline" className="w-full">SIM Relay</Button>
                                 </Link>
                             </DialogClose>
                             <DialogClose asChild>
