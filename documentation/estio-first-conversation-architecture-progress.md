@@ -1,6 +1,6 @@
 # Estio-First Conversation Architecture Progress
 
-Last updated: 2026-05-02
+Last updated: 2026-05-05
 
 ## Goal
 
@@ -8,7 +8,7 @@ Make Estio the canonical system of record for conversations, messages, contacts,
 
 ## Current Status
 
-Status: **Core migration deployed; Gmail-native inbound queue wave implemented locally.**
+Status: **Core migration deployed; Gmail-native inbound queue and provider-sync operations waves implemented locally.**
 
 The critical conversation path is now Estio-first:
 
@@ -54,6 +54,12 @@ The critical conversation path is now Estio-first:
   - conversation read/archive/trash/restore actions enqueue status sync without blocking UX
   - task actions already enqueue `ContactTaskOutbox` work in fire-and-forget background calls
   - viewing actions enqueue `ViewingOutbox` rows and do not call provider APIs inline
+- Added Wave 4 local operations visibility:
+  - admin Provider Sync Operations page
+  - provider/Gmail/domain outbox health summaries
+  - stale sync-record health summaries
+  - high-signal alert banners for dead jobs, failed jobs, stale locks, stale aliases, and disabled-job volume
+  - scoped manual retry/disable actions for ProviderOutbox and GmailSyncOutbox jobs
 - Added provider outbox cron script and installed production cron entry.
 - Repaired production Prisma migration history for `20260423120000_legacy_crm_owner_identity`.
 - Marked previously db-pushed migrations as applied where production schema already matched.
@@ -89,15 +95,22 @@ Status: **Locally complete. Deployment-only checks deferred until final deploy.*
 
 ### Wave 4: Observability And Operations
 
-- Add admin/provider-sync dashboard for:
+Status: **Locally complete. Deployment-only checks deferred until final deploy.**
+
+- Implemented admin/provider-sync dashboard for:
   - pending jobs
   - failed jobs
   - dead-letter jobs
   - disabled jobs
   - stale sync records
+  - stale processing locks
   - per-provider health
-- Add manual retry / disable / inspect actions for provider outbox rows.
-- Add alerts for high dead-letter volume or stale provider sync.
+- Implemented manual retry / disable actions for provider and Gmail outbox rows.
+- Implemented in-app alert banners for dead-letter volume, accumulated retryable failures, stale locks, stale provider aliases, and disabled-job volume.
+- Deferred final-deploy checks:
+  - smoke dashboard access with a real location admin
+  - retry one non-production-safe failed row or verify action against a seeded/staging row
+  - confirm cron workers pick up retried rows after cutover
 
 ### Wave 5: Legacy Cleanup
 

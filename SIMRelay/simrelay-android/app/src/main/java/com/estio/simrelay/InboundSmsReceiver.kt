@@ -21,18 +21,18 @@ class InboundSmsReceiver : BroadcastReceiver() {
                 val timestamp = sms.timestampMillis
 
                 if (sender != null && body != null) {
-                    // Fire and forget POST to CRM
                     CoroutineScope(Dispatchers.IO).launch {
                         try {
                             val prefs = context.getSharedPreferences("estio_prefs", Context.MODE_PRIVATE)
                             val token = prefs.getString("device_token", null)
+                            val baseUrl = prefs.getString("base_url", "https://estio.co")
                             if (token != null) {
+                                ApiClient.initBaseUrl(baseUrl!!)
                                 ApiClient.initToken(token)
                                 val req = InboundSmsRequest(from = sender, body = body, received_at_ms = timestamp)
                                 ApiClient.api.reportInboundSms(req)
                             }
                         } catch (e: Exception) {
-                            // Ignored (or we could queue failed inbound messages in local DB for retry)
                         }
                     }
                 }

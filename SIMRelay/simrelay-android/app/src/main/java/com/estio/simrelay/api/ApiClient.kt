@@ -7,37 +7,54 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 
 object ApiClient {
-    // Replace with actual CRM domain
-    private const val BASE_URL = "https://app.estio.co"
-    
+    private var baseUrl: String = "https://estio.co"
     private var token: String? = null
     
+    // We make api nullable just during rebuild, but typically it will be non-null.
+    // For safety, we can expose a non-null property that throws if not initialized.
+    private var _api: ApiService? = null
+    val api: ApiService
+        get() = _api ?: throw IllegalStateException("ApiClient not initialized")
+
     fun initToken(newToken: String) {
         token = newToken
     }
-    
-    private val authInterceptor = Interceptor { chain ->
-        val requestBuilder = chain.request().newBuilder()
-        token?.let {
-            requestBuilder.addHeader("Authorization", "Bearer $it")
+
+    fun initBaseUrl(newUrl: String) {
+        baseUrl = newUrl
+        rebuildApi()
+    }
+
+    private fun rebuildApi() {
+        val authInterceptor = Interceptor { chain ->
+            val requestBuilder = chain.request().newBuilder()
+            token?.let {
+                requestBuilder.addHeader("Authorization", "Bearer $it")
+            }
+            chain.proceed(requestBuilder.build())
         }
-        chain.proceed(requestBuilder.build())
+
+        val loggingInterceptor = HttpLoggingInterceptor().apply {
+            level = HttpLoggingInterceptor.Level.BODY
+        }
+
+        val okHttpClient = OkHttpClient.Builder()
+            .addInterceptor(authInterceptor)
+            .addInterceptor(loggingInterceptor)
+            .build()
+
+        val urlToUse = if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
+
+        val retrofit = Retrofit.Builder()
+            .baseUrl(urlToUse)
+            .client(okHttpClient)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+
+        _api = retrofit.create(ApiService::class.java)
     }
 
-    private val loggingInterceptor = HttpLoggingInterceptor().apply {
-        level = HttpLoggingInterceptor.Level.BODY
+    init {
+        rebuildApi()
     }
-
-    private val okHttpClient = OkHttpClient.Builder()
-        .addInterceptor(authInterceptor)
-        .addInterceptor(loggingInterceptor)
-        .build()
-
-    private val retrofit = Retrofit.Builder()
-        .baseUrl(BASE_URL)
-        .client(okHttpClient)
-        .addConverterFactory(GsonConverterFactory.create())
-        .build()
-
-    val api: ApiService = retrofit.create(ApiService::class.java)
 }

@@ -1,0 +1,77 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Installation {
+  id                String   @id @default(uuid())
+  agency_id         String
+  sub_account_id    String?
+  ghl_installation_id String @unique
+  access_token      String
+  refresh_token     String
+  token_expires_at  DateTime
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  locationBindings  LocationDeviceBinding[]
+  messages          Message[]
+}
+
+model Device {
+  id                String   @id @default(uuid())
+  installation_id   String
+  label             String
+  device_push_token String?
+  paired            Boolean  @default(false)
+  pair_token_hash   String?
+  platform          String   @default("ios")
+  phone_number      String?
+  last_seen_at      DateTime?
+  status            String   @default("offline") // online, offline
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  locationBindings  LocationDeviceBinding[]
+  messages          Message[]
+}
+
+model LocationDeviceBinding {
+  id              String   @id @default(uuid())
+  installation_id String
+  sub_account_id  String
+  device_id       String
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  installation    Installation @relation(fields: [installation_id], references: [id])
+  device          Device       @relation(fields: [device_id], references: [id])
+
+  @@unique([sub_account_id, device_id])
+}
+
+model Message {
+  id              String   @id @default(uuid())
+  installation_id String
+  sub_account_id  String
+  device_id       String
+  hl_message_id   String?
+  direction       String   @default("outbound")
+  from_number     String?
+  to_number       String
+  body            String
+  status          String   @default("queued") // queued, pushed_to_device, sent_by_user, cancelled, failed
+  error_message   String?
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  installation    Installation @relation(fields: [installation_id], references: [id])
+  device          Device       @relation(fields: [device_id], references: [id])
+}

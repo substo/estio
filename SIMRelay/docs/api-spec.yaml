@@ -1,0 +1,119 @@
+openapi: 3.0.0
+info:
+  title: SIMRelay API
+  version: 1.0.0
+  description: API for SIMRelay - GoHighLevel SMS Relay via iOS
+servers:
+  - url: http://localhost:3000
+    description: Local Development
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+paths:
+  /simrelay/api/devices/initiate-pairing:
+    post:
+      summary: Initiate device pairing (Web)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                installation_id:
+                  type: string
+                label:
+                  type: string
+      responses:
+        '200':
+          description: Pairing initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pairCode:
+                    type: string
+                  qrPayload:
+                    type: string
+
+  /simrelay/gateway/ios/pair:
+    post:
+      summary: Complete device pairing (iOS)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pair_token:
+                  type: string
+                device_push_token:
+                  type: string
+                device_label:
+                  type: string
+      responses:
+        '200':
+          description: Paired successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  device_api_token:
+                    type: string
+                  installation_id:
+                    type: string
+
+  /simrelay/gateway/ios/jobs:
+    get:
+      summary: Fetch pending SMS jobs (iOS)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of jobs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    job_id:
+                      type: string
+                    to:
+                      type: string
+                    body:
+                      type: string
+                    sub_account_id:
+                      type: string
+
+  /simrelay/gateway/ios/job-result:
+    post:
+      summary: Report job result (iOS)
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                job_id:
+                  type: string
+                result:
+                  type: string
+                  enum: [sent_by_user, cancelled, failed]
+                error_message:
+                  type: string
+      responses:
+        '200':
+          description: Result recorded

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SIMRelay Devices</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>SIMRelay Devices</h1>
+            <button id="addDeviceBtn" class="btn-primary">Add iPhone</button>
+        </header>
+
+        <div id="deviceList" class="device-list">
+            <!-- Devices will be populated here -->
+            <div class="loading">Loading devices...</div>
+        </div>
+
+        <!-- Add Device Modal -->
+        <div id="addDeviceModal" class="modal hidden">
+            <div class="modal-content">
+                <span class="close">&times;</span>
+                <h2>Pair New Device</h2>
+                <div class="form-group">
+                    <label for="deviceLabel">Device Label</label>
+                    <input type="text" id="deviceLabel" placeholder="e.g. Martin's iPhone 14">
+                </div>
+                <button id="generatePairCodeBtn" class="btn-primary">Generate Pair Code</button>
+                
+                <div id="pairingInfo" class="hidden">
+                    <div class="qr-container">
+                        <canvas id="qrCanvas"></canvas>
+                    </div>
+                    <div class="code-display">
+                        <p>Pairing Code:</p>
+                        <h3 id="pairCodeDisplay">------</h3>
+                    </div>
+                    <p class="instructions">
+                        1. Install SIMRelay on your iPhone.<br>
+                        2. Open the app and scan this QR code or enter the code above.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/devices.js"></script>
+</body>
+</html>

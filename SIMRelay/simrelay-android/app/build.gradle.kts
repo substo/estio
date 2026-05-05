@@ -49,4 +49,7 @@ dependencies {
 
     // Security
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
+    // QR Code Scanning (GMS)
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
 }

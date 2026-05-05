@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SIMRelay Location Mapping</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>Location Mapping</h1>
+        </header>
+
+        <div class="card">
+            <p class="instructions">
+                Select which iPhone should send SMS for this location.
+            </p>
+
+            <div class="form-group">
+                <label for="deviceSelect">Select Device</label>
+                <select id="deviceSelect">
+                    <option value="">-- Select a Device --</option>
+                    <!-- Options populated via JS -->
+                </select>
+            </div>
+
+            <button id="saveBtn" class="btn-primary">Save Mapping</button>
+            <div id="message" class="message hidden"></div>
+        </div>
+    </div>
+
+    <script src="/js/mapping.js"></script>
+</body>
+
+</html>

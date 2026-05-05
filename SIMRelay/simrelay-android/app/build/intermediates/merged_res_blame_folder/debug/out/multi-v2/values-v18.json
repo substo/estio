@@ -1,0 +1,19 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.estio.simrelay.app-mergeDebugResources-30:/values-v18/values-v18.xml",
+            "map": [
+                {
+                    "source": "/Users/martingreen/.gradle/caches/transforms-3/0a387646109aa4c7cf95500856c54193/transformed/appcompat-1.6.1/res/values-v18/values-v18.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "48",
+                        "endOffsets": "99"
+                    }
+                }
+            ]
+        }
+    ]
+}

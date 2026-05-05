@@ -32,6 +32,13 @@ export type SmsRelayStats = {
     pending: number;
 };
 
+export type DeviceActivityStats = {
+    sentToday: number;
+    failedToday: number;
+    queuedNow: number;
+    lastMessageAt: string | null;
+};
+
 // ---------------------------------------------------------------------------
 // List all devices for the current location
 // ---------------------------------------------------------------------------
@@ -238,4 +245,43 @@ export async function toggleSmsRelay(enabled: boolean): Promise<boolean> {
     });
 
     return updated.smsRelayEnabled;
+}
+
+// ---------------------------------------------------------------------------
+// Per-Device Activity Stats
+// ---------------------------------------------------------------------------
+
+export async function getDeviceActivityStats(deviceId: string): Promise<DeviceActivityStats> {
+    const { userId } = await auth();
+    if (!userId) throw new Error("Unauthorized");
+
+    const location = await getLocationContext();
+    if (!location) return { sentToday: 0, failedToday: 0, queuedNow: 0, lastMessageAt: null };
+
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const [sentToday, failedToday, queuedNow, lastMessage] = await Promise.all([
+        (db as any).smsRelayOutbox.count({
+            where: { deviceId, status: "sent", processedAt: { gte: startOfDay } },
+        }),
+        (db as any).smsRelayOutbox.count({
+            where: { deviceId, status: { in: ["failed", "dead"] }, processedAt: { gte: startOfDay } },
+        }),
+        (db as any).smsRelayOutbox.count({
+            where: { deviceId, status: { in: ["pending", "processing"] } },
+        }),
+        (db as any).smsRelayOutbox.findFirst({
+            where: { deviceId, status: "sent" },
+            orderBy: { processedAt: "desc" },
+            select: { processedAt: true },
+        }),
+    ]);
+
+    return {
+        sentToday,
+        failedToday,
+        queuedNow,
+        lastMessageAt: lastMessage?.processedAt ? new Date(lastMessage.processedAt).toISOString() : null,
+    };
 }

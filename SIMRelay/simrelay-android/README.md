@@ -12,7 +12,7 @@ This directory contains the source code for the native Android SIM Relay app.
 
 ## Production Configuration
 
-Before building the final APK for your team, be sure to update the `BASE_URL` in `app/src/main/java/com/estio/simrelay/api/ApiClient.kt` to point to your live CRM production URL (e.g., `https://app.estio.co`).
+Before building the final APK for your team, be sure to update the `BASE_URL` in `app/src/main/java/com/estio/simrelay/api/ApiClient.kt` to point to your live CRM production URL (e.g., `https://estio.co`).
 
 ## Features
 - **Pairing**: Securely pairs the device to the CRM.

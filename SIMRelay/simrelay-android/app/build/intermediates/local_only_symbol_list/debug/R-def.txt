@@ -1,0 +1,8 @@
+R_DEF: Internal format may change without notice
+local
+id btnPair
+id btnStartService
+id etPairingCode
+id tvStatus
+layout activity_main
+string app_name

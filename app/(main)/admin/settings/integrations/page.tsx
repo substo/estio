@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { MessageSquare } from "lucide-react";
+import { Activity, MessageSquare } from "lucide-react";
 
 export default function IntegrationsPage() {
     return (
@@ -113,6 +113,26 @@ export default function IntegrationsPage() {
                         </div>
                         <div className="mt-6 flex items-center text-sm font-medium text-primary group-hover:underline">
                             Configure Integration &rarr;
+                        </div>
+                    </div>
+                </Link>
+
+                {/* Provider Sync Operations Card */}
+                <Link href="/admin/settings/integrations/provider-sync" className="group block h-full">
+                    <div className="flex h-full flex-col justify-between rounded-lg border p-6 transition-colors hover:border-primary hover:bg-muted/50">
+                        <div className="space-y-4">
+                            <div className="flex items-center space-x-3">
+                                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400">
+                                    <Activity className="h-6 w-6" />
+                                </div>
+                                <h3 className="font-semibold text-lg">Provider Sync Operations</h3>
+                            </div>
+                            <p className="text-sm text-muted-foreground">
+                                Monitor async provider queues, retry failed mirror jobs, and inspect sync alias health.
+                            </p>
+                        </div>
+                        <div className="mt-6 flex items-center text-sm font-medium text-primary group-hover:underline">
+                            Open Operations &rarr;
                         </div>
                     </div>
                 </Link>

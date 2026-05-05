@@ -1,6 +1,5 @@
 package com.estio.simrelay
 
-import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
@@ -16,6 +15,10 @@ import kotlinx.coroutines.*
 
 class RelayForegroundService : Service() {
 
+    companion object {
+        var isRunning = false
+    }
+
     private val serviceScope = CoroutineScope(Dispatchers.IO + Job())
     private val CHANNEL_ID = "SimRelayServiceChannel"
 
@@ -27,18 +30,28 @@ class RelayForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Estio SIM Relay Active")
-            .setContentText("Listening for outgoing SMS jobs...")
+            .setContentText("Connected to Estio - Relaying SMS")
             .setSmallIcon(android.R.drawable.ic_dialog_email)
             .build()
 
-        startForeground(1, notification)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(1, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            startForeground(1, notification)
+        }
 
-        // Ensure token is loaded
+        isRunning = true
+
         val prefs = getSharedPreferences("estio_prefs", Context.MODE_PRIVATE)
         val token = prefs.getString("device_token", null)
+        val baseUrl = prefs.getString("base_url", "https://estio.co")
+        
         if (token != null) {
+            ApiClient.initBaseUrl(baseUrl!!)
             ApiClient.initToken(token)
             startPolling()
+        } else {
+            stopSelf()
         }
 
         return START_STICKY
@@ -48,7 +61,6 @@ class RelayForegroundService : Service() {
         serviceScope.launch {
             while (isActive) {
                 try {
-                    // Poll Jobs
                     val response = ApiClient.api.getJobs()
                     if (response.isSuccessful && response.body() != null) {
                         val jobs = response.body()!!
@@ -56,15 +68,10 @@ class RelayForegroundService : Service() {
                             sendSms(job.job_id, job.to, job.body)
                         }
                     }
-
-                    // Heartbeat
                     ApiClient.api.heartbeat()
-
                 } catch (e: Exception) {
-                    // Log or handle error implicitly (retry next cycle)
+                    // Ignored
                 }
-
-                // Poll every 5 seconds
                 delay(5000)
             }
         }
@@ -78,14 +85,9 @@ class RelayForegroundService : Service() {
                 } else {
                     SmsManager.getDefault()
                 }
-
-                // Actually dispatch SMS
                 smsManager.sendTextMessage(destination, null, message, null, null)
-
-                // Report success
                 ApiClient.api.reportJobResult(JobResultRequest(jobId, "sent"))
             } catch (e: Exception) {
-                // Report failure
                 ApiClient.api.reportJobResult(JobResultRequest(jobId, "failed", e.message))
             }
         }
@@ -93,6 +95,7 @@ class RelayForegroundService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        isRunning = false
         serviceScope.cancel()
     }
 
@@ -104,7 +107,7 @@ class RelayForegroundService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val serviceChannel = NotificationChannel(
                 CHANNEL_ID,
-                "SIM Relay Service Channel",
+                "SIM Relay Service",
                 NotificationManager.IMPORTANCE_LOW
             )
             val manager = getSystemService(NotificationManager::class.java)
