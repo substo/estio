@@ -359,7 +359,7 @@ export async function processWhatsAppOutboundOutboxJob(args: {
 
         void publishConversationRealtimeEvent({
             locationId: row.locationId,
-            conversationId: row.conversation?.ghlConversationId || null,
+            conversationId: row.conversation?.id || row.conversationId,
             type: "message.status",
             payload: failurePayload,
         });

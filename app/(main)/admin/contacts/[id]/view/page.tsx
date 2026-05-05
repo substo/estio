@@ -37,6 +37,7 @@ export default async function ContactViewPage({ params, searchParams }: { params
             },
             conversations: {
                 select: {
+                    id: true,
                     ghlConversationId: true,
                     unreadCount: true,
                     deletedAt: true,

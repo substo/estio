@@ -2614,7 +2614,7 @@ export async function searchContactsAction(query: string) {
       conversations: {
         orderBy: { lastMessageAt: 'desc' },
         take: 1,
-        select: { ghlConversationId: true, status: true }
+        select: { id: true, ghlConversationId: true, status: true }
       }
     }
   });
@@ -2703,7 +2703,7 @@ export async function searchContactsAction(query: string) {
         phone: contact.phone,
         email: contact.email,
         location: contact.location,
-        conversationId: latestConversation?.ghlConversationId || null,
+        conversationId: latestConversation?.id || null,
         conversationStatus: latestConversation?.status || null,
         matchReason,
         _score: score,
@@ -3234,7 +3234,7 @@ export async function checkSharedContactsSavedState(
         conversations: {
           take: 1,
           orderBy: { createdAt: 'desc' },
-          select: { ghlConversationId: true }
+          select: { id: true, ghlConversationId: true }
         }
       }
     });
@@ -3248,7 +3248,7 @@ export async function checkSharedContactsSavedState(
         finalStates[inputPhone] = { 
           saved: true, 
           contactId: matched.id,
-          conversationId: matched.conversations?.[0]?.ghlConversationId 
+          conversationId: matched.conversations?.[0]?.id
         };
       }
     });

@@ -250,7 +250,7 @@ export async function listLocationTasks(statusFilter?: 'open' | 'completed' | 'a
             email: true,
             phone: true,
             conversations: {
-              select: { ghlConversationId: true },
+              select: { id: true, ghlConversationId: true },
               take: 1,
               orderBy: { lastMessageAt: 'desc' as const },
             },

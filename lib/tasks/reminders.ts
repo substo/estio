@@ -44,7 +44,6 @@ type ReminderTaskRecord = Prisma.ContactTaskGetPayload<{
     conversation: {
       select: {
         id: true;
-        ghlConversationId: true;
       };
     };
     assignedUser: {
@@ -80,7 +79,6 @@ type ReminderJobRecord = Prisma.TaskReminderJobGetPayload<{
         conversation: {
           select: {
             id: true;
-            ghlConversationId: true;
           };
         };
         assignedUser: {
@@ -233,7 +231,7 @@ function buildReminderNotificationContent(job: ReminderJobRecord) {
   const contactName = String(job.task.contact?.name || job.task.contact?.email || job.task.contact?.phone || 'Contact').trim();
   const deepLinkUrl = buildTaskReminderDeepLink({
     taskId: job.taskId,
-    conversationId: job.task.conversation?.ghlConversationId || null,
+    conversationId: job.task.conversation?.id || null,
   });
 
   let title = `Task reminder: ${job.task.title}`;
@@ -635,7 +633,6 @@ async function processSingleTaskReminderJob(jobId: string): Promise<'success' | 
           conversation: {
             select: {
               id: true,
-              ghlConversationId: true,
             },
           },
           assignedUser: {
@@ -762,7 +759,6 @@ export async function rebuildTaskReminderJobs(taskId: string) {
       conversation: {
         select: {
           id: true,
-          ghlConversationId: true,
         },
       },
       assignedUser: {

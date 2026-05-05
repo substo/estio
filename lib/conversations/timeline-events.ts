@@ -297,10 +297,32 @@ async function resolveConversations(options: AssembleTimelineOptions): Promise<R
 
     const deal = await db.dealContext.findUnique({
         where: { id: options.dealId, locationId: options.locationId },
-        select: { conversationIds: true },
+        select: {
+            conversationIds: true,
+            conversationLinks: {
+                select: {
+                    conversationId: true,
+                    legacyConversationRef: true,
+                },
+            },
+        },
     });
 
-    if (!deal || !Array.isArray(deal.conversationIds) || deal.conversationIds.length === 0) {
+    if (!deal) {
+        return [];
+    }
+
+    const linkedConversationIds = Array.from(new Set(
+        (deal.conversationLinks || [])
+            .map((link) => String(link.conversationId || "").trim())
+            .filter(Boolean)
+    ));
+    const legacyConversationRefs = Array.from(new Set([
+        ...(deal.conversationIds || []),
+        ...(deal.conversationLinks || []).map((link) => link.legacyConversationRef),
+    ].map((ref) => String(ref || "").trim()).filter(Boolean)));
+
+    if (linkedConversationIds.length === 0 && legacyConversationRefs.length === 0) {
         return [];
     }
 
@@ -308,8 +330,11 @@ async function resolveConversations(options: AssembleTimelineOptions): Promise<R
         where: {
             locationId: options.locationId,
             OR: [
-                { id: { in: deal.conversationIds } },
-                { ghlConversationId: { in: deal.conversationIds } },
+                { id: { in: linkedConversationIds } },
+                { id: { in: legacyConversationRefs } },
+                { ghlConversationId: { in: legacyConversationRefs } },
+                { syncRecords: { some: { providerConversationId: { in: legacyConversationRefs } } } },
+                { syncRecords: { some: { providerThreadId: { in: legacyConversationRefs } } } },
             ],
         },
         select: {

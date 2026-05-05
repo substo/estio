@@ -320,6 +320,7 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
             companyRoles: { include: { company: true } },
             conversations: {
                 select: {
+                    id: true,
                     ghlConversationId: true,
                     unreadCount: true,
                     deletedAt: true,

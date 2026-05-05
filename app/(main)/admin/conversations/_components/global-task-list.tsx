@@ -180,8 +180,8 @@ export function GlobalTaskList({
       <div className="flex-1 overflow-y-auto">
         {tasks.map((task) => {
           const convId =
-            task.conversation?.ghlConversationId
-            || task.contact?.conversations?.[0]?.ghlConversationId
+            task.conversation?.id
+            || task.contact?.conversations?.[0]?.id
             || null;
           const isConversationSelected = convId === selectedConversationId;
           const isTaskSelected = task.id === selectedTaskId;

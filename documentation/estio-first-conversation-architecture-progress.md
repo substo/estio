@@ -114,9 +114,21 @@ Status: **Locally complete. Deployment-only checks deferred until final deploy.*
 
 ### Wave 5: Legacy Cleanup
 
-- Continue removing nonessential `ghlConversationId` references in logs, compatibility maps, and old fallback paths.
-- Keep old URLs readable, but ensure all newly generated URLs use `Conversation.id`.
-- Eventually replace remaining `DealContext.conversationIds` reads with `DealConversationLink` as the only source of truth.
+Status: **In progress locally. First cleanup pass implemented.**
+
+- Removed another set of generated-link dependencies on `ghlConversationId`:
+  - contact list/view conversation links now use `Conversation.id`
+  - contact form open-conversation action now uses `Conversation.id`
+  - global task sidebar conversation selection now uses `Conversation.id`
+  - task reminder deep links now use `Conversation.id`
+  - viewing reminder active-conversation IDs now use `Conversation.id`
+  - WhatsApp outbound failure realtime events now emit `Conversation.id`
+  - AI suggestion/decision payloads now emit `Conversation.id`
+- Moved deal timeline conversation resolution to `DealConversationLink` first, with `DealContext.conversationIds` retained as a compatibility fallback.
+- Remaining cleanup:
+  - Continue removing nonessential `ghlConversationId` references in logs, compatibility maps, and old fallback paths.
+  - Replace remaining `DealContext.conversationIds` reads in AI/deal enrichment with `DealConversationLink` as the primary source.
+  - Keep old URLs readable, but ensure all newly generated URLs use `Conversation.id`.
 - Once production has aged safely, consider dropping or renaming `ghlConversationId` to a clearer legacy alias field.
 
 ## Acceptance Criteria For Fully Finished

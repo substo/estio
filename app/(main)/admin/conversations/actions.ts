@@ -8248,7 +8248,7 @@ export async function getAggregateAIUsage() {
                     if (!record || !usage) return null;
                     return {
                         id: record.id,
-                        conversationId: record.ghlConversationId,
+                        conversationId: record.id,
                         contactName: (record as any).contact?.name || "Unknown",
                         contactEmail: (record as any).contact?.email || null,
                         totalTokens: usage.totalTokens,
@@ -14118,7 +14118,7 @@ export async function listSuggestedResponses(input: ListSuggestedResponsesInput)
         status: row.status,
         createdAt: row.createdAt.toISOString(),
         updatedAt: row.updatedAt.toISOString(),
-        conversationId: row.conversation?.ghlConversationId || row.conversation?.id || null,
+        conversationId: row.conversation?.id || null,
         contactId: row.contactId || row.contact?.id || null,
         contactName: row.contact?.name || null,
         contactEmail: row.contact?.email || null,
@@ -14699,7 +14699,7 @@ export async function listAiDecisions(input?: ListAiDecisionsInput) {
         policyVersion: row.policyVersion || null,
         createdAt: row.createdAt.toISOString(),
         updatedAt: row.updatedAt.toISOString(),
-        conversationId: row.conversation?.ghlConversationId || row.conversation?.id || row.conversationId || null,
+        conversationId: row.conversation?.id || row.conversationId || null,
         contactId: row.contact?.id || row.contactId || null,
         contactName: row.contact?.name || null,
         dealId: row.dealId || null,

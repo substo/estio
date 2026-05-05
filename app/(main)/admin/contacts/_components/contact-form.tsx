@@ -130,7 +130,8 @@ export type ContactData = {
     lastGoogleSync?: Date | null;
     payload?: any;
     conversations?: {
-        ghlConversationId: string;
+        id: string;
+        ghlConversationId?: string | null;
         unreadCount: number;
         deletedAt?: Date | null;
         archivedAt?: Date | null;
@@ -281,11 +282,11 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
     const [isEditing, setIsEditing] = useState(initialMode !== 'view');
     const isCreating = initialMode === 'create';
     const latestConversation = contact?.conversations?.[0];
-    const hasConversation = !!latestConversation?.ghlConversationId;
+    const hasConversation = !!latestConversation?.id;
     const canStartConversation = !!contact?.phone;
 
-    const getConversationHref = useCallback((ghlConversationId: string) => {
-        const params = new URLSearchParams({ id: ghlConversationId });
+    const getConversationHref = useCallback((conversationId: string) => {
+        const params = new URLSearchParams({ id: conversationId });
 
         if (latestConversation?.deletedAt) {
             params.set('view', 'trash');
@@ -350,8 +351,8 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
         if (!contact?.id) return;
         setConversationError(null);
 
-        if (hasConversation && latestConversation?.ghlConversationId) {
-            router.push(getConversationHref(latestConversation.ghlConversationId));
+        if (hasConversation && latestConversation?.id) {
+            router.push(getConversationHref(latestConversation.id));
             return;
         }
 
