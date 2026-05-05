@@ -5994,6 +5994,7 @@ export async function sendReply(
                     direction: "outbound",
                     status: "pending",
                     source: "sms_relay",
+                    createdAt: new Date(),
                 }
             });
 
