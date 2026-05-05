@@ -1,4 +1,5 @@
 import { Database, Layers, Zap, Sparkles, Wand2, PenTool, Smartphone } from "lucide-react";
+import Link from "next/link";
 
 export function FeaturesSection() {
     const features = [
@@ -31,6 +32,7 @@ export function FeaturesSection() {
             title: "SIM Relay",
             description: "Send and receive CRM SMS through your own Android phone and SIM card to reduce gateway fees.",
             icon: Smartphone,
+            href: "/sim-relay",
         },
         {
             title: "High Performance",
@@ -43,17 +45,37 @@ export function FeaturesSection() {
         <section className="py-24 bg-slate-50 dark:bg-slate-900/50 w-full">
             <div className="container px-4 md:px-6 mx-auto">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                    {features.map((feature, idx) => (
-                        <div key={idx} className="flex flex-col space-y-2 p-6 bg-background rounded-lg border shadow-sm hover:shadow-md transition-shadow">
-                            <div className="p-2 w-fit rounded-lg bg-primary/10 text-primary mb-2">
-                                <feature.icon className="h-6 w-6" />
+                    {features.map((feature, idx) => {
+                        const content = (
+                            <>
+                                <div className="p-2 w-fit rounded-lg bg-primary/10 text-primary mb-2">
+                                    <feature.icon className="h-6 w-6" />
+                                </div>
+                                <h3 className="text-xl font-bold">{feature.title}</h3>
+                                <p className="text-sm text-muted-foreground leading-relaxed">
+                                    {feature.description}
+                                </p>
+                            </>
+                        );
+
+                        if (feature.href) {
+                            return (
+                                <Link
+                                    key={idx}
+                                    href={feature.href}
+                                    className="flex flex-col space-y-2 p-6 bg-background rounded-lg border shadow-sm hover:shadow-md transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                >
+                                    {content}
+                                </Link>
+                            );
+                        }
+
+                        return (
+                            <div key={idx} className="flex flex-col space-y-2 p-6 bg-background rounded-lg border shadow-sm hover:shadow-md transition-shadow">
+                                {content}
                             </div>
-                            <h3 className="text-xl font-bold">{feature.title}</h3>
-                            <p className="text-sm text-muted-foreground leading-relaxed">
-                                {feature.description}
-                            </p>
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
             </div>
         </section>
