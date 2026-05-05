@@ -53,13 +53,18 @@ fi
 
 CURL_CMD="${CURL_CMD} '${APP_URL}/api/cron/gmail-sync'"
 
-# Execute and capture response
+# Execute and capture response. Do not let set -e skip logging on curl errors.
+set +e
 RESPONSE=$(eval "${CURL_CMD}" 2>&1)
+CURL_EXIT=$?
+set -e
 HTTP_CODE="${RESPONSE: -3}"
 BODY="${RESPONSE:0:-3}"
 
 # Log result
-if [ "${HTTP_CODE}" = "200" ]; then
+if [ "${CURL_EXIT}" -ne 0 ]; then
+    log "ERROR: curl exit ${CURL_EXIT} - ${RESPONSE}"
+elif [ "${HTTP_CODE}" = "200" ]; then
     log "SUCCESS: HTTP ${HTTP_CODE} - ${BODY}"
 else
     log "ERROR: HTTP ${HTTP_CODE} - ${BODY}"

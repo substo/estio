@@ -84,6 +84,29 @@ export async function enqueueGhlMessageMirror(args: {
     });
 }
 
+export async function enqueueGhlStatusSync(args: {
+    locationId: string;
+    conversationId: string;
+    contactId?: string | null;
+    payload?: Prisma.InputJsonValue | null;
+}) {
+    const location = await db.location.findUnique({
+        where: { id: args.locationId },
+        select: { ghlAccessToken: true, ghlLocationId: true },
+    });
+    if (!location?.ghlAccessToken) return null;
+
+    return enqueueAndDispatch({
+        locationId: args.locationId,
+        provider: "ghl",
+        providerAccountId: location.ghlLocationId || "default",
+        operation: "sync_status",
+        conversationId: args.conversationId,
+        contactId: args.contactId || null,
+        payload: args.payload || { source: "provider_outbox_status_sync" },
+    });
+}
+
 export async function enqueueGoogleContactSync(args: {
     locationId: string;
     contactId: string;

@@ -433,7 +433,28 @@ async function processGhlProviderOutbox(row: any) {
     if (row.operation === "mirror_conversation") return processGhlMirrorConversation(row);
     if (row.operation === "mirror_message") return processGhlMirrorMessage(row);
     if (row.operation === "sync_status") {
-        return { disabled: "GHL status sync is intentionally not enabled; Estio owns conversation status." };
+        if (!row.conversationId) {
+            return { disabled: "No conversation is associated with this provider status job." };
+        }
+
+        const providerAccountId = getProviderAccountId(row);
+        await upsertConversationSync({
+            conversationId: row.conversationId,
+            locationId: row.locationId,
+            provider: "ghl",
+            providerAccountId,
+            status: "synced",
+            metadata: {
+                source: (row.payload as any)?.source || "provider_outbox_status_sync",
+                estioStatus: (row.payload as any)?.estioStatus || null,
+                archivedAt: (row.payload as any)?.archivedAt || null,
+                deletedAt: (row.payload as any)?.deletedAt || null,
+                unreadCount: (row.payload as any)?.unreadCount ?? null,
+                remoteMutation: "not_supported_estio_owns_status",
+                syncedAt: new Date().toISOString(),
+            },
+        });
+        return { completed: true };
     }
     return { disabled: `Unsupported GHL provider outbox operation: ${row.operation}` };
 }

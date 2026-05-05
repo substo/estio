@@ -49,6 +49,11 @@ The critical conversation path is now Estio-first:
   - Gmail messages upsert Google `ConversationSync` and `MessageSync` aliases
   - Gmail-created conversations keep `ghlConversationId = null`
   - GHL email logging is queued through `ProviderOutbox` instead of called inline
+- Finished Wave 3 local status/audit work:
+  - GHL `sync_status` records Estio-owned read/archive/trash metadata in `ConversationSync`
+  - conversation read/archive/trash/restore actions enqueue status sync without blocking UX
+  - task actions already enqueue `ContactTaskOutbox` work in fire-and-forget background calls
+  - viewing actions enqueue `ViewingOutbox` rows and do not call provider APIs inline
 - Added provider outbox cron script and installed production cron entry.
 - Repaired production Prisma migration history for `20260423120000_legacy_crm_owner_identity`.
 - Marked previously db-pushed migrations as applied where production schema already matched.
@@ -74,16 +79,13 @@ Notes:
 
 ### Wave 3: Provider Sync Completion
 
-- Finish operational hardening for Gmail-native inbound:
-  - deploy/apply `GmailSyncOutbox` migration
+Status: **Locally complete. Deployment-only checks deferred until final deploy.**
+
+- Deferred final-deploy checks:
+  - apply/verify `GmailSyncOutbox` migration in the target environment
   - install or confirm Gmail cron dispatch in production
-  - smoke Gmail webhook queueing and provider-outbox GHL email mirror
-- Audit calendar/task frontend flows for blocking provider sync:
-  - keep `ViewingOutbox` and `ContactTaskOutbox` as the domain outboxes
-  - only change UI/server actions if a blocking sync path is found
-- Keep Outlook out of scope unless the product decision changes.
-- Finish GHL provider operations that need explicit API/product policy:
-  - `sync_status`
+  - smoke Gmail webhook queueing and provider-outbox GHL email mirror after cutover
+- Outlook remains out of scope unless the product decision changes.
 
 ### Wave 4: Observability And Operations
 

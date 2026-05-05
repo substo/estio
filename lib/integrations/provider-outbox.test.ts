@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { operationCapability } from "./provider-outbox";
 import { buildProviderOutboxIdempotencyKey } from "./provider-outbox-keys";
 
@@ -43,4 +44,12 @@ test("operationCapability routes provider outbox operations to capability checks
     assert.equal(operationCapability("sync_contact"), "canSyncContacts");
     assert.equal(operationCapability("sync_status"), "canUpdateStatus");
     assert.equal(operationCapability("unknown"), null);
+});
+
+test("GHL sync_status records Estio-owned status without remote mutation", () => {
+    const source = readFileSync(new URL("./provider-outbox.ts", import.meta.url), "utf8");
+
+    assert.equal(source.includes('row.operation === "sync_status"'), true);
+    assert.equal(source.includes("remoteMutation: \"not_supported_estio_owns_status\""), true);
+    assert.equal(source.includes("estioStatus"), true);
 });

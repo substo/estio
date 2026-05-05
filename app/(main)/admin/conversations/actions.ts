@@ -78,6 +78,7 @@ import {
 import {
     enqueueGhlContactSync,
     enqueueGhlConversationMirror,
+    enqueueGhlStatusSync,
     enqueueGoogleContactSync,
 } from "@/lib/integrations/provider-outbox-enqueue";
 import type { ViewingSyncProviderDecision } from "@/lib/viewings/sync-engine";
@@ -302,6 +303,26 @@ function parseJsonObjectFromModelOutput(rawText: string): any {
 function runDetachedTask(taskName: string, task: () => Promise<void>) {
     void task().catch((error) => {
         console.error(`[DetachedTask:${taskName}] Failed:`, error);
+    });
+}
+
+function queueGhlConversationStatusSync(args: {
+    locationId: string;
+    conversations: Array<{ id: string; contactId?: string | null }>;
+    payload: Record<string, any>;
+}) {
+    if (!args.conversations.length) return;
+
+    runDetachedTask(`conversation_status_sync:${args.payload.estioStatus || "status"}:${args.conversations.length}`, async () => {
+        await Promise.allSettled(args.conversations.map((conversation) => enqueueGhlStatusSync({
+            locationId: args.locationId,
+            conversationId: conversation.id,
+            contactId: conversation.contactId || null,
+            payload: {
+                ...args.payload,
+                source: args.payload.source || "conversation_status_action",
+            },
+        })));
     });
 }
 
@@ -8500,7 +8521,7 @@ export async function markConversationAsRead(conversationId: string) {
     try {
         const conversation = await db.conversation.findFirst({
             where: buildConversationReferenceWhere(location.id, conversationId),
-            select: { id: true },
+            select: { id: true, contactId: true },
         });
         if (!conversation) {
             return { success: false, error: "Conversation not found" };
@@ -8518,6 +8539,15 @@ export async function markConversationAsRead(conversationId: string) {
         });
 
         if (result.count > 0) {
+            queueGhlConversationStatusSync({
+                locationId: location.id,
+                conversations: [conversation],
+                payload: {
+                    source: "mark_conversation_as_read",
+                    estioStatus: "read",
+                    unreadCount: 0,
+                },
+            });
             invalidateConversationReadCaches(conversation.id);
             emitConversationRealtimeEvent({
                 locationId: location.id,
@@ -8543,15 +8573,23 @@ export async function deleteConversations(conversationIds: string[]) {
 
     try {
         const refs = conversationIds.map((id) => String(id || "").trim()).filter(Boolean);
-        // Soft Delete: Mark conversations as deleted instead of removing them
-        // This allows users to restore them from the trash within 30 days
-        const result = await db.conversation.updateMany({
+        const targetConversations = await db.conversation.findMany({
             where: {
                 OR: [
                     { id: { in: refs } },
                     { ghlConversationId: { in: refs } },
                     { syncRecords: { some: { providerConversationId: { in: refs } } } },
                 ],
+                locationId: location.id,
+                deletedAt: null,
+            },
+            select: { id: true, contactId: true },
+        });
+        // Soft Delete: Mark conversations as deleted instead of removing them
+        // This allows users to restore them from the trash within 30 days
+        const result = await db.conversation.updateMany({
+            where: {
+                id: { in: targetConversations.map((conversation) => conversation.id) },
                 locationId: location.id, // Security check to ensure ownership
                 deletedAt: null // Only delete non-deleted conversations (prevent double-delete)
             },
@@ -8563,6 +8601,15 @@ export async function deleteConversations(conversationIds: string[]) {
         });
 
         console.log(`[Soft Delete] Moved ${result.count} conversations to trash.`);
+        queueGhlConversationStatusSync({
+            locationId: location.id,
+            conversations: targetConversations,
+            payload: {
+                source: "delete_conversations",
+                estioStatus: "trash",
+                deletedAt: new Date().toISOString(),
+            },
+        });
         invalidateConversationReadCaches();
         conversationIds.forEach((conversationId) => {
             emitConversationRealtimeEvent({
@@ -8588,14 +8635,22 @@ export async function restoreConversations(conversationIds: string[]) {
 
     try {
         const refs = conversationIds.map((id) => String(id || "").trim()).filter(Boolean);
-        // Restore: Remove deletedAt timestamp to bring back from trash
-        const result = await db.conversation.updateMany({
+        const targetConversations = await db.conversation.findMany({
             where: {
                 OR: [
                     { id: { in: refs } },
                     { ghlConversationId: { in: refs } },
                     { syncRecords: { some: { providerConversationId: { in: refs } } } },
                 ],
+                locationId: location.id,
+                deletedAt: { not: null },
+            },
+            select: { id: true, contactId: true },
+        });
+        // Restore: Remove deletedAt timestamp to bring back from trash
+        const result = await db.conversation.updateMany({
+            where: {
+                id: { in: targetConversations.map((conversation) => conversation.id) },
                 locationId: location.id,
                 deletedAt: { not: null } // Only restore deleted conversations
             },
@@ -8606,6 +8661,15 @@ export async function restoreConversations(conversationIds: string[]) {
         });
 
         console.log(`[Restore] Restored ${result.count} conversations from trash.`);
+        queueGhlConversationStatusSync({
+            locationId: location.id,
+            conversations: targetConversations,
+            payload: {
+                source: "restore_conversations",
+                estioStatus: "open",
+                deletedAt: null,
+            },
+        });
         invalidateConversationReadCaches();
         conversationIds.forEach((conversationId) => {
             emitConversationRealtimeEvent({
@@ -8671,14 +8735,23 @@ export async function archiveConversations(conversationIds: string[]) {
 
     try {
         const refs = conversationIds.map((id) => String(id || "").trim()).filter(Boolean);
-        // Archive: Hide from inbox without deleting
-        const result = await db.conversation.updateMany({
+        const targetConversations = await db.conversation.findMany({
             where: {
                 OR: [
                     { id: { in: refs } },
                     { ghlConversationId: { in: refs } },
                     { syncRecords: { some: { providerConversationId: { in: refs } } } },
                 ],
+                locationId: location.id,
+                archivedAt: null,
+                deletedAt: null,
+            },
+            select: { id: true, contactId: true },
+        });
+        // Archive: Hide from inbox without deleting
+        const result = await db.conversation.updateMany({
+            where: {
+                id: { in: targetConversations.map((conversation) => conversation.id) },
                 locationId: location.id,
                 archivedAt: null, // Only archive non-archived conversations
                 deletedAt: null // Don't archive deleted conversations
@@ -8689,6 +8762,15 @@ export async function archiveConversations(conversationIds: string[]) {
         });
 
         console.log(`[Archive] Archived ${result.count} conversations.`);
+        queueGhlConversationStatusSync({
+            locationId: location.id,
+            conversations: targetConversations,
+            payload: {
+                source: "archive_conversations",
+                estioStatus: "archived",
+                archivedAt: new Date().toISOString(),
+            },
+        });
         invalidateConversationReadCaches();
         conversationIds.forEach((conversationId) => {
             emitConversationRealtimeEvent({
@@ -8714,14 +8796,22 @@ export async function unarchiveConversations(conversationIds: string[]) {
 
     try {
         const refs = conversationIds.map((id) => String(id || "").trim()).filter(Boolean);
-        // Unarchive: Return to inbox
-        const result = await db.conversation.updateMany({
+        const targetConversations = await db.conversation.findMany({
             where: {
                 OR: [
                     { id: { in: refs } },
                     { ghlConversationId: { in: refs } },
                     { syncRecords: { some: { providerConversationId: { in: refs } } } },
                 ],
+                locationId: location.id,
+                archivedAt: { not: null },
+            },
+            select: { id: true, contactId: true },
+        });
+        // Unarchive: Return to inbox
+        const result = await db.conversation.updateMany({
+            where: {
+                id: { in: targetConversations.map((conversation) => conversation.id) },
                 locationId: location.id,
                 archivedAt: { not: null } // Only unarchive archived conversations
             },
@@ -8731,6 +8821,15 @@ export async function unarchiveConversations(conversationIds: string[]) {
         });
 
         console.log(`[Unarchive] Unarchived ${result.count} conversations.`);
+        queueGhlConversationStatusSync({
+            locationId: location.id,
+            conversations: targetConversations,
+            payload: {
+                source: "unarchive_conversations",
+                estioStatus: "open",
+                archivedAt: null,
+            },
+        });
         invalidateConversationReadCaches();
         conversationIds.forEach((conversationId) => {
             emitConversationRealtimeEvent({
