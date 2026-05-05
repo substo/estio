@@ -125,9 +125,15 @@ Status: **In progress locally. First cleanup pass implemented.**
   - WhatsApp outbound failure realtime events now emit `Conversation.id`
   - AI suggestion/decision payloads now emit `Conversation.id`
 - Moved deal timeline conversation resolution to `DealConversationLink` first, with `DealContext.conversationIds` retained as a compatibility fallback.
+- Continued deal/AI cleanup:
+  - deal enrichment now resolves conversations from `DealConversationLink` first
+  - AI runtime deal-progress candidates now use linked conversation rows first
+  - multi-context deal drafting now reads Estio messages first and only falls back to GHL for real legacy remote IDs
+  - AI automation deal maps now prefer linked conversation rows before legacy refs
+  - deal workspace participant lookup now uses linked conversation rows first
 - Remaining cleanup:
   - Continue removing nonessential `ghlConversationId` references in logs, compatibility maps, and old fallback paths.
-  - Replace remaining `DealContext.conversationIds` reads in AI/deal enrichment with `DealConversationLink` as the primary source.
+  - Reduce remaining `DealContext.conversationIds` reads to write-side compatibility mirrors and old-ID fallbacks.
   - Keep old URLs readable, but ensure all newly generated URLs use `Conversation.id`.
 - Once production has aged safely, consider dropping or renaming `ghlConversationId` to a clearer legacy alias field.
 

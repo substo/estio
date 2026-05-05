@@ -4,6 +4,8 @@ import db from "@/lib/db";
 import { getLocationDefaultReplyLanguage } from "@/lib/ai/location-reply-language";
 import { getMessages, getConversation } from "@/lib/ghl/conversations";
 import { DEFAULT_MODEL } from "@/lib/ai/pricing";
+import { collectDealConversationReferences } from "@/lib/deals/conversation-links";
+import { isLikelyGhlConversationId } from "@/lib/conversations/identity";
 import {
     buildDealProtectiveCommunicationContract,
     resolveCommunicationLanguage
@@ -21,7 +23,15 @@ export async function generateMultiContextDraft(params: MultiContextParams) {
         // 1. Fetch Deal Context
         const dealContext = await db.dealContext.findUnique({
             where: { id: params.dealContextId },
-            include: { location: true } // Need location for API Key
+            include: {
+                location: true,
+                conversationLinks: {
+                    select: {
+                        conversationId: true,
+                        legacyConversationRef: true,
+                    },
+                },
+            }
         });
 
         if (!dealContext) {
@@ -36,20 +46,76 @@ export async function generateMultiContextDraft(params: MultiContextParams) {
         const genAI = new GoogleGenerativeAI(apiKey);
         const model = genAI.getGenerativeModel({ model: configAny?.googleAiModel || DEFAULT_MODEL });
 
-        // 3. Fetch All Linked Conversations
-        const conversationPromises = dealContext.conversationIds.map(async (cid: string) => {
-            const [details, messages] = await Promise.all([
-                getConversation(params.accessToken, cid),
-                getMessages(params.accessToken, cid)
-            ]);
-            return {
-                id: cid,
-                details: details.conversation,
-                messages: Array.isArray(messages?.messages?.messages) ? [...messages.messages.messages].reverse() : []
-            };
-        });
+        // 3. Fetch all linked conversations from Estio first. GHL is only a legacy fallback.
+        const refs = collectDealConversationReferences(dealContext);
+        const localConversations = refs.allRefs.length > 0
+            ? await db.conversation.findMany({
+                where: {
+                    locationId: dealContext.location.id,
+                    OR: [
+                        { id: { in: refs.linkedConversationIds } },
+                        { id: { in: refs.legacyConversationRefs } },
+                        { ghlConversationId: { in: refs.legacyConversationRefs } },
+                        { syncRecords: { some: { providerConversationId: { in: refs.legacyConversationRefs } } } },
+                        { syncRecords: { some: { providerThreadId: { in: refs.legacyConversationRefs } } } },
+                    ],
+                },
+                include: {
+                    contact: { select: { name: true, email: true } },
+                    messages: {
+                        orderBy: { createdAt: "desc" },
+                        take: 5,
+                        select: {
+                            body: true,
+                            direction: true,
+                            createdAt: true,
+                        },
+                    },
+                },
+            })
+            : [];
 
-        const conversations = await Promise.all(conversationPromises);
+        const byLocalRef = new Map<string, typeof localConversations[number]>();
+        for (const conversation of localConversations) {
+            byLocalRef.set(conversation.id, conversation);
+            if (conversation.ghlConversationId) byLocalRef.set(conversation.ghlConversationId, conversation);
+        }
+
+        const seenConversationRefs = new Set<string>();
+        const conversations = refs.allRefs.length > 0
+            ? (await Promise.all(refs.allRefs.map(async (ref: string) => {
+                const localConversation = byLocalRef.get(ref);
+                if (localConversation) {
+                    if (seenConversationRefs.has(localConversation.id)) return null;
+                    seenConversationRefs.add(localConversation.id);
+                    return {
+                        id: localConversation.id,
+                        details: {
+                            contactName: localConversation.contact?.name || localConversation.contact?.email || "Unknown",
+                        },
+                        messages: [...localConversation.messages]
+                            .reverse()
+                            .map((message) => ({
+                                body: message.body,
+                                direction: message.direction,
+                            })),
+                    };
+                }
+
+                if (!params.accessToken || !isLikelyGhlConversationId(ref)) return null;
+                if (seenConversationRefs.has(ref)) return null;
+                seenConversationRefs.add(ref);
+                const [details, messages] = await Promise.all([
+                    getConversation(params.accessToken, ref),
+                    getMessages(params.accessToken, ref)
+                ]);
+                return {
+                    id: ref,
+                    details: details.conversation,
+                    messages: Array.isArray(messages?.messages?.messages) ? [...messages.messages.messages].reverse() : []
+                };
+            }))).filter(Boolean)
+            : [];
 
         // 4. Fetch Linked Properties (Context)
         const propertyPromises = dealContext.propertyIds.map((id: string) => db.property.findUnique({ where: { id } }));

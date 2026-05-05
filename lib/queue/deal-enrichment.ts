@@ -8,6 +8,8 @@ import {
     mergeDealEnrichmentMetadata,
 } from "@/lib/deals/enrichment";
 import { buildQueueJobId, isDuplicateQueueJobError } from "@/lib/queue/job-id";
+import { isLikelyGhlConversationId } from "@/lib/conversations/identity";
+import { collectDealConversationReferences } from "@/lib/deals/conversation-links";
 
 const REDIS_CONNECTION = {
     host: process.env.REDIS_HOST || "127.0.0.1",
@@ -83,6 +85,12 @@ export async function processDealEnrichment(dealId: string): Promise<void> {
                     ghlAccessToken: true,
                 },
             },
+            conversationLinks: {
+                select: {
+                    conversationId: true,
+                    legacyConversationRef: true,
+                },
+            },
         },
     });
 
@@ -101,13 +109,20 @@ export async function processDealEnrichment(dealId: string): Promise<void> {
     });
 
     try {
+        const {
+            linkedConversationIds,
+            legacyConversationRefs,
+        } = collectDealConversationReferences(deal);
+
         const localConversations = await db.conversation.findMany({
             where: {
                 locationId: deal.locationId,
                 OR: [
-                    { id: { in: deal.conversationIds } },
-                    { ghlConversationId: { in: deal.conversationIds } },
-                    { syncRecords: { some: { providerConversationId: { in: deal.conversationIds } } } },
+                    { id: { in: linkedConversationIds } },
+                    { id: { in: legacyConversationRefs } },
+                    { ghlConversationId: { in: legacyConversationRefs } },
+                    { syncRecords: { some: { providerConversationId: { in: legacyConversationRefs } } } },
+                    { syncRecords: { some: { providerThreadId: { in: legacyConversationRefs } } } },
                 ],
             },
             select: {
@@ -135,16 +150,26 @@ export async function processDealEnrichment(dealId: string): Promise<void> {
 
         const accessToken = String(deal.location?.ghlAccessToken || "").trim();
         if (accessToken) {
-            const unresolvedConversationIds = deal.conversationIds.filter((conversationId) => {
+            const remoteConversationRefs = new Set<string>();
+            for (const ref of legacyConversationRefs) {
+                if (isLikelyGhlConversationId(ref)) remoteConversationRefs.add(ref);
+            }
+            for (const conversation of localConversations) {
+                if (isLikelyGhlConversationId(conversation.ghlConversationId)) {
+                    remoteConversationRefs.add(String(conversation.ghlConversationId));
+                }
+            }
+
+            const unresolvedConversationIds = Array.from(remoteConversationRefs).filter((conversationId) => {
                 const localConversation = localConversations.find((conversation) =>
                     conversation.id === conversationId || conversation.ghlConversationId === conversationId
                 );
                 return !localConversation?.contact?.ghlContactId;
-            }).filter((conversationId) => /^[A-Za-z0-9]{20,}$/.test(String(conversationId || "")));
+            });
 
             const conversationIdsToResolve = unresolvedConversationIds.length > 0
                 ? unresolvedConversationIds
-                : deal.conversationIds;
+                : Array.from(remoteConversationRefs);
 
             const remoteConversations = await Promise.allSettled(
                 conversationIdsToResolve.map((conversationId) => getConversation(accessToken, conversationId))

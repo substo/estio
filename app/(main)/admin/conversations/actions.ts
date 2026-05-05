@@ -39,7 +39,7 @@ import {
     isLikelyGhlConversationId,
     resolveConversationReference,
 } from "@/lib/conversations/identity";
-import { syncDealConversationLinks } from "@/lib/deals/conversation-links";
+import { collectDealConversationReferences, syncDealConversationLinks } from "@/lib/deals/conversation-links";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
 import {
@@ -6029,7 +6029,7 @@ export async function sendReply(
 
             // Enqueue the outbox job
             const { enqueueSmsRelayOutbox } = await import("@/lib/sms-relay/outbox");
-            await enqueueSmsRelayOutbox({
+            const outboxRow = await enqueueSmsRelayOutbox({
                 locationId: location.id,
                 conversationId: conversation.id,
                 messageId: localMessage.id,
@@ -6037,6 +6037,10 @@ export async function sendReply(
                 toNumber: contact.phone,
                 body: normalizedBody,
             });
+
+            // Immediately trigger BullMQ to process the outbox row (no waiting for cron)
+            const { enqueueSmsRelayOutboxQueueJob } = await import("@/lib/queue/sms-relay-outbox");
+            await enqueueSmsRelayOutboxQueueJob({ outboxId: outboxRow.id });
 
             invalidateConversationReadCaches(conversation.id);
             emitConversationRealtimeEvent({
@@ -14043,15 +14047,28 @@ export async function listSuggestedResponses(input: ListSuggestedResponsesInput)
             select: {
                 id: true,
                 conversationIds: true,
+                conversationLinks: {
+                    select: {
+                        conversationId: true,
+                        legacyConversationRef: true,
+                    },
+                },
             },
         });
 
         if (!deal) return [];
+        const refs = collectDealConversationReferences(deal);
 
         const dealConversations = await db.conversation.findMany({
             where: {
                 locationId: location.id,
-                ghlConversationId: { in: deal.conversationIds || [] },
+                OR: [
+                    { id: { in: refs.linkedConversationIds } },
+                    { id: { in: refs.legacyConversationRefs } },
+                    { ghlConversationId: { in: refs.legacyConversationRefs } },
+                    { syncRecords: { some: { providerConversationId: { in: refs.legacyConversationRefs } } } },
+                    { syncRecords: { some: { providerThreadId: { in: refs.legacyConversationRefs } } } },
+                ],
             },
             select: { id: true },
         });
@@ -14819,13 +14836,28 @@ export async function simulateSkillDecision(input: {
     if (!resolvedConversationId && resolvedDealId) {
         const deal = await db.dealContext.findFirst({
             where: { id: resolvedDealId, locationId: targetLocationId },
-            select: { conversationIds: true },
+            select: {
+                conversationIds: true,
+                conversationLinks: {
+                    select: {
+                        conversationId: true,
+                        legacyConversationRef: true,
+                    },
+                },
+            },
         });
-        if (deal?.conversationIds?.length) {
+        if (deal) {
+            const refs = collectDealConversationReferences(deal);
             const conversation = await db.conversation.findFirst({
                 where: {
                     locationId: targetLocationId,
-                    ghlConversationId: { in: deal.conversationIds },
+                    OR: [
+                        { id: { in: refs.linkedConversationIds } },
+                        { id: { in: refs.legacyConversationRefs } },
+                        { ghlConversationId: { in: refs.legacyConversationRefs } },
+                        { syncRecords: { some: { providerConversationId: { in: refs.legacyConversationRefs } } } },
+                        { syncRecords: { some: { providerThreadId: { in: refs.legacyConversationRefs } } } },
+                    ],
                 },
                 select: { id: true },
                 orderBy: { lastMessageAt: "desc" },

@@ -103,7 +103,7 @@ Primary file: [`app/(main)/admin/tasks/actions.ts`](/Users/martingreen/Projects/
 - Uses Clerk auth + location context + membership verification.
 - All operations are location-scoped.
 - Contacts can be resolved by local id or `ghlContactId`.
-- Conversations can be resolved by local id or `ghlConversationId`.
+- Conversations resolve by canonical `Conversation.id`; legacy provider aliases remain readable for old links.
 
 ### Available actions
 
@@ -233,7 +233,7 @@ Files:
 - URL-driven selection is supported with:
   - `view=tasks`
   - `task=<taskId>`
-  - optional `id=<ghlConversationId>`
+  - optional `id=<conversationId>`
 - selecting a task highlights the row and opens `TaskDetailDialog`
 - uses **optimistic UI**: tasks are removed from the list instantly on complete/delete before the server responds; rolled back on failure
 - the `estio-tasks-mutated` event listener is **debounced** (300ms) to batch rapid successive events and avoid redundant full refetches

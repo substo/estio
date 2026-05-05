@@ -235,7 +235,7 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
 - **Shallow URL Sync**: When `shallowUrlSync` is enabled, the client updates `id` / `task` / `view` / `mode` / `dealId` using `history.replaceState(...)` and restores them via `popstate`, avoiding unnecessary App Router churn during thread switches.
 - **Task Workspace Deep Links**:
   - `?view=tasks&task=<taskId>` highlights the task row and opens the shared task detail dialog
-  - `?view=tasks&task=<taskId>&id=<ghlConversationId>` also hydrates the related conversation in the background workspace
+  - `?view=tasks&task=<taskId>&id=<conversationId>` also hydrates the related conversation in the background workspace
   - full reminder and notification behavior is documented in [task-deadline-reminders.md](/Users/martingreen/Projects/IDX/documentation/task-deadline-reminders.md)
 - **Infinite Scroll**: The left list auto-loads more conversations near the bottom using a sentinel + `IntersectionObserver`, with a visible "Load more" fallback.
 - **Deep-Link Stability**: URL-selected conversations are preserved during list refreshes and view changes, preventing the center panel from dropping back to "Select a conversation" when the selected item is older than the first page.

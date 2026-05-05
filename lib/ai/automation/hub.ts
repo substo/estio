@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 import db from "@/lib/db";
+import { collectDealConversationReferences } from "@/lib/deals/conversation-links";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
 import { orchestrate } from "@/lib/ai/orchestrator";
@@ -106,15 +107,12 @@ async function buildDealConversationMap(locationId: string): Promise<Map<string,
 
   const map = new Map<string, string>();
   for (const deal of deals) {
-    for (const conversationGhlId of deal.conversationIds || []) {
-      if (!conversationGhlId) continue;
-      if (!map.has(conversationGhlId)) {
-        map.set(String(conversationGhlId), deal.id);
-      }
+    const refs = collectDealConversationReferences(deal);
+    for (const conversationId of refs.linkedConversationIds) {
+      if (!map.has(conversationId)) map.set(conversationId, deal.id);
     }
-    for (const link of (deal as any).conversationLinks || []) {
-      if (link.conversationId && !map.has(link.conversationId)) map.set(link.conversationId, deal.id);
-      if (link.legacyConversationRef && !map.has(link.legacyConversationRef)) map.set(link.legacyConversationRef, deal.id);
+    for (const legacyRef of refs.legacyConversationRefs) {
+      if (!map.has(legacyRef)) map.set(legacyRef, deal.id);
     }
   }
 

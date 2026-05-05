@@ -1,5 +1,6 @@
 import db from "@/lib/db";
 import { buildTimelineCursorFromEvent } from "./timeline-cursor";
+import { collectDealConversationReferences } from "@/lib/deals/conversation-links";
 
 type TimelineMode = "chat" | "deal";
 
@@ -312,15 +313,7 @@ async function resolveConversations(options: AssembleTimelineOptions): Promise<R
         return [];
     }
 
-    const linkedConversationIds = Array.from(new Set(
-        (deal.conversationLinks || [])
-            .map((link) => String(link.conversationId || "").trim())
-            .filter(Boolean)
-    ));
-    const legacyConversationRefs = Array.from(new Set([
-        ...(deal.conversationIds || []),
-        ...(deal.conversationLinks || []).map((link) => link.legacyConversationRef),
-    ].map((ref) => String(ref || "").trim()).filter(Boolean)));
+    const { linkedConversationIds, legacyConversationRefs } = collectDealConversationReferences(deal);
 
     if (linkedConversationIds.length === 0 && legacyConversationRefs.length === 0) {
         return [];

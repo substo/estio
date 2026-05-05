@@ -360,7 +360,7 @@ Behavior:
 
 - `view=tasks` keeps the left pane on `GlobalTaskList`
 - `task=<taskId>` highlights the task row and opens `TaskDetailDialog`
-- `id=<ghlConversationId>` loads the related conversation in the workspace background when present
+- `id=<conversationId>` loads the related conversation in the workspace background when present
 
 ## Deep Links and Notification Click Behavior
 
@@ -369,7 +369,7 @@ Primary helper: [`lib/tasks/reminder-links.ts`](/Users/martingreen/Projects/IDX/
 Generated URL format:
 
 ```text
-/admin/conversations?view=tasks&task=<taskId>&id=<ghlConversationId-if-present>
+/admin/conversations?view=tasks&task=<taskId>&id=<conversationId-if-present>
 ```
 
 ### Browser click handling

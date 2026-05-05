@@ -13,7 +13,7 @@ import {
     initDealEnrichmentWorker,
 } from "@/lib/queue/deal-enrichment";
 import { DealAgent } from "@/lib/ai/agent";
-import { resolveDealConversationRefs, syncDealConversationLinks } from "@/lib/deals/conversation-links";
+import { collectDealConversationReferences, resolveDealConversationRefs, syncDealConversationLinks } from "@/lib/deals/conversation-links";
 
 type DealTimelineWindow = {
     oldestCursor: string | null;
@@ -62,24 +62,27 @@ async function queryDealParticipants(dealId: string, locationId: string, ghlLoca
             metadata: true,
             propertyIds: true,
             conversationIds: true,
+            conversationLinks: {
+                select: {
+                    conversationId: true,
+                    legacyConversationRef: true,
+                },
+            },
         },
     });
 
     if (!deal) return null;
 
-    const linkedConversationIds = await (db as any).dealConversationLink.findMany({
-        where: { dealId: deal.id },
-        select: { conversationId: true },
-    });
-    const legacyRefs = deal.conversationIds || [];
+    const refs = collectDealConversationReferences(deal);
     const conversations = await db.conversation.findMany({
         where: {
             locationId,
             OR: [
-                { id: { in: linkedConversationIds.map((row: any) => row.conversationId) } },
-                { id: { in: legacyRefs } },
-                { ghlConversationId: { in: legacyRefs } },
-                { syncRecords: { some: { providerConversationId: { in: legacyRefs } } } },
+                { id: { in: refs.linkedConversationIds } },
+                { id: { in: refs.legacyConversationRefs } },
+                { ghlConversationId: { in: refs.legacyConversationRefs } },
+                { syncRecords: { some: { providerConversationId: { in: refs.legacyConversationRefs } } } },
+                { syncRecords: { some: { providerThreadId: { in: refs.legacyConversationRefs } } } },
             ],
         },
         include: {

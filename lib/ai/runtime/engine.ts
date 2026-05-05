@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 import db from "@/lib/db";
+import { collectDealConversationReferences } from "@/lib/deals/conversation-links";
 import { orchestrate } from "@/lib/ai/orchestrator";
 import { SkillLoader } from "@/lib/ai/skills/loader";
 import { getTimeZoneDayKey, isWithinQuietHours } from "@/lib/ai/automation/config";
@@ -504,7 +505,7 @@ async function collectDealProgressCandidates(args: {
       id: true,
       stage: true,
       conversationIds: true,
-      conversationLinks: { select: { conversationId: true } },
+      conversationLinks: { select: { conversationId: true, legacyConversationRef: true } },
       lastActivityAt: true,
     },
     orderBy: { lastActivityAt: "asc" },
@@ -512,19 +513,23 @@ async function collectDealProgressCandidates(args: {
   });
 
   if (!deals.length) return [];
-  const conversationRefs = Array.from(new Set(deals.flatMap((deal) => [
-    ...((deal as any).conversationLinks || []).map((link: any) => link.conversationId),
-    ...(deal.conversationIds || []),
-  ]).filter(Boolean)));
-  if (!conversationRefs.length) return [];
+  const dealRefs = deals.map((deal) => ({
+    deal,
+    refs: collectDealConversationReferences(deal),
+  }));
+  const linkedConversationIds = Array.from(new Set(dealRefs.flatMap((entry) => entry.refs.linkedConversationIds)));
+  const legacyConversationRefs = Array.from(new Set(dealRefs.flatMap((entry) => entry.refs.legacyConversationRefs)));
+  if (linkedConversationIds.length === 0 && legacyConversationRefs.length === 0) return [];
 
   const conversations = await db.conversation.findMany({
     where: {
       locationId: args.locationId,
       OR: [
-        { id: { in: conversationRefs } },
-        { ghlConversationId: { in: conversationRefs } },
-        { syncRecords: { some: { providerConversationId: { in: conversationRefs } } } },
+        { id: { in: linkedConversationIds } },
+        { id: { in: legacyConversationRefs } },
+        { ghlConversationId: { in: legacyConversationRefs } },
+        { syncRecords: { some: { providerConversationId: { in: legacyConversationRefs } } } },
+        { syncRecords: { some: { providerThreadId: { in: legacyConversationRefs } } } },
       ],
       deletedAt: null,
       archivedAt: null,
@@ -546,12 +551,8 @@ async function collectDealProgressCandidates(args: {
     if (conversation.ghlConversationId) byRef.set(conversation.ghlConversationId, conversation);
   }
   const candidates: RuntimeCandidate[] = [];
-  for (const deal of deals) {
-    const refs = [
-      ...(((deal as any).conversationLinks || []).map((link: any) => link.conversationId)),
-      ...(deal.conversationIds || []),
-    ];
-    const selected = refs
+  for (const { deal, refs } of dealRefs) {
+    const selected = refs.allRefs
       .map((id) => byRef.get(id))
       .find(Boolean);
     if (!selected?.id) continue;

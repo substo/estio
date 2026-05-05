@@ -142,7 +142,7 @@ model Contact {
 -   **Relation**: `Contact` has a `conversations` relation (see Prisma schema) used by the Admin Conversations hub.
 -   **Current Rule**: The database enforces **one conversation per contact per location** via a unique constraint on `Conversation(locationId, contactId)`.
 -   **UI Behavior (`/admin/contacts`)**:
-    -   If a conversation exists, the contact row shows an **Open conversation** action (message icon) that deep-links to `/admin/conversations?id=<ghlConversationId>`.
+    -   If a conversation exists, the contact row shows an **Open conversation** action (message icon) that deep-links to `/admin/conversations?id=<conversationId>`.
     -   If the existing conversation is in **Archived** or **Trash**, the link includes the matching `view` query param (`?view=archived` / `?view=trash`) so the correct list filter is opened.
     -   If no conversation exists, the row shows **Start conversation** (when a phone exists), which creates the conversation for that exact contact and then opens it.
     -   If the contact has no usable phone number and no existing conversation, the action is disabled (`No phone`), because the "Start conversation" action currently creates phone/WhatsApp threads only.
@@ -406,4 +406,3 @@ The system implements a robust merge process (`mergeContacts` action) to safely 
 -   **Ghost Record Cleanup**: After the local database transaction completes, a non-blocking background task (using Next.js `after()`) asynchronously deletes the source "ghost" contact from external systems (Google Contacts and GoHighLevel).
 -   **Target Synchronization**: The newly enriched target contact is immediately re-synced to GoHighLevel and Google to ensure external systems reflect the merged state.
 -   **Enhanced Audit Trail**: The target's `ContactHistory` receives a detailed `MERGED_FROM` log explicitly tracking transferred roles, newly filled fields, and the unlinked external IDs of the source contact.
-

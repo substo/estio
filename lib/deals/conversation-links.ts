@@ -9,6 +9,43 @@ export type ResolvedDealConversationRef = {
     legacyConversationRef: string | null;
 };
 
+export type DealConversationRefSource = {
+    conversationIds?: Array<string | null | undefined> | null;
+    conversationLinks?: Array<{
+        conversationId?: string | null;
+        legacyConversationRef?: string | null;
+    }> | null;
+};
+
+export function collectDealConversationReferences(deal: DealConversationRefSource): {
+    linkedConversationIds: string[];
+    legacyConversationRefs: string[];
+    fallbackConversationRefs: string[];
+    allRefs: string[];
+} {
+    const linkedConversationIds = Array.from(new Set(
+        (deal.conversationLinks || [])
+            .map((link) => String(link.conversationId || "").trim())
+            .filter(Boolean)
+    ));
+
+    const legacyConversationRefs = Array.from(new Set([
+        ...(deal.conversationIds || []),
+        ...(deal.conversationLinks || []).map((link) => link.legacyConversationRef),
+    ].map((ref) => String(ref || "").trim()).filter(Boolean)));
+
+    const fallbackConversationRefs = linkedConversationIds.length > 0
+        ? linkedConversationIds
+        : legacyConversationRefs;
+
+    return {
+        linkedConversationIds,
+        legacyConversationRefs,
+        fallbackConversationRefs,
+        allRefs: Array.from(new Set([...linkedConversationIds, ...legacyConversationRefs])),
+    };
+}
+
 export async function resolveDealConversationRefs(
     db: DbLike,
     locationId: string,
