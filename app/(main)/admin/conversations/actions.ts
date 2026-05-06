@@ -11575,6 +11575,7 @@ async function parseLeadFromTextInternal(
             "internalNotes is a CRM activity note that appears on the conversation timeline for the agent.",
             "ALWAYS populate internalNotes with property details, even when a direct message also exists.",
             "internalNotes must preserve ALL useful lead context: goal, source, next action, property reference numbers (e.g. DT1234), property type, area/city, price, covered area, plot size, bedrooms, and URLs.",
+            "When the input includes a 'Linked URLs:' section, preserve those URLs in internalNotes.",
             "If multiple properties are mentioned, keep ALL property references in internalNotes.",
             "Write internalNotes as a concise CRM-style note with the most important facts an agent should see.",
             "Example: 'Goal: To Buy. Interested in Ref. No. DT3144: 1-bed Town House in Paphos. Price: €150,000. Source: Bazaraki.'",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
@@ -48,6 +48,7 @@ import { ViewingsSuggestionDialog } from "./viewings-suggestion-dialog";
 import { AiModelSelect } from "@/components/ai/ai-model-select";
 import { useAiModelCatalog } from "@/components/ai/use-ai-model-catalog";
 import { GEMINI_FLASH_LATEST_ALIAS } from "@/lib/ai/models";
+import { buildLeadTextFromClipboardData, insertTextIntoTextareaValue } from "./paste-lead-rich-text";
 
 export type MessageSelectionActionTarget = {
     text: string;
@@ -399,6 +400,25 @@ export function MessageSelectionActions({
 
         return importLeadFromText(key, selectedLeadModel || undefined);
     }, [selectedLeadModel]);
+
+    const handleLeadTextareaPaste = useCallback((event: ClipboardEvent<HTMLTextAreaElement>) => {
+        const html = event.clipboardData.getData("text/html");
+        if (!html) return;
+
+        const enrichedText = buildLeadTextFromClipboardData(event.clipboardData);
+        if (!enrichedText.trim()) return;
+
+        event.preventDefault();
+        const nextText = insertTextIntoTextareaValue(
+            leadText,
+            enrichedText,
+            event.currentTarget.selectionStart,
+            event.currentTarget.selectionEnd
+        );
+        setLeadText(nextText);
+        setParsedLead(null);
+        leadParseCacheRef.current = { key: "", result: null, promise: null };
+    }, [leadText]);
 
     useEffect(() => {
         if (!pasteLeadOpen || parsedLead) return;
@@ -1163,6 +1183,7 @@ export function MessageSelectionActions({
                             <Textarea
                                 value={leadText}
                                 onChange={(e) => setLeadText(e.target.value)}
+                                onPaste={handleLeadTextareaPaste}
                                 className="min-h-[170px] font-mono text-sm"
                                 placeholder="Selected text will appear here..."
                                 disabled={isAnalyzingLead}

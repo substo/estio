@@ -19,6 +19,7 @@ import {
     type SelectionBatchInput,
     type SelectionBatchItem,
 } from "./message-selection-actions";
+import { buildPlainLeadTextFromHtml } from "./paste-lead-rich-text";
 
 type MessageAttachment = string | {
     id?: string;
@@ -526,12 +527,16 @@ export function MessageBubble({
     const getActionableText = useCallback(() => {
         if (selectionTarget?.text?.trim()) return selectionTarget.text.trim();
         if (isContactMessage) return getContactBodyReadablePart(message.body);
+        if (isEmail) {
+            const plainEmailText = buildPlainLeadTextFromHtml(message.body);
+            if (plainEmailText.trim()) return plainEmailText.trim();
+        }
         return String(message.body || "")
             .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
             .replace(/<[^>]*>/g, " ")
             .replace(/\s+/g, " ")
             .trim();
-    }, [selectionTarget, isContactMessage, message.body]);
+    }, [selectionTarget, isContactMessage, isEmail, message.body]);
 
     // Strategy B: Handle context menu action trigger.
     const handleContextMenuAction = useCallback((action: string) => {

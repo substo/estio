@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { enrichTextWithSelectedAnchorUrls } from "./paste-lead-rich-text";
 
 export type EmailFrameSelection = {
     text: string;
@@ -147,7 +148,7 @@ export function EmailFrame({ html, onSelectionChange }: EmailFrameProps) {
 
                 const iframeRect = iframe.getBoundingClientRect();
                 selectionCallback({
-                    text: rawText.trim(),
+                    text: enrichTextWithSelectedAnchorUrls(rawText.trim(), doc, range),
                     rect: {
                         top: iframeRect.top + rect.top,
                         left: iframeRect.left + rect.left,
