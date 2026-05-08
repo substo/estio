@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.provider.Telephony
+import android.util.Log
 import com.estio.simrelay.api.ApiClient
 import com.estio.simrelay.api.InboundSmsRequest
 import kotlinx.coroutines.CoroutineScope
@@ -15,28 +16,41 @@ class InboundSmsReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == Telephony.Sms.Intents.SMS_RECEIVED_ACTION) {
             val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
-            for (sms in messages) {
-                val sender = sms.displayOriginatingAddress
-                val body = sms.displayMessageBody
-                val timestamp = sms.timestampMillis
+            val groupedMessages = messages
+                .filter { it.displayOriginatingAddress != null && it.displayMessageBody != null }
+                .groupBy { sms -> sms.displayOriginatingAddress ?: "" }
 
-                if (sender != null && body != null) {
-                    CoroutineScope(Dispatchers.IO).launch {
-                        try {
-                            val prefs = context.getSharedPreferences("estio_prefs", Context.MODE_PRIVATE)
-                            val token = prefs.getString("device_token", null)
-                            val baseUrl = prefs.getString("base_url", "https://estio.co")
-                            if (token != null) {
-                                ApiClient.initBaseUrl(baseUrl!!)
-                                ApiClient.initToken(token)
-                                val req = InboundSmsRequest(from = sender, body = body, received_at_ms = timestamp)
-                                ApiClient.api.reportInboundSms(req)
-                            }
-                        } catch (e: Exception) {
+            for ((sender, parts) in groupedMessages) {
+                val body = parts.joinToString(separator = "") { it.displayMessageBody ?: "" }
+                val timestamp = parts.minOfOrNull { it.timestampMillis } ?: System.currentTimeMillis()
+                if (sender.isBlank() || body.isBlank()) continue
+
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        val prefs = context.getSharedPreferences("estio_prefs", Context.MODE_PRIVATE)
+                        val token = prefs.getString("device_token", null)
+                        val baseUrl = prefs.getString("base_url", "https://estio.co")
+                        if (token.isNullOrBlank()) {
+                            Log.w(TAG, "Skipping inbound SMS forward because device is not paired")
+                            return@launch
                         }
+
+                        ApiClient.initBaseUrl(baseUrl ?: "https://estio.co")
+                        ApiClient.initToken(token)
+                        val req = InboundSmsRequest(from = sender, body = body, received_at_ms = timestamp)
+                        val response = ApiClient.api.reportInboundSms(req)
+                        if (!response.isSuccessful) {
+                            Log.w(TAG, "Inbound SMS forward failed: HTTP ${response.code()}")
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Inbound SMS forward failed", e)
                     }
                 }
             }
         }
+    }
+
+    companion object {
+        private const val TAG = "InboundSmsReceiver"
     }
 }

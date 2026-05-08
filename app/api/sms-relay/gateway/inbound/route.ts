@@ -6,7 +6,6 @@
  *
  * Body: { from, to, body, received_at_ms, contact_name? }
  * Auth: Bearer <device_api_token>
- * Security: HMAC-SHA256 signature verified via X-SmsRelay-Signature header
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -14,7 +13,6 @@ import db from "@/lib/db";
 import {
     extractDeviceFromAuthHeader,
     hashDeviceToken,
-    verifyInboundSignature,
 } from "@/lib/sms-relay/auth";
 import { processSmsRelayInbound } from "@/lib/sms-relay/sync";
 
@@ -31,19 +29,12 @@ export async function POST(req: NextRequest) {
     const { deviceId, locationId } = devicePayload;
 
     try {
-        // 2. Read raw body for HMAC verification
+        // 2. Read raw body once so validation and parsing use the same payload.
         const rawBody = await req.text();
 
-        // 3. Verify HMAC signature (skip in dev if secret not set)
-        const sigHeader = req.headers.get("x-smsrelay-signature");
-        if (process.env.SMS_RELAY_WEBHOOK_SECRET) {
-            if (!verifyInboundSignature(rawBody, sigHeader)) {
-                console.warn(`[SmsRelay] Invalid inbound signature from device ${deviceId}`);
-                return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
-            }
-        }
-
-        // 4. Verify token hash against DB
+        // 3. Verify token hash against DB.
+        // Inbound SMS uses the same paired-device Bearer token model as jobs,
+        // heartbeat, and job-result endpoints.
         const rawToken = authHeader!.replace(/^Bearer\s+/i, "");
         const tokenHash = hashDeviceToken(rawToken);
         const device = await (db as any).smsRelayDevice.findFirst({
@@ -54,7 +45,7 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
-        // 5. Parse body
+        // 4. Parse body
         let parsed: any;
         try {
             parsed = JSON.parse(rawBody);
@@ -75,7 +66,7 @@ export async function POST(req: NextRequest) {
             ? new Date(Number(received_at_ms))
             : new Date();
 
-        // 6. Process the inbound SMS
+        // 5. Process the inbound SMS
         const result = await processSmsRelayInbound({
             locationId,
             deviceId,
@@ -86,7 +77,7 @@ export async function POST(req: NextRequest) {
             contactName: contact_name ? String(contact_name) : null,
         });
 
-        // 7. Update device heartbeat
+        // 6. Update device heartbeat
         await (db as any).smsRelayDevice.update({
             where: { id: deviceId },
             data: { lastSeenAt: new Date(), status: "online" },

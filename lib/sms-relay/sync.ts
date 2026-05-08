@@ -9,7 +9,7 @@
  *   1. Deduplication by (locationId, deviceId, fromNumber, body hash, approx timestamp)
  *   2. Contact upsert (search by phone → create Lead if not found)
  *   3. Conversation upsert (one per contact per location)
- *   4. Message insert (type=SMS_RELAY, direction=inbound)
+ *   4. Message insert (type=TYPE_SMS, direction=inbound, source=sms_relay)
  *   5. Update Conversation.lastMessage* + unreadCount
  *   6. Publish SSE realtime event
  */
@@ -17,6 +17,16 @@
 import crypto from "crypto";
 import db from "@/lib/db";
 import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-events";
+
+type SmsRelayInboundDeps = {
+    db?: any;
+    publishConversationRealtimeEvent?: typeof publishConversationRealtimeEvent;
+    lookupGhlContactId?: (args: {
+        ghlLocationId: string;
+        ghlAccessToken: string;
+        rawFrom: string;
+    }) => Promise<string | undefined>;
+};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -60,14 +70,17 @@ function buildInboundDedupeKey(payload: SmsRelayInboundPayload): string {
 // ---------------------------------------------------------------------------
 
 export async function processSmsRelayInbound(
-    payload: SmsRelayInboundPayload
+    payload: SmsRelayInboundPayload,
+    deps: SmsRelayInboundDeps = {}
 ): Promise<SmsRelayInboundResult> {
     const { locationId, deviceId, from, body, receivedAt, contactName } = payload;
+    const database = deps.db ?? db;
+    const publishRealtime = deps.publishConversationRealtimeEvent ?? publishConversationRealtimeEvent;
 
     console.log(`[SmsRelay Sync] Inbound from ${from} on device ${deviceId}`);
 
     // 1. Load location
-    const location = await db.location.findUnique({
+    const location = await database.location.findUnique({
         where: { id: locationId },
         select: { id: true, ghlLocationId: true, ghlAccessToken: true },
     });
@@ -77,7 +90,7 @@ export async function processSmsRelayInbound(
 
     // 2. Deduplication check — use clientMessageId as the dedupe key
     const dedupeKey = buildInboundDedupeKey(payload);
-    const existingMsg = await (db as any).message.findFirst({
+    const existingMsg = await database.message.findFirst({
         where: { clientMessageId: `smsrelay:${dedupeKey}` },
         select: { id: true },
     });
@@ -92,7 +105,7 @@ export async function processSmsRelayInbound(
     const searchSuffix = rawFrom.length > 7 ? rawFrom.slice(-7) : rawFrom;
 
     // 4. Find or create contact
-    let contact = await db.contact.findFirst({
+    let contact = await database.contact.findFirst({
         where: {
             locationId,
             phone: { contains: searchSuffix },
@@ -108,24 +121,32 @@ export async function processSmsRelayInbound(
         let ghlContactId: string | undefined;
         if (location.ghlLocationId && location.ghlAccessToken) {
             try {
-                const { ghlFetch } = await import("@/lib/ghl/client");
-                const searchRes = await ghlFetch<{ contacts: any[] }>(
-                    `/contacts/?locationId=${location.ghlLocationId}&query=${rawFrom}`,
-                    location.ghlAccessToken
-                );
-                const match = (searchRes.contacts || []).find((c: any) => {
-                    const cPhone = c.phone?.replace(/\D/g, "");
-                    return cPhone && (cPhone === rawFrom || cPhone.endsWith(rawFrom.slice(-9)));
-                });
-                if (match) {
-                    ghlContactId = match.id;
+                if (deps.lookupGhlContactId) {
+                    ghlContactId = await deps.lookupGhlContactId({
+                        ghlLocationId: location.ghlLocationId,
+                        ghlAccessToken: location.ghlAccessToken,
+                        rawFrom,
+                    });
+                } else {
+                    const { ghlFetch } = await import("@/lib/ghl/client");
+                    const searchRes = await ghlFetch<{ contacts: any[] }>(
+                        `/contacts/?locationId=${location.ghlLocationId}&query=${rawFrom}`,
+                        location.ghlAccessToken
+                    );
+                    const match = (searchRes.contacts || []).find((c: any) => {
+                        const cPhone = c.phone?.replace(/\D/g, "");
+                        return cPhone && (cPhone === rawFrom || cPhone.endsWith(rawFrom.slice(-9)));
+                    });
+                    if (match) {
+                        ghlContactId = match.id;
+                    }
                 }
             } catch (err) {
                 console.warn("[SmsRelay Sync] GHL contact lookup failed:", err);
             }
         }
 
-        contact = await db.contact.create({
+        contact = await database.contact.create({
             data: {
                 locationId,
                 name: displayName,
@@ -144,33 +165,33 @@ export async function processSmsRelayInbound(
     }
 
     // 5. Find or create conversation (one per contact per location)
-    let conversation = await db.conversation.findUnique({
+    let conversation = await database.conversation.findUnique({
         where: {
             locationId_contactId: { locationId, contactId: contact.id },
         },
     });
 
     if (!conversation) {
-        conversation = await db.conversation.create({
+        conversation = await database.conversation.create({
             data: {
                 locationId,
                 contactId: contact.id,
                 status: "open",
                 lastMessageBody: body,
                 lastMessageAt: receivedAt,
-                lastMessageType: "SMS_RELAY",
+                lastMessageType: "TYPE_SMS",
                 unreadCount: 1,
             },
         });
         console.log(`[SmsRelay Sync] Created new conversation ${conversation.id}`);
     } else {
         // Update conversation metadata
-        await db.conversation.update({
+        await database.conversation.update({
             where: { id: conversation.id },
             data: {
                 lastMessageBody: body,
                 lastMessageAt: receivedAt,
-                lastMessageType: "SMS_RELAY",
+                lastMessageType: "TYPE_SMS",
                 unreadCount: { increment: 1 },
                 status: "open",
             },
@@ -178,11 +199,11 @@ export async function processSmsRelayInbound(
     }
 
     // 6. Insert message
-    const message = await db.message.create({
+    const message = await database.message.create({
         data: {
             conversationId: conversation.id,
             clientMessageId: `smsrelay:${dedupeKey}`,
-            type: "SMS_RELAY",
+            type: "TYPE_SMS",
             direction: "inbound",
             status: "delivered",
             body,
@@ -197,7 +218,7 @@ export async function processSmsRelayInbound(
     );
 
     // 7. Publish realtime SSE event
-    void publishConversationRealtimeEvent({
+    void publishRealtime({
         locationId,
         conversationId: conversation.id,
         type: "message.inbound",
