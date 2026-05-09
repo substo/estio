@@ -5,6 +5,14 @@ import { createWhatsAppMediaReadUrl } from "@/lib/whatsapp/media-r2";
 import { updateConversationLastMessage } from "@/lib/conversations/update";
 import { enqueueGhlMessageMirror } from "@/lib/integrations/provider-outbox-enqueue";
 import { Prisma } from "@prisma/client";
+import {
+    WHATSAPP_CLOUD_PROVIDER,
+    extractCloudWamId,
+    sendWhatsAppCloudMedia,
+    sendWhatsAppCloudTemplate,
+    sendWhatsAppCloudText,
+} from "@/lib/whatsapp/client";
+import { sendTwilioMessage } from "@/lib/twilio/client";
 
 const MAX_OUTBOX_ATTEMPTS = Math.max(Number(process.env.WHATSAPP_OUTBOX_MAX_ATTEMPTS || 6), 1);
 const STALE_PROCESSING_LOCK_MS = Math.max(Number(process.env.WHATSAPP_OUTBOX_STALE_LOCK_MS || 5 * 60 * 1000), 60_000);
@@ -17,7 +25,7 @@ export type WhatsAppOutboundOutboxProcessResult = {
     error?: string;
 };
 
-function normalizePhoneForEvolution(phone: string | null | undefined): string {
+function normalizePhoneDigits(phone: string | null | undefined): string {
     return String(phone || "").replace(/\D/g, "");
 }
 
@@ -87,6 +95,10 @@ function toMediaType(kind: string): "image" | "audio" | "document" {
     return "image";
 }
 
+function extractTwilioMessageId(response: any): string | null {
+    return response?.sid ? String(response.sid) : null;
+}
+
 export async function processWhatsAppOutboundOutboxJob(args: {
     outboxId: string;
     workerId: string;
@@ -130,62 +142,130 @@ export async function processWhatsAppOutboundOutboxJob(args: {
     const attemptCount = Number(row.attemptCount || 0) + 1;
 
     try {
-        const instanceId = String(row.location?.evolutionInstanceId || "").trim();
-        if (!instanceId) {
-            throw new Error("WhatsApp Evolution instance is not connected.");
-        }
-
-        const normalizedPhone = normalizePhoneForEvolution(row.contact?.phone);
+        const transport = String(row.transport || "evolution").trim() || "evolution";
+        const normalizedPhone = normalizePhoneDigits(row.contact?.phone);
         if (!normalizedPhone || normalizedPhone.length < 7) {
             throw new Error("Contact phone is missing or invalid for WhatsApp send.");
         }
 
-        const timeoutMs = Math.max(Number(process.env.WHATSAPP_OUTBOUND_EVOLUTION_TIMEOUT_MS || 12000), 1000);
         let wamId: string | null = null;
+        let provider = "evolution";
+        let providerAccountId = "default";
 
-        if (row.kind === "text") {
+        if (transport === "cloud_api") {
+            provider = WHATSAPP_CLOUD_PROVIDER;
+            providerAccountId = String(row.location?.whatsappPhoneNumberId || "default");
+
+            if (row.kind === "text") {
+                const text = String(payload?.text || row.message?.body || "");
+                if (!text.trim()) {
+                    throw new Error("Cannot send empty WhatsApp message body.");
+                }
+                const response = await sendWhatsAppCloudText(row.locationId, normalizedPhone, text);
+                wamId = extractCloudWamId(response);
+            } else if (row.kind === "template") {
+                const templateName = String(payload?.templateName || "").trim();
+                const templateLanguage = String(payload?.templateLanguage || "").trim();
+                if (!templateName || !templateLanguage) {
+                    throw new Error("WhatsApp template payload is missing name or language.");
+                }
+                const response = await sendWhatsAppCloudTemplate(row.locationId, normalizedPhone, {
+                    name: templateName,
+                    language: templateLanguage,
+                    category: payload?.templateCategory || null,
+                    components: Array.isArray(payload?.templateComponents) ? payload.templateComponents : [],
+                });
+                wamId = extractCloudWamId(response);
+            } else {
+                const objectKey = String(payload?.objectKey || "").trim();
+                const contentType = String(payload?.contentType || "").trim();
+                const fileName = String(payload?.fileName || "upload");
+                const caption = String(payload?.caption || "").trim() || undefined;
+                if (!objectKey || !contentType) {
+                    throw new Error("Missing media payload details.");
+                }
+
+                const signedMediaUrl = await createWhatsAppMediaReadUrl({
+                    key: objectKey,
+                    contentType,
+                    fileName,
+                    expiresInSeconds: 300,
+                });
+
+                const response = await sendWhatsAppCloudMedia(row.locationId, normalizedPhone, {
+                    mediaType: toMediaType(String(row.kind || "")),
+                    mediaUrl: signedMediaUrl,
+                    caption,
+                    mimetype: contentType,
+                    fileName,
+                });
+                wamId = extractCloudWamId(response);
+            }
+        } else if (transport === "twilio") {
+            provider = "twilio";
+            providerAccountId = String(row.location?.twilioAccountSid || "default");
             const text = String(payload?.text || row.message?.body || "");
             if (!text.trim()) {
                 throw new Error("Cannot send empty WhatsApp message body.");
             }
-
-            const response = await evolutionClient.sendMessage(instanceId, normalizedPhone, text, {
-                delayMs: 0,
-                presence: "composing",
-                timeoutMs,
-            });
-            wamId = response?.key?.id ? String(response.key.id) : null;
+            const response = await sendTwilioMessage(row.locationId, `+${normalizedPhone}`, { body: text });
+            wamId = extractTwilioMessageId(response);
         } else {
-            const objectKey = String(payload?.objectKey || "").trim();
-            const contentType = String(payload?.contentType || "").trim();
-            const fileName = String(payload?.fileName || "upload");
-            const caption = String(payload?.caption || "").trim() || undefined;
-            if (!objectKey || !contentType) {
-                throw new Error("Missing media payload details.");
+            const instanceId = String(row.location?.evolutionInstanceId || "").trim();
+            if (!instanceId) {
+                throw new Error("WhatsApp Evolution instance is not connected.");
             }
+            provider = "evolution";
+            providerAccountId = instanceId || "default";
 
-            const signedMediaUrl = await createWhatsAppMediaReadUrl({
-                key: objectKey,
-                contentType,
-                fileName,
-                expiresInSeconds: 300,
-            });
+            const timeoutMs = Math.max(Number(process.env.WHATSAPP_OUTBOUND_EVOLUTION_TIMEOUT_MS || 12000), 1000);
 
-            const response = await evolutionClient.sendMedia(instanceId, normalizedPhone, {
-                mediaType: toMediaType(String(row.kind || "")),
-                mediaUrl: signedMediaUrl,
-                caption,
-                mimetype: contentType,
-                fileName,
-                delayMs: 0,
-                presence: "composing",
-                timeoutMs,
-            });
-            wamId = response?.key?.id ? String(response.key.id) : null;
+            if (row.kind === "text") {
+                const text = String(payload?.text || row.message?.body || "");
+                if (!text.trim()) {
+                    throw new Error("Cannot send empty WhatsApp message body.");
+                }
+
+                const response = await evolutionClient.sendMessage(instanceId, normalizedPhone, text, {
+                    delayMs: 0,
+                    presence: "composing",
+                    timeoutMs,
+                });
+                wamId = response?.key?.id ? String(response.key.id) : null;
+            } else if (row.kind === "template") {
+                throw new Error("WhatsApp templates require Cloud API transport.");
+            } else {
+                const objectKey = String(payload?.objectKey || "").trim();
+                const contentType = String(payload?.contentType || "").trim();
+                const fileName = String(payload?.fileName || "upload");
+                const caption = String(payload?.caption || "").trim() || undefined;
+                if (!objectKey || !contentType) {
+                    throw new Error("Missing media payload details.");
+                }
+
+                const signedMediaUrl = await createWhatsAppMediaReadUrl({
+                    key: objectKey,
+                    contentType,
+                    fileName,
+                    expiresInSeconds: 300,
+                });
+
+                const response = await evolutionClient.sendMedia(instanceId, normalizedPhone, {
+                    mediaType: toMediaType(String(row.kind || "")),
+                    mediaUrl: signedMediaUrl,
+                    caption,
+                    mimetype: contentType,
+                    fileName,
+                    delayMs: 0,
+                    presence: "composing",
+                    timeoutMs,
+                });
+                wamId = response?.key?.id ? String(response.key.id) : null;
+            }
         }
 
         if (!wamId) {
-            throw new Error("Evolution send did not return wamId confirmation.");
+            throw new Error(`${transport} send did not return provider message id confirmation.`);
         }
 
         const messageStatus = "sent";
@@ -233,21 +313,28 @@ export async function processWhatsAppOutboundOutboxJob(args: {
             where: {
                 messageId_provider_providerAccountId: {
                     messageId: row.messageId,
-                    provider: "evolution",
-                    providerAccountId: instanceId || "default",
+                    provider,
+                    providerAccountId,
                 },
             },
             create: {
                 messageId: row.messageId,
                 conversationId: row.conversationId,
                 locationId: row.locationId,
-                provider: "evolution",
-                providerAccountId: instanceId || "default",
+                provider,
+                providerAccountId,
                 providerMessageId: wamId,
                 providerThreadId: row.conversation?.ghlConversationId || row.conversationId,
                 status: "synced",
                 remoteUpdatedAt: new Date(),
                 lastSyncedAt: new Date(),
+                metadata: {
+                    transport,
+                    pricingIntent: payload?.pricingIntent || null,
+                    templateName: payload?.templateName || null,
+                    templateLanguage: payload?.templateLanguage || null,
+                    templateCategory: payload?.templateCategory || null,
+                },
             },
             update: {
                 providerMessageId: wamId,
@@ -256,9 +343,16 @@ export async function processWhatsAppOutboundOutboxJob(args: {
                 remoteUpdatedAt: new Date(),
                 lastSyncedAt: new Date(),
                 lastError: null,
+                metadata: {
+                    transport,
+                    pricingIntent: payload?.pricingIntent || null,
+                    templateName: payload?.templateName || null,
+                    templateLanguage: payload?.templateLanguage || null,
+                    templateCategory: payload?.templateCategory || null,
+                },
             },
         }).catch((err: any) => {
-            console.error("[WhatsApp Outbox] Failed to persist Evolution message sync:", err);
+            console.error(`[WhatsApp Outbox] Failed to persist ${provider} message sync:`, err);
         });
 
         await updateConversationLastMessage({

@@ -1,7 +1,19 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { getWhatsAppSettings, updateWhatsAppSettings, exchangeSystemUserToken, connectEvolutionDevice, logoutEvolutionInstance, checkInstanceHealth, repairEvolutionConnection } from "./actions";
+import {
+    getWhatsAppSettings,
+    updateWhatsAppSettings,
+    exchangeSystemUserToken,
+    connectEvolutionDevice,
+    logoutEvolutionInstance,
+    checkInstanceHealth,
+    repairEvolutionConnection,
+    getWhatsAppCloudHealth,
+    syncWhatsAppTemplates,
+    repairWhatsAppCloudConnection,
+    createWhatsAppTemplate,
+} from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -43,6 +55,16 @@ export default function WhatsAppSettingsPage() {
         // Evolution
         evolutionInstanceId: "",
         evolutionConnectionStatus: "close",
+        whatsappProviderMode: "cloud_primary",
+    });
+    const [cloudHealth, setCloudHealth] = useState<any>(null);
+    const [cloudBusy, setCloudBusy] = useState(false);
+    const [templates, setTemplates] = useState<any[]>([]);
+    const [newTemplate, setNewTemplate] = useState({
+        name: "",
+        language: "en_US",
+        category: "UTILITY",
+        body: "",
     });
     const [clearWhatsAppAccessToken, setClearWhatsAppAccessToken] = useState(false);
     const [clearTwilioAuthToken, setClearTwilioAuthToken] = useState(false);
@@ -99,7 +121,69 @@ export default function WhatsAppSettingsPage() {
             twilioWhatsAppFrom: data.twilioWhatsAppFrom || "",
             evolutionInstanceId: data.evolutionInstanceId || "",
             evolutionConnectionStatus: data.evolutionConnectionStatus || "close",
+            whatsappProviderMode: data.whatsappProviderMode || "cloud_primary",
         });
+    };
+
+    const refreshCloudOps = async (syncTemplates = false) => {
+        setCloudBusy(true);
+        try {
+            const health = await getWhatsAppCloudHealth(settings.locationId || null);
+            setCloudHealth(health);
+            if (syncTemplates) {
+                const result = await syncWhatsAppTemplates(settings.locationId || null);
+                if (result?.success) setTemplates(result.templates || []);
+            }
+        } catch (error: any) {
+            toast({ title: "Cloud API check failed", description: error?.message || "Unable to check Cloud API.", variant: "destructive" });
+        } finally {
+            setCloudBusy(false);
+        }
+    };
+
+    const handleRepairCloud = async () => {
+        setCloudBusy(true);
+        try {
+            const result = await repairWhatsAppCloudConnection(settings.locationId || null);
+            setCloudHealth(result.health);
+            if ((result.templateResult as any)?.templates) setTemplates((result.templateResult as any).templates);
+            toast({
+                title: result.success ? "Cloud API verified" : "Cloud API needs attention",
+                description: result.success ? "Webhook and template checks completed." : "Some checks are still failing.",
+                variant: result.success ? "default" : "destructive",
+            });
+        } catch (error: any) {
+            toast({ title: "Repair failed", description: error?.message || "Unable to repair Cloud API connection.", variant: "destructive" });
+        } finally {
+            setCloudBusy(false);
+        }
+    };
+
+    const handleCreateTemplate = async () => {
+        const name = newTemplate.name.trim();
+        const body = newTemplate.body.trim();
+        if (!name || !body) {
+            toast({ title: "Template incomplete", description: "Name and body are required.", variant: "destructive" });
+            return;
+        }
+        setCloudBusy(true);
+        try {
+            await createWhatsAppTemplate({
+                locationId: settings.locationId || null,
+                name,
+                language: newTemplate.language,
+                category: newTemplate.category,
+                components: [{ type: "BODY", text: body }],
+            });
+            const result = await syncWhatsAppTemplates(settings.locationId || null);
+            if (result?.success) setTemplates(result.templates || []);
+            setNewTemplate(prev => ({ ...prev, name: "", body: "" }));
+            toast({ title: "Template submitted", description: "Meta will review the template before it can be sent." });
+        } catch (error: any) {
+            toast({ title: "Template failed", description: error?.message || "Unable to submit template.", variant: "destructive" });
+        } finally {
+            setCloudBusy(false);
+        }
     };
 
     const performHealthCheck = async () => {
@@ -236,6 +320,11 @@ export default function WhatsAppSettingsPage() {
         });
     }, []);
 
+    useEffect(() => {
+        if (!settings.locationId || !settings.phoneNumberId) return;
+        refreshCloudOps(false);
+    }, [settings.locationId, settings.phoneNumberId]);
+
     // Polling for connection status when QR code is visible
     useEffect(() => {
         if (!qrCode) return;
@@ -263,6 +352,7 @@ export default function WhatsAppSettingsPage() {
         formData.append("accessToken", settings.accessToken);
         formData.append("clearWhatsAppAccessToken", clearWhatsAppAccessToken ? "on" : "off");
         formData.append("webhookSecret", settings.webhookSecret);
+        formData.append("whatsappProviderMode", settings.whatsappProviderMode);
 
         // Twilio
         formData.append("twilioAccountSid", settings.twilioAccountSid);
@@ -384,6 +474,122 @@ export default function WhatsAppSettingsPage() {
             )}
 
             <div className="grid gap-6">
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Cloud API Enterprise</CardTitle>
+                        <CardDescription>
+                            Primary outbound transport, Meta health checks, webhook subscription, and template operations.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-5">
+                        <div className="grid gap-3 sm:grid-cols-3">
+                            <div className="space-y-1">
+                                <Label htmlFor="whatsappProviderMode">Provider Mode</Label>
+                                <select
+                                    id="whatsappProviderMode"
+                                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                                    value={settings.whatsappProviderMode}
+                                    onChange={(e) => setSettings({ ...settings, whatsappProviderMode: e.target.value })}
+                                >
+                                    <option value="cloud_primary">Cloud API Primary</option>
+                                    <option value="evolution_linked">Evolution Linked Device</option>
+                                    <option value="twilio_fallback">Twilio Fallback</option>
+                                </select>
+                            </div>
+                            <div className="space-y-1">
+                                <Label>Phone Number ID</Label>
+                                <div className="rounded-md border px-3 py-2 text-sm">{settings.phoneNumberId || "Not configured"}</div>
+                            </div>
+                            <div className="space-y-1">
+                                <Label>WABA ID</Label>
+                                <div className="rounded-md border px-3 py-2 text-sm">{settings.businessAccountId || "Not configured"}</div>
+                            </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                            <Button type="button" variant="outline" onClick={() => refreshCloudOps(false)} disabled={cloudBusy}>
+                                {cloudBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                                Verify Cloud API
+                            </Button>
+                            <Button type="button" variant="outline" onClick={() => refreshCloudOps(true)} disabled={cloudBusy}>
+                                <RefreshCw className="mr-2 h-4 w-4" />
+                                Refresh Templates
+                            </Button>
+                            <Button type="button" onClick={handleRepairCloud} disabled={cloudBusy}>
+                                <Settings className="mr-2 h-4 w-4" />
+                                Repair Connection
+                            </Button>
+                        </div>
+
+                        {cloudHealth?.checks && (
+                            <div className="grid gap-2 sm:grid-cols-2">
+                                {Object.entries(cloudHealth.checks).map(([key, check]: any) => (
+                                    <div key={key} className="flex items-start gap-2 rounded-md border p-3 text-sm">
+                                        {check.ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 text-green-600" /> : <XCircle className="mt-0.5 h-4 w-4 text-red-600" />}
+                                        <div>
+                                            <div className="font-medium">{key.replace(/([A-Z])/g, " $1")}</div>
+                                            {check.message && <div className="text-muted-foreground">{check.message}</div>}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        <div className="grid gap-3 rounded-md border p-4">
+                            <div className="font-medium">Create Template</div>
+                            <div className="grid gap-3 sm:grid-cols-3">
+                                <Input
+                                    placeholder="template_name"
+                                    value={newTemplate.name}
+                                    onChange={(e) => setNewTemplate({ ...newTemplate, name: e.target.value })}
+                                />
+                                <Input
+                                    placeholder="en_US"
+                                    value={newTemplate.language}
+                                    onChange={(e) => setNewTemplate({ ...newTemplate, language: e.target.value })}
+                                />
+                                <select
+                                    className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                                    value={newTemplate.category}
+                                    onChange={(e) => setNewTemplate({ ...newTemplate, category: e.target.value })}
+                                >
+                                    <option value="UTILITY">Utility</option>
+                                    <option value="MARKETING">Marketing</option>
+                                    <option value="AUTHENTICATION">Authentication</option>
+                                </select>
+                            </div>
+                            <Input
+                                placeholder="Template body, use {{1}} for variables"
+                                value={newTemplate.body}
+                                onChange={(e) => setNewTemplate({ ...newTemplate, body: e.target.value })}
+                            />
+                            <div>
+                                <Button type="button" onClick={handleCreateTemplate} disabled={cloudBusy}>
+                                    Submit Template
+                                </Button>
+                            </div>
+                        </div>
+
+                        {templates.length > 0 && (
+                            <div className="rounded-md border">
+                                <div className="grid grid-cols-4 gap-2 border-b px-3 py-2 text-xs font-medium text-muted-foreground">
+                                    <span>Name</span>
+                                    <span>Language</span>
+                                    <span>Category</span>
+                                    <span>Status</span>
+                                </div>
+                                {templates.map((template) => (
+                                    <div key={`${template.name}:${template.language}`} className="grid grid-cols-4 gap-2 px-3 py-2 text-sm">
+                                        <span className="truncate">{template.name}</span>
+                                        <span>{template.language}</span>
+                                        <span>{template.category}</span>
+                                        <span>{template.status}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
 
                 {/* Linked Device (Shadow API) Card */}
                 <Card className="border-purple-200 dark:border-purple-900 bg-purple-50/20">

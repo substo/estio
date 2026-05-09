@@ -57,6 +57,7 @@ model Location {
   deepScrapeRunStages           DeepScrapeRunStage[]
   agentExecutions               AgentExecution[]
   whatsappOutboundOutboxJobs    WhatsAppOutboundOutbox[]
+  whatsappTemplates             WhatsAppTemplate[]
   conversationSyncRecords       ConversationSync[]
   messageSyncRecords            MessageSync[]
   providerOutboxJobs            ProviderOutbox[]
@@ -74,6 +75,7 @@ model Location {
   whatsappPhoneNumberId     String?
   whatsappAccessToken       String? @db.Text // Long-lived system user token
   whatsappWebhookSecret     String?
+  whatsappProviderMode      String  @default("cloud_primary") // cloud_primary | evolution_linked | twilio_fallback
 
   // Twilio Integration
   twilioAccountSid   String?
@@ -597,7 +599,9 @@ model Contact {
   conversationParticipations ConversationParticipant[]
 
   // WhatsApp Metadata
-  lid String? // WhatsApp Lightweight ID (for mapping)
+  lid                              String?   // WhatsApp Lightweight ID (for mapping)
+  whatsappLastInboundAt           DateTime?
+  whatsappCustomerServiceExpiresAt DateTime?
 
   // AI Lead Scoring (Phase 2)
   leadScore          Int?    @default(0)
@@ -2309,8 +2313,8 @@ model WhatsAppOutboundOutbox {
   contactId      String
   locationId     String
 
-  transport String // evolution
-  kind      String // text | image | audio | document
+  transport String // cloud_api | evolution | twilio
+  kind      String // text | image | audio | document | template
   payload   Json
 
   status       String    @default("pending") // pending | processing | completed | failed | dead
@@ -2331,6 +2335,34 @@ model WhatsAppOutboundOutbox {
   @@index([status, scheduledAt])
   @@index([locationId, status, scheduledAt])
   @@index([conversationId, status, scheduledAt])
+}
+
+model WhatsAppTemplate {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId String
+  wabaId     String
+
+  name              String
+  language          String
+  category          String
+  status            String   @default("draft")
+  components        Json
+  parameterFormat   String?
+  metaTemplateId    String?
+  rejectionReason   String?  @db.Text
+  variableLabels    Json?
+  examples          Json?
+  lastSyncedAt      DateTime?
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([locationId, name, language])
+  @@index([locationId, status])
+  @@index([locationId, category, status])
+  @@index([metaTemplateId])
 }
 
 model LegacyCrmLeadEmailProcessing {

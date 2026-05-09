@@ -3,8 +3,9 @@ import db from "@/lib/db";
 import { enqueueWhatsAppOutboundOutboxJob, initWhatsAppOutboundWorker } from "@/lib/queue/whatsapp-outbound";
 import { computeWhatsAppTypingDelay, type WhatsAppTypingDelayResult } from "@/lib/whatsapp/outbound-typing";
 import { processWhatsAppOutboundOutboxJob } from "@/lib/whatsapp/outbound-outbox";
+import type { WhatsAppOutboundKind, WhatsAppTransport, WhatsAppTemplateComponent } from "@/lib/whatsapp/client";
 
-type WhatsAppOutboundKind = "text" | "image" | "audio" | "document";
+export type { WhatsAppOutboundKind, WhatsAppTransport };
 
 type WhatsAppOutboundAttachmentInput = {
     objectKey: string;
@@ -24,6 +25,12 @@ type EnqueueWhatsAppOutboundInput = {
     clientMessageId?: string | null;
     attachment?: WhatsAppOutboundAttachmentInput;
     caption?: string | null;
+    transport?: WhatsAppTransport | null;
+    templateName?: string | null;
+    templateLanguage?: string | null;
+    templateCategory?: string | null;
+    templateComponents?: WhatsAppTemplateComponent[] | null;
+    pricingIntent?: string | null;
 };
 
 export type EnqueueWhatsAppOutboundResult = {
@@ -128,7 +135,10 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
     const contactId = String(input.contactId || "").trim();
     const source = String(input.source || "app_user").trim() || "app_user";
     const kind = input.kind;
-    const normalizedBody = normalizeBody(input.body);
+    const templateName = String(input.templateName || "").trim();
+    const templateLanguage = String(input.templateLanguage || "").trim();
+    const normalizedBody = normalizeBody(input.body) || (kind === "template" && templateName ? `[Template: ${templateName}]` : "");
+    const transport = input.transport || "cloud_api";
     const clientMessageId = normalizeClientMessageId(input.clientMessageId);
 
     if (!locationId || !conversationInternalId || !conversationGhlId || !contactId) {
@@ -139,7 +149,11 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
     }
 
     const attachment = input.attachment;
-    if (kind !== "text") {
+    if (kind === "template") {
+        if (!templateName || !templateLanguage) {
+            throw new Error("Template name and language are required for WhatsApp template sends.");
+        }
+    } else if (kind !== "text") {
         if (!attachment?.objectKey || !attachment?.contentType || !attachment?.fileName) {
             throw new Error("Missing media attachment metadata for WhatsApp outbound enqueue.");
         }
@@ -208,7 +222,7 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
                     conversationId: conversationInternalId,
                     contactId,
                     locationId,
-                    transport: "evolution",
+                    transport,
                     kind,
                     scheduledAt,
                     idempotencyKey,
@@ -225,6 +239,11 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
                         initialTypingDelayMs: typing.delayMs,
                         clientMessageId,
                         conversationGhlId,
+                        templateName: templateName || undefined,
+                        templateLanguage: templateLanguage || undefined,
+                        templateCategory: input.templateCategory ? String(input.templateCategory) : undefined,
+                        templateComponents: input.templateComponents || undefined,
+                        pricingIntent: input.pricingIntent ? String(input.pricingIntent) : undefined,
                     },
                 },
                 select: {

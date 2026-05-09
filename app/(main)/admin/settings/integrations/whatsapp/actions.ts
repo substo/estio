@@ -17,6 +17,13 @@ import {
     isSettingsParityCheckEnabled,
 } from "@/lib/settings/constants";
 import { getLegacyCryptr } from "@/lib/security/legacy-cryptr";
+import {
+    createWhatsAppCloudTemplate,
+    fetchWhatsAppCloudTemplates,
+    getWhatsAppCloudCredentials,
+    getWhatsAppCloudHealth as getCloudHealth,
+    subscribeWhatsAppAppToWaba,
+} from "@/lib/whatsapp/client";
 
 const MASKED_SECRET = "********";
 
@@ -56,6 +63,10 @@ export async function updateWhatsAppSettings(formData: FormData) {
     const phoneNumberId = formData.get("phoneNumberId") as string;
     const accessTokenInput = String(formData.get("accessToken") || "").trim();
     const webhookSecret = formData.get("webhookSecret") as string;
+    const providerModeInput = String(formData.get("whatsappProviderMode") || "cloud_primary").trim();
+    const whatsappProviderMode = ["cloud_primary", "evolution_linked", "twilio_fallback"].includes(providerModeInput)
+        ? providerModeInput
+        : "cloud_primary";
 
     // Twilio Credentials
     const twilioAccountSid = formData.get("twilioAccountSid") as string;
@@ -68,6 +79,7 @@ export async function updateWhatsAppSettings(formData: FormData) {
         whatsappBusinessAccountId: businessAccountId || null,
         whatsappPhoneNumberId: phoneNumberId || null,
         whatsappWebhookSecret: webhookSecret || null,
+        whatsappProviderMode,
         twilioAccountSid: twilioAccountSid || null,
         twilioWhatsAppFrom: twilioWhatsAppFrom || null,
         evolutionInstanceId: location.evolutionInstanceId || null,
@@ -130,6 +142,7 @@ export async function updateWhatsAppSettings(formData: FormData) {
             whatsappBusinessAccountId: payload.whatsappBusinessAccountId,
             whatsappPhoneNumberId: payload.whatsappPhoneNumberId,
             whatsappWebhookSecret: payload.whatsappWebhookSecret,
+            whatsappProviderMode: payload.whatsappProviderMode,
             twilioAccountSid: payload.twilioAccountSid,
             twilioWhatsAppFrom: payload.twilioWhatsAppFrom,
         };
@@ -229,6 +242,7 @@ export async function getWhatsAppSettings(locationId?: string | null) {
         accessToken: "",
         hasAccessToken: hasAccessToken || Boolean(location.whatsappAccessToken),
         webhookSecret: payload.whatsappWebhookSecret || location.whatsappWebhookSecret || "",
+        whatsappProviderMode: payload.whatsappProviderMode || (location as any).whatsappProviderMode || "cloud_primary",
 
         // Twilio
         twilioAccountSid: payload.twilioAccountSid || location.twilioAccountSid || "",
@@ -241,6 +255,175 @@ export async function getWhatsAppSettings(locationId?: string | null) {
         evolutionConnectionStatus: evolutionStatus,
 
         locationId: location.id,
+    };
+}
+
+function normalizeTemplateStatus(value: unknown) {
+    return String(value || "UNKNOWN").toLowerCase();
+}
+
+function normalizeTemplateCategory(value: unknown) {
+    return String(value || "UTILITY").toUpperCase();
+}
+
+async function upsertLocalWhatsAppTemplate(locationId: string, template: any, fallbackWabaId?: string) {
+    const credentials = fallbackWabaId
+        ? null
+        : await getWhatsAppCloudCredentials(locationId).catch(() => null);
+    const wabaId = String(fallbackWabaId || credentials?.businessAccountId || template?.wabaId || "").trim();
+    const name = String(template?.name || "").trim();
+    const language = String(template?.language || "").trim();
+    if (!wabaId || !name || !language) return null;
+
+    return (db as any).whatsAppTemplate.upsert({
+        where: {
+            locationId_name_language: {
+                locationId,
+                name,
+                language,
+            },
+        },
+        create: {
+            locationId,
+            wabaId,
+            name,
+            language,
+            category: normalizeTemplateCategory(template?.category),
+            status: normalizeTemplateStatus(template?.status),
+            components: template?.components || [],
+            parameterFormat: template?.parameter_format || template?.parameterFormat || null,
+            metaTemplateId: template?.id ? String(template.id) : null,
+            rejectionReason: template?.rejected_reason || template?.rejectionReason || null,
+            lastSyncedAt: new Date(),
+        },
+        update: {
+            wabaId,
+            category: normalizeTemplateCategory(template?.category),
+            status: normalizeTemplateStatus(template?.status),
+            components: template?.components || [],
+            parameterFormat: template?.parameter_format || template?.parameterFormat || null,
+            metaTemplateId: template?.id ? String(template.id) : null,
+            rejectionReason: template?.rejected_reason || template?.rejectionReason || null,
+            lastSyncedAt: new Date(),
+        },
+    });
+}
+
+export async function getWhatsAppCloudHealth(locationId?: string | null) {
+    const { location } = await resolveAdminContext(locationId || null);
+    return getCloudHealth(location.id);
+}
+
+export async function syncWhatsAppTemplates(locationId?: string | null) {
+    const { location } = await resolveAdminContext(locationId || null);
+    const credentials = await getWhatsAppCloudCredentials(location.id);
+    const templates = await fetchWhatsAppCloudTemplates(location.id);
+    const rows = [];
+
+    for (const template of templates) {
+        const row = await upsertLocalWhatsAppTemplate(location.id, template, credentials.businessAccountId);
+        if (row) rows.push(row);
+    }
+
+    revalidatePath("/admin/settings/integrations/whatsapp");
+    return {
+        success: true as const,
+        count: rows.length,
+        templates: rows.map((row: any) => ({
+            id: row.id,
+            name: row.name,
+            language: row.language,
+            category: row.category,
+            status: row.status,
+            rejectionReason: row.rejectionReason,
+            lastSyncedAt: row.lastSyncedAt?.toISOString?.() || null,
+        })),
+    };
+}
+
+export async function createWhatsAppTemplate(input: {
+    locationId?: string | null;
+    name: string;
+    language: string;
+    category: string;
+    components: any[];
+    parameterFormat?: string | null;
+    variableLabels?: any;
+    examples?: any;
+}) {
+    const { location } = await resolveAdminContext(input.locationId || null);
+    const name = String(input.name || "").trim().toLowerCase().replace(/[^a-z0-9_]/g, "_");
+    const language = String(input.language || "en_US").trim();
+    const category = normalizeTemplateCategory(input.category);
+    const components = Array.isArray(input.components) ? input.components : [];
+
+    if (!name) throw new Error("Template name is required.");
+    if (!components.length) throw new Error("At least one template component is required.");
+
+    const created = await createWhatsAppCloudTemplate(location.id, {
+        name,
+        language,
+        category,
+        components,
+        parameterFormat: input.parameterFormat || null,
+    });
+
+    const credentials = await getWhatsAppCloudCredentials(location.id);
+    const row = await (db as any).whatsAppTemplate.upsert({
+        where: {
+            locationId_name_language: {
+                locationId: location.id,
+                name,
+                language,
+            },
+        },
+        create: {
+            locationId: location.id,
+            wabaId: credentials.businessAccountId,
+            name,
+            language,
+            category,
+            status: normalizeTemplateStatus(created?.status || "submitted"),
+            components,
+            parameterFormat: input.parameterFormat || null,
+            metaTemplateId: created?.id ? String(created.id) : null,
+            variableLabels: input.variableLabels || null,
+            examples: input.examples || null,
+            lastSyncedAt: new Date(),
+        },
+        update: {
+            category,
+            status: normalizeTemplateStatus(created?.status || "submitted"),
+            components,
+            parameterFormat: input.parameterFormat || null,
+            metaTemplateId: created?.id ? String(created.id) : null,
+            variableLabels: input.variableLabels || null,
+            examples: input.examples || null,
+            lastSyncedAt: new Date(),
+        },
+    });
+
+    revalidatePath("/admin/settings/integrations/whatsapp");
+    return { success: true as const, template: row, meta: created };
+}
+
+export async function repairWhatsAppCloudConnection(locationId?: string | null) {
+    const { location } = await resolveAdminContext(locationId || null);
+    const subscribeResult = await subscribeWhatsAppAppToWaba(location.id).catch((error) => ({
+        error: error?.message || String(error),
+    }));
+    const templateResult = await syncWhatsAppTemplates(location.id).catch((error) => ({
+        success: false as const,
+        error: error?.message || String(error),
+    }));
+    const health = await getCloudHealth(location.id);
+
+    revalidatePath("/admin/settings/integrations/whatsapp");
+    return {
+        success: health.ok,
+        subscribeResult,
+        templateResult,
+        health,
     };
 }
 
@@ -749,6 +932,7 @@ export async function exchangeSystemUserToken(
             whatsappBusinessAccountId: wabaId,
             whatsappPhoneNumberId: phoneNumberId,
             whatsappWebhookSecret: location.whatsappWebhookSecret || crypto.randomUUID(),
+            whatsappProviderMode: "cloud_primary",
             twilioAccountSid: location.twilioAccountSid || null,
             twilioWhatsAppFrom: location.twilioWhatsAppFrom || null,
             evolutionInstanceId: location.evolutionInstanceId || null,
@@ -778,10 +962,18 @@ export async function exchangeSystemUserToken(
                     whatsappBusinessAccountId: wabaId,
                     whatsappPhoneNumberId: phoneNumberId,
                     whatsappAccessToken: encryptedAccessToken,
-                    whatsappWebhookSecret: webhookSecret
-                }
+                    whatsappWebhookSecret: webhookSecret,
+                    whatsappProviderMode: "cloud_primary",
+                } as any
             });
         }
+
+        await subscribeWhatsAppAppToWaba(resolvedLocationId).catch((error) => {
+            console.warn("[WhatsApp Cloud] Embedded signup webhook subscription failed:", error?.message || error);
+        });
+        await syncWhatsAppTemplates(resolvedLocationId).catch((error) => {
+            console.warn("[WhatsApp Cloud] Embedded signup template sync failed:", error?.message || error);
+        });
 
         if (isSettingsDualWriteLegacyEnabled() && isSettingsParityCheckEnabled()) {
             await settingsService.checkDocumentParity({

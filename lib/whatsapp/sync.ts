@@ -10,9 +10,17 @@ import {
     normalizeLidRaw,
 } from "@/lib/whatsapp/identity";
 import { extractGroupParticipantIdentity } from "@/lib/whatsapp/group-participants";
+import { computeWhatsAppCustomerServiceExpiresAt } from "@/lib/whatsapp/customer-window";
+import { WHATSAPP_CLOUD_PROVIDER } from "@/lib/whatsapp/client";
 
 const LID_RETRY_INTERVAL_MS = Number(process.env.WHATSAPP_LID_RETRY_INTERVAL_MS || 30000);
 const LID_RETRY_MAX_ATTEMPTS = Number(process.env.WHATSAPP_LID_MAX_ATTEMPTS || 240);
+
+function getMessageSyncProvider(source: NormalizedMessage["source"]) {
+    if (source === "whatsapp_native") return WHATSAPP_CLOUD_PROVIDER;
+    if (source === "whatsapp_twilio") return "twilio";
+    return "evolution";
+}
 
 export interface NormalizedMessage {
     locationId: string;
@@ -527,7 +535,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     // Fetch Location for Access Token
     const locationDef = await db.location.findUnique({
         where: { id: locationId },
-        select: { id: true, ghlLocationId: true, ghlAccessToken: true, evolutionInstanceId: true }
+        select: { id: true, ghlLocationId: true, ghlAccessToken: true, evolutionInstanceId: true, whatsappPhoneNumberId: true, twilioAccountSid: true }
     });
     if (!locationDef) {
         console.error(`[WhatsApp Sync] Location ${locationId} not found`);
@@ -969,6 +977,19 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
             .catch(err => console.error("[GoogleAutoSync] WhatsApp inbound sync failed:", err));
     }
 
+    if (direction === "inbound" && !isGroup && contact?.id) {
+        const inboundAt = timestamp || new Date();
+        await db.contact.update({
+            where: { id: contact.id },
+            data: {
+                whatsappLastInboundAt: inboundAt,
+                whatsappCustomerServiceExpiresAt: computeWhatsAppCustomerServiceExpiresAt(inboundAt),
+            } as any,
+        }).catch((err) => {
+            console.warn("[WhatsApp Sync] Failed to update customer service window:", err?.message || err);
+        });
+    }
+
     // 4. Find or Create Conversation — anchored by contactId + locationId
     let conversation = await db.conversation.findFirst({
         where: { contactId: contact.id, locationId }
@@ -1000,32 +1021,40 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     }
 
     const evolutionThreadId = msg.remoteJid || msg.chatId || msg.from || conversation.ghlConversationId || conversation.id;
+    const syncProvider = getMessageSyncProvider(source);
+    const syncProviderAccountId =
+        syncProvider === WHATSAPP_CLOUD_PROVIDER
+            ? (locationDef?.whatsappPhoneNumberId || "default")
+            : syncProvider === "twilio"
+                ? (locationDef?.twilioAccountSid || "default")
+                : (locationDef?.evolutionInstanceId || "default");
     await (db as any).conversationSync.upsert({
         where: {
             conversationId_provider_providerAccountId: {
                 conversationId: conversation.id,
-                provider: "evolution",
-                providerAccountId: locationDef?.evolutionInstanceId || "default",
+                provider: syncProvider,
+                providerAccountId: syncProviderAccountId,
             },
         },
         create: {
             conversationId: conversation.id,
             locationId,
-            provider: "evolution",
-            providerAccountId: locationDef?.evolutionInstanceId || "default",
+            provider: syncProvider,
+            providerAccountId: syncProviderAccountId,
             providerConversationId: evolutionThreadId,
             status: "synced",
             lastSyncedAt: new Date(),
-            metadata: { source: "whatsapp_sync" },
+            metadata: { source },
         },
         update: {
             providerConversationId: evolutionThreadId,
             status: "synced",
             lastSyncedAt: new Date(),
             lastError: null,
+            metadata: { source },
         },
     }).catch((error: any) => {
-        console.warn("[WhatsApp Sync] Failed to persist Evolution conversation sync:", error?.message || error);
+        console.warn(`[WhatsApp Sync] Failed to persist ${syncProvider} conversation sync:`, error?.message || error);
     });
 
     if (direction === "outbound") {
@@ -1095,21 +1124,22 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         where: {
             messageId_provider_providerAccountId: {
                 messageId: newMessage.id,
-                provider: "evolution",
-                providerAccountId: locationDef?.evolutionInstanceId || "default",
+                provider: syncProvider,
+                providerAccountId: syncProviderAccountId,
             },
         },
         create: {
             messageId: newMessage.id,
             conversationId: conversation.id,
             locationId,
-            provider: "evolution",
-            providerAccountId: locationDef?.evolutionInstanceId || "default",
+            provider: syncProvider,
+            providerAccountId: syncProviderAccountId,
             providerMessageId: wamId,
             providerThreadId: evolutionThreadId,
             status: "synced",
             remoteUpdatedAt: timestamp,
             lastSyncedAt: new Date(),
+            metadata: { source },
         },
         update: {
             providerMessageId: wamId,
@@ -1118,9 +1148,10 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
             remoteUpdatedAt: timestamp,
             lastSyncedAt: new Date(),
             lastError: null,
+            metadata: { source },
         },
     }).catch((error: any) => {
-        console.warn("[WhatsApp Sync] Failed to persist Evolution message sync:", error?.message || error);
+        console.warn(`[WhatsApp Sync] Failed to persist ${syncProvider} message sync:`, error?.message || error);
     });
 
     // Unified Update Logic

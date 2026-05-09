@@ -41,7 +41,7 @@ import {
 } from "@/lib/conversations/identity";
 import { collectDealConversationReferences, syncDealConversationLinks } from "@/lib/deals/conversation-links";
 import { settingsService } from "@/lib/settings/service";
-import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
+import { SETTINGS_DOMAINS, SETTINGS_SECRET_KEYS } from "@/lib/settings/constants";
 import {
     AiAutomationConfigSchema,
     cadenceToDays,
@@ -63,6 +63,8 @@ import {
 } from "@/lib/whatsapp/media-r2";
 import { ingestEvolutionMediaAttachment, parseEvolutionMessageContent } from "@/lib/whatsapp/evolution-media";
 import { enqueueWhatsAppOutbound } from "@/lib/whatsapp/outbound-enqueue";
+import { hasOpenWhatsAppCustomerServiceWindow } from "@/lib/whatsapp/customer-window";
+import type { WhatsAppTransport, WhatsAppTemplateComponent } from "@/lib/whatsapp/client";
 import {
     canOpenDirectChatForParticipant,
     formatGroupParticipantIdentitySummary,
@@ -5576,15 +5578,92 @@ function getWhatsAppMediaMaxSize(kind: WhatsAppMediaKind) {
     return MAX_WHATSAPP_DOCUMENT_BYTES;
 }
 
+async function resolveWhatsAppOutboundTransport(locationId: string, explicit?: WhatsAppTransport | null): Promise<{
+    transport: WhatsAppTransport;
+    cloudConfigured: boolean;
+    evolutionConfigured: boolean;
+}> {
+    const [integrationDoc, hasCloudSecret] = await Promise.all([
+        settingsService.getDocument<any>({
+            scopeType: "LOCATION",
+            scopeId: locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+        }).catch(() => null),
+        settingsService.hasSecret({
+            scopeType: "LOCATION",
+            scopeId: locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+            secretKey: SETTINGS_SECRET_KEYS.WHATSAPP_ACCESS_TOKEN,
+        }).catch(() => false),
+    ]);
+    const integrationPayload = integrationDoc?.payload || {};
+
+    if (explicit) {
+        const row = await db.location.findUnique({
+            where: { id: locationId },
+            select: { whatsappPhoneNumberId: true, whatsappAccessToken: true, evolutionInstanceId: true },
+        });
+        return {
+            transport: explicit,
+            cloudConfigured: Boolean((integrationPayload.whatsappPhoneNumberId || row?.whatsappPhoneNumberId) && (hasCloudSecret || row?.whatsappAccessToken)),
+            evolutionConfigured: Boolean(row?.evolutionInstanceId),
+        };
+    }
+
+    const row = await db.location.findUnique({
+        where: { id: locationId },
+        select: {
+            whatsappPhoneNumberId: true,
+            whatsappAccessToken: true,
+            whatsappProviderMode: true,
+            evolutionInstanceId: true,
+            twilioAccountSid: true,
+            twilioWhatsAppFrom: true,
+        } as any,
+    });
+
+    const mode = String(integrationPayload.whatsappProviderMode || (row as any)?.whatsappProviderMode || "cloud_primary");
+    const cloudConfigured = Boolean((integrationPayload.whatsappPhoneNumberId || row?.whatsappPhoneNumberId) && (hasCloudSecret || row?.whatsappAccessToken));
+    const evolutionConfigured = Boolean(integrationPayload.evolutionInstanceId || row?.evolutionInstanceId);
+    const twilioConfigured = Boolean((integrationPayload.twilioAccountSid || row?.twilioAccountSid) && (integrationPayload.twilioWhatsAppFrom || row?.twilioWhatsAppFrom));
+
+    if (mode === "evolution_linked" && evolutionConfigured) {
+        return { transport: "evolution", cloudConfigured, evolutionConfigured };
+    }
+    if (mode === "twilio_fallback" && twilioConfigured) {
+        return { transport: "twilio", cloudConfigured, evolutionConfigured };
+    }
+    if (cloudConfigured) {
+        return { transport: "cloud_api", cloudConfigured, evolutionConfigured };
+    }
+    if (evolutionConfigured) {
+        return { transport: "evolution", cloudConfigured, evolutionConfigured };
+    }
+    if (twilioConfigured) {
+        return { transport: "twilio", cloudConfigured, evolutionConfigured };
+    }
+    return { transport: "cloud_api", cloudConfigured, evolutionConfigured };
+}
+
+function requireTemplateWindowForCloud(contact: { whatsappCustomerServiceExpiresAt?: Date | null }, transport: WhatsAppTransport) {
+    if (transport !== "cloud_api") return null;
+    if (hasOpenWhatsAppCustomerServiceWindow(contact.whatsappCustomerServiceExpiresAt || null)) return null;
+    return {
+        success: false as const,
+        error: "This WhatsApp conversation is outside the 24-hour customer service window. Send an approved template instead.",
+        errorCode: "WHATSAPP_TEMPLATE_REQUIRED" as const,
+    };
+}
+
 export async function createWhatsAppMediaUploadUrl(
     conversationId: string,
     contactId: string,
     file: { fileName: string; contentType: string; size: number }
 ) {
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
-
-    if (!location?.evolutionInstanceId) {
-        return { success: false, error: "WhatsApp (Evolution) is not connected." };
+    const transportState = await resolveWhatsAppOutboundTransport(location.id);
+    if (!transportState.cloudConfigured && !transportState.evolutionConfigured) {
+        return { success: false, error: "WhatsApp is not connected." };
     }
 
     const contentType = String(file.contentType || "").toLowerCase();
@@ -5690,8 +5769,12 @@ export async function sendWhatsAppMediaReply(
 
     try {
         if (!location?.evolutionInstanceId) {
-            return { success: false, error: "WhatsApp (Evolution) is not connected." };
+            const transportState = await resolveWhatsAppOutboundTransport(location.id);
+            if (!transportState.cloudConfigured && !transportState.evolutionConfigured) {
+                return { success: false, error: "WhatsApp is not connected." };
+            }
         }
+        const transportState = await resolveWhatsAppOutboundTransport(location.id);
 
         const contentType = String(upload?.contentType || "").toLowerCase();
         const size = Number(upload?.size || 0);
@@ -5715,7 +5798,7 @@ export async function sendWhatsAppMediaReply(
             return { success: false, error: "Conversation not found." };
         }
 
-        if (!objectKey.startsWith("whatsapp/evolution/v1/")) {
+        if (!objectKey.startsWith("whatsapp/evolution/v1/") && !objectKey.startsWith("whatsapp/cloud/v1/")) {
             return { success: false, error: "Invalid upload reference." };
         }
         if (!objectKey.includes(`/location/${location.id}/`) || !objectKey.includes(`/conversation/${conversation.id}/`)) {
@@ -5745,7 +5828,7 @@ export async function sendWhatsAppMediaReply(
                 ],
                 locationId: location.id
             },
-            select: { id: true, phone: true, ghlContactId: true, name: true }
+            select: { id: true, phone: true, ghlContactId: true, name: true, whatsappCustomerServiceExpiresAt: true } as any
         });
 
         if (!contact) {
@@ -5774,6 +5857,9 @@ export async function sendWhatsAppMediaReply(
             };
         }
 
+        const windowError = requireTemplateWindowForCloud(contact as any, transportState.transport);
+        if (windowError) return windowError;
+
         const enqueueResult = await enqueueWhatsAppOutbound({
             locationId: location.id,
             conversationInternalId: conversation.id,
@@ -5782,6 +5868,7 @@ export async function sendWhatsAppMediaReply(
             body: previewBody,
             kind: mediaKind,
             source: "app_user",
+            transport: transportState.transport,
             clientMessageId: options?.clientMessageId || null,
             caption: cleanCaption || null,
             attachment: {
@@ -5837,6 +5924,110 @@ export async function sendWhatsAppImageReply(
     }, { caption, kind: "image" });
 }
 
+export async function sendWhatsAppTemplateReply(
+    conversationId: string,
+    contactId: string,
+    templatePayload: {
+        name: string;
+        language: string;
+        category?: string | null;
+        components?: WhatsAppTemplateComponent[] | null;
+        bodyPreview?: string | null;
+        pricingIntent?: string | null;
+    },
+    options?: { clientMessageId?: string | null }
+) {
+    try {
+        const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+        const transportState = await resolveWhatsAppOutboundTransport(location.id, "cloud_api");
+        if (!transportState.cloudConfigured) {
+            return { success: false, error: "WhatsApp Cloud API is not connected." };
+        }
+
+        const templateName = String(templatePayload?.name || "").trim();
+        const templateLanguage = String(templatePayload?.language || "").trim();
+        if (!templateName || !templateLanguage) {
+            return { success: false, error: "Template name and language are required." };
+        }
+
+        const conversation = await db.conversation.findFirst({
+            where: buildConversationReferenceWhere(location.id, conversationId),
+            select: { id: true, locationId: true, contactId: true },
+        });
+        if (!conversation || conversation.locationId !== location.id) {
+            return { success: false, error: "Conversation not found." };
+        }
+
+        const contact = await db.contact.findFirst({
+            where: {
+                OR: [{ ghlContactId: contactId }, { id: contactId }],
+                locationId: location.id,
+            },
+            select: { id: true, phone: true, name: true },
+        });
+        if (!contact) return { success: false, error: "Contact not found in database." };
+        if (conversation.contactId !== contact.id) return { success: false, error: "Conversation/contact mismatch." };
+        if (!contact.phone) return { success: false, error: "Contact does not have a phone number. Please add a phone number to this contact." };
+        if (contact.phone.includes("*")) {
+            return { success: false, error: `${contact.name || "This contact"}'s phone number is masked. You cannot send WhatsApp templates to masked numbers.` };
+        }
+
+        const normalizedPhone = contact.phone.replace(/\D/g, "");
+        if (normalizedPhone.length < 10) {
+            return { success: false, error: `${contact.name || "This contact"}'s phone number appears to be missing a country code.` };
+        }
+
+        const enqueueResult = await enqueueWhatsAppOutbound({
+            locationId: location.id,
+            conversationInternalId: conversation.id,
+            conversationGhlId: conversation.id,
+            contactId: contact.id,
+            body: String(templatePayload.bodyPreview || `[Template: ${templateName}]`),
+            kind: "template",
+            source: "app_user",
+            transport: "cloud_api",
+            clientMessageId: options?.clientMessageId || null,
+            templateName,
+            templateLanguage,
+            templateCategory: templatePayload.category || null,
+            templateComponents: templatePayload.components || [],
+            pricingIntent: templatePayload.pricingIntent || templatePayload.category || null,
+        });
+
+        invalidateConversationReadCaches(conversation.id);
+        emitConversationRealtimeEvent({
+            locationId: location.id,
+            conversationId: conversation.id,
+            type: "message.outbound",
+            payload: {
+                channel: "whatsapp",
+                mode: "template",
+                queued: true,
+                messageId: enqueueResult.messageId,
+                clientMessageId: enqueueResult.clientMessageId,
+                outboxJobId: enqueueResult.outboxJobId,
+                queueAccepted: enqueueResult.queueAccepted,
+                dispatchMode: enqueueResult.dispatchMode,
+            },
+        });
+
+        return {
+            success: true as const,
+            queued: true as const,
+            messageId: enqueueResult.messageId,
+            clientMessageId: enqueueResult.clientMessageId,
+            outboxJobId: enqueueResult.outboxJobId,
+            queueAccepted: enqueueResult.queueAccepted,
+            dispatchMode: enqueueResult.dispatchMode,
+            warning: enqueueResult.warning,
+            errorCode: enqueueResult.errorCode,
+        };
+    } catch (err: any) {
+        console.error("WhatsApp template enqueue failed:", err);
+        return { success: false, error: `WhatsApp template queue failed: ${err.message || "Unknown error"}` };
+    }
+}
+
 export async function sendReply(
     conversationId: string,
     contactId: string,
@@ -5852,8 +6043,9 @@ export async function sendReply(
     try {
         if (type === "WhatsApp") {
             const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
-            if (!location?.evolutionInstanceId) {
-                return { success: false, error: "WhatsApp (Evolution) is not connected." };
+            const transportState = await resolveWhatsAppOutboundTransport(location.id);
+            if (!transportState.cloudConfigured && !transportState.evolutionConfigured) {
+                return { success: false, error: "WhatsApp is not connected." };
             }
 
             const normalizedBody = String(messageBody || "").trim();
@@ -5877,7 +6069,7 @@ export async function sendReply(
                     ],
                     locationId: location.id,
                 },
-                select: { id: true, phone: true, name: true },
+                select: { id: true, phone: true, name: true, whatsappCustomerServiceExpiresAt: true } as any,
             });
             if (!contact) {
                 return { success: false, error: "Contact not found in database." };
@@ -5905,6 +6097,9 @@ export async function sendReply(
                 };
             }
 
+            const windowError = requireTemplateWindowForCloud(contact as any, transportState.transport);
+            if (windowError) return windowError;
+
             const enqueueResult = await enqueueWhatsAppOutbound({
                 locationId: location.id,
                 conversationInternalId: conversation.id,
@@ -5913,6 +6108,7 @@ export async function sendReply(
                 body: normalizedBody,
                 kind: "text",
                 source: "app_user",
+                transport: transportState.transport,
                 clientMessageId: options?.clientMessageId || null,
             });
 
