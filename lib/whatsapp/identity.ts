@@ -2,6 +2,22 @@ export function normalizeDigits(value: string | null | undefined) {
     return String(value || "").replace(/\D/g, "");
 }
 
+export function normalizeLidJid(value: string | null | undefined): string | null {
+    const raw = String(value || "").trim().toLowerCase().replace(/^\+/, "");
+    if (!raw) return null;
+
+    const lidIndex = raw.indexOf("@lid");
+    if (lidIndex < 0) return null;
+
+    const lidDigits = normalizeDigits(raw.slice(0, lidIndex));
+    return lidDigits ? `${lidDigits}@lid` : null;
+}
+
+export function normalizeLidRaw(value: string | null | undefined): string | null {
+    const normalized = normalizeLidJid(value);
+    return normalized ? normalized.replace("@lid", "") : null;
+}
+
 function normalizeComparableJid(value: unknown): string | null {
     const raw = String(value || "").trim().toLowerCase();
     return raw || null;

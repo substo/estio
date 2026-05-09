@@ -6,6 +6,8 @@ import {
     extractPhoneFromEvolutionContact,
     isHighConfidenceResolvedPhone,
     normalizeDigits,
+    normalizeLidJid,
+    normalizeLidRaw,
 } from "@/lib/whatsapp/identity";
 import { extractGroupParticipantIdentity } from "@/lib/whatsapp/group-participants";
 
@@ -63,6 +65,21 @@ function isRefGroupMemberPlaceholder(contact: {
 }) {
     return contact.contactType === "Ref-GroupMember"
         || (contact.name || "").startsWith("Group Member ");
+}
+
+function buildContactLidLookup(locationId: string, lidValue: string | null | undefined) {
+    const normalizedLid = normalizeLidJid(lidValue);
+    const lidRaw = normalizeLidRaw(lidValue);
+    if (!normalizedLid || !lidRaw) return null;
+
+    return {
+        locationId,
+        OR: [
+            { lid: normalizedLid },
+            { lid: lidRaw },
+            { lid: { contains: lidRaw } },
+        ],
+    } as any;
 }
 
 async function tryResolveLidToPhone(locationId: string, lidJid: string, instanceName?: string | null): Promise<string | null> {
@@ -439,13 +456,17 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
                 // 2. Check for Placeholder Contacts to Merge
                 // If we previously received messages from this LID, a placeholder "WhatsApp User ...@lid" might exist.
                 // We should merge it now.
-                const placeholder = await db.contact.findFirst({
-                    where: {
-                        locationId: locationId,
-                        lid: { contains: lidRaw },
-                        id: { not: realContact.id }
-                    }
-                });
+                const placeholderWhere = buildContactLidLookup(locationId, msg.lid);
+                const placeholder = placeholderWhere
+                    ? await db.contact.findFirst({
+                        where: {
+                            AND: [
+                                placeholderWhere,
+                                { id: { not: realContact.id } },
+                            ],
+                        } as any,
+                    })
+                    : null;
 
                 if (placeholder) {
                     // --- SAFETY GUARD: Verify placeholder is truly a placeholder ---
@@ -612,13 +633,18 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
 
     // 2. Find Existing Contact (Lookup by Phone OR LID)
     // Normalize LID for DB lookup (strip @lid suffix for contains search)
-    const lidRaw = msg.lid ? msg.lid.replace('@lid', '') : undefined;
+    const lidRaw = normalizeLidRaw(msg.lid) || undefined;
+    const normalizedMsgLid = normalizeLidJid(msg.lid) || undefined;
     const candidates = await db.contact.findMany({
         where: {
             locationId,
             OR: [
                 { phone: { contains: searchSuffix } },
-                ...(lidRaw ? [{ lid: { contains: lidRaw } }] : [])
+                ...(lidRaw ? [
+                    { lid: normalizedMsgLid },
+                    { lid: lidRaw },
+                    { lid: { contains: lidRaw } },
+                ] : [])
             ]
         } as any
     });
@@ -642,7 +668,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     const lidMatches = candidates.filter((c: any) => {
         if (!msg.lid || !c.lid) return false;
         // Normalize both for comparison (strip @lid if present)
-        return c.lid.replace('@lid', '') === msg.lid.replace('@lid', '');
+        return normalizeLidJid(c.lid) === normalizedMsgLid;
     });
     let contact =
         lidMatches.find((candidate: any) => candidate.contactType !== "Ref-GroupMember")
@@ -761,8 +787,8 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     }
 
     // Link LID if found by phone but missing LID
-    const contactLidNorm = contact?.lid?.replace('@lid', '');
-    const msgLidNorm = msg.lid?.replace('@lid', '');
+    const contactLidNorm = normalizeLidJid(contact?.lid);
+    const msgLidNorm = normalizedMsgLid;
     if (contact && msg.lid && contactLidNorm !== msgLidNorm) {
         await db.contact.update({
             where: { id: contact.id },
@@ -872,23 +898,55 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
 
         console.log(`[WhatsApp Sync] Creating new contact. Name: ${finalName}, GHL: ${foundGhlId}, Google: ${foundGoogleId}`);
 
-        // Create new contact
-        contact = await db.contact.create({
-            data: {
-                locationId,
-                phone: isUnresolvedLid ? undefined : contactPhone,
-                name: finalName,
-                email: foundEmail,
-                status: "New",
-                contactType: contactType,
-                lid: msg.lid || undefined, // Store full LID JID for consistent matching
-                ghlContactId: foundGhlId,
-                googleContactId: foundGoogleId,
-                tags: foundTags.length > 0 ? foundTags : undefined,
-                ...foundAddress
-            } as any
-        });
-        isNewContact = true;
+        const contactCreateData = {
+            locationId,
+            phone: isUnresolvedLid ? undefined : contactPhone,
+            name: finalName,
+            email: foundEmail,
+            status: "New",
+            contactType: contactType,
+            lid: normalizedMsgLid || msg.lid || undefined, // Store canonical full LID JID for consistent matching
+            ghlContactId: foundGhlId,
+            googleContactId: foundGoogleId,
+            tags: foundTags.length > 0 ? foundTags : undefined,
+            ...foundAddress
+        } as any;
+
+        if (isUnresolvedLid && normalizedMsgLid) {
+            const existingOrCreated = await db.$transaction(async (tx) => {
+                // Serialize unresolved-LID creation per location so concurrent webhooks for
+                // the same WhatsApp Web chat cannot create duplicate placeholder contacts.
+                await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${locationId}), hashtext(${normalizedMsgLid}))`;
+
+                const existingLidContact = await (tx as any).contact.findFirst({
+                    where: buildContactLidLookup(locationId, normalizedMsgLid),
+                    orderBy: [
+                        { phone: "desc" },
+                        { createdAt: "asc" },
+                        { id: "asc" },
+                    ],
+                });
+                if (existingLidContact) {
+                    return { contact: existingLidContact, created: false };
+                }
+
+                const created = await (tx as any).contact.create({
+                    data: contactCreateData,
+                });
+                return { contact: created, created: true };
+            });
+
+            contact = existingOrCreated.contact;
+            isNewContact = existingOrCreated.created;
+            if (!isNewContact) {
+                console.log(`[WhatsApp Sync] Reused existing unresolved LID contact ${contact.id} for ${normalizedMsgLid}`);
+            }
+        } else {
+            contact = await db.contact.create({
+                data: contactCreateData,
+            });
+            isNewContact = true;
+        }
     } else {
         console.log(`[WhatsApp Sync] Matched existing contact: ${contact.name} (${contact.id})`);
 
@@ -917,19 +975,28 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     });
 
     if (!conversation) {
-        conversation = await db.conversation.create({
-            data: {
-                ghlConversationId: null,
-                locationId,
-                contactId: contact.id,
-                lastMessageBody: body,
-                lastMessageAt: timestamp,
-                lastMessageType: 'TYPE_WHATSAPP',
-                unreadCount: direction === 'inbound' ? 1 : 0,
-                status: 'open'
-            }
-        });
-        console.log(`[WhatsApp Sync] Created conversation ${conversation.id} for contact ${contact.id}`);
+        try {
+            conversation = await db.conversation.create({
+                data: {
+                    ghlConversationId: null,
+                    locationId,
+                    contactId: contact.id,
+                    lastMessageBody: body,
+                    lastMessageAt: timestamp,
+                    lastMessageType: 'TYPE_WHATSAPP',
+                    unreadCount: direction === 'inbound' ? 1 : 0,
+                    status: 'open'
+                }
+            });
+            console.log(`[WhatsApp Sync] Created conversation ${conversation.id} for contact ${contact.id}`);
+        } catch (error: any) {
+            if (error?.code !== "P2002") throw error;
+            conversation = await db.conversation.findUnique({
+                where: { locationId_contactId: { locationId, contactId: contact.id } },
+            });
+            if (!conversation) throw error;
+            console.log(`[WhatsApp Sync] Reused concurrently-created conversation ${conversation.id} for contact ${contact.id}`);
+        }
     }
 
     const evolutionThreadId = msg.remoteJid || msg.chatId || msg.from || conversation.ghlConversationId || conversation.id;
