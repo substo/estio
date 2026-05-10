@@ -28,11 +28,30 @@ export type WhatsAppTemplatePayload = {
 
 export type WhatsAppCloudCredentials = {
     locationId: string;
+    channelId?: string | null;
     businessAccountId: string;
     phoneNumberId: string;
+    displayPhoneNumber?: string | null;
     accessToken: string;
     webhookSecret: string;
     providerMode: WhatsAppProviderMode;
+};
+
+export type WhatsAppCloudChannel = {
+    id: string;
+    locationId: string;
+    wabaId: string;
+    phoneNumberId: string;
+    displayPhoneNumber?: string | null;
+    verifiedName?: string | null;
+    providerMode: WhatsAppProviderMode;
+    status: string;
+    qualityRating?: string | null;
+    platformType?: string | null;
+    isDefaultOutbound: boolean;
+    coexistenceEnabled: boolean;
+    lastHealthCheckedAt?: Date | null;
+    metadata?: any;
 };
 
 type GraphError = Error & {
@@ -62,11 +81,158 @@ function decryptLegacyToken(value: string | null | undefined): string {
     }
 }
 
+function normalizeCloudStatus(value: unknown) {
+    return String(value || "unknown").trim().toLowerCase() || "unknown";
+}
+
+function normalizeMetaPhoneNumber(phone: any) {
+    return {
+        wabaId: String(phone?.wabaId || phone?.whatsapp_business_account_id || "").trim(),
+        phoneNumberId: String(phone?.id || phone?.phone_number_id || "").trim(),
+        displayPhoneNumber: phone?.display_phone_number ? String(phone.display_phone_number) : null,
+        verifiedName: phone?.verified_name ? String(phone.verified_name) : null,
+        status: normalizeCloudStatus(phone?.code_verification_status || phone?.status || phone?.account_mode || "unknown"),
+        qualityRating: phone?.quality_rating ? String(phone.quality_rating) : null,
+        platformType: phone?.platform_type ? String(phone.platform_type) : null,
+        coexistenceEnabled: String(phone?.platform_type || "").toLowerCase().includes("business_app"),
+        metadata: phone || null,
+    };
+}
+
+export function inferWhatsAppCoexistenceEnabled(phone: any) {
+    return normalizeMetaPhoneNumber(phone).coexistenceEnabled;
+}
+
+export async function getDefaultWhatsAppCloudChannel(locationId: string): Promise<WhatsAppCloudChannel | null> {
+    const channel = await (db as any).whatsAppChannel.findFirst({
+        where: { locationId },
+        orderBy: [
+            { isDefaultOutbound: "desc" },
+            { updatedAt: "desc" },
+        ],
+    }).catch(() => null);
+    return channel || null;
+}
+
+export async function getWhatsAppCloudChannelByPhoneNumberId(phoneNumberId: string): Promise<WhatsAppCloudChannel | null> {
+    const id = String(phoneNumberId || "").trim();
+    if (!id) return null;
+    const channel = await (db as any).whatsAppChannel.findUnique({
+        where: { phoneNumberId: id },
+    }).catch(() => null);
+    return channel || null;
+}
+
+export async function setDefaultWhatsAppCloudChannel(locationId: string, channelId: string) {
+    const channel = await (db as any).whatsAppChannel.findFirst({
+        where: { id: channelId, locationId },
+    });
+    if (!channel) throw new Error("WhatsApp channel not found for this location.");
+
+    await db.$transaction([
+        (db as any).whatsAppChannel.updateMany({
+            where: { locationId },
+            data: { isDefaultOutbound: false },
+        }),
+        (db as any).whatsAppChannel.update({
+            where: { id: channelId },
+            data: { isDefaultOutbound: true },
+        }),
+        db.location.update({
+            where: { id: locationId },
+            data: {
+                whatsappBusinessAccountId: channel.wabaId || null,
+                whatsappPhoneNumberId: channel.phoneNumberId,
+                whatsappProviderMode: channel.providerMode || "cloud_primary",
+            } as any,
+        }),
+    ]);
+
+    await settingsService.getDocument<any>({
+        scopeType: "LOCATION",
+        scopeId: locationId,
+        domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+    }).then((doc) => settingsService.upsertDocument({
+        scopeType: "LOCATION",
+        scopeId: locationId,
+        domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+        payload: {
+            ...(doc?.payload || {}),
+            whatsappBusinessAccountId: channel.wabaId || null,
+            whatsappPhoneNumberId: channel.phoneNumberId,
+            whatsappProviderMode: channel.providerMode || "cloud_primary",
+        },
+        schemaVersion: doc?.schemaVersion || 1,
+    })).catch(() => undefined);
+
+    return channel as WhatsAppCloudChannel;
+}
+
+export async function upsertWhatsAppCloudChannel(input: {
+    locationId: string;
+    wabaId: string;
+    phone: any;
+    providerMode?: WhatsAppProviderMode;
+    makeDefault?: boolean;
+}) {
+    const normalized = normalizeMetaPhoneNumber({
+        ...input.phone,
+        wabaId: input.wabaId || input.phone?.wabaId,
+    });
+    if (!normalized.phoneNumberId) throw new Error("Phone Number ID is required.");
+    const providerMode = normalizeProviderMode(input.providerMode || "cloud_primary");
+
+    const existingDefault = await getDefaultWhatsAppCloudChannel(input.locationId);
+    const makeDefault = Boolean(input.makeDefault || !existingDefault);
+
+    const channel = await (db as any).whatsAppChannel.upsert({
+        where: { phoneNumberId: normalized.phoneNumberId },
+        create: {
+            locationId: input.locationId,
+            wabaId: normalized.wabaId || input.wabaId,
+            phoneNumberId: normalized.phoneNumberId,
+            displayPhoneNumber: normalized.displayPhoneNumber,
+            verifiedName: normalized.verifiedName,
+            providerMode,
+            status: normalized.status,
+            qualityRating: normalized.qualityRating,
+            platformType: normalized.platformType,
+            isDefaultOutbound: makeDefault,
+            coexistenceEnabled: normalized.coexistenceEnabled,
+            lastHealthCheckedAt: new Date(),
+            metadata: normalized.metadata,
+        },
+        update: {
+            locationId: input.locationId,
+            wabaId: normalized.wabaId || input.wabaId,
+            displayPhoneNumber: normalized.displayPhoneNumber,
+            verifiedName: normalized.verifiedName,
+            providerMode,
+            status: normalized.status,
+            qualityRating: normalized.qualityRating,
+            platformType: normalized.platformType,
+            ...(makeDefault ? { isDefaultOutbound: true } : {}),
+            coexistenceEnabled: normalized.coexistenceEnabled,
+            lastHealthCheckedAt: new Date(),
+            metadata: normalized.metadata,
+        },
+    });
+
+    if (makeDefault) {
+        await (db as any).whatsAppChannel.updateMany({
+            where: { locationId: input.locationId, id: { not: channel.id } },
+            data: { isDefaultOutbound: false },
+        });
+    }
+
+    return channel as WhatsAppCloudChannel;
+}
+
 export function normalizeWhatsAppRecipient(to: string | null | undefined) {
     return String(to || "").replace(/\D/g, "");
 }
 
-export async function getWhatsAppCloudCredentials(locationId: string): Promise<WhatsAppCloudCredentials> {
+export async function getWhatsAppCloudCredentials(locationId: string, channelId?: string | null): Promise<WhatsAppCloudCredentials> {
     const [location, integrationDoc, accessTokenSecret] = await Promise.all([
         db.location.findUnique({
             where: { id: locationId },
@@ -93,11 +259,14 @@ export async function getWhatsAppCloudCredentials(locationId: string): Promise<W
     ]);
 
     const payload = integrationDoc?.payload || {};
-    const businessAccountId = String(payload.whatsappBusinessAccountId || location?.whatsappBusinessAccountId || "").trim();
-    const phoneNumberId = String(payload.whatsappPhoneNumberId || location?.whatsappPhoneNumberId || "").trim();
+    const channel = channelId
+        ? await (db as any).whatsAppChannel.findFirst({ where: { id: channelId, locationId } }).catch(() => null)
+        : await getDefaultWhatsAppCloudChannel(locationId);
+    const businessAccountId = String(channel?.wabaId || payload.whatsappBusinessAccountId || location?.whatsappBusinessAccountId || "").trim();
+    const phoneNumberId = String(channel?.phoneNumberId || payload.whatsappPhoneNumberId || location?.whatsappPhoneNumberId || "").trim();
     const webhookSecret = String(payload.whatsappWebhookSecret || location?.whatsappWebhookSecret || "").trim();
-    const providerMode = normalizeProviderMode(payload.whatsappProviderMode || (location as any)?.whatsappProviderMode);
-    const accessToken = String(accessTokenSecret || decryptLegacyToken(location?.whatsappAccessToken) || "").trim();
+    const providerMode = normalizeProviderMode(channel?.providerMode || payload.whatsappProviderMode || (location as any)?.whatsappProviderMode);
+    const accessToken = String(accessTokenSecret || decryptLegacyToken((location as any)?.whatsappAccessToken) || "").trim();
 
     if (!phoneNumberId || !accessToken) {
         throw new Error("WhatsApp Cloud API credentials not found for this location.");
@@ -105,8 +274,10 @@ export async function getWhatsAppCloudCredentials(locationId: string): Promise<W
 
     return {
         locationId,
+        channelId: channel?.id || null,
         businessAccountId,
         phoneNumberId,
+        displayPhoneNumber: channel?.displayPhoneNumber || null,
         accessToken,
         webhookSecret,
         providerMode,
@@ -210,47 +381,49 @@ export function buildCloudTemplatePayload(to: string, template: WhatsAppTemplate
     };
 }
 
-async function sendCloudPayload(locationId: string, payload: Record<string, any>) {
-    const credentials = await getWhatsAppCloudCredentials(locationId);
+async function sendCloudPayload(locationId: string, payload: Record<string, any>, channelId?: string | null) {
+    const credentials = await getWhatsAppCloudCredentials(locationId, channelId);
     return graphRequest<any>(`${credentials.phoneNumberId}/messages`, credentials.accessToken, {
         method: "POST",
         body: JSON.stringify(payload),
     });
 }
 
-export async function sendWhatsAppCloudText(locationId: string, to: string, body: string) {
-    return sendCloudPayload(locationId, buildCloudTextPayload(to, body));
+export async function sendWhatsAppCloudText(locationId: string, to: string, body: string, channelId?: string | null) {
+    return sendCloudPayload(locationId, buildCloudTextPayload(to, body), channelId);
 }
 
 export async function sendWhatsAppCloudMedia(
     locationId: string,
     to: string,
-    input: Parameters<typeof buildCloudMediaPayload>[1]
+    input: Parameters<typeof buildCloudMediaPayload>[1],
+    channelId?: string | null
 ) {
-    return sendCloudPayload(locationId, buildCloudMediaPayload(to, input));
+    return sendCloudPayload(locationId, buildCloudMediaPayload(to, input), channelId);
 }
 
-export async function sendWhatsAppCloudTemplate(locationId: string, to: string, template: WhatsAppTemplatePayload) {
-    return sendCloudPayload(locationId, buildCloudTemplatePayload(to, template));
+export async function sendWhatsAppCloudTemplate(locationId: string, to: string, template: WhatsAppTemplatePayload, channelId?: string | null) {
+    return sendCloudPayload(locationId, buildCloudTemplatePayload(to, template), channelId);
 }
 
 export async function sendWhatsAppMessage(
     locationId: string,
     to: string,
-    message: ({ type: "text"; body: string } | ({ type: "template" } & WhatsAppTemplatePayload))
+    message: ({ type: "text"; body: string } | ({ type: "template" } & WhatsAppTemplatePayload)),
+    channelId?: string | null
 ) {
     if (message.type === "template") {
-        return sendWhatsAppCloudTemplate(locationId, to, message);
+        return sendWhatsAppCloudTemplate(locationId, to, message, channelId);
     }
-    return sendWhatsAppCloudText(locationId, to, message.body);
+    return sendWhatsAppCloudText(locationId, to, message.body, channelId);
 }
 
 export function extractCloudWamId(response: any): string | null {
     return response?.messages?.[0]?.id ? String(response.messages[0].id) : null;
 }
 
-export async function markWhatsAppCloudMessageRead(locationId: string, messageId: string) {
-    const credentials = await getWhatsAppCloudCredentials(locationId);
+export async function markWhatsAppCloudMessageRead(locationId: string, messageId: string, channelId?: string | null) {
+    const credentials = await getWhatsAppCloudCredentials(locationId, channelId);
     return graphRequest<any>(`${credentials.phoneNumberId}/messages`, credentials.accessToken, {
         method: "POST",
         body: JSON.stringify({
@@ -303,7 +476,7 @@ export async function subscribeWhatsAppAppToWaba(locationId: string) {
     });
 }
 
-export async function getWhatsAppCloudHealth(locationId: string) {
+export async function getWhatsAppCloudHealth(locationId: string, channelId?: string | null) {
     const checks: Record<string, { ok: boolean; message?: string; data?: any }> = {
         token: { ok: false },
         waba: { ok: false },
@@ -314,7 +487,7 @@ export async function getWhatsAppCloudHealth(locationId: string) {
     };
 
     try {
-        const credentials = await getWhatsAppCloudCredentials(locationId);
+        const credentials = await getWhatsAppCloudCredentials(locationId, channelId);
         checks.token = { ok: true };
         checks.messagesPermission = { ok: true, message: "Send endpoint credentials are present." };
 
@@ -368,6 +541,14 @@ export async function getWhatsAppCloudHealth(locationId: string) {
                 { method: "GET", headers: { "Content-Type": "application/json" } }
             );
             checks.phoneNumber = { ok: true, data: phone };
+            if (credentials.channelId) {
+                await upsertWhatsAppCloudChannel({
+                    locationId,
+                    wabaId: credentials.businessAccountId,
+                    phone: phone,
+                    providerMode: credentials.providerMode,
+                }).catch(() => undefined);
+            }
         } catch (error: any) {
             checks.phoneNumber = { ok: false, message: error?.message || "Phone number lookup failed." };
         }
@@ -375,6 +556,7 @@ export async function getWhatsAppCloudHealth(locationId: string) {
         return {
             ok: Object.values(checks).every((check) => check.ok),
             locationId,
+            channelId: credentials.channelId || null,
             providerMode: credentials.providerMode,
             phoneNumberId: credentials.phoneNumberId,
             businessAccountId: credentials.businessAccountId,

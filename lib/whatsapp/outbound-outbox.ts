@@ -8,6 +8,7 @@ import { Prisma } from "@prisma/client";
 import {
     WHATSAPP_CLOUD_PROVIDER,
     extractCloudWamId,
+    getDefaultWhatsAppCloudChannel,
     sendWhatsAppCloudMedia,
     sendWhatsAppCloudTemplate,
     sendWhatsAppCloudText,
@@ -154,14 +155,16 @@ export async function processWhatsAppOutboundOutboxJob(args: {
 
         if (transport === "cloud_api") {
             provider = WHATSAPP_CLOUD_PROVIDER;
-            providerAccountId = String(row.location?.whatsappPhoneNumberId || "default");
+            const channel = await getDefaultWhatsAppCloudChannel(row.locationId);
+            const channelId = channel?.id || null;
+            providerAccountId = String(channel?.phoneNumberId || row.location?.whatsappPhoneNumberId || "default");
 
             if (row.kind === "text") {
                 const text = String(payload?.text || row.message?.body || "");
                 if (!text.trim()) {
                     throw new Error("Cannot send empty WhatsApp message body.");
                 }
-                const response = await sendWhatsAppCloudText(row.locationId, normalizedPhone, text);
+                const response = await sendWhatsAppCloudText(row.locationId, normalizedPhone, text, channelId);
                 wamId = extractCloudWamId(response);
             } else if (row.kind === "template") {
                 const templateName = String(payload?.templateName || "").trim();
@@ -174,7 +177,7 @@ export async function processWhatsAppOutboundOutboxJob(args: {
                     language: templateLanguage,
                     category: payload?.templateCategory || null,
                     components: Array.isArray(payload?.templateComponents) ? payload.templateComponents : [],
-                });
+                }, channelId);
                 wamId = extractCloudWamId(response);
             } else {
                 const objectKey = String(payload?.objectKey || "").trim();
@@ -198,7 +201,7 @@ export async function processWhatsAppOutboundOutboxJob(args: {
                     caption,
                     mimetype: contentType,
                     fileName,
-                });
+                }, channelId);
                 wamId = extractCloudWamId(response);
             }
         } else if (transport === "twilio") {

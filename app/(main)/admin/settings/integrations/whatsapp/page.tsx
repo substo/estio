@@ -13,6 +13,8 @@ import {
     syncWhatsAppTemplates,
     repairWhatsAppCloudConnection,
     createWhatsAppTemplate,
+    setDefaultWhatsAppChannelAction,
+    verifyWhatsAppCloudChannel,
 } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,6 +37,21 @@ import {
     AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
+type WhatsAppChannelRow = {
+    id: string;
+    wabaId: string;
+    phoneNumberId: string;
+    displayPhoneNumber: string;
+    verifiedName: string;
+    providerMode: string;
+    status: string;
+    qualityRating: string;
+    platformType: string;
+    isDefaultOutbound: boolean;
+    coexistenceEnabled: boolean;
+    lastHealthCheckedAt: string | null;
+};
+
 export default function WhatsAppSettingsPage() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -56,6 +73,7 @@ export default function WhatsAppSettingsPage() {
         evolutionInstanceId: "",
         evolutionConnectionStatus: "close",
         whatsappProviderMode: "cloud_primary",
+        whatsappChannels: [] as WhatsAppChannelRow[],
     });
     const [cloudHealth, setCloudHealth] = useState<any>(null);
     const [cloudBusy, setCloudBusy] = useState(false);
@@ -122,6 +140,7 @@ export default function WhatsAppSettingsPage() {
             evolutionInstanceId: data.evolutionInstanceId || "",
             evolutionConnectionStatus: data.evolutionConnectionStatus || "close",
             whatsappProviderMode: data.whatsappProviderMode || "cloud_primary",
+            whatsappChannels: Array.isArray(data.whatsappChannels) ? data.whatsappChannels : [],
         });
     };
 
@@ -146,6 +165,9 @@ export default function WhatsAppSettingsPage() {
         try {
             const result = await repairWhatsAppCloudConnection(settings.locationId || null);
             setCloudHealth(result.health);
+            if (Array.isArray((result as any).channels)) {
+                setSettings(prev => ({ ...prev, whatsappChannels: (result as any).channels }));
+            }
             if ((result.templateResult as any)?.templates) setTemplates((result.templateResult as any).templates);
             toast({
                 title: result.success ? "Cloud API verified" : "Cloud API needs attention",
@@ -154,6 +176,47 @@ export default function WhatsAppSettingsPage() {
             });
         } catch (error: any) {
             toast({ title: "Repair failed", description: error?.message || "Unable to repair Cloud API connection.", variant: "destructive" });
+        } finally {
+            setCloudBusy(false);
+        }
+    };
+
+    const handleVerifyChannel = async (channelId: string) => {
+        setCloudBusy(true);
+        try {
+            const result = await verifyWhatsAppCloudChannel(channelId, settings.locationId || null);
+            setCloudHealth(result.health);
+            if (Array.isArray(result.channels)) {
+                setSettings(prev => ({ ...prev, whatsappChannels: result.channels }));
+            }
+            toast({
+                title: result.success ? "Number verified" : "Number needs attention",
+                description: result.success ? "Meta returned healthy number details." : "Some Meta checks are still failing.",
+                variant: result.success ? "default" : "destructive",
+            });
+        } catch (error: any) {
+            toast({ title: "Verification failed", description: error?.message || "Unable to verify number.", variant: "destructive" });
+        } finally {
+            setCloudBusy(false);
+        }
+    };
+
+    const handleSetDefaultChannel = async (channelId: string) => {
+        setCloudBusy(true);
+        try {
+            const result = await setDefaultWhatsAppChannelAction(channelId, settings.locationId || null);
+            if (Array.isArray(result.channels)) {
+                const nextDefault = result.channels.find((channel: WhatsAppChannelRow) => channel.isDefaultOutbound);
+                setSettings(prev => ({
+                    ...prev,
+                    whatsappChannels: result.channels,
+                    phoneNumberId: nextDefault?.phoneNumberId || prev.phoneNumberId,
+                    businessAccountId: nextDefault?.wabaId || prev.businessAccountId,
+                }));
+            }
+            toast({ title: "Default number updated", description: "New Cloud API sends will use this number." });
+        } catch (error: any) {
+            toast({ title: "Could not update default", description: error?.message || "Unable to set default number.", variant: "destructive" });
         } finally {
             setCloudBusy(false);
         }
@@ -248,11 +311,17 @@ export default function WhatsAppSettingsPage() {
         // Check for either code (SUAT flow) or accessToken (User token flow)
         const code = response.authResponse?.code || response.code;
         const accessToken = response.authResponse?.accessToken;
+        const selectedPhoneNumberId =
+            response.authResponse?.phone_number_id ||
+            response.authResponse?.phoneNumberId ||
+            response.phone_number_id ||
+            response.phoneNumberId ||
+            null;
 
         if (code) {
             // System User Access Token flow - exchange code for token
             try {
-                const result = await exchangeSystemUserToken(code, appId, undefined, false, settings.locationId || null);
+                const result = await exchangeSystemUserToken(code, appId, undefined, false, settings.locationId || null, selectedPhoneNumberId);
 
                 if (result.success) {
                     setConnectionStatus({ type: 'success', message: result.message });
@@ -272,7 +341,7 @@ export default function WhatsAppSettingsPage() {
         } else if (accessToken) {
             // User Access Token flow - use token directly to fetch WABA info
             try {
-                const result = await exchangeSystemUserToken(accessToken, appId, undefined, true, settings.locationId || null);
+                const result = await exchangeSystemUserToken(accessToken, appId, undefined, true, settings.locationId || null, selectedPhoneNumberId);
 
                 if (result.success) {
                     setConnectionStatus({ type: 'success', message: result.message });
@@ -361,12 +430,16 @@ export default function WhatsAppSettingsPage() {
         formData.append("twilioWhatsAppFrom", settings.twilioWhatsAppFrom);
 
         try {
-            await updateWhatsAppSettings(formData);
-            toast({ title: "Settings saved", description: "WhatsApp configuration updated successfully." });
-            const data = await getWhatsAppSettings(settings.locationId || null);
-            if (data) applyServerSettings(data);
-            setClearTwilioAuthToken(false);
-            setClearWhatsAppAccessToken(false);
+            const result = await updateWhatsAppSettings(formData);
+            if (result.success) {
+                toast({ title: "Settings saved", description: "WhatsApp configuration updated successfully." });
+                const data = await getWhatsAppSettings(settings.locationId || null);
+                if (data) applyServerSettings(data);
+                setClearTwilioAuthToken(false);
+                setClearWhatsAppAccessToken(false);
+            } else {
+                toast({ title: "Error", description: (result as any).error || "Failed to save settings.", variant: "destructive" });
+            }
         } catch (error) {
             toast({ title: "Error", description: "Failed to save settings.", variant: "destructive" });
         } finally {
@@ -497,7 +570,7 @@ export default function WhatsAppSettingsPage() {
                                 </select>
                             </div>
                             <div className="space-y-1">
-                                <Label>Phone Number ID</Label>
+                                <Label>Default Phone Number ID</Label>
                                 <div className="rounded-md border px-3 py-2 text-sm">{settings.phoneNumberId || "Not configured"}</div>
                             </div>
                             <div className="space-y-1">
@@ -507,6 +580,10 @@ export default function WhatsAppSettingsPage() {
                         </div>
 
                         <div className="flex flex-wrap gap-2">
+                            <Button type="button" onClick={launchFacebookLogin} disabled={saving || (!fbSdkReady && !useBridge)}>
+                                {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Facebook className="mr-2 h-4 w-4" />}
+                                Add Cloud API Number
+                            </Button>
                             <Button type="button" variant="outline" onClick={() => refreshCloudOps(false)} disabled={cloudBusy}>
                                 {cloudBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                                 Verify Cloud API
@@ -517,8 +594,53 @@ export default function WhatsAppSettingsPage() {
                             </Button>
                             <Button type="button" onClick={handleRepairCloud} disabled={cloudBusy}>
                                 <Settings className="mr-2 h-4 w-4" />
-                                Repair Connection
+                                Repair Default
                             </Button>
+                        </div>
+
+                        <div className="rounded-md border">
+                            <div className="grid grid-cols-[1.2fr_1fr_0.8fr_0.8fr_1.1fr] gap-2 border-b px-3 py-2 text-xs font-medium text-muted-foreground">
+                                <span>Number</span>
+                                <span>Meta State</span>
+                                <span>Quality</span>
+                                <span>Coexistence</span>
+                                <span className="text-right">Actions</span>
+                            </div>
+                            {settings.whatsappChannels.length > 0 ? (
+                                settings.whatsappChannels.map((channel) => (
+                                    <div key={channel.id} className="grid grid-cols-[1.2fr_1fr_0.8fr_0.8fr_1.1fr] items-center gap-2 px-3 py-3 text-sm">
+                                        <div className="min-w-0">
+                                            <div className="flex items-center gap-2 font-medium">
+                                                <span className="truncate">{channel.displayPhoneNumber || channel.phoneNumberId}</span>
+                                                {channel.isDefaultOutbound && (
+                                                    <span className="rounded border px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">Default</span>
+                                                )}
+                                            </div>
+                                            <div className="truncate text-xs text-muted-foreground">{channel.phoneNumberId}</div>
+                                            {channel.verifiedName && <div className="truncate text-xs text-muted-foreground">{channel.verifiedName}</div>}
+                                        </div>
+                                        <span className="truncate">{channel.status || "unknown"}</span>
+                                        <span className="truncate">{channel.qualityRating || "unknown"}</span>
+                                        <span className={channel.coexistenceEnabled ? "text-green-700" : "text-muted-foreground"}>
+                                            {channel.coexistenceEnabled ? "Enabled" : "Not detected"}
+                                        </span>
+                                        <div className="flex justify-end gap-2">
+                                            <Button type="button" size="sm" variant="outline" onClick={() => handleVerifyChannel(channel.id)} disabled={cloudBusy}>
+                                                Verify
+                                            </Button>
+                                            {!channel.isDefaultOutbound && (
+                                                <Button type="button" size="sm" variant="outline" onClick={() => handleSetDefaultChannel(channel.id)} disabled={cloudBusy}>
+                                                    Set Default
+                                                </Button>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))
+                            ) : (
+                                <div className="px-3 py-6 text-sm text-muted-foreground">
+                                    No Cloud API numbers are synced yet. Add a number with Embedded Signup to avoid manual WhatsApp Manager setup.
+                                </div>
+                            )}
                         </div>
 
                         {cloudHealth?.checks && (
@@ -866,7 +988,7 @@ export default function WhatsAppSettingsPage() {
                                     Connecting...
                                 </>
                             ) : (
-                                "Connect with Facebook"
+                            "Add / Reconnect Cloud API Number"
                             )}
                         </Button>
                         {!useBridge && <FacebookSDKScript appId={appId} onReady={() => setFbSdkReady(true)} />}

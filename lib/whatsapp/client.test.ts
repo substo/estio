@@ -5,6 +5,7 @@ import {
     buildCloudMediaPayload,
     buildCloudTemplatePayload,
     buildCloudTextPayload,
+    inferWhatsAppCoexistenceEnabled,
     mapWhatsAppCloudStatus,
     verifyWhatsAppWebhookSignature,
 } from "./client";
@@ -69,4 +70,9 @@ test("mapWhatsAppCloudStatus keeps delivery state vocabulary", () => {
     assert.equal(mapWhatsAppCloudStatus("delivered"), "delivered");
     assert.equal(mapWhatsAppCloudStatus("read"), "read");
     assert.equal(mapWhatsAppCloudStatus("failed"), "failed");
+});
+
+test("inferWhatsAppCoexistenceEnabled detects Business App platform", () => {
+    assert.equal(inferWhatsAppCoexistenceEnabled({ platform_type: "BUSINESS_APP" }), true);
+    assert.equal(inferWhatsAppCoexistenceEnabled({ platform_type: "CLOUD_API" }), false);
 });

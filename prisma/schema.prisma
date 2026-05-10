@@ -57,6 +57,7 @@ model Location {
   deepScrapeRunStages           DeepScrapeRunStage[]
   agentExecutions               AgentExecution[]
   whatsappOutboundOutboxJobs    WhatsAppOutboundOutbox[]
+  whatsappChannels              WhatsAppChannel[]
   whatsappTemplates             WhatsAppTemplate[]
   conversationSyncRecords       ConversationSync[]
   messageSyncRecords            MessageSync[]
@@ -2335,6 +2336,34 @@ model WhatsAppOutboundOutbox {
   @@index([status, scheduledAt])
   @@index([locationId, status, scheduledAt])
   @@index([conversationId, status, scheduledAt])
+}
+
+model WhatsAppChannel {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId String
+
+  wabaId             String
+  phoneNumberId     String
+  displayPhoneNumber String?
+  verifiedName      String?
+  providerMode      String  @default("cloud_primary") // cloud_primary | evolution_linked | twilio_fallback
+  status            String  @default("unknown")
+  qualityRating     String?
+  platformType      String?
+  isDefaultOutbound Boolean @default(false)
+  coexistenceEnabled Boolean @default(false)
+  lastHealthCheckedAt DateTime?
+  metadata          Json?
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([phoneNumberId])
+  @@index([locationId, isDefaultOutbound])
+  @@index([locationId, wabaId])
+  @@index([status])
 }
 
 model WhatsAppTemplate {

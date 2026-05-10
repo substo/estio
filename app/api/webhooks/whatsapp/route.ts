@@ -4,6 +4,7 @@ import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-ev
 import { processNormalizedMessage, NormalizedMessage } from "@/lib/whatsapp/sync";
 import {
     WHATSAPP_CLOUD_PROVIDER,
+    getWhatsAppCloudChannelByPhoneNumberId,
     mapWhatsAppCloudStatus,
     verifyWhatsAppWebhookSignature,
 } from "@/lib/whatsapp/client";
@@ -169,17 +170,23 @@ async function processMessagesValue(value: any) {
         return;
     }
 
-    const location = await db.location.findFirst({
-        where: { whatsappPhoneNumberId: phoneNumberId },
-    });
+    const channel = await getWhatsAppCloudChannelByPhoneNumberId(phoneNumberId);
+    const location = channel
+        ? await db.location.findUnique({ where: { id: channel.locationId } })
+        : await db.location.findFirst({ where: { whatsappPhoneNumberId: phoneNumberId } });
 
     if (!location) {
         console.warn(`Received WhatsApp webhook for unknown Phone Number ID: ${phoneNumberId}`);
         return;
     }
 
+    const locationForSync = {
+        ...location,
+        whatsappPhoneNumberId: channel?.phoneNumberId || location.whatsappPhoneNumberId,
+    };
+
     for (const status of value?.statuses || []) {
-        await updateCloudStatus(location, status);
+        await updateCloudStatus(locationForSync, status);
     }
 
     const contacts = Array.isArray(value?.contacts) ? value.contacts : [];

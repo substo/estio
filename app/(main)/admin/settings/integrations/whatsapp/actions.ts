@@ -22,10 +22,41 @@ import {
     fetchWhatsAppCloudTemplates,
     getWhatsAppCloudCredentials,
     getWhatsAppCloudHealth as getCloudHealth,
+    setDefaultWhatsAppCloudChannel,
     subscribeWhatsAppAppToWaba,
+    upsertWhatsAppCloudChannel,
 } from "@/lib/whatsapp/client";
 
 const MASKED_SECRET = "********";
+
+function serializeWhatsAppChannel(channel: any) {
+    return {
+        id: channel.id,
+        locationId: channel.locationId,
+        wabaId: channel.wabaId,
+        phoneNumberId: channel.phoneNumberId,
+        displayPhoneNumber: channel.displayPhoneNumber || "",
+        verifiedName: channel.verifiedName || "",
+        providerMode: channel.providerMode || "cloud_primary",
+        status: channel.status || "unknown",
+        qualityRating: channel.qualityRating || "",
+        platformType: channel.platformType || "",
+        isDefaultOutbound: Boolean(channel.isDefaultOutbound),
+        coexistenceEnabled: Boolean(channel.coexistenceEnabled),
+        lastHealthCheckedAt: channel.lastHealthCheckedAt?.toISOString?.() || null,
+    };
+}
+
+async function listWhatsAppChannels(locationId: string) {
+    const channels = await (db as any).whatsAppChannel.findMany({
+        where: { locationId },
+        orderBy: [
+            { isDefaultOutbound: "desc" },
+            { updatedAt: "desc" },
+        ],
+    }).catch(() => []);
+    return channels.map(serializeWhatsAppChannel);
+}
 
 async function resolveAdminContext(locationIdInput?: string | null) {
     const { userId } = await auth();
@@ -176,6 +207,22 @@ export async function updateWhatsAppSettings(formData: FormData) {
         });
     }
 
+    if (payload.whatsappBusinessAccountId && payload.whatsappPhoneNumberId) {
+        await upsertWhatsAppCloudChannel({
+            locationId: resolvedLocationId,
+            wabaId: payload.whatsappBusinessAccountId,
+            phone: {
+                id: payload.whatsappPhoneNumberId,
+                wabaId: payload.whatsappBusinessAccountId,
+                status: "manual_configured",
+            },
+            providerMode: whatsappProviderMode as any,
+            makeDefault: true,
+        }).catch((error) => {
+            console.warn("[WhatsApp Cloud] Failed to upsert manual channel:", error?.message || error);
+        });
+    }
+
     revalidatePath("/admin/settings/integrations/whatsapp");
     return { success: true };
 }
@@ -235,6 +282,8 @@ export async function getWhatsAppSettings(locationId?: string | null) {
         }
     }
 
+    const whatsappChannels = await listWhatsAppChannels(location.id);
+
     return {
         // Meta
         businessAccountId: payload.whatsappBusinessAccountId || location.whatsappBusinessAccountId || "",
@@ -243,6 +292,7 @@ export async function getWhatsAppSettings(locationId?: string | null) {
         hasAccessToken: hasAccessToken || Boolean(location.whatsappAccessToken),
         webhookSecret: payload.whatsappWebhookSecret || location.whatsappWebhookSecret || "",
         whatsappProviderMode: payload.whatsappProviderMode || (location as any).whatsappProviderMode || "cloud_primary",
+        whatsappChannels,
 
         // Twilio
         twilioAccountSid: payload.twilioAccountSid || location.twilioAccountSid || "",
@@ -312,6 +362,32 @@ async function upsertLocalWhatsAppTemplate(locationId: string, template: any, fa
 export async function getWhatsAppCloudHealth(locationId?: string | null) {
     const { location } = await resolveAdminContext(locationId || null);
     return getCloudHealth(location.id);
+}
+
+export async function verifyWhatsAppCloudChannel(channelId: string, locationId?: string | null) {
+    const { location } = await resolveAdminContext(locationId || null);
+    const channel = await (db as any).whatsAppChannel.findFirst({
+        where: { id: channelId, locationId: location.id },
+    });
+    if (!channel) throw new Error("WhatsApp channel not found.");
+
+    const health = await getCloudHealth(location.id, channel.id);
+    revalidatePath("/admin/settings/integrations/whatsapp");
+    return {
+        success: health.ok,
+        health,
+        channels: await listWhatsAppChannels(location.id),
+    };
+}
+
+export async function setDefaultWhatsAppChannelAction(channelId: string, locationId?: string | null) {
+    const { location } = await resolveAdminContext(locationId || null);
+    await setDefaultWhatsAppCloudChannel(location.id, channelId);
+    revalidatePath("/admin/settings/integrations/whatsapp");
+    return {
+        success: true as const,
+        channels: await listWhatsAppChannels(location.id),
+    };
 }
 
 export async function syncWhatsAppTemplates(locationId?: string | null) {
@@ -424,6 +500,7 @@ export async function repairWhatsAppCloudConnection(locationId?: string | null) 
         subscribeResult,
         templateResult,
         health,
+        channels: await listWhatsAppChannels(location.id),
     };
 }
 
@@ -802,7 +879,8 @@ export async function exchangeSystemUserToken(
     appId: string,
     redirectUri?: string,
     isDirectToken: boolean = false,
-    locationId?: string | null
+    locationId?: string | null,
+    selectedPhoneNumberId?: string | null
 ) {
     const appSecret = process.env.META_APP_SECRET;
     if (!appSecret) throw new Error("Server Misconfiguration: META_APP_SECRET is missing.");
@@ -902,10 +980,13 @@ export async function exchangeSystemUserToken(
         const wabaId = wabas[0].id;
         console.log("✅ Using WABA ID:", wabaId);
 
-        // 4. Fetch Phone Number
+        // 4. Fetch and sync all Phone Numbers on this WABA.
         const phoneUrl = `https://graph.facebook.com/v21.0/${wabaId}/phone_numbers`;
         const phoneResponse = await axios.get(phoneUrl, {
-            params: { access_token: accessToken }
+            params: {
+                access_token: accessToken,
+                fields: "id,display_phone_number,verified_name,quality_rating,platform_type,code_verification_status",
+            }
         });
 
         const phones = phoneResponse.data.data;
@@ -914,9 +995,33 @@ export async function exchangeSystemUserToken(
             throw new Error("No Phone Numbers found in this WhatsApp Account.");
         }
 
-        const phoneNumberId = phones[0].id;
-        const displayPhoneNumber = phones[0].display_phone_number;
-        console.log("✅ Found Phone ID:", phoneNumberId, "Display:", displayPhoneNumber);
+        const selectedId = String(selectedPhoneNumberId || "").trim();
+        const syncedChannels = [];
+        for (const phone of phones) {
+            const makeDefault = selectedId
+                ? String(phone?.id || "") === selectedId
+                : false;
+            const channel = await upsertWhatsAppCloudChannel({
+                locationId: resolvedLocationId,
+                wabaId,
+                phone,
+                providerMode: "cloud_primary",
+                makeDefault,
+            });
+            syncedChannels.push(channel);
+        }
+
+        const defaultChannel =
+            syncedChannels.find((channel: any) => selectedId && channel.phoneNumberId === selectedId)
+            || syncedChannels.find((channel: any) => channel.isDefaultOutbound)
+            || syncedChannels[0];
+        if (defaultChannel?.id) {
+            await setDefaultWhatsAppCloudChannel(resolvedLocationId, defaultChannel.id);
+        }
+
+        const phoneNumberId = defaultChannel.phoneNumberId;
+        const displayPhoneNumber = defaultChannel.displayPhoneNumber || phoneNumberId;
+        console.log("✅ Synced Phone IDs:", syncedChannels.length, "Default:", phoneNumberId, "Display:", displayPhoneNumber);
 
         // 5. Save encrypted token in settings secrets
         await settingsService.setSecret({
