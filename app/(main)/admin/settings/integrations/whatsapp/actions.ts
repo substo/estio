@@ -26,6 +26,15 @@ import {
     subscribeWhatsAppAppToWaba,
     upsertWhatsAppCloudChannel,
 } from "@/lib/whatsapp/client";
+import { callLLM } from "@/lib/ai/llm";
+import { GEMINI_DRAFT_FAST_DEFAULT } from "@/lib/ai/models";
+import {
+    buildWhatsAppTemplateComponents,
+    extractTemplateBodyText,
+    normalizeTemplateName,
+    renderTemplatePreview,
+    validateWhatsAppTemplate,
+} from "@/lib/whatsapp/templates";
 
 const MASKED_SECRET = "********";
 
@@ -316,6 +325,53 @@ function normalizeTemplateCategory(value: unknown) {
     return String(value || "UTILITY").toUpperCase();
 }
 
+function normalizeTemplateLocalStatus(row: any) {
+    const status = String(row?.status || "").toLowerCase();
+    if (String(row?.localStatus || "").trim()) return String(row.localStatus).toLowerCase();
+    if (status === "approved") return "approved";
+    if (status === "rejected") return "rejected";
+    if (["pending", "submitted", "in_appeal"].includes(status)) return "pending";
+    return "synced";
+}
+
+function serializeWhatsAppTemplate(row: any) {
+    const components = Array.isArray(row.components) ? row.components : [];
+    const bodyText = row.bodyText || extractTemplateBodyText(components);
+    const examples = row.examples && typeof row.examples === "object" ? row.examples : {};
+    const validation = validateWhatsAppTemplate({
+        name: row.name,
+        category: row.category,
+        language: row.language,
+        bodyText,
+        headerText: row.header?.text || "",
+        footerText: row.footer || "",
+        examples,
+    });
+    return {
+        id: row.id,
+        name: row.name,
+        language: row.language,
+        category: row.category,
+        status: row.status,
+        localStatus: normalizeTemplateLocalStatus(row),
+        metaTemplateId: row.metaTemplateId || null,
+        rejectionReason: row.rejectionReason || null,
+        bodyText,
+        header: row.header || null,
+        footer: row.footer || "",
+        buttons: row.buttons || [],
+        components,
+        variableLabels: row.variableLabels || {},
+        examples,
+        aiPrompt: row.aiPrompt || "",
+        aiRiskNotes: row.aiRiskNotes || [],
+        previewText: renderTemplatePreview(bodyText, examples),
+        validation,
+        lastSyncedAt: row.lastSyncedAt?.toISOString?.() || null,
+        updatedAt: row.updatedAt?.toISOString?.() || null,
+    };
+}
+
 async function upsertLocalWhatsAppTemplate(locationId: string, template: any, fallbackWabaId?: string) {
     const credentials = fallbackWabaId
         ? null
@@ -344,6 +400,12 @@ async function upsertLocalWhatsAppTemplate(locationId: string, template: any, fa
             parameterFormat: template?.parameter_format || template?.parameterFormat || null,
             metaTemplateId: template?.id ? String(template.id) : null,
             rejectionReason: template?.rejected_reason || template?.rejectionReason || null,
+            bodyText: extractTemplateBodyText(template?.components || []),
+            localStatus: normalizeTemplateStatus(template?.status) === "approved"
+                ? "approved"
+                : normalizeTemplateStatus(template?.status) === "rejected"
+                    ? "rejected"
+                    : "pending",
             lastSyncedAt: new Date(),
         },
         update: {
@@ -354,6 +416,12 @@ async function upsertLocalWhatsAppTemplate(locationId: string, template: any, fa
             parameterFormat: template?.parameter_format || template?.parameterFormat || null,
             metaTemplateId: template?.id ? String(template.id) : null,
             rejectionReason: template?.rejected_reason || template?.rejectionReason || null,
+            bodyText: extractTemplateBodyText(template?.components || []),
+            localStatus: normalizeTemplateStatus(template?.status) === "approved"
+                ? "approved"
+                : normalizeTemplateStatus(template?.status) === "rejected"
+                    ? "rejected"
+                    : "pending",
             lastSyncedAt: new Date(),
         },
     });
@@ -405,15 +473,169 @@ export async function syncWhatsAppTemplates(locationId?: string | null) {
     return {
         success: true as const,
         count: rows.length,
-        templates: rows.map((row: any) => ({
-            id: row.id,
-            name: row.name,
-            language: row.language,
-            category: row.category,
-            status: row.status,
-            rejectionReason: row.rejectionReason,
-            lastSyncedAt: row.lastSyncedAt?.toISOString?.() || null,
-        })),
+        templates: rows.map(serializeWhatsAppTemplate),
+    };
+}
+
+export async function listWhatsAppTemplates(locationId?: string | null) {
+    const { location } = await resolveAdminContext(locationId || null);
+    const rows = await (db as any).whatsAppTemplate.findMany({
+        where: { locationId: location.id },
+        orderBy: [{ updatedAt: "desc" }],
+    });
+    return { success: true as const, templates: rows.map(serializeWhatsAppTemplate) };
+}
+
+export async function saveWhatsAppTemplateDraft(input: {
+    locationId?: string | null;
+    templateId?: string | null;
+    name: string;
+    language: string;
+    category: string;
+    bodyText: string;
+    headerText?: string | null;
+    footerText?: string | null;
+    buttons?: any[];
+    variableLabels?: Record<string, string>;
+    examples?: Record<string, string>;
+    aiPrompt?: string | null;
+    aiRiskNotes?: any;
+}) {
+    const { location } = await resolveAdminContext(input.locationId || null);
+    const credentials = await getWhatsAppCloudCredentials(location.id);
+    const name = normalizeTemplateName(input.name);
+    const category = normalizeTemplateCategory(input.category);
+    const bodyText = String(input.bodyText || "").trim();
+    const headerText = String(input.headerText || "").trim();
+    const footerText = String(input.footerText || "").trim();
+    const validation = validateWhatsAppTemplate({
+        name,
+        language: input.language,
+        category,
+        bodyText,
+        headerText,
+        footerText,
+        examples: input.examples || {},
+    });
+    if (!name) throw new Error("Template name is required.");
+    if (!bodyText) throw new Error("Template body is required.");
+
+    const components = buildWhatsAppTemplateComponents({
+        headerText,
+        bodyText,
+        footerText,
+        buttons: input.buttons || [],
+        examples: input.examples || {},
+    });
+
+    const row = await (db as any).whatsAppTemplate.upsert({
+        where: {
+            locationId_name_language: {
+                locationId: location.id,
+                name,
+                language: String(input.language || "en_US").trim(),
+            },
+        },
+        create: {
+            locationId: location.id,
+            wabaId: credentials.businessAccountId,
+            name,
+            language: String(input.language || "en_US").trim(),
+            category,
+            status: "draft",
+            localStatus: validation.ok ? "ready" : "draft",
+            components,
+            bodyText,
+            header: headerText ? { type: "TEXT", text: headerText } : null,
+            footer: footerText || null,
+            buttons: input.buttons || [],
+            variableLabels: input.variableLabels || {},
+            examples: input.examples || {},
+            aiPrompt: input.aiPrompt || null,
+            aiRiskNotes: input.aiRiskNotes || [],
+        },
+        update: {
+            category,
+            status: "draft",
+            localStatus: validation.ok ? "ready" : "draft",
+            components,
+            bodyText,
+            header: headerText ? { type: "TEXT", text: headerText } : null,
+            footer: footerText || null,
+            buttons: input.buttons || [],
+            variableLabels: input.variableLabels || {},
+            examples: input.examples || {},
+            aiPrompt: input.aiPrompt || null,
+            aiRiskNotes: input.aiRiskNotes || [],
+        },
+    });
+
+    revalidatePath("/admin/settings/integrations/whatsapp");
+    return { success: true as const, template: serializeWhatsAppTemplate(row), validation };
+}
+
+export async function generateWhatsAppTemplateDrafts(input: {
+    locationId?: string | null;
+    intent: string;
+    notes?: string | null;
+    language?: string | null;
+    model?: string | null;
+}) {
+    await resolveAdminContext(input.locationId || null);
+    const intent = String(input.intent || "first contact").trim();
+    const language = String(input.language || "en_US").trim();
+    const notes = String(input.notes || "").trim();
+    const model = String(input.model || GEMINI_DRAFT_FAST_DEFAULT).trim() || GEMINI_DRAFT_FAST_DEFAULT;
+    const systemPrompt = [
+        "You create WhatsApp Business Cloud API message templates for an enterprise real-estate SaaS.",
+        "Return strict JSON only.",
+        "Generate 3 variants. Do not submit anything to Meta.",
+        "Each variant must include name, category, language, components, variableLabels, examples, riskNotes, approvalChecklist.",
+        "Use BODY text with sequential variables like {{1}}, {{2}}. Provide sample values for every variable.",
+        "Categories must be UTILITY, MARKETING, or AUTHENTICATION.",
+        "Utility templates must be tied to an actual customer action or transaction.",
+        "Marketing templates may be promotional and should include an opt-out footer where appropriate.",
+    ].join("\n");
+    const userContent = JSON.stringify({ intent, language, notes });
+    const raw = await callLLM(model, systemPrompt, userContent, {
+        jsonMode: true,
+        temperature: 0.4,
+        maxOutputTokens: 3000,
+    });
+    let parsed: any;
+    try {
+        parsed = JSON.parse(raw);
+    } catch {
+        throw new Error("AI returned an invalid template response. Please try again.");
+    }
+    const variants = Array.isArray(parsed?.variants) ? parsed.variants : Array.isArray(parsed) ? parsed : [];
+    return {
+        success: true as const,
+        variants: variants.slice(0, 3).map((variant: any) => {
+            const components = Array.isArray(variant.components) ? variant.components : [];
+            const bodyText = String(variant.bodyText || extractTemplateBodyText(components) || "").trim();
+            const footer = components.find((component: any) => String(component?.type || "").toUpperCase() === "FOOTER")?.text || variant.footer || "";
+            const header = components.find((component: any) => String(component?.type || "").toUpperCase() === "HEADER");
+            const examples = variant.examples || {};
+            const normalized = {
+                name: normalizeTemplateName(variant.name || intent),
+                category: normalizeTemplateCategory(variant.category),
+                language: variant.language || language,
+                bodyText,
+                headerText: header?.text || variant.headerText || "",
+                footerText: footer,
+                buttons: variant.buttons || [],
+                variableLabels: variant.variableLabels || {},
+                examples,
+                riskNotes: Array.isArray(variant.riskNotes) ? variant.riskNotes : [],
+                approvalChecklist: Array.isArray(variant.approvalChecklist) ? variant.approvalChecklist : [],
+            };
+            return {
+                ...normalized,
+                previewText: renderTemplatePreview(bodyText, examples),
+                validation: validateWhatsAppTemplate(normalized),
+            };
+        }),
     };
 }
 
@@ -460,27 +682,73 @@ export async function createWhatsAppTemplate(input: {
             language,
             category,
             status: normalizeTemplateStatus(created?.status || "submitted"),
+            localStatus: "pending",
             components,
             parameterFormat: input.parameterFormat || null,
             metaTemplateId: created?.id ? String(created.id) : null,
             variableLabels: input.variableLabels || null,
             examples: input.examples || null,
+            bodyText: extractTemplateBodyText(components),
             lastSyncedAt: new Date(),
         },
         update: {
             category,
             status: normalizeTemplateStatus(created?.status || "submitted"),
+            localStatus: "pending",
             components,
             parameterFormat: input.parameterFormat || null,
             metaTemplateId: created?.id ? String(created.id) : null,
             variableLabels: input.variableLabels || null,
             examples: input.examples || null,
+            bodyText: extractTemplateBodyText(components),
             lastSyncedAt: new Date(),
         },
     });
 
     revalidatePath("/admin/settings/integrations/whatsapp");
     return { success: true as const, template: row, meta: created };
+}
+
+export async function submitWhatsAppTemplateDraft(input: {
+    locationId?: string | null;
+    templateId?: string | null;
+    name?: string;
+    language?: string;
+    category?: string;
+    bodyText?: string;
+    headerText?: string | null;
+    footerText?: string | null;
+    buttons?: any[];
+    variableLabels?: Record<string, string>;
+    examples?: Record<string, string>;
+}) {
+    const { location } = await resolveAdminContext(input.locationId || null);
+    const existing = input.templateId
+        ? await (db as any).whatsAppTemplate.findFirst({ where: { id: input.templateId, locationId: location.id } })
+        : null;
+    const name = normalizeTemplateName(input.name || existing?.name || "");
+    const language = String(input.language || existing?.language || "en_US").trim();
+    const category = normalizeTemplateCategory(input.category || existing?.category || "UTILITY");
+    const bodyText = String(input.bodyText || existing?.bodyText || extractTemplateBodyText(existing?.components || []) || "").trim();
+    const headerText = String(input.headerText ?? existing?.header?.text ?? "").trim();
+    const footerText = String(input.footerText ?? existing?.footer ?? "").trim();
+    const buttons = input.buttons || existing?.buttons || [];
+    const variableLabels = input.variableLabels || existing?.variableLabels || {};
+    const examples = input.examples || existing?.examples || {};
+    const validation = validateWhatsAppTemplate({ name, language, category, bodyText, headerText, footerText, examples });
+    if (!validation.ok) {
+        throw new Error(validation.errors.join(" "));
+    }
+    const components = buildWhatsAppTemplateComponents({ headerText, bodyText, footerText, buttons, examples });
+    return createWhatsAppTemplate({
+        locationId: location.id,
+        name,
+        language,
+        category,
+        components,
+        variableLabels,
+        examples,
+    });
 }
 
 export async function repairWhatsAppCloudConnection(locationId?: string | null) {

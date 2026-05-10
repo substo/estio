@@ -2382,6 +2382,13 @@ model WhatsAppTemplate {
   parameterFormat   String?
   metaTemplateId    String?
   rejectionReason   String?  @db.Text
+  bodyText          String?  @db.Text
+  header            Json?
+  footer            String?  @db.Text
+  buttons           Json?
+  aiPrompt          String?  @db.Text
+  aiRiskNotes       Json?
+  localStatus       String   @default("synced")
   variableLabels    Json?
   examples          Json?
   lastSyncedAt      DateTime?

@@ -11,16 +11,21 @@ import {
     repairEvolutionConnection,
     getWhatsAppCloudHealth,
     syncWhatsAppTemplates,
+    listWhatsAppTemplates,
     repairWhatsAppCloudConnection,
-    createWhatsAppTemplate,
+    saveWhatsAppTemplateDraft,
+    submitWhatsAppTemplateDraft,
+    generateWhatsAppTemplateDrafts,
     setDefaultWhatsAppChannelAction,
     verifyWhatsAppCloudChannel,
 } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, Copy, Check, Facebook, CheckCircle2, XCircle, AlertCircle, ChevronDown, Settings, RefreshCw, AlertTriangle } from "lucide-react";
+import { Loader2, Copy, Check, Facebook, CheckCircle2, XCircle, AlertCircle, ChevronDown, Settings, RefreshCw, AlertTriangle, Sparkles, Send, Save, Wand2 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { FacebookSDKScript } from "@/components/integrations/facebook-sdk-script";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -52,6 +57,81 @@ type WhatsAppChannelRow = {
     lastHealthCheckedAt: string | null;
 };
 
+type TemplateBuilderState = {
+    id: string | null;
+    name: string;
+    language: string;
+    category: string;
+    headerText: string;
+    bodyText: string;
+    footerText: string;
+    variableLabels: Record<string, string>;
+    examples: Record<string, string>;
+    aiPrompt: string;
+    aiRiskNotes: any[];
+};
+
+const EMPTY_TEMPLATE: TemplateBuilderState = {
+    id: null,
+    name: "",
+    language: "en_US",
+    category: "UTILITY",
+    headerText: "",
+    bodyText: "",
+    footerText: "",
+    variableLabels: {},
+    examples: {},
+    aiPrompt: "",
+    aiRiskNotes: [],
+};
+
+const TEMPLATE_INTENTS = [
+    "first contact",
+    "viewing reminder",
+    "property follow-up",
+    "owner update",
+    "document request",
+    "feedback request",
+    "reactivation",
+    "marketing/newsletter",
+];
+
+function normalizeTemplateNameInput(value: string) {
+    return String(value || "").toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function extractVariables(text: string) {
+    return Array.from(new Set(Array.from(String(text || "").matchAll(/\{\{\s*(\d+)\s*\}\}/g)).map((match) => match[1]))).sort((a, b) => Number(a) - Number(b));
+}
+
+function validateTemplateDraft(template: TemplateBuilderState) {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    const name = normalizeTemplateNameInput(template.name);
+    const variables = extractVariables(template.bodyText);
+    if (!name) errors.push("Template name is required.");
+    if (!template.bodyText.trim()) errors.push("Body text is required.");
+    if (template.bodyText.length > 1024) errors.push("Body must be 1024 characters or less.");
+    if (template.headerText.length > 60) errors.push("Header text must be 60 characters or less.");
+    if (template.footerText.length > 60) errors.push("Footer text must be 60 characters or less.");
+    variables.forEach((variable, index) => {
+        if (variable !== String(index + 1)) errors.push("Variables must be sequential, starting at {{1}}.");
+        if (!String(template.examples[variable] || "").trim()) errors.push(`Sample value is required for {{${variable}}}.`);
+    });
+    const lowerBody = template.bodyText.toLowerCase();
+    if (template.category === "UTILITY" && ["discount", "offer", "sale", "newsletter", "promotion", "new listing"].some((word) => lowerBody.includes(word))) {
+        warnings.push("This may be Marketing rather than Utility.");
+    }
+    if (template.category === "MARKETING" && !template.footerText.toLowerCase().includes("stop")) {
+        warnings.push("Marketing templates should usually include an opt-out footer.");
+    }
+    return { errors: Array.from(new Set(errors)), warnings: Array.from(new Set(warnings)), variables };
+}
+
+function renderPreview(text: string, examples: Record<string, string>) {
+    return String(text || "").replace(/\{\{\s*(\d+)\s*\}\}/g, (_match, index) => examples[index] || `{{${index}}}`);
+}
+
 export default function WhatsAppSettingsPage() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -78,12 +158,12 @@ export default function WhatsAppSettingsPage() {
     const [cloudHealth, setCloudHealth] = useState<any>(null);
     const [cloudBusy, setCloudBusy] = useState(false);
     const [templates, setTemplates] = useState<any[]>([]);
-    const [newTemplate, setNewTemplate] = useState({
-        name: "",
-        language: "en_US",
-        category: "UTILITY",
-        body: "",
-    });
+    const [templateFilter, setTemplateFilter] = useState("all");
+    const [templateBuilder, setTemplateBuilder] = useState<TemplateBuilderState>(EMPTY_TEMPLATE);
+    const [aiTemplateIntent, setAiTemplateIntent] = useState("first contact");
+    const [aiTemplateNotes, setAiTemplateNotes] = useState("");
+    const [aiVariants, setAiVariants] = useState<any[]>([]);
+    const [aiBusy, setAiBusy] = useState(false);
     const [clearWhatsAppAccessToken, setClearWhatsAppAccessToken] = useState(false);
     const [clearTwilioAuthToken, setClearTwilioAuthToken] = useState(false);
 
@@ -222,30 +302,107 @@ export default function WhatsAppSettingsPage() {
         }
     };
 
-    const handleCreateTemplate = async () => {
-        const name = newTemplate.name.trim();
-        const body = newTemplate.body.trim();
-        if (!name || !body) {
+    const loadTemplates = async (locationId = settings.locationId || null) => {
+        const result = await listWhatsAppTemplates(locationId);
+        if (result?.success) setTemplates(result.templates || []);
+    };
+
+    const applyTemplateToBuilder = (template: any) => {
+        setTemplateBuilder({
+            id: template.id || null,
+            name: template.name || "",
+            language: template.language || "en_US",
+            category: template.category || "UTILITY",
+            headerText: template.header?.text || template.headerText || "",
+            bodyText: template.bodyText || "",
+            footerText: template.footer || template.footerText || "",
+            variableLabels: template.variableLabels || {},
+            examples: template.examples || {},
+            aiPrompt: template.aiPrompt || "",
+            aiRiskNotes: template.aiRiskNotes || template.riskNotes || [],
+        });
+    };
+
+    const handleSaveTemplateDraft = async () => {
+        const validation = validateTemplateDraft(templateBuilder);
+        if (!templateBuilder.name.trim() || !templateBuilder.bodyText.trim()) {
             toast({ title: "Template incomplete", description: "Name and body are required.", variant: "destructive" });
             return;
         }
         setCloudBusy(true);
         try {
-            await createWhatsAppTemplate({
+            const result = await saveWhatsAppTemplateDraft({
                 locationId: settings.locationId || null,
-                name,
-                language: newTemplate.language,
-                category: newTemplate.category,
-                components: [{ type: "BODY", text: body }],
+                templateId: templateBuilder.id,
+                name: templateBuilder.name,
+                language: templateBuilder.language,
+                category: templateBuilder.category,
+                headerText: templateBuilder.headerText,
+                bodyText: templateBuilder.bodyText,
+                footerText: templateBuilder.footerText,
+                variableLabels: templateBuilder.variableLabels,
+                examples: templateBuilder.examples,
+                aiPrompt: templateBuilder.aiPrompt,
+                aiRiskNotes: templateBuilder.aiRiskNotes,
+            });
+            await loadTemplates();
+            if (result.template) applyTemplateToBuilder(result.template);
+            toast({
+                title: validation.errors.length ? "Draft saved" : "Template ready",
+                description: validation.errors.length ? "Fix validation items before submitting to Meta." : "Human review can now submit this to Meta.",
+            });
+        } catch (error: any) {
+            toast({ title: "Draft failed", description: error?.message || "Unable to save template.", variant: "destructive" });
+        } finally {
+            setCloudBusy(false);
+        }
+    };
+
+    const handleSubmitTemplate = async () => {
+        const validation = validateTemplateDraft(templateBuilder);
+        if (validation.errors.length) {
+            toast({ title: "Template not ready", description: validation.errors[0], variant: "destructive" });
+            return;
+        }
+        setCloudBusy(true);
+        try {
+            await submitWhatsAppTemplateDraft({
+                locationId: settings.locationId || null,
+                templateId: templateBuilder.id,
+                name: templateBuilder.name,
+                language: templateBuilder.language,
+                category: templateBuilder.category,
+                headerText: templateBuilder.headerText,
+                bodyText: templateBuilder.bodyText,
+                footerText: templateBuilder.footerText,
+                variableLabels: templateBuilder.variableLabels,
+                examples: templateBuilder.examples,
             });
             const result = await syncWhatsAppTemplates(settings.locationId || null);
             if (result?.success) setTemplates(result.templates || []);
-            setNewTemplate(prev => ({ ...prev, name: "", body: "" }));
-            toast({ title: "Template submitted", description: "Meta will review the template before it can be sent." });
+            toast({ title: "Template submitted", description: "Meta will review the template before agents can send it." });
         } catch (error: any) {
-            toast({ title: "Template failed", description: error?.message || "Unable to submit template.", variant: "destructive" });
+            toast({ title: "Submission failed", description: error?.message || "Unable to submit template.", variant: "destructive" });
         } finally {
             setCloudBusy(false);
+        }
+    };
+
+    const handleGenerateTemplateVariants = async () => {
+        setAiBusy(true);
+        try {
+            const result = await generateWhatsAppTemplateDrafts({
+                locationId: settings.locationId || null,
+                intent: aiTemplateIntent,
+                notes: aiTemplateNotes,
+                language: templateBuilder.language,
+            });
+            setAiVariants(result.variants || []);
+            toast({ title: "AI variants ready", description: "Choose one, edit it, then save or submit after review." });
+        } catch (error: any) {
+            toast({ title: "AI generation failed", description: error?.message || "Unable to generate templates.", variant: "destructive" });
+        } finally {
+            setAiBusy(false);
         }
     };
 
@@ -384,6 +541,9 @@ export default function WhatsAppSettingsPage() {
         getWhatsAppSettings(null).then((data) => {
             if (data) {
                 applyServerSettings(data);
+                listWhatsAppTemplates(data.locationId || null).then((result) => {
+                    if (result?.success) setTemplates(result.templates || []);
+                }).catch(() => undefined);
             }
             setLoading(false);
         });
@@ -657,59 +817,232 @@ export default function WhatsAppSettingsPage() {
                             </div>
                         )}
 
-                        <div className="grid gap-3 rounded-md border p-4">
-                            <div className="font-medium">Create Template</div>
-                            <div className="grid gap-3 sm:grid-cols-3">
-                                <Input
-                                    placeholder="template_name"
-                                    value={newTemplate.name}
-                                    onChange={(e) => setNewTemplate({ ...newTemplate, name: e.target.value })}
-                                />
-                                <Input
-                                    placeholder="en_US"
-                                    value={newTemplate.language}
-                                    onChange={(e) => setNewTemplate({ ...newTemplate, language: e.target.value })}
-                                />
-                                <select
-                                    className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-                                    value={newTemplate.category}
-                                    onChange={(e) => setNewTemplate({ ...newTemplate, category: e.target.value })}
-                                >
-                                    <option value="UTILITY">Utility</option>
-                                    <option value="MARKETING">Marketing</option>
-                                    <option value="AUTHENTICATION">Authentication</option>
-                                </select>
-                            </div>
-                            <Input
-                                placeholder="Template body, use {{1}} for variables"
-                                value={newTemplate.body}
-                                onChange={(e) => setNewTemplate({ ...newTemplate, body: e.target.value })}
-                            />
-                            <div>
-                                <Button type="button" onClick={handleCreateTemplate} disabled={cloudBusy}>
-                                    Submit Template
+                        <div className="space-y-4 rounded-md border p-4">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div>
+                                    <div className="font-medium">Template Center</div>
+                                    <div className="text-sm text-muted-foreground">Governed WhatsApp templates for Meta approval and outbound recovery.</div>
+                                </div>
+                                <Button type="button" variant="outline" onClick={() => loadTemplates()} disabled={cloudBusy}>
+                                    <RefreshCw className="mr-2 h-4 w-4" />
+                                    Sync Catalog
                                 </Button>
                             </div>
-                        </div>
 
-                        {templates.length > 0 && (
-                            <div className="rounded-md border">
-                                <div className="grid grid-cols-4 gap-2 border-b px-3 py-2 text-xs font-medium text-muted-foreground">
-                                    <span>Name</span>
-                                    <span>Language</span>
-                                    <span>Category</span>
-                                    <span>Status</span>
-                                </div>
-                                {templates.map((template) => (
-                                    <div key={`${template.name}:${template.language}`} className="grid grid-cols-4 gap-2 px-3 py-2 text-sm">
-                                        <span className="truncate">{template.name}</span>
-                                        <span>{template.language}</span>
-                                        <span>{template.category}</span>
-                                        <span>{template.status}</span>
-                                    </div>
+                            <div className="flex flex-wrap gap-2">
+                                {["all", "approved", "pending", "rejected", "draft", "ready"].map((filter) => (
+                                    <Button
+                                        key={filter}
+                                        type="button"
+                                        size="sm"
+                                        variant={templateFilter === filter ? "default" : "outline"}
+                                        onClick={() => setTemplateFilter(filter)}
+                                    >
+                                        {filter.charAt(0).toUpperCase() + filter.slice(1)}
+                                    </Button>
                                 ))}
                             </div>
-                        )}
+
+                            <div className="grid gap-4 lg:grid-cols-[1fr_0.95fr]">
+                                <div className="space-y-3">
+                                    <div className="rounded-md border">
+                                        <div className="grid grid-cols-[1fr_0.55fr_0.55fr_0.7fr] gap-2 border-b px-3 py-2 text-xs font-medium text-muted-foreground">
+                                            <span>Name</span>
+                                            <span>Category</span>
+                                            <span>Status</span>
+                                            <span>Meta ID</span>
+                                        </div>
+                                        {templates.filter((template) => {
+                                            if (templateFilter === "all") return true;
+                                            if (templateFilter === "pending") return ["pending", "submitted"].includes(String(template.localStatus || template.status).toLowerCase());
+                                            return String(template.localStatus || template.status).toLowerCase() === templateFilter;
+                                        }).length > 0 ? (
+                                            templates.filter((template) => {
+                                                if (templateFilter === "all") return true;
+                                                if (templateFilter === "pending") return ["pending", "submitted"].includes(String(template.localStatus || template.status).toLowerCase());
+                                                return String(template.localStatus || template.status).toLowerCase() === templateFilter;
+                                            }).map((template) => (
+                                                <button
+                                                    key={template.id || `${template.name}:${template.language}`}
+                                                    type="button"
+                                                    className="grid w-full grid-cols-[1fr_0.55fr_0.55fr_0.7fr] gap-2 px-3 py-3 text-left text-sm hover:bg-muted/50"
+                                                    onClick={() => applyTemplateToBuilder(template)}
+                                                >
+                                                    <span className="min-w-0">
+                                                        <span className="block truncate font-medium">{template.name}</span>
+                                                        <span className="block truncate text-xs text-muted-foreground">{template.language}</span>
+                                                    </span>
+                                                    <span><Badge variant="outline">{template.category}</Badge></span>
+                                                    <span className="truncate">{template.localStatus || template.status}</span>
+                                                    <span className="truncate text-xs text-muted-foreground">{template.metaTemplateId || "local"}</span>
+                                                </button>
+                                            ))
+                                        ) : (
+                                            <div className="px-3 py-6 text-sm text-muted-foreground">No templates in this view.</div>
+                                        )}
+                                    </div>
+
+                                    <div className="space-y-3 rounded-md border p-3">
+                                        <div className="flex items-center gap-2 font-medium">
+                                            <Sparkles className="h-4 w-4" />
+                                            AI Template Assistant
+                                        </div>
+                                        <div className="grid gap-2 sm:grid-cols-2">
+                                            <select
+                                                className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                                                value={aiTemplateIntent}
+                                                onChange={(e) => setAiTemplateIntent(e.target.value)}
+                                            >
+                                                {TEMPLATE_INTENTS.map((intent) => <option key={intent} value={intent}>{intent}</option>)}
+                                            </select>
+                                            <Input
+                                                placeholder="Context, property type, audience, tone"
+                                                value={aiTemplateNotes}
+                                                onChange={(e) => setAiTemplateNotes(e.target.value)}
+                                            />
+                                        </div>
+                                        <Button type="button" variant="outline" onClick={handleGenerateTemplateVariants} disabled={aiBusy || cloudBusy}>
+                                            {aiBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                                            Generate Variants
+                                        </Button>
+                                        {aiVariants.length > 0 && (
+                                            <div className="space-y-2">
+                                                {aiVariants.map((variant, index) => (
+                                                    <button
+                                                        key={`${variant.name}-${index}`}
+                                                        type="button"
+                                                        className="w-full rounded-md border p-3 text-left text-sm hover:bg-muted/50"
+                                                        onClick={() => applyTemplateToBuilder({ ...variant, aiPrompt: `${aiTemplateIntent}: ${aiTemplateNotes}`, aiRiskNotes: variant.riskNotes })}
+                                                    >
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <span className="font-medium">{variant.name}</span>
+                                                            <Badge variant="outline">{variant.category}</Badge>
+                                                        </div>
+                                                        <div className="mt-2 whitespace-pre-wrap text-muted-foreground">{variant.previewText || variant.bodyText}</div>
+                                                        {variant.riskNotes?.length > 0 && <div className="mt-2 text-xs text-amber-700">{variant.riskNotes.join(" ")}</div>}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="space-y-3">
+                                    <div className="grid gap-3 rounded-md border p-3">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <div className="font-medium">Builder</div>
+                                            <Button type="button" size="sm" variant="outline" onClick={() => setTemplateBuilder(EMPTY_TEMPLATE)}>New Draft</Button>
+                                        </div>
+                                        <div className="grid gap-3 sm:grid-cols-3">
+                                            <div className="space-y-1">
+                                                <Label>Name</Label>
+                                                <Input
+                                                    placeholder="viewing_reminder"
+                                                    value={templateBuilder.name}
+                                                    onChange={(e) => setTemplateBuilder({ ...templateBuilder, name: normalizeTemplateNameInput(e.target.value) })}
+                                                />
+                                            </div>
+                                            <div className="space-y-1">
+                                                <Label>Language</Label>
+                                                <Input
+                                                    placeholder="en_US"
+                                                    value={templateBuilder.language}
+                                                    onChange={(e) => setTemplateBuilder({ ...templateBuilder, language: e.target.value })}
+                                                />
+                                            </div>
+                                            <div className="space-y-1">
+                                                <Label>Category</Label>
+                                                <select
+                                                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                                                    value={templateBuilder.category}
+                                                    onChange={(e) => setTemplateBuilder({ ...templateBuilder, category: e.target.value })}
+                                                >
+                                                    <option value="UTILITY">Utility</option>
+                                                    <option value="MARKETING">Marketing</option>
+                                                    <option value="AUTHENTICATION">Authentication</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <Label>Header</Label>
+                                            <Input
+                                                placeholder="Optional text header"
+                                                value={templateBuilder.headerText}
+                                                onChange={(e) => setTemplateBuilder({ ...templateBuilder, headerText: e.target.value })}
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <Label>Body</Label>
+                                            <Textarea
+                                                className="min-h-28"
+                                                placeholder="Hi {{1}}, your viewing for {{2}} is confirmed for {{3}}."
+                                                value={templateBuilder.bodyText}
+                                                onChange={(e) => setTemplateBuilder({ ...templateBuilder, bodyText: e.target.value })}
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <Label>Footer</Label>
+                                            <Input
+                                                placeholder="Optional footer"
+                                                value={templateBuilder.footerText}
+                                                onChange={(e) => setTemplateBuilder({ ...templateBuilder, footerText: e.target.value })}
+                                            />
+                                        </div>
+                                        {validateTemplateDraft(templateBuilder).variables.length > 0 && (
+                                            <div className="grid gap-2 sm:grid-cols-2">
+                                                {validateTemplateDraft(templateBuilder).variables.map((variable) => (
+                                                    <div key={variable} className="grid gap-1">
+                                                        <Label>{`{{${variable}}}`}</Label>
+                                                        <Input
+                                                            placeholder="Sample value"
+                                                            value={templateBuilder.examples[variable] || ""}
+                                                            onChange={(e) => setTemplateBuilder({
+                                                                ...templateBuilder,
+                                                                examples: { ...templateBuilder.examples, [variable]: e.target.value },
+                                                            })}
+                                                        />
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                        <div className="flex flex-wrap gap-2">
+                                            <Button type="button" variant="outline" onClick={handleSaveTemplateDraft} disabled={cloudBusy}>
+                                                <Save className="mr-2 h-4 w-4" />
+                                                Save Draft
+                                            </Button>
+                                            <Button type="button" onClick={handleSubmitTemplate} disabled={cloudBusy || validateTemplateDraft(templateBuilder).errors.length > 0}>
+                                                <Send className="mr-2 h-4 w-4" />
+                                                Submit to Meta
+                                            </Button>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-3 rounded-md border p-3">
+                                        <div className="font-medium">WhatsApp Preview</div>
+                                        <div className="rounded-md bg-[#e7f6df] p-3">
+                                            <div className="max-w-[92%] rounded-md bg-white p-3 text-sm shadow-sm">
+                                                {templateBuilder.headerText && <div className="mb-2 font-semibold">{templateBuilder.headerText}</div>}
+                                                <div className="whitespace-pre-wrap">{renderPreview(templateBuilder.bodyText || "Template body preview", templateBuilder.examples)}</div>
+                                                {templateBuilder.footerText && <div className="mt-2 text-xs text-muted-foreground">{templateBuilder.footerText}</div>}
+                                            </div>
+                                        </div>
+                                        <div className="space-y-2 text-sm">
+                                            {validateTemplateDraft(templateBuilder).errors.length === 0 ? (
+                                                <div className="flex items-center gap-2 text-green-700"><CheckCircle2 className="h-4 w-4" /> Ready for human review</div>
+                                            ) : validateTemplateDraft(templateBuilder).errors.map((error) => (
+                                                <div key={error} className="flex items-center gap-2 text-red-700"><XCircle className="h-4 w-4" /> {error}</div>
+                                            ))}
+                                            {validateTemplateDraft(templateBuilder).warnings.map((warning) => (
+                                                <div key={warning} className="flex items-center gap-2 text-amber-700"><AlertTriangle className="h-4 w-4" /> {warning}</div>
+                                            ))}
+                                            {templateBuilder.aiRiskNotes?.map((note, index) => (
+                                                <div key={`${note}-${index}`} className="flex items-center gap-2 text-muted-foreground"><AlertCircle className="h-4 w-4" /> {String(note)}</div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </CardContent>
                 </Card>
 
