@@ -12,6 +12,7 @@ import {
 import { extractGroupParticipantIdentity } from "@/lib/whatsapp/group-participants";
 import { computeWhatsAppCustomerServiceExpiresAt } from "@/lib/whatsapp/customer-window";
 import { WHATSAPP_CLOUD_PROVIDER } from "@/lib/whatsapp/client";
+import { WHATSAPP_WEB_BRIDGE_PROVIDER } from "@/lib/whatsapp/web-bridge";
 
 const LID_RETRY_INTERVAL_MS = Number(process.env.WHATSAPP_LID_RETRY_INTERVAL_MS || 30000);
 const LID_RETRY_MAX_ATTEMPTS = Number(process.env.WHATSAPP_LID_MAX_ATTEMPTS || 240);
@@ -19,6 +20,7 @@ const LID_RETRY_MAX_ATTEMPTS = Number(process.env.WHATSAPP_LID_MAX_ATTEMPTS || 2
 function getMessageSyncProvider(source: NormalizedMessage["source"]) {
     if (source === "whatsapp_native") return WHATSAPP_CLOUD_PROVIDER;
     if (source === "whatsapp_twilio") return "twilio";
+    if (source === "whatsapp_web_bridge") return WHATSAPP_WEB_BRIDGE_PROVIDER;
     return "evolution";
 }
 
@@ -32,7 +34,7 @@ export interface NormalizedMessage {
     timestamp: Date;
     mediaUrl?: string; // For improved media handling
     contactName?: string;
-    source: "whatsapp_native" | "whatsapp_twilio" | "whatsapp_evolution";
+    source: "whatsapp_native" | "whatsapp_twilio" | "whatsapp_evolution" | "whatsapp_web_bridge";
     direction?: "inbound" | "outbound";
     isGroup?: boolean;
     participant?: string;
@@ -1027,6 +1029,8 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
             ? (locationDef?.whatsappPhoneNumberId || "default")
             : syncProvider === "twilio"
                 ? (locationDef?.twilioAccountSid || "default")
+                : syncProvider === WHATSAPP_WEB_BRIDGE_PROVIDER
+                    ? locationId
                 : (locationDef?.evolutionInstanceId || "default");
     await (db as any).conversationSync.upsert({
         where: {

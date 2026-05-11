@@ -9,6 +9,7 @@
         "start": "next start",
         "start:scrape-worker": "node scripts/start-scrape-worker.js",
         "start:viewing-live-relay": "tsx scripts/start-viewing-live-relay.ts",
+        "start:whatsapp-web-bridge": "tsx scripts/whatsapp-web-bridge-service.ts",
         "ops:viewings:retention": "tsx scripts/cleanup-viewing-session-retention.ts",
         "lint": "next lint",
         "settings:backfill": "tsx scripts/settings/backfill.ts",
@@ -131,6 +132,7 @@
         "uuid": "^13.0.0",
         "web-push": "^3.6.7",
         "whatsapp-chat-parser": "^4.0.2",
+        "whatsapp-web.js": "^1.34.7",
         "zod": "^3.23.5"
     },
     "devDependencies": {

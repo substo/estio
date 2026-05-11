@@ -18,6 +18,10 @@ import {
     generateWhatsAppTemplateDrafts,
     setDefaultWhatsAppChannelAction,
     verifyWhatsAppCloudChannel,
+    connectWhatsAppWebBridge,
+    disconnectWhatsAppWebBridge,
+    clearWhatsAppWebBridge,
+    setWhatsAppWebBridgeDefault,
 } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,7 +29,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, Copy, Check, Facebook, CheckCircle2, XCircle, AlertCircle, ChevronDown, Settings, RefreshCw, AlertTriangle, Sparkles, Send, Save, Wand2 } from "lucide-react";
+import { Loader2, Copy, Check, Facebook, CheckCircle2, XCircle, AlertCircle, ChevronDown, Settings, RefreshCw, AlertTriangle, Sparkles, Send, Save, Wand2, QrCode, Unplug } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { FacebookSDKScript } from "@/components/integrations/facebook-sdk-script";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -55,6 +59,18 @@ type WhatsAppChannelRow = {
     isDefaultOutbound: boolean;
     coexistenceEnabled: boolean;
     lastHealthCheckedAt: string | null;
+};
+
+type WhatsAppWebBridgeSessionRow = {
+    id: string;
+    sessionId: string;
+    phone: string;
+    status: string;
+    qrCode: string;
+    lastReadyAt: string | null;
+    lastSeenAt: string | null;
+    lastError: string;
+    isDefaultOutbound: boolean;
 };
 
 type TemplateBuilderState = {
@@ -154,6 +170,7 @@ export default function WhatsAppSettingsPage() {
         evolutionConnectionStatus: "close",
         whatsappProviderMode: "cloud_primary",
         whatsappChannels: [] as WhatsAppChannelRow[],
+        webBridgeSession: null as WhatsAppWebBridgeSessionRow | null,
     });
     const [cloudHealth, setCloudHealth] = useState<any>(null);
     const [cloudBusy, setCloudBusy] = useState(false);
@@ -221,6 +238,7 @@ export default function WhatsAppSettingsPage() {
             evolutionConnectionStatus: data.evolutionConnectionStatus || "close",
             whatsappProviderMode: data.whatsappProviderMode || "cloud_primary",
             whatsappChannels: Array.isArray(data.whatsappChannels) ? data.whatsappChannels : [],
+            webBridgeSession: data.webBridgeSession || null,
         });
     };
 
@@ -297,6 +315,67 @@ export default function WhatsAppSettingsPage() {
             toast({ title: "Default number updated", description: "New Cloud API sends will use this number." });
         } catch (error: any) {
             toast({ title: "Could not update default", description: error?.message || "Unable to set default number.", variant: "destructive" });
+        } finally {
+            setCloudBusy(false);
+        }
+    };
+
+    const reloadSettings = async () => {
+        const data = await getWhatsAppSettings(settings.locationId || null);
+        applyServerSettings(data);
+    };
+
+    const handleConnectWebBridge = async () => {
+        setCloudBusy(true);
+        try {
+            const result = await connectWhatsAppWebBridge(settings.locationId || null);
+            await reloadSettings();
+            toast({
+                title: result.success ? "WhatsApp Web Bridge starting" : "Bridge start failed",
+                description: result.success ? "Scan the QR code when it appears, then refresh status." : result.error,
+                variant: result.success ? "default" : "destructive",
+            });
+        } catch (error: any) {
+            toast({ title: "Bridge start failed", description: error?.message || "Unable to start bridge.", variant: "destructive" });
+        } finally {
+            setCloudBusy(false);
+        }
+    };
+
+    const handleDisconnectWebBridge = async () => {
+        setCloudBusy(true);
+        try {
+            await disconnectWhatsAppWebBridge(settings.locationId || null);
+            await reloadSettings();
+            toast({ title: "WhatsApp Web Bridge disconnected" });
+        } catch (error: any) {
+            toast({ title: "Disconnect failed", description: error?.message || "Unable to disconnect bridge.", variant: "destructive" });
+        } finally {
+            setCloudBusy(false);
+        }
+    };
+
+    const handleClearWebBridge = async () => {
+        setCloudBusy(true);
+        try {
+            await clearWhatsAppWebBridge(settings.locationId || null);
+            await reloadSettings();
+            toast({ title: "WhatsApp Web Bridge session cleared" });
+        } catch (error: any) {
+            toast({ title: "Clear failed", description: error?.message || "Unable to clear bridge session.", variant: "destructive" });
+        } finally {
+            setCloudBusy(false);
+        }
+    };
+
+    const handleSetWebBridgeDefault = async () => {
+        setCloudBusy(true);
+        try {
+            await setWhatsAppWebBridgeDefault(settings.locationId || null);
+            await reloadSettings();
+            toast({ title: "Default transport updated", description: "New WhatsApp sends will use the Web Bridge." });
+        } catch (error: any) {
+            toast({ title: "Could not update default", description: error?.message || "Unable to set bridge as default.", variant: "destructive" });
         } finally {
             setCloudBusy(false);
         }
@@ -725,6 +804,7 @@ export default function WhatsAppSettingsPage() {
                                     onChange={(e) => setSettings({ ...settings, whatsappProviderMode: e.target.value })}
                                 >
                                     <option value="cloud_primary">Cloud API Primary</option>
+                                    <option value="web_bridge">WhatsApp Web Bridge</option>
                                     <option value="evolution_linked">Evolution Linked Device</option>
                                     <option value="twilio_fallback">Twilio Fallback</option>
                                 </select>
@@ -816,6 +896,80 @@ export default function WhatsAppSettingsPage() {
                                 ))}
                             </div>
                         )}
+
+                        <div className="space-y-4 rounded-md border p-4">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                    <div className="font-medium">WhatsApp Web Bridge</div>
+                                    <div className="text-sm text-muted-foreground">
+                                        Self-hosted linked-device transport for normal free-text WhatsApp conversations and manual mobile/web echoes.
+                                    </div>
+                                </div>
+                                <Badge variant={settings.webBridgeSession?.status === "ready" ? "default" : "outline"}>
+                                    {settings.webBridgeSession?.status || "not paired"}
+                                </Badge>
+                            </div>
+
+                            <div className="grid gap-4 md:grid-cols-[220px_1fr]">
+                                <div className="flex min-h-[220px] items-center justify-center rounded-md border bg-muted/20 p-3">
+                                    {settings.webBridgeSession?.qrCode ? (
+                                        <img src={settings.webBridgeSession.qrCode} alt="WhatsApp Web QR code" className="h-48 w-48 rounded bg-white p-2" />
+                                    ) : (
+                                        <QrCode className="h-16 w-16 text-muted-foreground" />
+                                    )}
+                                </div>
+                                <div className="space-y-3 text-sm">
+                                    <div className="grid gap-2 sm:grid-cols-2">
+                                        <div className="rounded-md border p-3">
+                                            <div className="text-xs text-muted-foreground">Session</div>
+                                            <div className="truncate font-medium">{settings.webBridgeSession?.sessionId || "Not created"}</div>
+                                        </div>
+                                        <div className="rounded-md border p-3">
+                                            <div className="text-xs text-muted-foreground">Phone</div>
+                                            <div className="truncate font-medium">{settings.webBridgeSession?.phone || "Not connected"}</div>
+                                        </div>
+                                        <div className="rounded-md border p-3">
+                                            <div className="text-xs text-muted-foreground">Last Ready</div>
+                                            <div className="truncate font-medium">
+                                                {settings.webBridgeSession?.lastReadyAt ? new Date(settings.webBridgeSession.lastReadyAt).toLocaleString() : "Never"}
+                                            </div>
+                                        </div>
+                                        <div className="rounded-md border p-3">
+                                            <div className="text-xs text-muted-foreground">Default</div>
+                                            <div className="truncate font-medium">{settings.whatsappProviderMode === "web_bridge" ? "Yes" : "No"}</div>
+                                        </div>
+                                    </div>
+                                    {settings.webBridgeSession?.lastError && (
+                                        <Alert variant="destructive">
+                                            <AlertTriangle className="h-4 w-4" />
+                                            <AlertTitle>Bridge Error</AlertTitle>
+                                            <AlertDescription>{settings.webBridgeSession.lastError}</AlertDescription>
+                                        </Alert>
+                                    )}
+                                    <div className="flex flex-wrap gap-2">
+                                        <Button type="button" onClick={handleConnectWebBridge} disabled={cloudBusy}>
+                                            {cloudBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <QrCode className="mr-2 h-4 w-4" />}
+                                            Connect / Restart
+                                        </Button>
+                                        <Button type="button" variant="outline" onClick={reloadSettings} disabled={cloudBusy}>
+                                            <RefreshCw className="mr-2 h-4 w-4" />
+                                            Refresh Status
+                                        </Button>
+                                        <Button type="button" variant="outline" onClick={handleSetWebBridgeDefault} disabled={cloudBusy || settings.webBridgeSession?.status !== "ready"}>
+                                            <CheckCircle2 className="mr-2 h-4 w-4" />
+                                            Set Default
+                                        </Button>
+                                        <Button type="button" variant="outline" onClick={handleDisconnectWebBridge} disabled={cloudBusy || !settings.webBridgeSession}>
+                                            <Unplug className="mr-2 h-4 w-4" />
+                                            Disconnect
+                                        </Button>
+                                        <Button type="button" variant="outline" onClick={handleClearWebBridge} disabled={cloudBusy || !settings.webBridgeSession}>
+                                            Clear Session
+                                        </Button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
 
                         <div className="space-y-4 rounded-md border p-4">
                             <div className="flex flex-wrap items-center justify-between gap-3">

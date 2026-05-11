@@ -13,6 +13,7 @@ import {
     sendWhatsAppCloudTemplate,
     sendWhatsAppCloudText,
 } from "@/lib/whatsapp/client";
+import { sendWhatsAppWebBridgeMessage, WHATSAPP_WEB_BRIDGE_PROVIDER } from "@/lib/whatsapp/web-bridge";
 import { sendTwilioMessage } from "@/lib/twilio/client";
 
 const MAX_OUTBOX_ATTEMPTS = Math.max(Number(process.env.WHATSAPP_OUTBOX_MAX_ATTEMPTS || 6), 1);
@@ -203,6 +204,51 @@ export async function processWhatsAppOutboundOutboxJob(args: {
                     fileName,
                 }, channelId);
                 wamId = extractCloudWamId(response);
+            }
+        } else if (transport === "web_bridge") {
+            provider = WHATSAPP_WEB_BRIDGE_PROVIDER;
+            providerAccountId = row.locationId;
+
+            if (row.kind === "template") {
+                throw new Error("WhatsApp templates require Cloud API transport.");
+            }
+
+            if (row.kind === "text") {
+                const text = String(payload?.text || row.message?.body || "");
+                if (!text.trim()) {
+                    throw new Error("Cannot send empty WhatsApp message body.");
+                }
+                const response = await sendWhatsAppWebBridgeMessage({
+                    locationId: row.locationId,
+                    to: normalizedPhone,
+                    text,
+                });
+                wamId = response?.messageId ? String(response.messageId) : null;
+            } else {
+                const objectKey = String(payload?.objectKey || "").trim();
+                const contentType = String(payload?.contentType || "").trim();
+                const fileName = String(payload?.fileName || "upload");
+                const caption = String(payload?.caption || "").trim() || undefined;
+                if (!objectKey || !contentType) {
+                    throw new Error("Missing media payload details.");
+                }
+
+                const signedMediaUrl = await createWhatsAppMediaReadUrl({
+                    key: objectKey,
+                    contentType,
+                    fileName,
+                    expiresInSeconds: 300,
+                });
+
+                const response = await sendWhatsAppWebBridgeMessage({
+                    locationId: row.locationId,
+                    to: normalizedPhone,
+                    mediaUrl: signedMediaUrl,
+                    mimetype: contentType,
+                    fileName,
+                    caption,
+                });
+                wamId = response?.messageId ? String(response.messageId) : null;
             }
         } else if (transport === "twilio") {
             provider = "twilio";

@@ -63,6 +63,7 @@ import {
 } from "@/lib/whatsapp/media-r2";
 import { ingestEvolutionMediaAttachment, parseEvolutionMessageContent } from "@/lib/whatsapp/evolution-media";
 import { enqueueWhatsAppOutbound } from "@/lib/whatsapp/outbound-enqueue";
+import { getReadyWhatsAppWebBridgeSession } from "@/lib/whatsapp/web-bridge";
 import { hasOpenWhatsAppCustomerServiceWindow } from "@/lib/whatsapp/customer-window";
 import type { WhatsAppTransport, WhatsAppTemplateComponent } from "@/lib/whatsapp/client";
 import {
@@ -5582,6 +5583,7 @@ async function resolveWhatsAppOutboundTransport(locationId: string, explicit?: W
     transport: WhatsAppTransport;
     cloudConfigured: boolean;
     evolutionConfigured: boolean;
+    webBridgeConfigured: boolean;
 }> {
     const [integrationDoc, hasCloudSecret] = await Promise.all([
         settingsService.getDocument<any>({
@@ -5603,10 +5605,12 @@ async function resolveWhatsAppOutboundTransport(locationId: string, explicit?: W
             where: { id: locationId },
             select: { whatsappPhoneNumberId: true, whatsappAccessToken: true, evolutionInstanceId: true },
         });
+        const webBridgeConfigured = Boolean(await getReadyWhatsAppWebBridgeSession(locationId).catch(() => null));
         return {
             transport: explicit,
             cloudConfigured: Boolean((integrationPayload.whatsappPhoneNumberId || row?.whatsappPhoneNumberId) && (hasCloudSecret || row?.whatsappAccessToken)),
             evolutionConfigured: Boolean(row?.evolutionInstanceId),
+            webBridgeConfigured,
         };
     }
 
@@ -5626,23 +5630,33 @@ async function resolveWhatsAppOutboundTransport(locationId: string, explicit?: W
     const cloudConfigured = Boolean((integrationPayload.whatsappPhoneNumberId || row?.whatsappPhoneNumberId) && (hasCloudSecret || row?.whatsappAccessToken));
     const evolutionConfigured = Boolean(integrationPayload.evolutionInstanceId || row?.evolutionInstanceId);
     const twilioConfigured = Boolean((integrationPayload.twilioAccountSid || row?.twilioAccountSid) && (integrationPayload.twilioWhatsAppFrom || row?.twilioWhatsAppFrom));
+    const webBridgeConfigured = Boolean(await getReadyWhatsAppWebBridgeSession(locationId).catch(() => null));
 
+    if (mode === "web_bridge" && webBridgeConfigured) {
+        return { transport: "web_bridge", cloudConfigured, evolutionConfigured, webBridgeConfigured };
+    }
+    if (mode === "web_bridge") {
+        return { transport: "web_bridge", cloudConfigured, evolutionConfigured, webBridgeConfigured };
+    }
     if (mode === "evolution_linked" && evolutionConfigured) {
-        return { transport: "evolution", cloudConfigured, evolutionConfigured };
+        return { transport: "evolution", cloudConfigured, evolutionConfigured, webBridgeConfigured };
     }
     if (mode === "twilio_fallback" && twilioConfigured) {
-        return { transport: "twilio", cloudConfigured, evolutionConfigured };
+        return { transport: "twilio", cloudConfigured, evolutionConfigured, webBridgeConfigured };
     }
     if (cloudConfigured) {
-        return { transport: "cloud_api", cloudConfigured, evolutionConfigured };
+        return { transport: "cloud_api", cloudConfigured, evolutionConfigured, webBridgeConfigured };
+    }
+    if (webBridgeConfigured) {
+        return { transport: "web_bridge", cloudConfigured, evolutionConfigured, webBridgeConfigured };
     }
     if (evolutionConfigured) {
-        return { transport: "evolution", cloudConfigured, evolutionConfigured };
+        return { transport: "evolution", cloudConfigured, evolutionConfigured, webBridgeConfigured };
     }
     if (twilioConfigured) {
-        return { transport: "twilio", cloudConfigured, evolutionConfigured };
+        return { transport: "twilio", cloudConfigured, evolutionConfigured, webBridgeConfigured };
     }
-    return { transport: "cloud_api", cloudConfigured, evolutionConfigured };
+    return { transport: "cloud_api", cloudConfigured, evolutionConfigured, webBridgeConfigured };
 }
 
 function requireTemplateWindowForCloud(contact: { whatsappCustomerServiceExpiresAt?: Date | null }, transport: WhatsAppTransport) {
@@ -5662,7 +5676,10 @@ export async function createWhatsAppMediaUploadUrl(
 ) {
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const transportState = await resolveWhatsAppOutboundTransport(location.id);
-    if (!transportState.cloudConfigured && !transportState.evolutionConfigured) {
+    if (transportState.transport === "web_bridge" && !transportState.webBridgeConfigured) {
+        return { success: false, error: "WhatsApp Web Bridge is selected but not connected. Scan the QR code in WhatsApp settings first." };
+    }
+    if (!transportState.cloudConfigured && !transportState.evolutionConfigured && !transportState.webBridgeConfigured) {
         return { success: false, error: "WhatsApp is not connected." };
     }
 
@@ -5770,11 +5787,14 @@ export async function sendWhatsAppMediaReply(
     try {
         if (!location?.evolutionInstanceId) {
             const transportState = await resolveWhatsAppOutboundTransport(location.id);
-            if (!transportState.cloudConfigured && !transportState.evolutionConfigured) {
+            if (!transportState.cloudConfigured && !transportState.evolutionConfigured && !transportState.webBridgeConfigured) {
                 return { success: false, error: "WhatsApp is not connected." };
             }
         }
         const transportState = await resolveWhatsAppOutboundTransport(location.id);
+        if (transportState.transport === "web_bridge" && !transportState.webBridgeConfigured) {
+            return { success: false, error: "WhatsApp Web Bridge is selected but not connected. Scan the QR code in WhatsApp settings first." };
+        }
 
         const contentType = String(upload?.contentType || "").toLowerCase();
         const size = Number(upload?.size || 0);
@@ -6044,7 +6064,10 @@ export async function sendReply(
         if (type === "WhatsApp") {
             const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
             const transportState = await resolveWhatsAppOutboundTransport(location.id);
-            if (!transportState.cloudConfigured && !transportState.evolutionConfigured) {
+            if (transportState.transport === "web_bridge" && !transportState.webBridgeConfigured) {
+                return { success: false, error: "WhatsApp Web Bridge is selected but not connected. Scan the QR code in WhatsApp settings first." };
+            }
+            if (!transportState.cloudConfigured && !transportState.evolutionConfigured && !transportState.webBridgeConfigured) {
                 return { success: false, error: "WhatsApp is not connected." };
             }
 

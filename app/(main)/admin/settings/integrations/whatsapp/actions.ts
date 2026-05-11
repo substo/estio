@@ -35,6 +35,14 @@ import {
     renderTemplatePreview,
     validateWhatsAppTemplate,
 } from "@/lib/whatsapp/templates";
+import {
+    clearWhatsAppWebBridgeSession,
+    getWhatsAppWebBridgeBaseUrl,
+    getWhatsAppWebBridgeSession,
+    startWhatsAppWebBridgeSession,
+    stopWhatsAppWebBridgeSession,
+    upsertWhatsAppWebBridgeSession,
+} from "@/lib/whatsapp/web-bridge";
 
 const MASKED_SECRET = "********";
 
@@ -104,7 +112,7 @@ export async function updateWhatsAppSettings(formData: FormData) {
     const accessTokenInput = String(formData.get("accessToken") || "").trim();
     const webhookSecret = formData.get("webhookSecret") as string;
     const providerModeInput = String(formData.get("whatsappProviderMode") || "cloud_primary").trim();
-    const whatsappProviderMode = ["cloud_primary", "evolution_linked", "twilio_fallback"].includes(providerModeInput)
+    const whatsappProviderMode = ["cloud_primary", "evolution_linked", "twilio_fallback", "web_bridge"].includes(providerModeInput)
         ? providerModeInput
         : "cloud_primary";
 
@@ -292,6 +300,7 @@ export async function getWhatsAppSettings(locationId?: string | null) {
     }
 
     const whatsappChannels = await listWhatsAppChannels(location.id);
+    const webBridgeSession = await getWhatsAppWebBridgeSession(location.id);
 
     return {
         // Meta
@@ -302,6 +311,17 @@ export async function getWhatsAppSettings(locationId?: string | null) {
         webhookSecret: payload.whatsappWebhookSecret || location.whatsappWebhookSecret || "",
         whatsappProviderMode: payload.whatsappProviderMode || (location as any).whatsappProviderMode || "cloud_primary",
         whatsappChannels,
+        webBridgeSession: webBridgeSession ? {
+            id: webBridgeSession.id,
+            sessionId: webBridgeSession.sessionId,
+            phone: webBridgeSession.phone || "",
+            status: webBridgeSession.status || "disconnected",
+            qrCode: webBridgeSession.qrCode || "",
+            lastReadyAt: webBridgeSession.lastReadyAt?.toISOString?.() || null,
+            lastSeenAt: webBridgeSession.lastSeenAt?.toISOString?.() || null,
+            lastError: webBridgeSession.lastError || "",
+            isDefaultOutbound: Boolean(webBridgeSession.isDefaultOutbound),
+        } : null,
 
         // Twilio
         twilioAccountSid: payload.twilioAccountSid || location.twilioAccountSid || "",
@@ -315,6 +335,95 @@ export async function getWhatsAppSettings(locationId?: string | null) {
 
         locationId: location.id,
     };
+}
+
+export async function connectWhatsAppWebBridge(locationId?: string | null) {
+    const { location, localUserId } = await resolveAdminContext(locationId || null);
+    try {
+        const bridgeResult = await startWhatsAppWebBridgeSession(location.id);
+        const doc = await settingsService.getDocument<any>({
+            scopeType: "LOCATION",
+            scopeId: location.id,
+            domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+        }).catch(() => null);
+        await settingsService.upsertDocument({
+            scopeType: "LOCATION",
+            scopeId: location.id,
+            domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+            payload: {
+                ...(doc?.payload || {}),
+                whatsappProviderMode: "web_bridge",
+            },
+            actorUserId: localUserId,
+            schemaVersion: doc?.schemaVersion || 1,
+        });
+        await db.location.update({
+            where: { id: location.id },
+            data: { whatsappProviderMode: "web_bridge" } as any,
+        });
+        revalidatePath("/admin/settings/integrations/whatsapp");
+        return { success: true as const, bridgeResult };
+    } catch (error: any) {
+        await upsertWhatsAppWebBridgeSession(location.id, {
+            status: "failed",
+            lastError: error?.message || "WhatsApp Web Bridge service is not reachable.",
+            isDefaultOutbound: true,
+        });
+        return {
+            success: false as const,
+            error: `${error?.message || "Unable to start WhatsApp Web Bridge."} Bridge URL: ${getWhatsAppWebBridgeBaseUrl()}`,
+        };
+    }
+}
+
+export async function disconnectWhatsAppWebBridge(locationId?: string | null) {
+    const { location } = await resolveAdminContext(locationId || null);
+    try {
+        await stopWhatsAppWebBridgeSession(location.id);
+    } catch (error: any) {
+        await upsertWhatsAppWebBridgeSession(location.id, {
+            status: "disconnected",
+            qrCode: null,
+            lastError: error?.message || null,
+            isDefaultOutbound: false,
+        });
+    }
+    revalidatePath("/admin/settings/integrations/whatsapp");
+    return { success: true as const };
+}
+
+export async function clearWhatsAppWebBridge(locationId?: string | null) {
+    const { location } = await resolveAdminContext(locationId || null);
+    await clearWhatsAppWebBridgeSession(location.id);
+    revalidatePath("/admin/settings/integrations/whatsapp");
+    return { success: true as const };
+}
+
+export async function setWhatsAppWebBridgeDefault(locationId?: string | null) {
+    const { location, localUserId } = await resolveAdminContext(locationId || null);
+    const doc = await settingsService.getDocument<any>({
+        scopeType: "LOCATION",
+        scopeId: location.id,
+        domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+    }).catch(() => null);
+    await settingsService.upsertDocument({
+        scopeType: "LOCATION",
+        scopeId: location.id,
+        domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+        payload: {
+            ...(doc?.payload || {}),
+            whatsappProviderMode: "web_bridge",
+        },
+        actorUserId: localUserId,
+        schemaVersion: doc?.schemaVersion || 1,
+    });
+    await db.location.update({
+        where: { id: location.id },
+        data: { whatsappProviderMode: "web_bridge" } as any,
+    }).catch(() => null);
+    await upsertWhatsAppWebBridgeSession(location.id, { isDefaultOutbound: true });
+    revalidatePath("/admin/settings/integrations/whatsapp");
+    return { success: true as const };
 }
 
 function normalizeTemplateStatus(value: unknown) {

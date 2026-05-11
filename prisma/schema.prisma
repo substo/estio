@@ -58,6 +58,7 @@ model Location {
   agentExecutions               AgentExecution[]
   whatsappOutboundOutboxJobs    WhatsAppOutboundOutbox[]
   whatsappChannels              WhatsAppChannel[]
+  whatsappWebBridgeSessions     WhatsAppWebBridgeSession[]
   whatsappTemplates             WhatsAppTemplate[]
   conversationSyncRecords       ConversationSync[]
   messageSyncRecords            MessageSync[]
@@ -76,7 +77,7 @@ model Location {
   whatsappPhoneNumberId     String?
   whatsappAccessToken       String? @db.Text // Long-lived system user token
   whatsappWebhookSecret     String?
-  whatsappProviderMode      String  @default("cloud_primary") // cloud_primary | evolution_linked | twilio_fallback
+  whatsappProviderMode      String  @default("cloud_primary") // cloud_primary | evolution_linked | twilio_fallback | web_bridge
 
   // Twilio Integration
   twilioAccountSid   String?
@@ -2314,7 +2315,7 @@ model WhatsAppOutboundOutbox {
   contactId      String
   locationId     String
 
-  transport String // cloud_api | evolution | twilio
+  transport String // cloud_api | evolution | twilio | web_bridge
   kind      String // text | image | audio | document | template
   payload   Json
 
@@ -2349,7 +2350,7 @@ model WhatsAppChannel {
   phoneNumberId     String
   displayPhoneNumber String?
   verifiedName      String?
-  providerMode      String  @default("cloud_primary") // cloud_primary | evolution_linked | twilio_fallback
+  providerMode      String  @default("cloud_primary") // cloud_primary | evolution_linked | twilio_fallback | web_bridge
   status            String  @default("unknown")
   qualityRating     String?
   platformType      String?
@@ -2363,6 +2364,31 @@ model WhatsAppChannel {
   @@unique([phoneNumberId])
   @@index([locationId, isDefaultOutbound])
   @@index([locationId, wabaId])
+  @@index([status])
+}
+
+model WhatsAppWebBridgeSession {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId String
+  sessionId  String
+
+  phone             String?
+  status            String   @default("disconnected") // disconnected | starting | qr | authenticated | ready | failed
+  qrCode            String?  @db.Text
+  lastReadyAt       DateTime?
+  lastSeenAt        DateTime?
+  lastError         String?  @db.Text
+  isDefaultOutbound Boolean  @default(false)
+  metadata          Json?
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([locationId])
+  @@unique([sessionId])
+  @@index([locationId, isDefaultOutbound])
   @@index([status])
 }
 
