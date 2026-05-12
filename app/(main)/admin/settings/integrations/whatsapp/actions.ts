@@ -38,7 +38,9 @@ import {
 import {
     clearWhatsAppWebBridgeSession,
     getWhatsAppWebBridgeBaseUrl,
+    getWhatsAppWebBridgeHealth,
     getWhatsAppWebBridgeSession,
+    restartWhatsAppWebBridgeSession,
     startWhatsAppWebBridgeSession,
     stopWhatsAppWebBridgeSession,
     upsertWhatsAppWebBridgeSession,
@@ -73,6 +75,61 @@ async function listWhatsAppChannels(locationId: string) {
         ],
     }).catch(() => []);
     return channels.map(serializeWhatsAppChannel);
+}
+
+function buildWebBridgeDiagnostics(session: any, health: any) {
+    const sessionId = session?.sessionId ? String(session.sessionId) : "";
+    const workerSession = sessionId && Array.isArray(health?.sessions)
+        ? health.sessions.find((item: any) => String(item.sessionId || "") === sessionId)
+        : null;
+    const dbStatus = String(session?.status || "not_created");
+    const workerStatus = workerSession?.status || (workerSession?.ready ? "ready" : null);
+    const dbReady = dbStatus === "ready";
+    const workerReady = Boolean(workerSession?.ready);
+    const stale = dbReady && (!health?.reachable || !workerReady);
+
+    let severity: "healthy" | "warning" | "error" = "healthy";
+    let message = "WhatsApp Web Bridge is reachable.";
+    if (!health?.reachable) {
+        severity = "error";
+        message = health?.error || "WhatsApp Web Bridge worker is not reachable.";
+    } else if (stale) {
+        severity = "warning";
+        message = "Database session says ready, but the worker does not have a matching ready session. Restart the bridge session.";
+    } else if (dbStatus === "failed") {
+        severity = "error";
+        message = session?.lastError || "Bridge session is failed. Clear or restart the session.";
+    } else if (dbStatus === "disconnected" || dbStatus === "not_created") {
+        severity = "warning";
+        message = "Bridge session is not connected. Start the session and scan the QR code.";
+    } else if (dbStatus === "qr") {
+        severity = "warning";
+        message = "QR code is waiting to be scanned.";
+    } else if (dbStatus === "authenticated" || dbStatus === "starting") {
+        severity = "warning";
+        message = "Bridge session is starting. Refresh status shortly.";
+    }
+
+    return {
+        reachable: Boolean(health?.reachable),
+        ok: Boolean(health?.ok),
+        severity,
+        message,
+        baseUrl: health?.baseUrl || getWhatsAppWebBridgeBaseUrl(),
+        uptimeSeconds: health?.uptimeSeconds ?? null,
+        sessionCount: health?.sessionCount ?? null,
+        sessionDir: health?.sessionDir || null,
+        maxInlineMediaBytes: health?.maxInlineMediaBytes ?? null,
+        dbStatus,
+        workerStatus,
+        workerSessionPresent: Boolean(workerSession),
+        workerReady,
+        stale,
+        workerLastEventAt: workerSession?.lastEventAt || null,
+        workerLastReadyAt: workerSession?.lastReadyAt || null,
+        workerLastError: workerSession?.lastError || null,
+        error: health?.error || null,
+    };
 }
 
 async function resolveAdminContext(locationIdInput?: string | null) {
@@ -300,7 +357,10 @@ export async function getWhatsAppSettings(locationId?: string | null) {
     }
 
     const whatsappChannels = await listWhatsAppChannels(location.id);
-    const webBridgeSession = await getWhatsAppWebBridgeSession(location.id);
+    const [webBridgeSession, webBridgeHealth] = await Promise.all([
+        getWhatsAppWebBridgeSession(location.id),
+        getWhatsAppWebBridgeHealth(),
+    ]);
 
     return {
         // Meta
@@ -322,6 +382,7 @@ export async function getWhatsAppSettings(locationId?: string | null) {
             lastError: webBridgeSession.lastError || "",
             isDefaultOutbound: Boolean(webBridgeSession.isDefaultOutbound),
         } : null,
+        webBridgeDiagnostics: buildWebBridgeDiagnostics(webBridgeSession, webBridgeHealth),
 
         // Twilio
         twilioAccountSid: payload.twilioAccountSid || location.twilioAccountSid || "",
@@ -334,6 +395,18 @@ export async function getWhatsAppSettings(locationId?: string | null) {
         evolutionConnectionStatus: evolutionStatus,
 
         locationId: location.id,
+    };
+}
+
+export async function getWhatsAppWebBridgeDiagnostics(locationId?: string | null) {
+    const { location } = await resolveAdminContext(locationId || null);
+    const [session, health] = await Promise.all([
+        getWhatsAppWebBridgeSession(location.id),
+        getWhatsAppWebBridgeHealth(),
+    ]);
+    return {
+        success: true as const,
+        diagnostics: buildWebBridgeDiagnostics(session, health),
     };
 }
 
@@ -372,6 +445,45 @@ export async function connectWhatsAppWebBridge(locationId?: string | null) {
         return {
             success: false as const,
             error: `${error?.message || "Unable to start WhatsApp Web Bridge."} Bridge URL: ${getWhatsAppWebBridgeBaseUrl()}`,
+        };
+    }
+}
+
+export async function restartWhatsAppWebBridge(locationId?: string | null) {
+    const { location, localUserId } = await resolveAdminContext(locationId || null);
+    try {
+        const bridgeResult = await restartWhatsAppWebBridgeSession(location.id);
+        const doc = await settingsService.getDocument<any>({
+            scopeType: "LOCATION",
+            scopeId: location.id,
+            domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+        }).catch(() => null);
+        await settingsService.upsertDocument({
+            scopeType: "LOCATION",
+            scopeId: location.id,
+            domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+            payload: {
+                ...(doc?.payload || {}),
+                whatsappProviderMode: "web_bridge",
+            },
+            actorUserId: localUserId,
+            schemaVersion: doc?.schemaVersion || 1,
+        });
+        await db.location.update({
+            where: { id: location.id },
+            data: { whatsappProviderMode: "web_bridge" } as any,
+        }).catch(() => null);
+        revalidatePath("/admin/settings/integrations/whatsapp");
+        return { success: true as const, bridgeResult };
+    } catch (error: any) {
+        await upsertWhatsAppWebBridgeSession(location.id, {
+            status: "failed",
+            lastError: error?.message || "WhatsApp Web Bridge restart failed.",
+            isDefaultOutbound: true,
+        });
+        return {
+            success: false as const,
+            error: `${error?.message || "Unable to restart WhatsApp Web Bridge."} Bridge URL: ${getWhatsAppWebBridgeBaseUrl()}`,
         };
     }
 }

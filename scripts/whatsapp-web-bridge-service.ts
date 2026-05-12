@@ -18,9 +18,15 @@ type ManagedSession = {
     client: any;
     ready: boolean;
     phone?: string | null;
+    status: string;
+    startedAt: Date;
+    lastEventAt?: Date | null;
+    lastReadyAt?: Date | null;
+    lastError?: string | null;
 };
 
 const sessions = new Map<string, ManagedSession>();
+const serviceStartedAt = new Date();
 const MAX_INLINE_MEDIA_BYTES = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_MAX_INLINE_MEDIA_BYTES || 25 * 1024 * 1024), 1024 * 1024);
 
 function json(res: ServerResponse, status: number, payload: any) {
@@ -53,6 +59,36 @@ async function emitEvent(payload: Record<string, any>) {
         const text = await response.text().catch(() => "");
         throw new Error(`App webhook failed ${response.status}: ${text}`);
     }
+}
+
+function markSessionEvent(session: ManagedSession, status: string, error?: unknown) {
+    session.status = status;
+    session.lastEventAt = new Date();
+    session.lastError = error ? String((error as any)?.message || error) : null;
+}
+
+async function emitSessionEvent(session: ManagedSession, payload: Record<string, any>) {
+    try {
+        await emitEvent(payload);
+    } catch (error: any) {
+        session.lastError = error?.message || "Failed to emit bridge webhook event.";
+        session.lastEventAt = new Date();
+        console.error(`[WhatsApp Web Bridge] Failed to emit ${payload.event || "event"} for ${session.sessionId}:`, error?.message || error);
+    }
+}
+
+function serializeManagedSession(session: ManagedSession) {
+    return {
+        sessionId: session.sessionId,
+        locationId: session.locationId,
+        ready: Boolean(session.ready),
+        phone: session.phone || null,
+        status: session.status || (session.ready ? "ready" : "starting"),
+        startedAt: session.startedAt.toISOString(),
+        lastEventAt: session.lastEventAt?.toISOString?.() || null,
+        lastReadyAt: session.lastReadyAt?.toISOString?.() || null,
+        lastError: session.lastError || null,
+    };
 }
 
 async function serializeMessage(message: any, options?: { includeMedia?: boolean }) {
@@ -123,50 +159,75 @@ async function startSession(sessionId: string, locationId: string) {
         },
     });
 
-    const managed: ManagedSession = { sessionId, locationId, client, ready: false };
+    const managed: ManagedSession = {
+        sessionId,
+        locationId,
+        client,
+        ready: false,
+        status: "starting",
+        startedAt: new Date(),
+        lastEventAt: new Date(),
+        lastReadyAt: null,
+        lastError: null,
+    };
     sessions.set(sessionId, managed);
 
     client.on("qr", async (qr: string) => {
+        markSessionEvent(managed, "qr");
+        console.log(`[WhatsApp Web Bridge] QR generated for ${sessionId}`);
         const qrCode = await qrcode.toDataURL(qr, { margin: 1, width: 320 });
-        await emitEvent({ event: "qr", locationId, sessionId, qrCode });
+        await emitSessionEvent(managed, { event: "qr", locationId, sessionId, qrCode });
     });
 
     client.on("loading_screen", async (percent: number, message: string) => {
-        await emitEvent({ event: "loading", locationId, sessionId, metadata: { percent, message } }).catch(console.error);
+        markSessionEvent(managed, "starting");
+        await emitSessionEvent(managed, { event: "loading", locationId, sessionId, metadata: { percent, message } });
     });
 
     client.on("authenticated", async () => {
-        await emitEvent({ event: "authenticated", locationId, sessionId }).catch(console.error);
+        markSessionEvent(managed, "authenticated");
+        console.log(`[WhatsApp Web Bridge] Authenticated ${sessionId}`);
+        await emitSessionEvent(managed, { event: "authenticated", locationId, sessionId });
     });
 
     client.on("auth_failure", async (error: string) => {
         managed.ready = false;
-        await emitEvent({ event: "auth_failure", locationId, sessionId, error }).catch(console.error);
+        markSessionEvent(managed, "failed", error);
+        console.error(`[WhatsApp Web Bridge] Auth failure for ${sessionId}:`, error);
+        await emitSessionEvent(managed, { event: "auth_failure", locationId, sessionId, error });
     });
 
     client.on("ready", async () => {
         managed.ready = true;
         managed.phone = await getPhone(client);
-        await emitEvent({ event: "ready", locationId, sessionId, phone: managed.phone }).catch(console.error);
+        markSessionEvent(managed, "ready");
+        managed.lastReadyAt = new Date();
+        console.log(`[WhatsApp Web Bridge] Ready ${sessionId} phone=${managed.phone || "unknown"}`);
+        await emitSessionEvent(managed, { event: "ready", locationId, sessionId, phone: managed.phone });
     });
 
     client.on("disconnected", async (reason: string) => {
         managed.ready = false;
+        markSessionEvent(managed, "disconnected", reason);
+        console.warn(`[WhatsApp Web Bridge] Disconnected ${sessionId}:`, reason);
         sessions.delete(sessionId);
-        await emitEvent({ event: "disconnected", locationId, sessionId, error: reason }).catch(console.error);
+        await emitSessionEvent(managed, { event: "disconnected", locationId, sessionId, error: reason });
     });
 
     client.on("message", async (message: any) => {
-        await emitEvent({ event: "message", locationId, sessionId, phone: managed.phone, message: await serializeMessage(message, { includeMedia: true }) }).catch(console.error);
+        managed.lastEventAt = new Date();
+        await emitSessionEvent(managed, { event: "message", locationId, sessionId, phone: managed.phone, message: await serializeMessage(message, { includeMedia: true }) });
     });
 
     client.on("message_create", async (message: any) => {
-        await emitEvent({ event: "message_create", locationId, sessionId, phone: managed.phone, message: await serializeMessage(message, { includeMedia: true }) }).catch(console.error);
+        managed.lastEventAt = new Date();
+        await emitSessionEvent(managed, { event: "message_create", locationId, sessionId, phone: managed.phone, message: await serializeMessage(message, { includeMedia: true }) });
     });
 
     client.on("message_ack", async (message: any, ack: number) => {
+        managed.lastEventAt = new Date();
         const messageId = message?.id?._serialized || message?.id?.id || "";
-        await emitEvent({ event: "message_ack", locationId, sessionId, messageId, ack }).catch(console.error);
+        await emitSessionEvent(managed, { event: "message_ack", locationId, sessionId, messageId, ack });
     });
 
     await client.initialize();
@@ -238,7 +299,14 @@ const server = createServer(async (req, res) => {
         const parts = url.pathname.split("/").filter(Boolean);
 
         if (req.method === "GET" && url.pathname === "/health") {
-            return json(res, 200, { ok: true, sessions: sessions.size });
+            return json(res, 200, {
+                ok: true,
+                uptimeSeconds: Math.floor((Date.now() - serviceStartedAt.getTime()) / 1000),
+                sessionCount: sessions.size,
+                sessions: Array.from(sessions.values()).map(serializeManagedSession),
+                sessionDir: SESSION_DIR,
+                maxInlineMediaBytes: MAX_INLINE_MEDIA_BYTES,
+            });
         }
 
         if (parts[0] === "sessions" && parts[1]) {

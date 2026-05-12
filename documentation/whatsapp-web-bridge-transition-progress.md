@@ -18,6 +18,83 @@ Cloud API cannot deliver the exact “normal WhatsApp app” experience by desig
 
 The Web Bridge fills that product gap by running a linked-device WhatsApp Web session under our own control. This is operationally more fragile than Cloud API, so it is isolated as a separate worker/service and kept replaceable.
 
+## Phase 1 Completed: Live Chat Connection Smoke Test
+
+Production smoke testing confirmed the first Web Bridge path is usable:
+
+- QR pairing works from the Estio UI.
+- Online/offline status works on `/admin/conversations`.
+- Sending WhatsApp messages from Estio works through the default Web Bridge number.
+- Tested reference conversation:
+  - `https://estio.co/admin/conversations?id=cmmna7umo00a1a4i7bj7ujw61`
+
+Remaining live checks from the original acceptance checklist:
+
+- Manual outbound echo from WhatsApp mobile/web appears in Estio without a contact reply.
+- Inbound replies appear in Estio.
+- Image/audio/document media appears with attachments.
+- Bridge process restart restores sessions without QR when possible.
+- Disconnecting the linked device from WhatsApp mobile moves Estio to offline/disconnected.
+
+## Current Phase: Phase 2 Operations Hardening
+
+Phase 2 is focused on reliability and observability, not new chat features.
+
+Implemented in this phase:
+
+- Worker `/health` now returns structured service health:
+  - `ok`
+  - `uptimeSeconds`
+  - `sessionCount`
+  - per-session `sessionId`, `locationId`, `ready`, `phone`, `status`, `startedAt`, `lastEventAt`, `lastReadyAt`, `lastError`
+  - `sessionDir`
+  - `maxInlineMediaBytes`
+- Worker tracks runtime metadata in memory for each browser session.
+- Worker logs important lifecycle events:
+  - QR generated
+  - authenticated
+  - ready
+  - disconnected
+  - auth failure
+  - webhook emit failure
+  - persisted-session bootstrap failure
+- App helper added:
+  - `getWhatsAppWebBridgeHealth()`
+  - `restartWhatsAppWebBridgeSession()`
+- Settings server action added:
+  - `getWhatsAppWebBridgeDiagnostics(locationId?)`
+  - combines database session state and worker health.
+  - detects stale DB-ready sessions when the worker has no matching ready session.
+  - detects unreachable worker, failed/auth/disconnected states, and returns an actionable message.
+- WhatsApp settings Web Bridge card now shows:
+  - service reachable/unreachable
+  - worker uptime
+  - worker session registered/ready
+  - DB status
+  - connected phone
+  - last ready
+  - last seen
+  - worker/session errors
+  - stale-session warning
+  - health URL
+  - session directory
+  - inline media limit
+- Admin controls are clearer:
+  - `Connect` starts the bridge and keeps provider mode as `web_bridge`.
+  - `Restart Session` stops and starts the worker session while preserving LocalAuth files.
+  - `Disconnect` stops the worker session while preserving pairing files where possible.
+  - `Clear Session` removes LocalAuth pairing files and forces a fresh QR.
+
+Phase 2 acceptance checklist:
+
+1. Refresh WhatsApp settings and confirm diagnostics render.
+2. Confirm worker reachable status is shown.
+3. Confirm worker uptime and session count are shown.
+4. Restart PM2 bridge process and confirm diagnostics recover.
+5. Disconnect from WhatsApp mobile linked devices and confirm UI shows disconnected/stale state.
+6. Use `Clear Session`, then confirm QR is required again.
+7. Reconnect and confirm normal send still works.
+
 ## Current Implementation State
 
 ### Already Implemented
@@ -34,6 +111,8 @@ The Web Bridge fills that product gap by running a linked-device WhatsApp Web se
 - Added app-side Web Bridge helper:
   - `lib/whatsapp/web-bridge.ts`
   - Starts/stops/clears sessions.
+  - Restarts sessions while preserving LocalAuth pairing files.
+  - Fetches worker health.
   - Sends messages.
   - Fetches chats/messages.
   - Normalizes WhatsApp Web chat IDs and multi-device IDs.
@@ -145,6 +224,18 @@ The production deploy script starts this under PM2 using the app name:
 estio-whatsapp-web-bridge
 ```
 
+Production checks:
+
+```bash
+pm2 status estio-whatsapp-web-bridge
+pm2 logs estio-whatsapp-web-bridge --lines 100
+curl -H "x-whatsapp-web-bridge-secret: $WHATSAPP_WEB_BRIDGE_SECRET" http://127.0.0.1:3218/health
+```
+
+Important deployment note:
+
+- `WHATSAPP_WEB_BRIDGE_SESSION_DIR` must point to persistent storage that survives deploys and PM2 restarts. If this directory is wiped between deploys, every location will need a fresh QR pairing.
+
 ## Manual Live Acceptance Checklist
 
 Use one test location configured as `web_bridge`.
@@ -169,31 +260,11 @@ Use one test location configured as `web_bridge`.
 
 ## Next Phases
 
-### Phase 1: Commit, Deploy, And Smoke Test
-
-- Apply database migrations on the target server.
-- Deploy the app and Web Bridge worker.
-- Confirm PM2 has both the main app and `estio-whatsapp-web-bridge`.
-- Pair one test location via QR.
-- Run the manual live acceptance checklist.
-
-### Phase 2: Harden Worker Operations
-
-- Confirm session directory persists across blue/green deploys.
-- Add log rotation or log grouping for Web Bridge events.
-- Add dashboard/admin diagnostics for:
-  - session status
-  - connected phone
-  - last ready time
-  - last seen time
-  - last error
-  - restart/disconnect/clear session actions
-- Add alerting for bridge down, repeated auth failures, and stale ready sessions.
-
 ### Phase 3: Improve Media Reliability
 
-- Test large files, voice notes, documents, and images from both directions.
-- Decide whether the 25 MB inline media limit is enough or whether the worker should stream/upload directly to R2.
+- Complete live testing for large files, voice notes, documents, and images from both directions.
+- Confirm worker inline media limit is acceptable in production.
+- Decide whether the worker should stream/upload directly to R2 for large media instead of sending inline base64 to the app webhook.
 - Add retry/dead-letter tracking for failed media ingestion.
 - Add UI indicators when media exists but ingestion failed.
 

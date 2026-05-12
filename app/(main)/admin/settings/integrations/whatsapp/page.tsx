@@ -19,6 +19,7 @@ import {
     setDefaultWhatsAppChannelAction,
     verifyWhatsAppCloudChannel,
     connectWhatsAppWebBridge,
+    restartWhatsAppWebBridge,
     disconnectWhatsAppWebBridge,
     clearWhatsAppWebBridge,
     setWhatsAppWebBridgeDefault,
@@ -71,6 +72,27 @@ type WhatsAppWebBridgeSessionRow = {
     lastSeenAt: string | null;
     lastError: string;
     isDefaultOutbound: boolean;
+};
+
+type WhatsAppWebBridgeDiagnostics = {
+    reachable: boolean;
+    ok: boolean;
+    severity: "healthy" | "warning" | "error";
+    message: string;
+    baseUrl: string;
+    uptimeSeconds: number | null;
+    sessionCount: number | null;
+    sessionDir: string | null;
+    maxInlineMediaBytes: number | null;
+    dbStatus: string;
+    workerStatus: string | null;
+    workerSessionPresent: boolean;
+    workerReady: boolean;
+    stale: boolean;
+    workerLastEventAt: string | null;
+    workerLastReadyAt: string | null;
+    workerLastError: string | null;
+    error: string | null;
 };
 
 type TemplateBuilderState = {
@@ -148,6 +170,23 @@ function renderPreview(text: string, examples: Record<string, string>) {
     return String(text || "").replace(/\{\{\s*(\d+)\s*\}\}/g, (_match, index) => examples[index] || `{{${index}}}`);
 }
 
+function formatBridgeUptime(seconds: number | null | undefined) {
+    const total = Math.max(0, Number(seconds || 0));
+    if (!Number.isFinite(total) || total <= 0) return "Unknown";
+    const days = Math.floor(total / 86400);
+    const hours = Math.floor((total % 86400) / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    if (days > 0) return `${days}d ${hours}h`;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    return `${Math.max(1, minutes)}m`;
+}
+
+function formatBridgeBytes(bytes: number | null | undefined) {
+    const value = Number(bytes || 0);
+    if (!Number.isFinite(value) || value <= 0) return "Unknown";
+    return `${Math.round(value / 1024 / 1024)} MB`;
+}
+
 export default function WhatsAppSettingsPage() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -171,6 +210,7 @@ export default function WhatsAppSettingsPage() {
         whatsappProviderMode: "web_bridge",
         whatsappChannels: [] as WhatsAppChannelRow[],
         webBridgeSession: null as WhatsAppWebBridgeSessionRow | null,
+        webBridgeDiagnostics: null as WhatsAppWebBridgeDiagnostics | null,
     });
     const [cloudHealth, setCloudHealth] = useState<any>(null);
     const [cloudBusy, setCloudBusy] = useState(false);
@@ -239,6 +279,7 @@ export default function WhatsAppSettingsPage() {
             whatsappProviderMode: data.whatsappProviderMode || "web_bridge",
             whatsappChannels: Array.isArray(data.whatsappChannels) ? data.whatsappChannels : [],
             webBridgeSession: data.webBridgeSession || null,
+            webBridgeDiagnostics: data.webBridgeDiagnostics || null,
         });
     };
 
@@ -350,6 +391,25 @@ export default function WhatsAppSettingsPage() {
             toast({ title: "WhatsApp Web Bridge disconnected" });
         } catch (error: any) {
             toast({ title: "Disconnect failed", description: error?.message || "Unable to disconnect bridge.", variant: "destructive" });
+        } finally {
+            setCloudBusy(false);
+        }
+    };
+
+    const handleRestartWebBridge = async () => {
+        setCloudBusy(true);
+        try {
+            const result = await restartWhatsAppWebBridge(settings.locationId || null);
+            await reloadSettings();
+            toast({
+                title: result.success ? "WhatsApp Web Bridge restarted" : "Bridge restart failed",
+                description: result.success
+                    ? "The worker session was restarted while keeping the saved pairing files."
+                    : result.error,
+                variant: result.success ? "default" : "destructive",
+            });
+        } catch (error: any) {
+            toast({ title: "Restart failed", description: error?.message || "Unable to restart bridge.", variant: "destructive" });
         } finally {
             setCloudBusy(false);
         }
@@ -910,6 +970,20 @@ export default function WhatsAppSettingsPage() {
                                 </Badge>
                             </div>
 
+                            {settings.webBridgeDiagnostics && (
+                                <Alert variant={settings.webBridgeDiagnostics.severity === "error" ? "destructive" : "default"}>
+                                    {settings.webBridgeDiagnostics.severity === "healthy" ? (
+                                        <CheckCircle2 className="h-4 w-4" />
+                                    ) : (
+                                        <AlertTriangle className="h-4 w-4" />
+                                    )}
+                                    <AlertTitle>
+                                        {settings.webBridgeDiagnostics.reachable ? "Bridge diagnostics" : "Bridge worker unreachable"}
+                                    </AlertTitle>
+                                    <AlertDescription>{settings.webBridgeDiagnostics.message}</AlertDescription>
+                                </Alert>
+                            )}
+
                             <div className="grid gap-4 md:grid-cols-[220px_1fr]">
                                 <div className="flex min-h-[220px] items-center justify-center rounded-md border bg-muted/20 p-3">
                                     {settings.webBridgeSession?.qrCode ? (
@@ -938,7 +1012,71 @@ export default function WhatsAppSettingsPage() {
                                             <div className="text-xs text-muted-foreground">Default</div>
                                             <div className="truncate font-medium">{settings.whatsappProviderMode === "web_bridge" ? "Yes" : "No"}</div>
                                         </div>
+                                        <div className="rounded-md border p-3">
+                                            <div className="text-xs text-muted-foreground">Service</div>
+                                            <div className="truncate font-medium">
+                                                {settings.webBridgeDiagnostics?.reachable ? "Reachable" : "Unreachable"}
+                                            </div>
+                                        </div>
+                                        <div className="rounded-md border p-3">
+                                            <div className="text-xs text-muted-foreground">Worker Uptime</div>
+                                            <div className="truncate font-medium">{formatBridgeUptime(settings.webBridgeDiagnostics?.uptimeSeconds)}</div>
+                                        </div>
+                                        <div className="rounded-md border p-3">
+                                            <div className="text-xs text-muted-foreground">Worker Session</div>
+                                            <div className="truncate font-medium">
+                                                {settings.webBridgeDiagnostics?.workerSessionPresent
+                                                    ? (settings.webBridgeDiagnostics.workerReady ? "Ready" : settings.webBridgeDiagnostics.workerStatus || "Registered")
+                                                    : "Not registered"}
+                                            </div>
+                                        </div>
+                                        <div className="rounded-md border p-3">
+                                            <div className="text-xs text-muted-foreground">Last Seen</div>
+                                            <div className="truncate font-medium">
+                                                {settings.webBridgeSession?.lastSeenAt ? new Date(settings.webBridgeSession.lastSeenAt).toLocaleString() : "Never"}
+                                            </div>
+                                        </div>
                                     </div>
+                                    <div className="grid gap-2 rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground sm:grid-cols-2">
+                                        <div className="min-w-0">
+                                            <span className="font-medium text-foreground">DB status: </span>
+                                            <span>{settings.webBridgeDiagnostics?.dbStatus || settings.webBridgeSession?.status || "not_created"}</span>
+                                        </div>
+                                        <div className="min-w-0">
+                                            <span className="font-medium text-foreground">Worker sessions: </span>
+                                            <span>{settings.webBridgeDiagnostics?.sessionCount ?? "unknown"}</span>
+                                        </div>
+                                        <div className="min-w-0">
+                                            <span className="font-medium text-foreground">Inline media limit: </span>
+                                            <span>{formatBridgeBytes(settings.webBridgeDiagnostics?.maxInlineMediaBytes)}</span>
+                                        </div>
+                                        <div className="min-w-0 truncate">
+                                            <span className="font-medium text-foreground">Health URL: </span>
+                                            <span>{settings.webBridgeDiagnostics?.baseUrl || "not configured"}</span>
+                                        </div>
+                                        {settings.webBridgeDiagnostics?.sessionDir && (
+                                            <div className="min-w-0 truncate sm:col-span-2">
+                                                <span className="font-medium text-foreground">Session dir: </span>
+                                                <span>{settings.webBridgeDiagnostics.sessionDir}</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                    {settings.webBridgeDiagnostics?.stale && (
+                                        <Alert>
+                                            <AlertTriangle className="h-4 w-4" />
+                                            <AlertTitle>Stale ready session</AlertTitle>
+                                            <AlertDescription>
+                                                The database says this session is ready, but the worker does not have the matching ready browser session. Restart the session from here.
+                                            </AlertDescription>
+                                        </Alert>
+                                    )}
+                                    {settings.webBridgeDiagnostics?.workerLastError && (
+                                        <Alert variant="destructive">
+                                            <AlertTriangle className="h-4 w-4" />
+                                            <AlertTitle>Worker Error</AlertTitle>
+                                            <AlertDescription>{settings.webBridgeDiagnostics.workerLastError}</AlertDescription>
+                                        </Alert>
+                                    )}
                                     {settings.webBridgeSession?.lastError && (
                                         <Alert variant="destructive">
                                             <AlertTriangle className="h-4 w-4" />
@@ -949,7 +1087,11 @@ export default function WhatsAppSettingsPage() {
                                     <div className="flex flex-wrap gap-2">
                                         <Button type="button" onClick={handleConnectWebBridge} disabled={cloudBusy}>
                                             {cloudBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <QrCode className="mr-2 h-4 w-4" />}
-                                            Connect / Restart
+                                            Connect
+                                        </Button>
+                                        <Button type="button" variant="outline" onClick={handleRestartWebBridge} disabled={cloudBusy || !settings.webBridgeSession}>
+                                            <RefreshCw className="mr-2 h-4 w-4" />
+                                            Restart Session
                                         </Button>
                                         <Button type="button" variant="outline" onClick={reloadSettings} disabled={cloudBusy}>
                                             <RefreshCw className="mr-2 h-4 w-4" />
@@ -966,6 +1108,9 @@ export default function WhatsAppSettingsPage() {
                                         <Button type="button" variant="outline" onClick={handleClearWebBridge} disabled={cloudBusy || !settings.webBridgeSession}>
                                             Clear Session
                                         </Button>
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">
+                                        Connect starts the Web Bridge and keeps this location on `web_bridge`. Restart preserves saved pairing files. Disconnect stops the worker session. Clear Session removes LocalAuth pairing and forces a fresh QR.
                                     </div>
                                 </div>
                             </div>
