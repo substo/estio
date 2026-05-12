@@ -5,11 +5,27 @@ import {
     sanitizeWhatsAppMediaFilename,
 } from "@/lib/whatsapp/media-r2";
 
-function normalizeBridgeMediaType(type: string | null | undefined): "image" | "audio" | "document" | null {
+export function normalizeBridgeMediaType(type: string | null | undefined): "image" | "audio" | "document" | null {
     const value = String(type || "").toLowerCase();
     if (value === "image" || value.startsWith("image/")) return "image";
     if (value === "audio" || value === "ptt" || value.startsWith("audio/")) return "audio";
-    if (value === "document" || value.startsWith("application/") || value.startsWith("text/")) return "document";
+    if (
+        value === "document" ||
+        value === "pdf" ||
+        value.startsWith("application/") ||
+        value.startsWith("text/") ||
+        [
+            "application/pdf",
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.ms-excel",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.ms-powerpoint",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "text/csv",
+            "text/plain",
+        ].includes(value)
+    ) return "document";
     return null;
 }
 
@@ -19,11 +35,35 @@ function fallbackContentType(kind: "image" | "audio" | "document") {
     return "application/octet-stream";
 }
 
-function decodeBase64Payload(value: string) {
+export function decodeBridgeBase64Payload(value: string) {
     const trimmed = String(value || "").trim();
     const comma = trimmed.indexOf(",");
     const base64 = trimmed.startsWith("data:") && comma >= 0 ? trimmed.slice(comma + 1) : trimmed;
-    return Buffer.from(base64, "base64");
+    if (!base64) return null;
+    if (!/^[A-Za-z0-9+/=\s_-]+$/.test(base64)) return null;
+    const normalized = base64.replace(/-/g, "+").replace(/_/g, "/").replace(/\s+/g, "");
+    const buffer = Buffer.from(normalized, "base64");
+    if (buffer.length <= 0) return null;
+    return buffer;
+}
+
+export function formatWhatsAppWebBridgeMediaFailure(reason: string | undefined) {
+    switch (reason) {
+        case "missing_input":
+            return "missing media payload";
+        case "unsupported_media_type":
+            return "unsupported media type";
+        case "message_not_found":
+            return "message row missing";
+        case "attachment_exists":
+            return "attachment already exists";
+        case "invalid_base64":
+            return "media payload could not be decoded";
+        case "empty_decoded_payload":
+            return "decoded media file is empty";
+        default:
+            return reason || "unknown reason";
+    }
 }
 
 export async function ingestWhatsAppWebBridgeMediaAttachment(params: {
@@ -60,7 +100,10 @@ export async function ingestWhatsAppWebBridgeMediaAttachment(params: {
     if (!message) return { status: "skipped" as const, reason: "message_not_found" };
     if (message.attachments.length > 0) return { status: "skipped" as const, reason: "attachment_exists" };
 
-    const buffer = decodeBase64Payload(base64);
+    const buffer = decodeBridgeBase64Payload(base64);
+    if (!buffer) return { status: "failed" as const, reason: "invalid_base64" };
+    if (buffer.length <= 0) return { status: "failed" as const, reason: "empty_decoded_payload" };
+
     const contentType = String(params.media?.mimetype || fallbackContentType(kind));
     const fileName = sanitizeWhatsAppMediaFilename(
         String(params.media?.filename || wamId),

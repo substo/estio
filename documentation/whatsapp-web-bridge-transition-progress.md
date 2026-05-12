@@ -36,9 +36,9 @@ Remaining live checks from the original acceptance checklist:
 - Bridge process restart restores sessions without QR when possible.
 - Disconnecting the linked device from WhatsApp mobile moves Estio to offline/disconnected.
 
-## Current Phase: Phase 2 Operations Hardening
+## Phase 2 Completed: Operations Hardening
 
-Phase 2 is focused on reliability and observability, not new chat features.
+Phase 2 was deployed after production QR/status/send succeeded. It focused on reliability and observability, not new chat features.
 
 Implemented in this phase:
 
@@ -94,6 +94,33 @@ Phase 2 acceptance checklist:
 5. Disconnect from WhatsApp mobile linked devices and confirm UI shows disconnected/stale state.
 6. Use `Clear Session`, then confirm QR is required again.
 7. Reconnect and confirm normal send still works.
+
+## Current Phase: Phase 3 Media Reliability
+
+Phase 3 hardens image/audio/document send and receive for the already-working Web Bridge.
+
+Implemented in this phase:
+
+- Worker media serialization now includes structured `mediaMeta` and `mediaError`.
+- Worker logs media download success, oversized media, missing mimetype, unsupported type, and download failure.
+- Worker recent-message fetch can include media payloads for recovery.
+- Web Bridge media ingestion validates base64 decode output before uploading.
+- Web Bridge media type handling covers image, audio, document, PDF, text, and common Office mimetypes.
+- Web Bridge media ingestion returns structured failure/skip reasons.
+- Web Bridge webhook stores media ingestion state in the `MessageSync.metadata.webBridgeMedia` record.
+- Conversation bubbles show a clear `Media not stored` warning for Web Bridge media messages with no attachment.
+- Existing `Re-fetch Media` can now recover Web Bridge media from recent WhatsApp Web history when the worker can still retrieve it.
+- Web Bridge outbound media send errors are clearer for signed URL read failures, disconnected bridge sessions, invalid recipients, and WhatsApp Web send failures.
+
+Phase 3 acceptance checklist:
+
+1. Inbound client image stores and renders in Estio.
+2. Inbound client audio stores, renders, and queues transcription.
+3. Inbound client document stores and renders.
+4. Manual WhatsApp mobile/web outbound image/audio/document echoes into Estio.
+5. Estio outbound image/document sends through Web Bridge.
+6. Oversized media shows an actionable warning instead of silently disappearing.
+7. Failed media can be retried with `Re-fetch Media` or clearly explains why recovery is not possible.
 
 ## Current Implementation State
 
@@ -262,11 +289,7 @@ Use one test location configured as `web_bridge`.
 
 ### Phase 3: Improve Media Reliability
 
-- Complete live testing for large files, voice notes, documents, and images from both directions.
-- Confirm worker inline media limit is acceptable in production.
-- Decide whether the worker should stream/upload directly to R2 for large media instead of sending inline base64 to the app webhook.
-- Add retry/dead-letter tracking for failed media ingestion.
-- Add UI indicators when media exists but ingestion failed.
+Status: current implementation phase. Remaining live validation decides whether Phase 4 should include direct worker-to-R2 upload for large media.
 
 ### Phase 4: Finish History And Contact Replacement
 

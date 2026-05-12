@@ -28,6 +28,7 @@ type ManagedSession = {
 const sessions = new Map<string, ManagedSession>();
 const serviceStartedAt = new Date();
 const MAX_INLINE_MEDIA_BYTES = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_MAX_INLINE_MEDIA_BYTES || 25 * 1024 * 1024), 1024 * 1024);
+const SUPPORTED_INLINE_MEDIA_TYPES = new Set(["image", "audio", "ptt", "document", "video"]);
 
 function json(res: ServerResponse, status: number, payload: any) {
     res.writeHead(status, { "Content-Type": "application/json" });
@@ -93,38 +94,114 @@ function serializeManagedSession(session: ManagedSession) {
 
 async function serializeMessage(message: any, options?: { includeMedia?: boolean }) {
     const id = message?.id?._serialized || message?.id?.id || message?.id || "";
+    const messageType = String(message?.type || "text");
+    const caption = message?._data?.caption || "";
     const serialized: Record<string, any> = {
         id,
         from: message?.from || "",
         to: message?.to || "",
         fromMe: Boolean(message?.fromMe),
         body: message?.body || "",
-        caption: message?._data?.caption || "",
-        type: message?.type || "text",
+        caption,
+        type: messageType,
         timestamp: Number(message?.timestamp || Math.floor(Date.now() / 1000)),
         notifyName: message?._data?.notifyName || message?._data?.pushName || "",
         contactName: message?._data?.verifiedName || message?._data?.notifyName || "",
         hasMedia: Boolean(message?.hasMedia),
     };
 
+    if (message?.hasMedia) {
+        serialized.mediaMeta = {
+            mimetype: message?._data?.mimetype || "",
+            filename: message?._data?.filename || message?._data?.title || "",
+            size: Number(message?._data?.size || message?._data?.fileSize || 0) || null,
+            type: messageType,
+            caption,
+            attemptedDownload: Boolean(options?.includeMedia),
+            inlined: false,
+        };
+    }
+
     if (options?.includeMedia && message?.hasMedia && typeof message.downloadMedia === "function") {
+        if (!SUPPORTED_INLINE_MEDIA_TYPES.has(messageType)) {
+            serialized.mediaError = {
+                code: "unsupported_media_type",
+                message: `Unsupported WhatsApp Web media type: ${messageType}`,
+                type: messageType,
+            };
+            console.warn(`[WhatsApp Web Bridge] Media skipped for ${id}: unsupported type ${messageType}`);
+            return serialized;
+        }
+
         try {
             const media = await message.downloadMedia();
             const base64 = String(media?.data || "");
             const approxBytes = Math.floor((base64.length * 3) / 4);
-            if (media?.data && approxBytes <= MAX_INLINE_MEDIA_BYTES) {
+            const mimetype = media?.mimetype || message?._data?.mimetype || "";
+            const filename = media?.filename || message?._data?.filename || message?._data?.title || "";
+            serialized.mediaMeta = {
+                ...(serialized.mediaMeta || {}),
+                mimetype,
+                filename,
+                size: approxBytes || Number(message?._data?.size || message?._data?.fileSize || 0) || null,
+                type: messageType,
+                caption,
+                attemptedDownload: true,
+                inlined: false,
+            };
+
+            if (!mimetype) {
+                serialized.mediaError = {
+                    code: "missing_mimetype",
+                    message: "WhatsApp Web returned media without a mimetype.",
+                    type: messageType,
+                    size: approxBytes || null,
+                };
+                console.warn(`[WhatsApp Web Bridge] Media skipped for ${id}: missing mimetype`);
+            } else if (media?.data && approxBytes <= MAX_INLINE_MEDIA_BYTES) {
                 serialized.media = {
-                    mimetype: media.mimetype || message?._data?.mimetype || "",
-                    filename: media.filename || message?._data?.filename || message?._data?.title || "",
+                    mimetype,
+                    filename,
                     data: base64,
                     size: approxBytes,
                 };
+                serialized.mediaMeta.inlined = true;
+                console.log(`[WhatsApp Web Bridge] Media inlined for ${id}: ${mimetype} ${approxBytes} bytes`);
             } else if (media?.data) {
-                serialized.mediaError = `Media is too large to inline (${approxBytes} bytes).`;
+                serialized.mediaError = {
+                    code: "media_too_large",
+                    message: `Media is too large to inline (${approxBytes} bytes).`,
+                    size: approxBytes,
+                    limit: MAX_INLINE_MEDIA_BYTES,
+                    mimetype,
+                    filename,
+                };
+                console.warn(`[WhatsApp Web Bridge] Media too large for ${id}: ${approxBytes} bytes > ${MAX_INLINE_MEDIA_BYTES}`);
+            } else {
+                serialized.mediaError = {
+                    code: "missing_media_data",
+                    message: "WhatsApp Web did not return media data.",
+                    mimetype,
+                    filename,
+                    type: messageType,
+                };
+                console.warn(`[WhatsApp Web Bridge] Media skipped for ${id}: missing media data`);
             }
         } catch (error: any) {
-            serialized.mediaError = error?.message || "Failed to download media.";
+            serialized.mediaError = {
+                code: "download_failed",
+                message: error?.message || "Failed to download media.",
+                type: messageType,
+            };
+            console.error(`[WhatsApp Web Bridge] Media download failed for ${id}:`, error?.message || error);
         }
+    } else if (options?.includeMedia && message?.hasMedia) {
+        serialized.mediaError = {
+            code: "download_unavailable",
+            message: "WhatsApp Web message does not expose downloadMedia().",
+            type: messageType,
+        };
+        console.warn(`[WhatsApp Web Bridge] Media download unavailable for ${id}`);
     }
 
     return serialized;
@@ -245,21 +322,36 @@ async function stopSession(sessionId: string) {
 async function sendMessage(sessionId: string, payload: any) {
     const session = sessions.get(sessionId);
     if (!session?.client || !session.ready) throw new Error("WhatsApp Web session is not ready.");
+    const to = String(payload.to || "").trim();
+    if (!to) throw new Error("Missing WhatsApp Web recipient.");
 
     if (payload.mediaUrl) {
         const { MessageMedia } = require("whatsapp-web.js");
-        const media = await MessageMedia.fromUrl(String(payload.mediaUrl), {
-            unsafeMime: true,
-            filename: payload.fileName || undefined,
-        });
-        const sent = await session.client.sendMessage(String(payload.to), media, {
-            caption: payload.caption || payload.text || undefined,
-        });
-        return { messageId: sent?.id?._serialized || sent?.id?.id || "" };
+        let media: any;
+        try {
+            media = await MessageMedia.fromUrl(String(payload.mediaUrl), {
+                unsafeMime: true,
+                filename: payload.fileName || undefined,
+            });
+        } catch (error: any) {
+            throw new Error(`WhatsApp Web could not read the signed media URL. Re-upload or resend the attachment. ${error?.message || ""}`.trim());
+        }
+        try {
+            const sent = await session.client.sendMessage(to, media, {
+                caption: payload.caption || payload.text || undefined,
+            });
+            return { messageId: sent?.id?._serialized || sent?.id?.id || "" };
+        } catch (error: any) {
+            throw new Error(`WhatsApp Web media send failed. Confirm the recipient is on WhatsApp and the bridge is still connected. ${error?.message || ""}`.trim());
+        }
     }
 
-    const sent = await session.client.sendMessage(String(payload.to), String(payload.text || ""));
-    return { messageId: sent?.id?._serialized || sent?.id?.id || "" };
+    try {
+        const sent = await session.client.sendMessage(to, String(payload.text || ""));
+        return { messageId: sent?.id?._serialized || sent?.id?.id || "" };
+    } catch (error: any) {
+        throw new Error(`WhatsApp Web send failed. Confirm the recipient is on WhatsApp and the bridge is still connected. ${error?.message || ""}`.trim());
+    }
 }
 
 async function listChats(sessionId: string) {
@@ -286,9 +378,10 @@ async function fetchMessages(sessionId: string, payload: any) {
     if (!chatId) throw new Error("Missing chat id.");
 
     const limit = Math.min(Math.max(Number(payload.limit || 30), 1), 100);
+    const includeMedia = Boolean(payload.includeMedia);
     const chat = await session.client.getChatById(chatId);
     const messages = await chat.fetchMessages({ limit });
-    return Promise.all((messages || []).map((message: any) => serializeMessage(message, { includeMedia: false })));
+    return Promise.all((messages || []).map((message: any) => serializeMessage(message, { includeMedia })));
 }
 
 const server = createServer(async (req, res) => {

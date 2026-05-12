@@ -110,6 +110,21 @@ export interface MessageBubbleProps {
         emailFrom?: string;
         emailTo?: string;
         source?: string;
+        webBridgeMedia?: {
+            status?: string | null;
+            reason?: string | null;
+            error?: string | null;
+            meta?: {
+                mimetype?: string | null;
+                filename?: string | null;
+                size?: number | null;
+                type?: string | null;
+                caption?: string | null;
+                attemptedDownload?: boolean | null;
+                inlined?: boolean | null;
+            } | null;
+            updatedAt?: string | null;
+        } | null;
         contactName?: string;
         legacyCrmLead?: {
             status?: string;
@@ -309,8 +324,14 @@ export function MessageBubble({
     );
     const selectedImage = selectedImageIndex !== null ? imageAttachments[selectedImageIndex] : null;
     const hasLikelyMediaPlaceholder = ["[Audio]", "[Image]", "[Media]", "[Document]", "[Contact]"].includes(String(message.body || "").trim());
+    const webBridgeMedia = message.webBridgeMedia || null;
+    const hasUnstoredWebBridgeMedia = isWhatsApp
+        && String(message.source || "") === "whatsapp_web_bridge"
+        && !!webBridgeMedia
+        && webBridgeMedia.status !== "stored"
+        && attachments.length === 0;
     const hasRenderableMediaAttachment = imageAttachments.length > 0 || audioAttachments.length > 0 || fileAttachments.length > 0;
-    const canRefetchMedia = !!onRefetchMedia && isWhatsApp && !isContactMessage && (hasRenderableMediaAttachment || hasLikelyMediaPlaceholder);
+    const canRefetchMedia = !!onRefetchMedia && isWhatsApp && !isContactMessage && (hasRenderableMediaAttachment || hasLikelyMediaPlaceholder || hasUnstoredWebBridgeMedia);
 
     const handleSaveContact = useCallback(async (index: number, contact: SharedContactInfo) => {
         if (!locationId || contactSaveStates[index]?.saving) return;
@@ -1377,6 +1398,32 @@ export function MessageBubble({
                                 <ExternalLink className="h-3 w-3 shrink-0 ml-auto opacity-50" />
                             </a>
                         ))}
+                    </div>
+                )}
+
+                {hasUnstoredWebBridgeMedia && (
+                    <div className={cn("px-4 pb-2 mt-2", isEmail && "bg-gray-50 pt-2 border-t")}>
+                        <div className={cn(
+                            "rounded-md border px-3 py-2 text-xs",
+                            isOutbound && !isEmail
+                                ? "border-white/25 bg-white/10 text-blue-50"
+                                : "border-amber-200 bg-amber-50 text-amber-900"
+                        )}>
+                            <div className="flex items-start gap-2">
+                                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                                <div className="min-w-0 space-y-0.5">
+                                    <div className="font-medium">Media not stored</div>
+                                    <div className="break-words">
+                                        {webBridgeMedia.error || webBridgeMedia.reason || "WhatsApp sent media, but Estio could not store the attachment yet."}
+                                    </div>
+                                    {(webBridgeMedia.meta?.filename || webBridgeMedia.meta?.mimetype) && (
+                                        <div className={cn("truncate", isOutbound && !isEmail ? "text-blue-100/80" : "text-amber-800")}>
+                                            {[webBridgeMedia.meta?.filename, webBridgeMedia.meta?.mimetype].filter(Boolean).join(" · ")}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 )}
 

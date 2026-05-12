@@ -69,8 +69,10 @@ import {
     fetchWhatsAppWebBridgeMessages,
     getWhatsAppWebBridgeSession,
     getReadyWhatsAppWebBridgeSession,
+    normalizeWhatsAppWebChatId,
     startWhatsAppWebBridgeSession,
 } from "@/lib/whatsapp/web-bridge";
+import { ingestWhatsAppWebBridgeMediaAttachment, formatWhatsAppWebBridgeMediaFailure } from "@/lib/whatsapp/web-bridge-media";
 import { hasOpenWhatsAppCustomerServiceWindow } from "@/lib/whatsapp/customer-window";
 import type { WhatsAppTransport, WhatsAppTemplateComponent } from "@/lib/whatsapp/client";
 import {
@@ -1949,6 +1951,14 @@ export async function fetchMessages(
                     lockedAt: true,
                 },
             },
+            syncRecords: {
+                where: { provider: "whatsapp_web_bridge" },
+                select: {
+                    metadata: true,
+                    lastError: true,
+                },
+                take: 1,
+            },
             translationCaches: {
                 orderBy: [{ updatedAt: "desc" }],
                 take: 12,
@@ -2016,6 +2026,10 @@ export async function fetchMessages(
     });
 
     return messages.map((m: any) => {
+        const webBridgeSync = Array.isArray(m.syncRecords) ? m.syncRecords[0] : null;
+        const webBridgeMedia = webBridgeSync?.metadata && typeof webBridgeSync.metadata === "object"
+            ? (webBridgeSync.metadata as any).webBridgeMedia || null
+            : null;
         const translationEntries = (m.translationCaches || []).map((entry: any) => ({
             id: entry.id,
             targetLanguage: entry.targetLanguage,
@@ -2117,6 +2131,13 @@ export async function fetchMessages(
         emailFrom: m.emailFrom || undefined,
         emailTo: m.emailTo || undefined,
         source: m.source || undefined,
+        webBridgeMedia: webBridgeMedia ? {
+            status: webBridgeMedia.status || null,
+            reason: webBridgeMedia.reason || null,
+            error: webBridgeMedia.error || null,
+            meta: webBridgeMedia.meta || null,
+            updatedAt: webBridgeMedia.updatedAt || null,
+        } : null,
         detectedLanguage,
         detectedLanguageConfidence,
         translation: buildMessageTranslationState({
@@ -3970,6 +3991,162 @@ function formatMediaRefetchFailureReason(reason: string | undefined) {
     }
 }
 
+async function updateWebBridgeMediaSyncMetadata(messageId: string, mediaState: Record<string, any>) {
+    const existing = await (db as any).messageSync.findFirst({
+        where: {
+            messageId,
+            provider: "whatsapp_web_bridge",
+        },
+        select: { id: true, metadata: true },
+    }).catch(() => null);
+    if (!existing?.id) return;
+
+    const current = existing.metadata && typeof existing.metadata === "object" ? existing.metadata : {};
+    await (db as any).messageSync.update({
+        where: { id: existing.id },
+        data: {
+            metadata: {
+                ...current,
+                webBridgeMedia: {
+                    ...((current as any).webBridgeMedia || {}),
+                    ...mediaState,
+                    updatedAt: new Date().toISOString(),
+                },
+            },
+        },
+    }).catch((error: any) => {
+        console.warn("[refetchWhatsAppMediaAttachment] Failed to update Web Bridge media metadata:", error?.message || error);
+    });
+}
+
+async function refetchWhatsAppWebBridgeMediaAttachment(params: {
+    locationId: string;
+    conversation: any;
+    message: any;
+    deleteStoredObject?: boolean;
+    limit?: number;
+}) {
+    const contactPhone = String(params.conversation?.contact?.phone || "").trim();
+    const chatId = normalizeWhatsAppWebChatId(contactPhone);
+    if (!chatId) {
+        return { success: false as const, error: "Contact phone number is missing or invalid for Web Bridge media re-fetch." };
+    }
+
+    const response = await fetchWhatsAppWebBridgeMessages({
+        locationId: params.locationId,
+        chatId,
+        limit: params.limit || 80,
+        includeMedia: true,
+    });
+    const records = Array.isArray(response?.messages) ? response.messages : [];
+    const matched = records.find((item: any) => String(item?.id || item?.messageId || "").trim() === params.message.wamId);
+    if (!matched) {
+        return { success: false as const, error: `Could not locate this Web Bridge message in recent WhatsApp history. Scanned ${records.length} messages.` };
+    }
+    if (!matched?.media?.data) {
+        await updateWebBridgeMediaSyncMetadata(params.message.id, {
+            status: "failed",
+            reason: matched?.mediaError?.code || "missing_media_payload",
+            error: matched?.mediaError?.message || matched?.mediaError || "WhatsApp Web did not return media data for this message.",
+            meta: matched?.mediaMeta || null,
+        });
+        return {
+            success: false as const,
+            error: matched?.mediaError?.message || matched?.mediaError || "WhatsApp Web did not return media data for this message.",
+        };
+    }
+
+    const snapshot = (params.message.attachments || []).map((attachment: any) => ({
+        fileName: attachment.fileName,
+        contentType: attachment.contentType,
+        size: attachment.size,
+        url: attachment.url,
+    }));
+
+    if (snapshot.length > 0) {
+        await db.messageAttachment.deleteMany({
+            where: { messageId: params.message.id },
+        });
+    }
+
+    let ingestResult: any;
+    try {
+        ingestResult = await ingestWhatsAppWebBridgeMediaAttachment({
+            wamId: params.message.wamId,
+            media: matched.media,
+            messageType: String(matched.type || "text"),
+        });
+    } catch (error: any) {
+        if (snapshot.length > 0) {
+            await db.messageAttachment.createMany({
+                data: snapshot.map((attachment: any) => ({
+                    messageId: params.message.id,
+                    fileName: attachment.fileName,
+                    contentType: attachment.contentType,
+                    size: attachment.size,
+                    url: attachment.url,
+                })),
+            }).catch(() => null);
+        }
+        await updateWebBridgeMediaSyncMetadata(params.message.id, {
+            status: "failed",
+            reason: "ingest_exception",
+            error: error?.message || "Failed to ingest Web Bridge media.",
+            meta: matched?.mediaMeta || null,
+        });
+        return { success: false as const, error: `Failed to store Web Bridge media: ${error?.message || "Unknown error"}` };
+    }
+
+    if (ingestResult?.status !== "stored") {
+        if (snapshot.length > 0) {
+            await db.messageAttachment.createMany({
+                data: snapshot.map((attachment: any) => ({
+                    messageId: params.message.id,
+                    fileName: attachment.fileName,
+                    contentType: attachment.contentType,
+                    size: attachment.size,
+                    url: attachment.url,
+                })),
+            }).catch(() => null);
+        }
+        await updateWebBridgeMediaSyncMetadata(params.message.id, {
+            status: ingestResult?.status || "skipped",
+            reason: ingestResult?.reason || "unknown",
+            error: null,
+            meta: matched?.mediaMeta || null,
+        });
+        return {
+            success: false as const,
+            error: `Web Bridge media re-fetch did not store a new attachment (${formatWhatsAppWebBridgeMediaFailure(ingestResult?.reason)}).`,
+        };
+    }
+
+    if (params.deleteStoredObject !== false && snapshot.length > 0) {
+        for (const attachment of snapshot) {
+            const r2 = parseR2Uri(String(attachment.url || ""));
+            if (!r2) continue;
+            await deleteWhatsAppMediaObject(r2.key).catch(() => null);
+        }
+    }
+
+    await updateWebBridgeMediaSyncMetadata(params.message.id, {
+        status: "stored",
+        key: ingestResult.key || null,
+        error: null,
+        reason: null,
+        meta: matched?.mediaMeta || null,
+    });
+
+    return {
+        success: true as const,
+        mediaType: String(matched.type || "media"),
+        removedAttachmentRows: snapshot.length,
+        remoteJid: chatId,
+        scannedMessages: records.length,
+        warnings: [] as string[],
+    };
+}
+
 async function findEvolutionMessageByWamId(params: {
     evolutionClient: any;
     evolutionInstanceId: string;
@@ -4046,10 +4223,6 @@ export async function refetchWhatsAppMediaAttachment(
 ) {
     const location = await getAuthenticatedLocation();
 
-    if (!location?.evolutionInstanceId) {
-        return { success: false as const, error: "WhatsApp (Evolution) is not connected." };
-    }
-
     const conversation = await db.conversation.findFirst({
         where: buildConversationReferenceWhere(location.id, conversationId),
         include: {
@@ -4077,6 +4250,20 @@ export async function refetchWhatsAppMediaAttachment(
     }
     if (!message.wamId) {
         return { success: false as const, error: "Message is missing WhatsApp message id (wamId)." };
+    }
+
+    if (String(message.source || "") === "whatsapp_web_bridge") {
+        return refetchWhatsAppWebBridgeMediaAttachment({
+            locationId: location.id,
+            conversation,
+            message,
+            deleteStoredObject: options?.deleteStoredObject,
+            limit: options?.maxScan ? Math.min(Math.max(Number(options.maxScan), 1), 100) : undefined,
+        });
+    }
+
+    if (!location?.evolutionInstanceId) {
+        return { success: false as const, error: "WhatsApp (Evolution) is not connected." };
     }
 
     const { evolutionClient } = await import("@/lib/evolution/client");

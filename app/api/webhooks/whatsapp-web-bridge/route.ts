@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import db from "@/lib/db";
 import { processNormalizedMessage, processStatusUpdate } from "@/lib/whatsapp/sync";
 import {
     extractPhoneFromWhatsAppWebId,
     getWhatsAppWebBridgeSecret,
     upsertWhatsAppWebBridgeSession,
+    WHATSAPP_WEB_BRIDGE_PROVIDER,
 } from "@/lib/whatsapp/web-bridge";
 
 function isAuthorized(req: NextRequest) {
@@ -19,6 +21,44 @@ function normalizeAckStatus(ack: unknown) {
     if (n === 1) return "SERVER_ACK";
     if (n < 0) return "FAILED";
     return "";
+}
+
+async function updateBridgeMessageMediaMetadata(wamId: string, mediaState: Record<string, any>) {
+    if (!wamId) return;
+    const message = await (db as any).message.findUnique({
+        where: { wamId },
+        select: {
+            id: true,
+            syncRecords: {
+                where: { provider: WHATSAPP_WEB_BRIDGE_PROVIDER },
+                select: { metadata: true },
+                take: 1,
+            },
+        },
+    }).catch(() => null);
+    if (!message?.id) return;
+
+    const current = (message.syncRecords?.[0]?.metadata && typeof message.syncRecords[0].metadata === "object")
+        ? message.syncRecords[0].metadata
+        : {};
+    await (db as any).messageSync.updateMany({
+        where: {
+            messageId: message.id,
+            provider: WHATSAPP_WEB_BRIDGE_PROVIDER,
+        },
+        data: {
+            metadata: {
+                ...current,
+                webBridgeMedia: {
+                    ...((current as any).webBridgeMedia || {}),
+                    ...mediaState,
+                    updatedAt: new Date().toISOString(),
+                },
+            },
+        },
+    }).catch((error: any) => {
+        console.warn(`[WhatsApp Web Bridge Webhook] Failed to store media metadata for ${wamId}:`, error?.message || error);
+    });
 }
 
 export async function POST(req: NextRequest) {
@@ -102,11 +142,42 @@ export async function POST(req: NextRequest) {
                     wamId,
                     media: message.media,
                     messageType: String(message.type || "text"),
+                }).then((ingestResult: any) => {
+                    if (ingestResult?.status === "stored") {
+                        return updateBridgeMessageMediaMetadata(wamId, {
+                            status: "stored",
+                            key: ingestResult.key || null,
+                            meta: message.mediaMeta || null,
+                            error: null,
+                        });
+                    }
+                    return updateBridgeMessageMediaMetadata(wamId, {
+                        status: ingestResult?.status || "skipped",
+                        reason: ingestResult?.reason || "unknown",
+                        meta: message.mediaMeta || null,
+                        error: null,
+                    });
                 }).catch((error) => {
                     console.error(`[WhatsApp Web Bridge Webhook] Failed to ingest media for ${wamId}:`, error);
+                    void updateBridgeMessageMediaMetadata(wamId, {
+                        status: "failed",
+                        reason: "ingest_exception",
+                        meta: message.mediaMeta || null,
+                        error: error?.message || "Failed to ingest media.",
+                    });
                 });
             } else if (message.hasMedia && message.mediaError) {
-                console.warn(`[WhatsApp Web Bridge Webhook] Media not ingested for ${wamId}: ${message.mediaError}`);
+                console.warn(
+                    `[WhatsApp Web Bridge Webhook] Media not ingested for ${wamId}:`,
+                    typeof message.mediaError === "object" ? JSON.stringify(message.mediaError) : message.mediaError
+                );
+                void updateBridgeMessageMediaMetadata(wamId, {
+                    status: "failed",
+                    reason: typeof message.mediaError === "object" ? message.mediaError.code || "worker_media_error" : "worker_media_error",
+                    meta: message.mediaMeta || null,
+                    error: typeof message.mediaError === "object" ? message.mediaError.message || null : String(message.mediaError || ""),
+                    workerError: message.mediaError,
+                });
             }
 
             return NextResponse.json({ status: "processed" });
