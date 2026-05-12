@@ -36,6 +36,11 @@ export async function GET(req: NextRequest) {
                     console.error("Token refresh failed", e);
                 }
 
+                if (String((location as any).whatsappProviderMode || "") !== "evolution_linked") {
+                    send({ type: 'error', message: "Legacy Evolution sync is only available for locations explicitly set to Evolution Legacy Linked Device." });
+                    controller.close();
+                    return;
+                }
                 if (!location!.evolutionInstanceId) {
                     send({ type: 'error', message: "WhatsApp not connected" });
                     controller.close();

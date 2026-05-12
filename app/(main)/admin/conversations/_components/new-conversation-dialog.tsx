@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { MessageCirclePlus, Loader2, Phone, Users, Search, CheckCircle2, MessageCircle, ArrowRight } from 'lucide-react';
-import { fetchEvolutionChats, startNewConversation, parseLeadFromText, createParsedLead, importLeadFromText, getPasteLeadImportCapability, type ParsedLeadData } from '../actions';
+import { fetchWhatsAppChats, startNewConversation, parseLeadFromText, createParsedLead, importLeadFromText, getPasteLeadImportCapability, type ParsedLeadData } from '../actions';
 import { cn } from '@/lib/utils';
 import { Textarea } from '@/components/ui/textarea';
 import { Card } from '@/components/ui/card';
@@ -20,7 +20,7 @@ import { GEMINI_FLASH_LATEST_ALIAS } from '@/lib/ai/models';
 import { buildLeadTextFromClipboardData, insertTextIntoTextareaValue } from './paste-lead-rich-text';
 
 
-interface EvolutionChat {
+interface WhatsAppChat {
     jid: string;
     phone: string;
     name: string;
@@ -45,7 +45,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
     const [error, setError] = useState<string | null>(null);
 
     // Chat picker state
-    const [chats, setChats] = useState<EvolutionChat[]>([]);
+    const [chats, setChats] = useState<WhatsAppChat[]>([]);
     const [loadingChats, setLoadingChats] = useState(false);
     const [chatsLoaded, setChatsLoaded] = useState(false);
 
@@ -142,7 +142,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
         if (tab === 'pick' && !chatsLoaded) {
             setLoadingChats(true);
             try {
-                const res = await fetchEvolutionChats();
+                const res = await fetchWhatsAppChats();
                 if (res.success && res.chats) {
                     setChats(res.chats);
                 } else {
@@ -180,7 +180,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
     };
 
     // Start a conversation from a picked chat
-    const handlePickChat = async (chat: EvolutionChat) => {
+    const handlePickChat = async (chat: WhatsAppChat) => {
         setCreating(true);
         setError(null);
 

@@ -21,6 +21,7 @@ type ManagedSession = {
 };
 
 const sessions = new Map<string, ManagedSession>();
+const MAX_INLINE_MEDIA_BYTES = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_MAX_INLINE_MEDIA_BYTES || 25 * 1024 * 1024), 1024 * 1024);
 
 function json(res: ServerResponse, status: number, payload: any) {
     res.writeHead(status, { "Content-Type": "application/json" });
@@ -54,9 +55,9 @@ async function emitEvent(payload: Record<string, any>) {
     }
 }
 
-function serializeMessage(message: any) {
+async function serializeMessage(message: any, options?: { includeMedia?: boolean }) {
     const id = message?.id?._serialized || message?.id?.id || message?.id || "";
-    return {
+    const serialized: Record<string, any> = {
         id,
         from: message?.from || "",
         to: message?.to || "",
@@ -69,6 +70,28 @@ function serializeMessage(message: any) {
         contactName: message?._data?.verifiedName || message?._data?.notifyName || "",
         hasMedia: Boolean(message?.hasMedia),
     };
+
+    if (options?.includeMedia && message?.hasMedia && typeof message.downloadMedia === "function") {
+        try {
+            const media = await message.downloadMedia();
+            const base64 = String(media?.data || "");
+            const approxBytes = Math.floor((base64.length * 3) / 4);
+            if (media?.data && approxBytes <= MAX_INLINE_MEDIA_BYTES) {
+                serialized.media = {
+                    mimetype: media.mimetype || message?._data?.mimetype || "",
+                    filename: media.filename || message?._data?.filename || message?._data?.title || "",
+                    data: base64,
+                    size: approxBytes,
+                };
+            } else if (media?.data) {
+                serialized.mediaError = `Media is too large to inline (${approxBytes} bytes).`;
+            }
+        } catch (error: any) {
+            serialized.mediaError = error?.message || "Failed to download media.";
+        }
+    }
+
+    return serialized;
 }
 
 async function getPhone(client: any) {
@@ -134,11 +157,11 @@ async function startSession(sessionId: string, locationId: string) {
     });
 
     client.on("message", async (message: any) => {
-        await emitEvent({ event: "message", locationId, sessionId, phone: managed.phone, message: serializeMessage(message) }).catch(console.error);
+        await emitEvent({ event: "message", locationId, sessionId, phone: managed.phone, message: await serializeMessage(message, { includeMedia: true }) }).catch(console.error);
     });
 
     client.on("message_create", async (message: any) => {
-        await emitEvent({ event: "message_create", locationId, sessionId, phone: managed.phone, message: serializeMessage(message) }).catch(console.error);
+        await emitEvent({ event: "message_create", locationId, sessionId, phone: managed.phone, message: await serializeMessage(message, { includeMedia: true }) }).catch(console.error);
     });
 
     client.on("message_ack", async (message: any, ack: number) => {
@@ -178,6 +201,35 @@ async function sendMessage(sessionId: string, payload: any) {
     return { messageId: sent?.id?._serialized || sent?.id?.id || "" };
 }
 
+async function listChats(sessionId: string) {
+    const session = sessions.get(sessionId);
+    if (!session?.client || !session.ready) throw new Error("WhatsApp Web session is not ready.");
+
+    const chats = await session.client.getChats();
+    return (chats || []).map((chat: any) => ({
+        id: chat?.id?._serialized || chat?.id?.user || "",
+        name: chat?.name || chat?.formattedTitle || chat?.id?.user || "",
+        isGroup: Boolean(chat?.isGroup),
+        unreadCount: Number(chat?.unreadCount || 0),
+        timestamp: Number(chat?.timestamp || 0),
+        archived: Boolean(chat?.archived),
+        pinned: Boolean(chat?.pinned),
+    }));
+}
+
+async function fetchMessages(sessionId: string, payload: any) {
+    const session = sessions.get(sessionId);
+    if (!session?.client || !session.ready) throw new Error("WhatsApp Web session is not ready.");
+
+    const chatId = String(payload.chatId || payload.to || "").trim();
+    if (!chatId) throw new Error("Missing chat id.");
+
+    const limit = Math.min(Math.max(Number(payload.limit || 30), 1), 100);
+    const chat = await session.client.getChatById(chatId);
+    const messages = await chat.fetchMessages({ limit });
+    return Promise.all((messages || []).map((message: any) => serializeMessage(message, { includeMedia: false })));
+}
+
 const server = createServer(async (req, res) => {
     try {
         if (!isAuthorized(req)) return json(res, 401, { error: "Unauthorized" });
@@ -211,6 +263,15 @@ const server = createServer(async (req, res) => {
                 const body = await readJson(req);
                 const result = await sendMessage(sessionId, body);
                 return json(res, 200, { success: true, ...result });
+            }
+            if (req.method === "GET" && parts[2] === "chats") {
+                const chats = await listChats(sessionId);
+                return json(res, 200, { success: true, chats });
+            }
+            if (req.method === "POST" && parts[2] === "messages") {
+                const body = await readJson(req);
+                const messages = await fetchMessages(sessionId, body);
+                return json(res, 200, { success: true, messages });
             }
         }
 

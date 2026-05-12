@@ -62,8 +62,15 @@ import {
     parseR2Uri,
 } from "@/lib/whatsapp/media-r2";
 import { ingestEvolutionMediaAttachment, parseEvolutionMessageContent } from "@/lib/whatsapp/evolution-media";
+import { processNormalizedMessage } from "@/lib/whatsapp/sync";
 import { enqueueWhatsAppOutbound } from "@/lib/whatsapp/outbound-enqueue";
-import { getReadyWhatsAppWebBridgeSession } from "@/lib/whatsapp/web-bridge";
+import {
+    fetchWhatsAppWebBridgeChats,
+    fetchWhatsAppWebBridgeMessages,
+    getWhatsAppWebBridgeSession,
+    getReadyWhatsAppWebBridgeSession,
+    startWhatsAppWebBridgeSession,
+} from "@/lib/whatsapp/web-bridge";
 import { hasOpenWhatsAppCustomerServiceWindow } from "@/lib/whatsapp/customer-window";
 import type { WhatsAppTransport, WhatsAppTemplateComponent } from "@/lib/whatsapp/client";
 import {
@@ -5626,7 +5633,7 @@ async function resolveWhatsAppOutboundTransport(locationId: string, explicit?: W
         } as any,
     });
 
-    const mode = String(integrationPayload.whatsappProviderMode || (row as any)?.whatsappProviderMode || "cloud_primary");
+    const mode = String(integrationPayload.whatsappProviderMode || (row as any)?.whatsappProviderMode || "web_bridge");
     const cloudConfigured = Boolean((integrationPayload.whatsappPhoneNumberId || row?.whatsappPhoneNumberId) && (hasCloudSecret || row?.whatsappAccessToken));
     const evolutionConfigured = Boolean(integrationPayload.evolutionInstanceId || row?.evolutionInstanceId);
     const twilioConfigured = Boolean((integrationPayload.twilioAccountSid || row?.twilioAccountSid) && (integrationPayload.twilioWhatsAppFrom || row?.twilioWhatsAppFrom));
@@ -7533,6 +7540,7 @@ export async function getSmsChannelEligibility(conversationId: string) {
 export async function getWhatsAppChannelEligibility(conversationId: string) {
     try {
         const location = await getBasicLocationContext();
+        const mode = await resolveLocationWhatsAppProviderMode(location.id);
 
         const conversation = await db.conversation.findFirst({
             where: buildConversationReferenceWhere(location.id, conversationId),
@@ -7557,6 +7565,45 @@ export async function getWhatsAppChannelEligibility(conversationId: string) {
         }
 
         const contact = conversation.contact;
+        if (mode === "web_bridge") {
+            const phoneValue = String(contact.phone || "").trim();
+            const rawDigits = phoneValue.replace(/\D/g, "");
+            if (!phoneValue) {
+                return {
+                    success: true,
+                    eligible: false,
+                    status: "ineligible" as const,
+                    reason: `${contact.name || "This contact"} does not have a phone number.`,
+                    phone: contact.phone || null,
+                };
+            }
+            if (phoneValue.includes("*")) {
+                return {
+                    success: true,
+                    eligible: false,
+                    status: "ineligible" as const,
+                    reason: `${contact.name || "This contact"}'s phone number is masked, so WhatsApp cannot be verified.`,
+                    phone: contact.phone || null,
+                };
+            }
+            if (rawDigits.length < 7) {
+                return {
+                    success: true,
+                    eligible: false,
+                    status: "ineligible" as const,
+                    reason: `${contact.name || "This contact"}'s phone number is invalid or too short.`,
+                    phone: contact.phone || null,
+                };
+            }
+            return {
+                success: true,
+                eligible: null as boolean | null,
+                status: "unknown" as const,
+                reason: "WhatsApp Web Bridge will verify this number at send time.",
+                phone: contact.phone || null,
+            };
+        }
+
         const eligibility = await checkWhatsAppPhoneEligibility(
             {
                 evolutionInstanceId: location.evolutionInstanceId,
@@ -7583,6 +7630,128 @@ export async function getWhatsAppChannelEligibility(conversationId: string) {
             eligible: null as boolean | null,
             status: 'unknown' as const,
             reason: error?.message || 'Failed to check WhatsApp eligibility.',
+        };
+    }
+}
+
+async function resolveLocationWhatsAppProviderMode(locationId: string) {
+    const [doc, row] = await Promise.all([
+        settingsService.getDocument<any>({
+            scopeType: "LOCATION",
+            scopeId: locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+        }).catch(() => null),
+        db.location.findUnique({
+            where: { id: locationId },
+            select: { whatsappProviderMode: true } as any,
+        }).catch(() => null),
+    ]);
+    return String(doc?.payload?.whatsappProviderMode || (row as any)?.whatsappProviderMode || "web_bridge");
+}
+
+export async function getWhatsAppWebBridgeStatus() {
+    try {
+        const location = await getBasicLocationContext();
+        const mode = await resolveLocationWhatsAppProviderMode(location.id);
+        if (mode === "evolution_linked") {
+            const legacy = await getEvolutionStatus();
+            return {
+                provider: "evolution" as const,
+                mode,
+                status: legacy.status,
+                qrcode: legacy.qrcode,
+                phone: null as string | null,
+                sessionId: location.id,
+                lastSeenAt: null as string | null,
+                lastReadyAt: null as string | null,
+                error: null as string | null,
+            };
+        }
+
+        const session = await getWhatsAppWebBridgeSession(location.id);
+        return {
+            provider: "web_bridge" as const,
+            mode,
+            status: session?.status || "disconnected",
+            qrcode: session?.qrCode || null,
+            phone: session?.phone || null,
+            sessionId: session?.sessionId || null,
+            lastSeenAt: session?.lastSeenAt?.toISOString?.() || null,
+            lastReadyAt: session?.lastReadyAt?.toISOString?.() || null,
+            error: session?.lastError || null,
+        };
+    } catch (error: any) {
+        console.error("getWhatsAppWebBridgeStatus error:", error);
+        return {
+            provider: "web_bridge" as const,
+            mode: "web_bridge",
+            status: "ERROR",
+            qrcode: null,
+            phone: null,
+            sessionId: null,
+            lastSeenAt: null,
+            lastReadyAt: null,
+            error: error?.message || "Failed to check WhatsApp Web Bridge status.",
+        };
+    }
+}
+
+export async function triggerWhatsAppWebBridgeConnection() {
+    try {
+        const location = await getBasicLocationContext();
+        const mode = await resolveLocationWhatsAppProviderMode(location.id);
+        if (mode === "evolution_linked") {
+            const legacy = await triggerWhatsAppConnection();
+            return {
+                provider: "evolution" as const,
+                success: legacy.success,
+                qrCode: legacy.qrCode,
+                status: legacy.status,
+                error: (legacy as any).error || null,
+            };
+        }
+
+        const doc = await settingsService.getDocument<any>({
+            scopeType: "LOCATION",
+            scopeId: location.id,
+            domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+        }).catch(() => null);
+        await settingsService.upsertDocument({
+            scopeType: "LOCATION",
+            scopeId: location.id,
+            domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+            payload: {
+                ...(doc?.payload || {}),
+                whatsappProviderMode: "web_bridge",
+            },
+            schemaVersion: doc?.schemaVersion || 1,
+        }).catch((error: any) => {
+            console.warn("[WhatsApp Web Bridge] Failed to persist provider mode in settings:", error?.message || error);
+        });
+        await db.location.update({
+            where: { id: location.id },
+            data: { whatsappProviderMode: "web_bridge" } as any,
+        }).catch((error: any) => {
+            console.warn("[WhatsApp Web Bridge] Failed to persist provider mode on location:", error?.message || error);
+        });
+
+        await startWhatsAppWebBridgeSession(location.id);
+        const session = await getWhatsAppWebBridgeSession(location.id);
+        return {
+            provider: "web_bridge" as const,
+            success: true,
+            qrCode: session?.qrCode || null,
+            status: session?.status || "starting",
+            error: null as string | null,
+        };
+    } catch (error: any) {
+        console.error("triggerWhatsAppWebBridgeConnection error:", error);
+        return {
+            provider: "web_bridge" as const,
+            success: false,
+            qrCode: null,
+            status: "ERROR",
+            error: error?.message || "Failed to start WhatsApp Web Bridge.",
         };
     }
 }
@@ -7761,40 +7930,66 @@ export async function resendMessage(messageId: string) {
         return { success: false, error: "Contact phone not found" };
     }
 
-    // 2. Determine Transport (Same Logic as sendReply)
-    const hasEvolution = !!location.evolutionInstanceId;
-
-    if (message.type === 'TYPE_WHATSAPP' && hasEvolution) {
+    if (message.type === 'TYPE_WHATSAPP') {
         try {
-            const { evolutionClient } = await import("@/lib/evolution/client");
-            const normalizedPhone = contact.phone.replace(/\D/g, '');
+            const transportState = await resolveWhatsAppOutboundTransport(location.id);
+            if (transportState.transport === "web_bridge" && !transportState.webBridgeConfigured) {
+                return { success: false, error: "WhatsApp Web Bridge is selected but not connected. Scan the QR code first." };
+            }
+            if (!transportState.cloudConfigured && !transportState.evolutionConfigured && !transportState.webBridgeConfigured) {
+                return { success: false, error: "WhatsApp is not connected." };
+            }
+            const windowError = requireTemplateWindowForCloud(contact as any, transportState.transport);
+            if (windowError) return windowError;
 
-            console.log(`[resendMessage] Retrying wamId ${message.wamId || 'new'} via Evolution...`);
+            const existingOutbox = await (db as any).whatsAppOutboundOutbox.findFirst({
+                where: { messageId: message.id },
+                orderBy: { createdAt: "desc" },
+            });
 
-            const res = await evolutionClient.sendMessage(
-                location.evolutionInstanceId!,
-                normalizedPhone,
-                message.body || ''
-            );
-
-            if (res?.key?.id) {
-                // Update Existing or Create New?
-                // Creating new avoids confusion, but for "Retry" UI typically we want to update the failed one if it never sent.
-                // But wamId changes. So we should probably mark old as failed/retried and create new.
-                // OR update the existing record with new wamId.
+            if (existingOutbox) {
+                await (db as any).whatsAppOutboundOutbox.update({
+                    where: { id: existingOutbox.id },
+                    data: {
+                        status: "pending",
+                        transport: transportState.transport,
+                        attemptCount: 0,
+                        lastError: null,
+                        scheduledAt: new Date(),
+                        lockedAt: null,
+                        lockedBy: null,
+                    },
+                });
 
                 await db.message.update({
                     where: { id: message.id },
                     data: {
-                        wamId: res.key.id, // Update WAM ID
-                        status: 'sent',
+                        status: "sending",
+                        wamId: null,
                         updatedAt: new Date(),
-                        // error: null // Clear previous errors if any (field not in schema yet)
-                    }
+                    },
                 });
 
                 return { success: true };
             }
+
+            await enqueueWhatsAppOutbound({
+                locationId: location.id,
+                conversationInternalId: message.conversation.id,
+                conversationGhlId: message.conversation.ghlConversationId || message.conversation.id,
+                contactId: contact.id,
+                body: message.body || "",
+                kind: "text",
+                source: "app_user",
+                transport: transportState.transport,
+            });
+
+            await db.message.update({
+                where: { id: message.id },
+                data: { status: "failed", updatedAt: new Date() },
+            }).catch(() => null);
+
+            return { success: true };
         } catch (err: any) {
             console.error("Resend failed:", err);
             return { success: false, error: err.message };
@@ -9435,6 +9630,69 @@ async function resolvePreferredChannelTypeForPhone(
     return 'TYPE_SMS';
 }
 
+function getWhatsAppWebChatIdFromPhone(phone: string | null | undefined) {
+    const digits = String(phone || "").replace(/\D/g, "");
+    return digits.length >= 7 ? `${digits}@c.us` : "";
+}
+
+function normalizeWebBridgeChatPhone(chatId: string) {
+    return String(chatId || "")
+        .replace(/@(c\.us|s\.whatsapp\.net)$/i, "")
+        .split(":")[0]
+        .replace(/\D/g, "");
+}
+
+async function importWebBridgeRecentMessagesForContact(args: {
+    locationId: string;
+    phone: string | null | undefined;
+    contactName?: string | null;
+    limit?: number;
+    logPrefix?: string;
+}) {
+    const chatId = getWhatsAppWebChatIdFromPhone(args.phone);
+    if (!chatId) return 0;
+
+    const { messages } = await fetchWhatsAppWebBridgeMessages({
+        locationId: args.locationId,
+        chatId,
+        limit: args.limit || 30,
+    });
+
+    let imported = 0;
+    for (const message of messages || []) {
+        const wamId = String(message?.id || "").trim();
+        if (!wamId) continue;
+
+        const fromMe = Boolean(message?.fromMe);
+        const fromId = String(message?.from || "");
+        const toId = String(message?.to || "");
+        const remoteId = fromMe ? toId : fromId;
+        const contactPhone = normalizeWebBridgeChatPhone(remoteId);
+        const ownPhone = normalizeWebBridgeChatPhone(fromMe ? fromId : toId) || args.locationId;
+        if (!contactPhone) continue;
+
+        const result = await processNormalizedMessage({
+            locationId: args.locationId,
+            from: fromMe ? ownPhone : contactPhone,
+            to: fromMe ? contactPhone : ownPhone,
+            body: String(message?.body || message?.caption || ""),
+            type: String(message?.type || "text") as any,
+            wamId,
+            timestamp: new Date(Number(message?.timestamp || Date.now() / 1000) * 1000),
+            direction: fromMe ? "outbound" : "inbound",
+            source: "whatsapp_web_bridge" as any,
+            contactName: fromMe ? undefined : (message?.contactName || message?.notifyName || args.contactName || undefined),
+            resolvedPhone: contactPhone,
+        });
+        if (result?.status === "processed") imported++;
+    }
+
+    if (args.logPrefix) {
+        console.log(`${args.logPrefix} Imported ${imported} recent WhatsApp Web Bridge messages.`);
+    }
+    return imported;
+}
+
 /**
  * Bulk-sync all WhatsApp chats from Evolution API into local DB.
  * Safe to call multiple times — dedup handled at message, conversation, and contact levels.
@@ -9611,6 +9869,63 @@ export async function syncAllEvolutionChats() {
  */
 export async function fetchEvolutionChats() {
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const mode = await resolveLocationWhatsAppProviderMode(location.id);
+    if (mode !== "evolution_linked") {
+        try {
+            const res = await fetchWhatsAppWebBridgeChats(location.id);
+            const allChats = Array.isArray(res?.chats) ? res.chats : [];
+            const validChats = allChats.filter((chat: any) => {
+                const jid = String(chat.id || "");
+                return jid.endsWith("@c.us") || jid.endsWith("@s.whatsapp.net");
+            });
+
+            const existingContacts = await db.contact.findMany({
+                where: { locationId: location.id, phone: { not: null } },
+                select: { phone: true, name: true },
+            });
+            const existingConversations = await db.conversation.findMany({
+                where: { locationId: location.id },
+                include: { contact: { select: { phone: true } } },
+            });
+            const syncedPhones = new Set(
+                existingConversations
+                    .map((c: any) => c.contact?.phone?.replace(/\D/g, ""))
+                    .filter(Boolean)
+            );
+
+            const formatted = validChats.map((chat: any) => {
+                const jid = String(chat.id || "");
+                const rawPhone = normalizeWebBridgeChatPhone(jid);
+                const alreadySynced = syncedPhones.has(rawPhone) ||
+                    Array.from(syncedPhones).some((p) => p?.endsWith(rawPhone) || rawPhone.endsWith(p || ""));
+                const matchedContact = existingContacts.find((c) => {
+                    const cp = c.phone?.replace(/\D/g, "") || "";
+                    return cp === rawPhone || cp.endsWith(rawPhone) || rawPhone.endsWith(cp);
+                });
+
+                return {
+                    jid,
+                    phone: `+${rawPhone}`,
+                    name: chat.name || matchedContact?.name || `+${rawPhone}`,
+                    isGroup: false,
+                    alreadySynced,
+                    lastMessageTimestamp: chat.timestamp || null,
+                    provider: "web_bridge",
+                };
+            });
+
+            formatted.sort((a: any, b: any) => {
+                if (a.alreadySynced !== b.alreadySynced) return a.alreadySynced ? 1 : -1;
+                return (b.lastMessageTimestamp || 0) - (a.lastMessageTimestamp || 0);
+            });
+
+            return { success: true, chats: formatted };
+        } catch (e: any) {
+            console.error("[FetchChats] Web Bridge failed:", e);
+            return { success: false, error: e.message || "WhatsApp Web Bridge is not connected", chats: [] };
+        }
+    }
+
     if (!location.evolutionInstanceId) {
         return { success: false, error: "WhatsApp not connected", chats: [] };
     }
@@ -9692,11 +10007,16 @@ export async function fetchEvolutionChats() {
     }
 }
 
+export async function fetchWhatsAppChats() {
+    return fetchEvolutionChats();
+}
+
 /**
  * Create a new conversation for a phone number, with history backfill from Evolution.
  */
 export async function startNewConversation(phone: string) {
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const providerMode = await resolveLocationWhatsAppProviderMode(location.id);
     const { userId: clerkUserId } = await auth();
     const currentUser = clerkUserId
         ? await db.user.findUnique({ where: { clerkId: clerkUserId }, select: { id: true } })
@@ -9714,7 +10034,9 @@ export async function startNewConversation(phone: string) {
         return { success: false, error: "Phone number is too short. Please include the country code." };
     }
 
-    const preferredChannelType = await resolvePreferredChannelTypeForPhone(location, rawDigits);
+    const preferredChannelType = providerMode === "web_bridge"
+        ? "TYPE_WHATSAPP"
+        : await resolvePreferredChannelTypeForPhone(location, rawDigits);
 
     try {
         // 1. Find or create contact
@@ -9788,8 +10110,20 @@ export async function startNewConversation(phone: string) {
         if (existingConv) {
             console.log(`[NewConversation] Existing conversation found: ${existingConv.ghlConversationId}`);
 
-            // Still try to backfill recent messages if Evolution is connected
-            if (location.evolutionInstanceId) {
+            // Still try to backfill recent messages from the selected linked-device transport.
+            if (providerMode === "web_bridge") {
+                try {
+                    await importWebBridgeRecentMessagesForContact({
+                        locationId: location.id,
+                        phone: contact.phone || rawDigits,
+                        contactName: contact.name,
+                        limit: 30,
+                        logPrefix: `[NewConversation][existing:${existingConv.ghlConversationId || existingConv.id}]`,
+                    });
+                } catch (backfillErr) {
+                    console.warn("[NewConversation] Web Bridge history backfill failed:", backfillErr);
+                }
+            } else if (providerMode === "evolution_linked" && location.evolutionInstanceId) {
                 try {
                     const { evolutionClient } = await import("@/lib/evolution/client");
                     const { processNormalizedMessage } = await import("@/lib/whatsapp/sync");
@@ -9908,9 +10242,21 @@ export async function startNewConversation(phone: string) {
             });
         });
 
-        // 4. Try to backfill history from Evolution
+        // 4. Try to backfill history from the selected linked-device transport.
         let messagesImported = 0;
-        if (location.evolutionInstanceId) {
+        if (providerMode === "web_bridge") {
+            try {
+                messagesImported = await importWebBridgeRecentMessagesForContact({
+                    locationId: location.id,
+                    phone: contact.phone || rawDigits,
+                    contactName: contact.name,
+                    limit: 30,
+                    logPrefix: `[NewConversation][new:${conversation.id}]`,
+                });
+            } catch (backfillErr) {
+                console.warn("[NewConversation] Web Bridge history backfill failed:", backfillErr);
+            }
+        } else if (providerMode === "evolution_linked" && location.evolutionInstanceId) {
             try {
                 const { evolutionClient } = await import("@/lib/evolution/client");
                 const { processNormalizedMessage } = await import("@/lib/whatsapp/sync");
@@ -10302,6 +10648,20 @@ type LeadParseWithTraceResult =
     | { success: false; error: string };
 
 type ResolvedLeadPropertyMatch = Awaited<ReturnType<typeof resolveLeadPropertyMatch>>;
+
+export type PasteLeadPropertyImportStatus =
+    | "linked_existing"
+    | "queued_import"
+    | "skipped_missing_config"
+    | "queue_unavailable";
+
+export type PasteLeadPropertyImportResult = {
+    reference: string;
+    status: PasteLeadPropertyImportStatus;
+    propertyId?: string | null;
+    jobId?: string | null;
+    error?: string | null;
+};
 
 async function persistLeadAnalysisTraceRecord(args: {
     conversationId: string;

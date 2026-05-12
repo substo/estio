@@ -168,7 +168,7 @@ export default function WhatsAppSettingsPage() {
         // Evolution
         evolutionInstanceId: "",
         evolutionConnectionStatus: "close",
-        whatsappProviderMode: "cloud_primary",
+        whatsappProviderMode: "web_bridge",
         whatsappChannels: [] as WhatsAppChannelRow[],
         webBridgeSession: null as WhatsAppWebBridgeSessionRow | null,
     });
@@ -236,7 +236,7 @@ export default function WhatsAppSettingsPage() {
             twilioWhatsAppFrom: data.twilioWhatsAppFrom || "",
             evolutionInstanceId: data.evolutionInstanceId || "",
             evolutionConnectionStatus: data.evolutionConnectionStatus || "close",
-            whatsappProviderMode: data.whatsappProviderMode || "cloud_primary",
+            whatsappProviderMode: data.whatsappProviderMode || "web_bridge",
             whatsappChannels: Array.isArray(data.whatsappChannels) ? data.whatsappChannels : [],
             webBridgeSession: data.webBridgeSession || null,
         });
@@ -805,7 +805,7 @@ export default function WhatsAppSettingsPage() {
                                 >
                                     <option value="cloud_primary">Cloud API Primary</option>
                                     <option value="web_bridge">WhatsApp Web Bridge</option>
-                                    <option value="evolution_linked">Evolution Linked Device</option>
+                                    <option value="evolution_linked">Evolution Legacy Linked Device</option>
                                     <option value="twilio_fallback">Twilio Fallback</option>
                                 </select>
                             </div>
@@ -1200,15 +1200,15 @@ export default function WhatsAppSettingsPage() {
                     </CardContent>
                 </Card>
 
-                {/* Linked Device (Shadow API) Card */}
-                <Card className="border-purple-200 dark:border-purple-900 bg-purple-50/20">
+                {/* Legacy Evolution linked-device card */}
+                <Card className="border-amber-200 dark:border-amber-900 bg-amber-50/20">
                     <CardHeader>
                         <CardTitle className="flex items-center space-x-2">
-                            <span className="text-purple-600 font-bold">WhatsApp Coexistence</span>
-                            <span>(Linked Device)</span>
+                            <span className="text-amber-700 font-bold">Legacy Evolution Linked Device</span>
+                            <Badge variant="outline">Deprecated</Badge>
                         </CardTitle>
                         <CardDescription>
-                            Connect your existing WhatsApp Business App via QR code to use it simultaneously with Estio.
+                            Legacy fallback for older locations and history import. New normal WhatsApp chat should use WhatsApp Web Bridge above.
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
@@ -1217,7 +1217,7 @@ export default function WhatsAppSettingsPage() {
                                 <CheckCircle2 className="h-12 w-12 text-green-500" />
                                 <div className="text-center">
                                     <h3 className="font-medium text-lg text-green-700">Device Connected</h3>
-                                    <p className="text-sm text-green-600">Shadow API is active and syncing messages.</p>
+                                    <p className="text-sm text-green-600">Legacy Evolution API is active for this location.</p>
                                 </div>
 
                                 {/* Health Check / Zombie Repair Section */}
@@ -1385,7 +1385,7 @@ export default function WhatsAppSettingsPage() {
                                 ) : (
                                     <div className="text-center space-y-4">
                                         <p className="text-sm text-muted-foreground">
-                                            Scan a QR code to link your phone. This works just like WhatsApp Web without disconnecting your phone.
+                                            Legacy Evolution connection. Prefer WhatsApp Web Bridge for new linked-device sessions.
                                         </p>
                                         {repairing && (
                                             <Alert className="mb-4 border-yellow-200 bg-yellow-50">
@@ -1396,7 +1396,7 @@ export default function WhatsAppSettingsPage() {
                                             </Alert>
                                         )}
                                         <Button
-                                            className="bg-purple-600 hover:bg-purple-700 text-white"
+                                            className="bg-amber-600 hover:bg-amber-700 text-white"
                                             onClick={async () => {
                                                 setSaving(true);
                                                 try {
@@ -1420,7 +1420,7 @@ export default function WhatsAppSettingsPage() {
                                             disabled={saving || repairing}
                                         >
                                             {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                                            Connect Linked Device
+                                            Connect Legacy Device
                                         </Button>
                                     </div>
                                 )}

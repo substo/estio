@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
                 return NextResponse.json({ status: "ignored", reason: "missing_message_identity" });
             }
 
-            await processNormalizedMessage({
+            const result = await processNormalizedMessage({
                 locationId,
                 from: fromMe ? ownPhone : contactPhone,
                 to: fromMe ? contactPhone : ownPhone,
@@ -95,6 +95,19 @@ export async function POST(req: NextRequest) {
                 contactName: message.contactName || message.notifyName || undefined,
                 resolvedPhone: contactPhone,
             });
+
+            if (message.hasMedia && message.media?.data && result?.status !== "deferred_unresolved_lid") {
+                const { ingestWhatsAppWebBridgeMediaAttachment } = await import("@/lib/whatsapp/web-bridge-media");
+                void ingestWhatsAppWebBridgeMediaAttachment({
+                    wamId,
+                    media: message.media,
+                    messageType: String(message.type || "text"),
+                }).catch((error) => {
+                    console.error(`[WhatsApp Web Bridge Webhook] Failed to ingest media for ${wamId}:`, error);
+                });
+            } else if (message.hasMedia && message.mediaError) {
+                console.warn(`[WhatsApp Web Bridge Webhook] Media not ingested for ${wamId}: ${message.mediaError}`);
+            }
 
             return NextResponse.json({ status: "processed" });
         }

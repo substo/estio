@@ -1273,7 +1273,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
                 },
                 metadata: {
                     timestamp: new Date(),
-                    sourceId: "evolution-webhook",
+                    sourceId: source === "whatsapp_web_bridge" ? "whatsapp-web-bridge" : "evolution-webhook",
                     conversationId: conversation.id,
                     contactId: contact.id,
                 },

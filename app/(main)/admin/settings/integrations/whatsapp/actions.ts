@@ -111,10 +111,10 @@ export async function updateWhatsAppSettings(formData: FormData) {
     const phoneNumberId = formData.get("phoneNumberId") as string;
     const accessTokenInput = String(formData.get("accessToken") || "").trim();
     const webhookSecret = formData.get("webhookSecret") as string;
-    const providerModeInput = String(formData.get("whatsappProviderMode") || "cloud_primary").trim();
+    const providerModeInput = String(formData.get("whatsappProviderMode") || "web_bridge").trim();
     const whatsappProviderMode = ["cloud_primary", "evolution_linked", "twilio_fallback", "web_bridge"].includes(providerModeInput)
         ? providerModeInput
-        : "cloud_primary";
+        : "web_bridge";
 
     // Twilio Credentials
     const twilioAccountSid = formData.get("twilioAccountSid") as string;
@@ -309,7 +309,7 @@ export async function getWhatsAppSettings(locationId?: string | null) {
         accessToken: "",
         hasAccessToken: hasAccessToken || Boolean(location.whatsappAccessToken),
         webhookSecret: payload.whatsappWebhookSecret || location.whatsappWebhookSecret || "",
-        whatsappProviderMode: payload.whatsappProviderMode || (location as any).whatsappProviderMode || "cloud_primary",
+        whatsappProviderMode: payload.whatsappProviderMode || (location as any).whatsappProviderMode || "web_bridge",
         whatsappChannels,
         webBridgeSession: webBridgeSession ? {
             id: webBridgeSession.id,

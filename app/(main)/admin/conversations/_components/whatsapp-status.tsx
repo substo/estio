@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { format, formatDistanceToNow } from 'date-fns';
-import { getEvolutionStatus, getEmailSyncProvidersStatus, triggerWhatsAppConnection } from '../actions';
+import { getWhatsAppWebBridgeStatus, getEmailSyncProvidersStatus, triggerWhatsAppWebBridgeConnection } from '../actions';
 import { Loader2, RefreshCw, QrCode as QrIcon, WifiOff } from 'lucide-react';
 import { SiGmail, SiMicrosoftoutlook } from 'react-icons/si';
 import { Button } from '@/components/ui/button';
@@ -164,6 +164,9 @@ export function WhatsAppStatus() {
     const [isConnecting, setIsConnecting] = useState(false);
     const [dialogOpen, setDialogOpen] = useState(false);
     const [emailProviders, setEmailProviders] = useState<EmailProviderStatus[]>([]);
+    const [provider, setProvider] = useState<'web_bridge' | 'evolution'>('web_bridge');
+    const [phone, setPhone] = useState<string | null>(null);
+    const [statusError, setStatusError] = useState<string | null>(null);
 
     const checkStatus = async () => {
         if (loading) return; // Prevent double fetch
@@ -171,12 +174,16 @@ export function WhatsAppStatus() {
         if (status === 'checking') setLoading(true);
 
         try {
-            const res = await getEvolutionStatus();
+            const res = await getWhatsAppWebBridgeStatus();
+            setProvider(res.provider === 'evolution' ? 'evolution' : 'web_bridge');
             setStatus(res.status);
             setQrCode(res.qrcode);
+            setPhone(res.phone || null);
+            setStatusError(res.error || null);
         } catch (e) {
             console.error(e);
             setStatus('ERROR');
+            setStatusError('Unable to check WhatsApp status.');
         } finally {
             setLoading(false);
         }
@@ -199,13 +206,14 @@ export function WhatsAppStatus() {
         setIsConnecting(true);
         setDialogOpen(true); // Open dialog immediately to show loading state
         try {
-            const res = await triggerWhatsAppConnection();
+            const res = await triggerWhatsAppWebBridgeConnection();
             if (res.success) {
+                setProvider(res.provider === 'evolution' ? 'evolution' : 'web_bridge');
                 if (res.qrCode) {
                     setQrCode(res.qrCode);
                 }
                 if (res.status !== 'qrcode') {
-                    toast({ title: "Connecting...", description: "Requesting QR Code from WhatsApp..." });
+                    toast({ title: "Connecting...", description: "Requesting WhatsApp linked-device QR code..." });
                 }
                 checkStatus();
             } else {
@@ -220,8 +228,7 @@ export function WhatsAppStatus() {
 
     useEffect(() => {
         checkStatus();
-        // Poll every 10 seconds normally, but every 3 seconds if we have a QR code displayed to check for scan
-        const pollTime = (qrCode || status === 'connecting') ? 3000 : 30000;
+        const pollTime = (qrCode || ['starting', 'qr', 'authenticated', 'connecting', 'qrcode'].includes(status)) ? 3000 : 30000;
         const interval = setInterval(checkStatus, pollTime);
         return () => clearInterval(interval);
     }, [qrCode, status]);
@@ -232,8 +239,15 @@ export function WhatsAppStatus() {
         return () => clearInterval(interval);
     }, []);
 
-    const isConnected = status === 'open' || status === 'connected';
-    const isError = status === 'ERROR' || status === 'NOT_FOUND' || status === 'close';
+    const isConnected = status === 'ready' || status === 'open' || status === 'connected';
+    const isError = status === 'ERROR' || status === 'NOT_FOUND' || status === 'close' || status === 'failed' || status === 'disconnected';
+    const statusLabel = isConnected
+        ? 'Online'
+        : status === 'checking'
+            ? 'Checking...'
+            : ['starting', 'qr', 'authenticated', 'connecting', 'qrcode'].includes(status)
+                ? 'Connecting'
+                : 'Offline';
     const visibleEmailProviders = emailProviders.filter((provider) => provider.connected || provider.configured);
 
     return (
@@ -241,8 +255,13 @@ export function WhatsAppStatus() {
             <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : isError ? 'bg-red-500' : 'bg-yellow-500 animate-pulse'}`} />
 
             <span className="text-gray-500 font-medium truncate min-w-0">
-                {isConnected ? 'Online' : status === 'checking' ? 'Checking...' : 'Offline'}
+                {statusLabel}
             </span>
+            {provider === 'evolution' && (
+                <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 shrink-0">
+                    Legacy
+                </span>
+            )}
 
             {visibleEmailProviders.length > 0 && (
                 <div className="flex items-center gap-1 ml-1 shrink-0">
@@ -280,6 +299,9 @@ export function WhatsAppStatus() {
                         <div className="flex flex-col items-center justify-center p-4 space-y-4">
                             <p className="text-sm text-gray-500 text-center">
                                 Open WhatsApp on your phone, go to <strong>Linked Devices</strong>, and scan this code.
+                                {provider === 'web_bridge' && phone ? (
+                                    <span className="mt-1 block text-xs">Connected phone: {phone}</span>
+                                ) : null}
                             </p>
 
                             {qrCode ? (
@@ -307,6 +329,9 @@ export function WhatsAppStatus() {
                                         <Button onClick={handleConnect}>Generate QR Code</Button>
                                     )}
                                 </div>
+                            )}
+                            {statusError && (
+                                <p className="max-w-xs text-center text-xs text-red-600">{statusError}</p>
                             )}
 
                             <div className="flex gap-2">

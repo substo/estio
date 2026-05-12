@@ -52,7 +52,13 @@ export function normalizeWhatsAppWebChatId(value: unknown) {
 export function extractPhoneFromWhatsAppWebId(value: unknown) {
     const raw = String(value || "").trim();
     if (!raw) return "";
-    return raw.replace(/@(c\.us|s\.whatsapp\.net|lid)$/i, "").replace(/\D/g, "");
+    // WhatsApp multi-device JIDs look like 15551234567:95@c.us
+    // First, strip the domain part
+    const withoutDomain = raw.replace(/@(c\.us|s\.whatsapp\.net|lid)$/i, "");
+    // Next, split by colon to discard any device ID
+    const withoutDevice = withoutDomain.split(":")[0];
+    // Finally, keep only the digits
+    return withoutDevice.replace(/\D/g, "");
 }
 
 function serializeSession(row: any): WhatsAppWebBridgeSessionRow | null {
@@ -197,6 +203,36 @@ export async function sendWhatsAppWebBridgeMessage(input: {
             mimetype: input.mimetype || null,
             fileName: input.fileName || null,
             caption: input.caption || null,
+        }),
+    });
+}
+
+export async function fetchWhatsAppWebBridgeChats(locationId: string) {
+    const session = await getReadyWhatsAppWebBridgeSession(locationId);
+    if (!session) {
+        throw new Error("WhatsApp Web Bridge is not connected. Scan the QR code and wait until the session is ready.");
+    }
+
+    return bridgeFetch(`/sessions/${encodeURIComponent(session.sessionId)}/chats`, {
+        method: "GET",
+    });
+}
+
+export async function fetchWhatsAppWebBridgeMessages(input: {
+    locationId: string;
+    chatId: string;
+    limit?: number;
+}) {
+    const session = await getReadyWhatsAppWebBridgeSession(input.locationId);
+    if (!session) {
+        throw new Error("WhatsApp Web Bridge is not connected. Scan the QR code and wait until the session is ready.");
+    }
+
+    return bridgeFetch(`/sessions/${encodeURIComponent(session.sessionId)}/messages`, {
+        method: "POST",
+        body: JSON.stringify({
+            chatId: input.chatId,
+            limit: input.limit || 30,
         }),
     });
 }

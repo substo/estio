@@ -53,6 +53,11 @@ export async function GET(req: NextRequest) {
             const location = msg.conversation?.location;
             const contact = msg.conversation?.contact;
             
+            const providerMode = String((location as any)?.whatsappProviderMode || '').trim();
+            if (providerMode && providerMode !== 'evolution_linked') {
+                continue;
+            }
+
             if (!location?.evolutionInstanceId || !contact || !msg.wamId) {
                 continue;
             }

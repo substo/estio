@@ -33,6 +33,30 @@ export async function POST(req: NextRequest) {
         }
         console.log(`[Evolution Webhook] Found Location: ${location.id}`);
 
+        const providerMode = String((location as any).whatsappProviderMode || '').trim();
+        const isEvolutionDataEvent = [
+            'MESSAGES_UPSERT',
+            'MESSAGES.UPSERT',
+            'CONTACTS_UPSERT',
+            'CONTACTS.UPSERT',
+            'CONTACTS_UPDATE',
+            'CONTACTS.UPDATE',
+            'CHATS_UPSERT',
+            'CHATS.UPSERT',
+        ].includes(eventType);
+
+        if (isEvolutionDataEvent && providerMode && providerMode !== 'evolution_linked') {
+            console.warn(
+                `[Evolution Webhook] IGNORED: location ${location.id} providerMode=${providerMode}; ` +
+                `Cloud/Twilio locations must not ingest Evolution ${eventType || 'data'} events.`
+            );
+            return NextResponse.json({
+                status: 'ignored',
+                reason: 'provider_mode_not_evolution',
+                providerMode,
+            }, { status: 200 });
+        }
+
         // Ensure deferred LID worker is alive in this runtime.
         // Safe to call repeatedly; worker init is singleton-guarded.
         try {

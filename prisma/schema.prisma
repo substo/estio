@@ -77,7 +77,7 @@ model Location {
   whatsappPhoneNumberId     String?
   whatsappAccessToken       String? @db.Text // Long-lived system user token
   whatsappWebhookSecret     String?
-  whatsappProviderMode      String  @default("cloud_primary") // cloud_primary | evolution_linked | twilio_fallback | web_bridge
+  whatsappProviderMode      String  @default("web_bridge") // cloud_primary | evolution_linked | twilio_fallback | web_bridge
 
   // Twilio Integration
   twilioAccountSid   String?
