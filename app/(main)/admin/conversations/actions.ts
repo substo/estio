@@ -5876,9 +5876,6 @@ async function resolveWhatsAppOutboundTransport(locationId: string, explicit?: W
     if (webBridgeConfigured) {
         return { transport: "web_bridge", cloudConfigured, evolutionConfigured, webBridgeConfigured };
     }
-    if (evolutionConfigured) {
-        return { transport: "evolution", cloudConfigured, evolutionConfigured, webBridgeConfigured };
-    }
     if (twilioConfigured) {
         return { transport: "twilio", cloudConfigured, evolutionConfigured, webBridgeConfigured };
     }
@@ -7826,6 +7823,7 @@ export async function getWhatsAppChannelEligibility(conversationId: string) {
         const eligibility = await checkWhatsAppPhoneEligibility(
             {
                 evolutionInstanceId: location.evolutionInstanceId,
+                whatsappProviderMode: mode,
             },
             contact.phone,
             {
@@ -9679,7 +9677,7 @@ export async function openConversationForGroupParticipant(participantId: string)
 // =============================================
 
 async function checkWhatsAppPhoneEligibility(
-    location: { evolutionInstanceId?: string | null },
+    location: { evolutionInstanceId?: string | null; whatsappProviderMode?: string | null },
     phone: string | null | undefined,
     options?: {
         contactName?: string | null;
@@ -9713,6 +9711,14 @@ async function checkWhatsAppPhoneEligibility(
         return {
             status: 'ineligible',
             reason: `${contactName}'s phone number "${phoneValue}" is invalid or too short.`,
+            normalizedDigits: rawDigits,
+        };
+    }
+
+    if (String(location?.whatsappProviderMode || "web_bridge") === "web_bridge") {
+        return {
+            status: 'unknown',
+            reason: 'WhatsApp Web Bridge will verify this number at send time.',
             normalizedDigits: rawDigits,
         };
     }
@@ -9827,11 +9833,17 @@ async function checkSmsPhoneEligibility(
 }
 
 async function resolvePreferredChannelTypeForPhone(
-    location: { evolutionInstanceId?: string | null },
+    location: { evolutionInstanceId?: string | null; whatsappProviderMode?: string | null },
     phone: string | null | undefined
 ): Promise<'TYPE_WHATSAPP' | 'TYPE_SMS'> {
     const rawDigits = String(phone || '').replace(/\D/g, '');
-    if (!location?.evolutionInstanceId || rawDigits.length < 7) {
+    if (rawDigits.length < 7) {
+        return 'TYPE_SMS';
+    }
+    if (String(location?.whatsappProviderMode || "web_bridge") === "web_bridge") {
+        return 'TYPE_WHATSAPP';
+    }
+    if (!location?.evolutionInstanceId) {
         return 'TYPE_SMS';
     }
 
@@ -12621,14 +12633,17 @@ async function parseLeadFromTextInternal(
 }
 
 function resolveInitialLeadChannelType(
-    location: { evolutionInstanceId?: string | null },
+    location: { evolutionInstanceId?: string | null; whatsappProviderMode?: string | null },
     data: ParsedLeadData
 ): 'TYPE_WHATSAPP' | 'TYPE_SMS' | 'TYPE_EMAIL' {
     const phoneDigits = String(data.contact?.phone || '').replace(/\D/g, '');
     if (phoneDigits.length < 7 && data.contact?.email) {
         return 'TYPE_EMAIL';
     }
-    if (phoneDigits.length >= 7 && location?.evolutionInstanceId) {
+    if (phoneDigits.length >= 7 && String(location?.whatsappProviderMode || "web_bridge") === "web_bridge") {
+        return 'TYPE_WHATSAPP';
+    }
+    if (phoneDigits.length >= 7 && location?.evolutionInstanceId && String(location?.whatsappProviderMode || "") === "evolution_linked") {
         return 'TYPE_WHATSAPP';
     }
     return 'TYPE_SMS';

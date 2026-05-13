@@ -162,9 +162,9 @@ Phase 4 acceptance checklist:
 6. Use manual history sync on an existing Web Bridge conversation and confirm it imports recent messages.
 7. Verify an `evolution_linked` legacy location still uses Evolution paths.
 
-## Current Phase: Phase 5 Identity And Dedup Hardening
+## Phase 5 Completed: Identity And Dedup Hardening
 
-Phase 5 makes Web Bridge message identity deterministic across webhook, history import, picker, and bulk sync flows.
+Phase 5 made Web Bridge message identity deterministic across webhook, history import, picker, and bulk sync flows.
 
 Implemented in this phase:
 
@@ -185,6 +185,28 @@ Phase 5 acceptance checklist:
 5. Send/receive media twice or re-fetch media and confirm no duplicate attachments.
 6. Confirm delivered/read status updates land on the correct reconciled message.
 7. Confirm groups, broadcasts, newsletters, and LID-only IDs are ignored for normal v1 Web Bridge flows.
+
+## Current Phase: Phase 6 Evolution Product Deprecation
+
+Phase 6 moves Evolution out of normal product paths while preserving it for explicit `evolution_linked` rollback, legacy import, and historical data.
+
+Implemented in this phase:
+
+- Normal WhatsApp settings provider selection now shows Web Bridge and Cloud API as the primary choices.
+- Evolution controls are moved behind an Advanced Legacy section and are disabled unless the location is explicitly set to `evolution_linked`.
+- Evolution connection, health, repair, webhook reset, logout, and sync server actions refuse non-legacy locations.
+- Outbound transport resolution no longer auto-selects Evolution just because an old `evolutionInstanceId` exists.
+- Web Bridge phone/channel inference validates phone format locally and no longer depends on Evolution availability.
+- Pasted-lead conversation bootstrap chooses WhatsApp for valid phone numbers in Web Bridge locations.
+
+Phase 6 acceptance checklist:
+
+1. WhatsApp settings normal view shows Web Bridge and Cloud API as the standard provider choices.
+2. Evolution appears only inside Advanced Legacy and is visibly deprecated.
+3. Evolution actions fail safely unless the location is explicitly `evolution_linked`.
+4. Web Bridge sends still use Web Bridge when an old `evolutionInstanceId` exists.
+5. New conversation, paste-lead channel inference, and bulk sync still use Web Bridge for normal locations.
+6. Existing `evolution_linked` legacy locations can still use Evolution rollback/import controls.
 
 ## Current Implementation State
 
@@ -354,14 +376,6 @@ Use one test location configured as `web_bridge`.
 17. Confirm Estio shows offline/disconnected.
 
 ## Next Phases
-
-### Phase 6: Evolution Product Deprecation
-
-- Hide Evolution from normal user settings.
-- Keep a legacy/admin panel for existing `evolution_linked` locations.
-- Keep old `whatsapp_evolution` records readable.
-- Keep Evolution media parser only for historical messages.
-- Do not remove Evolution DB columns until all active locations have migrated and old data retention is decided.
 
 ### Phase 7: Final Evolution Removal
 

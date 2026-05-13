@@ -48,6 +48,26 @@ import {
 
 const MASKED_SECRET = "********";
 
+async function resolvePersistedWhatsAppProviderMode(location: any) {
+    const doc = await settingsService.getDocument<any>({
+        scopeType: "LOCATION",
+        scopeId: location.id,
+        domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+    }).catch(() => null);
+    return String(doc?.payload?.whatsappProviderMode || location?.whatsappProviderMode || "web_bridge");
+}
+
+async function requireLegacyEvolutionMode(location: any) {
+    const mode = await resolvePersistedWhatsAppProviderMode(location);
+    if (mode !== "evolution_linked") {
+        return {
+            ok: false as const,
+            error: "Legacy Evolution is deprecated and only available after explicitly setting this location to Evolution Linked Device mode.",
+        };
+    }
+    return { ok: true as const };
+}
+
 function serializeWhatsAppChannel(channel: any) {
     return {
         id: channel.id,
@@ -995,6 +1015,8 @@ export async function repairWhatsAppCloudConnection(locationId?: string | null) 
 
 export async function connectEvolutionDevice(locationId?: string | null) {
     const { location, userPhone } = await resolveAdminContext(locationId || null);
+    const legacyMode = await requireLegacyEvolutionMode(location);
+    if (!legacyMode.ok) return { success: false, error: legacyMode.error };
 
     try {
 
@@ -1139,6 +1161,8 @@ export async function connectEvolutionDevice(locationId?: string | null) {
 
 export async function logoutEvolutionInstance(locationId?: string | null) {
     const { location } = await resolveAdminContext(locationId || null);
+    const legacyMode = await requireLegacyEvolutionMode(location);
+    if (!legacyMode.ok) return { success: false, error: legacyMode.error };
 
     try {
         if (location.evolutionInstanceId) {
@@ -1161,6 +1185,8 @@ export async function logoutEvolutionInstance(locationId?: string | null) {
 
 export async function syncEvolutionChats(locationId?: string | null) {
     const { location } = await resolveAdminContext(locationId || null);
+    const legacyMode = await requireLegacyEvolutionMode(location);
+    if (!legacyMode.ok) return { success: false, error: legacyMode.error };
 
     if (!location.evolutionInstanceId) {
         return { success: false, error: "No WhatsApp instance connected" };
@@ -1598,6 +1624,8 @@ export async function exchangeSystemUserToken(
 
 export async function checkInstanceHealth(locationId?: string | null) {
     const { location } = await resolveAdminContext(locationId || null);
+    const legacyMode = await requireLegacyEvolutionMode(location);
+    if (!legacyMode.ok) return { success: false, error: legacyMode.error };
     try {
         if (!location.evolutionInstanceId) return { success: false, error: "No instance ID" };
 
@@ -1657,6 +1685,8 @@ export async function checkInstanceHealth(locationId?: string | null) {
 export async function resetWebhookUrl() {
     try {
         const { location } = await resolveAdminContext(null);
+        const legacyMode = await requireLegacyEvolutionMode(location);
+        if (!legacyMode.ok) return { success: false, error: legacyMode.error };
         if (!location.evolutionInstanceId) return { success: false, error: "No instance ID" };
         const res = await evolutionClient.updateWebhook(location.evolutionInstanceId);
 
@@ -1669,6 +1699,9 @@ export async function resetWebhookUrl() {
 
 export async function repairEvolutionConnection(locationId?: string | null) {
     console.log("🛠️ Starting Repair Process...");
+    const { location } = await resolveAdminContext(locationId || null);
+    const legacyMode = await requireLegacyEvolutionMode(location);
+    if (!legacyMode.ok) return { success: false, error: legacyMode.error };
 
     // 1. Logout/Delete
     try {

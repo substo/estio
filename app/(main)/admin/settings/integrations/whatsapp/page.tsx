@@ -223,6 +223,7 @@ export default function WhatsAppSettingsPage() {
     const [aiBusy, setAiBusy] = useState(false);
     const [clearWhatsAppAccessToken, setClearWhatsAppAccessToken] = useState(false);
     const [clearTwilioAuthToken, setClearTwilioAuthToken] = useState(false);
+    const [legacyEvolutionOpen, setLegacyEvolutionOpen] = useState(false);
 
     // Health Check State
     const [healthStatus, setHealthStatus] = useState<{
@@ -281,6 +282,7 @@ export default function WhatsAppSettingsPage() {
             webBridgeSession: data.webBridgeSession || null,
             webBridgeDiagnostics: data.webBridgeDiagnostics || null,
         });
+        setLegacyEvolutionOpen(data.whatsappProviderMode === "evolution_linked");
     };
 
     const refreshCloudOps = async (syncTemplates = false) => {
@@ -720,7 +722,10 @@ export default function WhatsAppSettingsPage() {
         formData.append("accessToken", settings.accessToken);
         formData.append("clearWhatsAppAccessToken", clearWhatsAppAccessToken ? "on" : "off");
         formData.append("webhookSecret", settings.webhookSecret);
-        formData.append("whatsappProviderMode", settings.whatsappProviderMode);
+        const submittedProviderMode = ["web_bridge", "cloud_primary", "evolution_linked"].includes(settings.whatsappProviderMode)
+            ? settings.whatsappProviderMode
+            : "web_bridge";
+        formData.append("whatsappProviderMode", submittedProviderMode);
 
         // Twilio
         formData.append("twilioAccountSid", settings.twilioAccountSid);
@@ -803,6 +808,7 @@ export default function WhatsAppSettingsPage() {
 
     const origin = typeof window !== "undefined" ? window.location.origin : "";
     const webhookUrl = `${origin}/api/webhooks/whatsapp`;
+    const legacyEvolutionEnabled = settings.whatsappProviderMode === "evolution_linked";
 
     return (
         <div className="space-y-6 max-w-4xl">
@@ -860,14 +866,15 @@ export default function WhatsAppSettingsPage() {
                                 <select
                                     id="whatsappProviderMode"
                                     className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                                    value={settings.whatsappProviderMode}
+                                    value={settings.whatsappProviderMode === "cloud_primary" ? "cloud_primary" : "web_bridge"}
                                     onChange={(e) => setSettings({ ...settings, whatsappProviderMode: e.target.value })}
                                 >
-                                    <option value="cloud_primary">Cloud API Primary</option>
                                     <option value="web_bridge">WhatsApp Web Bridge</option>
-                                    <option value="evolution_linked">Evolution Legacy Linked Device</option>
-                                    <option value="twilio_fallback">Twilio Fallback</option>
+                                    <option value="cloud_primary">Cloud API Primary</option>
                                 </select>
+                                <p className="text-xs text-muted-foreground">
+                                    Use Web Bridge for normal chat. Cloud API remains for Meta templates and official WABA operations.
+                                </p>
                             </div>
                             <div className="space-y-1">
                                 <Label>Default Phone Number ID</Label>
@@ -1346,17 +1353,48 @@ export default function WhatsAppSettingsPage() {
                 </Card>
 
                 {/* Legacy Evolution linked-device card */}
-                <Card className="border-amber-200 dark:border-amber-900 bg-amber-50/20">
-                    <CardHeader>
-                        <CardTitle className="flex items-center space-x-2">
-                            <span className="text-amber-700 font-bold">Legacy Evolution Linked Device</span>
-                            <Badge variant="outline">Deprecated</Badge>
-                        </CardTitle>
-                        <CardDescription>
-                            Legacy fallback for older locations and history import. New normal WhatsApp chat should use WhatsApp Web Bridge above.
-                        </CardDescription>
-                    </CardHeader>
+                <Collapsible open={legacyEvolutionOpen} onOpenChange={setLegacyEvolutionOpen}>
+                    <Card className="border-amber-200 dark:border-amber-900 bg-amber-50/20">
+                        <CardHeader>
+                            <div className="flex items-start justify-between gap-4">
+                                <div>
+                                    <CardTitle className="flex items-center space-x-2">
+                                        <span className="text-amber-700 font-bold">Advanced Legacy Evolution</span>
+                                        <Badge variant="outline">Deprecated</Badge>
+                                        {!legacyEvolutionEnabled && <Badge variant="secondary">Disabled</Badge>}
+                                    </CardTitle>
+                                    <CardDescription>
+                                        Legacy fallback for older locations, rollback, and historical imports. Use WhatsApp Web Bridge for normal linked-device chat.
+                                    </CardDescription>
+                                </div>
+                                <CollapsibleTrigger asChild>
+                                    <Button type="button" variant="outline" size="sm">
+                                        {legacyEvolutionOpen ? "Hide" : "Show"}
+                                    </Button>
+                                </CollapsibleTrigger>
+                            </div>
+                        </CardHeader>
+                        <CollapsibleContent>
                     <CardContent className="space-y-4">
+                        {!legacyEvolutionEnabled && (
+                            <Alert className="border-amber-200 bg-amber-50">
+                                <AlertTriangle className="h-4 w-4 text-amber-700" />
+                                <AlertTitle>Legacy Mode Disabled</AlertTitle>
+                                <AlertDescription className="space-y-3">
+                                    <p>
+                                        Evolution is deprecated and hidden from normal setup. Enable it only for rollback or legacy import/debug work.
+                                    </p>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        className="border-amber-300 text-amber-800 hover:bg-amber-100"
+                                        onClick={() => setSettings(prev => ({ ...prev, whatsappProviderMode: "evolution_linked" }))}
+                                    >
+                                        Enable Legacy Evolution Mode
+                                    </Button>
+                                </AlertDescription>
+                            </Alert>
+                        )}
                         {settings.evolutionConnectionStatus === 'open' ? (
                             <div className="flex flex-col items-center justify-center space-y-4 p-6 border rounded-lg bg-green-50/50">
                                 <CheckCircle2 className="h-12 w-12 text-green-500" />
@@ -1387,6 +1425,7 @@ export default function WhatsAppSettingsPage() {
                                                         size="sm"
                                                         variant="ghost"
                                                         onClick={performHealthCheck}
+                                                        disabled={!legacyEvolutionEnabled}
                                                         className="h-6 text-[10px] text-blue-700 hover:bg-blue-100"
                                                     >
                                                         Refresh Status
@@ -1409,7 +1448,7 @@ export default function WhatsAppSettingsPage() {
                                                         size="sm"
                                                         variant="destructive"
                                                         onClick={handleRepair}
-                                                        disabled={repairing}
+                                                        disabled={repairing || !legacyEvolutionEnabled}
                                                         className="w-full sm:w-auto"
                                                     >
                                                         {repairing ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-2 h-3 w-3" />}
@@ -1427,7 +1466,7 @@ export default function WhatsAppSettingsPage() {
                                                 <span>Chats: <strong>{healthStatus.chats}</strong></span>
                                             </div>
                                             <div className="flex items-center justify-center gap-2 mt-2">
-                                                <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={performHealthCheck}>
+                                                <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={performHealthCheck} disabled={!legacyEvolutionEnabled}>
                                                     Refresh Status
                                                 </Button>
                                                 <span className="text-muted-foreground/30">|</span>
@@ -1436,7 +1475,7 @@ export default function WhatsAppSettingsPage() {
                                                     size="sm"
                                                     className="h-6 text-[10px] text-orange-600 hover:text-orange-700 hover:bg-orange-50"
                                                     onClick={handleRepair}
-                                                    disabled={repairing}
+                                                    disabled={repairing || !legacyEvolutionEnabled}
                                                 >
                                                     {repairing ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1 h-3 w-3" />}
                                                     Force Re-scan
@@ -1461,7 +1500,7 @@ export default function WhatsAppSettingsPage() {
                                                         }
                                                         setSaving(false);
                                                     }}
-                                                    disabled={saving}
+                                                    disabled={saving || !legacyEvolutionEnabled}
                                                 >
                                                     <RefreshCw className="mr-1 h-3 w-3" />
                                                     Re-sync Webhook
@@ -1476,7 +1515,7 @@ export default function WhatsAppSettingsPage() {
                                         <Button
                                             variant="outline"
                                             className="border-red-200 text-red-600 hover:bg-red-50 mt-2"
-                                            disabled={saving || repairing}
+                                            disabled={saving || repairing || !legacyEvolutionEnabled}
                                         >
                                             {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                                             Disconnect Device
@@ -1495,7 +1534,12 @@ export default function WhatsAppSettingsPage() {
                                                 className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
                                                 onClick={async () => {
                                                     setSaving(true);
-                                                    await logoutEvolutionInstance(settings.locationId || null);
+                                                    const result = await logoutEvolutionInstance(settings.locationId || null);
+                                                    if (!result.success) {
+                                                        toast({ title: "Error", description: result.error || "Failed to disconnect", variant: "destructive" });
+                                                        setSaving(false);
+                                                        return;
+                                                    }
                                                     setSettings(prev => ({ ...prev, evolutionConnectionStatus: 'close' }));
                                                     setHealthStatus({ status: 'disconnected', contacts: 0, chats: 0 });
                                                     setSaving(false);
@@ -1562,7 +1606,7 @@ export default function WhatsAppSettingsPage() {
                                                 }
                                                 setSaving(false);
                                             }}
-                                            disabled={saving || repairing}
+                                            disabled={saving || repairing || !legacyEvolutionEnabled}
                                         >
                                             {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                                             Connect Legacy Device
@@ -1572,7 +1616,9 @@ export default function WhatsAppSettingsPage() {
                             </div>
                         )}
                     </CardContent>
-                </Card>
+                        </CollapsibleContent>
+                    </Card>
+                </Collapsible>
 
                 {/* Embedded Signup Card */}
                 <Card className="border-blue-200 dark:border-blue-900 bg-blue-50/20">
