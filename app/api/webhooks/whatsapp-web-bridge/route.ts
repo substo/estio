@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import db from "@/lib/db";
 import { processNormalizedMessage, processStatusUpdate } from "@/lib/whatsapp/sync";
 import {
-    extractPhoneFromWhatsAppWebId,
     getWhatsAppWebBridgeSecret,
+    parseWhatsAppWebChatIdentity,
     upsertWhatsAppWebBridgeSession,
     WHATSAPP_WEB_BRIDGE_PROVIDER,
 } from "@/lib/whatsapp/web-bridge";
@@ -114,12 +114,20 @@ export async function POST(req: NextRequest) {
             const fromId = String(message.from || "");
             const toId = String(message.to || "");
             const remoteId = fromMe ? toId : fromId;
-            const contactPhone = extractPhoneFromWhatsAppWebId(remoteId);
-            const ownPhone = extractPhoneFromWhatsAppWebId(body?.phone || (fromMe ? fromId : toId)) || locationId;
+            const contactIdentity = parseWhatsAppWebChatIdentity(remoteId);
+            const ownIdentity = parseWhatsAppWebChatIdentity(body?.phone || (fromMe ? fromId : toId));
+            const contactPhone = contactIdentity.phone;
+            const ownPhone = ownIdentity.phone || locationId;
             const wamId = String(message.id || message.messageId || "").trim();
 
-            if (!wamId || !contactPhone) {
-                return NextResponse.json({ status: "ignored", reason: "missing_message_identity" });
+            if (!wamId) {
+                return NextResponse.json({ status: "ignored", reason: "missing_message_id" });
+            }
+            if (!contactIdentity.isSupported || !contactPhone) {
+                return NextResponse.json({
+                    status: "ignored",
+                    reason: contactIdentity.reason || "unsupported_message_identity",
+                });
             }
 
             const result = await processNormalizedMessage({

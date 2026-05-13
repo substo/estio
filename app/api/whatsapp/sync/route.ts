@@ -5,18 +5,11 @@ import { processNormalizedMessage } from "@/lib/whatsapp/sync";
 import { ingestEvolutionMediaAttachment, parseEvolutionMessageContent } from "@/lib/whatsapp/evolution-media";
 import db from "@/lib/db";
 import { refreshGhlAccessToken } from "@/lib/location";
-import { fetchWhatsAppWebBridgeChats, fetchWhatsAppWebBridgeMessages } from "@/lib/whatsapp/web-bridge";
+import { fetchWhatsAppWebBridgeChats, fetchWhatsAppWebBridgeMessages, parseWhatsAppWebChatIdentity } from "@/lib/whatsapp/web-bridge";
 import { ingestWhatsAppWebBridgeMediaAttachment } from "@/lib/whatsapp/web-bridge-media";
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300; // 5 minutes
-
-function normalizeWebBridgeChatPhone(chatId: string) {
-    return String(chatId || "")
-        .replace(/@(c\.us|s\.whatsapp\.net)$/i, "")
-        .split(":")[0]
-        .replace(/\D/g, "");
-}
 
 async function updateWebBridgeMediaSyncMetadata(messageId: string, mediaState: Record<string, any>) {
     const existing = await (db as any).messageSync.findFirst({
@@ -93,8 +86,7 @@ export async function GET(req: NextRequest) {
                         const chatResponse = await fetchWhatsAppWebBridgeChats(location.id);
                         const allChats = Array.isArray(chatResponse?.chats) ? chatResponse.chats : [];
                         const validChats = allChats.filter((chat: any) => {
-                            const jid = String(chat?.id || "");
-                            return jid.endsWith("@c.us") || jid.endsWith("@s.whatsapp.net");
+                            return parseWhatsAppWebChatIdentity(chat?.id).isSupported;
                         });
 
                         if (validChats.length === 0) {
@@ -107,7 +99,8 @@ export async function GET(req: NextRequest) {
 
                         for (const chat of validChats) {
                             const chatId = String(chat?.id || "");
-                            const phone = normalizeWebBridgeChatPhone(chatId);
+                            const chatIdentity = parseWhatsAppWebChatIdentity(chatId);
+                            const phone = chatIdentity.phone;
                             const name = chat?.name || chat?.pushName || (phone ? `+${phone}` : "WhatsApp chat");
                             if (!phone) {
                                 totalSkipped++;
@@ -146,8 +139,15 @@ export async function GET(req: NextRequest) {
                                         const fromId = String(message?.from || "");
                                         const toId = String(message?.to || "");
                                         const remoteId = fromMe ? toId : fromId;
-                                        const contactPhone = normalizeWebBridgeChatPhone(remoteId) || phone;
-                                        const ownPhone = normalizeWebBridgeChatPhone(fromMe ? fromId : toId) || location.id;
+                                        const contactIdentity = parseWhatsAppWebChatIdentity(remoteId);
+                                        const ownIdentity = parseWhatsAppWebChatIdentity(fromMe ? fromId : toId);
+                                        const contactPhone = contactIdentity.phone || phone;
+                                        const ownPhone = ownIdentity.phone || location.id;
+                                        if (!contactPhone || (contactIdentity.reason && !contactIdentity.isSupported)) {
+                                            totalSkipped++;
+                                            chatSkipped++;
+                                            continue;
+                                        }
 
                                         const result = await processNormalizedMessage({
                                             locationId: location.id,

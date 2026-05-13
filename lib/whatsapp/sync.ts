@@ -251,7 +251,11 @@ async function tryReconcileOutboundWebhookToPendingMessage(args: {
     conversationGhlId: string;
     wamId: string;
     timestamp: Date;
+    source: NormalizedMessage["source"];
 }) {
+    if (args.source !== "whatsapp_web_bridge") {
+        return null;
+    }
     // Narrowed window from 20min to 5min — legitimate sends complete in seconds
     const RECONCILE_WINDOW_MS = 5 * 60 * 1000;
     const AMBIGUITY_GAP_MS = 5000;
@@ -264,11 +268,24 @@ async function tryReconcileOutboundWebhookToPendingMessage(args: {
             wamId: null,
             clientMessageId: { not: null },
             createdAt: { gte: candidateWindowStart },
+            outboundWhatsAppOutbox: {
+                is: {
+                    transport: "web_bridge",
+                    status: { in: ["pending", "processing", "failed", "completed"] },
+                },
+            },
         },
         select: {
             id: true,
             clientMessageId: true,
             createdAt: true,
+            outboundWhatsAppOutbox: {
+                select: {
+                    id: true,
+                    transport: true,
+                    status: true,
+                },
+            },
         },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: 12,
@@ -1068,6 +1085,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
             conversationGhlId: conversation.ghlConversationId || conversation.id,
             wamId,
             timestamp,
+            source,
         });
         if (reconciled?.id) {
             return { status: "processed", id: reconciled.id };
@@ -1284,30 +1302,23 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     return { status: 'processed' };
 }
 
-export async function processStatusUpdate(wamId: string, rawStatus: string) {
-    // Map Evolution/Baileys status to our internal status
-    // Evolution: SERVER_ACK, DELIVERY_ACK, READ, PLAYED
-    // Internal: sent, delivered, read, failed
-
-    let status = 'sent';
+export function mapWhatsAppDeliveryStatus(rawStatus: string) {
     const s = rawStatus.toUpperCase();
 
     if (s === 'DELIVERY_ACK' || s === 'DELIVERED') {
-        status = 'delivered';
-    } else if (s === 'READ' || s === 'PLAYED') {
-        status = 'read';
-    } else if (s === 'SERVER_ACK') {
-        status = 'sent';
-    } else if (s === 'ERROR' || s === 'FAILED') {
-        status = 'failed';
-    } else {
-        // Keep original if unknown, or default to sent? 
-        // Better to ignore if undefined/pending?
-        if (!rawStatus) return;
-        // If it's something 'PENDING', we might leave it. 
-        // But usually we just update.
-        status = rawStatus.toLowerCase();
+        return 'delivered';
     }
+    if (s === 'READ' || s === 'PLAYED') return 'read';
+    if (s === 'SERVER_ACK') return 'sent';
+    if (s === 'ERROR' || s === 'FAILED') return 'failed';
+    if (!rawStatus) return "";
+    return rawStatus.toLowerCase();
+}
+
+export async function processStatusUpdate(wamId: string, rawStatus: string) {
+    // Map Evolution/Baileys/WhatsApp Web status to our internal status.
+    const status = mapWhatsAppDeliveryStatus(rawStatus);
+    if (!status) return;
 
     console.log(`[WhatsApp Sync] Updating status for ${wamId}: ${rawStatus} -> ${status}`);
 

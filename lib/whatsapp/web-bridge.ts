@@ -49,6 +49,14 @@ export type WhatsAppWebBridgeHealth = {
     error?: string | null;
 };
 
+export type WhatsAppWebBridgeChatIdentity = {
+    rawId: string;
+    phone: string;
+    chatId: string;
+    isSupported: boolean;
+    reason?: "missing_id" | "group_unsupported" | "broadcast_unsupported" | "newsletter_unsupported" | "lid_unsupported" | "invalid_phone";
+};
+
 const DEFAULT_BRIDGE_BASE_URL = "http://127.0.0.1:3218";
 
 export function getWhatsAppWebBridgeBaseUrl() {
@@ -74,15 +82,42 @@ export function normalizeWhatsAppWebChatId(value: unknown) {
 }
 
 export function extractPhoneFromWhatsAppWebId(value: unknown) {
-    const raw = String(value || "").trim();
-    if (!raw) return "";
-    // WhatsApp multi-device JIDs look like 15551234567:95@c.us
-    // First, strip the domain part
-    const withoutDomain = raw.replace(/@(c\.us|s\.whatsapp\.net|lid)$/i, "");
-    // Next, split by colon to discard any device ID
+    return parseWhatsAppWebChatIdentity(value).phone;
+}
+
+export function parseWhatsAppWebChatIdentity(value: unknown): WhatsAppWebBridgeChatIdentity {
+    const rawId = String(value || "").trim();
+    if (!rawId) {
+        return { rawId, phone: "", chatId: "", isSupported: false, reason: "missing_id" };
+    }
+
+    const lower = rawId.toLowerCase();
+    if (lower.endsWith("@g.us")) {
+        return { rawId, phone: "", chatId: rawId, isSupported: false, reason: "group_unsupported" };
+    }
+    if (lower.endsWith("@broadcast") || lower.includes("status@broadcast")) {
+        return { rawId, phone: "", chatId: rawId, isSupported: false, reason: "broadcast_unsupported" };
+    }
+    if (lower.endsWith("@newsletter")) {
+        return { rawId, phone: "", chatId: rawId, isSupported: false, reason: "newsletter_unsupported" };
+    }
+    if (lower.endsWith("@lid")) {
+        return { rawId, phone: "", chatId: rawId, isSupported: false, reason: "lid_unsupported" };
+    }
+
+    const withoutDomain = rawId.replace(/@(c\.us|s\.whatsapp\.net)$/i, "");
     const withoutDevice = withoutDomain.split(":")[0];
-    // Finally, keep only the digits
-    return withoutDevice.replace(/\D/g, "");
+    const phone = withoutDevice.replace(/\D/g, "");
+    if (phone.length < 7) {
+        return { rawId, phone: "", chatId: rawId.includes("@") ? rawId : "", isSupported: false, reason: "invalid_phone" };
+    }
+
+    return {
+        rawId,
+        phone,
+        chatId: `${phone}@c.us`,
+        isSupported: true,
+    };
 }
 
 function serializeSession(row: any): WhatsAppWebBridgeSessionRow | null {

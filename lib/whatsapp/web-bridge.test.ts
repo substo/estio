@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
     extractPhoneFromWhatsAppWebId,
     normalizeWhatsAppWebChatId,
+    parseWhatsAppWebChatIdentity,
 } from "@/lib/whatsapp/web-bridge";
 import {
     decodeBridgeBase64Payload,
@@ -18,6 +19,23 @@ test("normalizeWhatsAppWebChatId creates 1:1 chat ids from phone numbers", () =>
 test("extractPhoneFromWhatsAppWebId handles multi-device ids", () => {
     assert.equal(extractPhoneFromWhatsAppWebId("35796407286:12@c.us"), "35796407286");
     assert.equal(extractPhoneFromWhatsAppWebId("35796407286@s.whatsapp.net"), "35796407286");
+});
+
+test("parseWhatsAppWebChatIdentity accepts supported one-to-one chat ids", () => {
+    assert.deepEqual(parseWhatsAppWebChatIdentity("35796407286:12@c.us"), {
+        rawId: "35796407286:12@c.us",
+        phone: "35796407286",
+        chatId: "35796407286@c.us",
+        isSupported: true,
+    });
+});
+
+test("parseWhatsAppWebChatIdentity rejects unsupported web chat ids", () => {
+    assert.equal(parseWhatsAppWebChatIdentity("120363000000000000@g.us").reason, "group_unsupported");
+    assert.equal(parseWhatsAppWebChatIdentity("status@broadcast").reason, "broadcast_unsupported");
+    assert.equal(parseWhatsAppWebChatIdentity("123456789@newsletter").reason, "newsletter_unsupported");
+    assert.equal(parseWhatsAppWebChatIdentity("123456789@lid").reason, "lid_unsupported");
+    assert.equal(parseWhatsAppWebChatIdentity("abc@c.us").reason, "invalid_phone");
 });
 
 test("normalizeBridgeMediaType accepts common media and document mimetypes", () => {

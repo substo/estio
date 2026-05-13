@@ -70,6 +70,7 @@ import {
     getWhatsAppWebBridgeSession,
     getReadyWhatsAppWebBridgeSession,
     normalizeWhatsAppWebChatId,
+    parseWhatsAppWebChatIdentity,
     startWhatsAppWebBridgeSession,
 } from "@/lib/whatsapp/web-bridge";
 import { ingestWhatsAppWebBridgeMediaAttachment, formatWhatsAppWebBridgeMediaFailure } from "@/lib/whatsapp/web-bridge-media";
@@ -9853,13 +9854,6 @@ function getWhatsAppWebChatIdFromPhone(phone: string | null | undefined) {
     return digits.length >= 7 ? `${digits}@c.us` : "";
 }
 
-function normalizeWebBridgeChatPhone(chatId: string) {
-    return String(chatId || "")
-        .replace(/@(c\.us|s\.whatsapp\.net)$/i, "")
-        .split(":")[0]
-        .replace(/\D/g, "");
-}
-
 async function importWebBridgeRecentMessagesForContact(args: {
     locationId: string;
     phone: string | null | undefined;
@@ -9896,9 +9890,14 @@ async function importWebBridgeRecentMessagesForContact(args: {
             const fromId = String(message?.from || "");
             const toId = String(message?.to || "");
             const remoteId = fromMe ? toId : fromId;
-            const contactPhone = normalizeWebBridgeChatPhone(remoteId);
-            const ownPhone = normalizeWebBridgeChatPhone(fromMe ? fromId : toId) || args.locationId;
-            if (!contactPhone) continue;
+            const contactIdentity = parseWhatsAppWebChatIdentity(remoteId);
+            const ownIdentity = parseWhatsAppWebChatIdentity(fromMe ? fromId : toId);
+            const contactPhone = contactIdentity.phone;
+            const ownPhone = ownIdentity.phone || args.locationId;
+            if (!contactIdentity.isSupported || !contactPhone) {
+                skipped++;
+                continue;
+            }
 
             const result = await processNormalizedMessage({
                 locationId: args.locationId,
@@ -10167,8 +10166,7 @@ async function fetchWebBridgeChatsForPicker(location: { id: string }) {
         const res = await fetchWhatsAppWebBridgeChats(location.id);
         const allChats = Array.isArray(res?.chats) ? res.chats : [];
         const validChats = allChats.filter((chat: any) => {
-            const jid = String(chat.id || "");
-            return jid.endsWith("@c.us") || jid.endsWith("@s.whatsapp.net");
+            return parseWhatsAppWebChatIdentity(chat.id).isSupported;
         });
 
         const existingContacts = await db.contact.findMany({
@@ -10187,7 +10185,7 @@ async function fetchWebBridgeChatsForPicker(location: { id: string }) {
 
         const formatted = validChats.map((chat: any) => {
             const jid = String(chat.id || "");
-            const rawPhone = normalizeWebBridgeChatPhone(jid);
+            const rawPhone = parseWhatsAppWebChatIdentity(jid).phone;
             const alreadySynced = syncedPhones.has(rawPhone) ||
                 Array.from(syncedPhones).some((p) => p?.endsWith(rawPhone) || rawPhone.endsWith(p || ""));
             const matchedContact = existingContacts.find((c) => {

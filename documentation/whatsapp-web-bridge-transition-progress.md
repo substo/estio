@@ -122,9 +122,9 @@ Phase 3 acceptance checklist:
 6. Oversized media shows an actionable warning instead of silently disappearing.
 7. Failed media can be retried with `Re-fetch Media` or clearly explains why recovery is not possible.
 
-## Current Phase: Phase 4 History And Contact Replacement
+## Phase 4 Completed: History And Contact Replacement
 
-Phase 4 makes Web Bridge the normal-user source for WhatsApp chat picking, recent history backfill, conversation creation, and bulk chat sync. Evolution remains available only for locations explicitly configured as `evolution_linked`.
+Phase 4 made Web Bridge the normal-user source for WhatsApp chat picking, recent history backfill, conversation creation, and bulk chat sync. Evolution remains available only for locations explicitly configured as `evolution_linked`.
 
 Implemented in this phase:
 
@@ -161,6 +161,30 @@ Phase 4 acceptance checklist:
 5. Run bulk sync and confirm counts return without Evolution dependency for a `web_bridge` location.
 6. Use manual history sync on an existing Web Bridge conversation and confirm it imports recent messages.
 7. Verify an `evolution_linked` legacy location still uses Evolution paths.
+
+## Current Phase: Phase 5 Identity And Dedup Hardening
+
+Phase 5 makes Web Bridge message identity deterministic across webhook, history import, picker, and bulk sync flows.
+
+Implemented in this phase:
+
+- Centralized Web Bridge chat identity parsing in `lib/whatsapp/web-bridge.ts`.
+- Shared parsing now supports `@c.us`, `@s.whatsapp.net`, and multi-device IDs such as `phone:device@c.us`.
+- Unsupported group, broadcast, newsletter, and LID-only IDs are explicitly rejected for normal v1 Web Bridge flows.
+- Web Bridge webhook, history import, picker, and bulk sync now use the shared identity helper.
+- 1:1 Web Bridge messages continue to pass `resolvedPhone` when a real phone is available, preventing normal Web Bridge phone chats from creating phone-less placeholder contacts.
+- App-sent outbound Web Bridge echo reconciliation is limited to pending app messages with a Web Bridge outbox job, reducing false adoption of manual mobile/web outbound messages.
+- Delivery status mapping is exposed for focused tests and still maps server ack, delivered, read, and failed states to Estio message statuses.
+
+Phase 5 acceptance checklist:
+
+1. Send from Estio and confirm only one message remains after the Web Bridge echo arrives.
+2. Send manually from WhatsApp mobile/web and confirm it appears immediately in Estio.
+3. Retry or duplicate a Web Bridge webhook payload and confirm no duplicate message is created.
+4. Receive an inbound reply from an existing contact and confirm it attaches to the same conversation.
+5. Send/receive media twice or re-fetch media and confirm no duplicate attachments.
+6. Confirm delivered/read status updates land on the correct reconciled message.
+7. Confirm groups, broadcasts, newsletters, and LID-only IDs are ignored for normal v1 Web Bridge flows.
 
 ## Current Implementation State
 
@@ -330,17 +354,6 @@ Use one test location configured as `web_bridge`.
 17. Confirm Estio shows offline/disconnected.
 
 ## Next Phases
-
-### Phase 5: Identity And Dedup Hardening
-
-- Add more Web Bridge-specific tests for:
-  - inbound text
-  - manual outbound echo
-  - app-sent outbound echo dedupe
-  - media message dedupe
-  - ack/read status updates
-- Audit contacts created from Web Bridge to ensure no phone-less placeholders are created when a phone is available.
-- Keep groups/newsletters/channels out of normal v1 unless intentionally prioritized.
 
 ### Phase 6: Evolution Product Deprecation
 
