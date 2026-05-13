@@ -57,6 +57,8 @@ class RelayForegroundService : Service() {
         return START_STICKY
     }
 
+    private val activeJobIds = mutableSetOf<String>()
+
     private fun startPolling() {
         serviceScope.launch {
             while (isActive) {
@@ -64,8 +66,18 @@ class RelayForegroundService : Service() {
                     val response = ApiClient.api.getJobs()
                     if (response.isSuccessful && response.body() != null) {
                         val jobs = response.body()!!
+                        
+                        // Clean up: retain only jobs that the server still thinks are processing,
+                        // PLUS any jobs we just sent but the server might not have removed yet.
+                        // Actually, just retaining a small bounded history is safer to prevent unbounded growth.
+                        if (activeJobIds.size > 1000) {
+                            activeJobIds.clear() // Extremely simple bound
+                        }
+
                         for (job in jobs) {
-                            sendSms(job.job_id, job.to, job.body)
+                            if (activeJobIds.add(job.job_id)) {
+                                sendSms(job.job_id, job.to, job.body)
+                            }
                         }
                     }
                     ApiClient.api.heartbeat()

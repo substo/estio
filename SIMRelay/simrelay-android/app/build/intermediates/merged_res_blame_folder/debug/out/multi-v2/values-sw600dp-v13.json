@@ -1,7 +1,7 @@
 {
     "logs": [
         {
-            "outputFile": "com.estio.simrelay.app-mergeDebugResources-30:/values-sw600dp-v13/values-sw600dp-v13.xml",
+            "outputFile": "com.estio.simrelay.app-mergeDebugResources-32:/values-sw600dp-v13/values-sw600dp-v13.xml",
             "map": [
                 {
                     "source": "/Users/martingreen/.gradle/caches/transforms-3/0a387646109aa4c7cf95500856c54193/transformed/appcompat-1.6.1/res/values-sw600dp-v13/values-sw600dp-v13.xml",

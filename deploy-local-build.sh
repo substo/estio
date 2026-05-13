@@ -17,6 +17,8 @@ APP_NAME_PREFIX="estio-app"
 SCRAPE_WORKER_APP_NAME="estio-scrape-worker"
 VIEWING_RELAY_APP_NAME="estio-viewing-live-relay"
 VIEWING_RELAY_DEFAULT_PORT=8788
+WHATSAPP_BRIDGE_APP_NAME="estio-whatsapp-web-bridge"
+WHATSAPP_BRIDGE_DEFAULT_PORT=3218
 LEGACY_SCRAPE_WORKER_PORT=3010
 PRISMA_CLI_VERSION="${PRISMA_CLI_VERSION:-6.19.0}"
 # Schema sync modes:
@@ -264,6 +266,8 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
     SCRAPE_WORKER_APP_NAME="$SCRAPE_WORKER_APP_NAME"
     VIEWING_RELAY_APP_NAME="$VIEWING_RELAY_APP_NAME"
     VIEWING_RELAY_DEFAULT_PORT="$VIEWING_RELAY_DEFAULT_PORT"
+    WHATSAPP_BRIDGE_APP_NAME="$WHATSAPP_BRIDGE_APP_NAME"
+    WHATSAPP_BRIDGE_DEFAULT_PORT="$WHATSAPP_BRIDGE_DEFAULT_PORT"
     BLUE_PORT="$BLUE_PORT"
     GREEN_PORT="$GREEN_PORT"
     LEGACY_SCRAPE_WORKER_PORT="$LEGACY_SCRAPE_WORKER_PORT"
@@ -280,6 +284,14 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
         RAW_VIEWING_RELAY_PORT=\$(grep -E '^VIEWING_SESSION_RELAY_PORT=' "\$TARGET_DIR/.env" | tail -n1 | sed -E 's/^[^=]+=//' | tr -d "'\"" | tr -d '[:space:]' || true)
         if [[ "\$RAW_VIEWING_RELAY_PORT" =~ ^[0-9]+$ ]]; then
             VIEWING_RELAY_PORT="\$RAW_VIEWING_RELAY_PORT"
+        fi
+    fi
+
+    WHATSAPP_BRIDGE_PORT="\$WHATSAPP_BRIDGE_DEFAULT_PORT"
+    if [ -f "\$TARGET_DIR/.env" ]; then
+        RAW_WHATSAPP_BRIDGE_PORT=\$(grep -E '^WHATSAPP_WEB_BRIDGE_PORT=' "\$TARGET_DIR/.env" | tail -n1 | sed -E 's/^[^=]+=//' | tr -d "'\"" | tr -d '[:space:]' || true)
+        if [[ "\$RAW_WHATSAPP_BRIDGE_PORT" =~ ^[0-9]+$ ]]; then
+            WHATSAPP_BRIDGE_PORT="\$RAW_WHATSAPP_BRIDGE_PORT"
         fi
     fi
 
@@ -543,6 +555,33 @@ NODE
         echo "❌ Viewing live relay failed readiness checks on :\$VIEWING_RELAY_PORT."
         pm2 describe "\$VIEWING_RELAY_APP_NAME" || true
         pm2 logs "\$VIEWING_RELAY_APP_NAME" --lines 120 --nostream || true
+        exit 1
+    fi
+
+    echo "📱 Ensuring WhatsApp Web Bridge process is running (\$WHATSAPP_BRIDGE_APP_NAME) on :\$WHATSAPP_BRIDGE_PORT..."
+    if pm2 describe "\$WHATSAPP_BRIDGE_APP_NAME" > /dev/null 2>&1; then
+        pm2 delete "\$WHATSAPP_BRIDGE_APP_NAME" || true
+    fi
+    NODE_ENV=production PROCESS_ROLE=whatsapp-bridge \
+        pm2 start npm --name "\$WHATSAPP_BRIDGE_APP_NAME" --cwd "\$SYMLINK_PATH" -- run start:whatsapp-web-bridge
+
+    echo "🩺 Waiting for WhatsApp Web Bridge readiness..."
+    BRIDGE_READY=0
+    for i in \$(seq 1 45); do
+        # Expect 401 Unauthorized because health endpoint requires secret
+        BRIDGE_HTTP_CODE=\$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:\$WHATSAPP_BRIDGE_PORT/health" || echo "000")
+        if [ "\$BRIDGE_HTTP_CODE" = "401" ] || [ "\$BRIDGE_HTTP_CODE" = "200" ]; then
+            BRIDGE_READY=1
+            echo "✅ WhatsApp Web Bridge is healthy"
+            break
+        fi
+        sleep 1
+    done
+
+    if [ "\$BRIDGE_READY" -ne 1 ]; then
+        echo "❌ WhatsApp Web Bridge failed readiness checks on :\$WHATSAPP_BRIDGE_PORT."
+        pm2 describe "\$WHATSAPP_BRIDGE_APP_NAME" || true
+        pm2 logs "\$WHATSAPP_BRIDGE_APP_NAME" --lines 120 --nostream || true
         exit 1
     fi
 

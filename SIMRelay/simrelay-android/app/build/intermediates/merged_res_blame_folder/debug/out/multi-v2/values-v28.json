@@ -1,7 +1,7 @@
 {
     "logs": [
         {
-            "outputFile": "com.estio.simrelay.app-mergeDebugResources-30:/values-v28/values-v28.xml",
+            "outputFile": "com.estio.simrelay.app-mergeDebugResources-32:/values-v28/values-v28.xml",
             "map": [
                 {
                     "source": "/Users/martingreen/.gradle/caches/transforms-3/3e1eb6ce54d65ef612874ea3f4f0de53/transformed/material-1.11.0/res/values-v28/values-v28.xml",

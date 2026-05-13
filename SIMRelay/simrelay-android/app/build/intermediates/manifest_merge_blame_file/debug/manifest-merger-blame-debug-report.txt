@@ -10,181 +10,281 @@
 10
 11    <!-- Permissions required for SMS Relay -->
 12    <uses-permission android:name="android.permission.INTERNET" />
-12-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:6:5-67
-12-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:6:22-64
+12-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:5:5-67
+12-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:5:22-64
 13    <uses-permission android:name="android.permission.SEND_SMS" />
-13-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:7:5-67
-13-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:7:22-64
+13-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:6:5-67
+13-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:6:22-64
 14    <uses-permission android:name="android.permission.RECEIVE_SMS" />
-14-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:8:5-70
-14-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:8:22-67
+14-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:7:5-70
+14-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:7:22-67
 15    <uses-permission android:name="android.permission.READ_SMS" />
-15-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:9:5-67
-15-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:9:22-64
+15-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:8:5-67
+15-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:8:22-64
 16    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-16-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:10:5-77
-16-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:10:22-74
+16-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:9:5-77
+16-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:9:22-74
 17    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-17-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:11:5-87
-17-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:11:22-84
+17-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:10:5-87
+17-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:10:22-84
 18    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-18-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:12:5-77
-18-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:12:22-74
+18-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:11:5-77
+18-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:11:22-74
 19    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-19-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:13:5-81
-19-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:13:22-78
-20
-21    <permission
-21-->[androidx.core:core:1.12.0] /Users/martingreen/.gradle/caches/transforms-3/8566dda15409a9dc3e85d19b7371de7c/transformed/core-1.12.0/AndroidManifest.xml:22:5-24:47
-22        android:name="com.estio.simrelay.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
-22-->[androidx.core:core:1.12.0] /Users/martingreen/.gradle/caches/transforms-3/8566dda15409a9dc3e85d19b7371de7c/transformed/core-1.12.0/AndroidManifest.xml:23:9-81
-23        android:protectionLevel="signature" />
-23-->[androidx.core:core:1.12.0] /Users/martingreen/.gradle/caches/transforms-3/8566dda15409a9dc3e85d19b7371de7c/transformed/core-1.12.0/AndroidManifest.xml:24:9-44
-24
-25    <uses-permission android:name="com.estio.simrelay.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
-25-->[androidx.core:core:1.12.0] /Users/martingreen/.gradle/caches/transforms-3/8566dda15409a9dc3e85d19b7371de7c/transformed/core-1.12.0/AndroidManifest.xml:26:5-97
-25-->[androidx.core:core:1.12.0] /Users/martingreen/.gradle/caches/transforms-3/8566dda15409a9dc3e85d19b7371de7c/transformed/core-1.12.0/AndroidManifest.xml:26:22-94
-26
-27    <application
-27-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:15:5-54:19
-28        android:allowBackup="false"
-28-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:16:9-36
-29        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
-29-->[androidx.core:core:1.12.0] /Users/martingreen/.gradle/caches/transforms-3/8566dda15409a9dc3e85d19b7371de7c/transformed/core-1.12.0/AndroidManifest.xml:28:18-86
-30        android:debuggable="true"
-31        android:extractNativeLibs="false"
-32        android:icon="@android:drawable/sym_def_app_icon"
-32-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:17:9-58
-33        android:label="@string/app_name"
-33-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:18:9-41
-34        android:roundIcon="@android:drawable/sym_def_app_icon"
-34-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:19:9-63
-35        android:supportsRtl="true"
-35-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:20:9-35
-36        android:theme="@style/Theme.AppCompat.Light.DarkActionBar" >
-36-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:21:9-67
-37        <activity
-37-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:23:9-30:20
-38            android:name="com.estio.simrelay.MainActivity"
-38-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:24:13-41
-39            android:exported="true" >
-39-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:25:13-36
-40            <intent-filter>
-40-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:26:13-29:29
-41                <action android:name="android.intent.action.MAIN" />
-41-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:27:17-69
-41-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:27:25-66
-42
-43                <category android:name="android.intent.category.LAUNCHER" />
-43-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:28:17-77
-43-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:28:27-74
-44            </intent-filter>
-45        </activity>
-46
-47        <service
-47-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:32:9-35:56
-48            android:name="com.estio.simrelay.RelayForegroundService"
-48-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:33:13-51
-49            android:exported="false"
-49-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:34:13-37
-50            android:foregroundServiceType="dataSync" />
-50-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:35:13-53
-51
-52        <receiver
-52-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:37:9-44:20
-53            android:name="com.estio.simrelay.InboundSmsReceiver"
-53-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:38:13-47
-54            android:exported="true"
-54-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:39:13-36
-55            android:permission="android.permission.BROADCAST_SMS" >
-55-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:40:13-66
-56            <intent-filter android:priority="999" >
-56-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:41:13-43:29
-56-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:41:28-50
-57                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
-57-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:42:17-82
-57-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:42:25-79
-58            </intent-filter>
-59        </receiver>
-60        <receiver
-60-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:46:9-52:20
-61            android:name="com.estio.simrelay.BootReceiver"
-61-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:47:13-41
-62            android:exported="true" >
-62-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:48:13-36
-63            <intent-filter>
-63-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:49:13-51:29
-64                <action android:name="android.intent.action.BOOT_COMPLETED" />
-64-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:50:17-79
-64-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:50:25-76
-65            </intent-filter>
-66        </receiver>
-67
-68        <provider
-68-->[androidx.emoji2:emoji2:1.2.0] /Users/martingreen/.gradle/caches/transforms-3/e9ca56cf9a6aaae941a158b329865174/transformed/emoji2-1.2.0/AndroidManifest.xml:24:9-32:20
-69            android:name="androidx.startup.InitializationProvider"
-69-->[androidx.emoji2:emoji2:1.2.0] /Users/martingreen/.gradle/caches/transforms-3/e9ca56cf9a6aaae941a158b329865174/transformed/emoji2-1.2.0/AndroidManifest.xml:25:13-67
-70            android:authorities="com.estio.simrelay.androidx-startup"
-70-->[androidx.emoji2:emoji2:1.2.0] /Users/martingreen/.gradle/caches/transforms-3/e9ca56cf9a6aaae941a158b329865174/transformed/emoji2-1.2.0/AndroidManifest.xml:26:13-68
-71            android:exported="false" >
-71-->[androidx.emoji2:emoji2:1.2.0] /Users/martingreen/.gradle/caches/transforms-3/e9ca56cf9a6aaae941a158b329865174/transformed/emoji2-1.2.0/AndroidManifest.xml:27:13-37
-72            <meta-data
-72-->[androidx.emoji2:emoji2:1.2.0] /Users/martingreen/.gradle/caches/transforms-3/e9ca56cf9a6aaae941a158b329865174/transformed/emoji2-1.2.0/AndroidManifest.xml:29:13-31:52
-73                android:name="androidx.emoji2.text.EmojiCompatInitializer"
-73-->[androidx.emoji2:emoji2:1.2.0] /Users/martingreen/.gradle/caches/transforms-3/e9ca56cf9a6aaae941a158b329865174/transformed/emoji2-1.2.0/AndroidManifest.xml:30:17-75
-74                android:value="androidx.startup" />
-74-->[androidx.emoji2:emoji2:1.2.0] /Users/martingreen/.gradle/caches/transforms-3/e9ca56cf9a6aaae941a158b329865174/transformed/emoji2-1.2.0/AndroidManifest.xml:31:17-49
-75            <meta-data
-75-->[androidx.lifecycle:lifecycle-process:2.6.1] /Users/martingreen/.gradle/caches/transforms-3/4e23cd0004303438a84b3f41d3c88bf6/transformed/lifecycle-process-2.6.1/AndroidManifest.xml:29:13-31:52
-76                android:name="androidx.lifecycle.ProcessLifecycleInitializer"
-76-->[androidx.lifecycle:lifecycle-process:2.6.1] /Users/martingreen/.gradle/caches/transforms-3/4e23cd0004303438a84b3f41d3c88bf6/transformed/lifecycle-process-2.6.1/AndroidManifest.xml:30:17-78
-77                android:value="androidx.startup" />
-77-->[androidx.lifecycle:lifecycle-process:2.6.1] /Users/martingreen/.gradle/caches/transforms-3/4e23cd0004303438a84b3f41d3c88bf6/transformed/lifecycle-process-2.6.1/AndroidManifest.xml:31:17-49
-78            <meta-data
-78-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:29:13-31:52
-79                android:name="androidx.profileinstaller.ProfileInstallerInitializer"
-79-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:30:17-85
-80                android:value="androidx.startup" />
-80-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:31:17-49
-81        </provider>
-82
-83        <receiver
-83-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:34:9-52:20
-84            android:name="androidx.profileinstaller.ProfileInstallReceiver"
-84-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:35:13-76
-85            android:directBootAware="false"
-85-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:36:13-44
-86            android:enabled="true"
-86-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:37:13-35
-87            android:exported="true"
-87-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:38:13-36
-88            android:permission="android.permission.DUMP" >
-88-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:39:13-57
-89            <intent-filter>
-89-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:40:13-42:29
-90                <action android:name="androidx.profileinstaller.action.INSTALL_PROFILE" />
-90-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:41:17-91
-90-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:41:25-88
-91            </intent-filter>
-92            <intent-filter>
-92-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:43:13-45:29
-93                <action android:name="androidx.profileinstaller.action.SKIP_FILE" />
-93-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:44:17-85
-93-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:44:25-82
-94            </intent-filter>
-95            <intent-filter>
-95-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:46:13-48:29
-96                <action android:name="androidx.profileinstaller.action.SAVE_PROFILE" />
-96-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:47:17-88
-96-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:47:25-85
-97            </intent-filter>
-98            <intent-filter>
-98-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:49:13-51:29
-99                <action android:name="androidx.profileinstaller.action.BENCHMARK_OPERATION" />
-99-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:50:17-95
-99-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:50:25-92
-100            </intent-filter>
-101        </receiver>
-102    </application>
-103
-104</manifest>
+19-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:12:5-81
+19-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:12:22-78
+20    <uses-permission android:name="android.permission.CAMERA" />
+20-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:13:5-65
+20-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:13:22-62
+21
+22    <permission
+22-->[androidx.core:core:1.12.0] /Users/martingreen/.gradle/caches/transforms-3/8566dda15409a9dc3e85d19b7371de7c/transformed/core-1.12.0/AndroidManifest.xml:22:5-24:47
+23        android:name="com.estio.simrelay.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+23-->[androidx.core:core:1.12.0] /Users/martingreen/.gradle/caches/transforms-3/8566dda15409a9dc3e85d19b7371de7c/transformed/core-1.12.0/AndroidManifest.xml:23:9-81
+24        android:protectionLevel="signature" />
+24-->[androidx.core:core:1.12.0] /Users/martingreen/.gradle/caches/transforms-3/8566dda15409a9dc3e85d19b7371de7c/transformed/core-1.12.0/AndroidManifest.xml:24:9-44
+25
+26    <uses-permission android:name="com.estio.simrelay.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" /> <!-- Although the *SdkVersion is captured in gradle build files, this is required for non gradle builds -->
+26-->[androidx.core:core:1.12.0] /Users/martingreen/.gradle/caches/transforms-3/8566dda15409a9dc3e85d19b7371de7c/transformed/core-1.12.0/AndroidManifest.xml:26:5-97
+26-->[androidx.core:core:1.12.0] /Users/martingreen/.gradle/caches/transforms-3/8566dda15409a9dc3e85d19b7371de7c/transformed/core-1.12.0/AndroidManifest.xml:26:22-94
+27    <!-- <uses-sdk android:minSdkVersion="14"/> -->
+28    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+28-->[com.google.android.datatransport:transport-backend-cct:2.3.3] /Users/martingreen/.gradle/caches/transforms-3/86398eeaa10655646879ae63912dbecc/transformed/transport-backend-cct-2.3.3/AndroidManifest.xml:25:5-79
+28-->[com.google.android.datatransport:transport-backend-cct:2.3.3] /Users/martingreen/.gradle/caches/transforms-3/86398eeaa10655646879ae63912dbecc/transformed/transport-backend-cct-2.3.3/AndroidManifest.xml:25:22-76
+29
+30    <application
+30-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:15:5-54:19
+31        android:allowBackup="false"
+31-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:16:9-36
+32        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
+32-->[androidx.core:core:1.12.0] /Users/martingreen/.gradle/caches/transforms-3/8566dda15409a9dc3e85d19b7371de7c/transformed/core-1.12.0/AndroidManifest.xml:28:18-86
+33        android:debuggable="true"
+34        android:extractNativeLibs="false"
+35        android:icon="@android:drawable/sym_def_app_icon"
+35-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:17:9-58
+36        android:label="@string/app_name"
+36-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:18:9-41
+37        android:roundIcon="@android:drawable/sym_def_app_icon"
+37-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:19:9-63
+38        android:supportsRtl="true"
+38-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:20:9-35
+39        android:theme="@style/Theme.MaterialComponents.DayNight.DarkActionBar" >
+39-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:21:9-79
+40        <activity
+40-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:23:9-30:20
+41            android:name="com.estio.simrelay.MainActivity"
+41-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:24:13-41
+42            android:exported="true" >
+42-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:25:13-36
+43            <intent-filter>
+43-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:26:13-29:29
+44                <action android:name="android.intent.action.MAIN" />
+44-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:27:17-69
+44-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:27:25-66
+45
+46                <category android:name="android.intent.category.LAUNCHER" />
+46-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:28:17-77
+46-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:28:27-74
+47            </intent-filter>
+48        </activity>
+49
+50        <service
+50-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:32:9-35:56
+51            android:name="com.estio.simrelay.RelayForegroundService"
+51-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:33:13-51
+52            android:exported="false"
+52-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:34:13-37
+53            android:foregroundServiceType="dataSync" />
+53-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:35:13-53
+54
+55        <receiver
+55-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:37:9-44:20
+56            android:name="com.estio.simrelay.InboundSmsReceiver"
+56-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:38:13-47
+57            android:exported="true"
+57-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:39:13-36
+58            android:permission="android.permission.BROADCAST_SMS" >
+58-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:40:13-66
+59            <intent-filter android:priority="999" >
+59-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:41:13-43:29
+59-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:41:28-50
+60                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+60-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:42:17-82
+60-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:42:25-79
+61            </intent-filter>
+62        </receiver>
+63        <receiver
+63-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:46:9-52:20
+64            android:name="com.estio.simrelay.BootReceiver"
+64-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:47:13-41
+65            android:exported="true" >
+65-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:48:13-36
+66            <intent-filter>
+66-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:49:13-51:29
+67                <action android:name="android.intent.action.BOOT_COMPLETED" />
+67-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:50:17-79
+67-->/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app/src/main/AndroidManifest.xml:50:25-76
+68            </intent-filter>
+69        </receiver>
+70
+71        <!--
+72        This activity is an invisible delegate activity to start scanner activity
+73        and receive result, so it's unnecessary to support screen orientation and
+74        we can avoid any side effect from activity recreation in any case.
+75        -->
+76        <activity
+76-->[com.google.android.gms:play-services-code-scanner:16.1.0] /Users/martingreen/.gradle/caches/transforms-3/93bcf981901260ad359f943881b27069/transformed/play-services-code-scanner-16.1.0/AndroidManifest.xml:15:9-20:20
+77            android:name="com.google.mlkit.vision.codescanner.internal.GmsBarcodeScanningDelegateActivity"
+77-->[com.google.android.gms:play-services-code-scanner:16.1.0] /Users/martingreen/.gradle/caches/transforms-3/93bcf981901260ad359f943881b27069/transformed/play-services-code-scanner-16.1.0/AndroidManifest.xml:16:13-107
+78            android:exported="false"
+78-->[com.google.android.gms:play-services-code-scanner:16.1.0] /Users/martingreen/.gradle/caches/transforms-3/93bcf981901260ad359f943881b27069/transformed/play-services-code-scanner-16.1.0/AndroidManifest.xml:17:13-37
+79            android:screenOrientation="portrait" >
+79-->[com.google.android.gms:play-services-code-scanner:16.1.0] /Users/martingreen/.gradle/caches/transforms-3/93bcf981901260ad359f943881b27069/transformed/play-services-code-scanner-16.1.0/AndroidManifest.xml:18:13-49
+80        </activity>
+81
+82        <service
+82-->[com.google.mlkit:vision-common:17.0.0] /Users/martingreen/.gradle/caches/transforms-3/575fec4dd68611397bf077a30dcbfd42/transformed/vision-common-17.0.0/AndroidManifest.xml:9:9-15:19
+83            android:name="com.google.mlkit.common.internal.MlKitComponentDiscoveryService"
+83-->[com.google.mlkit:vision-common:17.0.0] /Users/martingreen/.gradle/caches/transforms-3/575fec4dd68611397bf077a30dcbfd42/transformed/vision-common-17.0.0/AndroidManifest.xml:10:13-91
+84            android:directBootAware="true"
+84-->[com.google.mlkit:common:18.9.0] /Users/martingreen/.gradle/caches/transforms-3/df4a3f41047cb01470ff9db6447f0d16/transformed/common-18.9.0/AndroidManifest.xml:17:13-43
+85            android:exported="false" >
+85-->[com.google.mlkit:vision-common:17.0.0] /Users/martingreen/.gradle/caches/transforms-3/575fec4dd68611397bf077a30dcbfd42/transformed/vision-common-17.0.0/AndroidManifest.xml:11:13-37
+86            <meta-data
+86-->[com.google.mlkit:vision-common:17.0.0] /Users/martingreen/.gradle/caches/transforms-3/575fec4dd68611397bf077a30dcbfd42/transformed/vision-common-17.0.0/AndroidManifest.xml:12:13-14:85
+87                android:name="com.google.firebase.components:com.google.mlkit.vision.common.internal.VisionCommonRegistrar"
+87-->[com.google.mlkit:vision-common:17.0.0] /Users/martingreen/.gradle/caches/transforms-3/575fec4dd68611397bf077a30dcbfd42/transformed/vision-common-17.0.0/AndroidManifest.xml:13:17-124
+88                android:value="com.google.firebase.components.ComponentRegistrar" />
+88-->[com.google.mlkit:vision-common:17.0.0] /Users/martingreen/.gradle/caches/transforms-3/575fec4dd68611397bf077a30dcbfd42/transformed/vision-common-17.0.0/AndroidManifest.xml:14:17-82
+89            <meta-data
+89-->[com.google.mlkit:common:18.9.0] /Users/martingreen/.gradle/caches/transforms-3/df4a3f41047cb01470ff9db6447f0d16/transformed/common-18.9.0/AndroidManifest.xml:20:13-22:85
+90                android:name="com.google.firebase.components:com.google.mlkit.common.internal.CommonComponentRegistrar"
+90-->[com.google.mlkit:common:18.9.0] /Users/martingreen/.gradle/caches/transforms-3/df4a3f41047cb01470ff9db6447f0d16/transformed/common-18.9.0/AndroidManifest.xml:21:17-120
+91                android:value="com.google.firebase.components.ComponentRegistrar" />
+91-->[com.google.mlkit:common:18.9.0] /Users/martingreen/.gradle/caches/transforms-3/df4a3f41047cb01470ff9db6447f0d16/transformed/common-18.9.0/AndroidManifest.xml:22:17-82
+92        </service>
+93
+94        <provider
+94-->[com.google.mlkit:common:18.9.0] /Users/martingreen/.gradle/caches/transforms-3/df4a3f41047cb01470ff9db6447f0d16/transformed/common-18.9.0/AndroidManifest.xml:9:9-13:38
+95            android:name="com.google.mlkit.common.internal.MlKitInitProvider"
+95-->[com.google.mlkit:common:18.9.0] /Users/martingreen/.gradle/caches/transforms-3/df4a3f41047cb01470ff9db6447f0d16/transformed/common-18.9.0/AndroidManifest.xml:10:13-78
+96            android:authorities="com.estio.simrelay.mlkitinitprovider"
+96-->[com.google.mlkit:common:18.9.0] /Users/martingreen/.gradle/caches/transforms-3/df4a3f41047cb01470ff9db6447f0d16/transformed/common-18.9.0/AndroidManifest.xml:11:13-69
+97            android:exported="false"
+97-->[com.google.mlkit:common:18.9.0] /Users/martingreen/.gradle/caches/transforms-3/df4a3f41047cb01470ff9db6447f0d16/transformed/common-18.9.0/AndroidManifest.xml:12:13-37
+98            android:initOrder="99" />
+98-->[com.google.mlkit:common:18.9.0] /Users/martingreen/.gradle/caches/transforms-3/df4a3f41047cb01470ff9db6447f0d16/transformed/common-18.9.0/AndroidManifest.xml:13:13-35
+99
+100        <activity
+100-->[com.google.android.gms:play-services-base:18.1.0] /Users/martingreen/.gradle/caches/transforms-3/f8f0f178e410454c5026864d48f8b3aa/transformed/play-services-base-18.1.0/AndroidManifest.xml:20:9-22:45
+101            android:name="com.google.android.gms.common.api.GoogleApiActivity"
+101-->[com.google.android.gms:play-services-base:18.1.0] /Users/martingreen/.gradle/caches/transforms-3/f8f0f178e410454c5026864d48f8b3aa/transformed/play-services-base-18.1.0/AndroidManifest.xml:20:19-85
+102            android:exported="false"
+102-->[com.google.android.gms:play-services-base:18.1.0] /Users/martingreen/.gradle/caches/transforms-3/f8f0f178e410454c5026864d48f8b3aa/transformed/play-services-base-18.1.0/AndroidManifest.xml:22:19-43
+103            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+103-->[com.google.android.gms:play-services-base:18.1.0] /Users/martingreen/.gradle/caches/transforms-3/f8f0f178e410454c5026864d48f8b3aa/transformed/play-services-base-18.1.0/AndroidManifest.xml:21:19-78
+104
+105        <meta-data
+105-->[com.google.android.gms:play-services-basement:18.1.0] /Users/martingreen/.gradle/caches/transforms-3/813602b734b0b4ce464b39a2ecb68bb2/transformed/play-services-basement-18.1.0/AndroidManifest.xml:21:9-23:69
+106            android:name="com.google.android.gms.version"
+106-->[com.google.android.gms:play-services-basement:18.1.0] /Users/martingreen/.gradle/caches/transforms-3/813602b734b0b4ce464b39a2ecb68bb2/transformed/play-services-basement-18.1.0/AndroidManifest.xml:22:13-58
+107            android:value="@integer/google_play_services_version" />
+107-->[com.google.android.gms:play-services-basement:18.1.0] /Users/martingreen/.gradle/caches/transforms-3/813602b734b0b4ce464b39a2ecb68bb2/transformed/play-services-basement-18.1.0/AndroidManifest.xml:23:13-66
+108
+109        <provider
+109-->[androidx.emoji2:emoji2:1.2.0] /Users/martingreen/.gradle/caches/transforms-3/e9ca56cf9a6aaae941a158b329865174/transformed/emoji2-1.2.0/AndroidManifest.xml:24:9-32:20
+110            android:name="androidx.startup.InitializationProvider"
+110-->[androidx.emoji2:emoji2:1.2.0] /Users/martingreen/.gradle/caches/transforms-3/e9ca56cf9a6aaae941a158b329865174/transformed/emoji2-1.2.0/AndroidManifest.xml:25:13-67
+111            android:authorities="com.estio.simrelay.androidx-startup"
+111-->[androidx.emoji2:emoji2:1.2.0] /Users/martingreen/.gradle/caches/transforms-3/e9ca56cf9a6aaae941a158b329865174/transformed/emoji2-1.2.0/AndroidManifest.xml:26:13-68
+112            android:exported="false" >
+112-->[androidx.emoji2:emoji2:1.2.0] /Users/martingreen/.gradle/caches/transforms-3/e9ca56cf9a6aaae941a158b329865174/transformed/emoji2-1.2.0/AndroidManifest.xml:27:13-37
+113            <meta-data
+113-->[androidx.emoji2:emoji2:1.2.0] /Users/martingreen/.gradle/caches/transforms-3/e9ca56cf9a6aaae941a158b329865174/transformed/emoji2-1.2.0/AndroidManifest.xml:29:13-31:52
+114                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+114-->[androidx.emoji2:emoji2:1.2.0] /Users/martingreen/.gradle/caches/transforms-3/e9ca56cf9a6aaae941a158b329865174/transformed/emoji2-1.2.0/AndroidManifest.xml:30:17-75
+115                android:value="androidx.startup" />
+115-->[androidx.emoji2:emoji2:1.2.0] /Users/martingreen/.gradle/caches/transforms-3/e9ca56cf9a6aaae941a158b329865174/transformed/emoji2-1.2.0/AndroidManifest.xml:31:17-49
+116            <meta-data
+116-->[androidx.lifecycle:lifecycle-process:2.6.1] /Users/martingreen/.gradle/caches/transforms-3/4e23cd0004303438a84b3f41d3c88bf6/transformed/lifecycle-process-2.6.1/AndroidManifest.xml:29:13-31:52
+117                android:name="androidx.lifecycle.ProcessLifecycleInitializer"
+117-->[androidx.lifecycle:lifecycle-process:2.6.1] /Users/martingreen/.gradle/caches/transforms-3/4e23cd0004303438a84b3f41d3c88bf6/transformed/lifecycle-process-2.6.1/AndroidManifest.xml:30:17-78
+118                android:value="androidx.startup" />
+118-->[androidx.lifecycle:lifecycle-process:2.6.1] /Users/martingreen/.gradle/caches/transforms-3/4e23cd0004303438a84b3f41d3c88bf6/transformed/lifecycle-process-2.6.1/AndroidManifest.xml:31:17-49
+119            <meta-data
+119-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:29:13-31:52
+120                android:name="androidx.profileinstaller.ProfileInstallerInitializer"
+120-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:30:17-85
+121                android:value="androidx.startup" />
+121-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:31:17-49
+122        </provider>
+123
+124        <service
+124-->[com.google.android.datatransport:transport-backend-cct:2.3.3] /Users/martingreen/.gradle/caches/transforms-3/86398eeaa10655646879ae63912dbecc/transformed/transport-backend-cct-2.3.3/AndroidManifest.xml:29:9-35:19
+125            android:name="com.google.android.datatransport.runtime.backends.TransportBackendDiscovery"
+125-->[com.google.android.datatransport:transport-backend-cct:2.3.3] /Users/martingreen/.gradle/caches/transforms-3/86398eeaa10655646879ae63912dbecc/transformed/transport-backend-cct-2.3.3/AndroidManifest.xml:30:13-103
+126            android:exported="false" >
+126-->[com.google.android.datatransport:transport-backend-cct:2.3.3] /Users/martingreen/.gradle/caches/transforms-3/86398eeaa10655646879ae63912dbecc/transformed/transport-backend-cct-2.3.3/AndroidManifest.xml:31:13-37
+127            <meta-data
+127-->[com.google.android.datatransport:transport-backend-cct:2.3.3] /Users/martingreen/.gradle/caches/transforms-3/86398eeaa10655646879ae63912dbecc/transformed/transport-backend-cct-2.3.3/AndroidManifest.xml:32:13-34:39
+128                android:name="backend:com.google.android.datatransport.cct.CctBackendFactory"
+128-->[com.google.android.datatransport:transport-backend-cct:2.3.3] /Users/martingreen/.gradle/caches/transforms-3/86398eeaa10655646879ae63912dbecc/transformed/transport-backend-cct-2.3.3/AndroidManifest.xml:33:17-94
+129                android:value="cct" />
+129-->[com.google.android.datatransport:transport-backend-cct:2.3.3] /Users/martingreen/.gradle/caches/transforms-3/86398eeaa10655646879ae63912dbecc/transformed/transport-backend-cct-2.3.3/AndroidManifest.xml:34:17-36
+130        </service>
+131        <service
+131-->[com.google.android.datatransport:transport-runtime:2.2.6] /Users/martingreen/.gradle/caches/transforms-3/c3ab05e644959e0a1b8c852e33425279/transformed/transport-runtime-2.2.6/AndroidManifest.xml:26:9-30:19
+132            android:name="com.google.android.datatransport.runtime.scheduling.jobscheduling.JobInfoSchedulerService"
+132-->[com.google.android.datatransport:transport-runtime:2.2.6] /Users/martingreen/.gradle/caches/transforms-3/c3ab05e644959e0a1b8c852e33425279/transformed/transport-runtime-2.2.6/AndroidManifest.xml:27:13-117
+133            android:exported="false"
+133-->[com.google.android.datatransport:transport-runtime:2.2.6] /Users/martingreen/.gradle/caches/transforms-3/c3ab05e644959e0a1b8c852e33425279/transformed/transport-runtime-2.2.6/AndroidManifest.xml:28:13-37
+134            android:permission="android.permission.BIND_JOB_SERVICE" >
+134-->[com.google.android.datatransport:transport-runtime:2.2.6] /Users/martingreen/.gradle/caches/transforms-3/c3ab05e644959e0a1b8c852e33425279/transformed/transport-runtime-2.2.6/AndroidManifest.xml:29:13-69
+135        </service>
+136
+137        <receiver
+137-->[com.google.android.datatransport:transport-runtime:2.2.6] /Users/martingreen/.gradle/caches/transforms-3/c3ab05e644959e0a1b8c852e33425279/transformed/transport-runtime-2.2.6/AndroidManifest.xml:32:9-34:40
+138            android:name="com.google.android.datatransport.runtime.scheduling.jobscheduling.AlarmManagerSchedulerBroadcastReceiver"
+138-->[com.google.android.datatransport:transport-runtime:2.2.6] /Users/martingreen/.gradle/caches/transforms-3/c3ab05e644959e0a1b8c852e33425279/transformed/transport-runtime-2.2.6/AndroidManifest.xml:33:13-132
+139            android:exported="false" />
+139-->[com.google.android.datatransport:transport-runtime:2.2.6] /Users/martingreen/.gradle/caches/transforms-3/c3ab05e644959e0a1b8c852e33425279/transformed/transport-runtime-2.2.6/AndroidManifest.xml:34:13-37
+140        <receiver
+140-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:34:9-52:20
+141            android:name="androidx.profileinstaller.ProfileInstallReceiver"
+141-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:35:13-76
+142            android:directBootAware="false"
+142-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:36:13-44
+143            android:enabled="true"
+143-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:37:13-35
+144            android:exported="true"
+144-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:38:13-36
+145            android:permission="android.permission.DUMP" >
+145-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:39:13-57
+146            <intent-filter>
+146-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:40:13-42:29
+147                <action android:name="androidx.profileinstaller.action.INSTALL_PROFILE" />
+147-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:41:17-91
+147-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:41:25-88
+148            </intent-filter>
+149            <intent-filter>
+149-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:43:13-45:29
+150                <action android:name="androidx.profileinstaller.action.SKIP_FILE" />
+150-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:44:17-85
+150-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:44:25-82
+151            </intent-filter>
+152            <intent-filter>
+152-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:46:13-48:29
+153                <action android:name="androidx.profileinstaller.action.SAVE_PROFILE" />
+153-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:47:17-88
+153-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:47:25-85
+154            </intent-filter>
+155            <intent-filter>
+155-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:49:13-51:29
+156                <action android:name="androidx.profileinstaller.action.BENCHMARK_OPERATION" />
+156-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:50:17-95
+156-->[androidx.profileinstaller:profileinstaller:1.3.0] /Users/martingreen/.gradle/caches/transforms-3/a74992d684a07fc29d55fa2f6ec67ca3/transformed/profileinstaller-1.3.0/AndroidManifest.xml:50:25-92
+157            </intent-filter>
+158        </receiver>
+159    </application>
+160
+161</manifest>

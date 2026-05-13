@@ -21,6 +21,9 @@
 # misc
 .DS_Store
 *.pem
+*.jks
+*.keystore
+*.p12
 gcp-kms-credentials.json
 
 # debug
@@ -43,3 +46,8 @@ debug.log
 debug_output.txt
 .git.corrupted
 Down-Town-Cyprus-Website-Redesign
+
+# Android local release secrets
+SIMRelay/simrelay-android/release.properties
+SIMRelay/simrelay-android/keystores/
+SIMRelay/simrelay-android/app/release/

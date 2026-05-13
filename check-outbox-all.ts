@@ -1,18 +1,13 @@
-import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient();
-async function main() {
-    const jobs = await prisma.smsRelayOutbox.findMany({
-        orderBy: { id: 'desc' },
-        take: 5,
-    });
-    console.log("Outbox jobs:", JSON.stringify(jobs, null, 2));
+import db from "./lib/db";
 
-    const messages = await prisma.message.findMany({
-        where: { source: "sms_relay" },
-        orderBy: { createdAt: 'desc' },
-        take: 5,
-        select: { id: true, body: true, status: true, source: true, createdAt: true, conversationId: true }
-    });
-    console.log("\nSMS Relay messages:", JSON.stringify(messages, null, 2));
+async function checkAll() {
+  console.log('--- Recent SmsRelayOutbox Rows ---');
+  const outboxRows = await db.smsRelayOutbox.findMany({
+    include: { device: true },
+    orderBy: { scheduledAt: 'desc' },
+    take: 10
+  });
+  console.log(JSON.stringify(outboxRows, null, 2));
 }
-main().catch(console.error).finally(() => prisma.$disconnect());
+
+checkAll().catch(console.error).finally(() => db.$disconnect());

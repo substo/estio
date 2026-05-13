@@ -25,6 +25,13 @@ export async function register() {
             } catch (err) {
                 console.error('[QueueBootstrap] Failed to initialize WhatsApp outbound worker:', err);
             }
+
+            try {
+                const { initSmsRelayOutboxWorker } = await import('@/lib/queue/sms-relay-outbox');
+                await initSmsRelayOutboxWorker();
+            } catch (err) {
+                console.error('[QueueBootstrap] Failed to initialize SMS Relay worker:', err);
+            }
         }
 
         if (processRole === 'scrape-worker' || processRole === 'all') {

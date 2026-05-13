@@ -1,0 +1,19 @@
+<lint-module
+    format="1"
+    dir="/Users/martingreen/Projects/IDX/SIMRelay/simrelay-android/app"
+    name=":app"
+    type="APP"
+    maven="SIMRelay:app:"
+    agpVersion="8.1.0"
+    buildFolder="build"
+    bootClassPath="/Users/martingreen/Library/Android/sdk/platforms/android-34/android.jar:/Users/martingreen/Library/Android/sdk/build-tools/33.0.1/core-lambda-stubs.jar"
+    javaSourceLevel="17"
+    compileTarget="android-34"
+    neverShrinking="true">
+  <lintOptions
+      abortOnError="true"
+      absolutePaths="true"
+      checkReleaseBuilds="true"
+      explainIssues="true"/>
+  <variant name="release"/>
+</lint-module>

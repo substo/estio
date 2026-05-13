@@ -1,7 +1,33 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
+
+val releaseProperties = Properties().apply {
+    val file = rootProject.file("release.properties")
+    if (file.exists()) {
+        file.inputStream().use { load(it) }
+    }
+}
+
+fun releaseValue(propertyName: String, envName: String): String? {
+    return (releaseProperties.getProperty(propertyName) ?: System.getenv(envName))
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+}
+
+val releaseStoreFile = releaseValue("SIMRELAY_UPLOAD_STORE_FILE", "SIMRELAY_UPLOAD_STORE_FILE")
+val releaseStorePassword = releaseValue("SIMRELAY_UPLOAD_STORE_PASSWORD", "SIMRELAY_UPLOAD_STORE_PASSWORD")
+val releaseKeyAlias = releaseValue("SIMRELAY_UPLOAD_KEY_ALIAS", "SIMRELAY_UPLOAD_KEY_ALIAS")
+val releaseKeyPassword = releaseValue("SIMRELAY_UPLOAD_KEY_PASSWORD", "SIMRELAY_UPLOAD_KEY_PASSWORD")
+val hasReleaseSigningConfig = listOf(
+    releaseStoreFile,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword
+).all { !it.isNullOrBlank() }
 
 android {
     namespace = "com.estio.simrelay"
@@ -11,12 +37,29 @@ android {
         applicationId = "com.estio.simrelay"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = providers.gradleProperty("SIMRELAY_VERSION_CODE")
+            .map(String::toInt)
+            .getOrElse(1)
+        versionName = providers.gradleProperty("SIMRELAY_VERSION_NAME")
+            .getOrElse("1.0")
+    }
+
+    signingConfigs {
+        create("releaseUpload") {
+            if (hasReleaseSigningConfig) {
+                storeFile = rootProject.file(releaseStoreFile!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
     }
 
     buildTypes {
         release {
+            if (hasReleaseSigningConfig) {
+                signingConfig = signingConfigs.getByName("releaseUpload")
+            }
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
@@ -52,4 +95,20 @@ dependencies {
 
     // QR Code Scanning (GMS)
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+}
+
+tasks.register("printReleaseConfig") {
+    group = "help"
+    description = "Prints SIM Relay release version and signing configuration status."
+    doLast {
+        println("SIMRelay versionCode=${android.defaultConfig.versionCode}")
+        println("SIMRelay versionName=${android.defaultConfig.versionName}")
+        println(
+            if (hasReleaseSigningConfig) {
+                "Release signing: configured"
+            } else {
+                "Release signing: not configured; release APK/AAB will be unsigned"
+            }
+        )
+    }
 }

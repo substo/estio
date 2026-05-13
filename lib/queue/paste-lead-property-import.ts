@@ -55,6 +55,35 @@ async function getQueueInstance() {
     }
 }
 
+function truncateJobError(error: unknown): string {
+    const message = String((error as any)?.message || error || "Unknown error").replace(/\s+/g, " ").trim();
+    return message.length > 220 ? `${message.slice(0, 217)}...` : message;
+}
+
+async function addPropertyImportConversationNote(args: {
+    conversationId: string;
+    body: string;
+}) {
+    try {
+        await db.message.create({
+            data: {
+                conversationId: args.conversationId,
+                body: args.body,
+                direction: "system",
+                type: "TYPE_NOTE",
+                status: "read",
+                createdAt: new Date(),
+                source: "system",
+            },
+        });
+    } catch (error) {
+        console.error("[PasteLeadPropertyImport] Failed to add conversation note", {
+            conversationId: args.conversationId,
+            error: truncateJobError(error),
+        });
+    }
+}
+
 export async function processPasteLeadPropertyImportJob(job: PasteLeadPropertyImportJobData) {
     const startedAt = Date.now();
     const capability = await getOldCrmImportCapabilityForUser({
@@ -95,6 +124,10 @@ export async function processPasteLeadPropertyImportJob(job: PasteLeadPropertyIm
             contactId: job.contactId,
             property: existingProperty,
         });
+        await addPropertyImportConversationNote({
+            conversationId: job.conversationId,
+            body: `Property ${job.publicReference} linked from existing app record.`,
+        });
         console.log("[PasteLeadPropertyImport] Linked existing property", {
             conversationId: job.conversationId,
             contactId: job.contactId,
@@ -131,6 +164,11 @@ export async function processPasteLeadPropertyImportJob(job: PasteLeadPropertyIm
         });
     }
 
+    await addPropertyImportConversationNote({
+        conversationId: job.conversationId,
+        body: `Property ${job.publicReference} imported and linked.`,
+    });
+
     console.log("[PasteLeadPropertyImport] Imported property in background", {
         conversationId: job.conversationId,
         contactId: job.contactId,
@@ -166,7 +204,26 @@ export async function initPasteLeadPropertyImportWorker() {
         });
 
         worker.on("failed", (job: any, err: Error) => {
-            console.error(`[Queue] Paste lead property import job ${job?.id} failed: ${err.message}`);
+            const attemptsMade = Number(job?.attemptsMade || 0);
+            const attempts = Number(job?.opts?.attempts || 1);
+            const data = job?.data as PasteLeadPropertyImportJobData | undefined;
+            const errorMessage = truncateJobError(err);
+            console.error("[Queue] Paste lead property import job failed", {
+                jobId: job?.id,
+                attemptsMade,
+                attempts,
+                publicReference: data?.publicReference,
+                oldCrmPropertyId: data?.oldCrmPropertyId,
+                conversationId: data?.conversationId,
+                contactId: data?.contactId,
+                error: errorMessage,
+            });
+            if (data?.conversationId && attemptsMade >= attempts) {
+                void addPropertyImportConversationNote({
+                    conversationId: data.conversationId,
+                    body: `Property ${data.publicReference} import failed: ${errorMessage}`,
+                });
+            }
         });
 
         return worker;
