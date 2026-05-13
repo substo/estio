@@ -5387,10 +5387,41 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
     });
 
     if (!conversation) return { success: false, error: "Conversation not found" };
-    if (!location.evolutionInstanceId) return { success: false, error: "WhatsApp not connected" };
     if (!conversation.contact?.phone && !conversation.contact?.lid) return { success: false, error: "Contact has no phone number or WhatsApp LID" };
 
     try {
+        const providerMode = await resolveLocationWhatsAppProviderMode(location.id);
+        if (providerMode === "web_bridge") {
+            if (!conversation.contact?.phone) {
+                return { success: false, error: "Web Bridge history sync needs a contact phone number." };
+            }
+
+            const result = await importWebBridgeRecentMessagesForContact({
+                locationId: location.id,
+                phone: conversation.contact.phone,
+                contactName: conversation.contact.name,
+                limit: limit || 30,
+                logPrefix: `[Sync][web_bridge:${conversationId}]`,
+                stopAfterDuplicates: ignoreDuplicates ? Number.MAX_SAFE_INTEGER : 5,
+            });
+
+            if (result.imported > 0) {
+                invalidateConversationReadCaches(conversationId);
+            }
+            return {
+                success: true,
+                count: result.imported,
+                skipped: result.skipped,
+                errors: result.errors,
+                provider: "web_bridge",
+            };
+        }
+
+        if (providerMode !== "evolution_linked") {
+            return { success: false, error: "Recent history sync is available for Web Bridge or Legacy Evolution linked-device locations." };
+        }
+        if (!location.evolutionInstanceId) return { success: false, error: "Legacy Evolution is not connected." };
+
         const { evolutionClient } = await import("@/lib/evolution/client");
         const { processNormalizedMessage } = await import("@/lib/whatsapp/sync");
 
@@ -9835,49 +9866,126 @@ async function importWebBridgeRecentMessagesForContact(args: {
     contactName?: string | null;
     limit?: number;
     logPrefix?: string;
+    stopAfterDuplicates?: number;
 }) {
     const chatId = getWhatsAppWebChatIdFromPhone(args.phone);
-    if (!chatId) return 0;
+    if (!chatId) {
+        return { imported: 0, skipped: 0, errors: 0, processed: 0 };
+    }
 
     const { messages } = await fetchWhatsAppWebBridgeMessages({
         locationId: args.locationId,
         chatId,
         limit: args.limit || 30,
+        includeMedia: true,
     });
 
     let imported = 0;
+    let skipped = 0;
+    let errors = 0;
+    let processed = 0;
+    let consecutiveDuplicates = 0;
+    const stopAfterDuplicates = Math.max(1, Number(args.stopAfterDuplicates || 5));
+
     for (const message of messages || []) {
         const wamId = String(message?.id || "").trim();
         if (!wamId) continue;
 
-        const fromMe = Boolean(message?.fromMe);
-        const fromId = String(message?.from || "");
-        const toId = String(message?.to || "");
-        const remoteId = fromMe ? toId : fromId;
-        const contactPhone = normalizeWebBridgeChatPhone(remoteId);
-        const ownPhone = normalizeWebBridgeChatPhone(fromMe ? fromId : toId) || args.locationId;
-        if (!contactPhone) continue;
+        try {
+            const fromMe = Boolean(message?.fromMe);
+            const fromId = String(message?.from || "");
+            const toId = String(message?.to || "");
+            const remoteId = fromMe ? toId : fromId;
+            const contactPhone = normalizeWebBridgeChatPhone(remoteId);
+            const ownPhone = normalizeWebBridgeChatPhone(fromMe ? fromId : toId) || args.locationId;
+            if (!contactPhone) continue;
 
-        const result = await processNormalizedMessage({
-            locationId: args.locationId,
-            from: fromMe ? ownPhone : contactPhone,
-            to: fromMe ? contactPhone : ownPhone,
-            body: String(message?.body || message?.caption || ""),
-            type: String(message?.type || "text") as any,
-            wamId,
-            timestamp: new Date(Number(message?.timestamp || Date.now() / 1000) * 1000),
-            direction: fromMe ? "outbound" : "inbound",
-            source: "whatsapp_web_bridge" as any,
-            contactName: fromMe ? undefined : (message?.contactName || message?.notifyName || args.contactName || undefined),
-            resolvedPhone: contactPhone,
-        });
-        if (result?.status === "processed") imported++;
+            const result = await processNormalizedMessage({
+                locationId: args.locationId,
+                from: fromMe ? ownPhone : contactPhone,
+                to: fromMe ? contactPhone : ownPhone,
+                body: String(message?.body || message?.caption || ""),
+                type: String(message?.type || "text") as any,
+                wamId,
+                timestamp: new Date(Number(message?.timestamp || Date.now() / 1000) * 1000),
+                direction: fromMe ? "outbound" : "inbound",
+                source: "whatsapp_web_bridge" as any,
+                contactName: fromMe ? undefined : (message?.contactName || message?.notifyName || args.contactName || undefined),
+                resolvedPhone: contactPhone,
+            });
+
+            processed++;
+            const resultStatus = String(result?.status || "");
+            if (resultStatus === "skipped") {
+                skipped++;
+                consecutiveDuplicates++;
+            } else if (resultStatus === "processed") {
+                imported++;
+                consecutiveDuplicates = 0;
+            } else {
+                errors++;
+                consecutiveDuplicates = 0;
+            }
+
+            if (message?.hasMedia || message?.media || message?.mediaError || message?.mediaMeta) {
+                const messageId = (result as any)?.id || await db.message.findUnique({
+                    where: { wamId },
+                    select: { id: true },
+                }).then((row) => row?.id).catch(() => null);
+
+                if (messageId && message?.media?.data) {
+                    const ingestResult = await ingestWhatsAppWebBridgeMediaAttachment({
+                        wamId,
+                        media: message.media,
+                        messageType: String(message?.type || "text"),
+                    });
+                    if (ingestResult?.status === "stored") {
+                        await updateWebBridgeMediaSyncMetadata(messageId, {
+                            status: "stored",
+                            key: ingestResult.key || null,
+                            error: null,
+                            reason: null,
+                            meta: message?.mediaMeta || null,
+                        });
+                    } else {
+                        await updateWebBridgeMediaSyncMetadata(messageId, {
+                            status: ingestResult?.status || "skipped",
+                            reason: ingestResult?.reason || "unknown",
+                            error: null,
+                            meta: message?.mediaMeta || null,
+                        });
+                    }
+                } else if (messageId && message?.mediaError) {
+                    await updateWebBridgeMediaSyncMetadata(messageId, {
+                        status: "failed",
+                        reason: message?.mediaError?.code || "download_failed",
+                        error: message?.mediaError?.message || String(message?.mediaError || "WhatsApp Web Bridge could not retrieve media."),
+                        meta: message?.mediaMeta || null,
+                    });
+                } else if (messageId && message?.hasMedia) {
+                    await updateWebBridgeMediaSyncMetadata(messageId, {
+                        status: "skipped",
+                        reason: "missing_media_payload",
+                        error: null,
+                        meta: message?.mediaMeta || null,
+                    });
+                }
+            }
+
+            if (consecutiveDuplicates >= stopAfterDuplicates) {
+                break;
+            }
+        } catch (error) {
+            errors++;
+            consecutiveDuplicates = 0;
+            console.warn(`${args.logPrefix || "[WebBridgeHistory]"} Failed to import message ${wamId}:`, error);
+        }
     }
 
     if (args.logPrefix) {
-        console.log(`${args.logPrefix} Imported ${imported} recent WhatsApp Web Bridge messages.`);
+        console.log(`${args.logPrefix} Imported ${imported} recent WhatsApp Web Bridge messages; skipped=${skipped}; errors=${errors}.`);
     }
-    return imported;
+    return { imported, skipped, errors, processed };
 }
 
 /**
@@ -9886,6 +9994,10 @@ async function importWebBridgeRecentMessagesForContact(args: {
  */
 export async function syncAllEvolutionChats() {
     const location = await getAuthenticatedLocation();
+    const providerMode = await resolveLocationWhatsAppProviderMode(location.id);
+    if (providerMode !== "evolution_linked") {
+        return { success: false, error: "Legacy Evolution bulk sync is only available for Evolution Linked Device locations." };
+    }
     if (!location.evolutionInstanceId) {
         return { success: false, error: "WhatsApp not connected. Please connect via Settings." };
     }
@@ -10050,71 +10162,73 @@ export async function syncAllEvolutionChats() {
     }
 }
 
+async function fetchWebBridgeChatsForPicker(location: { id: string }) {
+    try {
+        const res = await fetchWhatsAppWebBridgeChats(location.id);
+        const allChats = Array.isArray(res?.chats) ? res.chats : [];
+        const validChats = allChats.filter((chat: any) => {
+            const jid = String(chat.id || "");
+            return jid.endsWith("@c.us") || jid.endsWith("@s.whatsapp.net");
+        });
+
+        const existingContacts = await db.contact.findMany({
+            where: { locationId: location.id, phone: { not: null } },
+            select: { phone: true, name: true },
+        });
+        const existingConversations = await db.conversation.findMany({
+            where: { locationId: location.id },
+            include: { contact: { select: { phone: true } } },
+        });
+        const syncedPhones = new Set(
+            existingConversations
+                .map((c: any) => c.contact?.phone?.replace(/\D/g, ""))
+                .filter(Boolean)
+        );
+
+        const formatted = validChats.map((chat: any) => {
+            const jid = String(chat.id || "");
+            const rawPhone = normalizeWebBridgeChatPhone(jid);
+            const alreadySynced = syncedPhones.has(rawPhone) ||
+                Array.from(syncedPhones).some((p) => p?.endsWith(rawPhone) || rawPhone.endsWith(p || ""));
+            const matchedContact = existingContacts.find((c) => {
+                const cp = c.phone?.replace(/\D/g, "") || "";
+                return cp === rawPhone || cp.endsWith(rawPhone) || rawPhone.endsWith(cp);
+            });
+
+            return {
+                jid,
+                phone: `+${rawPhone}`,
+                name: chat.name || matchedContact?.name || `+${rawPhone}`,
+                isGroup: false,
+                alreadySynced,
+                lastMessageTimestamp: chat.timestamp || null,
+                provider: "web_bridge",
+            };
+        });
+
+        formatted.sort((a: any, b: any) => {
+            if (a.alreadySynced !== b.alreadySynced) return a.alreadySynced ? 1 : -1;
+            return (b.lastMessageTimestamp || 0) - (a.lastMessageTimestamp || 0);
+        });
+
+        return { success: true, chats: formatted };
+    } catch (e: any) {
+        console.error("[FetchChats] Web Bridge failed:", e);
+        return { success: false, error: e.message || "WhatsApp Web Bridge is not connected", chats: [] };
+    }
+}
+
 /**
- * Fetch the list of WhatsApp chats from Evolution API for the picker UI.
- * Cross-references with existing DB conversations to mark "already synced".
+ * Fetch the list of WhatsApp chats from the legacy Evolution API for admin/rollback UI.
  */
 export async function fetchEvolutionChats() {
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const mode = await resolveLocationWhatsAppProviderMode(location.id);
     if (mode !== "evolution_linked") {
-        try {
-            const res = await fetchWhatsAppWebBridgeChats(location.id);
-            const allChats = Array.isArray(res?.chats) ? res.chats : [];
-            const validChats = allChats.filter((chat: any) => {
-                const jid = String(chat.id || "");
-                return jid.endsWith("@c.us") || jid.endsWith("@s.whatsapp.net");
-            });
-
-            const existingContacts = await db.contact.findMany({
-                where: { locationId: location.id, phone: { not: null } },
-                select: { phone: true, name: true },
-            });
-            const existingConversations = await db.conversation.findMany({
-                where: { locationId: location.id },
-                include: { contact: { select: { phone: true } } },
-            });
-            const syncedPhones = new Set(
-                existingConversations
-                    .map((c: any) => c.contact?.phone?.replace(/\D/g, ""))
-                    .filter(Boolean)
-            );
-
-            const formatted = validChats.map((chat: any) => {
-                const jid = String(chat.id || "");
-                const rawPhone = normalizeWebBridgeChatPhone(jid);
-                const alreadySynced = syncedPhones.has(rawPhone) ||
-                    Array.from(syncedPhones).some((p) => p?.endsWith(rawPhone) || rawPhone.endsWith(p || ""));
-                const matchedContact = existingContacts.find((c) => {
-                    const cp = c.phone?.replace(/\D/g, "") || "";
-                    return cp === rawPhone || cp.endsWith(rawPhone) || rawPhone.endsWith(cp);
-                });
-
-                return {
-                    jid,
-                    phone: `+${rawPhone}`,
-                    name: chat.name || matchedContact?.name || `+${rawPhone}`,
-                    isGroup: false,
-                    alreadySynced,
-                    lastMessageTimestamp: chat.timestamp || null,
-                    provider: "web_bridge",
-                };
-            });
-
-            formatted.sort((a: any, b: any) => {
-                if (a.alreadySynced !== b.alreadySynced) return a.alreadySynced ? 1 : -1;
-                return (b.lastMessageTimestamp || 0) - (a.lastMessageTimestamp || 0);
-            });
-
-            return { success: true, chats: formatted };
-        } catch (e: any) {
-            console.error("[FetchChats] Web Bridge failed:", e);
-            return { success: false, error: e.message || "WhatsApp Web Bridge is not connected", chats: [] };
-        }
+        return { success: false, error: "Legacy Evolution chat picking is only available for Evolution Linked Device locations.", chats: [] };
     }
-
     if (!location.evolutionInstanceId) {
-        return { success: false, error: "WhatsApp not connected", chats: [] };
+        return { success: false, error: "Legacy Evolution is not connected", chats: [] };
     }
 
     try {
@@ -10195,7 +10309,12 @@ export async function fetchEvolutionChats() {
 }
 
 export async function fetchWhatsAppChats() {
-    return fetchEvolutionChats();
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const mode = await resolveLocationWhatsAppProviderMode(location.id);
+    if (mode === "evolution_linked") {
+        return fetchEvolutionChats();
+    }
+    return fetchWebBridgeChatsForPicker(location);
 }
 
 /**
@@ -10433,13 +10552,14 @@ export async function startNewConversation(phone: string) {
         let messagesImported = 0;
         if (providerMode === "web_bridge") {
             try {
-                messagesImported = await importWebBridgeRecentMessagesForContact({
+                const backfill = await importWebBridgeRecentMessagesForContact({
                     locationId: location.id,
                     phone: contact.phone || rawDigits,
                     contactName: contact.name,
                     limit: 30,
                     logPrefix: `[NewConversation][new:${conversation.id}]`,
                 });
+                messagesImported = backfill.imported;
             } catch (backfillErr) {
                 console.warn("[NewConversation] Web Bridge history backfill failed:", backfillErr);
             }

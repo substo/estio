@@ -1,6 +1,6 @@
 # WhatsApp Web Bridge Transition Progress
 
-Last updated: 2026-05-12
+Last updated: 2026-05-13
 
 ## Purpose
 
@@ -95,9 +95,9 @@ Phase 2 acceptance checklist:
 6. Use `Clear Session`, then confirm QR is required again.
 7. Reconnect and confirm normal send still works.
 
-## Current Phase: Phase 3 Media Reliability
+## Phase 3 Completed: Media Reliability
 
-Phase 3 hardens image/audio/document send and receive for the already-working Web Bridge.
+Phase 3 hardened image/audio/document send and receive for the already-working Web Bridge.
 
 Implemented in this phase:
 
@@ -121,6 +121,46 @@ Phase 3 acceptance checklist:
 5. Estio outbound image/document sends through Web Bridge.
 6. Oversized media shows an actionable warning instead of silently disappearing.
 7. Failed media can be retried with `Re-fetch Media` or clearly explains why recovery is not possible.
+
+## Current Phase: Phase 4 History And Contact Replacement
+
+Phase 4 makes Web Bridge the normal-user source for WhatsApp chat picking, recent history backfill, conversation creation, and bulk chat sync. Evolution remains available only for locations explicitly configured as `evolution_linked`.
+
+Implemented in this phase:
+
+- `syncWhatsAppHistory(...)` now routes by provider mode:
+  - `web_bridge` imports recent messages through WhatsApp Web Bridge.
+  - `evolution_linked` keeps the legacy Evolution history path.
+  - other modes return a clear unsupported-provider message.
+- Web Bridge recent-history import now:
+  - fetches media metadata/payloads with `includeMedia: true`.
+  - dedupes by WhatsApp message id (`wamId`) through the existing ingestion layer.
+  - preserves inbound/outbound direction, caption/body, timestamp, contact name, and resolved phone.
+  - records media storage/recovery state in `MessageSync.metadata.webBridgeMedia`.
+  - stops after repeated duplicates to avoid slow re-imports.
+- `fetchWhatsAppChats()` now routes by provider mode:
+  - `web_bridge` uses the bridge worker chat list.
+  - `evolution_linked` uses legacy Evolution.
+- `fetchEvolutionChats()` is fenced to explicit legacy Evolution locations.
+- Starting a new Web Bridge conversation still creates/reuses the contact and conversation, then backfills recent Web Bridge history with media metadata.
+- `/api/whatsapp/sync` now performs normal-user bulk sync through Web Bridge unless the location is explicitly `evolution_linked`.
+- Web Bridge bulk sync:
+  - fetches 1:1 WhatsApp chats.
+  - skips groups for this phase.
+  - imports up to 30 recent messages per chat by default.
+  - uses a capped 100-message per-chat run for the existing “deep sync” toggle.
+  - returns processed/imported/skipped/error counts through the existing streaming UI.
+- `syncAllEvolutionChats()` is fenced to `evolution_linked` only.
+
+Phase 4 acceptance checklist:
+
+1. Open New Conversation -> Pick from WhatsApp and verify chats load from Web Bridge.
+2. Pick an unsynced WhatsApp chat and confirm contact/conversation are created.
+3. Confirm recent text/media history appears.
+4. Pick an already synced chat and confirm it opens/reuses the existing conversation without duplicates.
+5. Run bulk sync and confirm counts return without Evolution dependency for a `web_bridge` location.
+6. Use manual history sync on an existing Web Bridge conversation and confirm it imports recent messages.
+7. Verify an `evolution_linked` legacy location still uses Evolution paths.
 
 ## Current Implementation State
 
@@ -161,6 +201,10 @@ Phase 3 acceptance checklist:
   - The picker now calls a generic `fetchWhatsAppChats`.
   - Web Bridge locations fetch chats/history from Web Bridge.
   - Evolution locations continue using Evolution legacy chat import.
+- Updated history and bulk sync:
+  - Manual history sync uses Web Bridge for `web_bridge`.
+  - Bulk sync uses Web Bridge for `web_bridge`.
+  - Legacy Evolution sync remains fenced to `evolution_linked`.
 - Added Evolution fences:
   - Evolution webhook data events are ignored for non-`evolution_linked` locations.
   - Evolution reconciliation skips non-`evolution_linked` locations.
@@ -286,17 +330,6 @@ Use one test location configured as `web_bridge`.
 17. Confirm Estio shows offline/disconnected.
 
 ## Next Phases
-
-### Phase 3: Improve Media Reliability
-
-Status: current implementation phase. Remaining live validation decides whether Phase 4 should include direct worker-to-R2 upload for large media.
-
-### Phase 4: Finish History And Contact Replacement
-
-- Expand Web Bridge history/backfill coverage.
-- Replace remaining normal-user “import from Evolution” flows with Web Bridge equivalents.
-- Keep Evolution import only in an advanced legacy/admin area.
-- Add support for controlled one-off backfill from Web Bridge chats.
 
 ### Phase 5: Identity And Dedup Hardening
 
