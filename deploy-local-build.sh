@@ -55,28 +55,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Optional: Restart Evolution containers during this deploy?
-# Default is NO to avoid disconnecting WhatsApp sessions on app-only deploys.
-# Override non-interactively with: RESTART_EVOLUTION_CONTAINERS=true|false
-RESTART_EVOLUTION_CONTAINERS="${RESTART_EVOLUTION_CONTAINERS:-}"
-if [ -z "$RESTART_EVOLUTION_CONTAINERS" ]; then
-    if [ -t 0 ]; then
-        echo "🐳 Evolution API containers restart is optional (recommended: skip for app-only deploys)."
-        read -p "🔁 Restart Evolution API containers during this deploy? [y/N] " -r RESTART_EVOLUTION_REPLY
-        echo
-        case "$RESTART_EVOLUTION_REPLY" in
-            [Yy]|[Yy][Ee][Ss])
-                RESTART_EVOLUTION_CONTAINERS="true"
-                ;;
-            *)
-                RESTART_EVOLUTION_CONTAINERS="false"
-                ;;
-        esac
-    else
-        RESTART_EVOLUTION_CONTAINERS="false"
-        echo "🐳 Non-interactive shell detected; skipping Evolution container restart by default."
-    fi
-fi
+RESTART_EVOLUTION_CONTAINERS="${RESTART_EVOLUTION_CONTAINERS:-false}"
 
 # Step 0: Determine Active/Target Slots
 echo "🔍 Checking server state..."
@@ -233,13 +212,13 @@ ssh $SSH_OPTS $SERVER /bin/bash -s << ENDSSH
     esac
 ENDSSH
 
-# Step 6: Evolution Containers (Optional)
+# Step 6: Legacy Evolution Containers (Manual Only)
 if [[ "$RESTART_EVOLUTION_CONTAINERS" == "true" ]]; then
-    echo "🐳 Restarting Evolution API containers (user requested)..."
+    echo "🐳 Restarting legacy Evolution API containers (explicit rollback/admin request)..."
     ssh $SSH_OPTS $SERVER "cd $TARGET_DIR && docker rm -f evolution_api evolution_postgres evolution_redis 2>/dev/null || true && docker compose -f docker-compose.evolution.yml up -d"
 else
-    echo "⏭️  Skipping Evolution API container restart (app-only deploy)."
-    echo "   Set RESTART_EVOLUTION_CONTAINERS=true or answer 'y' to restart them."
+    echo "⏭️  Skipping legacy Evolution API container restart."
+    echo "   Standard deploys use WhatsApp Web Bridge. Set RESTART_EVOLUTION_CONTAINERS=true only for legacy rollback/admin work."
     ssh $SSH_OPTS $SERVER "docker ps --filter name=evolution --format 'table {{.Names}}\t{{.Status}}' || true"
 fi
 
@@ -567,12 +546,22 @@ NODE
 
     echo "🩺 Waiting for WhatsApp Web Bridge readiness..."
     BRIDGE_READY=0
+    BRIDGE_HEALTH_JSON=""
     for i in \$(seq 1 45); do
-        # Expect 401 Unauthorized because health endpoint requires secret
-        BRIDGE_HTTP_CODE=\$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:\$WHATSAPP_BRIDGE_PORT/health" || echo "000")
-        if [ "\$BRIDGE_HTTP_CODE" = "401" ] || [ "\$BRIDGE_HTTP_CODE" = "200" ]; then
+        BRIDGE_SECRET=""
+        if [ -f "\$SYMLINK_PATH/.env" ]; then
+            BRIDGE_SECRET=\$(grep -E '^WHATSAPP_WEB_BRIDGE_SECRET=' "\$SYMLINK_PATH/.env" | tail -n1 | sed -E 's/^[^=]+=//' | tr -d '"' | tr -d "'" || true)
+        fi
+
+        if [ -n "\$BRIDGE_SECRET" ]; then
+            BRIDGE_HEALTH_JSON=\$(curl -fsS -H "x-whatsapp-web-bridge-secret: \$BRIDGE_SECRET" "http://127.0.0.1:\$WHATSAPP_BRIDGE_PORT/health" 2>/dev/null || true)
+        else
+            BRIDGE_HEALTH_JSON=\$(curl -fsS "http://127.0.0.1:\$WHATSAPP_BRIDGE_PORT/health" 2>/dev/null || true)
+        fi
+
+        if [ -n "\$BRIDGE_HEALTH_JSON" ]; then
             BRIDGE_READY=1
-            echo "✅ WhatsApp Web Bridge is healthy"
+            echo "✅ WhatsApp Web Bridge service is reachable"
             break
         fi
         sleep 1
@@ -583,6 +572,29 @@ NODE
         pm2 describe "\$WHATSAPP_BRIDGE_APP_NAME" || true
         pm2 logs "\$WHATSAPP_BRIDGE_APP_NAME" --lines 120 --nostream || true
         exit 1
+    fi
+
+    if [ -n "\$BRIDGE_HEALTH_JSON" ]; then
+        BRIDGE_HEALTH_JSON="\$BRIDGE_HEALTH_JSON" node <<-'NODE'
+const health = JSON.parse(process.env.BRIDGE_HEALTH_JSON || '{}');
+const sessions = Array.isArray(health.sessions) ? health.sessions : [];
+const readySessions = sessions.filter((session) => session && session.ready);
+console.log('📱 WhatsApp Web Bridge health: ok=' + Boolean(health.ok) + ' sessions=' + sessions.length + ' ready=' + readySessions.length);
+
+for (const session of sessions) {
+    const status = String(session.status || 'unknown');
+    const ready = Boolean(session.ready);
+    const phone = session.phone || 'not available';
+    const locationId = session.locationId || 'unknown location';
+    const lastError = session.lastError ? ' lastError=' + session.lastError : '';
+    console.log('   - ' + locationId + ': status=' + status + ' ready=' + ready + ' phone=' + phone + lastError);
+}
+
+const needsQr = sessions.some((session) => ['qr', 'disconnected', 'failed'].includes(String(session?.status || '')));
+if (needsQr || readySessions.length === 0) {
+    console.log('⚠️  WhatsApp Web Bridge is running, but no session is ready yet. Open Estio and scan the QR if status remains qr/disconnected.');
+}
+NODE
     fi
 
     # Mark this deployment as current so stale delayed cleanup jobs become no-ops.
