@@ -45,6 +45,10 @@ import {
     stopWhatsAppWebBridgeSession,
     upsertWhatsAppWebBridgeSession,
 } from "@/lib/whatsapp/web-bridge";
+import {
+    getEvolutionRetirementAudit,
+    isEvolutionLegacyRuntimeEnabled,
+} from "@/lib/whatsapp/evolution-retirement";
 
 const MASKED_SECRET = "********";
 
@@ -63,6 +67,12 @@ async function requireLegacyEvolutionMode(location: any) {
         return {
             ok: false as const,
             error: "Legacy Evolution is deprecated and only available after explicitly setting this location to Evolution Linked Device mode.",
+        };
+    }
+    if (!isEvolutionLegacyRuntimeEnabled()) {
+        return {
+            ok: false as const,
+            error: "Legacy Evolution runtime is retired from normal operation. Set EVOLUTION_LEGACY_RUNTIME_ENABLED=true only for rollback or admin debugging.",
         };
     }
     return { ok: true as const };
@@ -348,9 +358,10 @@ export async function getWhatsAppSettings(locationId?: string | null) {
 
     // Evolution Status Check (Lazy Sync)
     // If DB says "close" or "connecting", double check with API in case webhook failed
+    const providerMode = payload.whatsappProviderMode || (location as any).whatsappProviderMode || "web_bridge";
     const payloadInstanceId = payload.evolutionInstanceId || location.evolutionInstanceId;
     let evolutionStatus = payload.evolutionConnectionStatus || location.evolutionConnectionStatus || "close";
-    if (payloadInstanceId && evolutionStatus !== "open") {
+    if (providerMode === "evolution_linked" && isEvolutionLegacyRuntimeEnabled() && payloadInstanceId && evolutionStatus !== "open") {
         try {
             // Only try to fetch if we have an instance ID
             const instanceData = await evolutionClient.fetchInstance(payloadInstanceId);
@@ -389,7 +400,7 @@ export async function getWhatsAppSettings(locationId?: string | null) {
         accessToken: "",
         hasAccessToken: hasAccessToken || Boolean(location.whatsappAccessToken),
         webhookSecret: payload.whatsappWebhookSecret || location.whatsappWebhookSecret || "",
-        whatsappProviderMode: payload.whatsappProviderMode || (location as any).whatsappProviderMode || "web_bridge",
+        whatsappProviderMode: providerMode,
         whatsappChannels,
         webBridgeSession: webBridgeSession ? {
             id: webBridgeSession.id,
@@ -427,6 +438,14 @@ export async function getWhatsAppWebBridgeDiagnostics(locationId?: string | null
     return {
         success: true as const,
         diagnostics: buildWebBridgeDiagnostics(session, health),
+    };
+}
+
+export async function getEvolutionRuntimeRetirementAudit(locationId?: string | null) {
+    const { location } = await resolveAdminContext(locationId || null);
+    return {
+        success: true as const,
+        audit: await getEvolutionRetirementAudit(db, location.id),
     };
 }
 

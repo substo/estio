@@ -110,18 +110,19 @@ This runtime owns websocket transport and Gemini Live relay lifecycle.
 - Operator must clean offending PIDs and rerun deploy.
 - Deploy fails hard if scrape worker readiness cannot be proven after start.
 
-### Optional Evolution Restart
+### Legacy Evolution Restart
 
-By default, Evolution containers are **not restarted** during app deploys.
+Standard app deploys no longer include Evolution API as a linked-device runtime. WhatsApp Web Bridge is the managed linked-device service and should be checked through PM2 as `estio-whatsapp-web-bridge`.
 
-- Interactive prompt default: `No`
-- Non-interactive default: `false`
-- Override:
+Evolution containers are kept only for explicit legacy rollback/admin debugging and are **not restarted** during normal app deploys. There is no interactive prompt.
+
+Manual legacy override:
 
 ```bash
-RESTART_EVOLUTION_CONTAINERS=false ./deploy-local-build.sh
 RESTART_EVOLUTION_CONTAINERS=true ./deploy-local-build.sh
 ```
+
+Only use this if a location has deliberately been moved back to `evolution_linked` and `EVOLUTION_LEGACY_RUNTIME_ENABLED=true` is set for the app runtime.
 
 ### Drain Window
 
@@ -164,7 +165,17 @@ This lowers cases where users must manually refresh after deploy.
 
 ## Post-Deploy Verification
 
-Run these checks after deployment:
+`deploy-local-build.sh` now automates the normal post-deploy checks:
+
+- Applies Prisma schema sync using `PRISMA_SCHEMA_SYNC_MODE`.
+- Starts and health-checks the active web process.
+- Runs public `/api/health` soak checks after Caddy switches traffic.
+- Restarts and verifies `estio-scrape-worker`.
+- Restarts and verifies `estio-viewing-live-relay`.
+- Restarts and verifies `estio-whatsapp-web-bridge` with the authenticated `/health` endpoint.
+- Prints WhatsApp Web Bridge session status, ready count, phone, and QR/disconnected warning when a re-scan is needed.
+
+Manual checks are only needed when the deploy script reports a warning or when you want extra confirmation:
 
 ```bash
 ssh root@138.199.214.117 "curl -sSI https://estio.co/"
@@ -186,7 +197,9 @@ ssh root@138.199.214.117 "pm2 describe estio-app-blue"
 ssh root@138.199.214.117 "pm2 describe estio-app-green"
 ssh root@138.199.214.117 "pm2 describe estio-scrape-worker"
 ssh root@138.199.214.117 "pm2 describe estio-viewing-live-relay"
+ssh root@138.199.214.117 "pm2 describe estio-whatsapp-web-bridge"
 ssh root@138.199.214.117 "curl -fsS http://127.0.0.1:8788/health"
+ssh root@138.199.214.117 'cd /home/martin/estio-app && set -a && . ./.env && set +a && curl -fsS -H "x-whatsapp-web-bridge-secret: ${WHATSAPP_WEB_BRIDGE_SECRET}" http://127.0.0.1:3218/health'
 ```
 
 Tail logs (active slot):
@@ -196,6 +209,7 @@ ssh root@138.199.214.117 "pm2 logs estio-app-blue --lines 120 --nostream"
 ssh root@138.199.214.117 "pm2 logs estio-app-green --lines 120 --nostream"
 ssh root@138.199.214.117 "pm2 logs estio-scrape-worker --lines 120 --nostream"
 ssh root@138.199.214.117 "pm2 logs estio-viewing-live-relay --lines 120 --nostream"
+ssh root@138.199.214.117 "pm2 logs estio-whatsapp-web-bridge --lines 120 --nostream"
 ```
 
 ## Operational Notes

@@ -1,5 +1,12 @@
 version: '3.3'
 
+#
+# Legacy rollback stack only.
+# Normal WhatsApp linked-device chat now runs through the first-party
+# whatsapp-web.js bridge (`estio-whatsapp-web-bridge`). Do not start this
+# stack during standard app deploys unless explicitly debugging or rolling
+# back an `evolution_linked` location.
+#
 services:
   evolution-api:
     container_name: evolution_api

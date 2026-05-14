@@ -722,7 +722,9 @@ export default function WhatsAppSettingsPage() {
         formData.append("accessToken", settings.accessToken);
         formData.append("clearWhatsAppAccessToken", clearWhatsAppAccessToken ? "on" : "off");
         formData.append("webhookSecret", settings.webhookSecret);
-        const submittedProviderMode = ["web_bridge", "cloud_primary", "evolution_linked"].includes(settings.whatsappProviderMode)
+        const submittedProviderMode = settings.whatsappProviderMode === "evolution_linked" && legacyEvolutionEnabled
+            ? "evolution_linked"
+            : ["web_bridge", "cloud_primary"].includes(settings.whatsappProviderMode)
             ? settings.whatsappProviderMode
             : "web_bridge";
         formData.append("whatsappProviderMode", submittedProviderMode);
@@ -1353,6 +1355,7 @@ export default function WhatsAppSettingsPage() {
                 </Card>
 
                 {/* Legacy Evolution linked-device card */}
+                {legacyEvolutionEnabled && (
                 <Collapsible open={legacyEvolutionOpen} onOpenChange={setLegacyEvolutionOpen}>
                     <Card className="border-amber-200 dark:border-amber-900 bg-amber-50/20">
                         <CardHeader>
@@ -1361,10 +1364,9 @@ export default function WhatsAppSettingsPage() {
                                     <CardTitle className="flex items-center space-x-2">
                                         <span className="text-amber-700 font-bold">Advanced Legacy Evolution</span>
                                         <Badge variant="outline">Deprecated</Badge>
-                                        {!legacyEvolutionEnabled && <Badge variant="secondary">Disabled</Badge>}
                                     </CardTitle>
                                     <CardDescription>
-                                        Legacy fallback for older locations, rollback, and historical imports. Use WhatsApp Web Bridge for normal linked-device chat.
+                                        Legacy fallback for this already-legacy location. Use WhatsApp Web Bridge for normal linked-device chat.
                                     </CardDescription>
                                 </div>
                                 <CollapsibleTrigger asChild>
@@ -1376,25 +1378,6 @@ export default function WhatsAppSettingsPage() {
                         </CardHeader>
                         <CollapsibleContent>
                     <CardContent className="space-y-4">
-                        {!legacyEvolutionEnabled && (
-                            <Alert className="border-amber-200 bg-amber-50">
-                                <AlertTriangle className="h-4 w-4 text-amber-700" />
-                                <AlertTitle>Legacy Mode Disabled</AlertTitle>
-                                <AlertDescription className="space-y-3">
-                                    <p>
-                                        Evolution is deprecated and hidden from normal setup. Enable it only for rollback or legacy import/debug work.
-                                    </p>
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        className="border-amber-300 text-amber-800 hover:bg-amber-100"
-                                        onClick={() => setSettings(prev => ({ ...prev, whatsappProviderMode: "evolution_linked" }))}
-                                    >
-                                        Enable Legacy Evolution Mode
-                                    </Button>
-                                </AlertDescription>
-                            </Alert>
-                        )}
                         {settings.evolutionConnectionStatus === 'open' ? (
                             <div className="flex flex-col items-center justify-center space-y-4 p-6 border rounded-lg bg-green-50/50">
                                 <CheckCircle2 className="h-12 w-12 text-green-500" />
@@ -1619,6 +1602,7 @@ export default function WhatsAppSettingsPage() {
                         </CollapsibleContent>
                     </Card>
                 </Collapsible>
+                )}
 
                 {/* Embedded Signup Card */}
                 <Card className="border-blue-200 dark:border-blue-900 bg-blue-50/20">

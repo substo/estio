@@ -4,6 +4,7 @@ import { processNormalizedMessage, NormalizedMessage } from '@/lib/whatsapp/sync
 import { handleContactSyncEvent } from '@/lib/whatsapp/contact-sync-handler';
 import { logWebhookPayload } from '@/lib/logging/webhook-logger';
 import { ingestEvolutionMediaAttachment, parseEvolutionMessageContent } from '@/lib/whatsapp/evolution-media';
+import { isEvolutionLegacyRuntimeEnabled } from '@/lib/whatsapp/evolution-retirement';
 
 export async function POST(req: NextRequest) {
     try {
@@ -34,6 +35,20 @@ export async function POST(req: NextRequest) {
         console.log(`[Evolution Webhook] Found Location: ${location.id}`);
 
         const providerMode = String((location as any).whatsappProviderMode || '').trim();
+        if (!isEvolutionLegacyRuntimeEnabled() || providerMode !== 'evolution_linked') {
+            console.warn(
+                `[Evolution Webhook] IGNORED: legacy runtime enabled=${isEvolutionLegacyRuntimeEnabled()} ` +
+                `providerMode=${providerMode || 'unset'} location=${location.id}.`
+            );
+            return NextResponse.json({
+                status: 'ignored',
+                reason: !isEvolutionLegacyRuntimeEnabled()
+                    ? 'evolution_legacy_runtime_disabled'
+                    : 'provider_mode_not_evolution',
+                providerMode,
+            }, { status: 200 });
+        }
+
         const isEvolutionDataEvent = [
             'MESSAGES_UPSERT',
             'MESSAGES.UPSERT',
