@@ -186,7 +186,7 @@ Phase 5 acceptance checklist:
 6. Confirm delivered/read status updates land on the correct reconciled message.
 7. Confirm groups, broadcasts, newsletters, and LID-only IDs are ignored for normal v1 Web Bridge flows.
 
-## Current Phase: Phase 6 Evolution Product Deprecation
+## Phase 6 Completed: Evolution Product Deprecation
 
 Phase 6 moves Evolution out of normal product paths while preserving it for explicit `evolution_linked` rollback, legacy import, and historical data.
 
@@ -207,6 +207,30 @@ Phase 6 acceptance checklist:
 4. Web Bridge sends still use Web Bridge when an old `evolutionInstanceId` exists.
 5. New conversation, paste-lead channel inference, and bulk sync still use Web Bridge for normal locations.
 6. Existing `evolution_linked` legacy locations can still use Evolution rollback/import controls.
+
+## Current Phase: Phase 7 Evolution Runtime Retirement Readiness
+
+Phase 7 retires Evolution from normal runtime/deploy behavior without deleting historical data support or schema fields.
+
+Implemented in this phase:
+
+- Standard deploys no longer prompt to restart Evolution containers.
+- Evolution container restarts are manual-only through `RESTART_EVOLUTION_CONTAINERS=true`.
+- Web Bridge is documented as the only standard linked-device runtime.
+- Evolution webhook processing is ignored unless `EVOLUTION_LEGACY_RUNTIME_ENABLED=true` and the location is explicitly `evolution_linked`.
+- Normal WhatsApp settings hide Evolution entirely unless the current location is already `evolution_linked`.
+- Added a read-only Evolution retirement audit for active legacy mode, old instance IDs, recent Evolution outbox usage, and recent historical sync/message usage.
+
+Phase 7 acceptance checklist:
+
+1. Standard deploy no longer asks whether to restart Evolution.
+2. Normal WhatsApp settings show Web Bridge and Cloud API only.
+3. Existing `evolution_linked` locations can still expose the legacy panel, but runtime actions require `EVOLUTION_LEGACY_RUNTIME_ENABLED=true`.
+4. Evolution webhook events for Web Bridge or Cloud API locations are ignored.
+5. Web Bridge QR/status/send/history continue to work.
+6. Cloud API template and WABA flows continue to work.
+7. Historical `whatsapp_evolution` messages remain readable.
+8. Evolution retirement audit returns enough counts to decide whether Phase 8 deletion is safe.
 
 ## Current Implementation State
 
@@ -377,12 +401,12 @@ Use one test location configured as `web_bridge`.
 
 ## Next Phases
 
-### Phase 7: Final Evolution Removal
+### Phase 8: Final Evolution Removal
 
 Only after live stability:
 
-- Remove Evolution runtime dependency from deployment.
-- Remove Evolution connection UI.
+- Remove remaining Evolution runtime dependency and manual rollback hooks.
+- Remove remaining Evolution connection UI and server actions.
 - Remove Evolution background jobs.
 - Remove Evolution normal chat import flows.
 - Keep or migrate historical source metadata as needed.
@@ -392,8 +416,32 @@ Only after live stability:
 - Web Bridge is linked-device automation and can break when WhatsApp Web changes.
 - Cloud API is still the official Meta-compliant enterprise path.
 - Web Bridge media currently travels from worker to app webhook as inline base64 up to the configured size limit.
+- WhatsApp Web can expose direct chats as `@lid` identities instead of real phone JIDs. Estio now treats those as internal WhatsApp identities, not phone numbers. Unresolved LID contacts should show as phone pending until trusted metadata or an identity-map hit resolves the real phone.
 - Groups/newsletters/channels are intentionally not part of the first normal-chat scope.
 - Existing Evolution historical messages must remain readable during the transition.
+
+## LID Identity Resolution
+
+Implemented after live testing showed WhatsApp Web returning 1:1 chats as `@lid`:
+
+- Added `WhatsAppIdentityMap` to persist Web Bridge LID, phone, and chat identity mappings per location/contact.
+- Enriched worker chat/message payloads with WhatsApp contact metadata from `whatsapp-web.js`.
+- Updated Web Bridge ingestion and history import so `@lid` messages are processed instead of ignored.
+- Prevented unresolved LID digits from being stored as fake `+<digits>` phone numbers.
+- Added a dry-run repair script for historical contacts where LID digits were previously saved as phone numbers:
+
+```bash
+npx tsx scripts/repair-web-bridge-lid-contacts.ts
+npx tsx scripts/repair-web-bridge-lid-contacts.ts --apply
+```
+
+Manual acceptance:
+
+1. Send a message from WhatsApp Web/mobile where the remote chat is `@lid`.
+2. Confirm it appears in Estio.
+3. Confirm the contact shows a display name plus phone pending, not a fake long phone number.
+4. Reply from Estio to that existing LID conversation and confirm WhatsApp sends through the stored chat id.
+5. Run the repair script dry-run and review examples before applying.
 
 ## Rollback Strategy
 

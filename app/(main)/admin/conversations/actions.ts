@@ -9869,12 +9869,13 @@ function getWhatsAppWebChatIdFromPhone(phone: string | null | undefined) {
 async function importWebBridgeRecentMessagesForContact(args: {
     locationId: string;
     phone: string | null | undefined;
+    chatId?: string | null;
     contactName?: string | null;
     limit?: number;
     logPrefix?: string;
     stopAfterDuplicates?: number;
 }) {
-    const chatId = getWhatsAppWebChatIdFromPhone(args.phone);
+    const chatId = String(args.chatId || "").trim() || getWhatsAppWebChatIdFromPhone(args.phone);
     if (!chatId) {
         return { imported: 0, skipped: 0, errors: 0, processed: 0 };
     }
@@ -9904,25 +9905,40 @@ async function importWebBridgeRecentMessagesForContact(args: {
             const remoteId = fromMe ? toId : fromId;
             const contactIdentity = parseWhatsAppWebChatIdentity(remoteId);
             const ownIdentity = parseWhatsAppWebChatIdentity(fromMe ? fromId : toId);
-            const contactPhone = contactIdentity.phone;
+            const { resolveWebBridgeIdentity } = await import("@/lib/whatsapp/web-bridge-identity");
+            const resolvedIdentity = await resolveWebBridgeIdentity({
+                locationId: args.locationId,
+                remoteJid: remoteId,
+                identity: message?.contactIdentity || null,
+            });
+            const contactPhone = contactIdentity.phone || resolvedIdentity.phone;
+            const contactLid = resolvedIdentity.lid || contactIdentity.lid || "";
+            const contactAddress = contactPhone || contactLid;
             const ownPhone = ownIdentity.phone || args.locationId;
-            if (!contactIdentity.isSupported || !contactPhone) {
+            if (!contactIdentity.isSupported || !contactAddress) {
                 skipped++;
                 continue;
             }
 
             const result = await processNormalizedMessage({
                 locationId: args.locationId,
-                from: fromMe ? ownPhone : contactPhone,
-                to: fromMe ? contactPhone : ownPhone,
+                from: fromMe ? ownPhone : contactAddress,
+                to: fromMe ? contactAddress : ownPhone,
                 body: String(message?.body || message?.caption || ""),
                 type: String(message?.type || "text") as any,
                 wamId,
                 timestamp: new Date(Number(message?.timestamp || Date.now() / 1000) * 1000),
                 direction: fromMe ? "outbound" : "inbound",
                 source: "whatsapp_web_bridge" as any,
-                contactName: fromMe ? undefined : (message?.contactName || message?.notifyName || args.contactName || undefined),
-                resolvedPhone: contactPhone,
+                contactName: fromMe ? undefined : (resolvedIdentity.displayName || message?.contactName || message?.notifyName || args.contactName || undefined),
+                resolvedPhone: contactPhone || undefined,
+                lid: contactLid || undefined,
+                remoteJid: remoteId,
+                chatId,
+                webBridgeIdentity: {
+                    ...resolvedIdentity,
+                    rawContactIdentity: message?.contactIdentity || null,
+                } as any,
             });
 
             processed++;
@@ -10177,9 +10193,7 @@ async function fetchWebBridgeChatsForPicker(location: { id: string }) {
     try {
         const res = await fetchWhatsAppWebBridgeChats(location.id);
         const allChats = Array.isArray(res?.chats) ? res.chats : [];
-        const validChats = allChats.filter((chat: any) => {
-            return parseWhatsAppWebChatIdentity(chat.id).isSupported;
-        });
+        const validChats = allChats.filter((chat: any) => parseWhatsAppWebChatIdentity(chat.id).isSupported);
 
         const existingContacts = await db.contact.findMany({
             where: { locationId: location.id, phone: { not: null } },
@@ -10187,19 +10201,37 @@ async function fetchWebBridgeChatsForPicker(location: { id: string }) {
         });
         const existingConversations = await db.conversation.findMany({
             where: { locationId: location.id },
-            include: { contact: { select: { phone: true } } },
+            include: { contact: { select: { phone: true, lid: true } } },
         });
         const syncedPhones = new Set(
             existingConversations
                 .map((c: any) => c.contact?.phone?.replace(/\D/g, ""))
                 .filter(Boolean)
         );
+        const syncedLids = new Set(
+            existingConversations
+                .map((c: any) => c.contact?.lid)
+                .filter(Boolean)
+        );
 
-        const formatted = validChats.map((chat: any) => {
+        const { resolveWebBridgeIdentity } = await import("@/lib/whatsapp/web-bridge-identity");
+        const formatted = await Promise.all(validChats.map(async (chat: any) => {
             const jid = String(chat.id || "");
-            const rawPhone = parseWhatsAppWebChatIdentity(jid).phone;
-            const alreadySynced = syncedPhones.has(rawPhone) ||
-                Array.from(syncedPhones).some((p) => p?.endsWith(rawPhone) || rawPhone.endsWith(p || ""));
+            const identity = parseWhatsAppWebChatIdentity(jid);
+            const resolvedIdentity = await resolveWebBridgeIdentity({
+                locationId: location.id,
+                remoteJid: jid,
+                identity: chat.contactIdentity || null,
+            });
+            const rawPhone = identity.phone || resolvedIdentity.phone;
+            const lid = resolvedIdentity.lid || identity.lid || "";
+            const alreadySynced = (
+                !!rawPhone
+                && (
+                    syncedPhones.has(rawPhone)
+                    || Array.from(syncedPhones).some((p) => p?.endsWith(rawPhone) || rawPhone.endsWith(p || ""))
+                )
+            ) || (!!lid && syncedLids.has(lid));
             const matchedContact = existingContacts.find((c) => {
                 const cp = c.phone?.replace(/\D/g, "") || "";
                 return cp === rawPhone || cp.endsWith(rawPhone) || rawPhone.endsWith(cp);
@@ -10207,14 +10239,16 @@ async function fetchWebBridgeChatsForPicker(location: { id: string }) {
 
             return {
                 jid,
-                phone: `+${rawPhone}`,
-                name: chat.name || matchedContact?.name || `+${rawPhone}`,
+                phone: rawPhone ? `+${rawPhone}` : null,
+                lid,
+                name: resolvedIdentity.displayName || chat.name || matchedContact?.name || "WhatsApp Contact",
                 isGroup: false,
                 alreadySynced,
                 lastMessageTimestamp: chat.timestamp || null,
                 provider: "web_bridge",
+                identityPending: !rawPhone && !!lid,
             };
-        });
+        }));
 
         formatted.sort((a: any, b: any) => {
             if (a.alreadySynced !== b.alreadySynced) return a.alreadySynced ? 1 : -1;
@@ -10339,14 +10373,18 @@ export async function startNewConversation(phone: string) {
         : null;
     const preferredUserId = currentUser?.id || null;
 
+    const requestedIdentity = String(phone || "").trim();
+    const isRequestedLid = /@lid$/i.test(requestedIdentity);
+    const requestedLid = isRequestedLid ? requestedIdentity : "";
+
     // Normalize phone to E.164
-    let normalizedPhone = phone.replace(/\s+/g, '').replace(/[-()]/g, '');
-    if (!normalizedPhone.startsWith('+')) {
+    let normalizedPhone = isRequestedLid ? "" : phone.replace(/\s+/g, '').replace(/[-()]/g, '');
+    if (normalizedPhone && !normalizedPhone.startsWith('+')) {
         normalizedPhone = `+${normalizedPhone}`;
     }
 
     const rawDigits = normalizedPhone.replace(/\D/g, '');
-    if (rawDigits.length < 7) {
+    if (!isRequestedLid && rawDigits.length < 7) {
         return { success: false, error: "Phone number is too short. Please include the country code." };
     }
 
@@ -10360,11 +10398,15 @@ export async function startNewConversation(phone: string) {
         const candidates = await db.contact.findMany({
             where: {
                 locationId: location.id,
-                phone: { contains: searchSuffix }
-            }
+                OR: [
+                    ...(searchSuffix ? [{ phone: { contains: searchSuffix } }] : []),
+                    ...(requestedLid ? [{ lid: requestedLid }] : []),
+                ],
+            } as any
         });
 
         let contact = candidates.find(c => {
+            if (requestedLid && (c as any).lid === requestedLid) return true;
             if (!c.phone) return false;
             const cp = c.phone.replace(/\D/g, '');
             return cp === rawDigits ||
@@ -10378,8 +10420,9 @@ export async function startNewConversation(phone: string) {
             contact = await db.contact.create({
                 data: {
                     locationId: location.id,
-                    phone: normalizedPhone,
-                    name: `WhatsApp ${normalizedPhone}`,
+                    phone: isRequestedLid ? undefined : normalizedPhone,
+                    lid: requestedLid || undefined,
+                    name: isRequestedLid ? "WhatsApp Contact" : `WhatsApp ${normalizedPhone}`,
                     status: "New",
                     contactType: "Lead"
                 }
@@ -10390,7 +10433,7 @@ export async function startNewConversation(phone: string) {
             console.log(`[NewConversation] Found existing contact: ${contact.name} (${contact.id})`);
         }
 
-        if (isNewContact) {
+        if (isNewContact && !isRequestedLid) {
             runDetachedTask(`new_conversation_google_autosync:${contact.id}`, async () => {
                 await runGoogleAutoSyncForContact({
                     locationId: location.id,
@@ -10432,6 +10475,7 @@ export async function startNewConversation(phone: string) {
                     await importWebBridgeRecentMessagesForContact({
                         locationId: location.id,
                         phone: contact.phone || rawDigits,
+                        chatId: requestedLid || undefined,
                         contactName: contact.name,
                         limit: 30,
                         logPrefix: `[NewConversation][existing:${existingConv.ghlConversationId || existingConv.id}]`,
@@ -10565,6 +10609,7 @@ export async function startNewConversation(phone: string) {
                 const backfill = await importWebBridgeRecentMessagesForContact({
                     locationId: location.id,
                     phone: contact.phone || rawDigits,
+                    chatId: requestedLid || undefined,
                     contactName: contact.name,
                     limit: 30,
                     logPrefix: `[NewConversation][new:${conversation.id}]`,

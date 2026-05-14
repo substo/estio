@@ -33,6 +33,69 @@ const MAX_INLINE_MEDIA_BYTES = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_M
 const SUPPORTED_INLINE_MEDIA_TYPES = new Set(["image", "audio", "ptt", "document", "video"]);
 const WATCHDOG_INTERVAL_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_WATCHDOG_INTERVAL_MS || 60_000), 15_000);
 
+function jidFromId(value: any) {
+    return String(value?._serialized || value?.serialized || value || "").trim();
+}
+
+function phoneJidFromContact(contact: any) {
+    const candidates = [
+        contact?.id?._serialized,
+        contact?.wid?._serialized,
+        contact?.jid,
+    ].map(jidFromId).filter(Boolean);
+    return candidates.find((candidate) => /@(c\.us|s\.whatsapp\.net)$/i.test(candidate)) || "";
+}
+
+function lidJidFromContact(contact: any, fallback?: string) {
+    const candidates = [
+        contact?.lid?._serialized,
+        contact?.lid,
+        contact?.id?._serialized,
+        contact?.wid?._serialized,
+        contact?.jid,
+        fallback,
+    ].map(jidFromId).filter(Boolean);
+    return candidates.find((candidate) => /@lid$/i.test(candidate)) || "";
+}
+
+async function buildContactIdentity(messageOrChat: any, fallbackJid: string) {
+    let contact: any = null;
+    try {
+        if (typeof messageOrChat?.getContact === "function") {
+            contact = await messageOrChat.getContact();
+        }
+    } catch (error: any) {
+        console.warn(`[WhatsApp Web Bridge] Contact metadata lookup failed for ${fallbackJid}:`, error?.message || error);
+    }
+
+    const phoneJid = phoneJidFromContact(contact) || (/@(c\.us|s\.whatsapp\.net)$/i.test(fallbackJid) ? fallbackJid : "");
+    const lidJid = lidJidFromContact(contact, fallbackJid);
+    const displayName = String(
+        contact?.verifiedName
+        || contact?.name
+        || contact?.shortName
+        || contact?.pushname
+        || messageOrChat?.name
+        || messageOrChat?.formattedTitle
+        || ""
+    ).trim();
+
+    return {
+        rawChatId: fallbackJid,
+        remoteJid: fallbackJid,
+        lidJid: lidJid || null,
+        phoneJid: phoneJid || null,
+        number: contact?.number || null,
+        pushname: contact?.pushname || null,
+        name: contact?.name || null,
+        shortName: contact?.shortName || null,
+        verifiedName: contact?.verifiedName || null,
+        displayName: displayName || null,
+        isMyContact: typeof contact?.isMyContact === "boolean" ? contact.isMyContact : null,
+        isBusiness: typeof contact?.isBusiness === "boolean" ? contact.isBusiness : null,
+    };
+}
+
 function json(res: ServerResponse, status: number, payload: any) {
     res.writeHead(status, { "Content-Type": "application/json" });
     res.end(JSON.stringify(payload));
@@ -136,6 +199,8 @@ async function serializeMessage(message: any, options?: { includeMedia?: boolean
     const id = message?.id?._serialized || message?.id?.id || message?.id || "";
     const messageType = String(message?.type || "text");
     const caption = message?._data?.caption || "";
+    const remoteJid = String(message?.fromMe ? message?.to : message?.from || "").trim();
+    const contactIdentity = await buildContactIdentity(message, remoteJid);
     const serialized: Record<string, any> = {
         id,
         from: message?.from || "",
@@ -146,7 +211,8 @@ async function serializeMessage(message: any, options?: { includeMedia?: boolean
         type: messageType,
         timestamp: Number(message?.timestamp || Math.floor(Date.now() / 1000)),
         notifyName: message?._data?.notifyName || message?._data?.pushName || "",
-        contactName: message?._data?.verifiedName || message?._data?.notifyName || "",
+        contactName: contactIdentity.displayName || message?._data?.verifiedName || message?._data?.notifyName || "",
+        contactIdentity,
         hasMedia: Boolean(message?.hasMedia),
     };
 
@@ -411,14 +477,19 @@ async function listChats(sessionId: string) {
     if (!session?.client || !session.ready) throw new Error("WhatsApp Web session is not ready.");
 
     const chats = await withStaleRecovery(session, () => session.client.getChats());
-    return (chats || []).map((chat: any) => ({
-        id: chat?.id?._serialized || chat?.id?.user || "",
-        name: chat?.name || chat?.formattedTitle || chat?.id?.user || "",
+    return Promise.all((chats || []).map(async (chat: any) => {
+        const chatId = chat?.id?._serialized || chat?.id?.user || "";
+        const contactIdentity = await buildContactIdentity(chat, chatId);
+        return {
+        id: chatId,
+        name: chat?.name || chat?.formattedTitle || contactIdentity.displayName || chat?.id?.user || "",
         isGroup: Boolean(chat?.isGroup),
         unreadCount: Number(chat?.unreadCount || 0),
         timestamp: Number(chat?.timestamp || 0),
         archived: Boolean(chat?.archived),
         pinned: Boolean(chat?.pinned),
+        contactIdentity,
+    };
     }));
 }
 

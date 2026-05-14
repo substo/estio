@@ -140,14 +140,31 @@ export async function processWhatsAppOutboundOutboxJob(args: {
         return { outcome: "skipped", error: "Outbox row no longer exists." };
     }
 
-    const payload = (row.payload || {}) as any;
-    const attemptCount = Number(row.attemptCount || 0) + 1;
+        const payload = (row.payload || {}) as any;
+        const attemptCount = Number(row.attemptCount || 0) + 1;
 
     try {
         const transport = String(row.transport || "evolution").trim() || "evolution";
         const normalizedPhone = normalizePhoneDigits(row.contact?.phone);
-        if (!normalizedPhone || normalizedPhone.length < 7) {
+        let webBridgeConversationChatId = "";
+        if (transport === "web_bridge" && (!normalizedPhone || normalizedPhone.length < 7) && row.conversationId) {
+            const sync = await (db as any).conversationSync.findFirst({
+                where: {
+                    conversationId: row.conversationId,
+                    provider: WHATSAPP_WEB_BRIDGE_PROVIDER,
+                    providerConversationId: { not: null },
+                },
+                select: { providerConversationId: true },
+                orderBy: { updatedAt: "desc" },
+            }).catch(() => null);
+            webBridgeConversationChatId = String(sync?.providerConversationId || "").trim();
+        }
+        const webBridgeRecipient = webBridgeConversationChatId || normalizedPhone;
+        if (transport !== "web_bridge" && (!normalizedPhone || normalizedPhone.length < 7)) {
             throw new Error("Contact phone is missing or invalid for WhatsApp send.");
+        }
+        if (transport === "web_bridge" && !webBridgeRecipient) {
+            throw new Error("Contact phone is missing and no WhatsApp Web chat id is available for this conversation.");
         }
 
         let wamId: string | null = null;
@@ -220,7 +237,7 @@ export async function processWhatsAppOutboundOutboxJob(args: {
                 }
                 const response = await sendWhatsAppWebBridgeMessage({
                     locationId: row.locationId,
-                    to: normalizedPhone,
+                    to: webBridgeRecipient,
                     text,
                 });
                 wamId = response?.messageId ? String(response.messageId) : null;
@@ -242,7 +259,7 @@ export async function processWhatsAppOutboundOutboxJob(args: {
 
                 const response = await sendWhatsAppWebBridgeMessage({
                     locationId: row.locationId,
-                    to: normalizedPhone,
+                    to: webBridgeRecipient,
                     mediaUrl: signedMediaUrl,
                     mimetype: contentType,
                     fileName,

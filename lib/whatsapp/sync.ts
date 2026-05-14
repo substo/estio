@@ -13,6 +13,7 @@ import { extractGroupParticipantIdentity } from "@/lib/whatsapp/group-participan
 import { computeWhatsAppCustomerServiceExpiresAt } from "@/lib/whatsapp/customer-window";
 import { WHATSAPP_CLOUD_PROVIDER } from "@/lib/whatsapp/client";
 import { WHATSAPP_WEB_BRIDGE_PROVIDER } from "@/lib/whatsapp/web-bridge";
+import { upsertWebBridgeIdentityMap } from "@/lib/whatsapp/web-bridge-identity";
 
 const LID_RETRY_INTERVAL_MS = Number(process.env.WHATSAPP_LID_RETRY_INTERVAL_MS || 30000);
 const LID_RETRY_MAX_ATTEMPTS = Number(process.env.WHATSAPP_LID_MAX_ATTEMPTS || 240);
@@ -44,6 +45,9 @@ export interface NormalizedMessage {
     participantDisplayName?: string;
     lid?: string; // WhatsApp Lightweight ID
     resolvedPhone?: string; // Explicitly passed resolved phone from webhook
+    remoteJid?: string;
+    chatId?: string;
+    webBridgeIdentity?: any;
     __skipUnresolvedLidDeferral?: boolean; // Internal: avoid enqueue loop during retry
     __deferredAttempt?: number; // Internal: deferred retry count for logging/limits
     __evolutionMediaAttachmentPayload?: {
@@ -478,6 +482,19 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
                     where: { id: realContact.id },
                     data: { lid: msg.lid }
                 }).catch(e => console.error("Failed to save LID:", e));
+                await upsertWebBridgeIdentityMap({
+                    locationId,
+                    contactId: realContact.id,
+                    identityType: "lid",
+                    identityValue: normalizeLidJid(msg.lid) || msg.lid,
+                    lid: normalizeLidJid(msg.lid) || msg.lid,
+                    phone: realContact.phone || null,
+                    displayName: realContact.name || null,
+                    confidence: realContact.phone ? "high" : "unresolved",
+                    source: "existing_message_lid_capture",
+                    lastSeenAt: timestamp,
+                    metadata: msg.webBridgeIdentity || undefined,
+                });
                 console.log(`[LID Capture] Saved LID mapping: ${msg.lid} -> ${realContact.phone}`);
 
                 // 2. Check for Placeholder Contacts to Merge
@@ -570,6 +587,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     // Determine the "Contact" phone number (The external party)
     // If inbound, Contact is "from". If outbound, Contact is "to".
     let contactPhone = direction === "inbound" ? normalizedFrom : normalizedTo;
+    const contactIdentityIsLid = !isGroup && /@lid$/i.test(contactPhone);
 
     // --- LID RESOLUTION CHECK ---
     // If contactPhone implies an LID (ends with @lid) but we have a resolved phone from webhook/route.ts, use it.
@@ -640,7 +658,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
 
     // --- Enhanced Contact Lookup ---
     // 1. Clean the input phone to raw digits
-    const rawInputPhone = contactPhone.replace(/\D/g, '');
+    const rawInputPhone = contactIdentityIsLid ? "" : contactPhone.replace(/\D/g, '');
     // Use last 7 digits for DB filter (was 2, which caused cross-contact false matches)
     const searchSuffix = rawInputPhone.length > 7 ? rawInputPhone.slice(-7) : rawInputPhone;
 
@@ -666,19 +684,20 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     // Normalize LID for DB lookup (strip @lid suffix for contains search)
     const lidRaw = normalizeLidRaw(msg.lid) || undefined;
     const normalizedMsgLid = normalizeLidJid(msg.lid) || undefined;
-    const candidates = await db.contact.findMany({
+    const contactLookupClauses = [
+        ...(searchSuffix ? [{ phone: { contains: searchSuffix } }] : []),
+        ...(lidRaw ? [
+            { lid: normalizedMsgLid },
+            { lid: lidRaw },
+            { lid: { contains: lidRaw } },
+        ] : [])
+    ];
+    const candidates = contactLookupClauses.length ? await db.contact.findMany({
         where: {
             locationId,
-            OR: [
-                { phone: { contains: searchSuffix } },
-                ...(lidRaw ? [
-                    { lid: normalizedMsgLid },
-                    { lid: lidRaw },
-                    { lid: { contains: lidRaw } },
-                ] : [])
-            ]
+            OR: contactLookupClauses
         } as any
-    });
+    }) : [];
 
     // Strategy: Prefer LID match -> Then Phone Match
     const phoneMatches = candidates.filter(c => {
@@ -847,7 +866,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         }
 
         // --- SOURCE OF TRUTH CHECK (Google > GHL) ---
-        let finalName = nameToUse || `WhatsApp User ${contactPhone}`; // Fallback: WhatsApp User +123... or ...@lid
+        let finalName = nameToUse || (isUnresolvedLid ? "WhatsApp Contact" : `WhatsApp User ${contactPhone}`);
         let foundGhlId: string | undefined;
         let foundGoogleId: string | undefined;
         let foundEmail: string | undefined;
@@ -1012,7 +1031,9 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         }
     }
 
-    if (isNewContact) {
+    const isWebBridgeLidOnlyContact = source === "whatsapp_web_bridge" && !contact?.phone && !!contact?.lid;
+
+    if (isNewContact && !isWebBridgeLidOnlyContact) {
         import("@/lib/google/automation")
             .then(({ runGoogleAutoSyncForContact }) =>
                 runGoogleAutoSyncForContact({
@@ -1023,6 +1044,55 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
                 })
             )
             .catch(err => console.error("[GoogleAutoSync] WhatsApp inbound sync failed:", err));
+    }
+
+    if (source === "whatsapp_web_bridge" && contact?.id) {
+        const mappedPhone = contact?.phone || (msg.resolvedPhone ? `+${normalizeDigits(msg.resolvedPhone)}` : null);
+        if (normalizedMsgLid) {
+            await upsertWebBridgeIdentityMap({
+                locationId,
+                contactId: contact.id,
+                identityType: "lid",
+                identityValue: normalizedMsgLid,
+                lid: normalizedMsgLid,
+                phone: mappedPhone,
+                displayName: contact.name || nameToUse || null,
+                confidence: mappedPhone ? "high" : "unresolved",
+                source: mappedPhone ? "message_ingestion" : "lid_only_message",
+                lastSeenAt: timestamp,
+                metadata: msg.webBridgeIdentity || undefined,
+            });
+        }
+        if (mappedPhone && !contactIdentityIsLid) {
+            await upsertWebBridgeIdentityMap({
+                locationId,
+                contactId: contact.id,
+                identityType: "phone",
+                identityValue: normalizeDigits(mappedPhone),
+                lid: normalizedMsgLid || contact.lid || null,
+                phone: mappedPhone,
+                displayName: contact.name || nameToUse || null,
+                confidence: "high",
+                source: "message_ingestion",
+                lastSeenAt: timestamp,
+                metadata: msg.webBridgeIdentity || undefined,
+            });
+        }
+        if (msg.chatId || msg.remoteJid) {
+            await upsertWebBridgeIdentityMap({
+                locationId,
+                contactId: contact.id,
+                identityType: "chat",
+                identityValue: String(msg.chatId || msg.remoteJid),
+                lid: normalizedMsgLid || contact.lid || null,
+                phone: mappedPhone,
+                displayName: contact.name || nameToUse || null,
+                confidence: mappedPhone ? "high" : "unresolved",
+                source: "message_ingestion",
+                lastSeenAt: timestamp,
+                metadata: msg.webBridgeIdentity || undefined,
+            });
+        }
     }
 
     if (direction === "inbound" && !isGroup && contact?.id) {

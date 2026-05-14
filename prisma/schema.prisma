@@ -60,6 +60,7 @@ model Location {
   whatsappChannels              WhatsAppChannel[]
   whatsappWebBridgeSessions     WhatsAppWebBridgeSession[]
   whatsappTemplates             WhatsAppTemplate[]
+  whatsappIdentityMaps          WhatsAppIdentityMap[]
   conversationSyncRecords       ConversationSync[]
   messageSyncRecords            MessageSync[]
   providerOutboxJobs            ProviderOutbox[]
@@ -617,6 +618,7 @@ model Contact {
   aiDecisions                AiDecision[]
   aiSuggestedResponses       AiSuggestedResponse[]
   whatsappOutboundOutboxJobs WhatsAppOutboundOutbox[]
+  whatsappIdentityMaps       WhatsAppIdentityMap[]
   syncRecords                ContactSync[]
   outboxJobs                 ContactOutbox[]
   providerOutboxJobs         ProviderOutbox[]
@@ -629,6 +631,36 @@ model Contact {
   @@index([legacyCrmOwnerId])
   @@index([phone])
   @@index([lid])
+}
+
+model WhatsAppIdentityMap {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId String
+  contactId  String?
+
+  provider      String // whatsapp_web_bridge | evolution | cloud_api
+  identityType  String // lid | phone | chat
+  identityValue String
+
+  lid         String?
+  phone       String?
+  displayName String?
+  confidence  String? // high | medium | low | unresolved
+  source      String?
+  lastSeenAt  DateTime?
+  metadata    Json?
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  contact  Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@unique([locationId, provider, identityType, identityValue])
+  @@index([locationId, provider, identityType])
+  @@index([locationId, phone])
+  @@index([locationId, lid])
+  @@index([contactId])
 }
 
 model Company {

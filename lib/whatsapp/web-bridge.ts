@@ -53,8 +53,10 @@ export type WhatsAppWebBridgeChatIdentity = {
     rawId: string;
     phone: string;
     chatId: string;
+    lid?: string;
+    identityKind: "phone" | "lid" | "unsupported";
     isSupported: boolean;
-    reason?: "missing_id" | "group_unsupported" | "broadcast_unsupported" | "newsletter_unsupported" | "lid_unsupported" | "invalid_phone";
+    reason?: "missing_id" | "group_unsupported" | "broadcast_unsupported" | "newsletter_unsupported" | "lid_identity" | "invalid_phone";
 };
 
 const DEFAULT_BRIDGE_BASE_URL = "http://127.0.0.1:3218";
@@ -76,7 +78,10 @@ export function buildWhatsAppWebBridgeSessionId(locationId: string) {
 export function normalizeWhatsAppWebChatId(value: unknown) {
     const raw = String(value || "").trim();
     if (!raw) return "";
-    if (raw.includes("@")) return raw;
+    if (raw.includes("@")) {
+        const identity = parseWhatsAppWebChatIdentity(raw);
+        return identity.isSupported ? identity.chatId || raw : "";
+    }
     const digits = raw.replace(/\D/g, "");
     return digits ? `${digits}@c.us` : "";
 }
@@ -88,34 +93,35 @@ export function extractPhoneFromWhatsAppWebId(value: unknown) {
 export function parseWhatsAppWebChatIdentity(value: unknown): WhatsAppWebBridgeChatIdentity {
     const rawId = String(value || "").trim();
     if (!rawId) {
-        return { rawId, phone: "", chatId: "", isSupported: false, reason: "missing_id" };
+        return { rawId, phone: "", chatId: "", identityKind: "unsupported", isSupported: false, reason: "missing_id" };
     }
 
     const lower = rawId.toLowerCase();
     if (lower.endsWith("@g.us")) {
-        return { rawId, phone: "", chatId: rawId, isSupported: false, reason: "group_unsupported" };
+        return { rawId, phone: "", chatId: rawId, identityKind: "unsupported", isSupported: false, reason: "group_unsupported" };
     }
     if (lower.endsWith("@broadcast") || lower.includes("status@broadcast")) {
-        return { rawId, phone: "", chatId: rawId, isSupported: false, reason: "broadcast_unsupported" };
+        return { rawId, phone: "", chatId: rawId, identityKind: "unsupported", isSupported: false, reason: "broadcast_unsupported" };
     }
     if (lower.endsWith("@newsletter")) {
-        return { rawId, phone: "", chatId: rawId, isSupported: false, reason: "newsletter_unsupported" };
+        return { rawId, phone: "", chatId: rawId, identityKind: "unsupported", isSupported: false, reason: "newsletter_unsupported" };
     }
     if (lower.endsWith("@lid")) {
-        return { rawId, phone: "", chatId: rawId, isSupported: false, reason: "lid_unsupported" };
+        return { rawId, phone: "", chatId: rawId, lid: rawId, identityKind: "lid", isSupported: true, reason: "lid_identity" };
     }
 
     const withoutDomain = rawId.replace(/@(c\.us|s\.whatsapp\.net)$/i, "");
     const withoutDevice = withoutDomain.split(":")[0];
     const phone = withoutDevice.replace(/\D/g, "");
     if (phone.length < 7) {
-        return { rawId, phone: "", chatId: rawId.includes("@") ? rawId : "", isSupported: false, reason: "invalid_phone" };
+        return { rawId, phone: "", chatId: rawId.includes("@") ? rawId : "", identityKind: "unsupported", isSupported: false, reason: "invalid_phone" };
     }
 
     return {
         rawId,
         phone,
         chatId: `${phone}@c.us`,
+        identityKind: "phone",
         isSupported: true,
     };
 }

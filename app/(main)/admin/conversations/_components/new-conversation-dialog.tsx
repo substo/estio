@@ -22,10 +22,12 @@ import { buildLeadTextFromClipboardData, insertTextIntoTextareaValue } from './p
 
 interface WhatsAppChat {
     jid: string;
-    phone: string;
+    phone: string | null;
+    lid?: string | null;
     name: string;
     isGroup: boolean;
     alreadySynced: boolean;
+    identityPending?: boolean;
     lastMessageTimestamp: number | null;
 }
 
@@ -185,8 +187,14 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
         setError(null);
 
         try {
-            const phoneNumber = chat.phone.startsWith('+') ? chat.phone : `+${chat.phone}`;
-            const res = await startNewConversation(phoneNumber);
+            const identity = chat.phone
+                ? (chat.phone.startsWith('+') ? chat.phone : `+${chat.phone}`)
+                : (chat.jid || chat.lid || "");
+            if (!identity) {
+                setError("This WhatsApp chat does not expose a phone or bridge identity yet.");
+                return;
+            }
+            const res = await startNewConversation(identity);
             if (res.success && res.conversationId) {
                 onConversationCreated?.(res.conversationId);
                 handleClose();
@@ -405,7 +413,9 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                                     </Badge>
                                                 )}
                                             </div>
-                                            <p className="text-xs text-gray-500 truncate">{chat.phone}</p>
+                                            <p className="text-xs text-gray-500 truncate">
+                                                {chat.phone || (chat.identityPending ? "Phone pending" : "WhatsApp identity pending")}
+                                            </p>
                                         </div>
 
                                         {/* Action */}

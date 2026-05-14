@@ -26,6 +26,7 @@ test("parseWhatsAppWebChatIdentity accepts supported one-to-one chat ids", () =>
         rawId: "35796407286:12@c.us",
         phone: "35796407286",
         chatId: "35796407286@c.us",
+        identityKind: "phone",
         isSupported: true,
     });
 });
@@ -34,8 +35,20 @@ test("parseWhatsAppWebChatIdentity rejects unsupported web chat ids", () => {
     assert.equal(parseWhatsAppWebChatIdentity("120363000000000000@g.us").reason, "group_unsupported");
     assert.equal(parseWhatsAppWebChatIdentity("status@broadcast").reason, "broadcast_unsupported");
     assert.equal(parseWhatsAppWebChatIdentity("123456789@newsletter").reason, "newsletter_unsupported");
-    assert.equal(parseWhatsAppWebChatIdentity("123456789@lid").reason, "lid_unsupported");
     assert.equal(parseWhatsAppWebChatIdentity("abc@c.us").reason, "invalid_phone");
+});
+
+test("parseWhatsAppWebChatIdentity accepts LID as internal non-phone identity", () => {
+    assert.deepEqual(parseWhatsAppWebChatIdentity("123456789@lid"), {
+        rawId: "123456789@lid",
+        phone: "",
+        chatId: "123456789@lid",
+        lid: "123456789@lid",
+        identityKind: "lid",
+        isSupported: true,
+        reason: "lid_identity",
+    });
+    assert.equal(normalizeWhatsAppWebChatId("123456789@lid"), "123456789@lid");
 });
 
 test("normalizeBridgeMediaType accepts common media and document mimetypes", () => {

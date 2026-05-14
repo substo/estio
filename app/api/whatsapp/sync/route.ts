@@ -85,9 +85,7 @@ export async function GET(req: NextRequest) {
                     try {
                         const chatResponse = await fetchWhatsAppWebBridgeChats(location.id);
                         const allChats = Array.isArray(chatResponse?.chats) ? chatResponse.chats : [];
-                        const validChats = allChats.filter((chat: any) => {
-                            return parseWhatsAppWebChatIdentity(chat?.id).isSupported;
-                        });
+                        const validChats = allChats.filter((chat: any) => parseWhatsAppWebChatIdentity(chat?.id).isSupported);
 
                         if (validChats.length === 0) {
                             send({ type: 'done', stats: { chatsProcessed: 0, messagesImported: 0, messagesSkipped: 0, errors: 0 } });
@@ -100,9 +98,16 @@ export async function GET(req: NextRequest) {
                         for (const chat of validChats) {
                             const chatId = String(chat?.id || "");
                             const chatIdentity = parseWhatsAppWebChatIdentity(chatId);
-                            const phone = chatIdentity.phone;
-                            const name = chat?.name || chat?.pushName || (phone ? `+${phone}` : "WhatsApp chat");
-                            if (!phone) {
+                            const { resolveWebBridgeIdentity } = await import("@/lib/whatsapp/web-bridge-identity");
+                            const resolvedIdentity = await resolveWebBridgeIdentity({
+                                locationId: location.id,
+                                remoteJid: chatId,
+                                identity: chat?.contactIdentity || null,
+                            });
+                            const phone = chatIdentity.phone || resolvedIdentity.phone;
+                            const lid = resolvedIdentity.lid || chatIdentity.lid || "";
+                            const name = resolvedIdentity.displayName || chat?.name || chat?.pushName || (phone ? `+${phone}` : "WhatsApp Contact");
+                            if (!phone && !lid) {
                                 totalSkipped++;
                                 chatsProcessed++;
                                 send({ type: 'progress', chatIndex: chatsProcessed, name, status: 'skipped' });
@@ -141,9 +146,16 @@ export async function GET(req: NextRequest) {
                                         const remoteId = fromMe ? toId : fromId;
                                         const contactIdentity = parseWhatsAppWebChatIdentity(remoteId);
                                         const ownIdentity = parseWhatsAppWebChatIdentity(fromMe ? fromId : toId);
-                                        const contactPhone = contactIdentity.phone || phone;
+                                        const resolvedMessageIdentity = await resolveWebBridgeIdentity({
+                                            locationId: location.id,
+                                            remoteJid: remoteId,
+                                            identity: message?.contactIdentity || null,
+                                        });
+                                        const contactPhone = contactIdentity.phone || resolvedMessageIdentity.phone || phone;
+                                        const contactLid = resolvedMessageIdentity.lid || contactIdentity.lid || lid;
+                                        const contactAddress = contactPhone || contactLid;
                                         const ownPhone = ownIdentity.phone || location.id;
-                                        if (!contactPhone || (contactIdentity.reason && !contactIdentity.isSupported)) {
+                                        if (!contactAddress || !contactIdentity.isSupported) {
                                             totalSkipped++;
                                             chatSkipped++;
                                             continue;
@@ -151,16 +163,23 @@ export async function GET(req: NextRequest) {
 
                                         const result = await processNormalizedMessage({
                                             locationId: location.id,
-                                            from: fromMe ? ownPhone : contactPhone,
-                                            to: fromMe ? contactPhone : ownPhone,
+                                            from: fromMe ? ownPhone : contactAddress,
+                                            to: fromMe ? contactAddress : ownPhone,
                                             body: String(message?.body || message?.caption || ""),
                                             type: String(message?.type || "text") as any,
                                             wamId,
                                             timestamp: new Date(Number(message?.timestamp || Date.now() / 1000) * 1000),
                                             direction: fromMe ? "outbound" : "inbound",
                                             source: "whatsapp_web_bridge",
-                                            contactName: fromMe ? undefined : (message?.contactName || message?.notifyName || name),
-                                            resolvedPhone: contactPhone,
+                                            contactName: fromMe ? undefined : (resolvedMessageIdentity.displayName || message?.contactName || message?.notifyName || name),
+                                            resolvedPhone: contactPhone || undefined,
+                                            lid: contactLid || undefined,
+                                            remoteJid: remoteId,
+                                            chatId,
+                                            webBridgeIdentity: {
+                                                ...resolvedMessageIdentity,
+                                                rawContactIdentity: message?.contactIdentity || null,
+                                            } as any,
                                         });
 
                                         if ((result as any)?.status === "skipped") {
