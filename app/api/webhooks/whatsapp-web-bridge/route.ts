@@ -7,6 +7,7 @@ import {
     upsertWhatsAppWebBridgeSession,
     WHATSAPP_WEB_BRIDGE_PROVIDER,
 } from "@/lib/whatsapp/web-bridge";
+import { normalizeDigits, normalizeLidJid } from "@/lib/whatsapp/identity";
 
 function isAuthorized(req: NextRequest) {
     const secret = getWhatsAppWebBridgeSecret();
@@ -59,6 +60,41 @@ async function updateBridgeMessageMediaMetadata(wamId: string, mediaState: Recor
     }).catch((error: any) => {
         console.warn(`[WhatsApp Web Bridge Webhook] Failed to store media metadata for ${wamId}:`, error?.message || error);
     });
+}
+
+async function resolveWebBridgeLidToKnownPhone(locationId: string, lidJid: string) {
+    const normalizedLid = normalizeLidJid(lidJid);
+    const lidRaw = normalizedLid ? normalizedLid.replace(/@lid$/i, "") : "";
+    if (!normalizedLid || !lidRaw) return "";
+
+    const contactByLid = await (db as any).contact.findFirst({
+        where: {
+            locationId,
+            lid: { in: [normalizedLid, lidRaw] },
+            phone: { not: null },
+        },
+        select: { phone: true },
+        orderBy: { updatedAt: "desc" },
+    }).catch(() => null);
+    const contactPhone = normalizeDigits(contactByLid?.phone || "");
+    if (contactPhone.length >= 7) return contactPhone;
+
+    const messageByLid = await (db as any).message.findFirst({
+        where: {
+            wamId: { contains: `${lidRaw}@lid` },
+            conversation: { locationId },
+        },
+        select: {
+            conversation: {
+                select: {
+                    contact: { select: { phone: true } },
+                },
+            },
+        },
+        orderBy: { createdAt: "desc" },
+    }).catch(() => null);
+    const messagePhone = normalizeDigits(messageByLid?.conversation?.contact?.phone || "");
+    return messagePhone.length >= 7 ? messagePhone : "";
 }
 
 export async function POST(req: NextRequest) {
@@ -120,14 +156,21 @@ export async function POST(req: NextRequest) {
             const remoteId = fromMe ? toId : fromId;
             const contactIdentity = parseWhatsAppWebChatIdentity(remoteId);
             const ownIdentity = parseWhatsAppWebChatIdentity(body?.phone || (fromMe ? fromId : toId));
-            const contactPhone = contactIdentity.phone;
+            const contactLid = contactIdentity.reason === "lid_unsupported"
+                ? normalizeLidJid(remoteId)
+                : "";
+            const resolvedLidPhone = contactLid
+                ? await resolveWebBridgeLidToKnownPhone(locationId, contactLid)
+                : "";
+            const contactPhone = contactIdentity.phone || resolvedLidPhone;
+            const contactAddress = contactPhone || contactLid;
             const ownPhone = ownIdentity.phone || locationId;
             const wamId = String(message.id || message.messageId || "").trim();
 
             if (!wamId) {
                 return NextResponse.json({ status: "ignored", reason: "missing_message_id" });
             }
-            if (!contactIdentity.isSupported || !contactPhone) {
+            if ((!contactIdentity.isSupported && !contactLid) || !contactAddress) {
                 return NextResponse.json({
                     status: "ignored",
                     reason: contactIdentity.reason || "unsupported_message_identity",
@@ -136,8 +179,8 @@ export async function POST(req: NextRequest) {
 
             const result = await processNormalizedMessage({
                 locationId,
-                from: fromMe ? ownPhone : contactPhone,
-                to: fromMe ? contactPhone : ownPhone,
+                from: fromMe ? ownPhone : contactAddress,
+                to: fromMe ? contactAddress : ownPhone,
                 body: String(message.body || message.caption || ""),
                 type: String(message.type || "text") as any,
                 wamId,
@@ -145,7 +188,8 @@ export async function POST(req: NextRequest) {
                 direction: fromMe ? "outbound" : "inbound",
                 source: "whatsapp_web_bridge" as any,
                 contactName: message.contactName || message.notifyName || undefined,
-                resolvedPhone: contactPhone,
+                lid: contactLid || undefined,
+                resolvedPhone: contactPhone || undefined,
             });
 
             if (message.hasMedia && message.media?.data && result?.status !== "deferred_unresolved_lid") {

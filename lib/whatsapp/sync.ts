@@ -588,7 +588,11 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
 
     // If inbound is unresolved LID-only, defer message until mapping is known.
     // This prevents creating a second placeholder contact/conversation immediately.
-    const isInboundUnresolvedLid = direction === 'inbound' && !isGroup && contactPhone.includes('@lid') && !msg.resolvedPhone;
+    const isInboundUnresolvedLid = direction === 'inbound'
+        && source !== "whatsapp_web_bridge"
+        && !isGroup
+        && contactPhone.includes('@lid')
+        && !msg.resolvedPhone;
     if (isInboundUnresolvedLid) {
         const lidJid = msg.lid || contactPhone;
         const resolvedDigits = await tryResolveLidToPhone(locationId, lidJid, locationDef.evolutionInstanceId);
