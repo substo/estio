@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { getWhatsAppWebBridgeStatus, getEmailSyncProvidersStatus, triggerWhatsAppWebBridgeConnection } from '../actions';
-import { Loader2, RefreshCw, QrCode as QrIcon, WifiOff } from 'lucide-react';
+import { CheckCircle2, Loader2, RefreshCw, QrCode as QrIcon, Smartphone, WifiOff } from 'lucide-react';
 import { SiGmail, SiMicrosoftoutlook } from 'react-icons/si';
 import { Button } from '@/components/ui/button';
 import {
@@ -241,11 +241,13 @@ export function WhatsAppStatus() {
 
     const isConnected = status === 'ready' || status === 'open' || status === 'connected';
     const isError = status === 'ERROR' || status === 'NOT_FOUND' || status === 'close' || status === 'failed' || status === 'disconnected';
+    const isAwaitingScan = !!qrCode && ['qr', 'qrcode'].includes(status);
+    const isPairing = ['authenticated', 'starting', 'connecting', 'loading', 'restarting'].includes(status) || (dialogOpen && !isConnected && !isAwaitingScan && !!qrCode);
     const statusLabel = isConnected
         ? 'Online'
         : status === 'checking'
             ? 'Checking...'
-            : ['starting', 'qr', 'authenticated', 'connecting', 'qrcode'].includes(status)
+            : ['starting', 'qr', 'authenticated', 'connecting', 'qrcode', 'loading', 'restarting'].includes(status)
                 ? 'Connecting'
                 : 'Offline';
     const visibleEmailProviders = emailProviders.filter((provider) => provider.connected || provider.configured);
@@ -297,12 +299,28 @@ export function WhatsAppStatus() {
                             <DialogTitle>Connect WhatsApp</DialogTitle>
                         </DialogHeader>
                         <div className="flex flex-col items-center justify-center p-4 space-y-4">
-                            <p className="text-sm text-gray-500 text-center">
-                                Open WhatsApp on your phone, go to <strong>Linked Devices</strong>, and scan this code.
-                                {provider === 'web_bridge' && phone ? (
-                                    <span className="mt-1 block text-xs">Connected phone: {phone}</span>
-                                ) : null}
-                            </p>
+                            <div className="w-full rounded-md border bg-slate-50 p-3">
+                                <div className="flex items-start gap-3">
+                                    <div className={`mt-0.5 flex h-8 w-8 items-center justify-center rounded-full ${
+                                        isPairing ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'
+                                    }`}>
+                                        {isPairing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Smartphone className="h-4 w-4" />}
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                        <p className="text-sm font-medium text-slate-900">
+                                            {isPairing ? 'Finishing WhatsApp connection' : 'Scan with WhatsApp'}
+                                        </p>
+                                        <p className="mt-1 text-xs leading-5 text-slate-600">
+                                            {isPairing
+                                                ? 'WhatsApp accepted the scan. Keep this window open while Estio confirms the linked device. This can take up to a minute.'
+                                                : <>Open WhatsApp on your phone, go to <strong>Linked Devices</strong>, and scan this code.</>}
+                                        </p>
+                                        {provider === 'web_bridge' && phone ? (
+                                            <p className="mt-1 text-xs text-slate-500">Connected phone: {phone}</p>
+                                        ) : null}
+                                    </div>
+                                </div>
+                            </div>
 
                             {qrCode ? (
                                 <div className="border-4 border-white shadow-lg rounded-lg overflow-hidden relative">
@@ -310,11 +328,14 @@ export function WhatsAppStatus() {
                                     <img
                                         src={qrCode.startsWith('data:') ? qrCode : `data:image/png;base64,${qrCode}`}
                                         alt="WhatsApp QR Code"
-                                        className="w-64 h-64"
+                                        className={`w-64 h-64 transition-opacity ${isPairing ? 'opacity-20' : 'opacity-100'}`}
                                     />
-                                    {isConnecting && (
-                                        <div className="absolute inset-0 bg-white/50 flex items-center justify-center">
-                                            <Loader2 className="w-8 h-8 animate-spin text-purple-600" />
+                                    {(isConnecting || isPairing) && (
+                                        <div className="absolute inset-0 bg-white/75 flex flex-col items-center justify-center text-center">
+                                            <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+                                            <p className="mt-3 max-w-40 text-xs font-medium text-slate-700">
+                                                {isPairing ? 'Pairing device...' : 'Preparing QR...'}
+                                            </p>
                                         </div>
                                     )}
                                 </div>
@@ -333,6 +354,21 @@ export function WhatsAppStatus() {
                             {statusError && (
                                 <p className="max-w-xs text-center text-xs text-red-600">{statusError}</p>
                             )}
+                            <div className="flex w-full max-w-xs items-center justify-between rounded-md border bg-white px-3 py-2 text-xs">
+                                <div className="flex items-center gap-2">
+                                    {isAwaitingScan ? (
+                                        <QrIcon className="h-3.5 w-3.5 text-slate-500" />
+                                    ) : isPairing ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-600" />
+                                    ) : (
+                                        <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+                                    )}
+                                    <span className="font-medium text-slate-700">
+                                        {isAwaitingScan ? 'Waiting for scan' : isPairing ? 'Confirming connection' : statusLabel}
+                                    </span>
+                                </div>
+                                <span className="text-slate-400">{status}</span>
+                            </div>
 
                             <div className="flex gap-2">
                                 <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading}>
@@ -340,7 +376,7 @@ export function WhatsAppStatus() {
                                     Check Status
                                 </Button>
                                 {qrCode && (
-                                    <Button variant="ghost" size="sm" onClick={handleConnect} disabled={isConnecting}>
+                                    <Button variant="ghost" size="sm" onClick={handleConnect} disabled={isConnecting || isPairing}>
                                         Regenerate
                                     </Button>
                                 )}
