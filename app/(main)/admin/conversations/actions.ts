@@ -10376,19 +10376,22 @@ export async function startNewConversation(phone: string) {
     const requestedIdentity = String(phone || "").trim();
     const isRequestedLid = /@lid$/i.test(requestedIdentity);
     const requestedLid = isRequestedLid ? requestedIdentity : "";
+    const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(requestedIdentity);
 
     // Normalize phone to E.164
-    let normalizedPhone = isRequestedLid ? "" : phone.replace(/\s+/g, '').replace(/[-()]/g, '');
+    let normalizedPhone = isRequestedLid || isEmail ? "" : phone.replace(/\s+/g, '').replace(/[-()]/g, '');
     if (normalizedPhone && !normalizedPhone.startsWith('+')) {
         normalizedPhone = `+${normalizedPhone}`;
     }
 
     const rawDigits = normalizedPhone.replace(/\D/g, '');
-    if (!isRequestedLid && rawDigits.length < 7) {
+    if (!isRequestedLid && !isEmail && rawDigits.length < 7) {
         return { success: false, error: "Phone number is too short. Please include the country code." };
     }
 
-    const preferredChannelType = providerMode === "web_bridge"
+    const preferredChannelType = isEmail
+        ? "TYPE_EMAIL"
+        : providerMode === "web_bridge"
         ? "TYPE_WHATSAPP"
         : await resolvePreferredChannelTypeForPhone(location, rawDigits);
 
@@ -10401,13 +10404,15 @@ export async function startNewConversation(phone: string) {
                 OR: [
                     ...(searchSuffix ? [{ phone: { contains: searchSuffix } }] : []),
                     ...(requestedLid ? [{ lid: requestedLid }] : []),
+                    ...(isEmail ? [{ email: { equals: requestedIdentity, mode: 'insensitive' } }] : []),
                 ],
             } as any
         });
 
         let contact = candidates.find(c => {
             if (requestedLid && (c as any).lid === requestedLid) return true;
-            if (!c.phone) return false;
+            if (isEmail && c.email?.toLowerCase() === requestedIdentity.toLowerCase()) return true;
+            if (!c.phone || isEmail || requestedLid) return false;
             const cp = c.phone.replace(/\D/g, '');
             return cp === rawDigits ||
                 (cp.endsWith(rawDigits) && rawDigits.length >= 7) ||
@@ -10417,12 +10422,14 @@ export async function startNewConversation(phone: string) {
 
         if (!contact) {
             // Create new contact
+            const newName = isRequestedLid ? "WhatsApp Contact" : isEmail ? requestedIdentity.split('@')[0] : `WhatsApp ${normalizedPhone}`;
             contact = await db.contact.create({
                 data: {
                     locationId: location.id,
-                    phone: isRequestedLid ? undefined : normalizedPhone,
+                    phone: isRequestedLid || isEmail ? undefined : normalizedPhone,
+                    email: isEmail ? requestedIdentity : undefined,
                     lid: requestedLid || undefined,
-                    name: isRequestedLid ? "WhatsApp Contact" : `WhatsApp ${normalizedPhone}`,
+                    name: newName,
                     status: "New",
                     contactType: "Lead"
                 }

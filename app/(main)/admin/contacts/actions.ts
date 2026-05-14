@@ -393,11 +393,13 @@ export async function openOrStartConversationForContact(contactId: string) {
       };
     }
 
-    if (!contact.phone) {
-      return { success: false, error: 'Contact has no phone number' };
+    if (!contact.phone && !contact.email) {
+      return { success: false, error: 'Contact has no phone number or email address' };
     }
 
-    const preferredChannelType = await resolvePreferredChannelTypeForPhone(location, contact.phone);
+    const preferredChannelType = contact.phone
+      ? await resolvePreferredChannelTypeForPhone(location, contact.phone)
+      : 'TYPE_EMAIL';
 
     const conversation = await db.conversation.create({
       data: {
