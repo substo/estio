@@ -4,6 +4,7 @@ import { rm } from "fs/promises";
 import path from "path";
 import qrcode from "qrcode";
 import db from "../lib/db";
+import { isWhatsAppWebBridgeStaleError } from "../lib/whatsapp/web-bridge-stale";
 
 const require = createRequire(path.join(process.cwd(), "scripts", "whatsapp-web-bridge-service.ts"));
 
@@ -23,12 +24,14 @@ type ManagedSession = {
     lastEventAt?: Date | null;
     lastReadyAt?: Date | null;
     lastError?: string | null;
+    restarting?: boolean;
 };
 
 const sessions = new Map<string, ManagedSession>();
 const serviceStartedAt = new Date();
 const MAX_INLINE_MEDIA_BYTES = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_MAX_INLINE_MEDIA_BYTES || 25 * 1024 * 1024), 1024 * 1024);
 const SUPPORTED_INLINE_MEDIA_TYPES = new Set(["image", "audio", "ptt", "document", "video"]);
+const WATCHDOG_INTERVAL_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_WATCHDOG_INTERVAL_MS || 60_000), 15_000);
 
 function json(res: ServerResponse, status: number, payload: any) {
     res.writeHead(status, { "Content-Type": "application/json" });
@@ -85,11 +88,48 @@ function serializeManagedSession(session: ManagedSession) {
         ready: Boolean(session.ready),
         phone: session.phone || null,
         status: session.status || (session.ready ? "ready" : "starting"),
+        restarting: Boolean(session.restarting),
         startedAt: session.startedAt.toISOString(),
         lastEventAt: session.lastEventAt?.toISOString?.() || null,
         lastReadyAt: session.lastReadyAt?.toISOString?.() || null,
         lastError: session.lastError || null,
     };
+}
+
+async function restartStaleSession(session: ManagedSession, error: unknown) {
+    if (session.restarting) return;
+    session.restarting = true;
+    session.ready = false;
+    markSessionEvent(session, "restarting", error);
+    console.warn(`[WhatsApp Web Bridge] Restarting stale session ${session.sessionId}:`, (error as any)?.message || error);
+    await emitSessionEvent(session, {
+        event: "restarting",
+        locationId: session.locationId,
+        sessionId: session.sessionId,
+        error: (error as any)?.message || String(error || "Stale WhatsApp Web browser session."),
+    });
+    const { sessionId, locationId } = session;
+    try {
+        sessions.delete(sessionId);
+        await session.client?.destroy?.().catch(() => null);
+    } finally {
+        setTimeout(() => {
+            startSession(sessionId, locationId).catch((restartError: any) => {
+                console.error(`[WhatsApp Web Bridge] Failed to restart stale session ${sessionId}:`, restartError?.message || restartError);
+            });
+        }, 1000);
+    }
+}
+
+async function withStaleRecovery<T>(session: ManagedSession, operation: () => Promise<T>): Promise<T> {
+    try {
+        return await operation();
+    } catch (error) {
+        if (isWhatsAppWebBridgeStaleError(error)) {
+            await restartStaleSession(session, error);
+        }
+        throw error;
+    }
 }
 
 async function serializeMessage(message: any, options?: { includeMedia?: boolean }) {
@@ -188,6 +228,10 @@ async function serializeMessage(message: any, options?: { includeMedia?: boolean
                 console.warn(`[WhatsApp Web Bridge] Media skipped for ${id}: missing media data`);
             }
         } catch (error: any) {
+            if (isWhatsAppWebBridgeStaleError(error)) {
+                const session = Array.from(sessions.values()).find((item) => item.client === message?.client);
+                if (session) void restartStaleSession(session, error);
+            }
             serialized.mediaError = {
                 code: "download_failed",
                 message: error?.message || "Failed to download media.",
@@ -293,12 +337,20 @@ async function startSession(sessionId: string, locationId: string) {
 
     client.on("message", async (message: any) => {
         managed.lastEventAt = new Date();
-        await emitSessionEvent(managed, { event: "message", locationId, sessionId, phone: managed.phone, message: await serializeMessage(message, { includeMedia: true }) });
+        try {
+            await emitSessionEvent(managed, { event: "message", locationId, sessionId, phone: managed.phone, message: await withStaleRecovery(managed, () => serializeMessage(message, { includeMedia: true })) });
+        } catch (error: any) {
+            console.error(`[WhatsApp Web Bridge] Failed to serialize inbound message for ${sessionId}:`, error?.message || error);
+        }
     });
 
     client.on("message_create", async (message: any) => {
         managed.lastEventAt = new Date();
-        await emitSessionEvent(managed, { event: "message_create", locationId, sessionId, phone: managed.phone, message: await serializeMessage(message, { includeMedia: true }) });
+        try {
+            await emitSessionEvent(managed, { event: "message_create", locationId, sessionId, phone: managed.phone, message: await withStaleRecovery(managed, () => serializeMessage(message, { includeMedia: true })) });
+        } catch (error: any) {
+            console.error(`[WhatsApp Web Bridge] Failed to serialize outbound echo for ${sessionId}:`, error?.message || error);
+        }
     });
 
     client.on("message_ack", async (message: any, ack: number) => {
@@ -337,9 +389,9 @@ async function sendMessage(sessionId: string, payload: any) {
             throw new Error(`WhatsApp Web could not read the signed media URL. Re-upload or resend the attachment. ${error?.message || ""}`.trim());
         }
         try {
-            const sent = await session.client.sendMessage(to, media, {
+            const sent = await withStaleRecovery(session, () => session.client.sendMessage(to, media, {
                 caption: payload.caption || payload.text || undefined,
-            });
+            }));
             return { messageId: sent?.id?._serialized || sent?.id?.id || "" };
         } catch (error: any) {
             throw new Error(`WhatsApp Web media send failed. Confirm the recipient is on WhatsApp and the bridge is still connected. ${error?.message || ""}`.trim());
@@ -347,7 +399,7 @@ async function sendMessage(sessionId: string, payload: any) {
     }
 
     try {
-        const sent = await session.client.sendMessage(to, String(payload.text || ""));
+        const sent = await withStaleRecovery(session, () => session.client.sendMessage(to, String(payload.text || "")));
         return { messageId: sent?.id?._serialized || sent?.id?.id || "" };
     } catch (error: any) {
         throw new Error(`WhatsApp Web send failed. Confirm the recipient is on WhatsApp and the bridge is still connected. ${error?.message || ""}`.trim());
@@ -358,7 +410,7 @@ async function listChats(sessionId: string) {
     const session = sessions.get(sessionId);
     if (!session?.client || !session.ready) throw new Error("WhatsApp Web session is not ready.");
 
-    const chats = await session.client.getChats();
+    const chats = await withStaleRecovery(session, () => session.client.getChats());
     return (chats || []).map((chat: any) => ({
         id: chat?.id?._serialized || chat?.id?.user || "",
         name: chat?.name || chat?.formattedTitle || chat?.id?.user || "",
@@ -379,9 +431,11 @@ async function fetchMessages(sessionId: string, payload: any) {
 
     const limit = Math.min(Math.max(Number(payload.limit || 30), 1), 100);
     const includeMedia = Boolean(payload.includeMedia);
-    const chat = await session.client.getChatById(chatId);
-    const messages = await chat.fetchMessages({ limit });
-    return Promise.all((messages || []).map((message: any) => serializeMessage(message, { includeMedia })));
+    const messages = await withStaleRecovery(session, async () => {
+        const chat = await session.client.getChatById(chatId);
+        return chat.fetchMessages({ limit });
+    });
+    return Promise.all((messages || []).map((message: any) => withStaleRecovery(session, () => serializeMessage(message, { includeMedia }))));
 }
 
 const server = createServer(async (req, res) => {
@@ -446,6 +500,24 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, () => {
     console.log(`[WhatsApp Web Bridge] Listening on ${PORT}; session dir ${SESSION_DIR}`);
 });
+
+setInterval(() => {
+    for (const session of sessions.values()) {
+        if (!session.ready || session.restarting || !session.client) continue;
+        withStaleRecovery(session, async () => {
+            if (typeof session.client.getState === "function") {
+                await session.client.getState();
+            } else {
+                await session.client.getChats();
+            }
+        }).catch((error: any) => {
+            if (!isWhatsAppWebBridgeStaleError(error)) {
+                session.lastError = error?.message || String(error || "WhatsApp Web watchdog failed.");
+                console.warn(`[WhatsApp Web Bridge] Watchdog check failed for ${session.sessionId}:`, session.lastError);
+            }
+        });
+    }
+}, WATCHDOG_INTERVAL_MS).unref?.();
 
 async function bootstrapPersistedSessions() {
     const rows = await (db as any).whatsAppWebBridgeSession.findMany({

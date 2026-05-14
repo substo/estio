@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "Missing locationId or sessionId" }, { status: 400 });
         }
 
-        if (["qr", "ready", "authenticated", "auth_failure", "disconnected", "loading"].includes(event)) {
+        if (["qr", "ready", "authenticated", "auth_failure", "disconnected", "loading", "stale", "restarting"].includes(event)) {
             const now = new Date();
             await upsertWhatsAppWebBridgeSession(locationId, {
                 sessionId,
@@ -87,6 +87,8 @@ export async function POST(req: NextRequest) {
                             ? "authenticated"
                             : event === "loading"
                                 ? "starting"
+                                : event === "stale" || event === "restarting"
+                                    ? "restarting"
                                 : event === "auth_failure"
                                     ? "failed"
                                     : "disconnected",
@@ -94,7 +96,9 @@ export async function POST(req: NextRequest) {
                 phone: body?.phone ? String(body.phone) : undefined,
                 lastReadyAt: event === "ready" ? now : undefined,
                 lastSeenAt: now,
-                lastError: event === "auth_failure" ? String(body?.error || "Authentication failed.") : null,
+                lastError: event === "auth_failure" || event === "stale" || event === "restarting"
+                    ? String(body?.error || (event === "auth_failure" ? "Authentication failed." : "WhatsApp Web browser session is restarting."))
+                    : null,
                 isDefaultOutbound: event === "ready" ? true : undefined,
                 metadata: body?.metadata || null,
             } as any);

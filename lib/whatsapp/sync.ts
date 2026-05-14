@@ -969,10 +969,35 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
                 console.log(`[WhatsApp Sync] Reused existing unresolved LID contact ${contact.id} for ${normalizedMsgLid}`);
             }
         } else {
-            contact = await db.contact.create({
-                data: contactCreateData,
-            });
-            isNewContact = true;
+            try {
+                contact = await db.contact.create({
+                    data: contactCreateData,
+                });
+                isNewContact = true;
+            } catch (error: any) {
+                if (error?.code !== "P2002") throw error;
+                const existingContact = await db.contact.findFirst({
+                    where: {
+                        locationId,
+                        OR: [
+                            ...(contactCreateData.phone ? [{ phone: contactCreateData.phone }] : []),
+                            ...(rawInputPhone ? [{ phone: { contains: searchSuffix } }] : []),
+                            ...(normalizedMsgLid ? [
+                                { lid: normalizedMsgLid },
+                                { lid: normalizeLidRaw(normalizedMsgLid) || normalizedMsgLid },
+                            ] : []),
+                        ],
+                    } as any,
+                    orderBy: [
+                        { updatedAt: "desc" },
+                        { createdAt: "asc" },
+                    ],
+                });
+                if (!existingContact) throw error;
+                contact = existingContact;
+                isNewContact = false;
+                console.warn(`[WhatsApp Sync] Reused concurrently-created contact ${contact.id} for ${contactCreateData.phone || normalizedMsgLid || contactPhone}`);
+            }
         }
     } else {
         console.log(`[WhatsApp Sync] Matched existing contact: ${contact.name} (${contact.id})`);
@@ -1074,7 +1099,28 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
             lastError: null,
             metadata: { source },
         },
-    }).catch((error: any) => {
+    }).catch(async (error: any) => {
+        if (error?.code === "P2002" && evolutionThreadId) {
+            const reused = await (db as any).conversationSync.updateMany({
+                where: {
+                    provider: syncProvider,
+                    providerAccountId: syncProviderAccountId,
+                    providerConversationId: evolutionThreadId,
+                },
+                data: {
+                    conversationId: conversation.id,
+                    locationId,
+                    status: "synced",
+                    lastSyncedAt: new Date(),
+                    lastError: null,
+                    metadata: { source, reusedAfterUniqueConflict: true },
+                },
+            }).catch(() => null);
+            if (reused?.count) {
+                console.warn(`[WhatsApp Sync] Reused ${syncProvider} conversation sync after providerConversationId conflict: ${evolutionThreadId}`);
+                return;
+            }
+        }
         console.warn(`[WhatsApp Sync] Failed to persist ${syncProvider} conversation sync:`, error?.message || error);
     });
 
