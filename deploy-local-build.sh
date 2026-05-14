@@ -134,7 +134,7 @@ rm -rf .next
 NODE_OPTIONS='--max-old-space-size=8192' npm run build
 
 # Cleanup local override immediately after build to prevent accidents
-rm .env.production.local
+rm -f .env.production.local
 
 # Step 2: Prepare Target Directory
 echo "📁 Preparing target directory ($TARGET_DIR)..."
