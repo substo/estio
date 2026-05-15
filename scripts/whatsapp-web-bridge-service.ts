@@ -509,6 +509,42 @@ async function fetchMessages(sessionId: string, payload: any) {
     return Promise.all((messages || []).map((message: any) => withStaleRecovery(session, () => serializeMessage(message, { includeMedia }))));
 }
 
+async function resolveChatForPhone(sessionId: string, payload: any) {
+    const session = sessions.get(sessionId);
+    if (!session?.client || !session.ready) throw new Error("WhatsApp Web session is not ready.");
+
+    const digits = String(payload.phone || "").replace(/\D/g, "");
+    if (!digits) throw new Error("Missing phone number.");
+
+    const numberId = await withStaleRecovery(session, async () => {
+        if (typeof session.client.getNumberId !== "function") return null;
+        return session.client.getNumberId(digits).catch(() => null);
+    });
+    const numberChatId = jidFromId(numberId);
+    if (numberChatId) {
+        return { chatId: numberChatId, source: "getNumberId" };
+    }
+
+    const chats = await withStaleRecovery(session, () => session.client.getChats());
+    for (const chat of chats || []) {
+        if (chat?.isGroup) continue;
+        const chatId = jidFromId(chat?.id);
+        if (!chatId) continue;
+
+        const identity = await buildContactIdentity(chat, chatId);
+        const candidates = [
+            identity.phoneJid,
+            identity.number,
+            chatId,
+        ].filter(Boolean);
+        if (candidates.some((candidate) => String(candidate).replace(/\D/g, "") === digits)) {
+            return { chatId, source: "chat_scan", contactIdentity: identity };
+        }
+    }
+
+    return { chatId: `${digits}@c.us`, source: "phone_fallback" };
+}
+
 const server = createServer(async (req, res) => {
     try {
         if (!isAuthorized(req)) return json(res, 401, { error: "Unauthorized" });
@@ -559,6 +595,11 @@ const server = createServer(async (req, res) => {
                 const messages = await fetchMessages(sessionId, body);
                 return json(res, 200, { success: true, messages });
             }
+            if (req.method === "POST" && parts[2] === "resolve-chat") {
+                const body = await readJson(req);
+                const result = await resolveChatForPhone(sessionId, body);
+                return json(res, 200, { success: true, ...result });
+            }
         }
 
         return json(res, 404, { error: "Not found." });
@@ -570,6 +611,9 @@ const server = createServer(async (req, res) => {
 
 server.listen(PORT, () => {
     console.log(`[WhatsApp Web Bridge] Listening on ${PORT}; session dir ${SESSION_DIR}`);
+    if (!process.env.WHATSAPP_WEB_BRIDGE_SESSION_DIR) {
+        console.warn("[WhatsApp Web Bridge] WHATSAPP_WEB_BRIDGE_SESSION_DIR is not set. Set it to a persistent path outside release folders, for example /home/martin/whatsapp-web-sessions.");
+    }
 });
 
 setInterval(() => {

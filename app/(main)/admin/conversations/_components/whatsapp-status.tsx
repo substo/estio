@@ -177,9 +177,13 @@ export function WhatsAppStatus() {
             const res = await getWhatsAppWebBridgeStatus();
             setProvider(res.provider === 'evolution' ? 'evolution' : 'web_bridge');
             setStatus(res.status);
-            setQrCode(res.qrcode);
+            const connected = res.status === 'ready' || res.status === 'open' || res.status === 'connected';
+            setQrCode(connected ? null : res.qrcode);
             setPhone(res.phone || null);
             setStatusError(res.error || null);
+            if (connected) {
+                setDialogOpen(false);
+            }
         } catch (e) {
             console.error(e);
             setStatus('ERROR');
@@ -228,7 +232,7 @@ export function WhatsAppStatus() {
 
     useEffect(() => {
         checkStatus();
-        const pollTime = (qrCode || ['starting', 'qr', 'authenticated', 'connecting', 'qrcode'].includes(status)) ? 3000 : 30000;
+        const pollTime = (qrCode || ['starting', 'qr', 'authenticated', 'connecting', 'qrcode', 'loading', 'restarting', 'reconnecting'].includes(status)) ? 3000 : 30000;
         const interval = setInterval(checkStatus, pollTime);
         return () => clearInterval(interval);
     }, [qrCode, status]);
@@ -242,12 +246,12 @@ export function WhatsAppStatus() {
     const isConnected = status === 'ready' || status === 'open' || status === 'connected';
     const isError = status === 'ERROR' || status === 'NOT_FOUND' || status === 'close' || status === 'failed' || status === 'disconnected';
     const isAwaitingScan = !!qrCode && ['qr', 'qrcode'].includes(status);
-    const isPairing = ['authenticated', 'starting', 'connecting', 'loading', 'restarting'].includes(status) || (dialogOpen && !isConnected && !isAwaitingScan && !!qrCode);
+    const isPairing = ['authenticated', 'starting', 'connecting', 'loading', 'restarting', 'reconnecting'].includes(status) || (dialogOpen && !isConnected && !isAwaitingScan && !!qrCode);
     const statusLabel = isConnected
         ? 'Online'
         : status === 'checking'
             ? 'Checking...'
-            : ['starting', 'qr', 'authenticated', 'connecting', 'qrcode', 'loading', 'restarting'].includes(status)
+            : ['starting', 'qr', 'authenticated', 'connecting', 'qrcode', 'loading', 'restarting', 'reconnecting'].includes(status)
                 ? 'Connecting'
                 : 'Offline';
     const visibleEmailProviders = emailProviders.filter((provider) => provider.connected || provider.configured);
@@ -314,6 +318,9 @@ export function WhatsAppStatus() {
                                             {isPairing
                                                 ? 'WhatsApp accepted the scan. Keep this window open while Estio confirms the linked device. This can take up to a minute.'
                                                 : <>Open WhatsApp on your phone, go to <strong>Linked Devices</strong>, and scan this code.</>}
+                                        </p>
+                                        <p className="mt-1 text-xs leading-5 text-slate-500">
+                                            Do not remove the active Estio linked device. Remove old duplicate Estio linked devices only if WhatsApp says the linked-device limit is reached.
                                         </p>
                                         {provider === 'web_bridge' && phone ? (
                                             <p className="mt-1 text-xs text-slate-500">Connected phone: {phone}</p>

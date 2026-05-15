@@ -67,11 +67,15 @@ import { enqueueWhatsAppOutbound } from "@/lib/whatsapp/outbound-enqueue";
 import {
     fetchWhatsAppWebBridgeChats,
     fetchWhatsAppWebBridgeMessages,
+    buildWhatsAppWebBridgeSessionId,
+    getWhatsAppWebBridgeHealth,
     getWhatsAppWebBridgeSession,
     getReadyWhatsAppWebBridgeSession,
     normalizeWhatsAppWebChatId,
     parseWhatsAppWebChatIdentity,
+    resolveWhatsAppWebBridgeChatForPhone,
     startWhatsAppWebBridgeSession,
+    upsertWhatsAppWebBridgeSession,
 } from "@/lib/whatsapp/web-bridge";
 import { ingestWhatsAppWebBridgeMediaAttachment, formatWhatsAppWebBridgeMediaFailure } from "@/lib/whatsapp/web-bridge-media";
 import { hasOpenWhatsAppCustomerServiceWindow } from "@/lib/whatsapp/customer-window";
@@ -1896,7 +1900,7 @@ export async function fetchMessages(
 
     const conversation = await db.conversation.findFirst({
         where: buildConversationReferenceWhere(location.id, conversationId),
-        include: { contact: true }
+        include: { contact: true, syncRecords: true }
     });
 
     if (!conversation) {
@@ -5384,7 +5388,7 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
 
     const conversation = await db.conversation.findFirst({
         where: buildConversationReferenceWhere(location.id, conversationId),
-        include: { contact: true }
+        include: { contact: true, syncRecords: true }
     });
 
     if (!conversation) return { success: false, error: "Conversation not found" };
@@ -5393,13 +5397,34 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
     try {
         const providerMode = await resolveLocationWhatsAppProviderMode(location.id);
         if (providerMode === "web_bridge") {
-            if (!conversation.contact?.phone) {
-                return { success: false, error: "Web Bridge history sync needs a contact phone number." };
+            const existingBridgeSync = (conversation.syncRecords || []).find((sync: any) =>
+                String(sync.provider || "") === "whatsapp_web_bridge" && sync.providerConversationId
+            );
+            let chatId = String(existingBridgeSync?.providerConversationId || conversation.contact?.lid || "").trim();
+            if (!chatId && conversation.contact?.phone) {
+                const resolvedChat = await resolveWhatsAppWebBridgeChatForPhone({
+                    locationId: location.id,
+                    phone: conversation.contact.phone,
+                }).catch((error: any) => {
+                    console.warn(`[Sync][web_bridge:${conversationId}] Phone chat resolution failed:`, error?.message || error);
+                    return null;
+                });
+                chatId = String(resolvedChat?.chatId || "").trim();
+            }
+            if (!chatId && conversation.contact?.phone) {
+                chatId = normalizeWhatsAppWebChatId(conversation.contact.phone);
+            }
+            if (!chatId) {
+                return { success: false, error: "Web Bridge history sync needs a contact phone number or WhatsApp identity." };
             }
 
             const result = await importWebBridgeRecentMessagesForContact({
                 locationId: location.id,
                 phone: conversation.contact.phone,
+                chatId,
+                canonicalContactId: conversation.contact.id,
+                canonicalConversationId: conversation.id,
+                canonicalPhone: conversation.contact.phone,
                 contactName: conversation.contact.name,
                 limit: limit || 30,
                 logPrefix: `[Sync][web_bridge:${conversationId}]`,
@@ -7885,7 +7910,81 @@ export async function getWhatsAppWebBridgeStatus() {
             };
         }
 
-        const session = await getWhatsAppWebBridgeSession(location.id);
+        const [session, health] = await Promise.all([
+            getWhatsAppWebBridgeSession(location.id),
+            getWhatsAppWebBridgeHealth().catch((error: any) => ({
+                reachable: false,
+                ok: false,
+                baseUrl: "",
+                error: error?.message || "WhatsApp Web Bridge is not reachable.",
+                sessions: [],
+            })),
+        ]);
+        const expectedSessionId = session?.sessionId || buildWhatsAppWebBridgeSessionId(location.id);
+        const workerSession = (health.sessions || []).find((item: any) =>
+            item?.locationId === location.id || item?.sessionId === expectedSessionId
+        );
+
+        if (health.reachable && workerSession?.ready) {
+            const now = new Date();
+            const lastReadyAt = workerSession.lastReadyAt ? new Date(workerSession.lastReadyAt) : now;
+            await upsertWhatsAppWebBridgeSession(location.id, {
+                sessionId: workerSession.sessionId || expectedSessionId,
+                status: "ready",
+                qrCode: null,
+                phone: workerSession.phone || session?.phone || null,
+                lastReadyAt,
+                lastSeenAt: now,
+                lastError: null,
+                isDefaultOutbound: true,
+            }).catch((error: any) => {
+                console.warn("[WhatsApp Web Bridge] Failed to repair ready DB session from worker health:", error?.message || error);
+            });
+            return {
+                provider: "web_bridge" as const,
+                mode,
+                status: "ready",
+                qrcode: null,
+                phone: workerSession.phone || session?.phone || null,
+                sessionId: workerSession.sessionId || expectedSessionId,
+                lastSeenAt: workerSession.lastEventAt || session?.lastSeenAt?.toISOString?.() || null,
+                lastReadyAt: workerSession.lastReadyAt || session?.lastReadyAt?.toISOString?.() || null,
+                error: null as string | null,
+            };
+        }
+
+        if (health.reachable && workerSession) {
+            const workerStatus = String(workerSession.status || "starting");
+            return {
+                provider: "web_bridge" as const,
+                mode,
+                status: workerStatus,
+                qrcode: workerStatus === "qr" ? (session?.qrCode || null) : null,
+                phone: workerSession.phone || session?.phone || null,
+                sessionId: workerSession.sessionId || expectedSessionId,
+                lastSeenAt: workerSession.lastEventAt || session?.lastSeenAt?.toISOString?.() || null,
+                lastReadyAt: workerSession.lastReadyAt || session?.lastReadyAt?.toISOString?.() || null,
+                error: workerSession.lastError || null,
+            };
+        }
+
+        if (session?.status === "ready" || session?.status === "authenticated" || session?.status === "starting") {
+            void startWhatsAppWebBridgeSession(location.id).catch((error: any) => {
+                console.warn("[WhatsApp Web Bridge] Background reconnect from status check failed:", error?.message || error);
+            });
+            return {
+                provider: "web_bridge" as const,
+                mode,
+                status: "reconnecting",
+                qrcode: null,
+                phone: session?.phone || null,
+                sessionId: session?.sessionId || expectedSessionId,
+                lastSeenAt: session?.lastSeenAt?.toISOString?.() || null,
+                lastReadyAt: session?.lastReadyAt?.toISOString?.() || null,
+                error: health.error || null,
+            };
+        }
+
         return {
             provider: "web_bridge" as const,
             mode,
@@ -7952,13 +8051,48 @@ export async function triggerWhatsAppWebBridgeConnection() {
             console.warn("[WhatsApp Web Bridge] Failed to persist provider mode on location:", error?.message || error);
         });
 
-        await startWhatsAppWebBridgeSession(location.id);
         const session = await getWhatsAppWebBridgeSession(location.id);
+        const health = await getWhatsAppWebBridgeHealth().catch(() => null);
+        const expectedSessionId = session?.sessionId || buildWhatsAppWebBridgeSessionId(location.id);
+        const workerSession = (health?.sessions || []).find((item: any) =>
+            item?.locationId === location.id || item?.sessionId === expectedSessionId
+        );
+        if (workerSession?.ready) {
+            await upsertWhatsAppWebBridgeSession(location.id, {
+                sessionId: workerSession.sessionId || expectedSessionId,
+                status: "ready",
+                qrCode: null,
+                phone: workerSession.phone || session?.phone || null,
+                lastReadyAt: workerSession.lastReadyAt ? new Date(workerSession.lastReadyAt) : new Date(),
+                lastSeenAt: new Date(),
+                lastError: null,
+                isDefaultOutbound: true,
+            }).catch(() => null);
+            return {
+                provider: "web_bridge" as const,
+                success: true,
+                qrCode: null,
+                status: "ready",
+                error: null as string | null,
+            };
+        }
+        if (workerSession && ["starting", "authenticated", "qr", "reconnecting", "loading", "restarting"].includes(String(workerSession.status || ""))) {
+            return {
+                provider: "web_bridge" as const,
+                success: true,
+                qrCode: String(workerSession.status || "") === "qr" ? (session?.qrCode || null) : null,
+                status: String(workerSession.status || "starting"),
+                error: workerSession.lastError || null,
+            };
+        }
+
+        await startWhatsAppWebBridgeSession(location.id);
+        const nextSession = await getWhatsAppWebBridgeSession(location.id);
         return {
             provider: "web_bridge" as const,
             success: true,
-            qrCode: session?.qrCode || null,
-            status: session?.status || "starting",
+            qrCode: nextSession?.qrCode || null,
+            status: nextSession?.status || "starting",
             error: null as string | null,
         };
     } catch (error: any) {
@@ -9870,6 +10004,9 @@ async function importWebBridgeRecentMessagesForContact(args: {
     locationId: string;
     phone: string | null | undefined;
     chatId?: string | null;
+    canonicalContactId?: string | null;
+    canonicalConversationId?: string | null;
+    canonicalPhone?: string | null;
     contactName?: string | null;
     limit?: number;
     logPrefix?: string;
@@ -9911,13 +10048,63 @@ async function importWebBridgeRecentMessagesForContact(args: {
                 remoteJid: remoteId,
                 identity: message?.contactIdentity || null,
             });
-            const contactPhone = contactIdentity.phone || resolvedIdentity.phone;
+            let contactPhone = contactIdentity.phone || resolvedIdentity.phone;
             const contactLid = resolvedIdentity.lid || contactIdentity.lid || "";
+            const canonicalPhoneDigits = String(args.canonicalPhone || args.phone || "").replace(/\D/g, "");
+            if (!contactPhone && contactLid && canonicalPhoneDigits.length >= 7) {
+                contactPhone = canonicalPhoneDigits;
+            }
             const contactAddress = contactPhone || contactLid;
             const ownPhone = ownIdentity.phone || args.locationId;
             if (!contactIdentity.isSupported || !contactAddress) {
                 skipped++;
                 continue;
+            }
+
+            if (contactLid && args.canonicalContactId && canonicalPhoneDigits.length >= 7) {
+                const { upsertWebBridgeIdentityMap } = await import("@/lib/whatsapp/web-bridge-identity");
+                await upsertWebBridgeIdentityMap({
+                    locationId: args.locationId,
+                    contactId: args.canonicalContactId,
+                    identityType: "lid",
+                    identityValue: contactLid,
+                    lid: contactLid,
+                    phone: `+${canonicalPhoneDigits}`,
+                    displayName: resolvedIdentity.displayName || message?.contactName || message?.notifyName || args.contactName || null,
+                    confidence: "high",
+                    source: "history_sync_canonical_contact",
+                    lastSeenAt: new Date(Number(message?.timestamp || Date.now() / 1000) * 1000),
+                    metadata: message?.contactIdentity || undefined,
+                });
+                await db.contact.update({
+                    where: { id: args.canonicalContactId },
+                    data: { lid: contactLid } as any,
+                }).catch(() => null);
+                if (args.canonicalConversationId) {
+                    await db.conversationSync.upsert({
+                        where: {
+                            conversationId_provider_providerAccountId: {
+                                conversationId: args.canonicalConversationId,
+                                provider: "whatsapp_web_bridge",
+                                providerAccountId: "default",
+                            },
+                        },
+                        create: {
+                            conversationId: args.canonicalConversationId,
+                            locationId: args.locationId,
+                            provider: "whatsapp_web_bridge",
+                            providerAccountId: "default",
+                            providerConversationId: chatId,
+                            status: "synced",
+                            lastSyncedAt: new Date(),
+                        },
+                        update: {
+                            providerConversationId: chatId,
+                            status: "synced",
+                            lastSyncedAt: new Date(),
+                        },
+                    }).catch(() => null);
+                }
             }
 
             const result = await processNormalizedMessage({

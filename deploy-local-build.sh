@@ -19,6 +19,7 @@ VIEWING_RELAY_APP_NAME="estio-viewing-live-relay"
 VIEWING_RELAY_DEFAULT_PORT=8788
 WHATSAPP_BRIDGE_APP_NAME="estio-whatsapp-web-bridge"
 WHATSAPP_BRIDGE_DEFAULT_PORT=3218
+WHATSAPP_BRIDGE_SESSION_DIR_DEFAULT="$BASE_DIR/whatsapp-web-sessions"
 LEGACY_SCRAPE_WORKER_PORT=3010
 PRISMA_CLI_VERSION="${PRISMA_CLI_VERSION:-6.19.0}"
 # Schema sync modes:
@@ -538,10 +539,16 @@ NODE
     fi
 
     echo "📱 Ensuring WhatsApp Web Bridge process is running (\$WHATSAPP_BRIDGE_APP_NAME) on :\$WHATSAPP_BRIDGE_PORT..."
+    WHATSAPP_BRIDGE_SESSION_DIR="\${WHATSAPP_WEB_BRIDGE_SESSION_DIR:-$WHATSAPP_BRIDGE_SESSION_DIR_DEFAULT}"
+    mkdir -p "\$WHATSAPP_BRIDGE_SESSION_DIR"
+    if echo "\$WHATSAPP_BRIDGE_SESSION_DIR" | grep -Eq '/estio-app(-blue|-green)?(/|$)'; then
+        echo "❌ WHATSAPP_WEB_BRIDGE_SESSION_DIR must be outside release directories. Current: \$WHATSAPP_BRIDGE_SESSION_DIR"
+        exit 1
+    fi
     if pm2 describe "\$WHATSAPP_BRIDGE_APP_NAME" > /dev/null 2>&1; then
         pm2 delete "\$WHATSAPP_BRIDGE_APP_NAME" || true
     fi
-    NODE_ENV=production PROCESS_ROLE=whatsapp-bridge \
+    NODE_ENV=production PROCESS_ROLE=whatsapp-bridge WHATSAPP_WEB_BRIDGE_SESSION_DIR="\$WHATSAPP_BRIDGE_SESSION_DIR" \
         pm2 start npm --name "\$WHATSAPP_BRIDGE_APP_NAME" --cwd "\$SYMLINK_PATH" -- run start:whatsapp-web-bridge
 
     echo "🩺 Waiting for WhatsApp Web Bridge readiness..."

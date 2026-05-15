@@ -154,8 +154,25 @@ export async function getWhatsAppWebBridgeSession(locationId: string) {
 
 export async function getReadyWhatsAppWebBridgeSession(locationId: string) {
     const session = await getWhatsAppWebBridgeSession(locationId);
-    if (!session || session.status !== "ready") return null;
-    return session;
+    if (session?.status === "ready") return session;
+
+    const health = await getWhatsAppWebBridgeHealth().catch(() => null);
+    const expectedSessionId = session?.sessionId || buildWhatsAppWebBridgeSessionId(locationId);
+    const workerSession = (health?.sessions || []).find((item: any) =>
+        item?.locationId === locationId || item?.sessionId === expectedSessionId
+    );
+    if (!health?.reachable || !workerSession?.ready) return null;
+
+    return upsertWhatsAppWebBridgeSession(locationId, {
+        sessionId: workerSession.sessionId || expectedSessionId,
+        status: "ready",
+        qrCode: null,
+        phone: workerSession.phone || session?.phone || null,
+        lastReadyAt: workerSession.lastReadyAt ? new Date(workerSession.lastReadyAt) : new Date(),
+        lastSeenAt: new Date(),
+        lastError: null,
+        isDefaultOutbound: true,
+    });
 }
 
 export async function upsertWhatsAppWebBridgeSession(locationId: string, data?: Partial<WhatsAppWebBridgeSessionRow>) {
@@ -265,6 +282,32 @@ export async function startWhatsAppWebBridgeSession(locationId: string) {
     return bridgeFetch(`/sessions/${encodeURIComponent(session.sessionId)}/start`, {
         method: "POST",
         body: JSON.stringify({ locationId }),
+    });
+}
+
+export async function resolveWhatsAppWebBridgeChatForPhone(input: {
+    locationId: string;
+    phone: string;
+    preferredChatId?: string | null;
+}) {
+    const session = await getReadyWhatsAppWebBridgeSession(input.locationId);
+    if (!session) {
+        throw new Error("WhatsApp Web Bridge is not connected. Scan the QR code and wait until the session is ready.");
+    }
+
+    const preferred = normalizeWhatsAppWebChatId(input.preferredChatId);
+    if (preferred) {
+        return { chatId: preferred, source: "preferred" };
+    }
+
+    const digits = String(input.phone || "").replace(/\D/g, "");
+    if (!digits) {
+        throw new Error("Missing phone number for WhatsApp Web chat resolution.");
+    }
+
+    return bridgeFetch(`/sessions/${encodeURIComponent(session.sessionId)}/resolve-chat`, {
+        method: "POST",
+        body: JSON.stringify({ phone: digits }),
     });
 }
 
