@@ -539,7 +539,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                             <Button
                                                 size="sm"
                                                 variant="secondary"
-                                                disabled={creating || !contact.phone}
+                                                disabled={creating || (!contact.phone && !contact.email)}
                                                 className="shrink-0 ml-2"
                                                 onClick={async () => {
                                                     setCreating(true);

@@ -61,7 +61,7 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
     const hasError = !!contact.error;
     const conversation = contact.conversations?.[0];
     const hasConversation = !!conversation?.id;
-    const canStartConversation = !!contact.phone;
+    const canStartConversation = !!contact.phone || !!contact.email;
     const getConversationHref = (conversationId: string) => {
         const params = new URLSearchParams({
             id: conversationId,
@@ -221,7 +221,7 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
                                         ? `Open conversation${conversation && conversation.unreadCount > 0 ? ` (${conversation.unreadCount} unread)` : ""}`
                                         : canStartConversation
                                             ? "Start conversation"
-                                            : "No phone number to start conversation"}
+                                            : "No phone or email to start conversation"}
                                 </TooltipContent>
                             </Tooltip>
                         </TooltipProvider>
@@ -235,7 +235,7 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
                             </Link>
                         ) : (
                             <span className={`text-xs ${canStartConversation ? "text-muted-foreground" : "text-gray-400"}`}>
-                                {isOpeningConversation ? "Creating..." : canStartConversation ? "Start" : "No phone"}
+                                {isOpeningConversation ? "Creating..." : canStartConversation ? "Start" : "No info"}
                             </span>
                         )}
                     </div>
