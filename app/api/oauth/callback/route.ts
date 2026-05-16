@@ -54,35 +54,48 @@ export async function GET(request: NextRequest) {
         let locationId = tokenData.locationId || context.locationId;
         let agencyId = tokenData.agencyId || context.agencyId;
         let userId = tokenData.userId || context.userId;
+        const internalLocationId = context.internalLocationId;
 
         console.log(`[OAuth] Derived IDs - Location: ${locationId}, Agency: ${agencyId}, User: ${userId}`);
 
         // If we have a userId,
         // Upsert Location into our DB
-        const where = locationId ? { ghlLocationId: locationId } : { ghlAgencyId: agencyId };
-        const dbLocation = await db.location.upsert({
-            where: where as any, // Prisma types might be tricky with optional uniques, but this should work if defined correctly
-            update: {
-                ghlAccessToken: tokenData.access_token,
-                ghlRefreshToken: tokenData.refresh_token,
-                ghlExpiresAt: new Date(Date.now() + tokenData.expires_in * 1000),
-                ghlTokenType: tokenData.token_type,
-                ghlScopes: tokenData.scope, // Store granted scopes for mismatch detection
-                // Update IDs if they were missing and now present (unlikely for upsert but good for completeness)
-                ghlLocationId: locationId,
-                ghlAgencyId: agencyId,
-            },
-            create: {
-                ghlLocationId: locationId,
-                ghlAgencyId: agencyId,
-                ghlAccessToken: tokenData.access_token,
-                ghlRefreshToken: tokenData.refresh_token,
-                ghlExpiresAt: new Date(Date.now() + tokenData.expires_in * 1000),
-                ghlTokenType: tokenData.token_type,
-                ghlScopes: tokenData.scope, // Store granted scopes for mismatch detection
-                name: "New Location", // Placeholder
-            },
-        });
+        let dbLocation;
+        const locationData = {
+            ghlAccessToken: tokenData.access_token,
+            ghlRefreshToken: tokenData.refresh_token,
+            ghlExpiresAt: new Date(Date.now() + tokenData.expires_in * 1000),
+            ghlTokenType: tokenData.token_type,
+            ghlScopes: tokenData.scope, // Store granted scopes for mismatch detection
+            ghlLocationId: locationId,
+            ghlAgencyId: agencyId,
+        };
+
+        if (internalLocationId) {
+            const existingLocation = await db.location.findUnique({
+                where: { id: internalLocationId },
+                select: { id: true },
+            });
+
+            if (existingLocation) {
+                dbLocation = await db.location.update({
+                    where: { id: internalLocationId },
+                    data: locationData,
+                });
+            }
+        }
+
+        if (!dbLocation) {
+            const where = locationId ? { ghlLocationId: locationId } : { ghlAgencyId: agencyId };
+            dbLocation = await db.location.upsert({
+                where: where as any, // Prisma types might be tricky with optional uniques, but this should work if defined correctly
+                update: locationData,
+                create: {
+                    ...locationData,
+                    name: "New Location", // Placeholder
+                },
+            });
+        }
         console.log("[OAuth] Location upserted successfully. ID:", dbLocation.id);
 
         // Link User to Location if we have user details

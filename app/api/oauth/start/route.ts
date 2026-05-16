@@ -5,6 +5,7 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const locationId = searchParams.get("locationId");
     const agencyId = searchParams.get("agencyId");
+    const internalLocationId = searchParams.get("internalLocationId");
     const proceed = searchParams.get("proceed");
 
     // If user clicked "Continue", redirect to OAuth
@@ -20,7 +21,7 @@ export async function GET(request: NextRequest) {
         console.log("----------------------------------------------------------------");
         params.append("scope", scopeString);
 
-        const state = JSON.stringify({ locationId, agencyId });
+        const state = JSON.stringify({ locationId, agencyId, internalLocationId });
         params.append("state", state);
 
         const authUrl = `https://marketplace.leadconnectorhq.com/oauth/chooselocation?${params.toString()}`;
@@ -33,6 +34,7 @@ export async function GET(request: NextRequest) {
     const currentUrl = new URL("/oauth/authorize", baseUrl);
     currentUrl.searchParams.set("locationId", locationId || "");
     currentUrl.searchParams.set("agencyId", agencyId || "");
+    currentUrl.searchParams.set("internalLocationId", internalLocationId || "");
 
     return NextResponse.redirect(currentUrl);
 }

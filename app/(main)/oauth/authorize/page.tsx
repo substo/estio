@@ -7,13 +7,17 @@ import Link from "next/link";
 export default async function OAuthAuthorizePage({
     searchParams,
 }: {
-    searchParams: Promise<{ locationId?: string; agencyId?: string }>;
+    searchParams: Promise<{ locationId?: string; agencyId?: string; internalLocationId?: string }>;
 }) {
     const params = await searchParams;
-    const { locationId, agencyId } = params;
+    const { locationId, agencyId, internalLocationId } = params;
 
     // Build the continue URL
-    const continueUrl = `/api/oauth/start?proceed=true${locationId ? `&locationId=${locationId}` : ''}${agencyId ? `&agencyId=${agencyId}` : ''}`;
+    const continueParams = new URLSearchParams({ proceed: "true" });
+    if (locationId) continueParams.set("locationId", locationId);
+    if (agencyId) continueParams.set("agencyId", agencyId);
+    if (internalLocationId) continueParams.set("internalLocationId", internalLocationId);
+    const continueUrl = `/api/oauth/start?${continueParams.toString()}`;
 
     return (
         <PageWrapper>
