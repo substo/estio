@@ -29,3 +29,9 @@ data class InboundSmsRequest(
     val received_at_ms: Long,
     val to: String? = null
 )
+
+data class ManualOutboundSmsRequest(
+    val to: String,
+    val body: String,
+    val sent_at_ms: Long
+)

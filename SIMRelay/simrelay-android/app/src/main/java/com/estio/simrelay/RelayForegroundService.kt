@@ -21,10 +21,12 @@ class RelayForegroundService : Service() {
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + Job())
     private val CHANNEL_ID = "SimRelayServiceChannel"
+    private lateinit var sentSmsMirror: SentSmsMirror
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        sentSmsMirror = SentSmsMirror(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -81,6 +83,7 @@ class RelayForegroundService : Service() {
                         }
                     }
                     ApiClient.api.heartbeat()
+                    sentSmsMirror.pollOnce()
                 } catch (e: Exception) {
                     // Ignored
                 }
@@ -97,6 +100,7 @@ class RelayForegroundService : Service() {
                 } else {
                     SmsManager.getDefault()
                 }
+                sentSmsMirror.suppressRelaySend(destination, message)
                 smsManager.sendTextMessage(destination, null, message, null, null)
                 ApiClient.api.reportJobResult(JobResultRequest(jobId, "sent"))
             } catch (e: Exception) {

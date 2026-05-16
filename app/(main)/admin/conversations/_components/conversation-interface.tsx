@@ -3634,18 +3634,52 @@ export function ConversationInterface({ locationId, initialConversations, initia
             });
         };
 
+        const normalizeSendError = (error: unknown) => {
+            const raw = error instanceof Error ? error.message : String(error || "");
+            const lower = raw.toLowerCase();
+            if (
+                lower.includes("failed to find server action") ||
+                lower.includes("failed-to-find-server-action") ||
+                (lower.includes("server action") && lower.includes("not found"))
+            ) {
+                return "Page updated. Reload and try again.";
+            }
+            return raw || "Unknown error occurred";
+        };
+
         let sendFailureToastShown = false;
         try {
-            const res = await sendReply(capturedConversationId, capturedContactId, text, type as 'SMS' | 'Email' | 'WhatsApp' | 'SMS_RELAY', {
-                clientMessageId: optimisticClientMessageId,
-                translationSourceText: options?.translationSourceText || null,
-                translationTargetLanguage: options?.translationTargetLanguage || null,
-                translationDetectedSourceLanguage: options?.translationDetectedSourceLanguage || null,
-            });
+            const res = type === "SMS_RELAY"
+                ? await fetch("/api/sms-relay/send", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        conversationId: capturedConversationId,
+                        contactId: capturedContactId,
+                        messageBody: text,
+                        clientMessageId: optimisticClientMessageId,
+                    }),
+                }).then(async (response) => {
+                    const payload = await response.json().catch(() => ({}));
+                    if (!response.ok) {
+                        return {
+                            success: false,
+                            error: payload?.error || `SIM Relay send failed (${response.status})`,
+                            errorCode: payload?.errorCode,
+                        };
+                    }
+                    return payload;
+                })
+                : await sendReply(capturedConversationId, capturedContactId, text, type as 'SMS' | 'Email' | 'WhatsApp' | 'SMS_RELAY', {
+                    clientMessageId: optimisticClientMessageId,
+                    translationSourceText: options?.translationSourceText || null,
+                    translationTargetLanguage: options?.translationTargetLanguage || null,
+                    translationDetectedSourceLanguage: options?.translationDetectedSourceLanguage || null,
+                });
 
             if (!res.success) {
                 markOptimisticMessageFailed();
-                const description = typeof res.error === 'string' ? res.error : 'Unknown error occurred';
+                const description = normalizeSendError(typeof res.error === 'string' ? res.error : 'Unknown error occurred');
                 toast({
                     title: 'Failed to send message',
                     description,
@@ -3701,12 +3735,12 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
                 if (warning) {
                     toast({
-                        title: 'WhatsApp delivery degraded',
+                        title: type === "SMS_RELAY" ? 'SIM Relay delivery queued' : 'WhatsApp delivery degraded',
                         description: warning,
                     });
                 } else if (degradedDelivery) {
                     toast({
-                        title: 'WhatsApp delivery degraded',
+                        title: type === "SMS_RELAY" ? 'SIM Relay delivery degraded' : 'WhatsApp delivery degraded',
                         description: 'Queue enqueue failed. Durable auto-recovery is active for this message.',
                     });
                 }
@@ -3716,7 +3750,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             if (!sendFailureToastShown) {
                 toast({
                     title: 'Failed to send message',
-                    description: e?.message || 'Unknown error occurred',
+                    description: normalizeSendError(e),
                     variant: 'destructive',
                 });
             }

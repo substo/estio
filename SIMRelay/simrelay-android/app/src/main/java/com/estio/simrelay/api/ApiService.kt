@@ -18,6 +18,9 @@ interface ApiService {
     @POST("/api/sms-relay/gateway/inbound")
     suspend fun reportInboundSms(@Body request: InboundSmsRequest): Response<Void>
 
+    @POST("/api/sms-relay/gateway/manual-outbound")
+    suspend fun reportManualOutboundSms(@Body request: ManualOutboundSmsRequest): Response<Void>
+
     @POST("/api/sms-relay/gateway/heartbeat")
     suspend fun heartbeat(): Response<Void>
 }

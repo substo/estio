@@ -5885,85 +5885,18 @@ export async function sendReply(
 
         if (type === "SMS_RELAY") {
             const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
-            
-            const conversation = await db.conversation.findFirst({
-                where: buildConversationReferenceWhere(location.id, conversationId),
-                select: { id: true, locationId: true, contactId: true },
+            const { sendSmsRelayMessage } = await import("@/lib/sms-relay/send");
+            const result = await sendSmsRelayMessage({
+                locationId: location.id,
+                conversationId,
+                contactId,
+                messageBody,
+                clientMessageId: options?.clientMessageId || null,
             });
-            if (!conversation || conversation.locationId !== location.id) {
-                return { success: false, error: "Conversation not found." };
+            if (result.success) {
+                invalidateConversationReadCaches(conversationId);
             }
-
-            const contact = await db.contact.findFirst({
-                where: {
-                    OR: [
-                        { ghlContactId: contactId },
-                        { id: contactId },
-                    ],
-                    locationId: location.id,
-                },
-                select: { id: true, phone: true, name: true },
-            });
-            if (!contact) return { success: false, error: "Contact not found." };
-            if (!contact.phone) return { success: false, error: "Contact does not have a phone number." };
-            
-            // Pick a paired device (Option A: first active one)
-            const device = await (db as any).smsRelayDevice.findFirst({
-                where: { locationId: location.id, paired: true },
-                orderBy: { lastSeenAt: 'desc' },
-                select: { id: true }
-            });
-            
-            if (!device) return { success: false, error: "No paired SIM Relay device found." };
-
-            const normalizedBody = String(messageBody || "").trim();
-            if (!normalizedBody) return { success: false, error: "Message body cannot be empty." };
-
-            // Create local message record directly (optimistic pending)
-            const localMessage = await db.message.create({
-                data: {
-                    conversationId: conversation.id,
-                    body: normalizedBody,
-                    type: "TYPE_SMS",
-                    direction: "outbound",
-                    status: "pending",
-                    source: "sms_relay",
-                    createdAt: new Date(),
-                }
-            });
-
-            await updateConversationLastMessage({
-                conversationId: conversation.id,
-                messageBody: normalizedBody,
-                messageType: "TYPE_SMS",
-                messageDate: new Date(),
-                direction: "outbound",
-            });
-
-            // Enqueue the outbox job
-            const { enqueueSmsRelayOutbox } = await import("@/lib/sms-relay/outbox");
-            const outboxRow = await enqueueSmsRelayOutbox({
-                locationId: location.id,
-                conversationId: conversation.id,
-                messageId: localMessage.id,
-                deviceId: device.id,
-                toNumber: contact.phone,
-                body: normalizedBody,
-            });
-
-            // Immediately trigger BullMQ to process the outbox row (no waiting for cron)
-            const { enqueueSmsRelayOutboxQueueJob } = await import("@/lib/queue/sms-relay-outbox");
-            await enqueueSmsRelayOutboxQueueJob({ outboxId: outboxRow.id });
-
-            invalidateConversationReadCaches(conversation.id);
-            emitConversationRealtimeEvent({
-                locationId: location.id,
-                conversationId: conversation.id,
-                type: "message.outbound",
-                payload: { channel: "sms_relay" },
-            });
-            
-            return { success: true as const, messageId: localMessage.id };
+            return result;
         }
 
         const location = await getAuthenticatedLocation();
