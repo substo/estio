@@ -12,7 +12,7 @@ export type ExtractedGroupParticipantIdentity = {
     phoneDigits: string | null;
     displayName: string | null;
     resolutionConfidence: GroupParticipantResolutionConfidence;
-    source: "whatsapp_evolution";
+    source: "whatsapp_web_bridge";
 };
 
 function normalizeJid(value: string | null | undefined): string | null {
@@ -67,7 +67,7 @@ export function extractGroupParticipantIdentity(input: {
             phoneDigits,
             displayName,
             resolutionConfidence: "verified_phone_jid",
-            source: "whatsapp_evolution",
+            source: "whatsapp_web_bridge",
         };
     }
 
@@ -80,7 +80,7 @@ export function extractGroupParticipantIdentity(input: {
             phoneDigits: null,
             displayName,
             resolutionConfidence: "lid_only",
-            source: "whatsapp_evolution",
+            source: "whatsapp_web_bridge",
         };
     }
 
@@ -93,7 +93,7 @@ export function extractGroupParticipantIdentity(input: {
             phoneDigits: null,
             displayName,
             resolutionConfidence: "participant_jid",
-            source: "whatsapp_evolution",
+            source: "whatsapp_web_bridge",
         };
     }
 
@@ -106,7 +106,7 @@ export function extractGroupParticipantIdentity(input: {
         phoneDigits: null,
         displayName,
         resolutionConfidence: "display_name_only",
-        source: "whatsapp_evolution",
+        source: "whatsapp_web_bridge",
     };
 }
 

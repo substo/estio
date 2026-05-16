@@ -5335,12 +5335,13 @@ async function resolveWhatsAppOutboundTransport(locationId: string, explicit?: W
         } as any,
     });
 
-    const mode = String(integrationPayload.whatsappProviderMode || (row as any)?.whatsappProviderMode || "web_bridge");
+    const rawMode = String(integrationPayload.whatsappProviderMode || (row as any)?.whatsappProviderMode || "web_bridge");
+    const mode = rawMode === "evolution_linked" ? "web_bridge" : rawMode;
     const cloudConfigured = Boolean((integrationPayload.whatsappPhoneNumberId || row?.whatsappPhoneNumberId) && (hasCloudSecret || row?.whatsappAccessToken));
     const twilioConfigured = Boolean((integrationPayload.twilioAccountSid || row?.twilioAccountSid) && (integrationPayload.twilioWhatsAppFrom || row?.twilioWhatsAppFrom));
     const webBridgeConfigured = Boolean(await getReadyWhatsAppWebBridgeSession(locationId).catch(() => null));
 
-    if (mode === "web_bridge" || mode === "evolution_linked") {
+    if (mode === "web_bridge") {
         return { transport: "web_bridge", cloudConfigured, webBridgeConfigured };
     }
     if (mode === "twilio_fallback" && twilioConfigured) {
