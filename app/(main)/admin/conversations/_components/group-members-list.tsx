@@ -302,7 +302,7 @@ export function GroupMembersList({ conversationId }: GroupMembersListProps) {
                                 </div>
                                 {!participant.canOpenDirect ? (
                                     <div className="text-[10px] text-muted-foreground">
-                                        Direct chat is unavailable until Evolution exposes a trusted direct number.
+                                        Direct chat is unavailable until WhatsApp exposes a trusted direct number.
                                     </div>
                                 ) : null}
                             </div>

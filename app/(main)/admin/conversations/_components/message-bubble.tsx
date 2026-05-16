@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Mail, Smartphone, Paperclip, ExternalLink, ChevronDown, ChevronUp, ArrowRight, Download, Maximize2, RefreshCw, Clock, Check, CheckCheck, AlertTriangle, UserPlus, User, Phone as PhoneIcon, Building2, MailIcon, ExternalLink as ExternalLinkIcon, MessageCirclePlus, MoreHorizontal, Clipboard, Search, FileText, Wand2, ListPlus, ListTodo, Sparkles, Home, Languages } from "lucide-react";
 import { saveSharedContact, openOrStartConversationForContact, checkSharedContactsSavedState } from "@/app/(main)/admin/contacts/actions";
-import type { SharedContactInfo } from "@/lib/whatsapp/evolution-media";
 import { format } from "date-fns";
 import { EmailFrame, type EmailFrameSelection } from "./email-frame";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -51,6 +50,13 @@ type MessageAttachment = string | {
             restricted?: boolean;
         } | null;
     } | null;
+};
+
+type SharedContactInfo = {
+    name?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    organization?: string | null;
 };
 
 const CONTACTS_DATA_SEPARATOR = "\n---CONTACTS_DATA---\n";

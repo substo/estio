@@ -129,9 +129,6 @@ const locationIntegrationsSchema = z.object({
     whatsappWebhookSecret: nullableTrimmedString,
     twilioAccountSid: nullableTrimmedString,
     twilioWhatsAppFrom: nullableTrimmedString,
-    evolutionInstanceId: nullableTrimmedString,
-    evolutionApiToken: nullableTrimmedString,
-    evolutionConnectionStatus: nullableTrimmedString,
 }).passthrough();
 
 const locationCrmSchema = z.object({

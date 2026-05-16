@@ -8,8 +8,8 @@ export const WHATSAPP_CLOUD_PROVIDER = "whatsapp_cloud";
 export const GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || "v21.0";
 export const GRAPH_API_URL = process.env.META_GRAPH_API_URL || "https://graph.facebook.com";
 
-export type WhatsAppTransport = "cloud_api" | "evolution" | "twilio" | "web_bridge";
-export type WhatsAppProviderMode = "cloud_primary" | "evolution_linked" | "twilio_fallback" | "web_bridge";
+export type WhatsAppTransport = "cloud_api" | "twilio" | "web_bridge";
+export type WhatsAppProviderMode = "cloud_primary" | "twilio_fallback" | "web_bridge";
 export type WhatsAppOutboundKind = "text" | "image" | "audio" | "document" | "template";
 
 export type WhatsAppTemplateComponent = {
@@ -67,7 +67,8 @@ function graphUrl(path: string) {
 }
 
 function normalizeProviderMode(value: unknown): WhatsAppProviderMode {
-    if (value === "evolution_linked" || value === "twilio_fallback" || value === "cloud_primary" || value === "web_bridge") return value;
+    if (value === "twilio_fallback" || value === "cloud_primary" || value === "web_bridge") return value;
+    if (value === "evolution_linked") return "web_bridge";
     return "cloud_primary";
 }
 

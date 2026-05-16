@@ -78,17 +78,12 @@ model Location {
   whatsappPhoneNumberId     String?
   whatsappAccessToken       String? @db.Text // Long-lived system user token
   whatsappWebhookSecret     String?
-  whatsappProviderMode      String  @default("web_bridge") // cloud_primary | evolution_linked | twilio_fallback | web_bridge
+  whatsappProviderMode      String  @default("web_bridge") // cloud_primary | twilio_fallback | web_bridge
 
   // Twilio Integration
   twilioAccountSid   String?
   twilioAuthToken    String? // Encrypted
   twilioWhatsAppFrom String?
-
-  // Evolution API (Shadow WhatsApp)
-  evolutionInstanceId       String?
-  evolutionApiToken         String?
-  evolutionConnectionStatus String? // "open", "connecting", "close"
 
   whatsappImportSessions WhatsAppImportSession[]
 
@@ -641,7 +636,7 @@ model WhatsAppIdentityMap {
   locationId String
   contactId  String?
 
-  provider      String // whatsapp_web_bridge | evolution | cloud_api
+  provider      String // whatsapp_web_bridge | cloud_api
   identityType  String // lid | phone | chat
   identityValue String
 
@@ -1843,7 +1838,7 @@ model ConversationParticipant {
   displayName    String?
   lastSeenAt     DateTime?
   resolutionConfidence String @default("unknown")
-  source         String   @default("whatsapp_evolution")
+  source         String   @default("whatsapp_web_bridge")
   joinedAt       DateTime @default(now())
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -2212,7 +2207,7 @@ model ConversationSync {
   conversationId String
   locationId     String
 
-  provider            String // ghl | google | outlook | evolution
+  provider            String // ghl | google | outlook | whatsapp_web_bridge | cloud_api
   providerAccountId   String  @default("default")
   providerConversationId String?
   providerThreadId       String?
@@ -2246,7 +2241,7 @@ model MessageSync {
   conversationId String
   locationId     String
 
-  provider          String // ghl | google | outlook | evolution
+  provider          String // ghl | google | outlook | whatsapp_web_bridge | cloud_api
   providerAccountId String @default("default")
   providerMessageId String?
   providerThreadId  String?
@@ -2347,7 +2342,7 @@ model WhatsAppOutboundOutbox {
   contactId      String
   locationId     String
 
-  transport String // cloud_api | evolution | twilio | web_bridge
+  transport String // cloud_api | twilio | web_bridge
   kind      String // text | image | audio | document | template
   payload   Json
 
@@ -2382,7 +2377,7 @@ model WhatsAppChannel {
   phoneNumberId     String
   displayPhoneNumber String?
   verifiedName      String?
-  providerMode      String  @default("cloud_primary") // cloud_primary | evolution_linked | twilio_fallback | web_bridge
+  providerMode      String  @default("cloud_primary") // cloud_primary | twilio_fallback | web_bridge
   status            String  @default("unknown")
   qualityRating     String?
   platformType      String?

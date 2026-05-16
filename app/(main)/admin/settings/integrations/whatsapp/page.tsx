@@ -5,10 +5,6 @@ import {
     getWhatsAppSettings,
     updateWhatsAppSettings,
     exchangeSystemUserToken,
-    connectEvolutionDevice,
-    logoutEvolutionInstance,
-    checkInstanceHealth,
-    repairEvolutionConnection,
     getWhatsAppCloudHealth,
     syncWhatsAppTemplates,
     listWhatsAppTemplates,
@@ -35,17 +31,6 @@ import { useToast } from "@/components/ui/use-toast";
 import { FacebookSDKScript } from "@/components/integrations/facebook-sdk-script";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import {
-    AlertDialog,
-    AlertDialogAction,
-    AlertDialogCancel,
-    AlertDialogContent,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogHeader,
-    AlertDialogTitle,
-    AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 
 type WhatsAppChannelRow = {
     id: string;
@@ -190,8 +175,6 @@ function formatBridgeBytes(bytes: number | null | undefined) {
 export default function WhatsAppSettingsPage() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
-    const [repairing, setRepairing] = useState(false);
-    const [qrCode, setQrCode] = useState<string | null>(null);
     const [settings, setSettings] = useState({
         businessAccountId: "",
         phoneNumberId: "",
@@ -204,9 +187,6 @@ export default function WhatsAppSettingsPage() {
         twilioAuthToken: "",
         hasTwilioAuthToken: false,
         twilioWhatsAppFrom: "",
-        // Evolution
-        evolutionInstanceId: "",
-        evolutionConnectionStatus: "close",
         whatsappProviderMode: "web_bridge",
         whatsappChannels: [] as WhatsAppChannelRow[],
         webBridgeSession: null as WhatsAppWebBridgeSessionRow | null,
@@ -223,14 +203,6 @@ export default function WhatsAppSettingsPage() {
     const [aiBusy, setAiBusy] = useState(false);
     const [clearWhatsAppAccessToken, setClearWhatsAppAccessToken] = useState(false);
     const [clearTwilioAuthToken, setClearTwilioAuthToken] = useState(false);
-    const [legacyEvolutionOpen, setLegacyEvolutionOpen] = useState(false);
-
-    // Health Check State
-    const [healthStatus, setHealthStatus] = useState<{
-        status: 'idle' | 'checking' | 'healthy' | 'zombie' | 'disconnected' | 'syncing';
-        contacts: number;
-        chats: number;
-    }>({ status: 'idle', contacts: 0, chats: 0 });
 
     // Embedded Signup State
     const [appId, setAppId] = useState(process.env.NEXT_PUBLIC_META_APP_ID || "");
@@ -275,14 +247,11 @@ export default function WhatsAppSettingsPage() {
             twilioAuthToken: data.twilioAuthToken || "",
             hasTwilioAuthToken: Boolean(data.hasTwilioAuthToken),
             twilioWhatsAppFrom: data.twilioWhatsAppFrom || "",
-            evolutionInstanceId: data.evolutionInstanceId || "",
-            evolutionConnectionStatus: data.evolutionConnectionStatus || "close",
             whatsappProviderMode: data.whatsappProviderMode || "web_bridge",
             whatsappChannels: Array.isArray(data.whatsappChannels) ? data.whatsappChannels : [],
             webBridgeSession: data.webBridgeSession || null,
             webBridgeDiagnostics: data.webBridgeDiagnostics || null,
         });
-        setLegacyEvolutionOpen(data.whatsappProviderMode === "evolution_linked");
     };
 
     const refreshCloudOps = async (syncTemplates = false) => {
@@ -547,59 +516,6 @@ export default function WhatsAppSettingsPage() {
         }
     };
 
-    const performHealthCheck = async () => {
-        if (settings.evolutionConnectionStatus !== 'open') return;
-
-        setHealthStatus(prev => ({ ...prev, status: 'checking' }));
-        try {
-            const res = await checkInstanceHealth(settings.locationId || null);
-            // @ts-ignore
-            if (res && res.success) {
-                // @ts-ignore
-                setHealthStatus({
-                    // @ts-ignore
-                    status: res.status, // healthy, zombie, disconnected
-                    // @ts-ignore
-                    contacts: res.contactsCount || 0,
-                    // @ts-ignore
-                    chats: res.chatsCount || 0
-                });
-            }
-        } catch (e) {
-            console.error("Health check error", e);
-        }
-    };
-
-    // Trigger health check when connected
-    useEffect(() => {
-        if (settings.evolutionConnectionStatus === 'open') {
-            performHealthCheck();
-        } else {
-            setHealthStatus({ status: 'disconnected', contacts: 0, chats: 0 });
-        }
-    }, [settings.evolutionConnectionStatus]);
-
-    const handleRepair = async () => {
-        setRepairing(true);
-        toast({ title: "Starting Repair", description: "Disconnecting and preparing new session..." });
-
-        try {
-            const res = await repairEvolutionConnection(settings.locationId || null);
-            if (res.success && res.qrCode) {
-                setSettings(prev => ({ ...prev, evolutionConnectionStatus: 'close' }));
-                setQrCode(res.qrCode);
-                setHealthStatus({ status: 'disconnected', contacts: 0, chats: 0 });
-                toast({ title: "Ready to Scan", description: "Please scan the new QR code immediately." });
-            } else {
-                toast({ title: "Repair Failed", description: res.error || "Could not generate QR", variant: "destructive" });
-            }
-        } catch (e) {
-            toast({ title: "Error", description: "Failed to repair connection.", variant: "destructive" });
-        } finally {
-            setRepairing(false);
-        }
-    };
-
     const handleLogin = async (response: any) => {
         // ... (rest of handleLogin implementation is unchanged)
         setSaving(true);
@@ -695,23 +611,6 @@ export default function WhatsAppSettingsPage() {
         refreshCloudOps(false);
     }, [settings.locationId, settings.phoneNumberId]);
 
-    // Polling for connection status when QR code is visible
-    useEffect(() => {
-        if (!qrCode) return;
-
-        const interval = setInterval(async () => {
-            const data = await getWhatsAppSettings(settings.locationId || null);
-            if (data && data.evolutionConnectionStatus === 'open') {
-                setSettings(prev => ({ ...prev, evolutionConnectionStatus: 'open' }));
-                setQrCode(null); // Clear QR code to show success state
-                toast({ title: "Connected", description: "WhatsApp device connected successfully." });
-                clearInterval(interval);
-            }
-        }, 3000);
-
-        return () => clearInterval(interval);
-    }, [qrCode]);
-
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setSaving(true);
@@ -722,9 +621,7 @@ export default function WhatsAppSettingsPage() {
         formData.append("accessToken", settings.accessToken);
         formData.append("clearWhatsAppAccessToken", clearWhatsAppAccessToken ? "on" : "off");
         formData.append("webhookSecret", settings.webhookSecret);
-        const submittedProviderMode = settings.whatsappProviderMode === "evolution_linked" && legacyEvolutionEnabled
-            ? "evolution_linked"
-            : ["web_bridge", "cloud_primary"].includes(settings.whatsappProviderMode)
+        const submittedProviderMode = ["web_bridge", "cloud_primary"].includes(settings.whatsappProviderMode)
             ? settings.whatsappProviderMode
             : "web_bridge";
         formData.append("whatsappProviderMode", submittedProviderMode);
@@ -810,8 +707,6 @@ export default function WhatsAppSettingsPage() {
 
     const origin = typeof window !== "undefined" ? window.location.origin : "";
     const webhookUrl = `${origin}/api/webhooks/whatsapp`;
-    const legacyEvolutionEnabled = settings.whatsappProviderMode === "evolution_linked";
-
     return (
         <div className="space-y-6 max-w-4xl">
             <FacebookSDKScript appId={process.env.NEXT_PUBLIC_META_APP_ID || ""} onReady={() => setFbSdkReady(true)} />
@@ -1353,256 +1248,6 @@ export default function WhatsAppSettingsPage() {
                         </div>
                     </CardContent>
                 </Card>
-
-                {/* Legacy Evolution linked-device card */}
-                {legacyEvolutionEnabled && (
-                <Collapsible open={legacyEvolutionOpen} onOpenChange={setLegacyEvolutionOpen}>
-                    <Card className="border-amber-200 dark:border-amber-900 bg-amber-50/20">
-                        <CardHeader>
-                            <div className="flex items-start justify-between gap-4">
-                                <div>
-                                    <CardTitle className="flex items-center space-x-2">
-                                        <span className="text-amber-700 font-bold">Advanced Legacy Evolution</span>
-                                        <Badge variant="outline">Deprecated</Badge>
-                                    </CardTitle>
-                                    <CardDescription>
-                                        Legacy fallback for this already-legacy location. Use WhatsApp Web Bridge for normal linked-device chat.
-                                    </CardDescription>
-                                </div>
-                                <CollapsibleTrigger asChild>
-                                    <Button type="button" variant="outline" size="sm">
-                                        {legacyEvolutionOpen ? "Hide" : "Show"}
-                                    </Button>
-                                </CollapsibleTrigger>
-                            </div>
-                        </CardHeader>
-                        <CollapsibleContent>
-                    <CardContent className="space-y-4">
-                        {settings.evolutionConnectionStatus === 'open' ? (
-                            <div className="flex flex-col items-center justify-center space-y-4 p-6 border rounded-lg bg-green-50/50">
-                                <CheckCircle2 className="h-12 w-12 text-green-500" />
-                                <div className="text-center">
-                                    <h3 className="font-medium text-lg text-green-700">Device Connected</h3>
-                                    <p className="text-sm text-green-600">Legacy Evolution API is active for this location.</p>
-                                </div>
-
-                                {/* Health Check / Zombie Repair Section */}
-                                <div className="w-full">
-                                    {healthStatus.status === 'checking' && (
-                                        <div className="flex items-center justify-center space-x-2 text-sm text-muted-foreground p-2">
-                                            <Loader2 className="h-3 w-3 animate-spin" />
-                                            <span>Verifying sync status...</span>
-                                        </div>
-                                    )}
-
-                                    {healthStatus.status === 'syncing' && (
-                                        <Alert className="border-blue-200 bg-blue-50 dark:bg-blue-950/20 mt-2 mb-4">
-                                            <RefreshCw className="h-4 w-4 text-blue-600 animate-spin" />
-                                            <AlertTitle className="text-blue-800 dark:text-blue-200 text-sm font-bold">
-                                                Syncing Contacts...
-                                            </AlertTitle>
-                                            <AlertDescription className="text-blue-700 dark:text-blue-300 text-xs mt-1">
-                                                New connection detected. Please wait while WhatsApp syncs your contacts and chats. This may take a few minutes.
-                                                <div className="mt-2">
-                                                    <Button
-                                                        size="sm"
-                                                        variant="ghost"
-                                                        onClick={performHealthCheck}
-                                                        disabled={!legacyEvolutionEnabled}
-                                                        className="h-6 text-[10px] text-blue-700 hover:bg-blue-100"
-                                                    >
-                                                        Refresh Status
-                                                    </Button>
-                                                </div>
-                                            </AlertDescription>
-                                        </Alert>
-                                    )}
-
-                                    {healthStatus.status === 'zombie' && (
-                                        <Alert className="border-yellow-200 bg-yellow-50 dark:bg-yellow-950/20 mt-2 mb-4">
-                                            <AlertTriangle className="h-4 w-4 text-yellow-600" />
-                                            <AlertTitle className="text-yellow-800 dark:text-yellow-200 text-sm font-bold">
-                                                Connection Unhealthy (Zombie State)
-                                            </AlertTitle>
-                                            <AlertDescription className="text-yellow-700 dark:text-yellow-300 text-xs mt-1">
-                                                The device is connected but showing <strong>0 synced contacts</strong>. This can happen after updates or server restarts. Messages may not be received correctly.
-                                                <div className="mt-3">
-                                                    <Button
-                                                        size="sm"
-                                                        variant="destructive"
-                                                        onClick={handleRepair}
-                                                        disabled={repairing || !legacyEvolutionEnabled}
-                                                        className="w-full sm:w-auto"
-                                                    >
-                                                        {repairing ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-2 h-3 w-3" />}
-                                                        Repair Connection (Re-Scan)
-                                                    </Button>
-                                                </div>
-                                            </AlertDescription>
-                                        </Alert>
-                                    )}
-
-                                    {healthStatus.status === 'healthy' && (
-                                        <div className="text-xs text-center text-muted-foreground mt-2 border-t pt-2">
-                                            <div className="flex justify-center space-x-4">
-                                                <span>Contacts: <strong>{healthStatus.contacts}</strong></span>
-                                                <span>Chats: <strong>{healthStatus.chats}</strong></span>
-                                            </div>
-                                            <div className="flex items-center justify-center gap-2 mt-2">
-                                                <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={performHealthCheck} disabled={!legacyEvolutionEnabled}>
-                                                    Refresh Status
-                                                </Button>
-                                                <span className="text-muted-foreground/30">|</span>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    className="h-6 text-[10px] text-orange-600 hover:text-orange-700 hover:bg-orange-50"
-                                                    onClick={handleRepair}
-                                                    disabled={repairing || !legacyEvolutionEnabled}
-                                                >
-                                                    {repairing ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1 h-3 w-3" />}
-                                                    Force Re-scan
-                                                </Button>
-                                                <span className="text-muted-foreground/30">|</span>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    className="h-6 text-[10px] text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                                                    onClick={async () => {
-                                                        setSaving(true);
-                                                        try {
-                                                            const { resetWebhookUrl } = await import("./actions");
-                                                            const res = await resetWebhookUrl();
-                                                            if (res.success) {
-                                                                toast({ title: "Webhook Updated", description: `Re-set to: ${res.url}` });
-                                                            } else {
-                                                                toast({ title: "Error", description: res.error, variant: "destructive" });
-                                                            }
-                                                        } catch (e) {
-                                                            toast({ title: "Error", description: "Failed to reset webhook", variant: "destructive" });
-                                                        }
-                                                        setSaving(false);
-                                                    }}
-                                                    disabled={saving || !legacyEvolutionEnabled}
-                                                >
-                                                    <RefreshCw className="mr-1 h-3 w-3" />
-                                                    Re-sync Webhook
-                                                </Button>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-
-                                <AlertDialog>
-                                    <AlertDialogTrigger asChild>
-                                        <Button
-                                            variant="outline"
-                                            className="border-red-200 text-red-600 hover:bg-red-50 mt-2"
-                                            disabled={saving || repairing || !legacyEvolutionEnabled}
-                                        >
-                                            {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                                            Disconnect Device
-                                        </Button>
-                                    </AlertDialogTrigger>
-                                    <AlertDialogContent>
-                                        <AlertDialogHeader>
-                                            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                                            <AlertDialogDescription>
-                                                This will disconnect the current WhatsApp session. You will need to scan the QR code again to reconnect.
-                                            </AlertDialogDescription>
-                                        </AlertDialogHeader>
-                                        <AlertDialogFooter>
-                                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                            <AlertDialogAction
-                                                className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
-                                                onClick={async () => {
-                                                    setSaving(true);
-                                                    const result = await logoutEvolutionInstance(settings.locationId || null);
-                                                    if (!result.success) {
-                                                        toast({ title: "Error", description: result.error || "Failed to disconnect", variant: "destructive" });
-                                                        setSaving(false);
-                                                        return;
-                                                    }
-                                                    setSettings(prev => ({ ...prev, evolutionConnectionStatus: 'close' }));
-                                                    setHealthStatus({ status: 'disconnected', contacts: 0, chats: 0 });
-                                                    setSaving(false);
-                                                    toast({ title: "Disconnected", description: "Linked device disconnected." });
-                                                }}
-                                            >
-                                                Disconnect
-                                            </AlertDialogAction>
-                                        </AlertDialogFooter>
-                                    </AlertDialogContent>
-                                </AlertDialog>
-                            </div>
-                        ) : (
-                            <div className="flex flex-col items-center space-y-4">
-                                {qrCode ? (
-                                    <div className="flex flex-col items-center space-y-4">
-                                        <div className="bg-white p-2 rounded-lg border shadow-sm">
-                                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                                            <img src={qrCode} alt="WhatsApp QR Code" className="w-64 h-64" />
-                                        </div>
-                                        <p className="text-sm text-center text-muted-foreground max-w-xs">
-                                            Open WhatsApp on your phone {'>'} Menu {'>'} Linked devices {'>'} Link a device.
-                                        </p>
-                                        <Button
-                                            variant="ghost"
-                                            onClick={() => setQrCode(null)}
-                                            size="sm"
-                                        >
-                                            Cancel
-                                        </Button>
-                                    </div>
-                                ) : (
-                                    <div className="text-center space-y-4">
-                                        <p className="text-sm text-muted-foreground">
-                                            Legacy Evolution connection. Prefer WhatsApp Web Bridge for new linked-device sessions.
-                                        </p>
-                                        {repairing && (
-                                            <Alert className="mb-4 border-yellow-200 bg-yellow-50">
-                                                <Loader2 className="h-4 w-4 animate-spin text-yellow-600" />
-                                                <AlertDescription className="text-yellow-700 text-xs">
-                                                    Resetting connection instance...
-                                                </AlertDescription>
-                                            </Alert>
-                                        )}
-                                        <Button
-                                            className="bg-amber-600 hover:bg-amber-700 text-white"
-                                            onClick={async () => {
-                                                setSaving(true);
-                                                try {
-                                                    const res = await connectEvolutionDevice(settings.locationId || null);
-                                                    if (res.success && res.qrCode) {
-                                                        setQrCode(res.qrCode);
-                                                        toast({ title: "Scan QR Code", description: "QR Code generated successfully." });
-                                                    } else if (res.success) {
-                                                        toast({ title: "Connected", description: "Instance seems already connected or connecting." });
-                                                        // Refresh settings
-                                                        const data = await getWhatsAppSettings(settings.locationId || null);
-                                                        if (data) setSettings(prev => ({ ...prev, evolutionConnectionStatus: data.evolutionConnectionStatus || 'close' }));
-                                                    } else {
-                                                        toast({ title: "Error", description: res.error || "Failed to generate QR", variant: "destructive" });
-                                                    }
-                                                } catch (e: any) {
-                                                    toast({ title: "Error", description: "Failed to connect", variant: "destructive" });
-                                                }
-                                                setSaving(false);
-                                            }}
-                                            disabled={saving || repairing || !legacyEvolutionEnabled}
-                                        >
-                                            {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                                            Connect Legacy Device
-                                        </Button>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </CardContent>
-                        </CollapsibleContent>
-                    </Card>
-                </Collapsible>
-                )}
 
                 {/* Embedded Signup Card */}
                 <Card className="border-blue-200 dark:border-blue-900 bg-blue-50/20">

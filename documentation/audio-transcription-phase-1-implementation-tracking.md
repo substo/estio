@@ -32,9 +32,9 @@ Related research doc:
 ## Architecture (Current)
 
 Inbound audio flow:
-1. Webhook event enters `app/api/webhooks/evolution/route.ts`.
+1. Webhook event enters `app/api/webhooks/whatsapp-web-bridge/route.ts`.
 2. Message sync persists `Message`.
-3. Media ingest persists `MessageAttachment` via `lib/whatsapp/evolution-media.ts`.
+3. Media ingest persists `MessageAttachment` via `lib/whatsapp/web-bridge-media.ts`.
 4. For audio, enqueue transcription job to `whatsapp-audio-transcription`.
 5. Worker calls Google transcription service.
 6. `MessageTranscript` is updated through `pending -> processing -> completed|failed`.
@@ -143,7 +143,7 @@ File:
 
 ## Inbound
 File:
-- `lib/whatsapp/evolution-media.ts`
+- `lib/whatsapp/web-bridge-media.ts`
 
 Behavior:
 - After `messageAttachment.create(...)`, if parsed type is audio:
@@ -163,7 +163,7 @@ Behavior:
 
 ## Worker initialization at webhook runtime
 File:
-- `app/api/webhooks/evolution/route.ts`
+- `app/api/webhooks/whatsapp-web-bridge/route.ts`
 
 Behavior:
 - Initializes audio transcription worker on webhook path startup.

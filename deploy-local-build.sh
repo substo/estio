@@ -56,8 +56,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-RESTART_EVOLUTION_CONTAINERS="${RESTART_EVOLUTION_CONTAINERS:-false}"
-
 # Step 0: Determine Active/Target Slots
 echo "🔍 Checking server state..."
 CURRENT_SYMLINK_COLOR=$(ssh $SSH_OPTS $SERVER "if [ -L '$SYMLINK_PATH' ]; then LINK=\$(readlink '$SYMLINK_PATH'); if [[ \"\$LINK\" == *'-blue'* ]]; then echo blue; elif [[ \"\$LINK\" == *'-green'* ]]; then echo green; else echo none; fi; else echo none; fi")
@@ -213,17 +211,7 @@ ssh $SSH_OPTS $SERVER /bin/bash -s << ENDSSH
     esac
 ENDSSH
 
-# Step 6: Legacy Evolution Containers (Manual Only)
-if [[ "$RESTART_EVOLUTION_CONTAINERS" == "true" ]]; then
-    echo "🐳 Restarting legacy Evolution API containers (explicit rollback/admin request)..."
-    ssh $SSH_OPTS $SERVER "cd $TARGET_DIR && docker rm -f evolution_api evolution_postgres evolution_redis 2>/dev/null || true && docker compose -f docker-compose.evolution.yml up -d"
-else
-    echo "⏭️  Skipping legacy Evolution API container restart."
-    echo "   Standard deploys use WhatsApp Web Bridge. Set RESTART_EVOLUTION_CONTAINERS=true only for legacy rollback/admin work."
-    ssh $SSH_OPTS $SERVER "docker ps --filter name=evolution --format 'table {{.Names}}\t{{.Status}}' || true"
-fi
-
-# Step 7: Runtime-Safe Blue/Green Switch
+# Step 6: Runtime-Safe Blue/Green Switch
 TARGET_APP_NAME="${APP_NAME_PREFIX}-${TARGET_COLOR}"
 if [[ "$ACTIVE_COLOR" == "none" ]]; then
     ACTIVE_APP_NAME=""

@@ -329,9 +329,6 @@ async function backfillLocation(location: any) {
         whatsappWebhookSecret: location.whatsappWebhookSecret ?? null,
         twilioAccountSid: location.twilioAccountSid ?? null,
         twilioWhatsAppFrom: location.twilioWhatsAppFrom ?? null,
-        evolutionInstanceId: location.evolutionInstanceId ?? null,
-        evolutionApiToken: location.evolutionApiToken ?? null,
-        evolutionConnectionStatus: location.evolutionConnectionStatus ?? null,
     };
 
     await upsertDocumentIfChanged({
@@ -523,9 +520,6 @@ async function main() {
             twilioAccountSid: true,
             twilioAuthToken: true,
             twilioWhatsAppFrom: true,
-            evolutionInstanceId: true,
-            evolutionApiToken: true,
-            evolutionConnectionStatus: true,
             crmUrl: true,
             crmEditUrlPattern: true,
             crmLeadUrlPattern: true,

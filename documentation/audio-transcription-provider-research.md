@@ -28,12 +28,12 @@
 ## Existing IDX Integration Surface
 
 ### Where audio already enters and is persisted
-- `lib/whatsapp/evolution-media.ts`
+- `lib/whatsapp/web-bridge-media.ts`
   - Parses WhatsApp audio/image/document messages and stores media attachment metadata.
   - Writes `MessageAttachment` rows and R2-backed URIs.
 - `lib/whatsapp/sync.ts`
   - Normalizes inbound/outbound WhatsApp messages and persists `Message` rows.
-- `app/api/webhooks/evolution/route.ts`
+- `app/api/webhooks/whatsapp-web-bridge/route.ts`
   - Webhook entrypoint for incoming WhatsApp events.
   - Calls sync and media ingest paths.
 - `app/(main)/admin/conversations/actions.ts`

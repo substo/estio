@@ -2,8 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-    evolutionContactMatchesRequestedJid,
-    extractPhoneFromEvolutionContact,
     extractPhoneJidCandidate,
     isHighConfidenceResolvedPhone,
     normalizeLidJid,
@@ -25,34 +23,4 @@ test("normalizeLidJid canonicalizes plus-prefixed and mixed-case LID values", ()
     assert.equal(normalizeLidJid("+261692508373041@LID"), "261692508373041@lid");
     assert.equal(normalizeLidRaw("+261692508373041@LID"), "261692508373041");
     assert.equal(normalizeLidJid("393477416063@s.whatsapp.net"), null);
-});
-
-test("evolutionContactMatchesRequestedJid requires an exact JID match", () => {
-    const contact = {
-        id: "cmm0r9kzt07qpph4j76awlbsy",
-        remoteJid: "37383579947232@lid",
-    };
-
-    assert.equal(evolutionContactMatchesRequestedJid(contact, "37383579947232@lid"), true);
-    assert.equal(evolutionContactMatchesRequestedJid(contact, "112738663714895@lid"), false);
-});
-
-test("extractPhoneFromEvolutionContact ignores internal ids and unresolved lid-only rows", () => {
-    const unresolvedLidContact = {
-        id: "cmm0r9kzt07qpph4j76awlbsy",
-        remoteJid: "37383579947232@lid",
-        pushName: "",
-    };
-
-    assert.equal(extractPhoneFromEvolutionContact(unresolvedLidContact), null);
-});
-
-test("extractPhoneFromEvolutionContact accepts explicit phone metadata", () => {
-    const contact = {
-        remoteJid: "37383579947232@lid",
-        remoteJidAlt: "393477416063@s.whatsapp.net",
-        phoneNumber: "393477416063",
-    };
-
-    assert.equal(extractPhoneFromEvolutionContact(contact), "393477416063");
 });

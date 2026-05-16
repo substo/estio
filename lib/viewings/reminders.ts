@@ -471,7 +471,7 @@ function pickBestConversation(conversations: ContactConversationRecord[]): Conta
 }
 
 async function checkWhatsAppPhoneEligibility(
-    location: { evolutionInstanceId?: string | null },
+    _location: Record<string, never>,
     phone: string | null | undefined,
     options?: { contactName?: string | null; verifyServiceHealth?: boolean }
 ): Promise<{ status: "eligible" | "ineligible" | "unknown"; reason?: string }> {
@@ -496,41 +496,10 @@ async function checkWhatsAppPhoneEligibility(
         };
     }
 
-    if (!location?.evolutionInstanceId) {
-        return {
-            status: "unknown",
-            reason: "WhatsApp eligibility check is unavailable (Evolution is not connected).",
-        };
-    }
-
-    try {
-        const { evolutionClient } = await import("@/lib/evolution/client");
-        if (options?.verifyServiceHealth) {
-            const health = await evolutionClient.healthCheck();
-            if (!health.ok) {
-                return {
-                    status: "unknown",
-                    reason: health.error || "WhatsApp service is unavailable.",
-                };
-            }
-        }
-
-        const lookup = await evolutionClient.checkWhatsAppNumber(location.evolutionInstanceId, rawDigits);
-        if (lookup.exists) {
-            return { status: "eligible" };
-        }
-
-        return {
-            status: "ineligible",
-            reason: `${contactName}'s phone number is not registered on WhatsApp.`,
-        };
-    } catch (error) {
-        console.warn("[ViewingReminder] WhatsApp lookup failed:", error);
-        return {
-            status: "unknown",
-            reason: "Could not verify WhatsApp registration right now.",
-        };
-    }
+    return {
+        status: "unknown",
+        reason: "WhatsApp Web Bridge will verify this number at send time.",
+    };
 }
 
 async function ensurePropertyDirectionsUrl(property: ViewingContextRecord["property"]): Promise<{ url: string | null; source: GoogleMapsLinkSource }> {
@@ -1041,13 +1010,8 @@ async function resolveLeadReminderEligibility(context: ViewingReminderContext): 
         return { status: "unknown", reason: "Viewing location context is missing." };
     }
 
-    const location = await db.location.findUnique({
-        where: { id: context.locationId },
-        select: { evolutionInstanceId: true },
-    });
-
     return checkWhatsAppPhoneEligibility(
-        { evolutionInstanceId: location?.evolutionInstanceId || null },
+        {},
         context.lead.phone,
         {
             contactName: context.lead.name,

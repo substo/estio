@@ -1,4 +1,4 @@
-export type IntegrationProvider = "estio" | "ghl" | "google" | "outlook" | "evolution";
+export type IntegrationProvider = "estio" | "ghl" | "google" | "outlook";
 
 export type ProviderCapabilities = {
     canSendSms: boolean;
@@ -56,17 +56,6 @@ export const PROVIDER_CAPABILITIES: Record<IntegrationProvider, ProviderCapabili
         canSyncContacts: true,
         canSyncCalendar: true,
         canSyncTasks: true,
-    },
-    evolution: {
-        canSendSms: false,
-        canSendEmail: false,
-        canSendWhatsApp: true,
-        canMirrorInbound: true,
-        canMirrorOutbound: true,
-        canUpdateStatus: true,
-        canSyncContacts: false,
-        canSyncCalendar: false,
-        canSyncTasks: false,
     },
 };
 

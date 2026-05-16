@@ -130,7 +130,7 @@ export function buildWhatsAppOutboundUploadKey(input: {
 
     return [
         "whatsapp",
-        "evolution",
+        "web-bridge",
         "v1",
         "env",
         env,
@@ -162,7 +162,7 @@ export function buildWhatsAppInboundAttachmentKey(input: {
 
     const base = [
         "whatsapp",
-        "evolution",
+        "web-bridge",
         "v1",
         "env",
         env,

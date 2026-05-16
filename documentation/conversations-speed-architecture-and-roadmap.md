@@ -11,7 +11,7 @@ This document captures the full performance-improvement thread for `/admin/conve
 Use this doc as the performance-focused source of truth.  
 For full functional behavior and API details, see:
 - `documentation/conversation-management.md`
-- `documentation/whatsapp-integration.md` (source of truth for WhatsApp/Evolution outbound send architecture)
+- `documentation/whatsapp-integration.md` (source of truth for WhatsApp Web Bridge outbound send architecture)
 
 ## Target Outcomes (SLO / UX)
 - Thread switch latency:
@@ -124,8 +124,8 @@ Implemented SSE channel: `/api/conversations/events`
 `handleSendMessage` now uses **optimistic UI + queue-first durable ack** for WhatsApp:
 
 1. **Optimistic insert**: local outbound row appears immediately (`status: sending`, stable `clientMessageId`).
-2. **Fast queue ACK**: `sendReply(...)` / `sendWhatsAppMediaReply(...)` persist `Message + WhatsAppOutboundOutbox` in one transaction and return `{ queued, messageId, clientMessageId, outboxJobId }` without waiting for Evolution network send.
-3. **Durable dispatch**: BullMQ worker handles Evolution send, retries, dead-letter, and stale-lock recovery outside the request path.
+2. **Fast queue ACK**: `sendReply(...)` / `sendWhatsAppMediaReply(...)` persist `Message + WhatsAppOutboundOutbox` in one transaction and return `{ queued, messageId, clientMessageId, outboxJobId }` without waiting for WhatsApp network send.
+3. **Durable dispatch**: BullMQ worker handles WhatsApp send, retries, dead-letter, and stale-lock recovery outside the request path.
 4. **Deterministic reconciliation**: client and realtime patch by `messageId` / `clientMessageId` / `wamId`; no body-text matching and no "fetch latest 5" replacement race.
 5. **Incremental status updates**: realtime `message.outbound` / `message.status` events patch active thread in-memory; full refresh remains fallback-only for unknown IDs.
 
@@ -139,7 +139,7 @@ To prevent the UI from flashing the unread badge back on, list merge functions (
 The paste-import path in `New Conversation` and selection toolbar now follows the same latency principles used by message send:
 
 1. **No token-refresh on parse/import auth path**:
-   - `parseLeadFromText(...)`, `createParsedLead(...)`, `startNewConversation(...)`, and `fetchEvolutionChats(...)` now use read-only location auth where GHL access tokens are not required.
+   - `parseLeadFromText(...)`, `createParsedLead(...)`, `startNewConversation(...)`, and `fetchWhatsAppChats(...)` now use read-only location auth where GHL access tokens are not required.
 2. **Bounded parse request envelope**:
    - parse input is normalized and capped to 8,000 chars.
    - LLM parse call uses JSON mode + bounded output tokens (`350`) + `thinkingBudget=0` for deterministic low-latency extraction.

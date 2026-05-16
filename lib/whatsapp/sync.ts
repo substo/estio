@@ -2,8 +2,6 @@ import db from "@/lib/db";
 import { generateSmartReplies } from "@/lib/ai/smart-replies";
 import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-events";
 import {
-    evolutionContactMatchesRequestedJid,
-    extractPhoneFromEvolutionContact,
     isHighConfidenceResolvedPhone,
     normalizeDigits,
     normalizeLidJid,
@@ -22,7 +20,7 @@ function getMessageSyncProvider(source: NormalizedMessage["source"]) {
     if (source === "whatsapp_native") return WHATSAPP_CLOUD_PROVIDER;
     if (source === "whatsapp_twilio") return "twilio";
     if (source === "whatsapp_web_bridge") return WHATSAPP_WEB_BRIDGE_PROVIDER;
-    return "evolution";
+    return "whatsapp_retired";
 }
 
 export interface NormalizedMessage {
@@ -50,18 +48,9 @@ export interface NormalizedMessage {
     webBridgeIdentity?: any;
     __skipUnresolvedLidDeferral?: boolean; // Internal: avoid enqueue loop during retry
     __deferredAttempt?: number; // Internal: deferred retry count for logging/limits
-    __evolutionMediaAttachmentPayload?: {
-        instanceName: string;
-        evolutionMessageData: any;
-    }; // Internal: used to ingest image/audio attachment after deferred LID resolution
-    __evolutionImageAttachmentPayload?: {
-        instanceName: string;
-        evolutionMessageData: any;
-    }; // Backward compatibility: legacy image-only payload
 }
 
 // ... handleWhatsAppMessage ...
-import { evolutionClient } from "@/lib/evolution/client";
 
 type DeferredLidMessage = {
     msg: NormalizedMessage;
@@ -96,11 +85,10 @@ function buildContactLidLookup(locationId: string, lidValue: string | null | und
     } as any;
 }
 
-async function tryResolveLidToPhone(locationId: string, lidJid: string, instanceName?: string | null): Promise<string | null> {
+async function tryResolveLidToPhone(locationId: string, lidJid: string): Promise<string | null> {
     const lidRaw = String(lidJid || '').replace('@lid', '');
     if (!lidRaw) return null;
 
-    // 1) Fast local DB mapping (best case)
     const existing = await db.contact.findFirst({
         where: {
             locationId,
@@ -111,48 +99,10 @@ async function tryResolveLidToPhone(locationId: string, lidJid: string, instance
     });
 
     const dbPhone = normalizeDigits(existing?.phone);
-    if (isHighConfidenceResolvedPhone(dbPhone)) {
-        return dbPhone;
-    }
+    if (isHighConfidenceResolvedPhone(dbPhone)) return dbPhone;
     if (dbPhone) {
         console.warn(`[LID Resolve] Ignoring low-confidence DB phone mapping for ${lidJid}: +${dbPhone}`);
     }
-
-    // 2) Ask Evolution contact endpoint (sometimes contains phoneNumber for known contact)
-    if (instanceName) {
-        const evoContact = await evolutionClient.findContact(instanceName, lidJid);
-        const evoPhone = extractPhoneFromEvolutionContact(evoContact);
-        if (evoPhone) {
-            return evoPhone;
-        }
-
-        // 3) Scan all Evolution contacts for LID↔phone mapping
-        // Some contacts in Evolution's address book have both `id` (phone JID) and `lid` fields.
-        // If findContact for the LID didn't return a phone, scan the full contact list.
-        try {
-            const allContacts = await evolutionClient.fetchContacts(instanceName);
-            if (Array.isArray(allContacts)) {
-                for (const c of allContacts) {
-                    if (!evolutionContactMatchesRequestedJid(c, lidJid)) continue;
-
-                    const phone = extractPhoneFromEvolutionContact(c);
-                    if (phone) {
-                        console.log(`[LID Resolve] Found phone via Evolution contacts scan: ${lidJid} -> +${phone}`);
-                        // Proactively save this mapping to DB for next time
-                        await db.contact.updateMany({
-                            where: { locationId, lid: { contains: lidRaw }, phone: null },
-                            data: { phone: `+${phone}` }
-                        }).catch(() => { });
-                        return phone;
-                    }
-                }
-            }
-        } catch (scanErr) {
-            // Non-critical — just log and continue
-            console.warn(`[LID Resolve] Evolution contacts scan failed for ${lidJid}:`, scanErr);
-        }
-    }
-
     return null;
 }
 
@@ -166,31 +116,6 @@ function clearDeferredLidEntry(key: string) {
     deferredLidMessages.delete(key);
 }
 
-export async function runDeferredEvolutionMediaAttachmentIngest(msg: NormalizedMessage) {
-    const payload = msg.__evolutionMediaAttachmentPayload || msg.__evolutionImageAttachmentPayload;
-    if ((msg.type !== "image" && msg.type !== "audio") || !payload?.instanceName || !payload?.evolutionMessageData || !msg.wamId) {
-        return;
-    }
-
-    try {
-        const { ingestEvolutionMediaAttachment } = await import("@/lib/whatsapp/evolution-media");
-        const result: any = await ingestEvolutionMediaAttachment({
-            instanceName: payload.instanceName,
-            evolutionMessageData: payload.evolutionMessageData,
-            wamId: msg.wamId,
-        });
-
-        if (result?.status === "skipped" && result?.reason === "message_not_found") {
-            console.warn(`[WhatsApp Sync] Deferred media attachment still missing message row for ${msg.wamId}`);
-        }
-    } catch (err) {
-        console.error(`[WhatsApp Sync] Deferred media attachment ingest failed for ${msg.wamId}:`, err);
-    }
-}
-
-export async function runDeferredEvolutionImageAttachmentIngest(msg: NormalizedMessage) {
-    return runDeferredEvolutionMediaAttachmentIngest(msg);
-}
 
 function scheduleDeferredLidRetry(key: string) {
     const entry = deferredLidMessages.get(key);
@@ -222,7 +147,6 @@ function scheduleDeferredLidRetry(key: string) {
                 return;
             }
 
-            await runDeferredEvolutionMediaAttachmentIngest(current.msg);
             clearDeferredLidEntry(key);
             console.log(`[WhatsApp Sync] Deferred LID message resolved/processed: ${current.msg.wamId}`);
         } catch (err) {
@@ -445,6 +369,10 @@ async function upsertGroupParticipantShadow(params: {
 }
 
 export async function processNormalizedMessage(msg: NormalizedMessage) {
+    if (msg.source === "whatsapp_evolution") {
+        console.warn(`[WhatsApp Sync] Ignoring Evolution message ${msg.wamId}; Evolution API is retired.`);
+        return { status: "ignored", reason: "evolution_retired" };
+    }
     console.log(`[WhatsApp Sync] processNormalizedMessage Called for ${msg.wamId} (${msg.direction})`);
     const { locationId, from, to, body, type, wamId, timestamp, contactName, source, isGroup, participant } = msg;
     const direction = msg.direction || "inbound";
@@ -571,7 +499,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     // Fetch Location for Access Token
     const locationDef = await db.location.findUnique({
         where: { id: locationId },
-        select: { id: true, ghlLocationId: true, ghlAccessToken: true, evolutionInstanceId: true, whatsappPhoneNumberId: true, twilioAccountSid: true }
+        select: { id: true, ghlLocationId: true, ghlAccessToken: true, whatsappPhoneNumberId: true, twilioAccountSid: true }
     });
     if (!locationDef) {
         console.error(`[WhatsApp Sync] Location ${locationId} not found`);
@@ -613,7 +541,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         && !msg.resolvedPhone;
     if (isInboundUnresolvedLid) {
         const lidJid = msg.lid || contactPhone;
-        const resolvedDigits = await tryResolveLidToPhone(locationId, lidJid, locationDef.evolutionInstanceId);
+        const resolvedDigits = await tryResolveLidToPhone(locationId, lidJid);
 
         if (resolvedDigits) {
             contactPhone = `+${resolvedDigits}`;
@@ -1138,7 +1066,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         }
     }
 
-    const evolutionThreadId = msg.remoteJid || msg.chatId || msg.from || conversation.ghlConversationId || conversation.id;
+    const providerThreadId = msg.remoteJid || msg.chatId || msg.from || conversation.ghlConversationId || conversation.id;
     const syncProvider = getMessageSyncProvider(source);
     const syncProviderAccountId =
         syncProvider === WHATSAPP_CLOUD_PROVIDER
@@ -1147,7 +1075,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
                 ? (locationDef?.twilioAccountSid || "default")
                 : syncProvider === WHATSAPP_WEB_BRIDGE_PROVIDER
                     ? locationId
-                : (locationDef?.evolutionInstanceId || "default");
+                : "retired";
     await (db as any).conversationSync.upsert({
         where: {
             conversationId_provider_providerAccountId: {
@@ -1161,25 +1089,25 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
             locationId,
             provider: syncProvider,
             providerAccountId: syncProviderAccountId,
-            providerConversationId: evolutionThreadId,
+            providerConversationId: providerThreadId,
             status: "synced",
             lastSyncedAt: new Date(),
             metadata: { source },
         },
         update: {
-            providerConversationId: evolutionThreadId,
+            providerConversationId: providerThreadId,
             status: "synced",
             lastSyncedAt: new Date(),
             lastError: null,
             metadata: { source },
         },
     }).catch(async (error: any) => {
-        if (error?.code === "P2002" && evolutionThreadId) {
+        if (error?.code === "P2002" && providerThreadId) {
             const reused = await (db as any).conversationSync.updateMany({
                 where: {
                     provider: syncProvider,
                     providerAccountId: syncProviderAccountId,
-                    providerConversationId: evolutionThreadId,
+                    providerConversationId: providerThreadId,
                 },
                 data: {
                     conversationId: conversation.id,
@@ -1191,7 +1119,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
                 },
             }).catch(() => null);
             if (reused?.count) {
-                console.warn(`[WhatsApp Sync] Reused ${syncProvider} conversation sync after providerConversationId conflict: ${evolutionThreadId}`);
+                console.warn(`[WhatsApp Sync] Reused ${syncProvider} conversation sync after providerConversationId conflict: ${providerThreadId}`);
                 return;
             }
         }
@@ -1277,7 +1205,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
             provider: syncProvider,
             providerAccountId: syncProviderAccountId,
             providerMessageId: wamId,
-            providerThreadId: evolutionThreadId,
+            providerThreadId,
             status: "synced",
             remoteUpdatedAt: timestamp,
             lastSyncedAt: new Date(),
@@ -1285,7 +1213,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         },
         update: {
             providerMessageId: wamId,
-            providerThreadId: evolutionThreadId,
+            providerThreadId,
             status: "synced",
             remoteUpdatedAt: timestamp,
             lastSyncedAt: new Date(),
@@ -1411,7 +1339,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
                 },
                 metadata: {
                     timestamp: new Date(),
-                    sourceId: source === "whatsapp_web_bridge" ? "whatsapp-web-bridge" : "evolution-webhook",
+                    sourceId: source === "whatsapp_web_bridge" ? "whatsapp-web-bridge" : "whatsapp-provider",
                     conversationId: conversation.id,
                     contactId: contact.id,
                 },
@@ -1436,7 +1364,7 @@ export function mapWhatsAppDeliveryStatus(rawStatus: string) {
 }
 
 export async function processStatusUpdate(wamId: string, rawStatus: string) {
-    // Map Evolution/Baileys/WhatsApp Web status to our internal status.
+    // Map WhatsApp Web / Cloud API statuses to our internal status.
     const status = mapWhatsAppDeliveryStatus(rawStatus);
     if (!status) return;
 

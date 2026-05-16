@@ -4587,7 +4587,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     }
 
                     // Stop if we fetched fewer than requested (end of history)
-                    // Evolution API usually returns what it finds. If it finds 0, we stop.
+                    // WhatsApp history fetch usually returns what it finds. If it finds 0, we stop.
                     if (count < CHUNK_SIZE) {
                         keepFetching = false;
                     }

@@ -1,5 +1,4 @@
 import db from "@/lib/db";
-import { evolutionClient } from "@/lib/evolution/client";
 import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-events";
 import { createWhatsAppMediaReadUrl } from "@/lib/whatsapp/media-r2";
 import { updateConversationLastMessage } from "@/lib/conversations/update";
@@ -48,7 +47,7 @@ function computeBackoffMs(attemptCount: number): number {
 }
 
 function isRetryableOutboundError(error: unknown): boolean {
-    const explicitRetryable = (error as any)?.evolutionClassification?.retryable;
+    const explicitRetryable = (error as any)?.providerClassification?.retryable;
     if (typeof explicitRetryable === "boolean") return explicitRetryable;
 
     const status = Number((error as any)?.response?.status || (error as any)?.status || 0);
@@ -144,7 +143,10 @@ export async function processWhatsAppOutboundOutboxJob(args: {
         const attemptCount = Number(row.attemptCount || 0) + 1;
 
     try {
-        const transport = String(row.transport || "evolution").trim() || "evolution";
+        const transport = String(row.transport || "web_bridge").trim() || "web_bridge";
+        if (transport === "evolution") {
+            throw new Error("Evolution API has been retired. Recreate or resend this message through WhatsApp Web Bridge or Cloud API.");
+        }
         const normalizedPhone = normalizePhoneDigits(row.contact?.phone);
         let webBridgeConversationChatId = "";
         if (transport === "web_bridge" && (!normalizedPhone || normalizedPhone.length < 7) && row.conversationId) {
@@ -168,7 +170,7 @@ export async function processWhatsAppOutboundOutboxJob(args: {
         }
 
         let wamId: string | null = null;
-        let provider = "evolution";
+        let provider = "whatsapp_retired";
         let providerAccountId = "default";
 
         if (transport === "cloud_api") {
@@ -277,57 +279,7 @@ export async function processWhatsAppOutboundOutboxJob(args: {
             const response = await sendTwilioMessage(row.locationId, `+${normalizedPhone}`, { body: text });
             wamId = extractTwilioMessageId(response);
         } else {
-            const instanceId = String(row.location?.evolutionInstanceId || "").trim();
-            if (!instanceId) {
-                throw new Error("WhatsApp Evolution instance is not connected.");
-            }
-            provider = "evolution";
-            providerAccountId = instanceId || "default";
-
-            const timeoutMs = Math.max(Number(process.env.WHATSAPP_OUTBOUND_EVOLUTION_TIMEOUT_MS || 12000), 1000);
-
-            if (row.kind === "text") {
-                const text = String(payload?.text || row.message?.body || "");
-                if (!text.trim()) {
-                    throw new Error("Cannot send empty WhatsApp message body.");
-                }
-
-                const response = await evolutionClient.sendMessage(instanceId, normalizedPhone, text, {
-                    delayMs: 0,
-                    presence: "composing",
-                    timeoutMs,
-                });
-                wamId = response?.key?.id ? String(response.key.id) : null;
-            } else if (row.kind === "template") {
-                throw new Error("WhatsApp templates require Cloud API transport.");
-            } else {
-                const objectKey = String(payload?.objectKey || "").trim();
-                const contentType = String(payload?.contentType || "").trim();
-                const fileName = String(payload?.fileName || "upload");
-                const caption = String(payload?.caption || "").trim() || undefined;
-                if (!objectKey || !contentType) {
-                    throw new Error("Missing media payload details.");
-                }
-
-                const signedMediaUrl = await createWhatsAppMediaReadUrl({
-                    key: objectKey,
-                    contentType,
-                    fileName,
-                    expiresInSeconds: 300,
-                });
-
-                const response = await evolutionClient.sendMedia(instanceId, normalizedPhone, {
-                    mediaType: toMediaType(String(row.kind || "")),
-                    mediaUrl: signedMediaUrl,
-                    caption,
-                    mimetype: contentType,
-                    fileName,
-                    delayMs: 0,
-                    presence: "composing",
-                    timeoutMs,
-                });
-                wamId = response?.key?.id ? String(response.key.id) : null;
-            }
+            throw new Error(`Unsupported WhatsApp transport: ${transport}`);
         }
 
         if (!wamId) {

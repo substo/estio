@@ -61,7 +61,6 @@ import {
     headWhatsAppMediaObject,
     parseR2Uri,
 } from "@/lib/whatsapp/media-r2";
-import { ingestEvolutionMediaAttachment, parseEvolutionMessageContent } from "@/lib/whatsapp/evolution-media";
 import { processNormalizedMessage } from "@/lib/whatsapp/sync";
 import { enqueueWhatsAppOutbound } from "@/lib/whatsapp/outbound-enqueue";
 import {
@@ -3845,137 +3844,6 @@ function dedupeStrings(values: Array<string | null | undefined>): string[] {
     return out;
 }
 
-function extractEvolutionLidJid(key: any): string | undefined {
-    const remoteJid = typeof key?.remoteJid === "string" ? key.remoteJid : null;
-    if (remoteJid?.endsWith("@lid")) return remoteJid;
-
-    const participantJid = typeof key?.participant === "string" ? key.participant : null;
-    if (participantJid?.endsWith("@lid")) return participantJid;
-
-    return undefined;
-}
-
-async function resolveWhatsAppHistoryRemoteJids(
-    evolutionClient: any,
-    evolutionInstanceId: string,
-    contact: { phone?: string | null; lid?: string | null; contactType?: string | null }
-): Promise<{ candidates: string[]; isGroup: boolean; phoneDigits: string }> {
-    const rawPhone = String(contact.phone || "").trim();
-    const phoneDigits = normalizeWhatsAppDigits(rawPhone);
-    const explicitPhoneJid = normalizeKnownChatJid(rawPhone);
-    const explicitLidJid = normalizeStoredLidJid(contact.lid);
-    const isGroup = contact.contactType === "WhatsAppGroup" || rawPhone.includes("@g.us");
-
-    if (isGroup) {
-        const groupJid =
-            (explicitPhoneJid && explicitPhoneJid.endsWith("@g.us") ? explicitPhoneJid : null) ||
-            (phoneDigits ? `${phoneDigits}@g.us` : null);
-        return { candidates: dedupeStrings([groupJid]), isGroup: true, phoneDigits };
-    }
-
-    const candidates: Array<string | null> = [explicitLidJid];
-
-    if (explicitPhoneJid && (explicitPhoneJid.endsWith("@s.whatsapp.net") || explicitPhoneJid.endsWith("@lid"))) {
-        candidates.push(explicitPhoneJid);
-    }
-
-    if (phoneDigits.length >= 7) {
-        try {
-            const lookup = await evolutionClient.checkWhatsAppNumber(evolutionInstanceId, phoneDigits);
-            if (lookup?.exists && typeof lookup.jid === "string" && lookup.jid) {
-                candidates.push(lookup.jid);
-            }
-        } catch (err) {
-            console.warn("[WhatsApp History] Failed to resolve phone to WhatsApp JID:", err);
-        }
-
-        candidates.push(`${phoneDigits}@s.whatsapp.net`);
-    }
-
-    return { candidates: dedupeStrings(candidates), isGroup: false, phoneDigits };
-}
-
-async function fetchEvolutionMessagesForContactHistory(params: {
-    evolutionClient: any;
-    evolutionInstanceId: string;
-    contact: { phone?: string | null; lid?: string | null; contactType?: string | null };
-    limit: number;
-    offset?: number;
-    logPrefix: string;
-}): Promise<{
-    messages: any[];
-    remoteJid: string | null;
-    candidates: string[];
-    fetchedFrom: string[];
-    isGroup: boolean;
-    phoneDigits: string;
-}> {
-    const { evolutionClient, evolutionInstanceId, contact, limit, offset = 0, logPrefix } = params;
-    const { candidates, isGroup, phoneDigits } = await resolveWhatsAppHistoryRemoteJids(
-        evolutionClient,
-        evolutionInstanceId,
-        contact
-    );
-
-    if (candidates.length === 0) {
-        return { messages: [], remoteJid: null, candidates, fetchedFrom: [], isGroup, phoneDigits };
-    }
-
-    const aggregated: any[] = [];
-    const fetchedFrom: string[] = [];
-    let lastTried: string | null = null;
-
-    for (const candidate of candidates) {
-        lastTried = candidate;
-        console.log(`${logPrefix} Fetching messages for ${candidate} (Limit: ${limit}, Offset: ${offset})...`);
-        const messages = await evolutionClient.fetchMessages(evolutionInstanceId, candidate, limit, offset);
-        if (Array.isArray(messages) && messages.length > 0) {
-            fetchedFrom.push(candidate);
-            aggregated.push(...messages);
-        }
-    }
-
-    if (aggregated.length === 0) {
-        return { messages: [], remoteJid: lastTried, candidates, fetchedFrom: [], isGroup, phoneDigits };
-    }
-
-    const seen = new Set<string>();
-    const deduped: any[] = [];
-
-    for (const message of aggregated) {
-        const keyId = String(message?.key?.id || message?.keyId || message?.messageId || "").trim();
-        const remoteJid = String(message?.key?.remoteJid || "").trim();
-        const timestamp = Number(message?.messageTimestamp || message?.timestamp || 0);
-        const fallback = String(
-            message?.message?.conversation ||
-            message?.message?.extendedTextMessage?.text ||
-            message?.body ||
-            ""
-        ).trim();
-        const dedupeKey = keyId
-            ? `id:${keyId}`
-            : `fallback:${remoteJid}:${timestamp}:${fallback}`;
-
-        if (seen.has(dedupeKey)) continue;
-        seen.add(dedupeKey);
-        deduped.push(message);
-    }
-
-    deduped.sort((a, b) => {
-        const ta = Number(a?.messageTimestamp || a?.timestamp || 0);
-        const tb = Number(b?.messageTimestamp || b?.timestamp || 0);
-        return tb - ta;
-    });
-
-    return {
-        messages: deduped,
-        remoteJid: fetchedFrom[0] || lastTried,
-        candidates,
-        fetchedFrom,
-        isGroup,
-        phoneDigits
-    };
-}
 
 const WHATSAPP_MEDIA_REFETCH_BATCH_SIZE = 50;
 const WHATSAPP_MEDIA_REFETCH_MAX_SCAN = 2500;
@@ -3991,7 +3859,7 @@ function formatMediaRefetchFailureReason(reason: string | undefined) {
         case "attachment_exists":
             return "attachment already exists";
         case "missing_base64":
-            return "WhatsApp/Evolution no longer provides media payload for this message";
+            return "WhatsApp Web no longer provides media payload for this message";
         default:
             return reason || "unknown reason";
     }
@@ -4153,70 +4021,6 @@ async function refetchWhatsAppWebBridgeMediaAttachment(params: {
     };
 }
 
-async function findEvolutionMessageByWamId(params: {
-    evolutionClient: any;
-    evolutionInstanceId: string;
-    contact: { phone?: string | null; lid?: string | null; contactType?: string | null };
-    wamId: string;
-    maxScan?: number;
-    batchSize?: number;
-}) {
-    const maxScan = Number(params.maxScan || WHATSAPP_MEDIA_REFETCH_MAX_SCAN);
-    const batchSize = Number(params.batchSize || WHATSAPP_MEDIA_REFETCH_BATCH_SIZE);
-    const safeMaxScan = Number.isFinite(maxScan) && maxScan > 0 ? Math.min(Math.floor(maxScan), 20000) : WHATSAPP_MEDIA_REFETCH_MAX_SCAN;
-    const safeBatchSize = Number.isFinite(batchSize) && batchSize > 0 ? Math.min(Math.floor(batchSize), 250) : WHATSAPP_MEDIA_REFETCH_BATCH_SIZE;
-
-    const { candidates } = await resolveWhatsAppHistoryRemoteJids(
-        params.evolutionClient,
-        params.evolutionInstanceId,
-        params.contact
-    );
-
-    let scannedTotal = 0;
-
-    for (const candidate of candidates) {
-        let offset = 0;
-        let scannedForCandidate = 0;
-
-        while (scannedForCandidate < safeMaxScan) {
-            const remaining = safeMaxScan - scannedForCandidate;
-            const limit = Math.min(safeBatchSize, remaining);
-            if (limit <= 0) break;
-
-            const batch = await params.evolutionClient.fetchMessages(
-                params.evolutionInstanceId,
-                candidate,
-                limit,
-                offset
-            );
-
-            const records = Array.isArray(batch) ? batch : [];
-            if (records.length === 0) break;
-
-            scannedForCandidate += records.length;
-            scannedTotal += records.length;
-            const matched = records.find((item: any) => String(item?.key?.id || "") === params.wamId);
-            if (matched) {
-                return {
-                    message: matched,
-                    remoteJid: candidate,
-                    scanned: scannedTotal,
-                    candidates,
-                };
-            }
-
-            offset += records.length;
-            if (records.length < limit) break;
-        }
-    }
-
-    return {
-        message: null as any,
-        remoteJid: null as string | null,
-        scanned: scannedTotal,
-        candidates,
-    };
-}
 
 export async function refetchWhatsAppMediaAttachment(
     conversationId: string,
@@ -4268,129 +4072,9 @@ export async function refetchWhatsAppMediaAttachment(
         });
     }
 
-    if (!location?.evolutionInstanceId) {
-        return { success: false as const, error: "WhatsApp (Evolution) is not connected." };
-    }
-
-    const { evolutionClient } = await import("@/lib/evolution/client");
-    const lookup = await findEvolutionMessageByWamId({
-        evolutionClient,
-        evolutionInstanceId: location.evolutionInstanceId,
-        contact: {
-            phone: conversation.contact?.phone || null,
-            lid: (conversation.contact as any)?.lid || null,
-            contactType: (conversation.contact as any)?.contactType || null,
-        },
-        wamId: message.wamId,
-        maxScan: options?.maxScan,
-        batchSize: options?.batchSize,
-    });
-
-    if (!lookup.message) {
-        return {
-            success: false as const,
-            error: `Could not locate this message in WhatsApp history. Tried JIDs: ${(lookup.candidates || []).join(", ") || "(none)"}; scanned ${lookup.scanned} messages.`,
-        };
-    }
-
-    const parsedContent = parseEvolutionMessageContent(lookup.message?.message);
-    if (parsedContent.type !== "image" && parsedContent.type !== "audio") {
-        return {
-            success: false as const,
-            error: `Target message is not an image/audio media message (detected: ${parsedContent.type}).`,
-        };
-    }
-
-    const snapshot = message.attachments.map((attachment) => ({
-        fileName: attachment.fileName,
-        contentType: attachment.contentType,
-        size: attachment.size,
-        url: attachment.url,
-    }));
-
-    if (snapshot.length > 0) {
-        await db.messageAttachment.deleteMany({
-            where: { messageId: message.id },
-        });
-    }
-
-    let ingestResult: any;
-    try {
-        ingestResult = await ingestEvolutionMediaAttachment({
-            instanceName: location.evolutionInstanceId,
-            evolutionMessageData: lookup.message,
-            wamId: message.wamId,
-        });
-    } catch (error: any) {
-        if (snapshot.length > 0) {
-            await db.messageAttachment.createMany({
-                data: snapshot.map((attachment) => ({
-                    messageId: message.id,
-                    fileName: attachment.fileName,
-                    contentType: attachment.contentType,
-                    size: attachment.size,
-                    url: attachment.url,
-                })),
-            }).catch((restoreErr) => {
-                console.error("[refetchWhatsAppMediaAttachment] Failed to restore attachment rows after ingest error:", restoreErr);
-            });
-        }
-
-        return {
-            success: false as const,
-            error: `Failed to fetch media from WhatsApp: ${error?.message || "Unknown error"}`,
-        };
-    }
-
-    if (ingestResult?.status !== "stored") {
-        if (snapshot.length > 0) {
-            await db.messageAttachment.createMany({
-                data: snapshot.map((attachment) => ({
-                    messageId: message.id,
-                    fileName: attachment.fileName,
-                    contentType: attachment.contentType,
-                    size: attachment.size,
-                    url: attachment.url,
-                })),
-            }).catch((restoreErr) => {
-                console.error("[refetchWhatsAppMediaAttachment] Failed to restore attachment rows after skipped ingest:", restoreErr);
-            });
-        }
-
-        return {
-            success: false as const,
-            error: `WhatsApp media re-fetch did not store a new attachment (${formatMediaRefetchFailureReason(ingestResult?.reason)}).`,
-        };
-    }
-
-    const deleteStoredObject = options?.deleteStoredObject !== false;
-    const storageWarnings: string[] = [];
-    let removedStorageObjects = 0;
-
-    if (deleteStoredObject && snapshot.length > 0) {
-        for (const attachment of snapshot) {
-            const r2 = parseR2Uri(String(attachment.url || ""));
-            if (!r2) continue;
-
-            try {
-                const removed = await deleteWhatsAppMediaObject(r2.key);
-                if (removed.deleted) {
-                    removedStorageObjects += 1;
-                }
-            } catch (storageErr: any) {
-                storageWarnings.push(`Failed to delete old object ${r2.key}: ${storageErr?.message || "Unknown error"}`);
-            }
-        }
-    }
-
     return {
-        success: true as const,
-        mediaType: parsedContent.type,
-        removedAttachmentRows: snapshot.length,
-        removedStorageObjects,
-        remoteJid: lookup.remoteJid,
-        scannedMessages: lookup.scanned,
-        warnings: storageWarnings,
+        success: false as const,
+        error: "This message came from a retired provider. Stored attachments remain readable, but missing media can no longer be re-fetched.",
     };
 }
 
@@ -5384,7 +5068,7 @@ export async function retryWhatsAppAudioTranscript(
     }
 }
 
-export async function syncWhatsAppHistory(conversationId: string, limit: number = 20, ignoreDuplicates: boolean = false, offset: number = 0) {
+export async function syncWhatsAppHistory(conversationId: string, limit: number = 20, ignoreDuplicates: boolean = false, _offset: number = 0) {
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
 
     const conversation = await db.conversation.findFirst({
@@ -5393,285 +5077,61 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
     });
 
     if (!conversation) return { success: false, error: "Conversation not found" };
-    if (!conversation.contact?.phone && !conversation.contact?.lid) return { success: false, error: "Contact has no phone number or WhatsApp LID" };
+    if (!conversation.contact?.phone && !conversation.contact?.lid) {
+        return { success: false, error: "Contact has no phone number or WhatsApp identity" };
+    }
 
     try {
-        const providerMode = await resolveLocationWhatsAppProviderMode(location.id);
-        if (providerMode === "web_bridge") {
-            const existingBridgeSync = (conversation.syncRecords || []).find((sync: any) =>
-                String(sync.provider || "") === "whatsapp_web_bridge" && sync.providerConversationId
-            );
-            let chatId = String(existingBridgeSync?.providerConversationId || conversation.contact?.lid || "").trim();
-            if (!chatId && conversation.contact?.phone) {
-                const resolvedChat = await resolveWhatsAppWebBridgeChatForPhone({
-                    locationId: location.id,
-                    phone: conversation.contact.phone,
-                }).catch((error: any) => {
-                    console.warn(`[Sync][web_bridge:${conversationId}] Phone chat resolution failed:`, error?.message || error);
-                    return null;
-                });
-                chatId = String(resolvedChat?.chatId || "").trim();
-            }
-            if (!chatId && conversation.contact?.phone) {
-                chatId = normalizeWhatsAppWebChatId(conversation.contact.phone);
-            }
-            if (!chatId) {
-                return { success: false, error: "Web Bridge history sync needs a contact phone number or WhatsApp identity." };
-            }
-
-            const result = await importWebBridgeRecentMessagesForContact({
+        const existingBridgeSync = (conversation.syncRecords || []).find((sync: any) =>
+            String(sync.provider || "") === "whatsapp_web_bridge" && sync.providerConversationId
+        );
+        let chatId = String(existingBridgeSync?.providerConversationId || conversation.contact?.lid || "").trim();
+        if (!chatId && conversation.contact?.phone) {
+            const resolvedChat = await resolveWhatsAppWebBridgeChatForPhone({
                 locationId: location.id,
                 phone: conversation.contact.phone,
-                chatId,
-                canonicalContactId: conversation.contact.id,
-                canonicalConversationId: conversation.id,
-                canonicalPhone: conversation.contact.phone,
-                contactName: conversation.contact.name,
-                limit: limit || 30,
-                logPrefix: `[Sync][web_bridge:${conversationId}]`,
-                stopAfterDuplicates: ignoreDuplicates ? Number.MAX_SAFE_INTEGER : 5,
+            }).catch((error: any) => {
+                console.warn(`[Sync][web_bridge:${conversationId}] Phone chat resolution failed:`, error?.message || error);
+                return null;
             });
-
-            if (result.imported > 0) {
-                invalidateConversationReadCaches(conversationId);
-            }
-            return {
-                success: true,
-                count: result.imported,
-                skipped: result.skipped,
-                errors: result.errors,
-                provider: "web_bridge",
-            };
+            chatId = String(resolvedChat?.chatId || "").trim();
+        }
+        if (!chatId && conversation.contact?.phone) {
+            chatId = normalizeWhatsAppWebChatId(conversation.contact.phone);
+        }
+        if (!chatId) {
+            return { success: false, error: "Web Bridge history sync needs a contact phone number or WhatsApp identity." };
         }
 
-        if (providerMode !== "evolution_linked") {
-            return { success: false, error: "Recent history sync is available for Web Bridge or Legacy Evolution linked-device locations." };
-        }
-        if (!location.evolutionInstanceId) return { success: false, error: "Legacy Evolution is not connected." };
-
-        const { evolutionClient } = await import("@/lib/evolution/client");
-        const { processNormalizedMessage } = await import("@/lib/whatsapp/sync");
-
-        const fetchLimit = limit || 50;
-        const {
-            messages: evolutionMessages,
-            remoteJid,
-            candidates: remoteJidCandidates,
-            fetchedFrom: fetchedRemoteJids,
-            phoneDigits: phone,
-        } = await fetchEvolutionMessagesForContactHistory({
-            evolutionClient,
-            evolutionInstanceId: location.evolutionInstanceId,
-            contact: {
-                phone: conversation.contact.phone,
-                lid: (conversation.contact as any).lid || null,
-                contactType: (conversation.contact as any).contactType || null,
-            },
-            limit: fetchLimit,
-            offset,
-            logPrefix: `[Sync][${conversationId}]`,
+        const result = await importWebBridgeRecentMessagesForContact({
+            locationId: location.id,
+            phone: conversation.contact.phone,
+            chatId,
+            canonicalContactId: conversation.contact.id,
+            canonicalConversationId: conversation.id,
+            canonicalPhone: conversation.contact.phone,
+            contactName: conversation.contact.name,
+            limit: limit || 30,
+            logPrefix: `[Sync][web_bridge:${conversationId}]`,
+            stopAfterDuplicates: ignoreDuplicates ? Number.MAX_SAFE_INTEGER : 5,
         });
 
-        console.log(
-            `[Sync] History fetch candidates for ${conversationId}: ${remoteJidCandidates.join(", ") || "(none)"}; fetchedFrom=${fetchedRemoteJids.join(", ") || "none"}; primary=${remoteJid || "none"}; found=${evolutionMessages.length}; ignoreDupes=${ignoreDuplicates}`
-        );
-
-        // --- Auto-resolve LID placeholder contacts ---
-        // If this contact has no phone but we discovered real phone digits via history fetch,
-        // backfill the phone or merge into an existing contact with that phone.
-        const syncContact = conversation.contact;
-        if (syncContact && !syncContact.phone && (syncContact as any).lid && phone && phone.length >= 7) {
-            const normalizedPhone = phone.startsWith('+') ? phone : `+${phone}`;
-            const phoneSuffix = phone.slice(-7);
-
-            try {
-                // Check if a real contact already exists for this phone
-                const phoneCandidates = await db.contact.findMany({
-                    where: {
-                        locationId: location.id,
-                        phone: { contains: phoneSuffix },
-                        id: { not: syncContact.id }
-                    }
-                });
-
-                const existingPhoneContact = phoneCandidates.find(c => {
-                    if (!c.phone) return false;
-                    const cDigits = c.phone.replace(/\D/g, '');
-                    return (
-                        cDigits === phone ||
-                        (cDigits.endsWith(phone) && phone.length >= 7) ||
-                        (phone.endsWith(cDigits) && cDigits.length >= 7)
-                    );
-                });
-
-                if (existingPhoneContact) {
-                    // Merge: move conversations & messages from placeholder to real contact
-                    console.log(`[Sync Auto-Merge] Merging LID placeholder ${syncContact.id} into phone contact ${existingPhoneContact.id} (${existingPhoneContact.phone})`);
-
-                    const sourceConvos = await db.conversation.findMany({
-                        where: { contactId: syncContact.id, locationId: location.id }
-                    });
-
-                    for (const sourceConvo of sourceConvos) {
-                        const targetConvo = await db.conversation.findUnique({
-                            where: {
-                                locationId_contactId: {
-                                    locationId: location.id,
-                                    contactId: existingPhoneContact.id
-                                }
-                            }
-                        });
-
-                        if (targetConvo) {
-                            await db.message.updateMany({
-                                where: { conversationId: sourceConvo.id },
-                                data: { conversationId: targetConvo.id }
-                            });
-                            await db.conversation.delete({ where: { id: sourceConvo.id } });
-                            console.log(`[Sync Auto-Merge] Merged conversation ${sourceConvo.id} -> ${targetConvo.id}`);
-                        } else {
-                            await db.conversation.update({
-                                where: { id: sourceConvo.id },
-                                data: { contactId: existingPhoneContact.id }
-                            });
-                            console.log(`[Sync Auto-Merge] Reassigned conversation ${sourceConvo.id} to ${existingPhoneContact.id}`);
-                        }
-                    }
-
-                    // Transfer LID to the real contact
-                    if ((syncContact as any).lid && !(existingPhoneContact as any).lid) {
-                        await db.contact.update({
-                            where: { id: existingPhoneContact.id },
-                            data: { lid: (syncContact as any).lid } as any
-                        });
-                    }
-
-                    // Delete the placeholder
-                    await db.contact.delete({ where: { id: syncContact.id } });
-                    console.log(`[Sync Auto-Merge] Deleted placeholder contact ${syncContact.id}. Merged into ${existingPhoneContact.id}`);
-
-                    return {
-                        success: true,
-                        count: 0,
-                        skipped: 0,
-                        autoMerged: true,
-                        mergedIntoContactId: existingPhoneContact.id,
-                        message: `Contact auto-merged into ${existingPhoneContact.name || existingPhoneContact.phone}`
-                    };
-                } else {
-                    // No duplicate — just backfill the phone on this placeholder
-                    await db.contact.update({
-                        where: { id: syncContact.id },
-                        data: { phone: normalizedPhone }
-                    });
-                    console.log(`[Sync Auto-Merge] Backfilled phone ${normalizedPhone} on LID contact ${syncContact.id}`);
-                }
-            } catch (autoMergeErr) {
-                console.error(`[Sync Auto-Merge] Error during auto-merge for ${syncContact.id}:`, autoMergeErr);
-                // Continue with normal sync even if auto-merge fails
-            }
-        }
-
-        let synced = 0;
-        let skipped = 0;
-        let consecutiveDuplicates = 0;
-        const STOP_ON_DUPLICATES = 5;
-
-        for (const msg of evolutionMessages) {
-            try {
-                const key = msg.key;
-                const messageContent = msg.message;
-                if (!messageContent || !key?.id) continue;
-
-                const isFromMe = key.fromMe;
-
-                // Detect group chat
-                const isGroup = key.remoteJid?.includes('@g.us') || false;
-
-                // Enhanced Participant Resolution (LID Fix)
-                const realSenderPhone = (msg as any).senderPn || (key.participant?.includes('@s.whatsapp.net') ? key.participant.replace('@s.whatsapp.net', '') : null);
-                let participantPhone = realSenderPhone || (key.participant ? key.participant.replace('@s.whatsapp.net', '').replace('@lid', '') : undefined);
-
-                // For group messages, the participant is the sender; for 1:1, it's the phone from the contact
-                // We use the Group Phone for 'from' to keep the conversation unified.
-                // The participant field identifies the actual sender.
-
-                const parsedContent = parseEvolutionMessageContent(messageContent);
-                const senderName = msg.pushName || realSenderPhone || "Unknown";
-                const normalizedBody = isGroup && parsedContent.type !== 'text'
-                    ? `[${senderName}]: ${parsedContent.body}`
-                    : parsedContent.body;
-
-                const normalized: any = {
-                    from: isFromMe ? location.id : phone,
-                    to: isFromMe ? phone : location.id,
-                    body: normalizedBody,
-                    type: parsedContent.type,
-                    wamId: key.id,
-                    timestamp: new Date(msg.messageTimestamp ? (msg.messageTimestamp as number) * 1000 : Date.now()),
-                    direction: isFromMe ? 'outbound' : 'inbound',
-                    source: 'whatsapp_evolution',
-                    locationId: location.id,
-                    contactName: isGroup ? undefined : (msg.pushName || realSenderPhone), // Don't rename group to sender name
-                    isGroup: isGroup,
-                    participant: participantPhone, // Pass resolved participant to sync
-                    participantJid: typeof key.participant === "string" ? key.participant : undefined,
-                    participantPhoneJid: typeof (msg as any).senderPn === "string" ? String((msg as any).senderPn) : undefined,
-                    participantLidJid: typeof key.participant === "string" && key.participant.endsWith("@lid") ? key.participant : undefined,
-                    participantDisplayName: isGroup ? (msg.pushName || realSenderPhone || undefined) : undefined,
-                    lid: !isGroup ? extractEvolutionLidJid(key) : undefined,
-                    resolvedPhone: !isGroup && phone ? phone : undefined,
-                };
-
-                if ((parsedContent.type === 'image' || parsedContent.type === 'audio' || parsedContent.type === 'document') && location.evolutionInstanceId) {
-                    normalized.__evolutionMediaAttachmentPayload = {
-                        instanceName: location.evolutionInstanceId,
-                        evolutionMessageData: msg,
-                    };
-                }
-
-                const result = await processNormalizedMessage(normalized);
-
-                if ((parsedContent.type === 'image' || parsedContent.type === 'audio' || parsedContent.type === 'document') && location.evolutionInstanceId) {
-                    if (result?.status === 'deferred_unresolved_lid') {
-                        console.log(`[Sync] Delaying media attachment ingest until LID resolves (${key.id})`);
-                    } else {
-                        void ingestEvolutionMediaAttachment({
-                            instanceName: location.evolutionInstanceId,
-                            evolutionMessageData: msg,
-                            wamId: key.id,
-                        }).catch((err) => {
-                            console.error(`[Sync] Failed to ingest media attachment for ${key.id}:`, err);
-                        });
-                    }
-                }
-
-                if (result?.status === 'skipped') {
-                    skipped++;
-                    consecutiveDuplicates++;
-                } else {
-                    synced++;
-                    consecutiveDuplicates = 0;
-                }
-
-                if (!ignoreDuplicates && consecutiveDuplicates >= STOP_ON_DUPLICATES) {
-                    console.log(`[Sync] Stopped after ${consecutiveDuplicates} consecutive duplicates.`);
-                    break;
-                }
-            } catch (msgErr) {
-                // Skip
-            }
-        }
-
-        if (synced > 0) {
+        if (result.imported > 0) {
             invalidateConversationReadCaches(conversationId);
         }
-        return { success: true, count: synced, skipped };
-    } catch (e: any) {
-        console.error("Manual sync failed:", e);
-        return { success: false, error: e.message };
+        return {
+            success: true,
+            count: result.imported,
+            skipped: result.skipped,
+            errors: result.errors,
+            provider: "web_bridge",
+        };
+    } catch (error: any) {
+        console.error("syncWhatsAppHistory error:", error);
+        return { success: false, error: error.message || "Failed to sync WhatsApp Web Bridge history." };
     }
 }
+
 
 const WHATSAPP_IMAGE_MIME_TYPES = new Set([
     "image/jpeg",
@@ -5834,7 +5294,6 @@ function getWhatsAppMediaMaxSize(kind: WhatsAppMediaKind) {
 async function resolveWhatsAppOutboundTransport(locationId: string, explicit?: WhatsAppTransport | null): Promise<{
     transport: WhatsAppTransport;
     cloudConfigured: boolean;
-    evolutionConfigured: boolean;
     webBridgeConfigured: boolean;
 }> {
     const [integrationDoc, hasCloudSecret] = await Promise.all([
@@ -5855,13 +5314,12 @@ async function resolveWhatsAppOutboundTransport(locationId: string, explicit?: W
     if (explicit) {
         const row = await db.location.findUnique({
             where: { id: locationId },
-            select: { whatsappPhoneNumberId: true, whatsappAccessToken: true, evolutionInstanceId: true },
+            select: { whatsappPhoneNumberId: true, whatsappAccessToken: true },
         });
         const webBridgeConfigured = Boolean(await getReadyWhatsAppWebBridgeSession(locationId).catch(() => null));
         return {
             transport: explicit,
             cloudConfigured: Boolean((integrationPayload.whatsappPhoneNumberId || row?.whatsappPhoneNumberId) && (hasCloudSecret || row?.whatsappAccessToken)),
-            evolutionConfigured: Boolean(row?.evolutionInstanceId),
             webBridgeConfigured,
         };
     }
@@ -5872,7 +5330,6 @@ async function resolveWhatsAppOutboundTransport(locationId: string, explicit?: W
             whatsappPhoneNumberId: true,
             whatsappAccessToken: true,
             whatsappProviderMode: true,
-            evolutionInstanceId: true,
             twilioAccountSid: true,
             twilioWhatsAppFrom: true,
         } as any,
@@ -5880,32 +5337,25 @@ async function resolveWhatsAppOutboundTransport(locationId: string, explicit?: W
 
     const mode = String(integrationPayload.whatsappProviderMode || (row as any)?.whatsappProviderMode || "web_bridge");
     const cloudConfigured = Boolean((integrationPayload.whatsappPhoneNumberId || row?.whatsappPhoneNumberId) && (hasCloudSecret || row?.whatsappAccessToken));
-    const evolutionConfigured = Boolean(integrationPayload.evolutionInstanceId || row?.evolutionInstanceId);
     const twilioConfigured = Boolean((integrationPayload.twilioAccountSid || row?.twilioAccountSid) && (integrationPayload.twilioWhatsAppFrom || row?.twilioWhatsAppFrom));
     const webBridgeConfigured = Boolean(await getReadyWhatsAppWebBridgeSession(locationId).catch(() => null));
 
-    if (mode === "web_bridge" && webBridgeConfigured) {
-        return { transport: "web_bridge", cloudConfigured, evolutionConfigured, webBridgeConfigured };
-    }
-    if (mode === "web_bridge") {
-        return { transport: "web_bridge", cloudConfigured, evolutionConfigured, webBridgeConfigured };
-    }
-    if (mode === "evolution_linked" && evolutionConfigured) {
-        return { transport: "evolution", cloudConfigured, evolutionConfigured, webBridgeConfigured };
+    if (mode === "web_bridge" || mode === "evolution_linked") {
+        return { transport: "web_bridge", cloudConfigured, webBridgeConfigured };
     }
     if (mode === "twilio_fallback" && twilioConfigured) {
-        return { transport: "twilio", cloudConfigured, evolutionConfigured, webBridgeConfigured };
+        return { transport: "twilio", cloudConfigured, webBridgeConfigured };
     }
     if (cloudConfigured) {
-        return { transport: "cloud_api", cloudConfigured, evolutionConfigured, webBridgeConfigured };
+        return { transport: "cloud_api", cloudConfigured, webBridgeConfigured };
     }
     if (webBridgeConfigured) {
-        return { transport: "web_bridge", cloudConfigured, evolutionConfigured, webBridgeConfigured };
+        return { transport: "web_bridge", cloudConfigured, webBridgeConfigured };
     }
     if (twilioConfigured) {
-        return { transport: "twilio", cloudConfigured, evolutionConfigured, webBridgeConfigured };
+        return { transport: "twilio", cloudConfigured, webBridgeConfigured };
     }
-    return { transport: "cloud_api", cloudConfigured, evolutionConfigured, webBridgeConfigured };
+    return { transport: "cloud_api", cloudConfigured, webBridgeConfigured };
 }
 
 function requireTemplateWindowForCloud(contact: { whatsappCustomerServiceExpiresAt?: Date | null }, transport: WhatsAppTransport) {
@@ -5928,7 +5378,7 @@ export async function createWhatsAppMediaUploadUrl(
     if (transportState.transport === "web_bridge" && !transportState.webBridgeConfigured) {
         return { success: false, error: "WhatsApp Web Bridge is selected but not connected. Scan the QR code in WhatsApp settings first." };
     }
-    if (!transportState.cloudConfigured && !transportState.evolutionConfigured && !transportState.webBridgeConfigured) {
+    if (!transportState.cloudConfigured && !transportState.webBridgeConfigured) {
         return { success: false, error: "WhatsApp is not connected." };
     }
 
@@ -6034,12 +5484,6 @@ export async function sendWhatsAppMediaReply(
     const cleanCaption = String(options?.caption || "").trim();
 
     try {
-        if (!location?.evolutionInstanceId) {
-            const transportState = await resolveWhatsAppOutboundTransport(location.id);
-            if (!transportState.cloudConfigured && !transportState.evolutionConfigured && !transportState.webBridgeConfigured) {
-                return { success: false, error: "WhatsApp is not connected." };
-            }
-        }
         const transportState = await resolveWhatsAppOutboundTransport(location.id);
         if (transportState.transport === "web_bridge" && !transportState.webBridgeConfigured) {
             return { success: false, error: "WhatsApp Web Bridge is selected but not connected. Scan the QR code in WhatsApp settings first." };
@@ -6067,7 +5511,7 @@ export async function sendWhatsAppMediaReply(
             return { success: false, error: "Conversation not found." };
         }
 
-        if (!objectKey.startsWith("whatsapp/evolution/v1/") && !objectKey.startsWith("whatsapp/cloud/v1/")) {
+        if (!objectKey.startsWith("whatsapp/web-bridge/v1/") && !objectKey.startsWith("whatsapp/cloud/v1/")) {
             return { success: false, error: "Invalid upload reference." };
         }
         if (!objectKey.includes(`/location/${location.id}/`) || !objectKey.includes(`/conversation/${conversation.id}/`)) {
@@ -6316,7 +5760,7 @@ export async function sendReply(
             if (transportState.transport === "web_bridge" && !transportState.webBridgeConfigured) {
                 return { success: false, error: "WhatsApp Web Bridge is selected but not connected. Scan the QR code in WhatsApp settings first." };
             }
-            if (!transportState.cloudConfigured && !transportState.evolutionConfigured && !transportState.webBridgeConfigured) {
+            if (!transportState.cloudConfigured && !transportState.webBridgeConfigured) {
                 return { success: false, error: "WhatsApp is not connected." };
             }
 
@@ -7848,7 +7292,6 @@ export async function getWhatsAppChannelEligibility(conversationId: string) {
 
         const eligibility = await checkWhatsAppPhoneEligibility(
             {
-                evolutionInstanceId: location.evolutionInstanceId,
                 whatsappProviderMode: mode,
             },
             contact.phone,
@@ -7889,7 +7332,8 @@ async function resolveLocationWhatsAppProviderMode(locationId: string) {
             select: { whatsappProviderMode: true } as any,
         }).catch(() => null),
     ]);
-    return String(doc?.payload?.whatsappProviderMode || (row as any)?.whatsappProviderMode || "web_bridge");
+    const mode = String(doc?.payload?.whatsappProviderMode || (row as any)?.whatsappProviderMode || "web_bridge");
+    return mode === "evolution_linked" ? "web_bridge" : mode;
 }
 
 function isStaleWebBridgeQrStatus(status: unknown, lastEventAt?: string | Date | null, lastSeenAt?: Date | null) {
@@ -7906,20 +7350,6 @@ export async function getWhatsAppWebBridgeStatus() {
     try {
         const location = await getBasicLocationContext();
         const mode = await resolveLocationWhatsAppProviderMode(location.id);
-        if (mode === "evolution_linked") {
-            const legacy = await getEvolutionStatus();
-            return {
-                provider: "evolution" as const,
-                mode,
-                status: legacy.status,
-                qrcode: legacy.qrcode,
-                phone: null as string | null,
-                sessionId: location.id,
-                lastSeenAt: null as string | null,
-                lastReadyAt: null as string | null,
-                error: null as string | null,
-            };
-        }
 
         const [session, health] = await Promise.all([
             getWhatsAppWebBridgeSession(location.id),
@@ -8044,16 +7474,6 @@ export async function triggerWhatsAppWebBridgeConnection() {
     try {
         const location = await getBasicLocationContext();
         const mode = await resolveLocationWhatsAppProviderMode(location.id);
-        if (mode === "evolution_linked") {
-            const legacy = await triggerWhatsAppConnection();
-            return {
-                provider: "evolution" as const,
-                success: legacy.success,
-                qrCode: legacy.qrCode,
-                status: legacy.status,
-                error: (legacy as any).error || null,
-            };
-        }
 
         const doc = await settingsService.getDocument<any>({
             scopeType: "LOCATION",
@@ -8147,151 +7567,11 @@ export async function triggerWhatsAppWebBridgeConnection() {
     }
 }
 
-export async function getEvolutionStatus() {
-    const traceId = createTraceId();
-    try {
-        // Relaxed Auth: Don't require GHL token just to check WhatsApp status
-        const location = await getBasicLocationContext();
-        const instanceName = location.id;
-        const { evolutionClient } = await import("@/lib/evolution/client");
-        let instance = await withServerTiming("conversations.evolution_status", {
-            traceId,
-            locationId: location.id,
-            instanceName,
-            step: "fetch_instance",
-        }, async () => withResilience({
-            breakerKey: `evolution:status:${instanceName}`,
-            timeoutMs: 8_000,
-            timeoutMessage: "Evolution status check timed out",
-            retry: { attempts: 2, baseDelayMs: 250, maxDelayMs: 1500 },
-            task: async () => evolutionClient.fetchInstance(instanceName),
-        }));
 
-        // Auto-Revival Logic:
-        // If Evolution API restarted, it might forget the instance handle but keep the session on disk.
-        // If we get NOT_FOUND, we try to "revive" it by calling createInstance.
-        if (!instance) {
-            console.log(`Instance ${instanceName} not found. Attempting to revive...`);
-            try {
-                const reviveRes = await withResilience({
-                    breakerKey: `evolution:revive:${instanceName}`,
-                    timeoutMs: 12_000,
-                    timeoutMessage: "Evolution instance revive timed out",
-                    retry: { attempts: 2, baseDelayMs: 400, maxDelayMs: 2000 },
-                    task: async () => evolutionClient.createInstance(location.id, instanceName),
-                });
-                if (reviveRes) {
-                    console.log(`Instance ${instanceName} revived successfully.`);
-                    // Use the result as the instance
-                    instance = reviveRes;
-                }
 
-            } catch (reviveError) {
-                console.warn(`Failed to revive instance ${instanceName}:`, reviveError);
-            }
-        }
 
-        // Map status
-        let status = 'UNKNOWN';
-        let qrcode = null;
 
-        if (!instance) {
-            status = 'NOT_FOUND';
-        } else {
-            // Evolution v2 structure might vary, check common paths
-            // Revive response might be the instance object itself or have .instance
-            // Also handle the case where it returns { connectionStatus: 'open' } directly (as seen in logs)
-            const rawStatus = instance.instance?.status
-                || (instance as any).status
-                || (instance as any).connectionStatus
-                || 'UNKNOWN';
 
-            status = rawStatus;
-        }
-
-        // CRITICAL FIX: Update the Database with the real status
-        // This ensures Settings page stays in sync with what we see here
-        // SPLIT-BRAIN FIX: Only update status if running in PRODUCTION to avoid Local overwriting it
-        if (process.env.NODE_ENV === 'production') {
-            if (location.evolutionConnectionStatus !== status) {
-                await db.location.update({
-                    where: { id: location.id },
-                    data: { evolutionConnectionStatus: status }
-                }).catch((err: any) => console.error("Failed to sync evolution status to DB:", err));
-            }
-        } else {
-            console.log(`[getEvolutionStatus] Skipped DB update for status '${status}' (Local Dev Mode)`);
-        }
-
-        // If not connected, try to get QR code (but do not aggressively create instance just on check)
-        // Only fetch QR if we are explicitly in a connecting state or if the user requested it?
-        // Actually, if it's 'close', we usually might want to show QR if it's available.
-        // But merely calling this shouldn't trigger a full connection flow unless necessary.
-        // Let's just check if there is a QR in the fetch response first.
-
-        if (instance?.qrcode?.base64) {
-            qrcode = instance.qrcode.base64;
-        }
-
-        return { status, qrcode };
-    } catch (error) {
-        console.error("getEvolutionStatus error:", error);
-        return { status: 'ERROR', qrcode: null };
-    }
-}
-
-export async function triggerWhatsAppConnection() {
-    try {
-        // Relaxed Auth
-        const location = await getBasicLocationContext();
-        const instanceName = location.id;
-        const { evolutionClient } = await import("@/lib/evolution/client");
-
-        // 1. Create if not exists (Idempotent-ish)
-        let qrCodeBase64 = null;
-        try {
-            const createRes = await evolutionClient.createInstance(location.id, instanceName);
-            if (createRes?.qrcode?.base64) {
-                qrCodeBase64 = createRes.qrcode.base64;
-            }
-        } catch (e) {
-            console.log("Instance might already exist, proceeding to connect...");
-        }
-
-        // 2. Connect
-        if (!qrCodeBase64) {
-            // Try explicit connect to generate QR
-            try {
-                const connectRes = await evolutionClient.connectInstance(instanceName);
-                if (connectRes?.base64 || connectRes?.qrcode?.base64) {
-                    qrCodeBase64 = connectRes.base64 || connectRes.qrcode.base64;
-                }
-            } catch (e) {
-                console.warn("Connect instance warning:", e);
-            }
-        }
-
-        // 3. Update DB
-        await db.location.update({
-            where: { id: location.id },
-            data: {
-                evolutionInstanceId: instanceName,
-                // We don't set status to 'open' yet, we wait for the poll to find it
-            }
-        });
-
-        // 4. Return result
-        return {
-            success: true,
-            qrCode: qrCodeBase64,
-            status: qrCodeBase64 ? 'qrcode' : 'connecting'
-        };
-
-    } catch (error: any) {
-        console.error("triggerWhatsAppConnection error:", error);
-        return { success: false, error: error.message };
-    }
-}
 
 export async function resendMessage(messageId: string) {
     const location = await getAuthenticatedLocation();
@@ -8327,7 +7607,7 @@ export async function resendMessage(messageId: string) {
             if (transportState.transport === "web_bridge" && !transportState.webBridgeConfigured) {
                 return { success: false, error: "WhatsApp Web Bridge is selected but not connected. Scan the QR code first." };
             }
-            if (!transportState.cloudConfigured && !transportState.evolutionConfigured && !transportState.webBridgeConfigured) {
+            if (!transportState.cloudConfigured && !transportState.webBridgeConfigured) {
                 return { success: false, error: "WhatsApp is not connected." };
             }
             const windowError = requireTemplateWindowForCloud(contact as any, transportState.transport);
@@ -9851,7 +9131,7 @@ export async function openConversationForGroupParticipant(participantId: string)
 // =============================================
 
 async function checkWhatsAppPhoneEligibility(
-    location: { evolutionInstanceId?: string | null; whatsappProviderMode?: string | null },
+    location: { whatsappProviderMode?: string | null },
     phone: string | null | undefined,
     options?: {
         contactName?: string | null;
@@ -9897,49 +9177,11 @@ async function checkWhatsAppPhoneEligibility(
         };
     }
 
-    if (!location?.evolutionInstanceId) {
-        return {
-            status: 'unknown',
-            reason: 'WhatsApp eligibility check is unavailable (Evolution is not connected).',
-            normalizedDigits: rawDigits,
-        };
-    }
-
-    try {
-        const { evolutionClient } = await import("@/lib/evolution/client");
-
-        if (options?.verifyServiceHealth) {
-            const health = await evolutionClient.healthCheck();
-            if (!health.ok) {
-                return {
-                    status: 'unknown',
-                    reason: health.error || 'WhatsApp service is unavailable.',
-                    normalizedDigits: rawDigits,
-                };
-            }
-        }
-
-        const lookup = await evolutionClient.checkWhatsAppNumber(location.evolutionInstanceId, rawDigits);
-        if (lookup.exists) {
-            return {
-                status: 'eligible',
-                normalizedDigits: rawDigits,
-            };
-        }
-
-        return {
-            status: 'ineligible',
-            reason: `${contactName}'s phone number is not registered on WhatsApp.`,
-            normalizedDigits: rawDigits,
-        };
-    } catch (err) {
-        console.warn(`[WhatsAppEligibility] Lookup failed for ${rawDigits}:`, err);
-        return {
-            status: 'unknown',
-            reason: 'Could not verify WhatsApp registration right now.',
-            normalizedDigits: rawDigits,
-        };
-    }
+    return {
+        status: 'unknown',
+        reason: 'WhatsApp Web Bridge will verify this number at send time.',
+        normalizedDigits: rawDigits,
+    };
 }
 
 async function checkSmsPhoneEligibility(
@@ -10007,32 +9249,11 @@ async function checkSmsPhoneEligibility(
 }
 
 async function resolvePreferredChannelTypeForPhone(
-    location: { evolutionInstanceId?: string | null; whatsappProviderMode?: string | null },
+    _location: { whatsappProviderMode?: string | null },
     phone: string | null | undefined
 ): Promise<'TYPE_WHATSAPP' | 'TYPE_SMS'> {
     const rawDigits = String(phone || '').replace(/\D/g, '');
-    if (rawDigits.length < 7) {
-        return 'TYPE_SMS';
-    }
-    if (String(location?.whatsappProviderMode || "web_bridge") === "web_bridge") {
-        return 'TYPE_WHATSAPP';
-    }
-    if (!location?.evolutionInstanceId) {
-        return 'TYPE_SMS';
-    }
-
-    try {
-        const { evolutionClient } = await import("@/lib/evolution/client");
-        const lookup = await evolutionClient.checkWhatsAppNumber(location.evolutionInstanceId, rawDigits);
-        if (lookup.exists) {
-            console.log(`[ChannelDetect] WhatsApp confirmed for ${rawDigits}`);
-            return 'TYPE_WHATSAPP';
-        }
-    } catch (err) {
-        console.warn(`[ChannelDetect] WhatsApp lookup failed for ${rawDigits}:`, err);
-    }
-
-    return 'TYPE_SMS';
+    return rawDigits.length >= 7 ? 'TYPE_WHATSAPP' : 'TYPE_SMS';
 }
 
 function getWhatsAppWebChatIdFromPhone(phone: string | null | undefined) {
@@ -10242,179 +9463,8 @@ async function importWebBridgeRecentMessagesForContact(args: {
     return { imported, skipped, errors, processed };
 }
 
-/**
- * Bulk-sync all WhatsApp chats from Evolution API into local DB.
- * Safe to call multiple times — dedup handled at message, conversation, and contact levels.
- */
-export async function syncAllEvolutionChats() {
-    const location = await getAuthenticatedLocation();
-    const providerMode = await resolveLocationWhatsAppProviderMode(location.id);
-    if (providerMode !== "evolution_linked") {
-        return { success: false, error: "Legacy Evolution bulk sync is only available for Evolution Linked Device locations." };
-    }
-    if (!location.evolutionInstanceId) {
-        return { success: false, error: "WhatsApp not connected. Please connect via Settings." };
-    }
 
-    try {
-        const { evolutionClient } = await import("@/lib/evolution/client");
-        const { processNormalizedMessage } = await import("@/lib/whatsapp/sync");
 
-        // 1. Health check
-        const health = await evolutionClient.healthCheck();
-        if (!health.ok) {
-            return { success: false, error: "Evolution API is unreachable. Please check the server." };
-        }
-
-        // 2. Fetch all chats from the phone
-        const allChats = await evolutionClient.fetchChats(location.evolutionInstanceId);
-        if (!allChats || allChats.length === 0) {
-            return { success: true, chatsProcessed: 0, messagesImported: 0, messagesSkipped: 0, errors: 0 };
-        }
-
-        // 3. Filter to valid WhatsApp chats only (1:1 and groups)
-        const validChats = allChats.filter((chat: any) => {
-            const jid = chat.id || chat.remoteJid || chat.jid;
-            if (!jid) return false;
-            return jid.endsWith('@s.whatsapp.net') || jid.endsWith('@g.us');
-        });
-
-        console.log(`[SyncAll] Found ${validChats.length} valid chats (filtered from ${allChats.length} total)`);
-
-        let chatsProcessed = 0;
-        let totalImported = 0;
-        let totalSkipped = 0;
-        let totalErrors = 0;
-
-        // 4. Process each chat
-        const MESSAGES_PER_CHAT = 30;
-        const STOP_ON_DUPLICATES = 5;
-
-        for (const chat of validChats) {
-            const remoteJid = chat.id || chat.remoteJid || chat.jid;
-            const isGroup = remoteJid.endsWith('@g.us');
-            const phone = remoteJid.replace('@s.whatsapp.net', '').replace('@g.us', '');
-
-            try {
-                // Fetch recent messages for this chat
-                const messages = await evolutionClient.fetchMessages(
-                    location.evolutionInstanceId,
-                    remoteJid,
-                    MESSAGES_PER_CHAT
-                );
-
-                if (!messages || messages.length === 0) {
-                    chatsProcessed++;
-                    continue;
-                }
-
-                let consecutiveDuplicates = 0;
-
-                for (const msg of messages) {
-                    try {
-                        const key = msg.key;
-                        const messageContent = msg.message;
-                        if (!messageContent || !key?.id) continue;
-
-                        const isFromMe = key.fromMe;
-
-                        // Enhanced Participant Resolution (same as syncWhatsAppHistory)
-                        const realSenderPhone = (msg as any).senderPn ||
-                            (key.participant?.includes('@s.whatsapp.net') ? key.participant.replace('@s.whatsapp.net', '') : null);
-                        let participantPhone = realSenderPhone ||
-                            (key.participant ? key.participant.replace('@s.whatsapp.net', '').replace('@lid', '') : undefined);
-                        const parsedContent = parseEvolutionMessageContent(messageContent);
-                        const senderName = msg.pushName || realSenderPhone || "Unknown";
-                        const normalizedBody = isGroup && parsedContent.type !== 'text'
-                            ? `[${senderName}]: ${parsedContent.body}`
-                            : parsedContent.body;
-
-                        const normalized: any = {
-                            from: isFromMe ? location.id : phone,
-                            to: isFromMe ? phone : location.id,
-                            body: normalizedBody,
-                            type: parsedContent.type,
-                            wamId: key.id,
-                            timestamp: new Date(msg.messageTimestamp ? (msg.messageTimestamp as number) * 1000 : Date.now()),
-                            direction: isFromMe ? 'outbound' : 'inbound',
-                            source: 'whatsapp_evolution',
-                            locationId: location.id,
-                            contactName: isGroup ? (chat.name || chat.subject) : (isFromMe ? undefined : (msg.pushName || realSenderPhone)),
-                            isGroup: isGroup,
-                            participant: participantPhone,
-                            participantJid: typeof key.participant === "string" ? key.participant : undefined,
-                            participantPhoneJid: typeof (msg as any).senderPn === "string" ? String((msg as any).senderPn) : undefined,
-                            participantLidJid: typeof key.participant === "string" && key.participant.endsWith("@lid") ? key.participant : undefined,
-                            participantDisplayName: isGroup ? (msg.pushName || realSenderPhone || undefined) : undefined,
-                        };
-
-                        if ((parsedContent.type === "image" || parsedContent.type === "audio") && location.evolutionInstanceId) {
-                            normalized.__evolutionMediaAttachmentPayload = {
-                                instanceName: location.evolutionInstanceId,
-                                evolutionMessageData: msg,
-                            };
-                        }
-
-                        const result = await processNormalizedMessage(normalized);
-
-                        if ((parsedContent.type === "image" || parsedContent.type === "audio") && location.evolutionInstanceId) {
-                            if (result?.status === 'deferred_unresolved_lid') {
-                                console.log(`[SyncAll] Delaying media attachment ingest until LID resolves (${key.id})`);
-                            } else {
-                                void ingestEvolutionMediaAttachment({
-                                    instanceName: location.evolutionInstanceId,
-                                    evolutionMessageData: msg,
-                                    wamId: key.id,
-                                }).catch((err) => {
-                                    console.error(`[SyncAll] Failed to ingest media attachment for ${key.id}:`, err);
-                                });
-                            }
-                        }
-
-                        if (result?.status === 'skipped') {
-                            totalSkipped++;
-                            consecutiveDuplicates++;
-                        } else if (result?.status === 'processed') {
-                            totalImported++;
-                            consecutiveDuplicates = 0;
-                        } else {
-                            totalErrors++;
-                            consecutiveDuplicates = 0;
-                        }
-
-                        // Early stop if we hit known history
-                        if (consecutiveDuplicates >= STOP_ON_DUPLICATES) {
-                            console.log(`[SyncAll] Chat ${remoteJid}: stopped after ${STOP_ON_DUPLICATES} consecutive dupes`);
-                            break;
-                        }
-                    } catch (msgErr) {
-                        totalErrors++;
-                    }
-                }
-
-                chatsProcessed++;
-            } catch (chatErr) {
-                console.error(`[SyncAll] Error processing chat ${remoteJid}:`, chatErr);
-                totalErrors++;
-                chatsProcessed++;
-            }
-        }
-
-        console.log(`[SyncAll] Complete: ${chatsProcessed} chats, ${totalImported} imported, ${totalSkipped} skipped, ${totalErrors} errors`);
-
-        return {
-            success: true,
-            chatsProcessed,
-            totalChats: validChats.length,
-            messagesImported: totalImported,
-            messagesSkipped: totalSkipped,
-            errors: totalErrors
-        };
-    } catch (e: any) {
-        console.error("[SyncAll] Failed:", e);
-        return { success: false, error: e.message };
-    }
-}
 
 async function fetchWebBridgeChatsForPicker(location: { id: string }) {
     try {
@@ -10489,107 +9539,16 @@ async function fetchWebBridgeChatsForPicker(location: { id: string }) {
     }
 }
 
-/**
- * Fetch the list of WhatsApp chats from the legacy Evolution API for admin/rollback UI.
- */
-export async function fetchEvolutionChats() {
-    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
-    const mode = await resolveLocationWhatsAppProviderMode(location.id);
-    if (mode !== "evolution_linked") {
-        return { success: false, error: "Legacy Evolution chat picking is only available for Evolution Linked Device locations.", chats: [] };
-    }
-    if (!location.evolutionInstanceId) {
-        return { success: false, error: "Legacy Evolution is not connected", chats: [] };
-    }
 
-    try {
-        const { evolutionClient } = await import("@/lib/evolution/client");
 
-        const health = await evolutionClient.healthCheck();
-        if (!health.ok) {
-            return { success: false, error: "Evolution API unreachable", chats: [] };
-        }
-
-        const allChats = await evolutionClient.fetchChats(location.evolutionInstanceId);
-        if (!allChats || allChats.length === 0) {
-            return { success: true, chats: [] };
-        }
-
-        // Filter to valid chats
-        const validChats = allChats.filter((chat: any) => {
-            const jid = chat.id || chat.remoteJid || chat.jid;
-            if (!jid) return false;
-            return jid.endsWith('@s.whatsapp.net') || jid.endsWith('@g.us');
-        });
-
-        // Cross-reference with existing contacts/conversations in DB
-        const existingContacts = await db.contact.findMany({
-            where: { locationId: location.id, phone: { not: null } },
-            select: { phone: true, name: true }
-        });
-
-        const existingConversations = await db.conversation.findMany({
-            where: { locationId: location.id },
-            include: { contact: { select: { phone: true } } }
-        });
-
-        // Build a set of normalized phones that already have conversations
-        const syncedPhones = new Set(
-            existingConversations
-                .map((c: any) => c.contact?.phone?.replace(/\D/g, ''))
-                .filter(Boolean)
-        );
-
-        const formatted = validChats.map((chat: any) => {
-            const jid = chat.id || chat.remoteJid || chat.jid;
-            const isGroup = jid.endsWith('@g.us');
-            const phone = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
-            const rawPhone = phone.replace(/\D/g, '');
-
-            // Check if already synced
-            const alreadySynced = syncedPhones.has(rawPhone) ||
-                Array.from(syncedPhones).some(p => p?.endsWith(rawPhone) || rawPhone.endsWith(p || ''));
-
-            // Try to find a name from existing contacts
-            const matchedContact = existingContacts.find(c => {
-                const cp = c.phone?.replace(/\D/g, '') || '';
-                return cp === rawPhone || cp.endsWith(rawPhone) || rawPhone.endsWith(cp);
-            });
-
-            return {
-                jid,
-                phone: `+${phone}`,
-                name: chat.name || chat.subject || chat.pushName || matchedContact?.name || `+${phone}`,
-                isGroup,
-                alreadySynced,
-                lastMessageTimestamp: chat.conversationTimestamp || chat.lastMessageTimestamp || null
-            };
-        });
-
-        // Sort: non-synced first, then by last message
-        formatted.sort((a: any, b: any) => {
-            if (a.alreadySynced !== b.alreadySynced) return a.alreadySynced ? 1 : -1;
-            return (b.lastMessageTimestamp || 0) - (a.lastMessageTimestamp || 0);
-        });
-
-        return { success: true, chats: formatted };
-    } catch (e: any) {
-        console.error("[FetchChats] Failed:", e);
-        return { success: false, error: e.message, chats: [] };
-    }
-}
 
 export async function fetchWhatsAppChats() {
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
-    const mode = await resolveLocationWhatsAppProviderMode(location.id);
-    if (mode === "evolution_linked") {
-        return fetchEvolutionChats();
-    }
     return fetchWebBridgeChatsForPicker(location);
 }
 
 /**
- * Create a new conversation for a phone number, with history backfill from Evolution.
+ * Create a new conversation for a phone number, with history backfill from WhatsApp Web Bridge.
  */
 export async function startNewConversation(phone: string) {
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
@@ -10717,80 +9676,8 @@ export async function startNewConversation(phone: string) {
                 } catch (backfillErr) {
                     console.warn("[NewConversation] Web Bridge history backfill failed:", backfillErr);
                 }
-            } else if (providerMode === "evolution_linked" && location.evolutionInstanceId) {
-                try {
-                    const { evolutionClient } = await import("@/lib/evolution/client");
-                    const { processNormalizedMessage } = await import("@/lib/whatsapp/sync");
-
-                    const whatsappPhone = rawDigits;
-                    const { messages, remoteJid, candidates, fetchedFrom } = await fetchEvolutionMessagesForContactHistory({
-                        evolutionClient,
-                        evolutionInstanceId: location.evolutionInstanceId,
-                        contact: {
-                            phone: contact.phone,
-                            lid: (contact as any).lid || null,
-                            contactType: (contact as any).contactType || null,
-                        },
-                        limit: 30,
-                        offset: 0,
-                        logPrefix: `[NewConversation][existing:${existingConv.ghlConversationId}]`,
-                    });
-                    console.log(
-                        `[NewConversation] Existing convo history candidates: ${candidates.join(", ") || "(none)"}; fetchedFrom=${fetchedFrom.join(", ") || "none"}; primary=${remoteJid || "none"}; found=${messages.length}`
-                    );
-
-                    let imported = 0;
-                    for (const msg of (messages || [])) {
-                        const key = msg.key;
-                        const messageContent = msg.message;
-                        if (!messageContent || !key?.id) continue;
-
-                        const isFromMe = key.fromMe;
-                        const parsedContent = parseEvolutionMessageContent(messageContent);
-                        const normalized: any = {
-                            from: isFromMe ? location.id : whatsappPhone,
-                            to: isFromMe ? whatsappPhone : location.id,
-                            body: parsedContent.body,
-                            type: parsedContent.type,
-                            wamId: key.id,
-                            timestamp: new Date(msg.messageTimestamp ? (msg.messageTimestamp as number) * 1000 : Date.now()),
-                            direction: isFromMe ? 'outbound' : 'inbound',
-                            source: 'whatsapp_evolution',
-                            locationId: location.id,
-                            contactName: isFromMe ? undefined : msg.pushName,
-                            lid: extractEvolutionLidJid(key),
-                            resolvedPhone: whatsappPhone,
-                        };
-
-                        if ((parsedContent.type === "image" || parsedContent.type === "audio") && location.evolutionInstanceId) {
-                            normalized.__evolutionMediaAttachmentPayload = {
-                                instanceName: location.evolutionInstanceId,
-                                evolutionMessageData: msg,
-                            };
-                        }
-
-                        const result = await processNormalizedMessage(normalized);
-                        if ((parsedContent.type === "image" || parsedContent.type === "audio") && location.evolutionInstanceId) {
-                            if (result?.status === "deferred_unresolved_lid") {
-                                console.log(`[NewConversation] Delaying media attachment ingest until LID resolves (${key.id})`);
-                            } else {
-                                void ingestEvolutionMediaAttachment({
-                                    instanceName: location.evolutionInstanceId,
-                                    evolutionMessageData: msg,
-                                    wamId: key.id,
-                                }).catch((err) => {
-                                    console.error(`[NewConversation] Failed to ingest media attachment for ${key.id}:`, err);
-                                });
-                            }
-                        }
-                        if (result?.status === 'processed') imported++;
-                    }
-
-                    console.log(`[NewConversation] Backfilled ${imported} messages for existing conversation`);
-                } catch (backfillErr) {
-                    console.warn("[NewConversation] History backfill failed:", backfillErr);
-                }
             }
+            
 
             const seedResult = await seedConversationFromContactLeadText({
                 conversationId: existingConv.id,
@@ -10852,79 +9739,8 @@ export async function startNewConversation(phone: string) {
             } catch (backfillErr) {
                 console.warn("[NewConversation] Web Bridge history backfill failed:", backfillErr);
             }
-        } else if (providerMode === "evolution_linked" && location.evolutionInstanceId) {
-            try {
-                const { evolutionClient } = await import("@/lib/evolution/client");
-                const { processNormalizedMessage } = await import("@/lib/whatsapp/sync");
-
-                const whatsappPhone = rawDigits;
-                const { messages, remoteJid, candidates, fetchedFrom } = await fetchEvolutionMessagesForContactHistory({
-                    evolutionClient,
-                    evolutionInstanceId: location.evolutionInstanceId,
-                    contact: {
-                        phone: contact.phone,
-                        lid: (contact as any).lid || null,
-                        contactType: (contact as any).contactType || null,
-                    },
-                    limit: 30,
-                    offset: 0,
-                    logPrefix: `[NewConversation][new:${conversation.id}]`,
-                });
-                console.log(
-                    `[NewConversation] New convo history candidates: ${candidates.join(", ") || "(none)"}; fetchedFrom=${fetchedFrom.join(", ") || "none"}; primary=${remoteJid || "none"}; found=${messages.length}`
-                );
-
-                for (const msg of (messages || [])) {
-                    const key = msg.key;
-                    const messageContent = msg.message;
-                    if (!messageContent || !key?.id) continue;
-
-                    const isFromMe = key.fromMe;
-                    const parsedContent = parseEvolutionMessageContent(messageContent);
-                    const normalized: any = {
-                        from: isFromMe ? location.id : whatsappPhone,
-                        to: isFromMe ? whatsappPhone : location.id,
-                        body: parsedContent.body,
-                        type: parsedContent.type,
-                        wamId: key.id,
-                        timestamp: new Date(msg.messageTimestamp ? (msg.messageTimestamp as number) * 1000 : Date.now()),
-                        direction: isFromMe ? 'outbound' : 'inbound',
-                        source: 'whatsapp_evolution',
-                        locationId: location.id,
-                        contactName: isFromMe ? undefined : msg.pushName,
-                        lid: extractEvolutionLidJid(key),
-                        resolvedPhone: whatsappPhone,
-                    };
-
-                    if ((parsedContent.type === "image" || parsedContent.type === "audio") && location.evolutionInstanceId) {
-                        normalized.__evolutionMediaAttachmentPayload = {
-                            instanceName: location.evolutionInstanceId,
-                            evolutionMessageData: msg,
-                        };
-                    }
-
-                    const result = await processNormalizedMessage(normalized);
-                    if ((parsedContent.type === "image" || parsedContent.type === "audio") && location.evolutionInstanceId) {
-                        if (result?.status === "deferred_unresolved_lid") {
-                            console.log(`[NewConversation] Delaying media attachment ingest until LID resolves (${key.id})`);
-                        } else {
-                            void ingestEvolutionMediaAttachment({
-                                instanceName: location.evolutionInstanceId,
-                                evolutionMessageData: msg,
-                                wamId: key.id,
-                            }).catch((err) => {
-                                console.error(`[NewConversation] Failed to ingest media attachment for ${key.id}:`, err);
-                            });
-                        }
-                    }
-                    if (result?.status === 'processed') messagesImported++;
-                }
-
-                console.log(`[NewConversation] Backfilled ${messagesImported} messages for new conversation`);
-            } catch (backfillErr) {
-                console.warn("[NewConversation] History backfill failed:", backfillErr);
-            }
         }
+        
 
         const seedResult = await seedConversationFromContactLeadText({
             conversationId: conversation.id,
@@ -12912,7 +11728,7 @@ async function parseLeadFromTextInternal(
 }
 
 function resolveInitialLeadChannelType(
-    location: { evolutionInstanceId?: string | null; whatsappProviderMode?: string | null },
+    location: { whatsappProviderMode?: string | null },
     data: ParsedLeadData
 ): 'TYPE_WHATSAPP' | 'TYPE_SMS' | 'TYPE_EMAIL' {
     const phoneDigits = String(data.contact?.phone || '').replace(/\D/g, '');
@@ -12922,10 +11738,7 @@ function resolveInitialLeadChannelType(
     if (phoneDigits.length >= 7 && String(location?.whatsappProviderMode || "web_bridge") === "web_bridge") {
         return 'TYPE_WHATSAPP';
     }
-    if (phoneDigits.length >= 7 && location?.evolutionInstanceId && String(location?.whatsappProviderMode || "") === "evolution_linked") {
-        return 'TYPE_WHATSAPP';
-    }
-    return 'TYPE_SMS';
+    return phoneDigits.length >= 7 ? 'TYPE_WHATSAPP' : 'TYPE_SMS';
 }
 
 async function applyMatchedPropertyToContact(args: {
@@ -13655,8 +12468,7 @@ export async function processLegacyCrmLeadEmailForLocation(args: {
         select: {
             id: true,
             name: true,
-            evolutionInstanceId: true,
-            ghlAccessToken: true,
+                        ghlAccessToken: true,
             ghlRefreshToken: true,
             ghlExpiresAt: true,
             legacyCrmLeadEmailEnabled: true,

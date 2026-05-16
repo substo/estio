@@ -224,7 +224,7 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
 | `emptyTrash()` | Permanently deletes all soft-deleted items > 30 days old (manual trigger). |
 | `markConversationAsRead(conversationId)` | Resets `unreadCount` to `0` for the selected conversation (location-scoped security check). |
 | `getSmsChannelEligibility(conversationId)` | Returns SMS send eligibility (`eligible`/`ineligible`/`unknown`) based on contact phone validity + GHL location SMS/phone-system readiness. |
-| `getWhatsAppChannelEligibility(conversationId)` | Returns WhatsApp send eligibility based on contact phone validity + Evolution checks. |
+| `getWhatsAppChannelEligibility(conversationId)` | Returns WhatsApp send eligibility based on contact phone validity + Web Bridge send-time checks. |
 
 ## UI Implementation
 - **View Filters**: `ConversationList` header uses icon buttons/dropdown states for Inbox, Tasks, Archive, and Trash with quick switching from the same control surface.
@@ -293,7 +293,7 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
   - Inbound translations are overlays only; canonical message content stays unchanged.
   - Manual typed replies support send-time translation preview and `Send translated` / `Send original`.
   - Translation cache persistence, payload structure, and action contracts are documented in the source-of-truth doc above.
-- **WhatsApp Media Composer**: In any WhatsApp-eligible reply context, the shared composer supports media upload (`image/*`, `audio/*`, and various document types like PDF/CSV) and in-app voice-note recording (`MediaRecorder`). Media is sent through the private R2 -> Evolution `sendMedia` flow and rendered inline (image preview, audio player, or document download link) from signed attachment URLs.
+- **WhatsApp Media Composer**: In any WhatsApp-eligible reply context, the shared composer supports media upload (`image/*`, `audio/*`, and various document types like PDF/CSV) and in-app voice-note recording (`MediaRecorder`). Media is sent through the private R2 -> Web Bridge media send flow and rendered inline (image preview, audio player, or document download link) from signed attachment URLs.
 - **WhatsApp Contact Cards**: Inbound shared contacts via WhatsApp are rendered natively as rich UI cards within the message bubble instead of generic media placeholders. These cards feature a direct `Save to Contacts` button that protects against duplicates and links back to the CRM viewer. Source-of-truth details: [`whatsapp-integration.md`](whatsapp-integration.md#8-contact-sharing-vcard-support-apr-19-2026).
 - **WhatsApp Media Recovery**: Message bubbles now expose `Re-fetch Media` for WhatsApp media messages/placeholders to recover missing or stale attachment storage. Source-of-truth details: [`whatsapp-integration.md`](whatsapp-integration.md#61-media-re-fetch-recovery-mar-2026).
 - **Source of Truth (Selection Workflow)**: This document is the canonical reference for chat text-selection behavior, batch summarize/custom flow, and CRM-log save semantics.

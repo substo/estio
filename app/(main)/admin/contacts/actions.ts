@@ -16,7 +16,6 @@ import { enqueueContactSync } from '@/lib/contacts/sync-engine';
 import { enqueueGhlContactSync, enqueueGoogleContactSync } from '@/lib/integrations/provider-outbox-enqueue';
 import { Prisma } from '@prisma/client';
 import { getLocationContext } from '@/lib/auth/location-context';
-import { parseEvolutionMessageContent } from '@/lib/whatsapp/evolution-media';
 import { seedConversationFromContactLeadText } from '@/lib/conversations/bootstrap';
 import { normalizeReplyLanguage } from '@/lib/ai/reply-language-options';
 import {
@@ -32,23 +31,11 @@ import {
 } from '@/lib/viewings/reminders';
 
 async function resolvePreferredChannelTypeForPhone(
-  location: { evolutionInstanceId?: string | null },
+  _location: unknown,
   phone: string | null | undefined
 ): Promise<'TYPE_WHATSAPP' | 'TYPE_SMS'> {
   const rawDigits = String(phone || '').replace(/\D/g, '');
-  if (!location?.evolutionInstanceId || rawDigits.length < 7) {
-    return 'TYPE_SMS';
-  }
-
-  try {
-    const { evolutionClient } = await import('@/lib/evolution/client');
-    const lookup = await evolutionClient.checkWhatsAppNumber(location.evolutionInstanceId, rawDigits);
-    if (lookup.exists) return 'TYPE_WHATSAPP';
-  } catch (err) {
-    console.warn('[Contacts] WhatsApp lookup failed:', err);
-  }
-
-  return 'TYPE_SMS';
+  return rawDigits.length >= 7 ? 'TYPE_WHATSAPP' : 'TYPE_SMS';
 }
 
 function enqueueProviderContactMirrorsAfterResponse(args: {
@@ -415,45 +402,7 @@ export async function openOrStartConversationForContact(contactId: string) {
       select: { id: true, ghlConversationId: true, lastMessageType: true, createdAt: true }
     });
 
-    let messagesImported = 0;
-    if (location.evolutionInstanceId && contact.phone) {
-      try {
-        const { evolutionClient } = await import('@/lib/evolution/client');
-        const { processNormalizedMessage } = await import('@/lib/whatsapp/sync');
-
-        const rawDigits = contact.phone.replace(/\D/g, '');
-        if (rawDigits.length >= 7) {
-          const remoteJid = `${rawDigits}@s.whatsapp.net`;
-          const messages = await evolutionClient.fetchMessages(location.evolutionInstanceId, remoteJid, 30);
-
-          for (const msg of (messages || [])) {
-            const key = msg.key;
-            const messageContent = msg.message;
-            if (!messageContent || !key?.id) continue;
-
-            const isFromMe = key.fromMe;
-            const parsedContent = parseEvolutionMessageContent(messageContent);
-            const normalized: any = {
-              from: isFromMe ? location.id : rawDigits,
-              to: isFromMe ? rawDigits : location.id,
-              body: parsedContent.body,
-              type: parsedContent.type,
-              wamId: key.id,
-              timestamp: new Date(msg.messageTimestamp ? (msg.messageTimestamp as number) * 1000 : Date.now()),
-              direction: isFromMe ? 'outbound' : 'inbound',
-              source: 'whatsapp_evolution',
-              locationId: location.id,
-              contactName: isFromMe ? undefined : msg.pushName
-            };
-
-            const result = await processNormalizedMessage(normalized);
-            if (result?.status === 'processed') messagesImported++;
-          }
-        }
-      } catch (backfillError) {
-        console.warn('[Contacts] Conversation backfill failed:', backfillError);
-      }
-    }
+    const messagesImported = 0;
 
     const seedResult = await seedConversationFromContactLeadText({
       conversationId: conversation.id,

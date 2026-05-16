@@ -4,7 +4,7 @@ Last updated: 2026-05-05
 
 ## Goal
 
-Make Estio the canonical system of record for conversations, messages, contacts, tasks, deals, AI context, realtime events, and notifications. External systems such as GHL, Google, Outlook, and Evolution should be optional provider integrations that mirror to/from Estio through explicit sync records and durable outboxes.
+Make Estio the canonical system of record for conversations, messages, contacts, tasks, deals, AI context, realtime events, and notifications. External systems such as GHL, Google, Outlook, and WhatsApp Web Bridge should be optional provider integrations that mirror to/from Estio through explicit sync records and durable outboxes.
 
 ## Current Status
 
@@ -141,7 +141,7 @@ Status: **In progress locally. First cleanup pass implemented.**
 
 - Estio works completely with all external providers disconnected.
 - All new internal writes use `Conversation.id`.
-- GHL, Google, Outlook, and Evolution provider data resolves through sync records.
+- GHL, Google, Outlook, and WhatsApp Web Bridge provider data resolves through sync records.
 - Provider outbound work is queued, idempotent, retryable, observable, and never blocks local UX.
 - Deal/task/AI/notification/realtime features use internal IDs exclusively.
 - Legacy IDs remain accepted only as compatibility inputs.

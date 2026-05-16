@@ -164,7 +164,6 @@ export function WhatsAppStatus() {
     const [isConnecting, setIsConnecting] = useState(false);
     const [dialogOpen, setDialogOpen] = useState(false);
     const [emailProviders, setEmailProviders] = useState<EmailProviderStatus[]>([]);
-    const [provider, setProvider] = useState<'web_bridge' | 'evolution'>('web_bridge');
     const [phone, setPhone] = useState<string | null>(null);
     const [statusError, setStatusError] = useState<string | null>(null);
     const statusPollInFlightRef = useRef(false);
@@ -173,7 +172,6 @@ export function WhatsAppStatus() {
         const nextStatus = String(res.status || 'disconnected');
         const connected = nextStatus === 'ready' || nextStatus === 'open' || nextStatus === 'connected';
 
-        setProvider(res.provider === 'evolution' ? 'evolution' : 'web_bridge');
         setStatus(nextStatus);
         setQrCode(connected ? null : res.qrcode);
         setPhone(res.phone || null);
@@ -225,7 +223,6 @@ export function WhatsAppStatus() {
         try {
             const res = await triggerWhatsAppWebBridgeConnection();
             if (res.success) {
-                setProvider(res.provider === 'evolution' ? 'evolution' : 'web_bridge');
                 const connected = res.status === 'ready' || res.status === 'open' || res.status === 'connected';
                 if (connected) {
                     setStatus(res.status);
@@ -287,12 +284,6 @@ export function WhatsAppStatus() {
             <span className="text-gray-500 font-medium truncate min-w-0">
                 {statusLabel}
             </span>
-            {provider === 'evolution' && (
-                <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 shrink-0">
-                    Legacy
-                </span>
-            )}
-
             {visibleEmailProviders.length > 0 && (
                 <div className="flex items-center gap-1 ml-1 shrink-0">
                     {visibleEmailProviders.map((provider) => (

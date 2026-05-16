@@ -1,7 +1,7 @@
 # Intelligent Phone Normalization
 
 ## Overview
-Due to varied international client formats, the `Paste Lead` feature previously captured phone numbers in inconsistent states (e.g., local numbers missing country dialing codes, or international numbers starting with a `00` prefix instead of the WhatsApp-mandated `+`). This variability caused routing issues and broke WhatsApp message delivery since Evolution/WhatsApp require strictly formatted E.164 numbers.
+Due to varied international client formats, the `Paste Lead` feature previously captured phone numbers in inconsistent states (e.g., local numbers missing country dialing codes, or international numbers starting with a `00` prefix instead of the WhatsApp-mandated `+`). This variability caused routing issues and broke WhatsApp message delivery since WhatsApp sends require strictly formatted E.164 numbers.
 
 To natively resolve this, we implemented an intelligent pipeline combining LLM context extraction and Google's industry-standard `libphonenumber-js` parsing library.
 
