@@ -337,7 +337,7 @@ export function WhatsAppStatus() {
                                         <p className="mt-1 text-xs leading-5 text-slate-500">
                                             Do not remove the active Estio linked device. Remove old duplicate Estio linked devices only if WhatsApp says the linked-device limit is reached.
                                         </p>
-                                        {provider === 'web_bridge' && phone ? (
+                                        {phone ? (
                                             <p className="mt-1 text-xs text-slate-500">Connected phone: {phone}</p>
                                         ) : null}
                                     </div>
