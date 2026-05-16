@@ -32,6 +32,7 @@ const serviceStartedAt = new Date();
 const MAX_INLINE_MEDIA_BYTES = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_MAX_INLINE_MEDIA_BYTES || 25 * 1024 * 1024), 1024 * 1024);
 const SUPPORTED_INLINE_MEDIA_TYPES = new Set(["image", "audio", "ptt", "document", "video"]);
 const WATCHDOG_INTERVAL_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_WATCHDOG_INTERVAL_MS || 60_000), 15_000);
+const QR_STALE_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_QR_STALE_MS || 90_000), 30_000);
 
 function jidFromId(value: any) {
     return String(value?._serialized || value?.serialized || value || "").trim();
@@ -618,6 +619,15 @@ server.listen(PORT, () => {
 
 setInterval(() => {
     for (const session of sessions.values()) {
+        if ((session.status === "qr" || session.status === "qrcode") && session.lastEventAt) {
+            const ageMs = Date.now() - session.lastEventAt.getTime();
+            if (ageMs > QR_STALE_MS && !session.restarting) {
+                restartStaleSession(session, new Error(`WhatsApp QR expired after ${Math.round(ageMs / 1000)} seconds.`)).catch((error: any) => {
+                    console.warn(`[WhatsApp Web Bridge] Failed to refresh expired QR for ${session.sessionId}:`, error?.message || error);
+                });
+                continue;
+            }
+        }
         if (!session.ready || session.restarting || !session.client) continue;
         withStaleRecovery(session, async () => {
             if (typeof session.client.getState === "function") {
