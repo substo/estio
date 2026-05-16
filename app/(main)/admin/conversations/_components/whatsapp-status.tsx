@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { getWhatsAppWebBridgeStatus, getEmailSyncProvidersStatus, triggerWhatsAppWebBridgeConnection } from '../actions';
 import { CheckCircle2, Loader2, RefreshCw, QrCode as QrIcon, Smartphone, WifiOff } from 'lucide-react';
@@ -167,29 +167,42 @@ export function WhatsAppStatus() {
     const [provider, setProvider] = useState<'web_bridge' | 'evolution'>('web_bridge');
     const [phone, setPhone] = useState<string | null>(null);
     const [statusError, setStatusError] = useState<string | null>(null);
+    const statusPollInFlightRef = useRef(false);
 
-    const checkStatus = async () => {
-        if (loading) return; // Prevent double fetch
-        // Don't show global loading spinner for background polls unless it's initial
-        if (status === 'checking') setLoading(true);
+    const applyWhatsAppStatus = (res: Awaited<ReturnType<typeof getWhatsAppWebBridgeStatus>>) => {
+        const nextStatus = String(res.status || 'disconnected');
+        const connected = nextStatus === 'ready' || nextStatus === 'open' || nextStatus === 'connected';
+
+        setProvider(res.provider === 'evolution' ? 'evolution' : 'web_bridge');
+        setStatus(nextStatus);
+        setQrCode(connected ? null : res.qrcode);
+        setPhone(res.phone || null);
+        setStatusError(connected ? null : (res.error || null));
+        setIsConnecting(false);
+
+        if (connected) {
+            setDialogOpen(false);
+        }
+
+        return connected;
+    };
+
+    const checkStatus = async (options?: { foreground?: boolean }) => {
+        if (statusPollInFlightRef.current) return false;
+        statusPollInFlightRef.current = true;
+        if (options?.foreground || status === 'checking') setLoading(true);
 
         try {
             const res = await getWhatsAppWebBridgeStatus();
-            setProvider(res.provider === 'evolution' ? 'evolution' : 'web_bridge');
-            setStatus(res.status);
-            const connected = res.status === 'ready' || res.status === 'open' || res.status === 'connected';
-            setQrCode(connected ? null : res.qrcode);
-            setPhone(res.phone || null);
-            setStatusError(res.error || null);
-            if (connected) {
-                setDialogOpen(false);
-            }
+            return applyWhatsAppStatus(res);
         } catch (e) {
             console.error(e);
             setStatus('ERROR');
             setStatusError('Unable to check WhatsApp status.');
+            return false;
         } finally {
             setLoading(false);
+            statusPollInFlightRef.current = false;
         }
     };
 
@@ -203,7 +216,7 @@ export function WhatsAppStatus() {
     };
 
     const handleRefresh = async () => {
-        await Promise.allSettled([checkStatus(), checkEmailProviders()]);
+        await Promise.allSettled([checkStatus({ foreground: true }), checkEmailProviders()]);
     };
 
     const handleConnect = async () => {
@@ -213,13 +226,23 @@ export function WhatsAppStatus() {
             const res = await triggerWhatsAppWebBridgeConnection();
             if (res.success) {
                 setProvider(res.provider === 'evolution' ? 'evolution' : 'web_bridge');
+                const connected = res.status === 'ready' || res.status === 'open' || res.status === 'connected';
+                if (connected) {
+                    setStatus(res.status);
+                    setQrCode(null);
+                    setStatusError(null);
+                    setDialogOpen(false);
+                    return;
+                }
                 if (res.qrCode) {
                     setQrCode(res.qrCode);
                 }
+                setStatus(res.status || 'starting');
+                setStatusError(res.error || null);
                 if (res.status !== 'qrcode') {
                     toast({ title: "Connecting...", description: "Requesting WhatsApp linked-device QR code..." });
                 }
-                checkStatus();
+                await checkStatus();
             } else {
                 toast({ title: "Error", description: res.error || "Failed to start connection", variant: "destructive" });
             }
@@ -231,11 +254,12 @@ export function WhatsAppStatus() {
     };
 
     useEffect(() => {
-        checkStatus();
-        const pollTime = (qrCode || ['starting', 'qr', 'authenticated', 'connecting', 'qrcode', 'loading', 'restarting', 'reconnecting'].includes(status)) ? 3000 : 30000;
+        void checkStatus();
+        const shouldPollFast = dialogOpen || qrCode || ['starting', 'qr', 'authenticated', 'connecting', 'qrcode', 'loading', 'restarting', 'reconnecting'].includes(status);
+        const pollTime = shouldPollFast ? 1500 : 30000;
         const interval = setInterval(checkStatus, pollTime);
         return () => clearInterval(interval);
-    }, [qrCode, status]);
+    }, [dialogOpen, qrCode, status]);
 
     useEffect(() => {
         checkEmailProviders();
