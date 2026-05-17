@@ -22,6 +22,7 @@ import {
 } from "@/app/(main)/admin/conversations/actions";
 import { useAiModelCatalog } from "@/components/ai/use-ai-model-catalog";
 import { toast } from "sonner";
+import { getSmsSegmentInfo } from "@/lib/sms/segments";
 
 type ComposerChannel = "SMS" | "Email" | "WhatsApp" | "SMS_RELAY";
 
@@ -629,6 +630,19 @@ export function ConversationComposer({
                 ? (whatsAppEligibility.reason || "WhatsApp not available for this contact")
                 : undefined;
     const hasTranslationPreview = !!translationPreviewText.trim();
+    const smsSegmentInfo = getSmsSegmentInfo(draft);
+    const showSmsRelaySegmentInfo = selectedChannel === "SMS_RELAY" && draft.length > 0;
+    const smsRelaySegmentLabel = `${smsSegmentInfo.segments || 1} SMS part${(smsSegmentInfo.segments || 1) === 1 ? "" : "s"} · ${smsSegmentInfo.remaining} left`;
+    const smsRelaySegmentTone = smsSegmentInfo.encoding === "unicode"
+        ? "text-amber-700"
+        : smsSegmentInfo.segments > 1
+            ? "text-slate-500"
+            : "text-slate-400";
+    const smsRelaySegmentTitle = smsSegmentInfo.encoding === "unicode"
+        ? "Unicode characters, emoji, or smart punctuation reduce SMS capacity to 70 characters for one part and 67 per multipart segment."
+        : smsSegmentInfo.segments > 1
+            ? "This Android SMS will be sent as multipart SMS."
+            : "Android SMS segment estimate.";
 
     return (
         <div className="border-t bg-white pb-[env(safe-area-inset-bottom)]" data-no-pane-swipe>
@@ -852,6 +866,14 @@ export function ConversationComposer({
                             {selectedChannel === "SMS" && draft.length > 0 && (
                                 <span className="text-[10px] text-slate-400">{draft.length}</span>
                             )}
+                            {showSmsRelaySegmentInfo && (
+                                <span
+                                    className={cn("text-[10px] whitespace-nowrap", smsRelaySegmentTone)}
+                                    title={smsRelaySegmentTitle}
+                                >
+                                    {smsRelaySegmentLabel}
+                                </span>
+                            )}
                             {canUseWriteTranslation && hasTranslationPreview ? (
                                 <>
                                     <Button
@@ -909,6 +931,16 @@ export function ConversationComposer({
                             ? `Draft in ${resolvedDraftLanguageLabel} · Auto-translates to ${autoTranslateTargetLabel} on send · ${replyLanguageSourceHint}`
                             : `Viewing in ${resolvedViewingLanguageLabel}. Drafting in ${resolvedDraftLanguageLabel}. ${replyLanguageSourceHint}`
                         }
+                    </div>
+                )}
+                {showSmsRelaySegmentInfo && smsSegmentInfo.segments > 1 && (
+                    <div className={cn(
+                        "px-1 pt-1 text-[10px]",
+                        smsSegmentInfo.encoding === "unicode" ? "text-amber-700" : "text-slate-500"
+                    )}>
+                        {smsSegmentInfo.encoding === "unicode"
+                            ? `Unicode SMS uses ${smsSegmentInfo.segmentLimit} characters per multipart segment. This will send as ${smsSegmentInfo.segments} SMS parts.`
+                            : `This will send as ${smsSegmentInfo.segments} SMS parts.`}
                     </div>
                 )}
             </div>

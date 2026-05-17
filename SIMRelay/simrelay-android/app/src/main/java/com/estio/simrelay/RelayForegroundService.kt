@@ -101,7 +101,12 @@ class RelayForegroundService : Service() {
                     SmsManager.getDefault()
                 }
                 sentSmsMirror.suppressRelaySend(destination, message)
-                smsManager.sendTextMessage(destination, null, message, null, null)
+                val parts = smsManager.divideMessage(message)
+                if (parts.size <= 1) {
+                    smsManager.sendTextMessage(destination, null, message, null, null)
+                } else {
+                    smsManager.sendMultipartTextMessage(destination, null, parts, null, null)
+                }
                 ApiClient.api.reportJobResult(JobResultRequest(jobId, "sent"))
             } catch (e: Exception) {
                 ApiClient.api.reportJobResult(JobResultRequest(jobId, "failed", e.message))
