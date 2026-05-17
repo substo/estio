@@ -14,6 +14,125 @@ Use Android Studio installs only while developing or debugging the app.
 
 Emulators cannot send or receive physical SIM SMS messages, so final verification must happen on a real phone with an active SIM.
 
+## Release Workflow Decision
+
+There are two different update workflows. Choose one before asking an AI agent or engineer to make a release.
+
+### Workflow A: Update Martin's Own Phone Only
+
+Use this for fast internal testing on the physical relay phone. This does not publish anything to app users and does not require Play Console.
+
+Best for:
+
+- Testing a new Android build immediately.
+- Updating the single paired relay phone used by Estio.
+- Verifying SMS send/receive behavior before a wider release.
+
+Do not bump `SIMRELAY_VERSION_CODE` for this workflow unless you also plan to publish through Managed Google Play.
+
+#### One-Time Phone Setup
+
+1. On the Android phone, enable **Developer options**.
+2. Enable **USB debugging**.
+3. Connect the phone to the Mac by USB.
+4. Accept the **Allow USB debugging** prompt on the phone.
+5. From `SIMRelay/simrelay-android`, confirm ADB can see the phone:
+
+   ```bash
+   adb devices
+   ```
+
+6. The device should show as `device`, not `unauthorized`.
+
+If `adb` is not found, use Android Studio's bundled platform tools or install Android platform tools.
+
+#### Update the Phone by USB
+
+From `SIMRelay/simrelay-android`:
+
+```bash
+./gradlew assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+Then on the phone:
+
+1. Open **Estio SIM Relay**.
+2. Confirm it is still paired.
+3. Confirm SMS permissions are still allowed.
+4. Start the relay service if it is not running.
+5. Send one outbound SMS from Estio.
+6. Send one inbound SMS to the SIM and confirm it appears in Estio.
+
+The `-r` flag updates the existing app and preserves app data when the app has the same package name and compatible signing key.
+
+#### Optional: Wireless ADB
+
+Use this only after USB debugging works.
+
+1. On the phone, open **Developer options > Wireless debugging**.
+2. Choose **Pair device with pairing code**.
+3. On the Mac, run the command shown by Android:
+
+   ```bash
+   adb pair PHONE_IP:PAIR_PORT
+   ```
+
+4. Enter the pairing code.
+5. Connect to the phone:
+
+   ```bash
+   adb connect PHONE_IP:ADB_PORT
+   adb devices
+   ```
+
+6. Then update with:
+
+   ```bash
+   ./gradlew assembleDebug
+   adb install -r app/build/outputs/apk/debug/app-debug.apk
+   ```
+
+Wireless ADB is convenient, but USB is more reliable for urgent fixes.
+
+#### Important Signing Warning
+
+Do not mix debug installs and Play/Managed Google Play installs on the same phone unless you understand the signing keys.
+
+- Android Studio / `assembleDebug` uses the debug signing key.
+- Managed Google Play uses the release/upload signing path.
+- Android will reject an update if the new APK is signed by a different key.
+
+If the phone is already installed from Managed Google Play, update it through Managed Google Play or install a release APK signed with the same release key. Uninstalling and reinstalling can clear pairing data.
+
+#### Future Agent Prompt
+
+Use this wording when you only want the physical relay phone updated:
+
+```text
+Update my own Android relay phone only. Build the debug APK and install it over ADB. Do not bump SIMRELAY_VERSION_CODE, do not create a Play release, and do not change the public/Managed Google Play workflow.
+```
+
+### Workflow B: Release to App Users
+
+Use this for any build that should reach other devices or app users through Managed Google Play.
+
+Best for:
+
+- Updating managed relay phones without Android Studio.
+- Releasing to multiple internal phones.
+- Publishing a controlled private app update.
+
+This workflow must bump `SIMRELAY_VERSION_CODE`, build `bundleRelease`, and publish through Play Console / Managed Google Play.
+
+#### Future Agent Prompt
+
+Use this wording when you want a real app-user release:
+
+```text
+Prepare an Android app-user release. Bump SIMRELAY_VERSION_CODE and SIMRELAY_VERSION_NAME, build bundleRelease, update release notes/checklist, and do not install a debug APK to my own phone unless I explicitly ask.
+```
+
 ## Production Update Strategy
 
 The recommended production path is:

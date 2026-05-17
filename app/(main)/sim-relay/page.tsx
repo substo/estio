@@ -82,6 +82,11 @@ const valueCards = [
         text: "An outbox queue, delivery result updates, and device status help reduce lost-message risk.",
         icon: ShieldCheck,
     },
+    {
+        title: "Know the real SMS count",
+        text: "Long messages, emojis, and smart punctuation can turn one draft into multiple billable SMS parts. Estio shows the count before your team sends.",
+        icon: BadgeCheck,
+    },
 ];
 
 const trustItems = [
@@ -136,6 +141,11 @@ const faqs = [
         question: "Is it good for high-volume bulk marketing?",
         answer:
             "It is best for local operational follow-up and steady agency messaging, not unmanaged blasting. Consent, opt-out, carrier rules, and local SMS regulations still apply.",
+    },
+    {
+        question: "Why does Estio show SMS parts?",
+        answer:
+            "SMS carriers often charge per part, especially for long texts or messages with emojis and special characters. Estio shows the estimate before sending so teams can control cost without learning SMS technical rules.",
     },
 ];
 
@@ -228,7 +238,7 @@ export default function SimRelayPage() {
                                 send and receive local text messages.
                             </p>
                         </div>
-                        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
                             {valueCards.map((item) => (
                                 <Card key={item.title} className="rounded-lg">
                                     <CardHeader>
@@ -281,6 +291,32 @@ export default function SimRelayPage() {
                                 <p className="mt-2 text-3xl font-semibold">$0.0864</p>
                                 <p className="mt-2 text-sm text-muted-foreground">per outbound SMS segment listed</p>
                             </a>
+                        </div>
+                    </div>
+                </section>
+
+                <section className="border-b bg-slate-50 py-16 dark:bg-slate-900/40">
+                    <div className="container mx-auto grid max-w-6xl gap-8 px-4 lg:grid-cols-[1fr_0.9fr]">
+                        <div>
+                            <h2 className="text-3xl font-semibold tracking-tight">No surprise SMS parts</h2>
+                            <p className="mt-4 leading-7 text-muted-foreground">
+                                A text can look like one message to a customer but still count as multiple billable
+                                SMS parts behind the scenes. Long messages, emojis, and special punctuation can
+                                increase the number of parts your carrier or gateway counts.
+                            </p>
+                            <p className="mt-4 leading-7 text-muted-foreground">
+                                In Android SMS mode, Estio previews the part count before sending, such as 1 SMS part
+                                or 2 SMS parts. Long messages still send normally, and Estio keeps the full text as one
+                                clean CRM conversation message.
+                            </p>
+                        </div>
+                        <div className="rounded-lg border bg-background p-6">
+                            <p className="text-sm font-medium text-muted-foreground">Example</p>
+                            <p className="mt-3 text-lg font-semibold">A short reminder may be 1 SMS part.</p>
+                            <p className="mt-3 leading-7 text-muted-foreground">
+                                A longer follow-up with emojis or curly quotes can become 2 or more parts. Estio warns
+                                agents before sending so they can shorten the message when cost matters.
+                            </p>
                         </div>
                     </div>
                 </section>
