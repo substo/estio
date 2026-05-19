@@ -2836,6 +2836,11 @@ function emptyConversationMergeEffects(): ConversationMergeEffects {
     tasksMoved: 0,
     dealLinks: { moved: 0, deduped: 0 },
     insightsMoved: 0,
+    agentExecutions: { moved: 0, detached: 0 },
+    aiAutomationJobs: { moved: 0, detached: 0 },
+    aiDecisions: { moved: 0, detached: 0 },
+    aiSuggestedResponses: { moved: 0, detached: 0 },
+    userNotifications: { moved: 0, detached: 0 },
     warnings: [],
   };
 }
@@ -2862,6 +2867,26 @@ function combineConversationMergeEffects(effects: ConversationMergeEffects[]): C
       deduped: combined.dealLinks.deduped + effect.dealLinks.deduped,
     },
     insightsMoved: combined.insightsMoved + effect.insightsMoved,
+    agentExecutions: {
+      moved: combined.agentExecutions.moved + effect.agentExecutions.moved,
+      detached: combined.agentExecutions.detached + effect.agentExecutions.detached,
+    },
+    aiAutomationJobs: {
+      moved: combined.aiAutomationJobs.moved + effect.aiAutomationJobs.moved,
+      detached: combined.aiAutomationJobs.detached + effect.aiAutomationJobs.detached,
+    },
+    aiDecisions: {
+      moved: combined.aiDecisions.moved + effect.aiDecisions.moved,
+      detached: combined.aiDecisions.detached + effect.aiDecisions.detached,
+    },
+    aiSuggestedResponses: {
+      moved: combined.aiSuggestedResponses.moved + effect.aiSuggestedResponses.moved,
+      detached: combined.aiSuggestedResponses.detached + effect.aiSuggestedResponses.detached,
+    },
+    userNotifications: {
+      moved: combined.userNotifications.moved + effect.userNotifications.moved,
+      detached: combined.userNotifications.detached + effect.userNotifications.detached,
+    },
     warnings: [...combined.warnings, ...effect.warnings],
   }), emptyConversationMergeEffects());
 }

@@ -307,6 +307,18 @@ function MergePreviewPanel({
         childEffects.providerOutboxJobsUpdated +
         childEffects.whatsappOutboundOutboxJobsUpdated +
         childEffects.smsRelayOutboxJobsUpdated;
+    const aiChildRowsMoved =
+        childEffects.agentExecutions.moved +
+        childEffects.aiAutomationJobs.moved +
+        childEffects.aiDecisions.moved +
+        childEffects.aiSuggestedResponses.moved +
+        childEffects.userNotifications.moved;
+    const aiChildRowsDetached =
+        childEffects.agentExecutions.detached +
+        childEffects.aiAutomationJobs.detached +
+        childEffects.aiDecisions.detached +
+        childEffects.aiSuggestedResponses.detached +
+        childEffects.userNotifications.detached;
 
     return (
         <div className="rounded-md border bg-muted/20 p-3 text-sm space-y-3">
@@ -338,6 +350,12 @@ function MergePreviewPanel({
                     </div>
                     <div className="text-xs">
                         Message sync/outbox/cache rows updated: {messageAdjacentUpdated}. Insights moved: {childEffects.insightsMoved}.
+                    </div>
+                    <div className="text-xs">
+                        AI and notification records: {aiChildRowsMoved} moved, {aiChildRowsDetached} detached.
+                    </div>
+                    <div className="text-xs">
+                        Executions {childEffects.agentExecutions.moved}, jobs {childEffects.aiAutomationJobs.moved}, decisions {childEffects.aiDecisions.moved}, suggestions {childEffects.aiSuggestedResponses.moved}, notifications {childEffects.userNotifications.moved}.
                     </div>
                 </div>
             )}

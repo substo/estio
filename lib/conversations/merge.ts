@@ -7,6 +7,11 @@ export type ConversationMergeRelationEffects = {
     deduped: number;
 };
 
+export type ConversationMergeMovableEffects = {
+    moved: number;
+    detached: number;
+};
+
 export type ConversationMergeEffects = {
     messagesMoved: number;
     messageSyncRecordsUpdated: number;
@@ -19,6 +24,11 @@ export type ConversationMergeEffects = {
     tasksMoved: number;
     dealLinks: ConversationMergeRelationEffects;
     insightsMoved: number;
+    agentExecutions: ConversationMergeMovableEffects;
+    aiAutomationJobs: ConversationMergeMovableEffects;
+    aiDecisions: ConversationMergeMovableEffects;
+    aiSuggestedResponses: ConversationMergeMovableEffects;
+    userNotifications: ConversationMergeMovableEffects;
     warnings: string[];
 };
 
@@ -37,27 +47,16 @@ function emptyEffects(): ConversationMergeEffects {
         tasksMoved: 0,
         dealLinks: { moved: 0, deduped: 0 },
         insightsMoved: 0,
+        agentExecutions: { moved: 0, detached: 0 },
+        aiAutomationJobs: { moved: 0, detached: 0 },
+        aiDecisions: { moved: 0, detached: 0 },
+        aiSuggestedResponses: { moved: 0, detached: 0 },
+        userNotifications: { moved: 0, detached: 0 },
         warnings: [],
     };
 }
 
-function mergeWarnings(counts: {
-    agentExecutions: number;
-    aiAutomationJobs: number;
-    aiDecisions: number;
-    aiSuggestedResponses: number;
-    userNotifications: number;
-}) {
-    const warnings: string[] = [];
-    if (counts.agentExecutions > 0) warnings.push(`${counts.agentExecutions} AI execution record(s) will be retained but detached from the deleted source conversation.`);
-    if (counts.aiAutomationJobs > 0) warnings.push(`${counts.aiAutomationJobs} AI automation job(s) will be retained but detached from the deleted source conversation.`);
-    if (counts.aiDecisions > 0) warnings.push(`${counts.aiDecisions} AI decision record(s) will be retained but detached from the deleted source conversation.`);
-    if (counts.aiSuggestedResponses > 0) warnings.push(`${counts.aiSuggestedResponses} AI suggested response(s) will be retained but detached from the deleted source conversation.`);
-    if (counts.userNotifications > 0) warnings.push(`${counts.userNotifications} notification(s) will be retained but detached from the deleted source conversation.`);
-    return warnings;
-}
-
-async function countDetachedOnDeleteWarnings(client: ConversationMergeClient, sourceConversationId: string) {
+async function countMovableChildRecords(client: ConversationMergeClient, sourceConversationId: string) {
     const db = client as any;
     const [
         agentExecutions,
@@ -97,7 +96,7 @@ export async function previewConversationMergeEffects(args: {
         targetSyncRecords,
         sourceDealLinks,
         targetDealLinks,
-        detachedCounts,
+        movableChildCounts,
         messagesMoved,
         messageSyncRecordsUpdated,
         messageTranslationCachesUpdated,
@@ -131,7 +130,7 @@ export async function previewConversationMergeEffects(args: {
             where: { conversationId: args.targetConversationId },
             select: { dealId: true },
         }),
-        countDetachedOnDeleteWarnings(args.client, args.sourceConversationId),
+        countMovableChildRecords(args.client, args.sourceConversationId),
         db.message.count({ where: { conversationId: args.sourceConversationId } }),
         db.messageSync.count({ where: { conversationId: args.sourceConversationId } }).catch(() => 0),
         db.messageTranslationCache.count({ where: { conversationId: args.sourceConversationId } }).catch(() => 0),
@@ -162,9 +161,79 @@ export async function previewConversationMergeEffects(args: {
     effects.smsRelayOutboxJobsUpdated = smsRelayOutboxJobsUpdated;
     effects.tasksMoved = tasksMoved;
     effects.insightsMoved = insightsMoved;
-    effects.warnings = mergeWarnings(detachedCounts);
+    effects.agentExecutions.moved = movableChildCounts.agentExecutions;
+    effects.aiAutomationJobs.moved = movableChildCounts.aiAutomationJobs;
+    effects.aiDecisions.moved = movableChildCounts.aiDecisions;
+    effects.aiSuggestedResponses.moved = movableChildCounts.aiSuggestedResponses;
+    effects.userNotifications.moved = movableChildCounts.userNotifications;
 
     return effects;
+}
+
+async function moveRecordsWithOptionalSourceContact(args: {
+    delegate: { updateMany: (params: any) => Promise<{ count: number }> };
+    label: string;
+    effects: ConversationMergeMovableEffects;
+    sourceConversationId: string;
+    targetConversationId: string;
+    sourceContactId: string;
+    targetContactId: string;
+    warnings: string[];
+}) {
+    try {
+        const contactMatched = await args.delegate.updateMany({
+            where: {
+                conversationId: args.sourceConversationId,
+                contactId: args.sourceContactId,
+            },
+            data: {
+                conversationId: args.targetConversationId,
+                contactId: args.targetContactId,
+            },
+        });
+        const remaining = await args.delegate.updateMany({
+            where: { conversationId: args.sourceConversationId },
+            data: { conversationId: args.targetConversationId },
+        });
+        args.effects.moved = contactMatched.count + remaining.count;
+        args.effects.detached = 0;
+    } catch (error) {
+        args.effects.detached += args.effects.moved;
+        args.effects.moved = 0;
+        args.warnings.push(`${args.label} could not be moved to the target conversation and may be detached when the source conversation is deleted.`);
+    }
+}
+
+async function moveAgentExecutions(args: {
+    delegate: { updateMany: (params: any) => Promise<{ count: number }> };
+    effects: ConversationMergeMovableEffects;
+    sourceConversationId: string;
+    targetConversationId: string;
+    warnings: string[];
+}) {
+    try {
+        const conversationSourceExecutions = await args.delegate.updateMany({
+            where: {
+                conversationId: args.sourceConversationId,
+                sourceType: "conversation",
+                sourceId: args.sourceConversationId,
+            },
+            data: {
+                conversationId: args.targetConversationId,
+                sourceId: args.targetConversationId,
+            },
+        });
+        const remainingExecutions = await args.delegate.updateMany({
+            where: { conversationId: args.sourceConversationId },
+            data: { conversationId: args.targetConversationId },
+        });
+        args.effects.moved = conversationSourceExecutions.count + remainingExecutions.count;
+        args.effects.detached = 0;
+    } catch (error) {
+        args.effects.detached += args.effects.moved;
+        args.effects.moved = 0;
+        args.warnings.push("AI execution records could not be moved to the target conversation and may be detached when the source conversation is deleted.");
+    }
 }
 
 export async function mergeConversationIntoTarget(args: {
@@ -295,6 +364,54 @@ export async function mergeConversationIntoTarget(args: {
         where: { conversationId: args.sourceConversationId },
         data: { conversationId: args.targetConversationId, contactId: args.targetContactId },
     }).catch(() => null);
+
+    await moveAgentExecutions({
+        delegate: tx.agentExecution,
+        effects: effects.agentExecutions,
+        sourceConversationId: args.sourceConversationId,
+        targetConversationId: args.targetConversationId,
+        warnings: effects.warnings,
+    });
+    await moveRecordsWithOptionalSourceContact({
+        delegate: tx.aiAutomationJob,
+        label: "AI automation jobs",
+        effects: effects.aiAutomationJobs,
+        sourceConversationId: args.sourceConversationId,
+        targetConversationId: args.targetConversationId,
+        sourceContactId: args.sourceContactId,
+        targetContactId: args.targetContactId,
+        warnings: effects.warnings,
+    });
+    await moveRecordsWithOptionalSourceContact({
+        delegate: tx.aiDecision,
+        label: "AI decision records",
+        effects: effects.aiDecisions,
+        sourceConversationId: args.sourceConversationId,
+        targetConversationId: args.targetConversationId,
+        sourceContactId: args.sourceContactId,
+        targetContactId: args.targetContactId,
+        warnings: effects.warnings,
+    });
+    await moveRecordsWithOptionalSourceContact({
+        delegate: tx.aiSuggestedResponse,
+        label: "AI suggested responses",
+        effects: effects.aiSuggestedResponses,
+        sourceConversationId: args.sourceConversationId,
+        targetConversationId: args.targetConversationId,
+        sourceContactId: args.sourceContactId,
+        targetContactId: args.targetContactId,
+        warnings: effects.warnings,
+    });
+    await moveRecordsWithOptionalSourceContact({
+        delegate: tx.userNotification,
+        label: "User notifications",
+        effects: effects.userNotifications,
+        sourceConversationId: args.sourceConversationId,
+        targetConversationId: args.targetConversationId,
+        sourceContactId: args.sourceContactId,
+        targetContactId: args.targetContactId,
+        warnings: effects.warnings,
+    });
 
     await recomputeConversationSummary(args.tx, args.targetConversationId);
     return effects;
