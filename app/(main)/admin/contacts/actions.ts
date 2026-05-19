@@ -17,6 +17,11 @@ import { enqueueGhlContactSync, enqueueGoogleContactSync } from '@/lib/integrati
 import { Prisma } from '@prisma/client';
 import { getLocationContext } from '@/lib/auth/location-context';
 import { seedConversationFromContactLeadText } from '@/lib/conversations/bootstrap';
+import {
+  mergeConversationIntoTarget,
+  previewConversationMergeEffects,
+  type ConversationMergeEffects,
+} from '@/lib/conversations/merge';
 import { normalizeReplyLanguage } from '@/lib/ai/reply-language-options';
 import {
   normalizeIanaTimeZoneOrThrow,
@@ -2761,6 +2766,7 @@ export type MergeContactPreview = {
     mergedCount: number;
     willMergeIntoExistingTargetConversation: boolean;
     messagesAffected: number;
+    childEffects: ConversationMergeEffects;
   };
   roles: {
     property: { total: number; transferred: number; duplicatesRemoved: number };
@@ -2808,12 +2814,56 @@ function buildMergeAuditSummary(args: {
   conversationsMoved: number;
   conversationsMerged: number;
   messagesAffected: number;
+  conversationChildEffects: ConversationMergeEffects;
   viewingsMoved: number;
   swipesMoved: number;
   fieldsFilled: string[];
   tagsAdded: string[];
 }) {
   return args;
+}
+
+function emptyConversationMergeEffects(): ConversationMergeEffects {
+  return {
+    messagesMoved: 0,
+    messageSyncRecordsUpdated: 0,
+    messageTranslationCachesUpdated: 0,
+    providerOutboxJobsUpdated: 0,
+    whatsappOutboundOutboxJobsUpdated: 0,
+    smsRelayOutboxJobsUpdated: 0,
+    participants: { moved: 0, deduped: 0 },
+    syncRecords: { moved: 0, deduped: 0 },
+    tasksMoved: 0,
+    dealLinks: { moved: 0, deduped: 0 },
+    insightsMoved: 0,
+    warnings: [],
+  };
+}
+
+function combineConversationMergeEffects(effects: ConversationMergeEffects[]): ConversationMergeEffects {
+  return effects.reduce((combined, effect) => ({
+    messagesMoved: combined.messagesMoved + effect.messagesMoved,
+    messageSyncRecordsUpdated: combined.messageSyncRecordsUpdated + effect.messageSyncRecordsUpdated,
+    messageTranslationCachesUpdated: combined.messageTranslationCachesUpdated + effect.messageTranslationCachesUpdated,
+    providerOutboxJobsUpdated: combined.providerOutboxJobsUpdated + effect.providerOutboxJobsUpdated,
+    whatsappOutboundOutboxJobsUpdated: combined.whatsappOutboundOutboxJobsUpdated + effect.whatsappOutboundOutboxJobsUpdated,
+    smsRelayOutboxJobsUpdated: combined.smsRelayOutboxJobsUpdated + effect.smsRelayOutboxJobsUpdated,
+    participants: {
+      moved: combined.participants.moved + effect.participants.moved,
+      deduped: combined.participants.deduped + effect.participants.deduped,
+    },
+    syncRecords: {
+      moved: combined.syncRecords.moved + effect.syncRecords.moved,
+      deduped: combined.syncRecords.deduped + effect.syncRecords.deduped,
+    },
+    tasksMoved: combined.tasksMoved + effect.tasksMoved,
+    dealLinks: {
+      moved: combined.dealLinks.moved + effect.dealLinks.moved,
+      deduped: combined.dealLinks.deduped + effect.dealLinks.deduped,
+    },
+    insightsMoved: combined.insightsMoved + effect.insightsMoved,
+    warnings: [...combined.warnings, ...effect.warnings],
+  }), emptyConversationMergeEffects());
 }
 
 async function buildMergeContactPreview(sourceContactId: string, targetContactId: string): Promise<MergeContactPreview | null> {
@@ -2846,7 +2896,7 @@ async function buildMergeContactPreview(sourceContactId: string, targetContactId
     }),
     db.conversation.findMany({
       where: { contactId: targetContactId },
-      select: { locationId: true },
+      select: { id: true, locationId: true },
     }),
     db.contactPropertyRole.findMany({
       where: { contactId: sourceContactId },
@@ -2871,6 +2921,19 @@ async function buildMergeContactPreview(sourceContactId: string, targetContactId
   const targetConversationLocationIds = new Set(targetConversationKeys.map((conversation) => conversation.locationId));
   const mergedCount = sourceConversations.filter((conversation) => targetConversationLocationIds.has(conversation.locationId)).length;
   const messagesAffected = sourceConversations.reduce((sum, conversation) => sum + conversation._count.messages, 0);
+  const conversationChildEffects = combineConversationMergeEffects(await Promise.all(
+    sourceConversations
+      .map((sourceConversation) => {
+        const targetConversation = targetConversationKeys.find((conversation) => conversation.locationId === sourceConversation.locationId);
+        if (!targetConversation?.id) return null;
+        return previewConversationMergeEffects({
+          client: db,
+          sourceConversationId: sourceConversation.id,
+          targetConversationId: targetConversation.id,
+        });
+      })
+      .filter(Boolean) as Array<Promise<ConversationMergeEffects>>
+  ));
 
   const targetPropertyRoleKeys = new Set(targetPropertyRoles.map((role) => `${role.propertyId}:${role.role}`));
   const duplicatePropertyRoleCount = sourcePropertyRoles.filter((role) => targetPropertyRoleKeys.has(`${role.propertyId}:${role.role}`)).length;
@@ -2906,6 +2969,7 @@ async function buildMergeContactPreview(sourceContactId: string, targetContactId
       mergedCount,
       willMergeIntoExistingTargetConversation: mergedCount > 0,
       messagesAffected,
+      childEffects: conversationChildEffects,
     },
     roles: {
       property: {
@@ -3023,6 +3087,7 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
     await db.$transaction(async (tx) => {
       let conversationsMerged = 0;
       let messagesAffected = 0;
+      const conversationMergeEffects: ConversationMergeEffects[] = [];
 
       // 1. Transfer LID if target doesn't have one
       if (source.lid && !target.lid) {
@@ -3052,10 +3117,14 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
         if (targetConv) {
           conversationsMerged += 1;
           console.log(`[Merge] Merging conversation ${sourceConv.id} into ${targetConv.id}`);
-          await tx.message.updateMany({
-            where: { conversationId: sourceConv.id },
-            data: { conversationId: targetConv.id }
+          const childEffects = await mergeConversationIntoTarget({
+            tx,
+            sourceConversationId: sourceConv.id,
+            targetConversationId: targetConv.id,
+            sourceContactId,
+            targetContactId,
           });
+          conversationMergeEffects.push(childEffects);
           await tx.conversation.delete({ where: { id: sourceConv.id } });
           targetConversationId = targetConv.id;
         } else {
@@ -3185,6 +3254,7 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
         conversationsMoved,
         conversationsMerged,
         messagesAffected,
+        conversationChildEffects: combineConversationMergeEffects(conversationMergeEffects),
         viewingsMoved: viewingsMoveResult.count,
         swipesMoved: swipesMoveResult.count,
         fieldsFilled: Object.keys(fillData),

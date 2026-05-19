@@ -300,6 +300,13 @@ function MergePreviewPanel({
         ...preview.arrayFieldsMerged.map((field) => `${field.label} (+${field.addedCount})`),
     ];
     const providers = preview.providerCleanupWarning.providers.join(", ");
+    const childEffects = preview.conversations.childEffects;
+    const messageAdjacentUpdated =
+        childEffects.messageSyncRecordsUpdated +
+        childEffects.messageTranslationCachesUpdated +
+        childEffects.providerOutboxJobsUpdated +
+        childEffects.whatsappOutboundOutboxJobsUpdated +
+        childEffects.smsRelayOutboxJobsUpdated;
 
     return (
         <div className="rounded-md border bg-muted/20 p-3 text-sm space-y-3">
@@ -318,8 +325,31 @@ function MergePreviewPanel({
             </div>
 
             {preview.conversations.willMergeIntoExistingTargetConversation && (
+                <div className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900 space-y-1">
+                    <div>A source conversation will be merged into an existing target conversation.</div>
+                    <div className="text-xs">
+                        Participants: {childEffects.participants.moved} moved, {childEffects.participants.deduped} deduped.
+                    </div>
+                    <div className="text-xs">
+                        Sync records: {childEffects.syncRecords.moved} moved, {childEffects.syncRecords.deduped} deduped.
+                    </div>
+                    <div className="text-xs">
+                        Tasks: {childEffects.tasksMoved} moved. Deal links: {childEffects.dealLinks.moved} moved, {childEffects.dealLinks.deduped} deduped.
+                    </div>
+                    <div className="text-xs">
+                        Message sync/outbox/cache rows updated: {messageAdjacentUpdated}. Insights moved: {childEffects.insightsMoved}.
+                    </div>
+                </div>
+            )}
+
+            {childEffects.warnings.length > 0 && (
                 <div className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
-                    A source conversation will be merged into an existing target conversation.
+                    <div className="font-medium">Conversation merge warnings</div>
+                    <div className="mt-1 space-y-1 text-xs">
+                        {childEffects.warnings.map((warning, index) => (
+                            <div key={`${warning}-${index}`}>{warning}</div>
+                        ))}
+                    </div>
                 </div>
             )}
 
