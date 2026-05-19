@@ -12,6 +12,7 @@ import { computeWhatsAppCustomerServiceExpiresAt } from "@/lib/whatsapp/customer
 import { WHATSAPP_CLOUD_PROVIDER } from "@/lib/whatsapp/client";
 import { WHATSAPP_WEB_BRIDGE_PROVIDER } from "@/lib/whatsapp/web-bridge";
 import { upsertWebBridgeIdentityMap } from "@/lib/whatsapp/web-bridge-identity";
+export { mapWhatsAppDeliveryStatus, processStatusUpdate } from "@/lib/whatsapp/status-updates";
 
 const LID_RETRY_INTERVAL_MS = Number(process.env.WHATSAPP_LID_RETRY_INTERVAL_MS || 30000);
 const LID_RETRY_MAX_ATTEMPTS = Number(process.env.WHATSAPP_LID_MAX_ATTEMPTS || 240);
@@ -1348,68 +1349,4 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     }
 
     return { status: 'processed' };
-}
-
-export function mapWhatsAppDeliveryStatus(rawStatus: string) {
-    const s = rawStatus.toUpperCase();
-
-    if (s === 'DELIVERY_ACK' || s === 'DELIVERED') {
-        return 'delivered';
-    }
-    if (s === 'READ' || s === 'PLAYED') return 'read';
-    if (s === 'SERVER_ACK') return 'sent';
-    if (s === 'ERROR' || s === 'FAILED') return 'failed';
-    if (!rawStatus) return "";
-    return rawStatus.toLowerCase();
-}
-
-export async function processStatusUpdate(wamId: string, rawStatus: string) {
-    // Map WhatsApp Web / Cloud API statuses to our internal status.
-    const status = mapWhatsAppDeliveryStatus(rawStatus);
-    if (!status) return;
-
-    console.log(`[WhatsApp Sync] Updating status for ${wamId}: ${rawStatus} -> ${status}`);
-
-    const updateResult = await db.message.updateMany({
-        where: { wamId },
-        data: { status: status }
-    });
-
-    if (updateResult.count > 0) {
-        const messageWithConversation = await (db as any).message.findFirst({
-            where: { wamId },
-            select: {
-                id: true,
-                wamId: true,
-                clientMessageId: true,
-                conversation: {
-                    select: {
-                        ghlConversationId: true,
-                        locationId: true,
-                    },
-                },
-            },
-        });
-
-        const conversationId = (messageWithConversation as any)?.conversation?.ghlConversationId;
-        const locationId = (messageWithConversation as any)?.conversation?.locationId;
-        if (conversationId && locationId) {
-            void publishConversationRealtimeEvent({
-                locationId,
-                conversationId,
-                type: "message.status",
-                payload: {
-                    messageId: (messageWithConversation as any).id,
-                    wamId: (messageWithConversation as any).wamId || wamId,
-                    clientMessageId: (messageWithConversation as any).clientMessageId || null,
-                    status,
-                    rawStatus,
-                },
-            });
-        }
-    }
-
-    // TODO: Sync Status to GHL if supported
-    // GHL API might not support updating status of injected messages easily.
-    // But we at least have it locally.
 }

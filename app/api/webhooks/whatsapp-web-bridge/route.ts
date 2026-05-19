@@ -3,25 +3,19 @@ import db from "@/lib/db";
 import { processNormalizedMessage, processStatusUpdate } from "@/lib/whatsapp/sync";
 import {
     getWhatsAppWebBridgeSecret,
-    parseWhatsAppWebChatIdentity,
     upsertWhatsAppWebBridgeSession,
     WHATSAPP_WEB_BRIDGE_PROVIDER,
 } from "@/lib/whatsapp/web-bridge";
 import { resolveWebBridgeIdentity } from "@/lib/whatsapp/web-bridge-identity";
+import {
+    normalizeWhatsAppWebBridgeAckStatus,
+    normalizeWhatsAppWebBridgeMessage,
+} from "@/lib/whatsapp/webhook-normalizers";
 
 function isAuthorized(req: NextRequest) {
     const secret = getWhatsAppWebBridgeSecret();
     if (!secret) return true;
     return req.headers.get("x-whatsapp-web-bridge-secret") === secret;
-}
-
-function normalizeAckStatus(ack: unknown) {
-    const n = Number(ack);
-    if (n >= 3) return "READ";
-    if (n === 2) return "DELIVERED";
-    if (n === 1) return "SERVER_ACK";
-    if (n < 0) return "FAILED";
-    return "";
 }
 
 async function updateBridgeMessageMediaMetadata(wamId: string, mediaState: Record<string, any>) {
@@ -108,60 +102,32 @@ export async function POST(req: NextRequest) {
 
         if (event === "message_ack") {
             const wamId = String(body?.messageId || body?.wamId || "").trim();
-            const status = normalizeAckStatus(body?.ack);
+            const status = normalizeWhatsAppWebBridgeAckStatus(body?.ack);
             if (wamId && status) await processStatusUpdate(wamId, status);
             return NextResponse.json({ status: "processed" });
         }
 
         if (event === "message" || event === "message_create") {
             const message = body?.message || {};
-            const fromMe = Boolean(message.fromMe);
-            const fromId = String(message.from || "");
-            const toId = String(message.to || "");
-            const remoteId = fromMe ? toId : fromId;
-            const contactIdentity = parseWhatsAppWebChatIdentity(remoteId);
-            const ownIdentity = parseWhatsAppWebChatIdentity(body?.phone || (fromMe ? fromId : toId));
+            const remoteId = message.fromMe ? String(message.to || "") : String(message.from || "");
             const resolvedIdentity = await resolveWebBridgeIdentity({
                 locationId,
                 remoteJid: remoteId,
                 identity: message.contactIdentity || null,
             });
-            const contactLid = resolvedIdentity.lid || contactIdentity.lid || "";
-            const contactPhone = contactIdentity.phone || resolvedIdentity.phone || "";
-            const contactAddress = contactPhone || contactLid;
-            const ownPhone = ownIdentity.phone || locationId;
-            const wamId = String(message.id || message.messageId || "").trim();
-
-            if (!wamId) {
-                return NextResponse.json({ status: "ignored", reason: "missing_message_id" });
-            }
-            if (!contactIdentity.isSupported || !contactAddress) {
-                return NextResponse.json({
-                    status: "ignored",
-                    reason: contactIdentity.reason || "unsupported_message_identity",
-                });
-            }
-
-            const result = await processNormalizedMessage({
+            const normalizedMessage = normalizeWhatsAppWebBridgeMessage({
                 locationId,
-                from: fromMe ? ownPhone : contactAddress,
-                to: fromMe ? contactAddress : ownPhone,
-                body: String(message.body || message.caption || ""),
-                type: String(message.type || "text") as any,
-                wamId,
-                timestamp: new Date(Number(message.timestamp || Date.now() / 1000) * 1000),
-                direction: fromMe ? "outbound" : "inbound",
-                source: "whatsapp_web_bridge" as any,
-                contactName: resolvedIdentity.displayName || message.contactName || message.notifyName || undefined,
-                lid: contactLid || undefined,
-                resolvedPhone: contactPhone || undefined,
-                remoteJid: remoteId,
-                chatId: contactIdentity.chatId || remoteId,
-                webBridgeIdentity: {
-                    ...resolvedIdentity,
-                    rawContactIdentity: message.contactIdentity || null,
-                } as any,
+                phone: body?.phone,
+                message,
+                resolvedIdentity,
             });
+            const wamId = normalizedMessage.wamId;
+
+            if (!normalizedMessage.normalized) {
+                return NextResponse.json({ status: "ignored", reason: normalizedMessage.ignoreReason });
+            }
+
+            const result = await processNormalizedMessage(normalizedMessage.normalized);
 
             if (message.hasMedia && message.media?.data && result?.status !== "deferred_unresolved_lid") {
                 const { ingestWhatsAppWebBridgeMediaAttachment } = await import("@/lib/whatsapp/web-bridge-media");
