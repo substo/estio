@@ -2777,6 +2777,45 @@ export type MergeContactPreview = {
   };
 };
 
+function parseContactHistoryChanges(changes: Prisma.JsonValue | string | null | undefined): any {
+  if (!changes) return null;
+  if (typeof changes !== 'string') return changes;
+
+  try {
+    return JSON.parse(changes);
+  } catch {
+    return changes;
+  }
+}
+
+async function findMergeTargetForSource(sourceContactId: string) {
+  const mergeHistory = await db.contactHistory.findMany({
+    where: { action: "MERGED_FROM" },
+    select: { contactId: true, changes: true },
+    orderBy: { createdAt: 'desc' },
+  }).catch(() => []);
+
+  return mergeHistory.find((entry) => {
+    const changes = parseContactHistoryChanges(entry.changes);
+    return !!changes
+      && typeof changes === 'object'
+      && !Array.isArray(changes)
+      && changes.sourceId === sourceContactId;
+  }) || null;
+}
+
+function buildMergeAuditSummary(args: {
+  conversationsMoved: number;
+  conversationsMerged: number;
+  messagesAffected: number;
+  viewingsMoved: number;
+  swipesMoved: number;
+  fieldsFilled: string[];
+  tagsAdded: string[];
+}) {
+  return args;
+}
+
 async function buildMergeContactPreview(sourceContactId: string, targetContactId: string): Promise<MergeContactPreview | null> {
   const [source, target] = await Promise.all([
     db.contact.findUnique({
@@ -2914,14 +2953,7 @@ export async function previewMergeContacts(sourceContactId: string, targetContac
     }),
   ]);
   if (!source) {
-    const mergeHistory = await db.contactHistory.findFirst({
-      where: {
-        action: "MERGED_FROM",
-        changes: { string_contains: sourceContactId }
-      },
-      select: { contactId: true },
-      orderBy: { createdAt: 'desc' }
-    }).catch(() => null);
+    const mergeHistory = await findMergeTargetForSource(sourceContactId);
 
     return {
       success: false,
@@ -2964,14 +2996,7 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
 
   if (!source) {
     // Check if already merged
-    const mergeHistory = await db.contactHistory.findFirst({
-      where: {
-        action: "MERGED_FROM",
-        changes: { string_contains: sourceContactId }
-      },
-      select: { contactId: true },
-      orderBy: { createdAt: 'desc' }
-    }).catch(() => null);
+    const mergeHistory = await findMergeTargetForSource(sourceContactId);
 
     return {
       success: false,
@@ -2996,6 +3021,9 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
 
   try {
     await db.$transaction(async (tx) => {
+      let conversationsMerged = 0;
+      let messagesAffected = 0;
+
       // 1. Transfer LID if target doesn't have one
       if (source.lid && !target.lid) {
         await tx.contact.update({
@@ -3005,7 +3033,11 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
       }
 
       // 2. Handle Conversations (Move or Merge)
-      const sourceConvs = await tx.conversation.findMany({ where: { contactId: sourceContactId } });
+      const sourceConvs = await tx.conversation.findMany({
+        where: { contactId: sourceContactId },
+        include: { _count: { select: { messages: true } } },
+      });
+      messagesAffected = sourceConvs.reduce((sum, conversation) => sum + conversation._count.messages, 0);
 
       for (const sourceConv of sourceConvs) {
         const targetConv = await tx.conversation.findUnique({
@@ -3018,6 +3050,7 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
         });
 
         if (targetConv) {
+          conversationsMerged += 1;
           console.log(`[Merge] Merging conversation ${sourceConv.id} into ${targetConv.id}`);
           await tx.message.updateMany({
             where: { conversationId: sourceConv.id },
@@ -3034,6 +3067,7 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
           targetConversationId = sourceConv.id;
         }
       }
+      const conversationsMoved = sourceConvs.length - conversationsMerged;
 
       if (!targetConversationId) {
         const existingTargetConv = await tx.conversation.findFirst({
@@ -3094,13 +3128,13 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
       }
 
       // 5. Transfer Viewings
-      await tx.viewing.updateMany({
+      const viewingsMoveResult = await tx.viewing.updateMany({
         where: { contactId: sourceContactId },
         data: { contactId: targetContactId }
       });
 
       // 6. Transfer Swipes
-      await tx.propertySwipe.updateMany({
+      const swipesMoveResult = await tx.propertySwipe.updateMany({
         where: { contactId: sourceContactId },
         data: { contactId: targetContactId }
       });
@@ -3120,6 +3154,7 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
       }
 
       // Merge tags (additive, deduplicated)
+      const tagsAdded = (source.tags || []).filter((tag) => !(target.tags || []).includes(tag));
       const mergedTags = [...new Set([
         ...(target.tags || []),
         ...(source.tags || [])
@@ -3146,6 +3181,46 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
         });
       }
 
+      const mergeAuditSummary = buildMergeAuditSummary({
+        conversationsMoved,
+        conversationsMerged,
+        messagesAffected,
+        viewingsMoved: viewingsMoveResult.count,
+        swipesMoved: swipesMoveResult.count,
+        fieldsFilled: Object.keys(fillData),
+        tagsAdded,
+      });
+
+      const sourceHistory = await tx.contactHistory.findMany({
+        where: { contactId: sourceContactId },
+        orderBy: { createdAt: 'asc' },
+        select: {
+          createdAt: true,
+          userId: true,
+          action: true,
+          changes: true,
+        },
+      });
+
+      if (sourceHistory.length > 0) {
+        await tx.contactHistory.createMany({
+          data: sourceHistory.map((historyItem) => ({
+            contactId: targetContactId,
+            userId: historyItem.userId,
+            action: "MERGED_SOURCE_HISTORY_PRESERVED",
+            changes: {
+              originalSourceContactId: sourceContactId,
+              originalSourceContactName: source.name,
+              originalSourceContactPhone: source.phone,
+              originalSourceContactEmail: source.email,
+              originalAction: historyItem.action,
+              originalCreatedAt: historyItem.createdAt.toISOString(),
+              originalChanges: parseContactHistoryChanges(historyItem.changes),
+            },
+          })),
+        });
+      }
+
       // 8. Delete Source Contact
       await tx.contact.delete({ where: { id: sourceContactId } });
 
@@ -3159,7 +3234,7 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
         sourceGhlContactId: source.ghlContactId,
         sourceGoogleContactId: source.googleContactId,
         sourceOutlookContactId: source.outlookContactId,
-        fieldsFilled: Object.keys(fillData),
+        ...mergeAuditSummary,
         rolesTransferred: {
           propertyRoles: sourcePropertyRoles.length,
           companyRoles: sourceCompanyRoles.length,
