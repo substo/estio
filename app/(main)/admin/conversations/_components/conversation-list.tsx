@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { Conversation } from "@/lib/ghl/conversations";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
@@ -53,6 +53,8 @@ interface ConversationListProps {
     isSearching?: boolean;
     disablePreviewCard?: boolean;
 }
+
+const SEARCH_DEBOUNCE_MS = 350;
 
 /**
  * Map GHL conversation type codes to friendly display names
@@ -114,12 +116,56 @@ export function ConversationList({
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isSearchExpanded, setIsSearchExpanded] = useState(!!searchQuery);
     const [localQuery, setLocalQuery] = useState(searchQuery || "");
-    const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const cancelPendingSearch = useCallback(() => {
+        if (searchDebounceRef.current) {
+            clearTimeout(searchDebounceRef.current);
+            searchDebounceRef.current = null;
+        }
+    }, []);
+
+    const commitSearch = useCallback((query: string) => {
+        cancelPendingSearch();
+        onSearchChange?.(query);
+    }, [cancelPendingSearch, onSearchChange]);
+
+    const clearSearch = useCallback(() => {
+        setLocalQuery("");
+        commitSearch("");
+    }, [commitSearch]);
 
     useEffect(() => {
         setLocalQuery(searchQuery || "");
         if (searchQuery) setIsSearchExpanded(true);
     }, [searchQuery]);
+
+    useEffect(() => {
+        if (!onSearchChange) return;
+
+        const trimmedLocalQuery = localQuery.trim();
+        const trimmedSearchQuery = searchQuery.trim();
+
+        if (!trimmedLocalQuery) {
+            cancelPendingSearch();
+            if (trimmedSearchQuery) {
+                onSearchChange("");
+            }
+            return;
+        }
+
+        if (trimmedLocalQuery === trimmedSearchQuery) {
+            cancelPendingSearch();
+            return;
+        }
+
+        searchDebounceRef.current = setTimeout(() => {
+            commitSearch(localQuery);
+        }, SEARCH_DEBOUNCE_MS);
+
+        return cancelPendingSearch;
+    }, [cancelPendingSearch, commitSearch, localQuery, onSearchChange, searchQuery]);
     const listScrollRef = useRef<HTMLDivElement | null>(null);
     const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
 
@@ -354,10 +400,9 @@ export function ConversationList({
                                 onChange={(e) => setLocalQuery(e.target.value)}
                                 onKeyDown={(e) => {
                                     if (e.key === 'Enter') {
-                                        onSearchChange?.(localQuery);
+                                        commitSearch(localQuery);
                                     } else if (e.key === 'Escape') {
-                                        setLocalQuery("");
-                                        onSearchChange?.("");
+                                        clearSearch();
                                     }
                                 }}
                             />
@@ -366,8 +411,7 @@ export function ConversationList({
                                 className="absolute inset-y-0 right-0 pr-2 flex items-center text-slate-400 hover:text-slate-600"
                                 onClick={() => {
                                     if (localQuery || searchQuery) {
-                                        setLocalQuery("");
-                                        onSearchChange?.("");
+                                        clearSearch();
                                     }
                                 }}
                                 aria-label="Clear contact search"
@@ -571,14 +615,14 @@ export function ConversationList({
                         </div>
                         <input
                             type="text"
-                            placeholder="Search contacts on Enter..."
+                            placeholder="Search contacts..."
                             autoFocus
                             className="block w-full pl-7 pr-8 py-1.5 text-xs border border-indigo-200 rounded-md leading-5 bg-white text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
                             value={localQuery}
                             onChange={(e) => setLocalQuery(e.target.value)}
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter') {
-                                    onSearchChange?.(localQuery);
+                                    commitSearch(localQuery);
                                 } else if (e.key === 'Escape') {
                                     setIsSearchExpanded(false);
                                     setLocalQuery(searchQuery || "");
@@ -593,9 +637,8 @@ export function ConversationList({
                         <button
                             className="absolute inset-y-0 right-0 pr-2 flex items-center text-slate-400 hover:text-slate-600"
                             onClick={() => {
-                                if (localQuery) {
-                                    setLocalQuery("");
-                                    onSearchChange?.("");
+                                if (localQuery || searchQuery) {
+                                    clearSearch();
                                 } else {
                                     setIsSearchExpanded(false);
                                 }

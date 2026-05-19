@@ -624,6 +624,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const [searchQuery, setSearchQuery] = useState('');
     const [isSearching, setIsSearching] = useState(false);
     const [searchResults, setSearchResults] = useState<Conversation[]>([]);
+    const searchRequestIdRef = useRef(0);
 
     const [deals, setDeals] = useState<any[]>(initialDeals || []);
     const [activeDealParticipants, setActiveDealParticipants] = useState<Conversation[]>([]);
@@ -642,7 +643,11 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
     // Global Search Effect
     useEffect(() => {
-        if (!searchQuery.trim()) {
+        const requestId = searchRequestIdRef.current + 1;
+        searchRequestIdRef.current = requestId;
+        const normalizedSearchQuery = searchQuery.trim();
+
+        if (!normalizedSearchQuery) {
             setSearchResults([]);
             setIsSearching(false);
             return;
@@ -651,9 +656,9 @@ export function ConversationInterface({ locationId, initialConversations, initia
         let isCancelled = false;
         setIsSearching(true);
 
-        searchConversations(searchQuery, { limit: 50 })
+        searchConversations(normalizedSearchQuery, { limit: 50 })
             .then(res => {
-                if (isCancelled) return;
+                if (isCancelled || searchRequestIdRef.current !== requestId) return;
                 if (res.success) {
                     setSearchResults(res.conversations || []);
                 } else {
@@ -662,12 +667,12 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 }
             })
             .catch(err => {
-                if (isCancelled) return;
+                if (isCancelled || searchRequestIdRef.current !== requestId) return;
                 console.error("Search failed:", err);
                 toast({ title: "Error", description: "Search failed.", variant: "destructive" });
             })
             .finally(() => {
-                if (!isCancelled) setIsSearching(false);
+                if (!isCancelled && searchRequestIdRef.current === requestId) setIsSearching(false);
             });
 
         return () => {
