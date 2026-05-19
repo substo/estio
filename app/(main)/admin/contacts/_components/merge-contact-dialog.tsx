@@ -13,9 +13,9 @@ import {
     DialogTrigger,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { AlertCircle, Check, ChevronsUpDown, Merge } from "lucide-react";
+import { AlertCircle, Check, ChevronsUpDown, Loader2, Merge } from "lucide-react";
 import { toast } from "sonner";
-import { mergeContacts, searchContactsAction } from "@/app/(main)/admin/contacts/actions";
+import { mergeContacts, previewMergeContacts, searchContactsAction, type MergeContactPreview } from "@/app/(main)/admin/contacts/actions";
 import { cn } from "@/lib/utils";
 import {
     Command,
@@ -47,12 +47,17 @@ export function MergeContactDialog({ sourceContactId, sourceName, trigger, open,
     const shouldRenderTrigger = trigger !== undefined || !isControlled;
     const [targetContactId, setTargetContactId] = useState<string | null>(null);
     const [isMerging, setIsMerging] = useState(false);
+    const [preview, setPreview] = useState<MergeContactPreview | null>(null);
+    const [previewLoading, setPreviewLoading] = useState(false);
+    const [previewError, setPreviewError] = useState<string | null>(null);
+    const previewRequestRef = React.useRef(0);
 
     // Search State
     const [searchOpen, setSearchOpen] = useState(false)
     const [query, setQuery] = useState("")
     const [results, setResults] = useState<any[]>([])
     const [loading, setLoading] = useState(false)
+    const hasCurrentPreview = !!preview && preview.source.id === sourceContactId && preview.target.id === targetContactId;
 
     // Debounced search effect
     React.useEffect(() => {
@@ -75,9 +80,61 @@ export function MergeContactDialog({ sourceContactId, sourceName, trigger, open,
         return () => clearTimeout(timer);
     }, [query, sourceContactId]);
 
+    React.useEffect(() => {
+        previewRequestRef.current += 1;
+        const requestId = previewRequestRef.current;
+
+        setPreview(null);
+        setPreviewError(null);
+
+        if (!resolvedOpen || !targetContactId) {
+            setPreviewLoading(false);
+            return;
+        }
+
+        setPreviewLoading(true);
+        previewMergeContacts(sourceContactId, targetContactId)
+            .then((result) => {
+                if (previewRequestRef.current !== requestId) return;
+
+                if (result.success && result.preview) {
+                    setPreview(result.preview);
+                    setPreviewError(null);
+                } else if (result.message?.startsWith("already_merged:")) {
+                    setPreviewError("This source contact was already merged. Confirm is disabled.");
+                } else {
+                    setPreviewError(result.message || "Could not load merge preview.");
+                }
+            })
+            .catch((error) => {
+                if (previewRequestRef.current !== requestId) return;
+                console.error(error);
+                setPreviewError("Could not load merge preview.");
+            })
+            .finally(() => {
+                if (previewRequestRef.current !== requestId) return;
+                setPreviewLoading(false);
+            });
+    }, [resolvedOpen, sourceContactId, targetContactId]);
+
+    React.useEffect(() => {
+        if (!resolvedOpen) {
+            setTargetContactId(null);
+            setQuery("");
+            setResults([]);
+            setPreview(null);
+            setPreviewError(null);
+            setPreviewLoading(false);
+        }
+    }, [resolvedOpen]);
+
     const handleMerge = async () => {
         if (!targetContactId) {
             toast.error("Please select a contact to merge into.");
+            return;
+        }
+        if (!hasCurrentPreview) {
+            toast.error("Wait for the merge preview to load before confirming.");
             return;
         }
 
@@ -126,7 +183,7 @@ export function MergeContactDialog({ sourceContactId, sourceName, trigger, open,
                     )}
                 </DialogTrigger>
             ) : null}
-            <DialogContent className="sm:max-w-[425px]">
+            <DialogContent className="sm:max-w-[560px]">
                 <DialogHeader>
                     <DialogTitle>Merge Contact</DialogTitle>
                     <DialogDescription>
@@ -190,14 +247,132 @@ export function MergeContactDialog({ sourceContactId, sourceName, trigger, open,
                             </PopoverContent>
                         </Popover>
                     </div>
+                    {targetContactId && (
+                        <MergePreviewPanel
+                            preview={preview}
+                            loading={previewLoading}
+                            error={previewError}
+                        />
+                    )}
                 </div>
                 <DialogFooter>
                     <Button variant="outline" onClick={() => setOpen(false)} disabled={isMerging}>Cancel</Button>
-                    <Button variant="destructive" onClick={handleMerge} disabled={!targetContactId || isMerging}>
-                        {isMerging ? "Merging..." : "Confirm Merge"}
+                    <Button variant="destructive" onClick={handleMerge} disabled={!targetContactId || !hasCurrentPreview || previewLoading || isMerging}>
+                        {isMerging ? "Merging..." : "Merge and delete source contact"}
                     </Button>
                 </DialogFooter>
             </DialogContent>
         </Dialog>
+    );
+}
+
+function MergePreviewPanel({
+    preview,
+    loading,
+    error,
+}: {
+    preview: MergeContactPreview | null;
+    loading: boolean;
+    error: string | null;
+}) {
+    if (loading) {
+        return (
+            <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading merge preview...
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive flex items-start gap-2">
+                <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                <span>{error}</span>
+            </div>
+        );
+    }
+
+    if (!preview) return null;
+
+    const filledFields = [
+        ...preview.blankFieldsFilled.map((field) => field.label),
+        ...preview.arrayFieldsMerged.map((field) => `${field.label} (+${field.addedCount})`),
+    ];
+    const providers = preview.providerCleanupWarning.providers.join(", ");
+
+    return (
+        <div className="rounded-md border bg-muted/20 p-3 text-sm space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+                <ContactSummary title="Source deleted" contact={preview.source} />
+                <ContactSummary title="Target kept" contact={preview.target} />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-muted-foreground">
+                <PreviewStat label="Source conversations" value={`${preview.conversations.sourceCount}`} />
+                <PreviewStat label="Messages affected" value={`${preview.conversations.messagesAffected}`} />
+                <PreviewStat label="Conversations moved" value={`${preview.conversations.movedCount}`} />
+                <PreviewStat label="Conversations merged" value={`${preview.conversations.mergedCount}`} />
+                <PreviewStat label="Viewings moved" value={`${preview.viewingsAffected}`} />
+                <PreviewStat label="Swipes moved" value={`${preview.swipesAffected}`} />
+            </div>
+
+            {preview.conversations.willMergeIntoExistingTargetConversation && (
+                <div className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
+                    A source conversation will be merged into an existing target conversation.
+                </div>
+            )}
+
+            <div className="grid gap-1 text-muted-foreground">
+                <div>
+                    <span className="font-medium text-foreground">Property roles:</span>{" "}
+                    {preview.roles.property.transferred} moved, {preview.roles.property.duplicatesRemoved} duplicate removed.
+                </div>
+                <div>
+                    <span className="font-medium text-foreground">Company roles:</span>{" "}
+                    {preview.roles.company.transferred} moved, {preview.roles.company.duplicatesRemoved} duplicate removed.
+                </div>
+                <div>
+                    <span className="font-medium text-foreground">Tags added:</span>{" "}
+                    {preview.tagsAdded.length > 0 ? preview.tagsAdded.join(", ") : "None"}
+                </div>
+                <div>
+                    <span className="font-medium text-foreground">Blank target fields filled:</span>{" "}
+                    {filledFields.length > 0 ? filledFields.join(", ") : "None"}
+                </div>
+            </div>
+
+            {preview.providerCleanupWarning.hasProviderIds && (
+                <div className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
+                    Source provider IDs exist for {providers}; external cleanup may run after the merge.
+                </div>
+            )}
+        </div>
+    );
+}
+
+function ContactSummary({
+    title,
+    contact,
+}: {
+    title: string;
+    contact: MergeContactPreview["source"];
+}) {
+    return (
+        <div className="min-w-0 rounded border bg-background p-2">
+            <div className="text-xs font-medium uppercase text-muted-foreground">{title}</div>
+            <div className="truncate font-medium">{contact.name || "Unnamed"}</div>
+            <div className="truncate text-xs text-muted-foreground">{contact.phone || "No phone"}</div>
+            <div className="truncate text-xs text-muted-foreground">{contact.email || "No email"}</div>
+        </div>
+    );
+}
+
+function PreviewStat({ label, value }: { label: string; value: string }) {
+    return (
+        <div className="rounded border bg-background px-2 py-1">
+            <div className="text-xs">{label}</div>
+            <div className="font-medium text-foreground">{value}</div>
+        </div>
     );
 }

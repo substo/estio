@@ -2672,6 +2672,279 @@ export async function searchContactsAction(query: string) {
   return scored;
 }
 
+const MERGE_FILL_SCALAR_FIELDS = [
+  'email', 'phone', 'firstName', 'lastName', 'name',
+  'address1', 'city', 'state', 'postalCode', 'country',
+  'dateOfBirth', 'leadSource', 'leadPriority', 'leadGoal',
+  'contactType', 'notes', 'preferredLang', 'message',
+  'outlookContactId',
+] as const;
+
+const MERGE_FILL_FIELD_LABELS: Record<typeof MERGE_FILL_SCALAR_FIELDS[number], string> = {
+  email: 'Email',
+  phone: 'Phone',
+  firstName: 'First name',
+  lastName: 'Last name',
+  name: 'Name',
+  address1: 'Address',
+  city: 'City',
+  state: 'State',
+  postalCode: 'Postal code',
+  country: 'Country',
+  dateOfBirth: 'Date of birth',
+  leadSource: 'Lead source',
+  leadPriority: 'Lead priority',
+  leadGoal: 'Lead goal',
+  contactType: 'Contact type',
+  notes: 'Notes',
+  preferredLang: 'Preferred language',
+  message: 'Message',
+  outlookContactId: 'Outlook contact ID',
+};
+
+const MERGE_ARRAY_FIELDS = [
+  'propertiesInterested', 'propertiesInspected',
+  'propertiesEmailed', 'propertiesMatched'
+] as const;
+
+const MERGE_ARRAY_FIELD_LABELS: Record<typeof MERGE_ARRAY_FIELDS[number], string> = {
+  propertiesInterested: 'Interested properties',
+  propertiesInspected: 'Inspected properties',
+  propertiesEmailed: 'Emailed properties',
+  propertiesMatched: 'Matched properties',
+};
+
+const MERGE_CONTACT_PREVIEW_SELECT = {
+  id: true,
+  locationId: true,
+  name: true,
+  firstName: true,
+  lastName: true,
+  email: true,
+  phone: true,
+  address1: true,
+  city: true,
+  state: true,
+  postalCode: true,
+  country: true,
+  dateOfBirth: true,
+  leadSource: true,
+  leadPriority: true,
+  leadGoal: true,
+  contactType: true,
+  notes: true,
+  preferredLang: true,
+  message: true,
+  outlookContactId: true,
+  ghlContactId: true,
+  googleContactId: true,
+  tags: true,
+  propertiesInterested: true,
+  propertiesInspected: true,
+  propertiesEmailed: true,
+  propertiesMatched: true,
+} satisfies Prisma.ContactSelect;
+
+type MergeContactPreviewContact = {
+  id: string;
+  name: string | null;
+  phone: string | null;
+  email: string | null;
+};
+
+export type MergeContactPreview = {
+  source: MergeContactPreviewContact;
+  target: MergeContactPreviewContact;
+  conversations: {
+    sourceCount: number;
+    movedCount: number;
+    mergedCount: number;
+    willMergeIntoExistingTargetConversation: boolean;
+    messagesAffected: number;
+  };
+  roles: {
+    property: { total: number; transferred: number; duplicatesRemoved: number };
+    company: { total: number; transferred: number; duplicatesRemoved: number };
+  };
+  viewingsAffected: number;
+  swipesAffected: number;
+  tagsAdded: string[];
+  blankFieldsFilled: Array<{ field: string; label: string }>;
+  arrayFieldsMerged: Array<{ field: string; label: string; addedCount: number }>;
+  providerCleanupWarning: {
+    hasProviderIds: boolean;
+    providers: string[];
+  };
+};
+
+async function buildMergeContactPreview(sourceContactId: string, targetContactId: string): Promise<MergeContactPreview | null> {
+  const [source, target] = await Promise.all([
+    db.contact.findUnique({
+      where: { id: sourceContactId },
+      select: MERGE_CONTACT_PREVIEW_SELECT,
+    }),
+    db.contact.findUnique({
+      where: { id: targetContactId },
+      select: MERGE_CONTACT_PREVIEW_SELECT,
+    }),
+  ]);
+
+  if (!source || !target) return null;
+
+  const [
+    sourceConversations,
+    targetConversationKeys,
+    sourcePropertyRoles,
+    targetPropertyRoles,
+    sourceCompanyRoles,
+    targetCompanyRoles,
+    viewingsAffected,
+    swipesAffected,
+  ] = await Promise.all([
+    db.conversation.findMany({
+      where: { contactId: sourceContactId },
+      select: { id: true, locationId: true, _count: { select: { messages: true } } },
+    }),
+    db.conversation.findMany({
+      where: { contactId: targetContactId },
+      select: { locationId: true },
+    }),
+    db.contactPropertyRole.findMany({
+      where: { contactId: sourceContactId },
+      select: { propertyId: true, role: true },
+    }),
+    db.contactPropertyRole.findMany({
+      where: { contactId: targetContactId },
+      select: { propertyId: true, role: true },
+    }),
+    db.contactCompanyRole.findMany({
+      where: { contactId: sourceContactId },
+      select: { companyId: true, role: true },
+    }),
+    db.contactCompanyRole.findMany({
+      where: { contactId: targetContactId },
+      select: { companyId: true, role: true },
+    }),
+    db.viewing.count({ where: { contactId: sourceContactId } }),
+    db.propertySwipe.count({ where: { contactId: sourceContactId } }),
+  ]);
+
+  const targetConversationLocationIds = new Set(targetConversationKeys.map((conversation) => conversation.locationId));
+  const mergedCount = sourceConversations.filter((conversation) => targetConversationLocationIds.has(conversation.locationId)).length;
+  const messagesAffected = sourceConversations.reduce((sum, conversation) => sum + conversation._count.messages, 0);
+
+  const targetPropertyRoleKeys = new Set(targetPropertyRoles.map((role) => `${role.propertyId}:${role.role}`));
+  const duplicatePropertyRoleCount = sourcePropertyRoles.filter((role) => targetPropertyRoleKeys.has(`${role.propertyId}:${role.role}`)).length;
+  const targetCompanyRoleKeys = new Set(targetCompanyRoles.map((role) => `${role.companyId}:${role.role}`));
+  const duplicateCompanyRoleCount = sourceCompanyRoles.filter((role) => targetCompanyRoleKeys.has(`${role.companyId}:${role.role}`)).length;
+
+  const tagsAdded = (source.tags || []).filter((tag) => !(target.tags || []).includes(tag));
+
+  const blankFieldsFilled = MERGE_FILL_SCALAR_FIELDS
+    .filter((field) => !(target as any)[field] && (source as any)[field])
+    .map((field) => ({ field, label: MERGE_FILL_FIELD_LABELS[field] }));
+
+  const arrayFieldsMerged = MERGE_ARRAY_FIELDS
+    .map((field) => {
+      const targetValues = new Set(((target as any)[field] || []) as string[]);
+      const addedCount = (((source as any)[field] || []) as string[]).filter((value) => !targetValues.has(value)).length;
+      return { field, label: MERGE_ARRAY_FIELD_LABELS[field], addedCount };
+    })
+    .filter((item) => item.addedCount > 0);
+
+  const providers = [
+    source.googleContactId ? 'Google' : null,
+    source.ghlContactId ? 'GHL' : null,
+    source.outlookContactId ? 'Outlook' : null,
+  ].filter(Boolean) as string[];
+
+  return {
+    source: { id: source.id, name: source.name, phone: source.phone, email: source.email },
+    target: { id: target.id, name: target.name, phone: target.phone, email: target.email },
+    conversations: {
+      sourceCount: sourceConversations.length,
+      movedCount: sourceConversations.length - mergedCount,
+      mergedCount,
+      willMergeIntoExistingTargetConversation: mergedCount > 0,
+      messagesAffected,
+    },
+    roles: {
+      property: {
+        total: sourcePropertyRoles.length,
+        transferred: sourcePropertyRoles.length - duplicatePropertyRoleCount,
+        duplicatesRemoved: duplicatePropertyRoleCount,
+      },
+      company: {
+        total: sourceCompanyRoles.length,
+        transferred: sourceCompanyRoles.length - duplicateCompanyRoleCount,
+        duplicatesRemoved: duplicateCompanyRoleCount,
+      },
+    },
+    viewingsAffected,
+    swipesAffected,
+    tagsAdded,
+    blankFieldsFilled,
+    arrayFieldsMerged,
+    providerCleanupWarning: {
+      hasProviderIds: providers.length > 0,
+      providers,
+    },
+  };
+}
+
+export async function previewMergeContacts(sourceContactId: string, targetContactId: string): Promise<{
+  success: boolean;
+  message?: string;
+  preview?: MergeContactPreview;
+}> {
+  const { userId } = await auth();
+  if (!userId) return { success: false, message: "Unauthorized" };
+  if (!sourceContactId || !targetContactId || sourceContactId === targetContactId) {
+    return { success: false, message: "Select two different contacts." };
+  }
+
+  const [source, target] = await Promise.all([
+    db.contact.findUnique({
+      where: { id: sourceContactId },
+      select: { locationId: true },
+    }),
+    db.contact.findUnique({
+      where: { id: targetContactId },
+      select: { locationId: true },
+    }),
+  ]);
+  if (!source) {
+    const mergeHistory = await db.contactHistory.findFirst({
+      where: {
+        action: "MERGED_FROM",
+        changes: { string_contains: sourceContactId }
+      },
+      select: { contactId: true },
+      orderBy: { createdAt: 'desc' }
+    }).catch(() => null);
+
+    return {
+      success: false,
+      message: mergeHistory
+        ? `already_merged:${mergeHistory.contactId}`
+        : "Contact not found"
+    };
+  }
+
+  const hasAccess = await verifyUserHasAccessToLocation(userId, source.locationId);
+  if (!hasAccess) return { success: false, message: "Unauthorized" };
+  if (!target) return { success: false, message: "Contact not found" };
+  if (source.locationId !== target.locationId) {
+    return { success: false, message: "Contacts must belong to the same location." };
+  }
+
+  const preview = await buildMergeContactPreview(sourceContactId, targetContactId);
+  if (!preview) return { success: false, message: "Contact not found" };
+  if (preview.source.id === preview.target.id) return { success: false, message: "Select two different contacts." };
+
+  return { success: true, preview };
+}
+
 export async function mergeContacts(sourceContactId: string, targetContactId: string) {
   const { userId } = await auth();
   if (!userId) return { success: false, message: "Unauthorized" };
@@ -2708,6 +2981,12 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
     };
   }
   if (!target) return { success: false, message: "Contact not found" };
+  if (source.locationId !== target.locationId) {
+    return { success: false, message: "Contacts must belong to the same location." };
+  }
+
+  const hasAccess = await verifyUserHasAccessToLocation(userId, source.locationId);
+  if (!hasAccess) return { success: false, message: "Unauthorized" };
 
   // Resolve location for GHL operations
   const location = await db.location.findUnique({
@@ -2834,14 +3113,7 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
 
       // 7. Fill blank fields on target from source ("fill the gaps")
       const fillData: Record<string, any> = {};
-      const scalarFields = [
-        'email', 'phone', 'firstName', 'lastName', 'name',
-        'address1', 'city', 'state', 'postalCode', 'country',
-        'dateOfBirth', 'leadSource', 'leadPriority', 'leadGoal',
-        'contactType', 'notes', 'preferredLang', 'message',
-        'outlookContactId',
-      ] as const;
-      for (const field of scalarFields) {
+      for (const field of MERGE_FILL_SCALAR_FIELDS) {
         if (!(target as any)[field] && (source as any)[field]) {
           fillData[field] = (source as any)[field];
         }
@@ -2857,11 +3129,7 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
       }
 
       // Merge property arrays (additive, deduplicated)
-      const arrayFields = [
-        'propertiesInterested', 'propertiesInspected',
-        'propertiesEmailed', 'propertiesMatched'
-      ] as const;
-      for (const field of arrayFields) {
+      for (const field of MERGE_ARRAY_FIELDS) {
         const merged = [...new Set([
           ...((target as any)[field] || []),
           ...((source as any)[field] || [])
