@@ -18,6 +18,7 @@ import { Prisma } from '@prisma/client';
 import { getLocationContext } from '@/lib/auth/location-context';
 import { seedConversationFromContactLeadText } from '@/lib/conversations/bootstrap';
 import {
+  combineConversationMergeEffects,
   mergeConversationIntoTarget,
   previewConversationMergeEffects,
   type ConversationMergeEffects,
@@ -2821,74 +2822,6 @@ function buildMergeAuditSummary(args: {
   tagsAdded: string[];
 }) {
   return args;
-}
-
-function emptyConversationMergeEffects(): ConversationMergeEffects {
-  return {
-    messagesMoved: 0,
-    messageSyncRecordsUpdated: 0,
-    messageTranslationCachesUpdated: 0,
-    providerOutboxJobsUpdated: 0,
-    whatsappOutboundOutboxJobsUpdated: 0,
-    smsRelayOutboxJobsUpdated: 0,
-    participants: { moved: 0, deduped: 0 },
-    syncRecords: { moved: 0, deduped: 0 },
-    tasksMoved: 0,
-    dealLinks: { moved: 0, deduped: 0 },
-    insightsMoved: 0,
-    agentExecutions: { moved: 0, detached: 0 },
-    aiAutomationJobs: { moved: 0, detached: 0 },
-    aiDecisions: { moved: 0, detached: 0 },
-    aiSuggestedResponses: { moved: 0, detached: 0 },
-    userNotifications: { moved: 0, detached: 0 },
-    warnings: [],
-  };
-}
-
-function combineConversationMergeEffects(effects: ConversationMergeEffects[]): ConversationMergeEffects {
-  return effects.reduce((combined, effect) => ({
-    messagesMoved: combined.messagesMoved + effect.messagesMoved,
-    messageSyncRecordsUpdated: combined.messageSyncRecordsUpdated + effect.messageSyncRecordsUpdated,
-    messageTranslationCachesUpdated: combined.messageTranslationCachesUpdated + effect.messageTranslationCachesUpdated,
-    providerOutboxJobsUpdated: combined.providerOutboxJobsUpdated + effect.providerOutboxJobsUpdated,
-    whatsappOutboundOutboxJobsUpdated: combined.whatsappOutboundOutboxJobsUpdated + effect.whatsappOutboundOutboxJobsUpdated,
-    smsRelayOutboxJobsUpdated: combined.smsRelayOutboxJobsUpdated + effect.smsRelayOutboxJobsUpdated,
-    participants: {
-      moved: combined.participants.moved + effect.participants.moved,
-      deduped: combined.participants.deduped + effect.participants.deduped,
-    },
-    syncRecords: {
-      moved: combined.syncRecords.moved + effect.syncRecords.moved,
-      deduped: combined.syncRecords.deduped + effect.syncRecords.deduped,
-    },
-    tasksMoved: combined.tasksMoved + effect.tasksMoved,
-    dealLinks: {
-      moved: combined.dealLinks.moved + effect.dealLinks.moved,
-      deduped: combined.dealLinks.deduped + effect.dealLinks.deduped,
-    },
-    insightsMoved: combined.insightsMoved + effect.insightsMoved,
-    agentExecutions: {
-      moved: combined.agentExecutions.moved + effect.agentExecutions.moved,
-      detached: combined.agentExecutions.detached + effect.agentExecutions.detached,
-    },
-    aiAutomationJobs: {
-      moved: combined.aiAutomationJobs.moved + effect.aiAutomationJobs.moved,
-      detached: combined.aiAutomationJobs.detached + effect.aiAutomationJobs.detached,
-    },
-    aiDecisions: {
-      moved: combined.aiDecisions.moved + effect.aiDecisions.moved,
-      detached: combined.aiDecisions.detached + effect.aiDecisions.detached,
-    },
-    aiSuggestedResponses: {
-      moved: combined.aiSuggestedResponses.moved + effect.aiSuggestedResponses.moved,
-      detached: combined.aiSuggestedResponses.detached + effect.aiSuggestedResponses.detached,
-    },
-    userNotifications: {
-      moved: combined.userNotifications.moved + effect.userNotifications.moved,
-      detached: combined.userNotifications.detached + effect.userNotifications.detached,
-    },
-    warnings: [...combined.warnings, ...effect.warnings],
-  }), emptyConversationMergeEffects());
 }
 
 async function buildMergeContactPreview(sourceContactId: string, targetContactId: string): Promise<MergeContactPreview | null> {
