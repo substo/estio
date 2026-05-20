@@ -65,10 +65,17 @@ import {
     mergePrependMessagesDedupe,
 } from '@/lib/conversations/thread-hydration';
 import {
-    isPendingOutboundMessage,
     matchesByCorrelation,
-    mergeSnapshotWithPendingMessages,
 } from '@/lib/conversations/outbound-reconciliation';
+import {
+    collectPendingMessagesForConversation,
+    createWorkspaceCoreSnapshot,
+    createWorkspaceHydrationState,
+    mergeSnapshotPreservingPendingMessages,
+    type WorkspaceCoreSnapshot,
+    type WorkspaceHydrationState,
+    type WorkspaceHydrationStatus,
+} from '@/lib/conversations/workspace-state';
 import { buildTimelineCursorFromEvent } from '@/lib/conversations/timeline-events';
 import { UnifiedTimeline } from './unified-timeline';
 import { ConversationList } from './conversation-list';
@@ -230,25 +237,6 @@ function hasPendingTranscripts(messages: Message[]): boolean {
     );
 }
 
-type WorkspaceHydrationStatus = 'partial' | 'full';
-
-type WorkspaceHydrationState = {
-    status: WorkspaceHydrationStatus;
-    oldestCursor: string | null;
-    newestCursor: string | null;
-    initialCount: number;
-    targetCount: number;
-    requestedLimit: number;
-};
-
-type WorkspaceCoreSnapshot = {
-    conversationHeader: Conversation | null;
-    messages: Message[];
-    activityTimeline: any[];
-    transcriptOnDemandEnabled: boolean;
-    hydration: WorkspaceHydrationState;
-};
-
 type WorkspaceSidebarSnapshot = {
     contactContext: any;
     taskSummary: any;
@@ -291,72 +279,12 @@ const WORKSPACE_ACTIVITY_LIMIT = 180;
 const ACTIVE_POLL_GRACE_MS = 2500;
 const COMPOSER_DRAFTS_SESSION_KEY = "estio:conversation-composer-drafts:v1";
 
-type WorkspaceMessageWindowLike = {
-    oldestCursor?: string | null;
-    newestCursor?: string | null;
-    count?: number;
-    requestedLimit?: number;
-} | null | undefined;
-
 type DealTimelineWindowLike = {
     oldestCursor?: string | null;
     newestCursor?: string | null;
     count?: number;
     requestedLimit?: number;
 } | null | undefined;
-
-function createWorkspaceHydrationState(args: {
-    status?: WorkspaceHydrationStatus;
-    messages: Message[];
-    messageWindow?: WorkspaceMessageWindowLike;
-    initialCount?: number;
-    targetCount?: number;
-    requestedLimit?: number;
-}): WorkspaceHydrationState {
-    const messages = Array.isArray(args.messages) ? args.messages : [];
-    const messageWindow = args.messageWindow;
-    const derivedInitialCount = Number(args.initialCount);
-    const derivedTargetCount = Number(args.targetCount);
-    const derivedRequestedLimit = Number(args.requestedLimit);
-    const resolvedCount = Number(messageWindow?.count);
-    const resolvedRequestedLimit = Number(messageWindow?.requestedLimit);
-
-    return {
-        status: args.status || 'full',
-        oldestCursor: messageWindow?.oldestCursor || buildMessageCursorFromMessage(messages[0]) || null,
-        newestCursor: messageWindow?.newestCursor || buildMessageCursorFromMessage(messages[messages.length - 1]) || null,
-        initialCount: Number.isFinite(derivedInitialCount)
-            ? Math.max(0, Math.floor(derivedInitialCount))
-            : (Number.isFinite(resolvedCount) ? Math.max(0, Math.floor(resolvedCount)) : messages.length),
-        targetCount: Number.isFinite(derivedTargetCount)
-            ? Math.max(1, Math.floor(derivedTargetCount))
-            : THREAD_TARGET_MESSAGE_COUNT,
-        requestedLimit: Number.isFinite(derivedRequestedLimit)
-            ? Math.max(1, Math.floor(derivedRequestedLimit))
-            : (Number.isFinite(resolvedRequestedLimit)
-                ? Math.max(1, Math.floor(resolvedRequestedLimit))
-                : Math.max(messages.length || 0, THREAD_INITIAL_FALLBACK_MESSAGES)),
-    };
-}
-
-function createWorkspaceCoreSnapshot(args: {
-    conversationHeader?: Conversation | null;
-    messages?: Message[];
-    activityTimeline?: any[];
-    transcriptEligibility?: { success?: boolean; enabled?: boolean } | null;
-    transcriptOnDemandEnabled?: boolean;
-    hydration: WorkspaceHydrationState;
-}): WorkspaceCoreSnapshot {
-    return {
-        conversationHeader: args.conversationHeader || null,
-        messages: Array.isArray(args.messages) ? args.messages : [],
-        activityTimeline: Array.isArray(args.activityTimeline) ? args.activityTimeline : [],
-        transcriptOnDemandEnabled: typeof args.transcriptOnDemandEnabled === 'boolean'
-            ? args.transcriptOnDemandEnabled
-            : (!!args.transcriptEligibility?.success && !!args.transcriptEligibility?.enabled),
-        hydration: args.hydration,
-    };
-}
 
 function createDealWorkspaceHydrationState(args: {
     status?: WorkspaceHydrationStatus;
@@ -989,48 +917,23 @@ export function ConversationInterface({ locationId, initialConversations, initia
         return getWorkspaceCoreCacheEntry(workspaceSidebarCacheRef.current, conversationId);
     }, []);
 
-    const getPendingMessageKey = useCallback((message: Partial<Message> | null | undefined): string | null => {
-        if (!message) return null;
-        const clientMessageId = String((message as any).clientMessageId || "").trim();
-        if (clientMessageId) return `client:${clientMessageId}`;
-        const id = String(message.id || "").trim();
-        if (id) return `id:${id}`;
-        const wamId = String((message as any).wamId || "").trim();
-        if (wamId) return `wam:${wamId}`;
-        return null;
-    }, []);
-
     const syncPendingMessagesForConversation = useCallback((conversationId: string, list: Message[]) => {
         const normalizedConversationId = String(conversationId || "").trim();
         if (!normalizedConversationId) return;
 
-        const nextMap = new Map<string, Message>();
-        for (const message of Array.isArray(list) ? list : []) {
-            if (!isPendingOutboundMessage(message as any)) continue;
-            
-            // Prevent optimistic leaking during rapid activeId changes before messages settle
-            if ((message as any).conversationId && (message as any).conversationId !== normalizedConversationId) {
-                continue;
-            }
-
-            const key = getPendingMessageKey(message);
-            if (!key) continue;
-            nextMap.set(key, message);
-        }
+        const nextMap = collectPendingMessagesForConversation(normalizedConversationId, list);
 
         if (nextMap.size > 0) {
             pendingOutboundByConversationRef.current.set(normalizedConversationId, nextMap);
         } else {
             pendingOutboundByConversationRef.current.delete(normalizedConversationId);
         }
-    }, [getPendingMessageKey]);
+    }, []);
 
     const mergeSnapshotPreservingPending = useCallback((conversationId: string, snapshotMessages: Message[]) => {
         const pendingMap = pendingOutboundByConversationRef.current.get(String(conversationId || "").trim());
         const pendingMessages = pendingMap ? Array.from(pendingMap.values()) : [];
-        const mergedMessages = pendingMessages.length > 0
-            ? mergeSnapshotWithPendingMessages(snapshotMessages || [], pendingMessages)
-            : (Array.isArray(snapshotMessages) ? snapshotMessages : []);
+        const mergedMessages = mergeSnapshotPreservingPendingMessages(snapshotMessages, pendingMessages);
         syncPendingMessagesForConversation(conversationId, mergedMessages);
         return mergedMessages;
     }, [syncPendingMessagesForConversation]);
