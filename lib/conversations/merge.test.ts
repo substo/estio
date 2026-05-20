@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
     mergeConversationIntoTarget,
     previewConversationMergeEffects,
+    summarizeConversationMergeEffects,
     type ConversationMergeEffects,
 } from "./merge";
 
@@ -173,4 +174,32 @@ test("merge effects keep detached counts at zero when records move cleanly", asy
     assert.equal(effects.aiDecisions.detached, 0);
     assert.equal(effects.aiSuggestedResponses.detached, 0);
     assert.equal(effects.userNotifications.detached, 0);
+});
+
+test("summarizeConversationMergeEffects keeps preview and merge effect totals consistent", () => {
+    const effects: ConversationMergeEffects = {
+        messagesMoved: 0,
+        messageSyncRecordsUpdated: 1,
+        messageTranslationCachesUpdated: 2,
+        providerOutboxJobsUpdated: 3,
+        whatsappOutboundOutboxJobsUpdated: 4,
+        smsRelayOutboxJobsUpdated: 5,
+        participants: { moved: 0, deduped: 0 },
+        syncRecords: { moved: 0, deduped: 0 },
+        tasksMoved: 0,
+        dealLinks: { moved: 0, deduped: 0 },
+        insightsMoved: 0,
+        agentExecutions: { moved: 6, detached: 7 },
+        aiAutomationJobs: { moved: 8, detached: 9 },
+        aiDecisions: { moved: 10, detached: 11 },
+        aiSuggestedResponses: { moved: 12, detached: 13 },
+        userNotifications: { moved: 14, detached: 15 },
+        warnings: [],
+    };
+
+    assert.deepEqual(summarizeConversationMergeEffects(effects), {
+        messageAdjacentRecordsUpdated: 15,
+        aiChildRecordsMoved: 50,
+        aiChildRecordsDetached: 55,
+    });
 });

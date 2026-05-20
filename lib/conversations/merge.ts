@@ -1,4 +1,4 @@
-import { Prisma, PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 
 type ConversationMergeClient = Prisma.TransactionClient | PrismaClient;
 
@@ -30,6 +30,12 @@ export type ConversationMergeEffects = {
     aiSuggestedResponses: ConversationMergeMovableEffects;
     userNotifications: ConversationMergeMovableEffects;
     warnings: string[];
+};
+
+export type ConversationMergeEffectSummary = {
+    messageAdjacentRecordsUpdated: number;
+    aiChildRecordsMoved: number;
+    aiChildRecordsDetached: number;
 };
 
 const READ_MESSAGE_STATUSES = new Set(["read", "played"]);
@@ -100,6 +106,29 @@ export function combineConversationMergeEffects(effects: ConversationMergeEffect
         },
         warnings: [...combined.warnings, ...effect.warnings],
     }), emptyConversationMergeEffects());
+}
+
+export function summarizeConversationMergeEffects(effects: ConversationMergeEffects): ConversationMergeEffectSummary {
+    return {
+        messageAdjacentRecordsUpdated:
+            effects.messageSyncRecordsUpdated +
+            effects.messageTranslationCachesUpdated +
+            effects.providerOutboxJobsUpdated +
+            effects.whatsappOutboundOutboxJobsUpdated +
+            effects.smsRelayOutboxJobsUpdated,
+        aiChildRecordsMoved:
+            effects.agentExecutions.moved +
+            effects.aiAutomationJobs.moved +
+            effects.aiDecisions.moved +
+            effects.aiSuggestedResponses.moved +
+            effects.userNotifications.moved,
+        aiChildRecordsDetached:
+            effects.agentExecutions.detached +
+            effects.aiAutomationJobs.detached +
+            effects.aiDecisions.detached +
+            effects.aiSuggestedResponses.detached +
+            effects.userNotifications.detached,
+    };
 }
 
 async function countMovableChildRecords(client: ConversationMergeClient, sourceConversationId: string) {

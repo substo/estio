@@ -2811,7 +2811,7 @@ async function findMergeTargetForSource(sourceContactId: string) {
   }) || null;
 }
 
-function buildMergeAuditSummary(args: {
+type MergeAuditSummary = {
   conversationsMoved: number;
   conversationsMerged: number;
   messagesAffected: number;
@@ -2820,9 +2820,7 @@ function buildMergeAuditSummary(args: {
   swipesMoved: number;
   fieldsFilled: string[];
   tagsAdded: string[];
-}) {
-  return args;
-}
+};
 
 async function buildMergeContactPreview(sourceContactId: string, targetContactId: string): Promise<MergeContactPreview | null> {
   const [source, target] = await Promise.all([
@@ -2879,7 +2877,7 @@ async function buildMergeContactPreview(sourceContactId: string, targetContactId
   const targetConversationLocationIds = new Set(targetConversationKeys.map((conversation) => conversation.locationId));
   const mergedCount = sourceConversations.filter((conversation) => targetConversationLocationIds.has(conversation.locationId)).length;
   const messagesAffected = sourceConversations.reduce((sum, conversation) => sum + conversation._count.messages, 0);
-  const conversationChildEffects = combineConversationMergeEffects(await Promise.all(
+  const previewConversationEffects = combineConversationMergeEffects(await Promise.all(
     sourceConversations
       .map((sourceConversation) => {
         const targetConversation = targetConversationKeys.find((conversation) => conversation.locationId === sourceConversation.locationId);
@@ -2927,7 +2925,7 @@ async function buildMergeContactPreview(sourceContactId: string, targetContactId
       mergedCount,
       willMergeIntoExistingTargetConversation: mergedCount > 0,
       messagesAffected,
-      childEffects: conversationChildEffects,
+      childEffects: previewConversationEffects,
     },
     roles: {
       property: {
@@ -3045,7 +3043,7 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
     await db.$transaction(async (tx) => {
       let conversationsMerged = 0;
       let messagesAffected = 0;
-      const conversationMergeEffects: ConversationMergeEffects[] = [];
+      const actualConversationEffects: ConversationMergeEffects[] = [];
 
       // 1. Transfer LID if target doesn't have one
       if (source.lid && !target.lid) {
@@ -3075,14 +3073,14 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
         if (targetConv) {
           conversationsMerged += 1;
           console.log(`[Merge] Merging conversation ${sourceConv.id} into ${targetConv.id}`);
-          const childEffects = await mergeConversationIntoTarget({
+          const mergeEffects = await mergeConversationIntoTarget({
             tx,
             sourceConversationId: sourceConv.id,
             targetConversationId: targetConv.id,
             sourceContactId,
             targetContactId,
           });
-          conversationMergeEffects.push(childEffects);
+          actualConversationEffects.push(mergeEffects);
           await tx.conversation.delete({ where: { id: sourceConv.id } });
           targetConversationId = targetConv.id;
         } else {
@@ -3208,16 +3206,16 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
         });
       }
 
-      const mergeAuditSummary = buildMergeAuditSummary({
+      const auditSummary: MergeAuditSummary = {
         conversationsMoved,
         conversationsMerged,
         messagesAffected,
-        conversationChildEffects: combineConversationMergeEffects(conversationMergeEffects),
+        conversationChildEffects: combineConversationMergeEffects(actualConversationEffects),
         viewingsMoved: viewingsMoveResult.count,
         swipesMoved: swipesMoveResult.count,
         fieldsFilled: Object.keys(fillData),
         tagsAdded,
-      });
+      };
 
       const sourceHistory = await tx.contactHistory.findMany({
         where: { contactId: sourceContactId },
@@ -3262,7 +3260,7 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
         sourceGhlContactId: source.ghlContactId,
         sourceGoogleContactId: source.googleContactId,
         sourceOutlookContactId: source.outlookContactId,
-        ...mergeAuditSummary,
+        ...auditSummary,
         rolesTransferred: {
           propertyRoles: sourcePropertyRoles.length,
           companyRoles: sourceCompanyRoles.length,
