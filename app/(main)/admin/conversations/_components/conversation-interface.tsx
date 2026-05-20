@@ -48,6 +48,12 @@ import {
 } from '../../deals/actions';
 import { shouldApplyRealtimeEnvelope } from '@/lib/conversations/realtime-merge';
 import {
+    appendConversationPageFromResponse as appendConversationPageStateFromResponse,
+    applyConversationDeltaPayload as applyConversationDeltaListPayload,
+    deriveConversationListPageInfo,
+    replaceConversationListFromResponse as replaceConversationListStateFromResponse,
+} from '@/lib/conversations/list-state';
+import {
     getWorkspaceCoreCacheEntry,
     setWorkspaceCoreCacheEntry,
 } from '@/lib/conversations/workspace-core-cache';
@@ -1799,107 +1805,45 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
     const hasHydratedListRef = useRef(false);
 
-    const mergeConversationLists = useCallback((existing: Conversation[], incoming: Conversation[]) => {
-        const seen = new Set<string>();
-        const merged: Conversation[] = [];
-        for (const item of [...existing, ...incoming]) {
-            if (!item?.id || seen.has(item.id)) continue;
-            seen.add(item.id);
-            merged.push(item);
-        }
-        return merged;
-    }, []);
-
-    const mergeConversationListsWithIncomingFirst = useCallback((existing: Conversation[], incoming: Conversation[]) => {
-        const seen = new Set<string>();
-        const merged: Conversation[] = [];
-        for (const item of [...incoming, ...existing]) {
-            if (!item?.id || seen.has(item.id)) continue;
-            seen.add(item.id);
-            merged.push(item);
-        }
-        return merged;
-    }, []);
-
     const replaceConversationListFromResponse = useCallback((data: any) => {
-        const fetchedConversations = Array.isArray(data?.conversations)
-            ? data.conversations.map((c: Conversation) => {
-                if (c.id && readResetInFlightRef.current.has(c.id)) {
-                    return { ...c, unreadCount: 0 };
-                }
-                return c;
-            })
-            : [];
-        setConversations(fetchedConversations);
-        setConversationListHasMore(!!data?.hasMore);
-        setConversationListNextCursor(typeof data?.nextCursor === 'string' ? data.nextCursor : null);
-        if (typeof data?.deltaCursor === 'string' || data?.deltaCursor === null) {
-            setConversationDeltaCursor(data?.deltaCursor || null);
-            conversationDeltaCursorRef.current = data?.deltaCursor || null;
+        const listState = replaceConversationListStateFromResponse<Conversation>(data, readResetInFlightRef.current);
+        setConversations(listState.conversations);
+        setConversationListHasMore(listState.pageInfo.hasMore);
+        setConversationListNextCursor(listState.pageInfo.nextCursor);
+        if ('deltaCursor' in listState.pageInfo) {
+            setConversationDeltaCursor(listState.pageInfo.deltaCursor || null);
+            conversationDeltaCursorRef.current = listState.pageInfo.deltaCursor || null;
         }
     }, []);
 
     const appendConversationPageFromResponse = useCallback((data: any) => {
-        const incoming = Array.isArray(data?.conversations)
-            ? data.conversations.map((c: Conversation) => {
-                if (c.id && readResetInFlightRef.current.has(c.id)) {
-                    return { ...c, unreadCount: 0 };
-                }
-                return c;
-            })
-            : [];
-        setConversations(prev => mergeConversationLists(prev, incoming));
-        setConversationListHasMore(!!data?.hasMore);
-        setConversationListNextCursor(typeof data?.nextCursor === 'string' ? data.nextCursor : null);
-        if (typeof data?.deltaCursor === 'string' || data?.deltaCursor === null) {
-            setConversationDeltaCursor(data?.deltaCursor || null);
-            conversationDeltaCursorRef.current = data?.deltaCursor || null;
+        const pageInfo = deriveConversationListPageInfo(data);
+        setConversations(prev => {
+            const listState = appendConversationPageStateFromResponse<Conversation>(prev, data, readResetInFlightRef.current);
+            return listState.conversations;
+        });
+        setConversationListHasMore(pageInfo.hasMore);
+        setConversationListNextCursor(pageInfo.nextCursor);
+        if ('deltaCursor' in pageInfo) {
+            setConversationDeltaCursor(pageInfo.deltaCursor || null);
+            conversationDeltaCursorRef.current = pageInfo.deltaCursor || null;
         }
-    }, [mergeConversationLists]);
+    }, []);
 
     const applyConversationDeltaPayload = useCallback((deltaPayload: any) => {
-        const deltas = Array.isArray(deltaPayload?.deltas) ? deltaPayload.deltas : [];
-        if (deltas.length === 0) {
-            if (typeof deltaPayload?.cursor === 'string' || deltaPayload?.cursor === null) {
-                setConversationDeltaCursor(deltaPayload?.cursor || null);
-                conversationDeltaCursorRef.current = deltaPayload?.cursor || null;
-            }
-            return;
-        }
-
-        const incoming = deltas
-            .filter((item: any) => !!item?.matchesFilter && !!item?.conversation)
-            .map((item: any) => {
-                const conv = { ...item.conversation };
-                // Prevent stale DB reads from reverting our optimistic read state
-                if (conv.id && readResetInFlightRef.current.has(conv.id)) {
-                    conv.unreadCount = 0;
-                }
-                return conv;
-            });
-        const removedIds = new Set(
-            deltas
-                .filter((item: any) => item && item.matchesFilter === false && item.id)
-                .map((item: any) => item.id)
-        );
-
         // We DO NOT call setActiveId(null) here even if the active conversation is in removedIds.
         // If a user clicks an archived conversation from the search results while on the 'active' tab,
         // it will naturally not match the filter, but we should not kick them out of the chat window.
-
         setConversations((prev) => {
-            const withoutRemoved = removedIds.size > 0
-                ? prev.filter((conversation) => !removedIds.has(conversation.id))
-                : prev;
-            if (incoming.length === 0) return withoutRemoved;
-            return mergeConversationListsWithIncomingFirst(withoutRemoved, incoming);
+            const listState = applyConversationDeltaListPayload<Conversation>(prev, deltaPayload, readResetInFlightRef.current);
+            return listState.conversations;
         });
 
         if (typeof deltaPayload?.cursor === 'string' || deltaPayload?.cursor === null) {
             setConversationDeltaCursor(deltaPayload?.cursor || null);
             conversationDeltaCursorRef.current = deltaPayload?.cursor || null;
         }
-    }, [mergeConversationListsWithIncomingFirst]);
+    }, []);
 
     const runRealtimeRefresh = useCallback((conversationId?: string | null) => {
         if (realtimeRefreshTimerRef.current) return;
