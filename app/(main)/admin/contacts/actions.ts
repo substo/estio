@@ -18,11 +18,19 @@ import { Prisma } from '@prisma/client';
 import { getLocationContext } from '@/lib/auth/location-context';
 import { seedConversationFromContactLeadText } from '@/lib/conversations/bootstrap';
 import {
-  combineConversationMergeEffects,
   mergeConversationIntoTarget,
-  previewConversationMergeEffects,
   type ConversationMergeEffects,
 } from '@/lib/conversations/merge';
+import {
+  buildMergeAuditSummary,
+  buildMergeContactPreview,
+  buildPreservedSourceHistoryRows,
+  findMergeTargetForSource,
+  prepareContactMergeFillData,
+  transferContactCompanyRoles,
+  transferContactPropertyRoles,
+  type MergeContactPreview,
+} from '@/lib/contacts/merge';
 import { normalizeReplyLanguage } from '@/lib/ai/reply-language-options';
 import {
   normalizeIanaTimeZoneOrThrow,
@@ -2678,278 +2686,7 @@ export async function searchContactsAction(query: string) {
   return scored;
 }
 
-const MERGE_FILL_SCALAR_FIELDS = [
-  'email', 'phone', 'firstName', 'lastName', 'name',
-  'address1', 'city', 'state', 'postalCode', 'country',
-  'dateOfBirth', 'leadSource', 'leadPriority', 'leadGoal',
-  'contactType', 'notes', 'preferredLang', 'message',
-  'outlookContactId',
-] as const;
-
-const MERGE_FILL_FIELD_LABELS: Record<typeof MERGE_FILL_SCALAR_FIELDS[number], string> = {
-  email: 'Email',
-  phone: 'Phone',
-  firstName: 'First name',
-  lastName: 'Last name',
-  name: 'Name',
-  address1: 'Address',
-  city: 'City',
-  state: 'State',
-  postalCode: 'Postal code',
-  country: 'Country',
-  dateOfBirth: 'Date of birth',
-  leadSource: 'Lead source',
-  leadPriority: 'Lead priority',
-  leadGoal: 'Lead goal',
-  contactType: 'Contact type',
-  notes: 'Notes',
-  preferredLang: 'Preferred language',
-  message: 'Message',
-  outlookContactId: 'Outlook contact ID',
-};
-
-const MERGE_ARRAY_FIELDS = [
-  'propertiesInterested', 'propertiesInspected',
-  'propertiesEmailed', 'propertiesMatched'
-] as const;
-
-const MERGE_ARRAY_FIELD_LABELS: Record<typeof MERGE_ARRAY_FIELDS[number], string> = {
-  propertiesInterested: 'Interested properties',
-  propertiesInspected: 'Inspected properties',
-  propertiesEmailed: 'Emailed properties',
-  propertiesMatched: 'Matched properties',
-};
-
-const MERGE_CONTACT_PREVIEW_SELECT = {
-  id: true,
-  locationId: true,
-  name: true,
-  firstName: true,
-  lastName: true,
-  email: true,
-  phone: true,
-  address1: true,
-  city: true,
-  state: true,
-  postalCode: true,
-  country: true,
-  dateOfBirth: true,
-  leadSource: true,
-  leadPriority: true,
-  leadGoal: true,
-  contactType: true,
-  notes: true,
-  preferredLang: true,
-  message: true,
-  outlookContactId: true,
-  ghlContactId: true,
-  googleContactId: true,
-  tags: true,
-  propertiesInterested: true,
-  propertiesInspected: true,
-  propertiesEmailed: true,
-  propertiesMatched: true,
-} satisfies Prisma.ContactSelect;
-
-type MergeContactPreviewContact = {
-  id: string;
-  name: string | null;
-  phone: string | null;
-  email: string | null;
-};
-
-export type MergeContactPreview = {
-  source: MergeContactPreviewContact;
-  target: MergeContactPreviewContact;
-  conversations: {
-    sourceCount: number;
-    movedCount: number;
-    mergedCount: number;
-    willMergeIntoExistingTargetConversation: boolean;
-    messagesAffected: number;
-    childEffects: ConversationMergeEffects;
-  };
-  roles: {
-    property: { total: number; transferred: number; duplicatesRemoved: number };
-    company: { total: number; transferred: number; duplicatesRemoved: number };
-  };
-  viewingsAffected: number;
-  swipesAffected: number;
-  tagsAdded: string[];
-  blankFieldsFilled: Array<{ field: string; label: string }>;
-  arrayFieldsMerged: Array<{ field: string; label: string; addedCount: number }>;
-  providerCleanupWarning: {
-    hasProviderIds: boolean;
-    providers: string[];
-  };
-};
-
-function parseContactHistoryChanges(changes: Prisma.JsonValue | string | null | undefined): any {
-  if (!changes) return null;
-  if (typeof changes !== 'string') return changes;
-
-  try {
-    return JSON.parse(changes);
-  } catch {
-    return changes;
-  }
-}
-
-async function findMergeTargetForSource(sourceContactId: string) {
-  const mergeHistory = await db.contactHistory.findMany({
-    where: { action: "MERGED_FROM" },
-    select: { contactId: true, changes: true },
-    orderBy: { createdAt: 'desc' },
-  }).catch(() => []);
-
-  return mergeHistory.find((entry) => {
-    const changes = parseContactHistoryChanges(entry.changes);
-    return !!changes
-      && typeof changes === 'object'
-      && !Array.isArray(changes)
-      && changes.sourceId === sourceContactId;
-  }) || null;
-}
-
-type MergeAuditSummary = {
-  conversationsMoved: number;
-  conversationsMerged: number;
-  messagesAffected: number;
-  conversationChildEffects: ConversationMergeEffects;
-  viewingsMoved: number;
-  swipesMoved: number;
-  fieldsFilled: string[];
-  tagsAdded: string[];
-};
-
-async function buildMergeContactPreview(sourceContactId: string, targetContactId: string): Promise<MergeContactPreview | null> {
-  const [source, target] = await Promise.all([
-    db.contact.findUnique({
-      where: { id: sourceContactId },
-      select: MERGE_CONTACT_PREVIEW_SELECT,
-    }),
-    db.contact.findUnique({
-      where: { id: targetContactId },
-      select: MERGE_CONTACT_PREVIEW_SELECT,
-    }),
-  ]);
-
-  if (!source || !target) return null;
-
-  const [
-    sourceConversations,
-    targetConversationKeys,
-    sourcePropertyRoles,
-    targetPropertyRoles,
-    sourceCompanyRoles,
-    targetCompanyRoles,
-    viewingsAffected,
-    swipesAffected,
-  ] = await Promise.all([
-    db.conversation.findMany({
-      where: { contactId: sourceContactId },
-      select: { id: true, locationId: true, _count: { select: { messages: true } } },
-    }),
-    db.conversation.findMany({
-      where: { contactId: targetContactId },
-      select: { id: true, locationId: true },
-    }),
-    db.contactPropertyRole.findMany({
-      where: { contactId: sourceContactId },
-      select: { propertyId: true, role: true },
-    }),
-    db.contactPropertyRole.findMany({
-      where: { contactId: targetContactId },
-      select: { propertyId: true, role: true },
-    }),
-    db.contactCompanyRole.findMany({
-      where: { contactId: sourceContactId },
-      select: { companyId: true, role: true },
-    }),
-    db.contactCompanyRole.findMany({
-      where: { contactId: targetContactId },
-      select: { companyId: true, role: true },
-    }),
-    db.viewing.count({ where: { contactId: sourceContactId } }),
-    db.propertySwipe.count({ where: { contactId: sourceContactId } }),
-  ]);
-
-  const targetConversationLocationIds = new Set(targetConversationKeys.map((conversation) => conversation.locationId));
-  const mergedCount = sourceConversations.filter((conversation) => targetConversationLocationIds.has(conversation.locationId)).length;
-  const messagesAffected = sourceConversations.reduce((sum, conversation) => sum + conversation._count.messages, 0);
-  const previewConversationEffects = combineConversationMergeEffects(await Promise.all(
-    sourceConversations
-      .map((sourceConversation) => {
-        const targetConversation = targetConversationKeys.find((conversation) => conversation.locationId === sourceConversation.locationId);
-        if (!targetConversation?.id) return null;
-        return previewConversationMergeEffects({
-          client: db,
-          sourceConversationId: sourceConversation.id,
-          targetConversationId: targetConversation.id,
-        });
-      })
-      .filter(Boolean) as Array<Promise<ConversationMergeEffects>>
-  ));
-
-  const targetPropertyRoleKeys = new Set(targetPropertyRoles.map((role) => `${role.propertyId}:${role.role}`));
-  const duplicatePropertyRoleCount = sourcePropertyRoles.filter((role) => targetPropertyRoleKeys.has(`${role.propertyId}:${role.role}`)).length;
-  const targetCompanyRoleKeys = new Set(targetCompanyRoles.map((role) => `${role.companyId}:${role.role}`));
-  const duplicateCompanyRoleCount = sourceCompanyRoles.filter((role) => targetCompanyRoleKeys.has(`${role.companyId}:${role.role}`)).length;
-
-  const tagsAdded = (source.tags || []).filter((tag) => !(target.tags || []).includes(tag));
-
-  const blankFieldsFilled = MERGE_FILL_SCALAR_FIELDS
-    .filter((field) => !(target as any)[field] && (source as any)[field])
-    .map((field) => ({ field, label: MERGE_FILL_FIELD_LABELS[field] }));
-
-  const arrayFieldsMerged = MERGE_ARRAY_FIELDS
-    .map((field) => {
-      const targetValues = new Set(((target as any)[field] || []) as string[]);
-      const addedCount = (((source as any)[field] || []) as string[]).filter((value) => !targetValues.has(value)).length;
-      return { field, label: MERGE_ARRAY_FIELD_LABELS[field], addedCount };
-    })
-    .filter((item) => item.addedCount > 0);
-
-  const providers = [
-    source.googleContactId ? 'Google' : null,
-    source.ghlContactId ? 'GHL' : null,
-    source.outlookContactId ? 'Outlook' : null,
-  ].filter(Boolean) as string[];
-
-  return {
-    source: { id: source.id, name: source.name, phone: source.phone, email: source.email },
-    target: { id: target.id, name: target.name, phone: target.phone, email: target.email },
-    conversations: {
-      sourceCount: sourceConversations.length,
-      movedCount: sourceConversations.length - mergedCount,
-      mergedCount,
-      willMergeIntoExistingTargetConversation: mergedCount > 0,
-      messagesAffected,
-      childEffects: previewConversationEffects,
-    },
-    roles: {
-      property: {
-        total: sourcePropertyRoles.length,
-        transferred: sourcePropertyRoles.length - duplicatePropertyRoleCount,
-        duplicatesRemoved: duplicatePropertyRoleCount,
-      },
-      company: {
-        total: sourceCompanyRoles.length,
-        transferred: sourceCompanyRoles.length - duplicateCompanyRoleCount,
-        duplicatesRemoved: duplicateCompanyRoleCount,
-      },
-    },
-    viewingsAffected,
-    swipesAffected,
-    tagsAdded,
-    blankFieldsFilled,
-    arrayFieldsMerged,
-    providerCleanupWarning: {
-      hasProviderIds: providers.length > 0,
-      providers,
-    },
-  };
-}
+export type { MergeContactPreview };
 
 export async function previewMergeContacts(sourceContactId: string, targetContactId: string): Promise<{
   success: boolean;
@@ -2973,7 +2710,7 @@ export async function previewMergeContacts(sourceContactId: string, targetContac
     }),
   ]);
   if (!source) {
-    const mergeHistory = await findMergeTargetForSource(sourceContactId);
+    const mergeHistory = await findMergeTargetForSource(db, sourceContactId);
 
     return {
       success: false,
@@ -2990,7 +2727,7 @@ export async function previewMergeContacts(sourceContactId: string, targetContac
     return { success: false, message: "Contacts must belong to the same location." };
   }
 
-  const preview = await buildMergeContactPreview(sourceContactId, targetContactId);
+  const preview = await buildMergeContactPreview(db, sourceContactId, targetContactId);
   if (!preview) return { success: false, message: "Contact not found" };
   if (preview.source.id === preview.target.id) return { success: false, message: "Select two different contacts." };
 
@@ -3016,7 +2753,7 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
 
   if (!source) {
     // Check if already merged
-    const mergeHistory = await findMergeTargetForSource(sourceContactId);
+    const mergeHistory = await findMergeTargetForSource(db, sourceContactId);
 
     return {
       success: false,
@@ -3103,54 +2840,9 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
         targetConversationId = existingTargetConv?.id || null;
       }
 
-      // 3. Transfer Property Roles (skip duplicates due to unique constraint)
-      const sourcePropertyRoles = await tx.contactPropertyRole.findMany({
-        where: { contactId: sourceContactId }
-      });
-      for (const role of sourcePropertyRoles) {
-        const existsOnTarget = await tx.contactPropertyRole.findUnique({
-          where: {
-            contactId_propertyId_role: {
-              contactId: targetContactId,
-              propertyId: role.propertyId,
-              role: role.role
-            }
-          }
-        });
-        if (existsOnTarget) {
-          // Target already has this role — delete the source's duplicate
-          await tx.contactPropertyRole.delete({ where: { id: role.id } });
-        } else {
-          await tx.contactPropertyRole.update({
-            where: { id: role.id },
-            data: { contactId: targetContactId }
-          });
-        }
-      }
-
-      // 4. Transfer Company Roles (skip duplicates)
-      const sourceCompanyRoles = await tx.contactCompanyRole.findMany({
-        where: { contactId: sourceContactId }
-      });
-      for (const role of sourceCompanyRoles) {
-        const existsOnTarget = await tx.contactCompanyRole.findUnique({
-          where: {
-            contactId_companyId_role: {
-              contactId: targetContactId,
-              companyId: role.companyId,
-              role: role.role
-            }
-          }
-        });
-        if (existsOnTarget) {
-          await tx.contactCompanyRole.delete({ where: { id: role.id } });
-        } else {
-          await tx.contactCompanyRole.update({
-            where: { id: role.id },
-            data: { contactId: targetContactId }
-          });
-        }
-      }
+      // 3-4. Transfer roles (skip duplicates due to unique constraints)
+      const sourcePropertyRoles = await transferContactPropertyRoles({ tx, sourceContactId, targetContactId });
+      const sourceCompanyRoles = await transferContactCompanyRoles({ tx, sourceContactId, targetContactId });
 
       // 5. Transfer Viewings
       const viewingsMoveResult = await tx.viewing.updateMany({
@@ -3170,34 +2862,8 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
         data: { contactId: null }
       });
 
-      // 7. Fill blank fields on target from source ("fill the gaps")
-      const fillData: Record<string, any> = {};
-      for (const field of MERGE_FILL_SCALAR_FIELDS) {
-        if (!(target as any)[field] && (source as any)[field]) {
-          fillData[field] = (source as any)[field];
-        }
-      }
-
-      // Merge tags (additive, deduplicated)
-      const tagsAdded = (source.tags || []).filter((tag) => !(target.tags || []).includes(tag));
-      const mergedTags = [...new Set([
-        ...(target.tags || []),
-        ...(source.tags || [])
-      ])];
-      if (mergedTags.length > (target.tags?.length || 0)) {
-        fillData.tags = mergedTags;
-      }
-
-      // Merge property arrays (additive, deduplicated)
-      for (const field of MERGE_ARRAY_FIELDS) {
-        const merged = [...new Set([
-          ...((target as any)[field] || []),
-          ...((source as any)[field] || [])
-        ])];
-        if (merged.length > ((target as any)[field]?.length || 0)) {
-          fillData[field] = merged;
-        }
-      }
+      // 7. Fill blank fields and additive arrays on target from source
+      const { fillData, tagsAdded } = prepareContactMergeFillData(source, target);
 
       if (Object.keys(fillData).length > 0) {
         await tx.contact.update({
@@ -3206,16 +2872,16 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
         });
       }
 
-      const auditSummary: MergeAuditSummary = {
+      const auditSummary = buildMergeAuditSummary({
         conversationsMoved,
         conversationsMerged,
         messagesAffected,
-        conversationChildEffects: combineConversationMergeEffects(actualConversationEffects),
+        actualConversationEffects,
         viewingsMoved: viewingsMoveResult.count,
         swipesMoved: swipesMoveResult.count,
-        fieldsFilled: Object.keys(fillData),
+        fillData,
         tagsAdded,
-      };
+      });
 
       const sourceHistory = await tx.contactHistory.findMany({
         where: { contactId: sourceContactId },
@@ -3230,20 +2896,12 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
 
       if (sourceHistory.length > 0) {
         await tx.contactHistory.createMany({
-          data: sourceHistory.map((historyItem) => ({
-            contactId: targetContactId,
-            userId: historyItem.userId,
-            action: "MERGED_SOURCE_HISTORY_PRESERVED",
-            changes: {
-              originalSourceContactId: sourceContactId,
-              originalSourceContactName: source.name,
-              originalSourceContactPhone: source.phone,
-              originalSourceContactEmail: source.email,
-              originalAction: historyItem.action,
-              originalCreatedAt: historyItem.createdAt.toISOString(),
-              originalChanges: parseContactHistoryChanges(historyItem.changes),
-            },
-          })),
+          data: buildPreservedSourceHistoryRows({
+            sourceHistory,
+            sourceContactId,
+            targetContactId,
+            source,
+          }),
         });
       }
 
