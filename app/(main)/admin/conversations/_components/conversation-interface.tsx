@@ -137,6 +137,12 @@ import {
     resolvePostMergeActiveConversationId,
 } from './conversation-merge-ui-actions';
 import {
+    buildContactContextShell,
+    mergeActivityTimelineEntries,
+    patchWorkspaceCoreSnapshotActivityEntry,
+    type ActivityTimelineItem,
+} from './conversation-workspace-ui-actions';
+import {
     buildDealContactOptions,
     chooseNextDealConversationId,
     resolveDealTitle,
@@ -181,15 +187,6 @@ type WorkspaceSidebarSnapshot = {
     taskSummary: any;
     viewingSummary: any;
     agentSummary: any;
-};
-
-type ActivityTimelineItem = {
-    id: string;
-    type: 'activity';
-    createdAt: string | Date;
-    action: string;
-    changes?: any;
-    user?: { name: string | null; email: string | null } | null;
 };
 
 type DealWorkspaceHydrationState = {
@@ -304,32 +301,6 @@ function estimateThreadViewportHeightPx(): number | null {
     if (!Number.isFinite(viewportHeight) || viewportHeight <= 0) return null;
     // Approximate header/composer/padding chrome to derive visible thread area.
     return Math.max(viewportHeight - 280, 320);
-}
-
-function buildContactContextShell(conversation: Conversation | null | undefined, appLocationId: string): any | null {
-    if (!conversation?.contactId) return null;
-    return {
-        contact: {
-            id: conversation.contactId,
-            name: conversation.contactName || "Unknown Contact",
-            email: conversation.contactEmail || null,
-            phone: conversation.contactPhone || null,
-            preferredLang: conversation.contactPreferredLanguage || null,
-            locationId: appLocationId,
-            contactType: "Lead",
-            propertyRoles: [],
-            companyRoles: [],
-            viewings: [],
-            interestedProperties: [],
-            inspectedProperties: [],
-            propertiesInterested: [],
-            propertiesInspected: [],
-            propertiesEmailed: [],
-            propertiesMatched: [],
-        },
-        leadSources: [],
-        shell: true,
-    };
 }
 
 export function ConversationInterface({ locationId, initialConversations, initialConversationListPageInfo, initialDeals, featureFlags }: ConversationInterfaceProps) {
@@ -860,32 +831,6 @@ export function ConversationInterface({ locationId, initialConversations, initia
         setLoadedChatId(conversationId);
     }, [mergeSnapshotPreservingPending]);
 
-    const mergeActivityTimelineEntries = useCallback((
-        currentEntries: ActivityTimelineItem[],
-        incomingEntry: ActivityTimelineItem
-    ): ActivityTimelineItem[] => {
-        const nextEntries = [...(Array.isArray(currentEntries) ? currentEntries : [])];
-        const existingIndex = nextEntries.findIndex((item) => item?.id === incomingEntry.id);
-
-        if (existingIndex >= 0) {
-            nextEntries[existingIndex] = {
-                ...nextEntries[existingIndex],
-                ...incomingEntry,
-            };
-        } else {
-            nextEntries.push(incomingEntry);
-        }
-
-        nextEntries.sort((left, right) => {
-            const leftTs = new Date(left.createdAt).getTime();
-            const rightTs = new Date(right.createdAt).getTime();
-            if (leftTs === rightTs) return String(left.id || "").localeCompare(String(right.id || ""));
-            return leftTs - rightTs;
-        });
-
-        return nextEntries;
-    }, []);
-
     const upsertActivityEntryInWorkspace = useCallback((
         conversationId: string | null | undefined,
         activityEntry: ActivityTimelineItem | null | undefined
@@ -899,15 +844,12 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
         const cached = getCachedWorkspaceCoreSnapshot(normalizedConversationId);
         if (cached) {
-            cacheWorkspaceCoreSnapshot(normalizedConversationId, {
-                ...cached,
-                activityTimeline: mergeActivityTimelineEntries(
-                    (cached.activityTimeline || []) as ActivityTimelineItem[],
-                    activityEntry
-                ),
-            });
+            cacheWorkspaceCoreSnapshot(
+                normalizedConversationId,
+                patchWorkspaceCoreSnapshotActivityEntry(cached, activityEntry)
+            );
         }
-    }, [cacheWorkspaceCoreSnapshot, getCachedWorkspaceCoreSnapshot, mergeActivityTimelineEntries]);
+    }, [cacheWorkspaceCoreSnapshot, getCachedWorkspaceCoreSnapshot]);
 
     const isDealWorkspaceHydrationBusy = useCallback((dealId?: string | null) => {
         const key = String(dealId || "");
