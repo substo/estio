@@ -87,6 +87,62 @@ import { SyncAllChatsDialog } from './sync-all-chats-dialog';
 import { NewConversationDialog } from './new-conversation-dialog';
 import { useSuggestedResponseQueue } from './use-suggested-response-queue';
 import { useMobileConversationPanes, type MobilePane } from './use-mobile-conversation-panes';
+import { useConversationComposerDrafts } from './use-conversation-composer-drafts';
+import {
+    applyConversationIdentityPatch,
+    applyDealContactIdentityPatch,
+    applyRefreshedConversationIdentityPatch,
+    applyRefreshedDealContactIdentityPatch,
+    applyRefreshedWorkspaceContactContextIdentityPatch,
+    applyWorkspaceContactContextIdentityPatch,
+    normalizeConversationContactIdentityPatch,
+    type DealContactOption,
+} from './conversation-contact-identity-actions';
+import { generateDraftWithStreamingFallback } from './conversation-draft-generation';
+import {
+    getMessageSignature,
+    getTranscriptActionModeLabel,
+    hasPendingTranscripts,
+    refreshMessagesAfterTranscriptAction,
+    runTranscriptAction,
+} from './conversation-transcript-actions';
+import {
+    appendOptimisticMessage,
+    applyResendAckById,
+    applySendAckByCorrelation,
+    buildOptimisticMediaMessage,
+    buildOptimisticTextMessage,
+    createOutboundClientMessageId,
+    getSendAckState,
+    markMessageFailedById,
+    markMessageSendingById,
+    normalizeSendError,
+} from './conversation-message-actions';
+import {
+    applyMessageTranslation,
+    applyReplyLanguageOverrideToConversations,
+    getConversationMessageType,
+} from './conversation-translation-actions';
+import {
+    applyVisibleConversationSelection,
+    collectConversationsByIds,
+    removeConversationsByIds,
+    resolveSelectedConversations,
+    shouldClearActiveConversation,
+    shouldExitSelectionModeAfterBulkAction,
+    toggleConversationSelection,
+} from './conversation-bulk-actions';
+import {
+    removeMergedSourceConversation,
+    resolvePostMergeActiveConversationId,
+} from './conversation-merge-ui-actions';
+import {
+    buildDealContactOptions,
+    chooseNextDealConversationId,
+    resolveDealTitle,
+    resolveSelectedConversationsForDeal,
+    resolveSelectedDealConversation,
+} from './conversation-deal-actions';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -118,63 +174,6 @@ interface ConversationInterfaceProps {
     };
     initialDeals?: any[];
     featureFlags: ConversationFeatureFlags;
-}
-
-/**
- * Derive the message type from the conversation's lastMessageType
- */
-function getMessageType(conversation: Conversation): 'SMS' | 'Email' | 'WhatsApp' {
-    const type = (conversation.lastMessageType || conversation.type || '').toUpperCase();
-    if (type.includes('EMAIL')) return 'Email';
-    if (type.includes('WHATSAPP')) return 'WhatsApp';
-    return 'SMS'; // Default fallback
-}
-
-function getMessageSignature(messages: Message[]): string {
-    if (!messages || messages.length === 0) return '0';
-    const compact = messages.map((message) => {
-        const attachmentSignature = (message.attachments || []).map((attachment) => {
-            if (typeof attachment === "string") return `s:${attachment.length}`;
-            const transcript = attachment.transcript;
-            const extraction = transcript?.extraction;
-            return [
-                attachment.id || "",
-                transcript?.status || "",
-                String(transcript?.text || "").length,
-                String(transcript?.error || "").length,
-                transcript?.updatedAt || "",
-                extraction?.status || "",
-                extraction?.updatedAt || "",
-                String(extraction?.error || "").length,
-                extraction?.payload ? JSON.stringify(extraction.payload).length : 0,
-            ].join(":");
-        }).join(",");
-
-        return [
-            message.id,
-            message.status,
-            message.dateAdded,
-            String(message.body || "").length,
-            attachmentSignature,
-        ].join("|");
-    }).join(";");
-
-    return `${messages.length}:${compact}`;
-}
-
-function hasPendingTranscripts(messages: Message[]): boolean {
-    return (messages || []).some((message) =>
-        (message.attachments || []).some((attachment) =>
-            typeof attachment !== "string"
-            && !!attachment.transcript
-            && (
-                attachment.transcript.status === "pending"
-                || attachment.transcript.status === "processing"
-                || attachment.transcript.extraction?.status === "pending"
-                || attachment.transcript.extraction?.status === "processing"
-            )
-        )
-    );
 }
 
 type WorkspaceSidebarSnapshot = {
@@ -217,7 +216,6 @@ const WORKSPACE_CORE_CACHE_TTL_MS = 2 * 60 * 1000;
 const WORKSPACE_SIDEBAR_CACHE_TTL_MS = 5 * 60 * 1000;
 const WORKSPACE_ACTIVITY_LIMIT = 180;
 const ACTIVE_POLL_GRACE_MS = 2500;
-const COMPOSER_DRAFTS_SESSION_KEY = "estio:conversation-composer-drafts:v1";
 
 type DealTimelineWindowLike = {
     oldestCursor?: string | null;
@@ -306,48 +304,6 @@ function estimateThreadViewportHeightPx(): number | null {
     if (!Number.isFinite(viewportHeight) || viewportHeight <= 0) return null;
     // Approximate header/composer/padding chrome to derive visible thread area.
     return Math.max(viewportHeight - 280, 320);
-}
-
-interface DealContactOption {
-    conversationId: string;
-    contactId: string;
-    contactName: string;
-    contactEmail?: string;
-    contactPhone?: string;
-    lastMessageDate: number;
-    unreadCount?: number;
-    lastMessageType?: string;
-}
-
-function buildDealContactOptions(participants: Conversation[]): DealContactOption[] {
-    const byContact = new Map<string, DealContactOption>();
-
-    for (const conversation of participants) {
-        const key = String(
-            conversation.contactId
-            || conversation.contactEmail
-            || conversation.contactPhone
-            || conversation.id
-        );
-
-        const candidate: DealContactOption = {
-            conversationId: conversation.id,
-            contactId: conversation.contactId,
-            contactName: conversation.contactName || "Unknown Contact",
-            contactEmail: conversation.contactEmail,
-            contactPhone: conversation.contactPhone,
-            lastMessageDate: Number(conversation.lastMessageDate || 0),
-            unreadCount: conversation.unreadCount,
-            lastMessageType: conversation.lastMessageType,
-        };
-
-        const current = byContact.get(key);
-        if (!current || candidate.lastMessageDate > current.lastMessageDate) {
-            byContact.set(key, candidate);
-        }
-    }
-
-    return Array.from(byContact.values()).sort((a, b) => b.lastMessageDate - a.lastMessageDate);
 }
 
 function buildContactContextShell(conversation: Conversation | null | undefined, appLocationId: string): any | null {
@@ -461,8 +417,6 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const selectedConversationCacheRef = useRef<Map<string, Conversation>>(
         new Map(initialConversations.filter((conversation) => !!conversation?.id).map((conversation) => [conversation.id, conversation]))
     );
-    const hasSkippedInitialDraftPersistRef = useRef(false);
-    const [composerDrafts, setComposerDrafts] = useState<Record<string, string>>({});
 
     // Initialize Active ID from URL
     const requestedInitialActiveId = getSearchParam('id');
@@ -556,6 +510,16 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
     const [activeDealId, setActiveDealId] = useState<string | null>(initialDealId);
     const [transcriptOnDemandEnabled, setTranscriptOnDemandEnabled] = useState(false);
+    const {
+        composerInsertSeed,
+        getComposerDraft,
+        setComposerDraftForConversation,
+        clearComposerDraftForConversation,
+        insertSuggestedResponseIntoComposer,
+    } = useConversationComposerDrafts({
+        activeConversationIdRef: activeIdRef,
+        resetKey: `${viewMode}:${activeId || ""}:${activeDealId || ""}`,
+    });
 
     const hasActiveConversationForMobile = activeId
         ? !!(
@@ -698,73 +662,6 @@ export function ConversationInterface({ locationId, initialConversations, initia
     useEffect(() => {
         messagesRef.current = messages;
     }, [messages]);
-
-    useEffect(() => {
-        if (typeof window === 'undefined') return;
-        try {
-            const rawDrafts = window.sessionStorage.getItem(COMPOSER_DRAFTS_SESSION_KEY);
-            if (!rawDrafts) return;
-            const parsed = JSON.parse(rawDrafts);
-            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
-            const restored: Record<string, string> = {};
-            for (const [conversationId, draft] of Object.entries(parsed)) {
-                const normalizedId = String(conversationId || "").trim();
-                const normalizedDraft = String(draft || "");
-                if (normalizedId && normalizedDraft) {
-                    restored[normalizedId] = normalizedDraft;
-                }
-            }
-            if (Object.keys(restored).length > 0) {
-                setComposerDrafts(restored);
-            }
-        } catch (error) {
-            console.warn("Failed to restore conversation drafts:", error);
-        }
-    }, []);
-
-    useEffect(() => {
-        if (typeof window === 'undefined') return;
-        if (!hasSkippedInitialDraftPersistRef.current) {
-            hasSkippedInitialDraftPersistRef.current = true;
-            return;
-        }
-        try {
-            const entries = Object.entries(composerDrafts).filter(([, draft]) => String(draft || "").length > 0);
-            if (entries.length === 0) {
-                window.sessionStorage.removeItem(COMPOSER_DRAFTS_SESSION_KEY);
-                return;
-            }
-            window.sessionStorage.setItem(COMPOSER_DRAFTS_SESSION_KEY, JSON.stringify(Object.fromEntries(entries)));
-        } catch (error) {
-            console.warn("Failed to persist conversation drafts:", error);
-        }
-    }, [composerDrafts]);
-
-    const getComposerDraft = useCallback((conversationId?: string | null) => {
-        const normalizedId = String(conversationId || "").trim();
-        if (!normalizedId) return "";
-        return composerDrafts[normalizedId] || "";
-    }, [composerDrafts]);
-
-    const setComposerDraftForConversation = useCallback((conversationId: string | null | undefined, draft: string) => {
-        const normalizedId = String(conversationId || "").trim();
-        if (!normalizedId) return;
-        const nextDraft = String(draft || "");
-        setComposerDrafts((prev) => {
-            if (nextDraft) {
-                if (prev[normalizedId] === nextDraft) return prev;
-                return { ...prev, [normalizedId]: nextDraft };
-            }
-            if (!(normalizedId in prev)) return prev;
-            const next = { ...prev };
-            delete next[normalizedId];
-            return next;
-        });
-    }, []);
-
-    const clearComposerDraftForConversation = useCallback((conversationId?: string | null) => {
-        setComposerDraftForConversation(conversationId, "");
-    }, [setComposerDraftForConversation]);
 
     useEffect(() => {
         conversationDeltaCursorRef.current = conversationDeltaCursor;
@@ -1038,24 +935,16 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const applyDealParticipants = useCallback((participants: Conversation[], preferredConversationId?: string | null) => {
         const normalizedParticipants = Array.isArray(participants) ? participants.filter((conversation) => !!conversation?.id) : [];
         const contacts = buildDealContactOptions(normalizedParticipants);
-        const availableIds = new Set(normalizedParticipants.map((conversation) => conversation.id));
 
         setActiveDealParticipants(normalizedParticipants);
         setDealContacts(contacts);
-        setActiveId((prev) => {
-            const preferredId = String(preferredConversationId || "").trim();
-            if (preferredId && availableIds.has(preferredId)) {
-                return preferredId;
-            }
-            const currentUrlId = urlConversationIdRef.current;
-            if (currentUrlId && availableIds.has(currentUrlId)) {
-                return currentUrlId;
-            }
-            if (prev && availableIds.has(prev)) {
-                return prev;
-            }
-            return contacts[0]?.conversationId || normalizedParticipants[0]?.id || null;
-        });
+        setActiveId((prev) => chooseNextDealConversationId(
+            normalizedParticipants,
+            contacts,
+            preferredConversationId,
+            urlConversationIdRef.current,
+            prev
+        ));
     }, []);
 
     const applyDealWorkspaceCoreSnapshot = useCallback((dealId: string, snapshot: DealWorkspaceCoreSnapshot, preferredConversationId?: string | null) => {
@@ -1876,9 +1765,11 @@ export function ConversationInterface({ locationId, initialConversations, initia
         setCreatingDeal(true);
         try {
             const ids = Array.from(selectedIds);
-            const selectedConversationsForDeal = ids
-                .map((id) => selectedConversationCacheRef.current.get(id) || conversationsRef.current.find((conversation) => conversation.id === id))
-                .filter((conversation): conversation is Conversation => !!conversation);
+            const selectedConversationsForDeal = resolveSelectedConversationsForDeal(
+                ids,
+                selectedConversationCacheRef.current,
+                conversationsRef.current
+            );
             const newDeal = await createPersistentDeal(title, ids);
 
             cacheDealWorkspaceCoreSnapshot(newDeal.id, createDealWorkspaceCoreSnapshot({
@@ -1927,13 +1818,15 @@ export function ConversationInterface({ locationId, initialConversations, initia
             || null
         )
         : null;
-    const selectedConversations = Array.from(selectedIds)
-        .map((id) => selectedConversationCacheRef.current.get(id) || conversations.find((conversation) => conversation.id === id))
-        .filter((conversation): conversation is Conversation => !!conversation);
-    const selectedDealConversation = activeDealParticipants.find((conversation) => conversation.id === activeId) || null;
+    const selectedConversations = resolveSelectedConversations(
+        selectedIds,
+        selectedConversationCacheRef.current,
+        conversations
+    );
+    const selectedDealConversation = resolveSelectedDealConversation(activeDealParticipants, activeId);
     const activeDealListEntry = deals.find((deal) => deal?.id === activeDealId) || null;
     const activeDealSnapshot = activeDealId ? getCachedDealWorkspaceCoreSnapshot(activeDealId) : null;
-    const activeDealTitle = String(activeDealListEntry?.title || activeDealSnapshot?.title || "Deal").trim() || "Deal";
+    const activeDealTitle = resolveDealTitle(activeDealListEntry, activeDealSnapshot);
     const activeDealEnrichmentStatus = String(
         activeDealMetadata?.enrichment?.status
         || activeDealListEntry?.metadata?.enrichment?.status
@@ -3000,10 +2893,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
     // Handle toggling context mode IDs
     const handleToggleSelect = (id: string, checked: boolean) => {
-        const next = new Set(selectedIds);
-        if (checked) next.add(id);
-        else next.delete(id);
-        setSelectedIds(next);
+        setSelectedIds(toggleConversationSelection(selectedIds, id, checked));
     };
 
     const handleDelete = async (ids: string[]) => {
@@ -3026,22 +2916,21 @@ export function ConversationInterface({ locationId, initialConversations, initia
         try {
             const res = await archiveConversations(ids);
             if (res.success) {
-                const idSet = new Set(ids);
-                const archivedConversations = conversations.filter(c => idSet.has(c.id));
+                const archivedConversations = collectConversationsByIds(conversations, ids);
 
                 // Remove from local state immediately if filtering active conversations
                 if (viewFilter === 'active') {
-                    setConversations(prev => prev.filter(c => !idSet.has(c.id)));
+                    setConversations(prev => removeConversationsByIds(prev, ids));
                 }
 
                 // Clear selection
                 setSelectedIds(new Set());
-                if (ids.length === conversations.length) {
+                if (shouldExitSelectionModeAfterBulkAction(ids, conversations)) {
                     setIsSelectionMode(false);
                 }
 
                 // If active ID was archived, deselect
-                if (activeId && idSet.has(activeId)) {
+                if (shouldClearActiveConversation(activeId, ids)) {
                     setActiveId(null);
                 }
 
@@ -3096,20 +2985,19 @@ export function ConversationInterface({ locationId, initialConversations, initia
         try {
             const res = await deleteConversations(ids);
             if (res.success) {
-                const idSet = new Set(ids);
-                const deletedConversations = conversations.filter(c => idSet.has(c.id));
+                const deletedConversations = collectConversationsByIds(conversations, ids);
 
                 // Remove from local state immediately
-                setConversations(prev => prev.filter(c => !idSet.has(c.id)));
+                setConversations(prev => removeConversationsByIds(prev, ids));
 
                 // Clear selection
                 setSelectedIds(new Set());
-                if (ids.length === conversations.length) {
+                if (shouldExitSelectionModeAfterBulkAction(ids, conversations)) {
                     setIsSelectionMode(false);
                 }
 
                 // If active ID was deleted, deselect
-                if (activeId && idSet.has(activeId)) {
+                if (shouldClearActiveConversation(activeId, ids)) {
                     setActiveId(null);
                 }
 
@@ -3149,17 +3037,16 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 toast({ title: "Deleted Forever", description: `Permanently deleted ${res.count} conversation(s).` });
 
                 // Remove from local state
-                const idSet = new Set(ids);
-                setConversations(prev => prev.filter(c => !idSet.has(c.id)));
+                setConversations(prev => removeConversationsByIds(prev, ids));
 
                 // Clear selection
                 setSelectedIds(new Set());
-                if (ids.length === conversations.length) {
+                if (shouldExitSelectionModeAfterBulkAction(ids, conversations)) {
                     setIsSelectionMode(false);
                 }
 
                 // If active ID was deleted, deselect
-                if (activeId && idSet.has(activeId)) {
+                if (shouldClearActiveConversation(activeId, ids)) {
                     setActiveId(null);
                 }
             } else {
@@ -3182,17 +3069,16 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 toast({ title: "Restored", description: `Restored ${res.count} conversation(s).` });
 
                 // Remove from local state
-                const idSet = new Set(ids);
-                setConversations(prev => prev.filter(c => !idSet.has(c.id)));
+                setConversations(prev => removeConversationsByIds(prev, ids));
 
                 // Clear selection
                 setSelectedIds(new Set());
-                if (ids.length === conversations.length) {
+                if (shouldExitSelectionModeAfterBulkAction(ids, conversations)) {
                     setIsSelectionMode(false);
                 }
 
                 // If active ID was restored, deselect
-                if (activeId && idSet.has(activeId)) {
+                if (shouldClearActiveConversation(activeId, ids)) {
                     setActiveId(null);
                 }
             } else {
@@ -3241,56 +3127,19 @@ export function ConversationInterface({ locationId, initialConversations, initia
         if (!conversationTarget) return;
 
         // Optimistic UI update — message appears instantly with 'sending' status
-        const optimisticClientMessageId = (
-            typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-                ? `cmid_${crypto.randomUUID()}`
-                : `cmid_${Date.now()}_${Math.random().toString(36).slice(2)}`
-        );
-        const optimisticMessageId = `opt-${optimisticClientMessageId}`;
-        const optimisticMessage: any = {
-            id: optimisticMessageId,
+        const optimisticClientMessageId = createOutboundClientMessageId();
+        const optimisticMessage = buildOptimisticTextMessage({
             clientMessageId: optimisticClientMessageId,
-            conversationId: conversationTarget.id,
-            contactId: conversationTarget.contactId,
-            body: text,
+            conversation: conversationTarget,
+            text,
             type,
-            direction: 'outbound',
-            status: 'sending',
-            sendState: 'queued',
-            outboxState: { id: null, status: 'pending' },
-            dateAdded: new Date().toISOString(),
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            ...(options?.translationSourceText && String(options.translationSourceText).trim() ? {
-                translation: {
-                    active: {
-                        targetLanguage: options.translationTargetLanguage || conversationTarget.replyLanguageOverride || conversationTarget.locationDefaultReplyLanguage || "en",
-                        sourceLanguage: options.translationDetectedSourceLanguage || null,
-                        sourceText: String(options.translationSourceText || "").trim(),
-                        translatedText: text,
-                        status: "completed",
-                        provider: "manual_send_preview",
-                        model: "manual_send_preview",
-                        updatedAt: new Date().toISOString(),
-                    },
-                    available: [{
-                        targetLanguage: options.translationTargetLanguage || conversationTarget.replyLanguageOverride || conversationTarget.locationDefaultReplyLanguage || "en",
-                        sourceLanguage: options.translationDetectedSourceLanguage || null,
-                        sourceText: String(options.translationSourceText || "").trim(),
-                        translatedText: text,
-                        status: "completed",
-                        provider: "manual_send_preview",
-                        model: "manual_send_preview",
-                        updatedAt: new Date().toISOString(),
-                    }],
-                    viewDefault: "original",
-                },
-            } : {}),
-        };
+            options,
+        });
+        const optimisticMessageId = optimisticMessage.id;
 
         if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
             setMessages((prev) => {
-                const next = [...prev, optimisticMessage];
+                const next = appendOptimisticMessage(prev, optimisticMessage);
                 syncPendingMessagesForConversation(conversationTarget.id, next);
                 return next;
             });
@@ -3302,27 +3151,10 @@ export function ConversationInterface({ locationId, initialConversations, initia
         const markOptimisticMessageFailed = () => {
             if (viewMode !== 'chats' || activeIdRef.current !== capturedConversationId) return;
             setMessages((prev) => {
-                const next = prev.map((m) =>
-                    m.id === optimisticMessageId
-                        ? { ...m, status: 'failed', sendState: 'failed', outboxState: { ...(m as any).outboxState, status: 'dead' } }
-                        : m
-                );
+                const next = markMessageFailedById(prev, optimisticMessageId, { deadOutbox: true });
                 syncPendingMessagesForConversation(capturedConversationId, next);
                 return next;
             });
-        };
-
-        const normalizeSendError = (error: unknown) => {
-            const raw = error instanceof Error ? error.message : String(error || "");
-            const lower = raw.toLowerCase();
-            if (
-                lower.includes("failed to find server action") ||
-                lower.includes("failed-to-find-server-action") ||
-                (lower.includes("server action") && lower.includes("not found"))
-            ) {
-                return "Page updated. Reload and try again.";
-            }
-            return raw || "Unknown error occurred";
         };
 
         let sendFailureToastShown = false;
@@ -3376,47 +3208,24 @@ export function ConversationInterface({ locationId, initialConversations, initia
             }
 
             if (viewMode === 'chats' && activeIdRef.current === capturedConversationId) {
-                const ackMessageId = String((res as any).messageId || "").trim();
-                const ackClientMessageId = String((res as any).clientMessageId || optimisticClientMessageId).trim();
-                const outboxJobId = String((res as any).outboxJobId || "").trim();
-                const queued = !!(res as any).queued;
-                const queueAccepted = (res as any).queueAccepted !== false;
-                const dispatchMode = String((res as any).dispatchMode || "queued").trim();
-                const fallbackSent = dispatchMode === "inline_fallback_sent";
-                const degradedDelivery = !queueAccepted && queued && !fallbackSent;
-                const warning = String((res as any).warning || "").trim();
+                const ackState = getSendAckState(res as any, optimisticClientMessageId);
 
                 setMessages((prev) => {
-                    const next = prev.map((message) => {
-                        const isTarget = matchesByCorrelation(message as any, {
-                            messageId: optimisticMessageId,
-                            clientMessageId: optimisticClientMessageId,
-                        });
-                        if (!isTarget) return message;
-
-                        return {
-                            ...message,
-                            ...(ackMessageId ? { id: ackMessageId } : {}),
-                            clientMessageId: ackClientMessageId,
-                            status: fallbackSent ? 'sent' : (queued ? 'sending' : 'sent'),
-                            sendState: fallbackSent ? 'sent' : (degradedDelivery ? 'retrying' : (queued ? 'queued' : 'sent')),
-                            outboxState: {
-                                id: outboxJobId || (message as any)?.outboxState?.id || null,
-                                status: fallbackSent ? 'completed' : (degradedDelivery ? 'failed' : (queued ? 'pending' : 'completed')),
-                            },
-                        } as Message;
+                    const next = applySendAckByCorrelation(prev, {
+                        optimisticMessageId,
+                        optimisticClientMessageId,
+                        ack: res as any,
                     });
-
                     syncPendingMessagesForConversation(capturedConversationId, next);
                     return next;
                 });
 
-                if (warning) {
+                if (ackState.warning) {
                     toast({
                         title: type === "SMS_RELAY" ? 'SIM Relay delivery queued' : 'WhatsApp delivery degraded',
-                        description: warning,
+                        description: ackState.warning,
                     });
-                } else if (degradedDelivery) {
+                } else if (ackState.degradedDelivery) {
                     toast({
                         title: type === "SMS_RELAY" ? 'SIM Relay delivery degraded' : 'WhatsApp delivery degraded',
                         description: 'Queue enqueue failed. Durable auto-recovery is active for this message.',
@@ -3454,19 +3263,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             };
         }
 
-        setMessages((prev) => prev.map((message) => {
-            if (String(message.id || "") !== normalizedMessageId) return message;
-            return {
-                ...message,
-                detectedLanguage: result.translation?.sourceLanguage || null,
-                translation: {
-                    active: result.translation,
-                    available: result.translation ? [result.translation] : [],
-                    viewDefault: result.translation?.sourceLanguage ? "translated" : "original",
-                },
-                translations: result.translation ? [result.translation] : [],
-            };
-        }));
+        setMessages((prev) => applyMessageTranslation(prev, normalizedMessageId, result.translation));
 
         return {
             success: true as const,
@@ -3516,17 +3313,9 @@ export function ConversationInterface({ locationId, initialConversations, initia
     }, []);
 
     const applyConversationReplyLanguageOverride = useCallback((conversationId: string, replyLanguageOverride: string | null) => {
-        setConversations((prev) => prev.map((conversationItem) =>
-            conversationItem.id === conversationId
-                ? { ...conversationItem, replyLanguageOverride }
-                : conversationItem
-        ));
-
-        setActiveDealParticipants((prev) => prev.map((conversationItem) =>
-            conversationItem.id === conversationId
-                ? { ...conversationItem, replyLanguageOverride }
-                : conversationItem
-        ));
+        setConversations((prev) => applyReplyLanguageOverrideToConversations(prev, conversationId, replyLanguageOverride));
+        setSearchResults((prev) => applyReplyLanguageOverrideToConversations(prev, conversationId, replyLanguageOverride));
+        setActiveDealParticipants((prev) => applyReplyLanguageOverrideToConversations(prev, conversationId, replyLanguageOverride));
     }, []);
 
     const handleContactMerged = useCallback(async (conversationId: string, targetContactId: string, targetConversationId?: string | null) => {
@@ -3534,14 +3323,14 @@ export function ConversationInterface({ locationId, initialConversations, initia
         if (!normalizedConversationId || !targetContactId) return;
 
         // 1. Remove the old (source) conversation from the list — it's been deleted/merged
-        setConversations(prev => prev.filter(c => c.id !== normalizedConversationId));
-        setSearchResults(prev => prev.filter(c => c.id !== normalizedConversationId));
+        setConversations(prev => removeMergedSourceConversation(prev, normalizedConversationId));
+        setSearchResults(prev => removeMergedSourceConversation(prev, normalizedConversationId));
 
         // 2. Invalidate workspace cache for the old conversation
         workspaceCoreCacheRef.current.delete(normalizedConversationId);
 
         // 3. Keep local state coherent while we navigate away from the merged source contact
-        const targetConvId = targetConversationId ? String(targetConversationId).trim() : null;
+        const targetConvId = resolvePostMergeActiveConversationId(targetConversationId);
         if (targetConvId) {
             setActiveId(targetConvId);
         } else {
@@ -3566,139 +3355,28 @@ export function ConversationInterface({ locationId, initialConversations, initia
     }, [locationId, router]);
 
     const handleConversationContactSaved = useCallback(async (conversationId: string, patch: ContactIdentityPatch) => {
-        const normalizedConversationId = String(conversationId || "").trim();
-        const patchedContactId = String(patch?.id || "").trim();
-        if (!normalizedConversationId || !patchedContactId) return;
+        const normalizedPatch = normalizeConversationContactIdentityPatch(conversationId, patch);
+        if (!normalizedPatch) return;
 
-        const normalizedName = patch.name === undefined
-            ? undefined
-            : (String(patch.name || "").trim() || "Unknown Contact");
-        const normalizedEmail = patch.email === undefined
-            ? undefined
-            : (String(patch.email || "").trim() || undefined);
-        const normalizedPhone = patch.phone === undefined
-            ? undefined
-            : (String(patch.phone || "").trim() || undefined);
-        const normalizedPreferredLang = patch.preferredLang === undefined
-            ? undefined
-            : (String(patch.preferredLang || "").trim() || null);
+        const sequence = (contactSaveRefreshSeqRef.current[normalizedPatch.conversationId] || 0) + 1;
+        contactSaveRefreshSeqRef.current[normalizedPatch.conversationId] = sequence;
 
-        const applyConversationIdentityPatch = (conversationItem: Conversation): Conversation => {
-            if (
-                conversationItem.id !== normalizedConversationId
-                && String(conversationItem.contactId || "") !== patchedContactId
-            ) {
-                return conversationItem;
-            }
-
-            return {
-                ...conversationItem,
-                ...(normalizedName !== undefined ? { contactName: normalizedName } : {}),
-                ...(normalizedEmail !== undefined ? { contactEmail: normalizedEmail } : {}),
-                ...(normalizedPhone !== undefined ? { contactPhone: normalizedPhone } : {}),
-                ...(normalizedPreferredLang !== undefined ? { contactPreferredLanguage: normalizedPreferredLang } : {}),
-            };
-        };
-
-        const applyDealContactIdentityPatch = (contact: DealContactOption): DealContactOption => {
-            if (
-                contact.conversationId !== normalizedConversationId
-                && String(contact.contactId || "") !== patchedContactId
-            ) {
-                return contact;
-            }
-
-            return {
-                ...contact,
-                ...(normalizedName !== undefined ? { contactName: normalizedName } : {}),
-                ...(normalizedEmail !== undefined ? { contactEmail: normalizedEmail } : {}),
-                ...(normalizedPhone !== undefined ? { contactPhone: normalizedPhone } : {}),
-            };
-        };
-
-        const sequence = (contactSaveRefreshSeqRef.current[normalizedConversationId] || 0) + 1;
-        contactSaveRefreshSeqRef.current[normalizedConversationId] = sequence;
-
-        setConversations((prev) => prev.map(applyConversationIdentityPatch));
-        setSearchResults((prev) => prev.map(applyConversationIdentityPatch));
-        setActiveDealParticipants((prev) => prev.map(applyConversationIdentityPatch));
-        setDealContacts((prev) => prev.map(applyDealContactIdentityPatch));
-        setWorkspaceContactContext((prev: any) => {
-            if (!prev?.contact || String(prev.contact.id || "") !== patchedContactId) return prev;
-            return {
-                ...prev,
-                contact: {
-                    ...prev.contact,
-                    ...(normalizedName !== undefined ? { name: normalizedName } : {}),
-                    ...(normalizedEmail !== undefined ? { email: normalizedEmail || null } : {}),
-                    ...(normalizedPhone !== undefined ? { phone: normalizedPhone || null } : {}),
-                    ...(normalizedPreferredLang !== undefined ? { preferredLang: normalizedPreferredLang } : {}),
-                },
-            };
-        });
+        setConversations((prev) => prev.map((conversationItem) => applyConversationIdentityPatch(conversationItem, normalizedPatch)));
+        setSearchResults((prev) => prev.map((conversationItem) => applyConversationIdentityPatch(conversationItem, normalizedPatch)));
+        setActiveDealParticipants((prev) => prev.map((conversationItem) => applyConversationIdentityPatch(conversationItem, normalizedPatch)));
+        setDealContacts((prev) => prev.map((contact) => applyDealContactIdentityPatch(contact, normalizedPatch)));
+        setWorkspaceContactContext((prev: any) => applyWorkspaceContactContextIdentityPatch(prev, normalizedPatch));
 
         try {
-            const fresh = await refreshConversation(normalizedConversationId);
+            const fresh = await refreshConversation(normalizedPatch.conversationId);
             if (!fresh) return;
-            if (contactSaveRefreshSeqRef.current[normalizedConversationId] !== sequence) return;
+            if (contactSaveRefreshSeqRef.current[normalizedPatch.conversationId] !== sequence) return;
 
-            const applyRefreshedConversation = (conversationItem: Conversation): Conversation => {
-                if (
-                    conversationItem.id !== normalizedConversationId
-                    && String(conversationItem.contactId || "") !== patchedContactId
-                ) {
-                    return conversationItem;
-                }
-
-                return {
-                    ...conversationItem,
-                    ...fresh,
-                    ...(normalizedName !== undefined ? { contactName: normalizedName } : {}),
-                    ...(normalizedEmail !== undefined ? { contactEmail: normalizedEmail } : {}),
-                    ...(normalizedPhone !== undefined ? { contactPhone: normalizedPhone } : {}),
-                    ...(normalizedPreferredLang !== undefined ? { contactPreferredLanguage: normalizedPreferredLang } : {}),
-                };
-            };
-
-            setConversations((prev) => prev.map(applyRefreshedConversation));
-            setSearchResults((prev) => prev.map(applyRefreshedConversation));
-            setActiveDealParticipants((prev) => prev.map(applyRefreshedConversation));
-            setDealContacts((prev) => prev.map((contact) => {
-                if (
-                    contact.conversationId !== normalizedConversationId
-                    && String(contact.contactId || "") !== patchedContactId
-                ) {
-                    return contact;
-                }
-
-                return {
-                    ...contact,
-                    ...(fresh.contactName !== undefined ? { contactName: fresh.contactName || "Unknown Contact" } : {}),
-                    ...(fresh.contactEmail !== undefined ? { contactEmail: fresh.contactEmail || undefined } : {}),
-                    ...(fresh.contactPhone !== undefined ? { contactPhone: fresh.contactPhone || undefined } : {}),
-                    ...(normalizedName !== undefined ? { contactName: normalizedName } : {}),
-                    ...(normalizedEmail !== undefined ? { contactEmail: normalizedEmail } : {}),
-                    ...(normalizedPhone !== undefined ? { contactPhone: normalizedPhone } : {}),
-                };
-            }));
-
-            setWorkspaceContactContext((prev: any) => {
-                if (!prev?.contact || String(prev.contact.id || "") !== patchedContactId) return prev;
-                return {
-                    ...prev,
-                    contact: {
-                        ...prev.contact,
-                        ...(fresh.contactName !== undefined ? { name: fresh.contactName || null } : {}),
-                        ...(fresh.contactEmail !== undefined ? { email: fresh.contactEmail || null } : {}),
-                        ...(fresh.contactPhone !== undefined ? { phone: fresh.contactPhone || null } : {}),
-                        ...(fresh.contactPreferredLanguage !== undefined ? { preferredLang: fresh.contactPreferredLanguage } : {}),
-                        ...(normalizedName !== undefined ? { name: normalizedName } : {}),
-                        ...(normalizedEmail !== undefined ? { email: normalizedEmail || null } : {}),
-                        ...(normalizedPhone !== undefined ? { phone: normalizedPhone || null } : {}),
-                        ...(normalizedPreferredLang !== undefined ? { preferredLang: normalizedPreferredLang } : {}),
-                    },
-                };
-            });
+            setConversations((prev) => prev.map((conversationItem) => applyRefreshedConversationIdentityPatch(conversationItem, fresh, normalizedPatch)));
+            setSearchResults((prev) => prev.map((conversationItem) => applyRefreshedConversationIdentityPatch(conversationItem, fresh, normalizedPatch)));
+            setActiveDealParticipants((prev) => prev.map((conversationItem) => applyRefreshedConversationIdentityPatch(conversationItem, fresh, normalizedPatch)));
+            setDealContacts((prev) => prev.map((contact) => applyRefreshedDealContactIdentityPatch(contact, fresh, normalizedPatch)));
+            setWorkspaceContactContext((prev: any) => applyRefreshedWorkspaceContactContextIdentityPatch(prev, fresh, normalizedPatch));
         } catch (error) {
             console.error("Failed to refresh conversation after contact save:", error);
         }
@@ -3712,41 +3390,30 @@ export function ConversationInterface({ locationId, initialConversations, initia
         const conversationTarget = targetConversation || activeConversation;
         if (!conversationTarget) return;
 
-        // Optimistic UI update for media
-        const optimisticClientMessageId = (
-            typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-                ? `cmid_${crypto.randomUUID()}`
-                : `cmid_${Date.now()}_${Math.random().toString(36).slice(2)}`
-        );
-        const optimisticMessageId = `opt-media-${optimisticClientMessageId}`;
+        const optimisticClientMessageId = createOutboundClientMessageId();
         const objectUrl = URL.createObjectURL(file);
-        const optimisticMessage: any = {
-            id: optimisticMessageId,
+        const optimisticMessage = buildOptimisticMediaMessage({
             clientMessageId: optimisticClientMessageId,
-            conversationId: conversationTarget.id,
-            contactId: conversationTarget.contactId,
-            body: caption,
-            type: 'WhatsApp',
-            direction: 'outbound',
-            status: 'sending',
-            sendState: 'queued',
-            outboxState: { id: null, status: 'pending' },
-            dateAdded: new Date().toISOString(),
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            attachments: [
-                {
-                    id: `opt-att-${Date.now()}`,
-                    url: objectUrl,
-                    fileName: file.name,
-                    mimeType: file.type || 'application/octet-stream',
-                }
-            ]
+            conversation: conversationTarget,
+            caption,
+            fileName: file.name,
+            mimeType: file.type || 'application/octet-stream',
+            objectUrl,
+        });
+        const optimisticMessageId = optimisticMessage.id;
+
+        const markOptimisticMediaFailed = () => {
+            if (viewMode !== 'chats' || activeIdRef.current !== conversationTarget.id) return;
+            setMessages((prev) => {
+                const next = markMessageFailedById(prev, optimisticMessageId, { deadOutbox: true });
+                syncPendingMessagesForConversation(conversationTarget.id, next);
+                return next;
+            });
         };
 
         if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
             setMessages((prev) => {
-                const next = [...prev, optimisticMessage];
+                const next = appendOptimisticMessage(prev, optimisticMessage);
                 syncPendingMessagesForConversation(conversationTarget.id, next);
                 return next;
             });
@@ -3760,17 +3427,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             });
 
             if (!prep.success) {
-                if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
-                    setMessages((prev) => {
-                        const next = prev.map((m) =>
-                            m.id === optimisticMessageId
-                                ? { ...m, status: 'failed', sendState: 'failed', outboxState: { ...(m as any).outboxState, status: 'dead' } }
-                                : m
-                        );
-                        syncPendingMessagesForConversation(conversationTarget.id, next);
-                        return next;
-                    });
-                }
+                markOptimisticMediaFailed();
                 toast({
                     title: 'Failed to prepare media upload',
                     description: typeof prep.error === 'string' ? prep.error : 'Unknown error',
@@ -3780,17 +3437,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             }
 
             if (!prep.uploadUrl || !prep.upload) {
-                if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
-                    setMessages((prev) => {
-                        const next = prev.map((m) =>
-                            m.id === optimisticMessageId
-                                ? { ...m, status: 'failed', sendState: 'failed', outboxState: { ...(m as any).outboxState, status: 'dead' } }
-                                : m
-                        );
-                        syncPendingMessagesForConversation(conversationTarget.id, next);
-                        return next;
-                    });
-                }
+                markOptimisticMediaFailed();
                 toast({
                     title: 'Missing upload details',
                     description: "Upload preparation response missing upload URL or upload reference.",
@@ -3811,17 +3458,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
             if (!uploadRes.ok) {
                 const errText = await uploadRes.text().catch(() => '');
-                if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
-                    setMessages((prev) => {
-                        const next = prev.map((m) =>
-                            m.id === optimisticMessageId
-                                ? { ...m, status: 'failed', sendState: 'failed', outboxState: { ...(m as any).outboxState, status: 'dead' } }
-                                : m
-                        );
-                        syncPendingMessagesForConversation(conversationTarget.id, next);
-                        return next;
-                    });
-                }
+                markOptimisticMediaFailed();
                 toast({
                     title: `R2 upload failed (${uploadRes.status})`,
                     description: errText,
@@ -3845,46 +3482,25 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     });
                 }
                 if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
-                    const ackMessageId = String((sendRes as any).messageId || "").trim();
-                    const ackClientMessageId = String((sendRes as any).clientMessageId || optimisticClientMessageId).trim();
-                    const outboxJobId = String((sendRes as any).outboxJobId || "").trim();
-                    const queueAccepted = (sendRes as any).queueAccepted !== false;
-                    const dispatchMode = String((sendRes as any).dispatchMode || "queued").trim();
-                    const fallbackSent = dispatchMode === "inline_fallback_sent";
-                    const degradedDelivery = !queueAccepted && !fallbackSent;
-                    const warning = String((sendRes as any).warning || "").trim();
+                    const ackState = getSendAckState(sendRes as any, optimisticClientMessageId, { media: true });
 
                     setMessages((prev) => {
-                        const next = prev.map((message) => {
-                            const isTarget = matchesByCorrelation(message as any, {
-                                messageId: optimisticMessageId,
-                                clientMessageId: optimisticClientMessageId,
-                            });
-                            if (!isTarget) return message;
-
-                            return {
-                                ...message,
-                                ...(ackMessageId ? { id: ackMessageId } : {}),
-                                clientMessageId: ackClientMessageId,
-                                status: fallbackSent ? 'sent' : 'sending',
-                                sendState: fallbackSent ? 'sent' : (degradedDelivery ? 'retrying' : 'queued'),
-                                outboxState: {
-                                    id: outboxJobId || (message as any)?.outboxState?.id || null,
-                                    status: fallbackSent ? 'completed' : (degradedDelivery ? 'failed' : 'pending'),
-                                },
-                            } as Message;
+                        const next = applySendAckByCorrelation(prev, {
+                            optimisticMessageId,
+                            optimisticClientMessageId,
+                            ack: sendRes as any,
+                            media: true,
                         });
-
                         syncPendingMessagesForConversation(conversationTarget.id, next);
                         return next;
                     });
 
-                    if (warning) {
+                    if (ackState.warning) {
                         toast({
                             title: 'WhatsApp delivery degraded',
-                            description: warning,
+                            description: ackState.warning,
                         });
-                    } else if (degradedDelivery) {
+                    } else if (ackState.degradedDelivery) {
                         toast({
                             title: 'WhatsApp delivery degraded',
                             description: 'Queue enqueue failed. Durable auto-recovery is active for this media message.',
@@ -3892,17 +3508,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     }
                 }
             } else {
-                if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
-                    setMessages((prev) => {
-                        const next = prev.map((m) =>
-                            m.id === optimisticMessageId
-                                ? { ...m, status: 'failed', sendState: 'failed', outboxState: { ...(m as any).outboxState, status: 'dead' } }
-                                : m
-                        );
-                        syncPendingMessagesForConversation(conversationTarget.id, next);
-                        return next;
-                    });
-                }
+                markOptimisticMediaFailed();
                 toast({
                     title: 'Failed to send media',
                     description: typeof sendRes.error === 'string' ? sendRes.error : 'Unknown error',
@@ -3910,17 +3516,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 });
             }
         } catch (e: any) {
-            if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
-                setMessages((prev) => {
-                    const next = prev.map((m) =>
-                        m.id === optimisticMessageId
-                            ? { ...m, status: 'failed', sendState: 'failed', outboxState: { ...(m as any).outboxState, status: 'dead' } }
-                            : m
-                    );
-                    syncPendingMessagesForConversation(conversationTarget.id, next);
-                    return next;
-                });
-            }
+            markOptimisticMediaFailed();
             toast({
                 title: 'Failed to send media',
                 description: e?.message || 'Unknown error',
@@ -3946,18 +3542,14 @@ export function ConversationInterface({ locationId, initialConversations, initia
         // Transition back to sending optimism
         if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
             setMessages((prev) => {
-                const next = prev.map((m) => m.id === messageId ? { ...m, status: 'sending', sendState: 'queued' } : m);
+                const next = markMessageSendingById(prev, messageId);
                 syncPendingMessagesForConversation(conversationTarget.id, next);
                 return next;
             });
         }
 
         try {
-            const resendClientMessageId = (
-                typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-                    ? `cmid_${crypto.randomUUID()}`
-                    : `cmid_${Date.now()}_${Math.random().toString(36).slice(2)}`
-            );
+            const resendClientMessageId = createOutboundClientMessageId();
             const hasAttachments = originalMsg.attachments && originalMsg.attachments.length > 0;
             const res = hasAttachments 
               // Basic retry for text for now, media retry requires original file which we don't store on client.
@@ -3974,7 +3566,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             if (!res.success) {
                 if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
                     setMessages((prev) => {
-                        const next = prev.map((m) => m.id === messageId ? { ...m, status: 'failed', sendState: 'failed' } : m);
+                        const next = markMessageFailedById(prev, messageId);
                         syncPendingMessagesForConversation(conversationTarget.id, next);
                         return next;
                     });
@@ -3995,44 +3587,24 @@ export function ConversationInterface({ locationId, initialConversations, initia
             }
 
             if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
-                const ackMessageId = String((res as any).messageId || "").trim();
-                const ackClientMessageId = String((res as any).clientMessageId || resendClientMessageId).trim();
-                const outboxJobId = String((res as any).outboxJobId || "").trim();
-                const queued = !!(res as any).queued;
-                const queueAccepted = (res as any).queueAccepted !== false;
-                const dispatchMode = String((res as any).dispatchMode || "queued").trim();
-                const fallbackSent = dispatchMode === "inline_fallback_sent";
-                const degradedDelivery = !queueAccepted && queued && !fallbackSent;
-                const warning = String((res as any).warning || "").trim();
+                const ackState = getSendAckState(res as any, resendClientMessageId);
 
                 setMessages((prev) => {
-                    const next = prev.map((m) => {
-                        if (m.id !== messageId) return m;
-                        return {
-                            ...m,
-                            ...(ackMessageId ? { id: ackMessageId } : {}),
-                            clientMessageId: ackClientMessageId,
-                            status: fallbackSent ? 'sent' : (queued ? 'sending' : 'sent'),
-                            sendState: fallbackSent ? 'sent' : (degradedDelivery ? 'retrying' : (queued ? 'queued' : 'sent')),
-                            outboxState: fallbackSent
-                                ? { id: outboxJobId || null, status: 'completed' }
-                                : degradedDelivery
-                                    ? { id: outboxJobId || null, status: 'failed' }
-                                    : queued
-                                        ? { id: outboxJobId || null, status: 'pending' }
-                                        : { id: outboxJobId || null, status: 'completed' },
-                        } as Message;
+                    const next = applyResendAckById(prev, {
+                        messageId,
+                        clientMessageId: resendClientMessageId,
+                        ack: res as any,
                     });
                     syncPendingMessagesForConversation(conversationTarget.id, next);
                     return next;
                 });
 
-                if (warning) {
+                if (ackState.warning) {
                     toast({
                         title: 'WhatsApp delivery degraded',
-                        description: warning,
+                        description: ackState.warning,
                     });
-                } else if (degradedDelivery) {
+                } else if (ackState.degradedDelivery) {
                     toast({
                         title: 'WhatsApp delivery degraded',
                         description: 'Queue enqueue failed. Durable auto-recovery is active for this resend.',
@@ -4042,7 +3614,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         } catch (e: any) {
             if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
                 setMessages((prev) => {
-                    const next = prev.map((m) => m.id === messageId ? { ...m, status: 'failed', sendState: 'failed' } : m);
+                    const next = markMessageFailedById(prev, messageId);
                     syncPendingMessagesForConversation(conversationTarget.id, next);
                     return next;
                 });
@@ -4106,35 +3678,28 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
     const handleRetryTranscript = async (messageId: string, attachmentId: string) => {
         if (!activeConversation) return;
-        try {
-            const result = await retryWhatsAppAudioTranscript(activeConversation.id, messageId, attachmentId);
-            if (!result?.success) {
+        const conversationId = activeConversation.id;
+        await runTranscriptAction({
+            run: () => retryWhatsAppAudioTranscript(conversationId, messageId, attachmentId),
+            refresh: () => refreshMessagesAfterTranscriptAction({
+                conversationId,
+                activeConversationId: activeIdRef.current,
+                fetchMessages,
+                setMessages,
+                messageSignatureRef,
+            }),
+            toast,
+            failureTitle: "Retry Failed",
+            failureDescription: "Could not retry transcript.",
+            unexpectedFailureDescription: "Unexpected error while retrying transcript.",
+            onSuccess: (result) => {
+                const modeLabel = getTranscriptActionModeLabel(result.mode);
                 toast({
-                    title: "Retry Failed",
-                    description: String(result?.error || "Could not retry transcript."),
-                    variant: "destructive",
+                    title: result.skipped ? "Transcript Already Complete" : "Transcript Retry Started",
+                    description: result.message || `Retry accepted via ${modeLabel}.`,
                 });
-                return;
-            }
-
-            const modeLabel = result.mode === "inline-fallback" ? "inline fallback" : result.mode;
-            toast({
-                title: result.skipped ? "Transcript Already Complete" : "Transcript Retry Started",
-                description: result.message || `Retry accepted via ${modeLabel}.`,
-            });
-
-            const refreshed = await fetchMessages(activeConversation.id);
-            if (activeIdRef.current === activeConversation.id) {
-                setMessages(refreshed);
-                messageSignatureRef.current = getMessageSignature(refreshed);
-            }
-        } catch (error: any) {
-            toast({
-                title: "Retry Failed",
-                description: String(error?.message || "Unexpected error while retrying transcript."),
-                variant: "destructive",
-            });
-        }
+            },
+        });
     };
 
     const handleRequestTranscript = async (
@@ -4143,81 +3708,65 @@ export function ConversationInterface({ locationId, initialConversations, initia
         options?: { force?: boolean }
     ) => {
         if (!activeConversation) return;
-        try {
-            const result = await requestWhatsAppAudioTranscript(
-                activeConversation.id,
+        const conversationId = activeConversation.id;
+        await runTranscriptAction({
+            run: () => requestWhatsAppAudioTranscript(
+                conversationId,
                 messageId,
                 attachmentId,
                 { force: !!options?.force, priority: "high" }
-            );
-
-            if (!result?.success) {
+            ),
+            refresh: () => refreshMessagesAfterTranscriptAction({
+                conversationId,
+                activeConversationId: activeIdRef.current,
+                fetchMessages,
+                setMessages,
+                messageSignatureRef,
+            }),
+            toast,
+            failureTitle: options?.force ? "Regeneration Failed" : "Transcription Failed",
+            failureDescription: "Could not start transcript job.",
+            unexpectedFailureDescription: "Unexpected error while starting transcript.",
+            onSuccess: (result) => {
+                const modeLabel = getTranscriptActionModeLabel(result.mode);
                 toast({
-                    title: options?.force ? "Regeneration Failed" : "Transcription Failed",
-                    description: String(result?.error || "Could not start transcript job."),
-                    variant: "destructive",
+                    title: result.skipped
+                        ? "Transcript Already Queued"
+                        : (options?.force ? "Transcript Regeneration Started" : "Transcript Started"),
+                    description: result.message || `Accepted via ${modeLabel}.`,
                 });
-                return;
-            }
-
-            const modeLabel = result.mode === "inline-fallback" ? "inline fallback" : result.mode;
-            toast({
-                title: result.skipped
-                    ? "Transcript Already Queued"
-                    : (options?.force ? "Transcript Regeneration Started" : "Transcript Started"),
-                description: result.message || `Accepted via ${modeLabel}.`,
-            });
-
-            const refreshed = await fetchMessages(activeConversation.id);
-            if (activeIdRef.current === activeConversation.id) {
-                setMessages(refreshed);
-                messageSignatureRef.current = getMessageSignature(refreshed);
-            }
-        } catch (error: any) {
-            toast({
-                title: options?.force ? "Regeneration Failed" : "Transcription Failed",
-                description: String(error?.message || "Unexpected error while starting transcript."),
-                variant: "destructive",
-            });
-        }
+            },
+        });
     };
 
     const handleBulkTranscribeUnprocessedAudio = async (options?: { window?: "30d" | "all" }) => {
         if (!activeConversation) return;
-        try {
-            const result = await bulkRequestWhatsAppAudioTranscripts(activeConversation.id, {
+        const conversationId = activeConversation.id;
+        await runTranscriptAction({
+            run: () => bulkRequestWhatsAppAudioTranscripts(conversationId, {
                 window: options?.window || "30d",
                 priority: "normal",
-            });
-
-            if (!result?.success) {
+            }),
+            refresh: () => refreshMessagesAfterTranscriptAction({
+                conversationId,
+                activeConversationId: activeIdRef.current,
+                fetchMessages,
+                setMessages,
+                messageSignatureRef,
+            }),
+            toast,
+            failureTitle: "Bulk Transcription Failed",
+            failureDescription: "Could not queue bulk transcript jobs.",
+            unexpectedFailureDescription: "Unexpected error while queuing bulk transcripts.",
+            onSuccess: (result) => {
+                const summary = `Queued ${result.queuedCount}, skipped ${result.skippedCount}, failed ${result.failedCount}.`;
                 toast({
-                    title: "Bulk Transcription Failed",
-                    description: String(result?.error || "Could not queue bulk transcript jobs."),
-                    variant: "destructive",
+                    title: "Bulk Transcription Requested",
+                    description: `${result.message} ${summary}`.trim(),
+                    variant: result.failedCount > 0 ? "destructive" : "default",
                 });
-                return;
-            }
-
-            const summary = `Queued ${result.queuedCount}, skipped ${result.skippedCount}, failed ${result.failedCount}.`;
-            toast({
-                title: "Bulk Transcription Requested",
-                description: `${result.message} ${summary}`.trim(),
-                variant: result.failedCount > 0 ? "destructive" : "default",
-            });
-
-            const refreshed = await fetchMessages(activeConversation.id);
-            if (activeIdRef.current === activeConversation.id) {
-                setMessages(refreshed);
-                messageSignatureRef.current = getMessageSignature(refreshed);
-            }
-        } catch (error: any) {
-            toast({
-                title: "Bulk Transcription Failed",
-                description: String(error?.message || "Unexpected error while queuing bulk transcripts."),
-                variant: "destructive",
-            });
-        }
+            },
+        });
     };
 
     const handleExtractViewingNotes = async (
@@ -4226,43 +3775,35 @@ export function ConversationInterface({ locationId, initialConversations, initia
         options?: { force?: boolean }
     ) => {
         if (!activeConversation) return;
-        try {
-            const result = await extractWhatsAppViewingNotes(
-                activeConversation.id,
+        const conversationId = activeConversation.id;
+        await runTranscriptAction({
+            run: () => extractWhatsAppViewingNotes(
+                conversationId,
                 messageId,
                 attachmentId,
                 { force: !!options?.force, priority: "high" }
-            );
-
-            if (!result?.success) {
+            ),
+            refresh: () => refreshMessagesAfterTranscriptAction({
+                conversationId,
+                activeConversationId: activeIdRef.current,
+                fetchMessages,
+                setMessages,
+                messageSignatureRef,
+            }),
+            toast,
+            failureTitle: options?.force ? "Notes Regeneration Failed" : "Extraction Failed",
+            failureDescription: "Could not start viewing notes extraction.",
+            unexpectedFailureDescription: "Unexpected error while extracting viewing notes.",
+            onSuccess: (result) => {
+                const modeLabel = getTranscriptActionModeLabel(result.mode);
                 toast({
-                    title: options?.force ? "Notes Regeneration Failed" : "Extraction Failed",
-                    description: String(result?.error || "Could not start viewing notes extraction."),
-                    variant: "destructive",
+                    title: result.skipped
+                        ? "Viewing Notes Already Available"
+                        : (options?.force ? "Notes Regeneration Started" : "Viewing Notes Extraction Started"),
+                    description: result.message || `Accepted via ${modeLabel}.`,
                 });
-                return;
-            }
-
-            const modeLabel = result.mode === "inline-fallback" ? "inline fallback" : result.mode;
-            toast({
-                title: result.skipped
-                    ? "Viewing Notes Already Available"
-                    : (options?.force ? "Notes Regeneration Started" : "Viewing Notes Extraction Started"),
-                description: result.message || `Accepted via ${modeLabel}.`,
-            });
-
-            const refreshed = await fetchMessages(activeConversation.id);
-            if (activeIdRef.current === activeConversation.id) {
-                setMessages(refreshed);
-                messageSignatureRef.current = getMessageSignature(refreshed);
-            }
-        } catch (error: any) {
-            toast({
-                title: options?.force ? "Notes Regeneration Failed" : "Extraction Failed",
-                description: String(error?.message || "Unexpected error while extracting viewing notes."),
-                variant: "destructive",
-            });
-        }
+            },
+        });
     };
 
 
@@ -4322,7 +3863,6 @@ export function ConversationInterface({ locationId, initialConversations, initia
     };
 
     const [suggestions, setSuggestions] = useState<string[]>([]);
-    const [composerInsertSeed, setComposerInsertSeed] = useState<{ key: string; body: string } | null>(null);
 
     // Reset suggestions when active conversation changes
     useEffect(() => {
@@ -4332,48 +3872,6 @@ export function ConversationInterface({ locationId, initialConversations, initia
     useEffect(() => {
         setChatTimelineInitialPainted(false);
     }, [viewMode, activeId]);
-
-    useEffect(() => {
-        setComposerInsertSeed(null);
-    }, [viewMode, activeId, activeDealId]);
-
-    useEffect(() => {
-        if (typeof window === 'undefined') return;
-        const globalWindow = window as any;
-        globalWindow.__ESTIO_INSERT_COMPOSER_DRAFT__ = (payload: {
-            key?: string;
-            body?: string;
-            conversationId?: string | null;
-        }) => {
-            const body = String(payload?.body || "").trim();
-            if (!body) return false;
-
-            const targetConversationId = String(payload?.conversationId || "").trim();
-            const activeConversationId = String(activeIdRef.current || "").trim();
-            if (targetConversationId && activeConversationId && targetConversationId !== activeConversationId) {
-                return false;
-            }
-
-            setComposerInsertSeed({
-                key: String(payload?.key || `${Date.now()}`),
-                body,
-            });
-            return true;
-        };
-
-        return () => {
-            if (globalWindow.__ESTIO_INSERT_COMPOSER_DRAFT__) {
-                delete globalWindow.__ESTIO_INSERT_COMPOSER_DRAFT__;
-            }
-        };
-    }, []);
-
-    const insertSuggestedResponseIntoComposer = useCallback((body: string, id: string) => {
-        setComposerInsertSeed({
-            key: `${id}:${Date.now()}`,
-            body,
-        });
-    }, []);
 
     const {
         suggestedResponseQueue,
@@ -4395,92 +3893,6 @@ export function ConversationInterface({ locationId, initialConversations, initia
         setSuggestions(Array.isArray(nextSuggestions) ? nextSuggestions : []);
         void refreshSuggestedResponseQueue({ trigger: "mission" });
     }, [refreshSuggestedResponseQueue]);
-
-    const streamDraftViaApi = useCallback(async (args: {
-        conversationId: string;
-        contactId: string;
-        instruction?: string;
-        model?: string;
-        mode: "chat" | "deal";
-        dealId?: string;
-        draftLanguage?: string | null;
-        onChunk?: (chunk: string) => void;
-    }) => {
-        const response = await fetch("/api/conversations/draft-stream", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                conversationId: args.conversationId,
-                contactId: args.contactId,
-                instruction: args.instruction,
-                model: args.model,
-                options: {
-                    mode: args.mode,
-                    dealId: args.dealId,
-                    draftLanguage: args.draftLanguage ?? null,
-                },
-            }),
-        });
-
-        if (!response.ok) {
-            const payload = await response.json().catch(() => null);
-            const fallbackMessage = `Draft stream request failed (${response.status})`;
-            throw new Error(payload?.error || payload?.message || fallbackMessage);
-        }
-
-        if (!response.body) {
-            throw new Error("Draft stream response body was empty.");
-        }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let finalResult: any = null;
-
-        const parseLine = (line: string) => {
-            if (!line.trim()) return;
-            let payload: any = null;
-            try {
-                payload = JSON.parse(line);
-            } catch {
-                return;
-            }
-
-            if (payload?.type === "chunk" && typeof payload.text === "string") {
-                args.onChunk?.(payload.text);
-                return;
-            }
-
-            if (payload?.type === "error") {
-                throw new Error(String(payload?.message || "Draft stream failed."));
-            }
-
-            if (payload?.type === "complete") {
-                finalResult = payload.result || null;
-            }
-        };
-
-        while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-
-            let newlineIndex = buffer.indexOf("\n");
-            while (newlineIndex >= 0) {
-                const line = buffer.slice(0, newlineIndex);
-                buffer = buffer.slice(newlineIndex + 1);
-                parseLine(line);
-                newlineIndex = buffer.indexOf("\n");
-            }
-        }
-
-        buffer += decoder.decode();
-        if (buffer.trim()) {
-            parseLine(buffer.trim());
-        }
-
-        return finalResult;
-    }, []);
 
     const conversationListPane = (
         <ConversationList
@@ -4508,15 +3920,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             onSelectTask={handleSelectTask}
             onSelectAll={(select, ids) => {
                 const visibleIds = ids && ids.length > 0 ? ids : conversations.map(c => c.id);
-                if (select) {
-                    setSelectedIds((prev) => new Set([...Array.from(prev), ...visibleIds]));
-                } else {
-                    setSelectedIds((prev) => {
-                        const next = new Set(prev);
-                        visibleIds.forEach((id) => next.delete(id));
-                        return next;
-                    });
-                }
+                setSelectedIds((prev) => applyVisibleConversationSelection(prev, visibleIds, select));
             }}
 
             // Deal Mode Props
@@ -4619,37 +4023,23 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     onChunk?: (chunk: string) => void
                 ) => {
                     try {
-                        let res: any = null;
-                        if (onChunk) {
-                            try {
-                                res = await streamDraftViaApi({
-                                    conversationId: activeConversation.id,
-                                    contactId: activeConversation.contactId,
-                                    instruction,
-                                    model,
-                                    mode: "chat",
-                                    draftLanguage,
-                                    onChunk,
-                                });
-                            } catch (streamError) {
+                        const res = await generateDraftWithStreamingFallback({
+                            conversationId: activeConversation.id,
+                            contactId: activeConversation.contactId,
+                            instruction,
+                            model,
+                            mode: "chat",
+                            draftLanguage,
+                            onChunk,
+                            generateDraft: generateAIDraft,
+                            onStreamError: (streamError) => {
                                 console.warn("[AI Draft] Stream path failed, falling back to server action.", streamError);
-                            }
-                        }
-
-                        if (!res) {
-                            res = await generateAIDraft(
-                                activeConversation.id,
-                                activeConversation.contactId,
-                                instruction,
-                                model,
-                                { mode: "chat", draftLanguage }
-                            );
-                        }
-
+                            },
+                        });
                         if (res.reasoning) {
                             toast({ title: "Draft Generated", description: res.reasoning });
                         }
-                        return res.draft;
+                        return res.draft || null;
                     } catch (e: any) {
                         toast({ title: "Draft Failed", description: e.message, variant: "destructive" });
                         return null;
@@ -4716,38 +4106,24 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 ) => {
                     if (!selectedDealConversation) return null;
                     try {
-                        let res: any = null;
-                        if (onChunk) {
-                            try {
-                                res = await streamDraftViaApi({
-                                    conversationId: selectedDealConversation.id,
-                                    contactId: selectedDealConversation.contactId,
-                                    instruction,
-                                    model,
-                                    mode: "deal",
-                                    dealId: activeDealId || undefined,
-                                    draftLanguage,
-                                    onChunk,
-                                });
-                            } catch (streamError) {
+                        const res = await generateDraftWithStreamingFallback({
+                            conversationId: selectedDealConversation.id,
+                            contactId: selectedDealConversation.contactId,
+                            instruction,
+                            model,
+                            mode: "deal",
+                            dealId: activeDealId || undefined,
+                            draftLanguage,
+                            onChunk,
+                            generateDraft: generateAIDraft,
+                            onStreamError: (streamError) => {
                                 console.warn("[AI Draft] Deal stream path failed, falling back to server action.", streamError);
-                            }
-                        }
-
-                        if (!res) {
-                            res = await generateAIDraft(
-                                selectedDealConversation.id,
-                                selectedDealConversation.contactId,
-                                instruction,
-                                model,
-                                { mode: "deal", dealId: activeDealId, draftLanguage }
-                            );
-                        }
-
+                            },
+                        });
                         if (res.reasoning) {
                             toast({ title: "Draft Generated", description: res.reasoning });
                         }
-                        return res.draft;
+                        return res.draft || null;
                     } catch (error: any) {
                         toast({ title: "Draft Failed", description: error?.message || "Failed to generate draft", variant: "destructive" });
                         return null;
@@ -4796,7 +4172,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 initialAgentSummary={workspaceAgentSummary}
                 lazySidebarDataEnabled={featureFlags.lazySidebarData}
                 onBackToConversation={isMobileViewport ? handleBackToConversation : undefined}
-                onDraftApproved={(text) => handleSendMessage(text, getMessageType(activeConversation))}
+                onDraftApproved={(text) => handleSendMessage(text, getConversationMessageType(activeConversation))}
                 onDeselect={(id) => handleToggleSelect(id, false)}
                 onSuggestionsGenerated={handleMissionSuggestionsGenerated}
                 onContactSaved={(patch) => handleConversationContactSaved(activeConversation.id, patch)}
@@ -4817,7 +4193,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 initialAgentSummary={workspaceAgentSummary}
                 lazySidebarDataEnabled={featureFlags.lazySidebarData}
                 onBackToConversation={isMobileViewport ? handleBackToConversation : undefined}
-                onDraftApproved={(text) => handleSendMessage(text, getMessageType(dealMissionConversation), undefined, dealMissionConversation)}
+                onDraftApproved={(text) => handleSendMessage(text, getConversationMessageType(dealMissionConversation), undefined, dealMissionConversation)}
                 onDeselect={() => undefined} // No deselect in deal mode
                 onSuggestionsGenerated={handleMissionSuggestionsGenerated}
                 onContactSaved={(patch) => handleConversationContactSaved(dealMissionConversation.id, patch)}
