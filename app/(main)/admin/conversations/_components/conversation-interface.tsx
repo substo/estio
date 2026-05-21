@@ -3752,10 +3752,10 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const handleSync = async () => {
         if (!activeId) return;
         setLoadingMessages(true);
-        let totalSynced = 0;
-        let offset = 0;
         const CHUNK_SIZE = 50;
         const MAX_LIMIT = 500; // Safety cap
+        let totalSynced = 0;
+        let offset = 0;
         let keepFetching = true;
 
         try {

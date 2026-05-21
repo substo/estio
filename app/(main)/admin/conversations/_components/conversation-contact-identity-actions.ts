@@ -39,7 +39,7 @@ export function normalizeConversationContactIdentityPatch(
     };
 }
 
-export function contactIdentityPatchMatches(
+function contactIdentityPatchMatches(
     item: { id?: string; conversationId?: string; contactId?: string | null },
     patch: ConversationContactIdentityPatch
 ): boolean {

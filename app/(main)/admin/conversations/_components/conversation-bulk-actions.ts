@@ -1,6 +1,6 @@
 import type { Conversation } from '@/lib/ghl/conversations';
 
-export function toConversationIdSet(ids: string[]): Set<string> {
+function toConversationIdSet(ids: string[]): Set<string> {
     return new Set(ids);
 }
 
