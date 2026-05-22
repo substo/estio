@@ -1,5 +1,19 @@
 #!/usr/bin/env node
 
+/*
+ * Local usage:
+ *   PERF_BASE_URL=http://localhost:3000 \
+ *   PERF_AUTH_COOKIE='__session=...' \
+ *   PERF_UI_CAPTURE_CONSOLE=1 \
+ *   npm run perf:conversations:ui-playwright
+ *
+ * PERF_BASE_URL defaults to http://localhost:3000. PERF_AUTH_COOKIE must be a
+ * logged-in browser cookie string that can access /admin/conversations.
+ *
+ * Chat switching is measured from row click until the active chat root exposes:
+ *   data-chat-initial-paint-ready="true"
+ */
+
 const fs = require("fs");
 const path = require("path");
 
@@ -208,7 +222,9 @@ async function main() {
   const baseUrl = String(process.env.PERF_BASE_URL || "http://localhost:3000").replace(/\/+$/, "");
   const authCookie = String(process.env.PERF_AUTH_COOKIE || "").trim();
   const iterations = Math.max(6, Number(process.env.PERF_UI_ITERATIONS || 18));
+  const captureConsole = ["1", "true", "yes"].includes(String(process.env.PERF_UI_CAPTURE_CONSOLE || "").toLowerCase());
   const target = `${baseUrl}/admin/conversations`;
+  const consolePerfLogs = [];
 
   const browser = await chromium.launch({ headless: true });
   try {
@@ -228,6 +244,14 @@ async function main() {
     }
 
     const page = await context.newPage();
+    if (captureConsole) {
+      page.on("console", (message) => {
+        const text = message.text();
+        if (!text.includes("[perf:conversations.")) return;
+        consolePerfLogs.push(text);
+      });
+    }
+
     const listStartedAt = Date.now();
     await page.goto(target, { waitUntil: "domcontentloaded" });
     await page.waitForSelector('[data-conversation-id]', { timeout: 20_000 });
@@ -279,6 +303,11 @@ async function main() {
         bindToOpen,
         contactEdit,
       },
+      measuredReadiness: {
+        chats: 'data-chat-initial-paint-ready="true"',
+        deals: 'data-deal-initial-paint-ready="true"',
+      },
+      consolePerfLogs: captureConsole ? consolePerfLogs : undefined,
       targets: {
         listFirstPaintLtMs: 1000,
         chatsWarmP95LtMs: 150,

@@ -2035,6 +2035,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                                 const olderMessages = await fetchMessages(selectedConversationId, {
                                     take: needed,
                                     beforeCursor: oldestCursor,
+                                    metadataMode: "firstPaint",
                                 });
                                 if (cancelled || activeIdRef.current !== selectedConversationId) break;
                                 if (!Array.isArray(olderMessages) || olderMessages.length === 0) break;
@@ -2131,6 +2132,34 @@ export function ConversationInterface({ locationId, initialConversations, initia
                         runDeferredActivityHydration(),
                     ]);
                     backfillCount = resolvedBackfillCount;
+
+                    if (cancelled || activeIdRef.current !== selectedConversationId) return;
+
+                    const currentSnapshot = getCachedWorkspaceCoreSnapshot(selectedConversationId) || initialSnapshot;
+                    if (Array.isArray(currentSnapshot.messages) && currentSnapshot.messages.length > 0) {
+                        trackClientRequest("workspace_message_metadata_deferred_load", { conversationId: selectedConversationId });
+                        const enrichedMessages = await fetchMessages(selectedConversationId, {
+                            take: Math.min(THREAD_TARGET_MESSAGE_COUNT, Math.max(currentSnapshot.messages.length, initialMessageLimit)),
+                            metadataMode: "full",
+                        });
+                        if (!cancelled && activeIdRef.current === selectedConversationId && Array.isArray(enrichedMessages) && enrichedMessages.length > 0) {
+                            const latestSnapshot = getCachedWorkspaceCoreSnapshot(selectedConversationId) || currentSnapshot;
+                            const enrichedSnapshot: WorkspaceCoreSnapshot = {
+                                ...latestSnapshot,
+                                messages: enrichedMessages,
+                                hydration: createWorkspaceHydrationState({
+                                    status: latestSnapshot.hydration?.status || 'full',
+                                    messages: enrichedMessages,
+                                    messageWindow: latestSnapshot.hydration,
+                                    initialCount: latestSnapshot.hydration?.initialCount || initialMessages.length,
+                                    targetCount: THREAD_TARGET_MESSAGE_COUNT,
+                                    requestedLimit: latestSnapshot.hydration?.requestedLimit || initialMessageLimit,
+                                }),
+                            };
+                            cacheWorkspaceCoreSnapshot(selectedConversationId, enrichedSnapshot);
+                            applyWorkspaceCoreSnapshot(selectedConversationId, enrichedSnapshot);
+                        }
+                    }
 
                     if (cancelled || activeIdRef.current !== selectedConversationId) return;
                     trackClientRequest("thread_open_full", {
