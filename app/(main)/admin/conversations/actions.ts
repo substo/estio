@@ -58,9 +58,11 @@ import {
     buildWhatsAppOutboundUploadKey,
     createWhatsAppMediaUploadUrl as createWhatsAppMediaUploadSignedUrl,
     deleteWhatsAppMediaObject,
+    getWhatsAppMediaObjectBytes,
     headWhatsAppMediaObject,
     parseR2Uri,
 } from "@/lib/whatsapp/media-r2";
+import { isVCardMedia, parseVCardContacts } from "@/lib/contacts/vcard";
 import { processNormalizedMessage } from "@/lib/whatsapp/sync";
 import { enqueueWhatsAppOutbound } from "@/lib/whatsapp/outbound-enqueue";
 import {
@@ -1885,6 +1887,7 @@ export async function fetchMessages(
         take?: number | null;
         beforeCursor?: string | null;
         includeLegacyEmailMeta?: boolean;
+        metadataMode?: "full" | "firstPaint";
     }
 ) {
     const startedAtMs = Date.now();
@@ -1897,7 +1900,9 @@ export async function fetchMessages(
     const boundedTake = Number.isFinite(requestedTake) && requestedTake > 0
         ? Math.min(Math.max(Math.floor(requestedTake), 1), 500)
         : null;
-    const includeLegacyEmailMeta = options?.includeLegacyEmailMeta !== false;
+    const metadataMode = options?.metadataMode === "firstPaint" ? "firstPaint" : "full";
+    const includeHeavyMessageMetadata = metadataMode !== "firstPaint";
+    const includeLegacyEmailMeta = includeHeavyMessageMetadata && options?.includeLegacyEmailMeta !== false;
     const paginationCursor = decodeMessagePaginationCursor(options?.beforeCursor);
     const authStartedAtMs = Date.now();
     const location = ensureHistory
@@ -1956,16 +1961,27 @@ export async function fetchMessages(
         ...(boundedTake ? { take: boundedTake } : {}),
         include: {
             attachments: {
-                include: {
-                    transcript: {
+                ...(includeHeavyMessageMetadata
+                    ? {
                         include: {
-                            extractions: {
-                                orderBy: { createdAt: "desc" },
-                                take: 1,
+                            transcript: {
+                                include: {
+                                    extractions: {
+                                        orderBy: { createdAt: "desc" },
+                                        take: 1,
+                                    },
+                                },
                             },
                         },
-                    },
-                },
+                    }
+                    : {
+                        select: {
+                            id: true,
+                            url: true,
+                            contentType: true,
+                            fileName: true,
+                        },
+                    }),
             },
             outboundWhatsAppOutbox: {
                 select: {
@@ -1978,30 +1994,34 @@ export async function fetchMessages(
                     lockedAt: true,
                 },
             },
-            syncRecords: {
-                where: { provider: "whatsapp_web_bridge" },
-                select: {
-                    metadata: true,
-                    lastError: true,
+            ...(includeHeavyMessageMetadata ? {
+                syncRecords: {
+                    where: { provider: "whatsapp_web_bridge" },
+                    select: {
+                        metadata: true,
+                        lastError: true,
+                    },
+                    take: 1,
                 },
-                take: 1,
-            },
-            translationCaches: {
-                orderBy: [{ updatedAt: "desc" }],
-                take: 12,
-                select: {
-                    id: true,
-                    targetLanguage: true,
-                    sourceText: true,
-                    translatedText: true,
-                    detectedSourceLanguage: true,
-                    detectionConfidence: true,
-                    status: true,
-                    provider: true,
-                    model: true,
-                    updatedAt: true,
+            } : {}),
+            ...(includeHeavyMessageMetadata ? {
+                translationCaches: {
+                    orderBy: [{ updatedAt: "desc" }],
+                    take: 12,
+                    select: {
+                        id: true,
+                        targetLanguage: true,
+                        sourceText: true,
+                        translatedText: true,
+                        detectedSourceLanguage: true,
+                        detectionConfidence: true,
+                        status: true,
+                        provider: true,
+                        model: true,
+                        updatedAt: true,
+                    },
                 },
-            },
+            } : {}),
             ...(includeLegacyEmailMeta ? {
                 legacyCrmLeadEmailProcessing: {
                     select: {
@@ -2043,8 +2063,12 @@ export async function fetchMessages(
             } as any
         })
             : Promise.resolve(null),
-        resolveTranscriptVisibilityAccess(location.id),
-        getLocationDefaultReplyLanguage(location.id, DEFAULT_TRANSLATION_TARGET_LANGUAGE),
+        includeHeavyMessageMetadata
+            ? resolveTranscriptVisibilityAccess(location.id)
+            : Promise.resolve({ canViewTranscripts: true, restrictContent: false }),
+        includeHeavyMessageMetadata
+            ? getLocationDefaultReplyLanguage(location.id, DEFAULT_TRANSLATION_TARGET_LANGUAGE)
+            : Promise.resolve(DEFAULT_TRANSLATION_TARGET_LANGUAGE),
     ]);
     markTiming("metadata_ms", metadataStartedAtMs);
 
@@ -2060,11 +2084,11 @@ export async function fetchMessages(
 
     const serializeStartedAtMs = Date.now();
     const serializedMessages = await Promise.all(messages.map(async (m: any) => {
-        const webBridgeSync = Array.isArray(m.syncRecords) ? m.syncRecords[0] : null;
+        const webBridgeSync = includeHeavyMessageMetadata && Array.isArray(m.syncRecords) ? m.syncRecords[0] : null;
         const webBridgeMedia = webBridgeSync?.metadata && typeof webBridgeSync.metadata === "object"
             ? (webBridgeSync.metadata as any).webBridgeMedia || null
             : null;
-        const translationEntries = (m.translationCaches || []).map((entry: any) => ({
+        const translationEntries = includeHeavyMessageMetadata ? (m.translationCaches || []).map((entry: any) => ({
             id: entry.id,
             targetLanguage: entry.targetLanguage,
             sourceLanguage: entry.detectedSourceLanguage || null,
@@ -2076,9 +2100,9 @@ export async function fetchMessages(
             provider: entry.provider || null,
             model: entry.model || null,
             updatedAt: entry.updatedAt ? new Date(entry.updatedAt).toISOString() : null,
-        }));
-        const detectedLanguage = (m.translationCaches?.[0]?.detectedSourceLanguage || null) || null;
-        const detectedLanguageConfidence = Number.isFinite(Number(m.translationCaches?.[0]?.detectionConfidence))
+        })) : [];
+        const detectedLanguage = includeHeavyMessageMetadata ? ((m.translationCaches?.[0]?.detectedSourceLanguage || null) || null) : null;
+        const detectedLanguageConfidence = includeHeavyMessageMetadata && Number.isFinite(Number(m.translationCaches?.[0]?.detectionConfidence))
             ? Number(m.translationCaches?.[0]?.detectionConfidence)
             : null;
 
@@ -2180,13 +2204,16 @@ export async function fetchMessages(
             detectedLanguageConfidence,
         }, translationEntries, resolvedTranslationTargetLanguage),
         translations: translationEntries,
-        attachments: (m.attachments || []).map((a: any) => ({
+        attachments: await Promise.all((m.attachments || []).map(async (a: any) => ({
             id: a.id,
             url: String(a.url || "").startsWith("r2://")
                 ? `/api/media/attachments/${a.id}`
                 : a.url,
             mimeType: a.contentType || null,
             fileName: a.fileName || null,
+            sharedContacts: includeHeavyMessageMetadata
+                ? await parseStoredVCardAttachmentContacts(a)
+                : [],
             transcript: a.transcript ? {
                 ...(a.transcript.extractions?.[0] ? {
                     extraction: {
@@ -2209,7 +2236,7 @@ export async function fetchMessages(
                 updatedAt: a.transcript.updatedAt ? new Date(a.transcript.updatedAt).toISOString() : null,
                 restricted: redactTranscriptContent,
             } : null,
-        })),
+        }))),
         // Hydrated fields for UI
         html: m.body?.includes('<') ? m.body : undefined // Simple check
     };
@@ -2233,7 +2260,9 @@ export async function fetchMessages(
         requestedConversationId: conversationId,
         requestedTake: boundedTake,
         beforeCursor: !!options?.beforeCursor,
+        metadataMode,
         includeLegacyEmailMeta,
+        includeHeavyMessageMetadata,
         ensureHistory,
         message_count: messages.length,
         attachment_count: attachmentCount,
@@ -2811,6 +2840,7 @@ const getCachedConversationWorkspaceSidebarMetadata = unstable_cache(
 
 type ConversationWorkspaceCoreOptions = Pick<ConversationWorkspaceOptions, "includeMessages" | "includeActivity" | "messageLimit" | "activityLimit"> & {
     activityBeforeCursor?: string | null;
+    messageMetadataMode?: "full" | "firstPaint";
 };
 
 export async function getConversationWorkspaceCore(
@@ -2874,6 +2904,7 @@ export async function getConversationWorkspaceCore(
                     ? fetchMessages(trimmedConversationId, {
                         take: messageLimit,
                         includeLegacyEmailMeta: includeActivity,
+                        metadataMode: options?.messageMetadataMode,
                     })
                     : Promise.resolve([] as Message[]),
                 includeActivity
@@ -5227,6 +5258,9 @@ const WHATSAPP_DOCUMENT_MIME_TYPES = new Set([
     "text/plain",
     "application/zip",
     "text/csv",
+    "text/vcard",
+    "text/x-vcard",
+    "text/directory",
 ]);
 const MAX_WHATSAPP_IMAGE_BYTES = 16 * 1024 * 1024;
 const MAX_WHATSAPP_AUDIO_BYTES = 16 * 1024 * 1024;
@@ -5246,6 +5280,24 @@ type WhatsAppMediaUploadRef = {
 
 type WhatsAppImageUploadRef = Omit<WhatsAppMediaUploadRef, "kind"> & { kind?: WhatsAppMediaKind };
 
+async function parseStoredVCardAttachmentContacts(attachment: {
+    url?: string | null;
+    contentType?: string | null;
+    fileName?: string | null;
+}) {
+    if (!isVCardMedia(attachment)) return [];
+    const parsed = parseR2Uri(String(attachment.url || ""));
+    if (!parsed?.key) return [];
+
+    try {
+        const object = await getWhatsAppMediaObjectBytes(parsed.key);
+        return parseVCardContacts(object.buffer.toString("utf8"));
+    } catch (error) {
+        console.warn("[Conversations] Failed to parse vCard attachment:", error);
+        return [];
+    }
+}
+
 function getWhatsAppMediaKind(contentType: string, fileName?: string): WhatsAppMediaKind | null {
     const normalizedContentType = String(contentType || "").toLowerCase();
     if (WHATSAPP_IMAGE_MIME_TYPES.has(normalizedContentType)) return "image";
@@ -5255,6 +5307,7 @@ function getWhatsAppMediaKind(contentType: string, fileName?: string): WhatsAppM
     const target = String(fileName || "").toLowerCase();
     if (target.match(/\.(jpg|jpeg|png|webp|gif|heic|heif)$/)) return "image";
     if (target.match(/\.(ogg|opus|mp3|m4a|webm|wav|aac)$/)) return "audio";
+    if (target.match(/\.(vcf|vcard)$/)) return "document";
     if (target.match(/\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|zip|csv)$/)) return "document";
     return null;
 }

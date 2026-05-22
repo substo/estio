@@ -89,6 +89,15 @@ async function main() {
       conversation.id
     );
 
+    const messageCreatedPlanRows = await db.$queryRawUnsafe(
+      `EXPLAIN SELECT m.id, m."createdAt"
+       FROM "Message" m
+       WHERE m."conversationId" = $1
+       ORDER BY m."createdAt" DESC, m.id DESC
+       LIMIT 250`,
+      conversation.id
+    );
+
     const historyPlanRows = await db.$queryRawUnsafe(
       `EXPLAIN SELECT h.id, h."createdAt"
        FROM "ContactHistory" h
@@ -100,6 +109,7 @@ async function main() {
 
     const listPlan = normalizePlanRows(listPlanRows);
     const messagePlan = normalizePlanRows(messagePlanRows);
+    const messageCreatedPlan = normalizePlanRows(messageCreatedPlanRows);
     const historyPlan = normalizePlanRows(historyPlanRows);
     const [conversationIndexes, messageIndexes, contactHistoryIndexes] = await Promise.all([
       existingIndexNames(db, "Conversation"),
@@ -115,6 +125,10 @@ async function main() {
       "idx_message_conversation_updated",
       "message_conversationid_updatedat_idx",
       "message_conversationid_createdat_idx",
+    ];
+    const messageCreatedIndexNames = [
+      "idx_message_conversation_created_id_desc",
+      "message_conversationid_createdat_id_idx",
     ];
     const historyIndexNames = [
       "idx_contact_history_contact_created",
@@ -132,6 +146,13 @@ async function main() {
         "index only scan",
         "bitmap heap scan",
       ]) && (planMatchesAny(messagePlan, messageIndexNames) || hasIndexName(messageIndexes, messageIndexNames)),
+      messageConversationCreatedIdOrderIndex: planMatchesAny(messageCreatedPlan, [
+        "index scan",
+        "index only scan",
+        "bitmap heap scan",
+      ])
+        && !planMatchesAny(messageCreatedPlan, ["sort"])
+        && (planMatchesAny(messageCreatedPlan, messageCreatedIndexNames) || hasIndexName(messageIndexes, messageCreatedIndexNames)),
       contactHistoryIndex: planMatchesAny(historyPlan, [
         "index scan",
         "index only scan",
@@ -149,6 +170,7 @@ async function main() {
       plans: {
         listPlan,
         messagePlan,
+        messageCreatedPlan,
         historyPlan,
       },
       indexes: {

@@ -26,6 +26,9 @@ ON "ContactHistory" ("contactId", "createdAt" DESC);
 CREATE INDEX IF NOT EXISTS idx_message_conversation_updated
 ON "Message" ("conversationId", "updatedAt" DESC);
 
+CREATE INDEX IF NOT EXISTS idx_message_conversation_created_id_desc
+ON "Message" ("conversationId", "createdAt" DESC, "id" DESC);
+
 CREATE INDEX IF NOT EXISTS idx_contact_task_conversation_deleted_status_due
 ON "ContactTask" ("conversationId", "deletedAt", "status", "dueAt");
 

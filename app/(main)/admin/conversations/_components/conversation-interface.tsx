@@ -922,6 +922,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 includeActivity: false,
                 messageLimit: prefetchedLimit,
                 activityLimit: WORKSPACE_ACTIVITY_LIMIT,
+                messageMetadataMode: "firstPaint",
             });
             if (!workspace?.success) return;
 
@@ -1954,6 +1955,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     includeActivity: false,
                     messageLimit: initialMessageLimit,
                     activityLimit: WORKSPACE_ACTIVITY_LIMIT,
+                    messageMetadataMode: "firstPaint",
                 });
 
                 if (cancelled || activeIdRef.current !== selectedConversationId) return;

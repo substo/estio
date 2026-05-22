@@ -2196,6 +2196,7 @@ model Message {
   @@index([conversationId])
   @@index([createdAt])
   @@index([conversationId, updatedAt(sort: Desc)])
+  @@index([conversationId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([emailThreadId])
 }
 
