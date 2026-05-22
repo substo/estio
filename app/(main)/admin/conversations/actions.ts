@@ -1887,6 +1887,11 @@ export async function fetchMessages(
         includeLegacyEmailMeta?: boolean;
     }
 ) {
+    const startedAtMs = Date.now();
+    const timings: Record<string, number> = {};
+    const markTiming = (key: string, sinceMs: number) => {
+        timings[key] = Date.now() - sinceMs;
+    };
     const ensureHistory = !!options?.ensureHistory;
     const requestedTake = Number(options?.take);
     const boundedTake = Number.isFinite(requestedTake) && requestedTake > 0
@@ -1894,21 +1899,37 @@ export async function fetchMessages(
         : null;
     const includeLegacyEmailMeta = options?.includeLegacyEmailMeta !== false;
     const paginationCursor = decodeMessagePaginationCursor(options?.beforeCursor);
+    const authStartedAtMs = Date.now();
     const location = ensureHistory
         ? await getAuthenticatedLocationExternal()
         : await getAuthenticatedLocationReadOnly();
+    markTiming("auth_ms", authStartedAtMs);
 
+    const conversationStartedAtMs = Date.now();
     const conversation = await db.conversation.findFirst({
         where: buildConversationReferenceWhere(location.id, conversationId),
         include: { contact: true, syncRecords: true }
     });
+    markTiming("conversation_ms", conversationStartedAtMs);
 
     if (!conversation) {
+        console.log("[perf:conversations.fetch_messages]", JSON.stringify({
+            conversationId,
+            requestedTake: boundedTake,
+            beforeCursor: !!options?.beforeCursor,
+            includeLegacyEmailMeta,
+            ensureHistory,
+            found: false,
+            total_ms: Date.now() - startedAtMs,
+            ...timings,
+        }));
         return [];
     }
 
     if (ensureHistory && conversation.contactId && location.ghlAccessToken) {
+        const historyStartedAtMs = Date.now();
         await ensureConversationHistory(conversation.contactId, location.id, location.ghlAccessToken!);
+        markTiming("ensure_history_ms", historyStartedAtMs);
     }
 
     const messageWhere: any = { conversationId: conversation.id };
@@ -1926,6 +1947,7 @@ export async function fetchMessages(
     }
 
     const readDescending = !!boundedTake || !!paginationCursor;
+    const queryStartedAtMs = Date.now();
     const messageRows = await (db as any).message.findMany({
         where: messageWhere,
         orderBy: readDescending
@@ -2000,6 +2022,7 @@ export async function fetchMessages(
             } : {}),
         }
     });
+    markTiming("query_ms", queryStartedAtMs);
 
     const messages = readDescending ? [...messageRows].reverse() : messageRows;
     console.log(`[DB Read] Fetched ${messages.length} messages from local database for conversation ${conversation.ghlConversationId}`);
@@ -2007,8 +2030,10 @@ export async function fetchMessages(
     const hasEmailMessages = includeLegacyEmailMeta
         ? messages.some((m: any) => String(m.type || '').toUpperCase().includes('EMAIL'))
         : false;
-    const legacyCrmSettings = hasEmailMessages
-        ? await db.location.findUnique({
+    const metadataStartedAtMs = Date.now();
+    const [legacyCrmSettings, transcriptVisibility, locationDefaultReplyLanguage] = await Promise.all([
+        hasEmailMessages
+            ? db.location.findUnique({
             where: { id: location.id },
             select: {
                 legacyCrmLeadEmailEnabled: true,
@@ -2017,20 +2042,24 @@ export async function fetchMessages(
                 legacyCrmLeadEmailSubjectPatterns: true,
             } as any
         })
-        : null;
+            : Promise.resolve(null),
+        resolveTranscriptVisibilityAccess(location.id),
+        getLocationDefaultReplyLanguage(location.id, DEFAULT_TRANSLATION_TARGET_LANGUAGE),
+    ]);
+    markTiming("metadata_ms", metadataStartedAtMs);
 
     const legacyCrmDetectionEnabled = !!(legacyCrmSettings as any)?.legacyCrmLeadEmailEnabled;
     const legacyCrmConfiguredSenders = (((legacyCrmSettings as any)?.legacyCrmLeadEmailSenders || []) as string[]);
     const legacyCrmConfiguredDomains = (((legacyCrmSettings as any)?.legacyCrmLeadEmailSenderDomains || []) as string[]);
     const legacyCrmSubjectPatterns = (((legacyCrmSettings as any)?.legacyCrmLeadEmailSubjectPatterns || []) as string[]);
-    const transcriptVisibility = await resolveTranscriptVisibilityAccess(location.id);
     const redactTranscriptContent = transcriptVisibility.restrictContent;
     const resolvedTranslationTargetLanguage = getResolvedConversationTranslationLanguage({
         replyLanguageOverride: conversation.replyLanguageOverride || null,
-        locationDefaultReplyLanguage: await getLocationDefaultReplyLanguage(location.id, DEFAULT_TRANSLATION_TARGET_LANGUAGE),
+        locationDefaultReplyLanguage,
     });
 
-    return messages.map((m: any) => {
+    const serializeStartedAtMs = Date.now();
+    const serializedMessages = await Promise.all(messages.map(async (m: any) => {
         const webBridgeSync = Array.isArray(m.syncRecords) ? m.syncRecords[0] : null;
         const webBridgeMedia = webBridgeSync?.metadata && typeof webBridgeSync.metadata === "object"
             ? (webBridgeSync.metadata as any).webBridgeMedia || null
@@ -2184,7 +2213,40 @@ export async function fetchMessages(
         // Hydrated fields for UI
         html: m.body?.includes('<') ? m.body : undefined // Simple check
     };
-    });
+    }));
+    markTiming("serialize_ms", serializeStartedAtMs);
+
+    const attachmentCount = messages.reduce((count: number, message: any) => (
+        count + (Array.isArray(message.attachments) ? message.attachments.length : 0)
+    ), 0);
+    const transcriptCount = messages.reduce((count: number, message: any) => (
+        count + (Array.isArray(message.attachments)
+            ? message.attachments.filter((attachment: any) => !!attachment.transcript).length
+            : 0)
+    ), 0);
+    const translationCount = messages.reduce((count: number, message: any) => (
+        count + (Array.isArray(message.translationCaches) ? message.translationCaches.length : 0)
+    ), 0);
+
+    console.log("[perf:conversations.fetch_messages]", JSON.stringify({
+        conversationId: conversation.id,
+        requestedConversationId: conversationId,
+        requestedTake: boundedTake,
+        beforeCursor: !!options?.beforeCursor,
+        includeLegacyEmailMeta,
+        ensureHistory,
+        message_count: messages.length,
+        attachment_count: attachmentCount,
+        transcript_count: transcriptCount,
+        translation_count: translationCount,
+        email_message_count: hasEmailMessages
+            ? messages.filter((message: any) => String(message.type || "").toUpperCase().includes("EMAIL")).length
+            : 0,
+        total_ms: Date.now() - startedAtMs,
+        ...timings,
+    }));
+
+    return serializedMessages;
 }
 
 type ConversationWorkspaceTaskSummary = {
@@ -2809,7 +2871,10 @@ export async function getConversationWorkspaceCore(
 
             const [messages, activityTimeline, transcriptEligibility] = await Promise.all([
                 includeMessages
-                    ? fetchMessages(trimmedConversationId, { take: messageLimit })
+                    ? fetchMessages(trimmedConversationId, {
+                        take: messageLimit,
+                        includeLegacyEmailMeta: includeActivity,
+                    })
                     : Promise.resolve([] as Message[]),
                 includeActivity
                     ? assembleTimelineEvents({
