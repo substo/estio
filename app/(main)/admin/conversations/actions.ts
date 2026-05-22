@@ -58,11 +58,9 @@ import {
     buildWhatsAppOutboundUploadKey,
     createWhatsAppMediaUploadUrl as createWhatsAppMediaUploadSignedUrl,
     deleteWhatsAppMediaObject,
-    getWhatsAppMediaObjectBytes,
     headWhatsAppMediaObject,
     parseR2Uri,
 } from "@/lib/whatsapp/media-r2";
-import { isVCardMedia, parseVCardContacts } from "@/lib/contacts/vcard";
 import { processNormalizedMessage } from "@/lib/whatsapp/sync";
 import { enqueueWhatsAppOutbound } from "@/lib/whatsapp/outbound-enqueue";
 import {
@@ -2211,9 +2209,6 @@ export async function fetchMessages(
                 : a.url,
             mimeType: a.contentType || null,
             fileName: a.fileName || null,
-            sharedContacts: includeHeavyMessageMetadata
-                ? await parseStoredVCardAttachmentContacts(a)
-                : [],
             transcript: a.transcript ? {
                 ...(a.transcript.extractions?.[0] ? {
                     extraction: {
@@ -5258,9 +5253,6 @@ const WHATSAPP_DOCUMENT_MIME_TYPES = new Set([
     "text/plain",
     "application/zip",
     "text/csv",
-    "text/vcard",
-    "text/x-vcard",
-    "text/directory",
 ]);
 const MAX_WHATSAPP_IMAGE_BYTES = 16 * 1024 * 1024;
 const MAX_WHATSAPP_AUDIO_BYTES = 16 * 1024 * 1024;
@@ -5280,24 +5272,6 @@ type WhatsAppMediaUploadRef = {
 
 type WhatsAppImageUploadRef = Omit<WhatsAppMediaUploadRef, "kind"> & { kind?: WhatsAppMediaKind };
 
-async function parseStoredVCardAttachmentContacts(attachment: {
-    url?: string | null;
-    contentType?: string | null;
-    fileName?: string | null;
-}) {
-    if (!isVCardMedia(attachment)) return [];
-    const parsed = parseR2Uri(String(attachment.url || ""));
-    if (!parsed?.key) return [];
-
-    try {
-        const object = await getWhatsAppMediaObjectBytes(parsed.key);
-        return parseVCardContacts(object.buffer.toString("utf8"));
-    } catch (error) {
-        console.warn("[Conversations] Failed to parse vCard attachment:", error);
-        return [];
-    }
-}
-
 function getWhatsAppMediaKind(contentType: string, fileName?: string): WhatsAppMediaKind | null {
     const normalizedContentType = String(contentType || "").toLowerCase();
     if (WHATSAPP_IMAGE_MIME_TYPES.has(normalizedContentType)) return "image";
@@ -5307,7 +5281,6 @@ function getWhatsAppMediaKind(contentType: string, fileName?: string): WhatsAppM
     const target = String(fileName || "").toLowerCase();
     if (target.match(/\.(jpg|jpeg|png|webp|gif|heic|heif)$/)) return "image";
     if (target.match(/\.(ogg|opus|mp3|m4a|webm|wav|aac)$/)) return "audio";
-    if (target.match(/\.(vcf|vcard)$/)) return "document";
     if (target.match(/\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|zip|csv)$/)) return "document";
     return null;
 }
