@@ -5,6 +5,7 @@ import {
     createWorkspaceCoreSnapshot,
     createWorkspaceHydrationState,
     getPendingMessageKey,
+    isWorkspaceRefreshBusy,
     mergeSnapshotPreservingPendingMessages,
 } from "./workspace-state";
 
@@ -108,4 +109,18 @@ test("workspace snapshot builders preserve payload shape and defaults", () => {
     assert.equal(snapshot.activityTimeline.length, 1);
     assert.equal(snapshot.transcriptOnDemandEnabled, true);
     assert.equal(snapshot.hydration, hydration);
+});
+
+test("isWorkspaceRefreshBusy includes deferred metadata enrichment", () => {
+    const inFlight = {
+        initialHydration: new Set<string>(),
+        backfill: new Set<string>(["conv_backfill"]),
+        activityHydration: new Set<string>(),
+        messageMetadata: new Set<string>(["conv_metadata"]),
+    };
+
+    assert.equal(isWorkspaceRefreshBusy("conv_metadata", inFlight), true);
+    assert.equal(isWorkspaceRefreshBusy("conv_backfill", inFlight), true);
+    assert.equal(isWorkspaceRefreshBusy("conv_idle", inFlight), false);
+    assert.equal(isWorkspaceRefreshBusy(" ", inFlight), false);
 });

@@ -28,6 +28,13 @@ export type WorkspaceCoreSnapshot = {
     hydration: WorkspaceHydrationState;
 };
 
+export type WorkspaceRefreshInFlightSets = {
+    initialHydration?: Set<string>;
+    backfill?: Set<string>;
+    activityHydration?: Set<string>;
+    messageMetadata?: Set<string>;
+};
+
 type WorkspaceMessageWindowLike = {
     oldestCursor?: string | null;
     newestCursor?: string | null;
@@ -86,6 +93,20 @@ export function createWorkspaceCoreSnapshot(args: {
             : (!!args.transcriptEligibility?.success && !!args.transcriptEligibility?.enabled),
         hydration: args.hydration,
     };
+}
+
+export function isWorkspaceRefreshBusy(
+    conversationId: string | null | undefined,
+    inFlight: WorkspaceRefreshInFlightSets
+): boolean {
+    const key = String(conversationId || "").trim();
+    if (!key) return false;
+    return (
+        !!inFlight.initialHydration?.has(key)
+        || !!inFlight.backfill?.has(key)
+        || !!inFlight.activityHydration?.has(key)
+        || !!inFlight.messageMetadata?.has(key)
+    );
 }
 
 export function getPendingMessageKey(message: Partial<Message> | null | undefined): string | null {

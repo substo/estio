@@ -71,6 +71,7 @@ import {
     collectPendingMessagesForConversation,
     createWorkspaceCoreSnapshot,
     createWorkspaceHydrationState,
+    isWorkspaceRefreshBusy,
     mergeSnapshotPreservingPendingMessages,
     type WorkspaceCoreSnapshot,
     type WorkspaceHydrationState,
@@ -376,6 +377,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const workspaceInitialHydrationInFlightRef = useRef<Set<string>>(new Set());
     const workspaceBackfillInFlightRef = useRef<Set<string>>(new Set());
     const workspaceActivityHydrationInFlightRef = useRef<Set<string>>(new Set());
+    const workspaceMessageMetadataInFlightRef = useRef<Set<string>>(new Set());
     const initialWorkspaceLoadedAtRef = useRef<Record<string, number>>({});
     const [realtimeMode, setRealtimeMode] = useState<'disabled' | 'connecting' | 'connected' | 'fallback'>(
         featureFlags.realtimeSse ? 'connecting' : 'disabled'
@@ -675,13 +677,12 @@ export function ConversationInterface({ locationId, initialConversations, initia
     }, [initialActiveId, initialConversations.length, trackClientMetric]);
 
     const isWorkspaceHydrationBusy = useCallback((conversationId?: string | null) => {
-        const key = String(conversationId || "");
-        if (!key) return false;
-        return (
-            workspaceInitialHydrationInFlightRef.current.has(key)
-            || workspaceBackfillInFlightRef.current.has(key)
-            || workspaceActivityHydrationInFlightRef.current.has(key)
-        );
+        return isWorkspaceRefreshBusy(conversationId, {
+            initialHydration: workspaceInitialHydrationInFlightRef.current,
+            backfill: workspaceBackfillInFlightRef.current,
+            activityHydration: workspaceActivityHydrationInFlightRef.current,
+            messageMetadata: workspaceMessageMetadataInFlightRef.current,
+        });
     }, []);
 
     const cacheWorkspaceCoreSnapshot = useCallback((conversationId: string, snapshot: WorkspaceCoreSnapshot) => {
@@ -1529,7 +1530,10 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 const targetConversationId = String(conversationId || "");
                 if (targetConversationId && targetConversationId === activeIdRef.current) {
                     if (isWorkspaceHydrationBusy(targetConversationId)) {
-                        trackClientRequest("realtime_refresh_skipped_hydration", { conversationId: targetConversationId });
+                        trackClientRequest("realtime_refresh_skipped_hydration", {
+                            conversationId: targetConversationId,
+                            reason: workspaceMessageMetadataInFlightRef.current.has(targetConversationId) ? "message_metadata" : "workspace_hydration",
+                        });
                         return;
                     }
                     const workspace = await getConversationWorkspaceCore(targetConversationId, {
@@ -2137,27 +2141,36 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
                     const currentSnapshot = getCachedWorkspaceCoreSnapshot(selectedConversationId) || initialSnapshot;
                     if (Array.isArray(currentSnapshot.messages) && currentSnapshot.messages.length > 0) {
-                        trackClientRequest("workspace_message_metadata_deferred_load", { conversationId: selectedConversationId });
-                        const enrichedMessages = await fetchMessages(selectedConversationId, {
-                            take: Math.min(THREAD_TARGET_MESSAGE_COUNT, Math.max(currentSnapshot.messages.length, initialMessageLimit)),
-                            metadataMode: "full",
-                        });
-                        if (!cancelled && activeIdRef.current === selectedConversationId && Array.isArray(enrichedMessages) && enrichedMessages.length > 0) {
-                            const latestSnapshot = getCachedWorkspaceCoreSnapshot(selectedConversationId) || currentSnapshot;
-                            const enrichedSnapshot: WorkspaceCoreSnapshot = {
-                                ...latestSnapshot,
-                                messages: enrichedMessages,
-                                hydration: createWorkspaceHydrationState({
-                                    status: latestSnapshot.hydration?.status || 'full',
-                                    messages: enrichedMessages,
-                                    messageWindow: latestSnapshot.hydration,
-                                    initialCount: latestSnapshot.hydration?.initialCount || initialMessages.length,
-                                    targetCount: THREAD_TARGET_MESSAGE_COUNT,
-                                    requestedLimit: latestSnapshot.hydration?.requestedLimit || initialMessageLimit,
-                                }),
-                            };
-                            cacheWorkspaceCoreSnapshot(selectedConversationId, enrichedSnapshot);
-                            applyWorkspaceCoreSnapshot(selectedConversationId, enrichedSnapshot);
+                        if (workspaceMessageMetadataInFlightRef.current.has(selectedConversationId)) {
+                            trackClientRequest("workspace_message_metadata_deferred_skip_inflight", { conversationId: selectedConversationId });
+                        } else {
+                            workspaceMessageMetadataInFlightRef.current.add(selectedConversationId);
+                            trackClientRequest("workspace_message_metadata_deferred_load", { conversationId: selectedConversationId });
+                            try {
+                                const enrichedMessages = await fetchMessages(selectedConversationId, {
+                                    take: Math.min(THREAD_TARGET_MESSAGE_COUNT, Math.max(currentSnapshot.messages.length, initialMessageLimit)),
+                                    metadataMode: "full",
+                                });
+                                if (!cancelled && activeIdRef.current === selectedConversationId && Array.isArray(enrichedMessages) && enrichedMessages.length > 0) {
+                                    const latestSnapshot = getCachedWorkspaceCoreSnapshot(selectedConversationId) || currentSnapshot;
+                                    const enrichedSnapshot: WorkspaceCoreSnapshot = {
+                                        ...latestSnapshot,
+                                        messages: enrichedMessages,
+                                        hydration: createWorkspaceHydrationState({
+                                            status: latestSnapshot.hydration?.status || 'full',
+                                            messages: enrichedMessages,
+                                            messageWindow: latestSnapshot.hydration,
+                                            initialCount: latestSnapshot.hydration?.initialCount || initialMessages.length,
+                                            targetCount: THREAD_TARGET_MESSAGE_COUNT,
+                                            requestedLimit: latestSnapshot.hydration?.requestedLimit || initialMessageLimit,
+                                        }),
+                                    };
+                                    cacheWorkspaceCoreSnapshot(selectedConversationId, enrichedSnapshot);
+                                    applyWorkspaceCoreSnapshot(selectedConversationId, enrichedSnapshot);
+                                }
+                            } finally {
+                                workspaceMessageMetadataInFlightRef.current.delete(selectedConversationId);
+                            }
                         }
                     }
 
@@ -2242,6 +2255,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         const workspaceInitialHydrationInFlight = workspaceInitialHydrationInFlightRef.current;
         const workspaceBackfillInFlight = workspaceBackfillInFlightRef.current;
         const workspaceActivityHydrationInFlight = workspaceActivityHydrationInFlightRef.current;
+        const workspaceMessageMetadataInFlight = workspaceMessageMetadataInFlightRef.current;
         const workspaceSidebarInFlight = workspaceSidebarInFlightRef.current;
 
         return () => {
@@ -2251,6 +2265,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             workspaceInitialHydrationInFlight.delete(selectedConversationId);
             workspaceBackfillInFlight.delete(selectedConversationId);
             workspaceActivityHydrationInFlight.delete(selectedConversationId);
+            workspaceMessageMetadataInFlight.delete(selectedConversationId);
             workspaceSidebarInFlight.delete(selectedConversationId);
         };
     }, [
@@ -2366,7 +2381,10 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 }
 
                 if (isWorkspaceHydrationBusy(selectedConversationId)) {
-                    trackClientRequest("active_delta_poll_skipped_hydration", { conversationId: selectedConversationId });
+                    trackClientRequest("active_delta_poll_skipped_hydration", {
+                        conversationId: selectedConversationId,
+                        reason: workspaceMessageMetadataInFlightRef.current.has(selectedConversationId) ? "message_metadata" : "workspace_hydration",
+                    });
                     return;
                 }
 
