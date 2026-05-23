@@ -6,6 +6,7 @@ import type { ConversationFeatureFlags } from '@/lib/feature-flags';
 import {
     createWorkspaceCoreSnapshot,
     createWorkspaceHydrationState,
+    mergeLatestMessageWindowIntoCachedMessages,
     type WorkspaceCoreSnapshot,
 } from '@/lib/conversations/workspace-state';
 import {
@@ -16,7 +17,7 @@ import {
     getConversationWorkspaceCore,
     refreshConversation,
 } from '../actions';
-import { THREAD_TARGET_MESSAGE_COUNT } from '@/lib/conversations/thread-hydration';
+import { ACTIVE_REFRESH_MESSAGE_LIMIT, THREAD_TARGET_MESSAGE_COUNT } from '@/lib/conversations/thread-hydration';
 import { hasPendingTranscripts, getMessageSignature } from './conversation-transcript-actions';
 
 const ACTIVE_POLL_GRACE_MS = 2500;
@@ -121,6 +122,7 @@ export function useConversationRefreshOrchestration({
             ...(typeof args.pendingTranscripts === "boolean" ? { pendingTranscripts: args.pendingTranscripts } : {}),
             refreshMode: "active_refresh",
             messageMetadataMode: args.pendingTranscripts ? "full" : "firstPaint",
+            activeRefreshMessageLimit: args.pendingTranscripts ? THREAD_TARGET_MESSAGE_COUNT : ACTIVE_REFRESH_MESSAGE_LIMIT,
             includeActivity: includeActivityForCoreRefresh,
             activityRefreshMode: includeActivityForCoreRefresh ? "pending_transcripts_inline" : "separate",
         });
@@ -129,10 +131,11 @@ export function useConversationRefreshOrchestration({
             // Pending transcript polling needs full metadata so transcript/extraction
             // status changes can update the thread signature and resolve the poll.
             const messageMetadataMode = args.pendingTranscripts ? "full" : "firstPaint";
+            const messageLimit = args.pendingTranscripts ? THREAD_TARGET_MESSAGE_COUNT : ACTIVE_REFRESH_MESSAGE_LIMIT;
             const workspace = await getConversationWorkspaceCore(targetConversationId, {
                 includeMessages: true,
                 includeActivity: includeActivityForCoreRefresh,
-                messageLimit: THREAD_TARGET_MESSAGE_COUNT,
+                messageLimit,
                 activityLimit: workspaceActivityLimit,
                 messageMetadataMode,
                 refreshMode: "active_refresh",
@@ -140,20 +143,29 @@ export function useConversationRefreshOrchestration({
             if (!workspace?.success || activeIdRef.current !== targetConversationId || args.shouldApply?.() === false) return;
 
             const workspaceMessages = Array.isArray(workspace?.messages) ? workspace.messages : [];
+            trackClientRequest(`${args.logKind}_result`, {
+                conversationId: targetConversationId,
+                activeRefreshMessageLimit: messageLimit,
+                returnedMessageCount: workspaceMessages.length,
+            });
+            const existingMessages = Array.isArray(messagesRef.current) ? messagesRef.current : [];
+            const nextMessages = args.pendingTranscripts
+                ? workspaceMessages
+                : mergeLatestMessageWindowIntoCachedMessages(existingMessages, workspaceMessages);
             const snapshot = createWorkspaceCoreSnapshot({
                 conversationHeader: workspace?.conversationHeader || null,
-                messages: workspaceMessages,
+                messages: nextMessages,
                 activityTimeline: includeActivityForCoreRefresh && Array.isArray(workspace?.activityTimeline)
                     ? workspace.activityTimeline
                     : (Array.isArray(activityLogRef.current) ? activityLogRef.current : []),
                 transcriptEligibility: workspace?.transcriptEligibility,
                 hydration: createWorkspaceHydrationState({
                     status: 'full',
-                    messages: workspaceMessages,
+                    messages: nextMessages,
                     messageWindow: workspace?.messageWindow,
-                    initialCount: workspaceMessages.length,
+                    initialCount: nextMessages.length,
                     targetCount: THREAD_TARGET_MESSAGE_COUNT,
-                    requestedLimit: THREAD_TARGET_MESSAGE_COUNT,
+                    requestedLimit: messageLimit,
                 }),
             });
             cacheWorkspaceCoreSnapshot(targetConversationId, snapshot);
@@ -184,6 +196,7 @@ export function useConversationRefreshOrchestration({
         workspaceActivityLimit,
         workspaceMessageMetadataInFlightRef,
         activityLogRef,
+        messagesRef,
     ]);
 
     const refreshActiveWorkspaceActivity = useCallback((

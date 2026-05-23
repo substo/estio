@@ -1930,6 +1930,8 @@ export async function fetchMessages(
             includeHeavyMessageMetadata,
             ensureHistory,
             found: false,
+            activeRefreshMessageLimit: refreshMode === "active_refresh" ? boundedTake : undefined,
+            returnedMessageCount: 0,
             total_ms: Date.now() - startedAtMs,
             ...timings,
         }));
@@ -2268,6 +2270,8 @@ export async function fetchMessages(
         includeLegacyEmailMeta,
         includeHeavyMessageMetadata,
         ensureHistory,
+        activeRefreshMessageLimit: refreshMode === "active_refresh" ? boundedTake : undefined,
+        returnedMessageCount: messages.length,
         message_count: messages.length,
         attachment_count: attachmentCount,
         transcript_count: transcriptCount,
@@ -2963,11 +2967,13 @@ export async function getConversationWorkspaceCore(
                 includeMessages,
                 includeActivity,
                 messageLimit,
+                activeRefreshMessageLimit: refreshMode === "active_refresh" ? messageLimit : undefined,
                 activityLimit,
                 activityRefreshMode,
                 refreshMode,
                 messageMetadataMode,
                 message_count: messageWindow.count,
+                returnedMessageCount: messageWindow.count,
                 activity_count: Array.isArray(activityTimeline) ? activityTimeline.length : 0,
             }));
 

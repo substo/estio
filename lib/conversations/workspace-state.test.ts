@@ -6,6 +6,7 @@ import {
     createWorkspaceHydrationState,
     getPendingMessageKey,
     isWorkspaceRefreshBusy,
+    mergeLatestMessageWindowIntoCachedMessages,
     mergeSnapshotPreservingPendingMessages,
 } from "./workspace-state";
 
@@ -78,6 +79,38 @@ test("mergeSnapshotPreservingPendingMessages keeps stale optimistic outbound and
     const merged = mergeSnapshotPreservingPendingMessages(snapshot, pending);
     assert.deepEqual(merged.map((message) => message.id), ["msg_real_1", "opt-2"]);
     assert.equal(merged[0].status, "sent");
+});
+
+test("mergeLatestMessageWindowIntoCachedMessages preserves older cached messages and updates latest window", () => {
+    const cached = [
+        { id: "m1", dateAdded: "2026-03-24T10:00:00.000Z", body: "older" },
+        { id: "m2", dateAdded: "2026-03-24T10:01:00.000Z", body: "stale" },
+        { id: "opt-1", clientMessageId: "cmid_1", dateAdded: "2026-03-24T10:02:00.000Z", body: "optimistic" },
+    ] as any[];
+    const latest = [
+        { id: "m2", dateAdded: "2026-03-24T10:01:00.000Z", body: "fresh" },
+        { id: "m3", dateAdded: "2026-03-24T10:03:00.000Z", body: "new" },
+    ] as any[];
+
+    const merged = mergeLatestMessageWindowIntoCachedMessages(cached, latest);
+
+    assert.deepEqual(merged.map((message) => message.id), ["m1", "m2", "opt-1", "m3"]);
+    assert.equal(merged[1].body, "fresh");
+    assert.equal(merged[2].body, "optimistic");
+});
+
+test("mergeLatestMessageWindowIntoCachedMessages reconciles optimistic messages by client id", () => {
+    const cached = [
+        { id: "opt-1", clientMessageId: "cmid_1", dateAdded: "2026-03-24T10:00:00.000Z", body: "optimistic" },
+    ] as any[];
+    const latest = [
+        { id: "real-1", clientMessageId: "cmid_1", dateAdded: "2026-03-24T10:00:01.000Z", body: "sent" },
+    ] as any[];
+
+    const merged = mergeLatestMessageWindowIntoCachedMessages(cached, latest);
+
+    assert.deepEqual(merged.map((message) => message.id), ["real-1"]);
+    assert.equal(merged[0].body, "sent");
 });
 
 test("workspace snapshot builders preserve payload shape and defaults", () => {

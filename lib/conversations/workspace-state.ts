@@ -6,6 +6,7 @@ import {
 } from "./thread-hydration";
 import {
     isPendingOutboundMessage,
+    buildMessageCorrelationKeys,
     mergeSnapshotWithPendingMessages,
 } from "./outbound-reconciliation";
 
@@ -151,4 +152,54 @@ export function mergeSnapshotPreservingPendingMessages(
     return Array.isArray(pendingMessages) && pendingMessages.length > 0
         ? mergeSnapshotWithPendingMessages(snapshotMessages || [], pendingMessages)
         : (Array.isArray(snapshotMessages) ? snapshotMessages : []);
+}
+
+function resolveMessageSortTimestampMs(message: Pick<Message, "dateAdded"> | null | undefined): number {
+    const parsed = Date.parse(String(message?.dateAdded || ""));
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function buildExistingMessageKeyIndex(messages: Message[]): Map<string, number> {
+    const keyIndex = new Map<string, number>();
+    messages.forEach((message, index) => {
+        for (const key of buildMessageCorrelationKeys(message as any)) {
+            if (!keyIndex.has(key)) {
+                keyIndex.set(key, index);
+            }
+        }
+    });
+    return keyIndex;
+}
+
+export function mergeLatestMessageWindowIntoCachedMessages(
+    cachedMessages: Message[],
+    latestMessages: Message[]
+): Message[] {
+    const merged = Array.isArray(cachedMessages) ? [...cachedMessages] : [];
+    const latest = Array.isArray(latestMessages) ? latestMessages : [];
+    if (latest.length === 0) return merged;
+
+    let keyIndex = buildExistingMessageKeyIndex(merged);
+
+    for (const message of latest) {
+        const keys = buildMessageCorrelationKeys(message as any);
+        const existingIndex = keys
+            .map((key) => keyIndex.get(key))
+            .find((index): index is number => typeof index === "number");
+
+        if (typeof existingIndex === "number") {
+            merged[existingIndex] = message;
+        } else {
+            merged.push(message);
+        }
+
+        keyIndex = buildExistingMessageKeyIndex(merged);
+    }
+
+    return merged.sort((left, right) => {
+        const leftTs = resolveMessageSortTimestampMs(left);
+        const rightTs = resolveMessageSortTimestampMs(right);
+        if (leftTs !== rightTs) return leftTs - rightTs;
+        return String(left?.id || "").localeCompare(String(right?.id || ""));
+    });
 }
