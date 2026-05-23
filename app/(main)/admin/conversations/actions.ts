@@ -58,9 +58,11 @@ import {
     buildWhatsAppOutboundUploadKey,
     createWhatsAppMediaUploadUrl as createWhatsAppMediaUploadSignedUrl,
     deleteWhatsAppMediaObject,
+    getWhatsAppMediaObjectBytes,
     headWhatsAppMediaObject,
     parseR2Uri,
 } from "@/lib/whatsapp/media-r2";
+import { isVCardMedia, parseVCardContacts } from "@/lib/contacts/vcard";
 import { processNormalizedMessage } from "@/lib/whatsapp/sync";
 import { enqueueWhatsAppOutbound } from "@/lib/whatsapp/outbound-enqueue";
 import {
@@ -2214,6 +2216,7 @@ export async function fetchMessages(
                 : a.url,
             mimeType: a.contentType || null,
             fileName: a.fileName || null,
+            sharedContacts: await parseStoredVCardAttachmentContacts(a),
             transcript: a.transcript ? {
                 ...(a.transcript.extractions?.[0] ? {
                     extraction: {
@@ -2876,6 +2879,9 @@ export async function getConversationWorkspaceCore(
         );
         const refreshMode = options?.refreshMode || "default";
         const messageMetadataMode = options?.messageMetadataMode === "firstPaint" ? "firstPaint" : "full";
+        const activityRefreshMode = includeActivity
+            ? (includeMessages ? "with_messages" : "activity_only")
+            : "skipped";
 
         return await withServerTiming("conversations.workspace_core", {
             traceId,
@@ -2885,6 +2891,7 @@ export async function getConversationWorkspaceCore(
             includeActivity,
             messageLimit,
             activityLimit,
+            activityRefreshMode,
             refreshMode,
             messageMetadataMode,
             workspaceV2: flags.workspaceV2,
@@ -2957,6 +2964,7 @@ export async function getConversationWorkspaceCore(
                 includeActivity,
                 messageLimit,
                 activityLimit,
+                activityRefreshMode,
                 refreshMode,
                 messageMetadataMode,
                 message_count: messageWindow.count,
@@ -5285,6 +5293,24 @@ type WhatsAppMediaUploadRef = {
 };
 
 type WhatsAppImageUploadRef = Omit<WhatsAppMediaUploadRef, "kind"> & { kind?: WhatsAppMediaKind };
+
+async function parseStoredVCardAttachmentContacts(attachment: {
+    url?: string | null;
+    contentType?: string | null;
+    fileName?: string | null;
+}) {
+    if (!isVCardMedia(attachment)) return [];
+    const parsed = parseR2Uri(String(attachment.url || ""));
+    if (!parsed?.key) return [];
+
+    try {
+        const object = await getWhatsAppMediaObjectBytes(parsed.key);
+        return parseVCardContacts(object.buffer.toString("utf8"));
+    } catch (error) {
+        console.warn("[Conversations] Failed to parse vCard attachment:", error);
+        return [];
+    }
+}
 
 function getWhatsAppMediaKind(contentType: string, fileName?: string): WhatsAppMediaKind | null {
     const normalizedContentType = String(contentType || "").toLowerCase();

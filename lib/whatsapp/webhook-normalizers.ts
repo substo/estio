@@ -11,7 +11,26 @@ export function getWhatsAppCloudInboundBody(message: any) {
     if (type === "sticker") return "[Sticker]";
     if (type === "button") return String(message?.button?.text || "[Button]");
     if (type === "interactive") return String(message?.interactive?.button_reply?.title || message?.interactive?.list_reply?.title || "[Interactive]");
-    if (type === "contacts") return "[Contact]";
+    if (type === "contacts") {
+        const contacts = Array.isArray(message?.contacts)
+            ? message.contacts.map((contact: any) => {
+                const name = contact?.name || {};
+                const phones = Array.isArray(contact?.phones) ? contact.phones : [];
+                const emails = Array.isArray(contact?.emails) ? contact.emails : [];
+                const org = contact?.org || {};
+                return {
+                    displayName: String(name.formatted_name || [name.first_name, name.last_name].filter(Boolean).join(" ") || phones[0]?.phone || emails[0]?.email || "Shared contact"),
+                    phoneNumber: phones[0]?.phone ? String(phones[0].phone) : null,
+                    email: emails[0]?.email ? String(emails[0].email) : null,
+                    organization: org.company ? String(org.company) : null,
+                };
+            }).filter((contact: any) => contact.displayName)
+            : [];
+        if (contacts.length > 0) {
+            return `[Contact]\n---CONTACTS_DATA---\n${JSON.stringify(contacts)}`;
+        }
+        return "[Contact]";
+    }
     if (type === "location") return "[Location]";
     return `[${type}]`;
 }

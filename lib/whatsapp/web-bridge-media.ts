@@ -4,6 +4,7 @@ import {
     putWhatsAppMediaObject,
     sanitizeWhatsAppMediaFilename,
 } from "@/lib/whatsapp/media-r2";
+import { isVCardMedia } from "@/lib/contacts/vcard";
 
 export function normalizeBridgeMediaType(type: string | null | undefined): "image" | "audio" | "document" | null {
     const value = String(type || "").toLowerCase();
@@ -80,7 +81,9 @@ export async function ingestWhatsAppWebBridgeMediaAttachment(params: {
     const base64 = String(params.media?.data || "").trim();
     if (!wamId || !base64) return { status: "skipped" as const, reason: "missing_input" };
 
-    const kind = normalizeBridgeMediaType(params.media?.mimetype || params.messageType);
+    const kind = isVCardMedia({ contentType: params.media?.mimetype, fileName: params.media?.filename })
+        ? "document"
+        : normalizeBridgeMediaType(params.media?.mimetype || params.messageType);
     if (!kind) return { status: "skipped" as const, reason: "unsupported_media_type" };
 
     const message = await db.message.findFirst({

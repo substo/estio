@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Mail, Smartphone, Paperclip, ExternalLink, ChevronDown, ChevronUp, ArrowRight, Download, Maximize2, RefreshCw, Clock, Check, CheckCheck, AlertTriangle, UserPlus, User, Phone as PhoneIcon, Building2, MailIcon, ExternalLink as ExternalLinkIcon, MessageCirclePlus, MoreHorizontal, Clipboard, Search, FileText, Wand2, ListPlus, ListTodo, Sparkles, Home, Languages } from "lucide-react";
@@ -19,12 +19,14 @@ import {
     type SelectionBatchItem,
 } from "./message-selection-actions";
 import { buildPlainLeadTextFromHtml } from "./paste-lead-rich-text";
+import type { SharedContactInfo } from "@/lib/contacts/vcard";
 
 type MessageAttachment = string | {
     id?: string;
     url: string;
     mimeType?: string | null;
     fileName?: string | null;
+    sharedContacts?: SharedContactInfo[] | null;
     transcript?: {
         status: "pending" | "processing" | "completed" | "failed";
         text?: string | null;
@@ -50,13 +52,6 @@ type MessageAttachment = string | {
             restricted?: boolean;
         } | null;
     } | null;
-};
-
-type SharedContactInfo = {
-    name?: string | null;
-    phone?: string | null;
-    email?: string | null;
-    organization?: string | null;
 };
 
 const CONTACTS_DATA_SEPARATOR = "\n---CONTACTS_DATA---\n";
@@ -151,6 +146,7 @@ export interface MessageBubbleProps {
         detectedLanguage?: string | null;
         detectedLanguageConfidence?: number | null;
         translation?: MessageTranslationState | null;
+        translations?: MessageTranslationVariant[];
     };
     locationId?: string;
     contactPhone?: string;
@@ -223,7 +219,16 @@ export function MessageBubble({
     const [translationViewMode, setTranslationViewMode] = useState<"thread" | "original" | "translated">("thread");
     const [isTranslatingMessage, setIsTranslatingMessage] = useState(false);
     const contentRef = useRef<HTMLDivElement>(null);
-    const sharedContacts = parseSharedContactsFromBody(message.body || "");
+    const attachments = useMemo(() => (message.attachments || []).map((attachment) =>
+        typeof attachment === "string"
+            ? { id: undefined, url: attachment, mimeType: undefined, fileName: undefined, sharedContacts: null, transcript: null }
+            : attachment
+    ), [message.attachments]);
+    const sharedContacts = useMemo(() => {
+        const bodySharedContacts = parseSharedContactsFromBody(message.body || "") || [];
+        const attachmentSharedContacts = attachments.flatMap((attachment) => attachment.sharedContacts || []);
+        return [...bodySharedContacts, ...attachmentSharedContacts];
+    }, [attachments, message.body]);
     const isContactMessage = !!sharedContacts && sharedContacts.length > 0;
     const [contactSaveStates, setContactSaveStates] = useState<Record<number, { saving?: boolean; saved?: boolean; contactId?: string; conversationId?: string; isNew?: boolean; error?: string }>>({}); 
     const [contactOpenMessageStates, setContactOpenMessageStates] = useState<Record<number, boolean>>({});
@@ -233,18 +238,17 @@ export function MessageBubble({
     const contextMenuButtonRef = useRef<HTMLButtonElement>(null);
 
     useEffect(() => {
-        if (!isContactMessage || !locationId || !message.body) {
+        if (!isContactMessage || !locationId) {
             setIsHydratingContactStates(false);
             return;
         }
 
-        const parsedContacts = parseSharedContactsFromBody(message.body);
-        if (!parsedContacts || parsedContacts.length === 0) {
+        if (sharedContacts.length === 0) {
             setIsHydratingContactStates(false);
             return;
         }
         
-        const phoneNumbers = parsedContacts.map(c => c.phoneNumber).filter(Boolean) as string[];
+        const phoneNumbers = sharedContacts.map(c => c.phoneNumber).filter(Boolean) as string[];
         if (phoneNumbers.length === 0) {
             setIsHydratingContactStates(false);
             return;
@@ -257,7 +261,7 @@ export function MessageBubble({
             if (res.success && res.states) {
                 setContactSaveStates(prev => {
                     const newState = { ...prev };
-                    parsedContacts.forEach((c, idx) => {
+                    sharedContacts.forEach((c, idx) => {
                         if (c.phoneNumber && res.states![c.phoneNumber]?.saved) {
                             newState[idx] = {
                                 ...newState[idx],
@@ -276,7 +280,7 @@ export function MessageBubble({
         });
 
         return () => { isMounted = false; };
-    }, [isContactMessage, locationId, message.body]);
+    }, [isContactMessage, locationId, sharedContacts]);
 
     useEffect(() => {
         setSelectionTarget(null);
@@ -306,11 +310,6 @@ export function MessageBubble({
     };
 
     const snippet = isEmail ? getSnippet(message.body) : "";
-    const attachments = (message.attachments || []).map((attachment) =>
-        typeof attachment === "string"
-            ? { id: undefined, url: attachment, mimeType: undefined, fileName: undefined, transcript: null }
-            : attachment
-    );
     const imageAttachments = attachments.filter((attachment) => {
         const mimeType = (attachment.mimeType || "").toLowerCase();
         if (mimeType.startsWith("image/")) return true;
@@ -325,8 +324,15 @@ export function MessageBubble({
         const target = (attachment.fileName || attachment.url || "").toLowerCase().split("?")[0];
         return [".ogg", ".opus", ".mp3", ".m4a", ".webm", ".wav", ".aac"].some((ext) => target.endsWith(ext));
     });
+    const contactAttachments = attachments.filter((attachment) => {
+        if ((attachment.sharedContacts || []).length > 0) return true;
+        const mimeType = (attachment.mimeType || "").split(";")[0].trim().toLowerCase();
+        if (["text/vcard", "text/x-vcard", "text/directory"].includes(mimeType)) return true;
+        const target = (attachment.fileName || attachment.url || "").toLowerCase().split("?")[0];
+        return target.endsWith(".vcf") || target.endsWith(".vcard");
+    });
     const fileAttachments = attachments.filter((attachment) =>
-        !imageAttachments.includes(attachment) && !audioAttachments.includes(attachment)
+        !imageAttachments.includes(attachment) && !audioAttachments.includes(attachment) && !contactAttachments.includes(attachment)
     );
     const selectedImage = selectedImageIndex !== null ? imageAttachments[selectedImageIndex] : null;
     const hasLikelyMediaPlaceholder = ["[Audio]", "[Image]", "[Media]", "[Document]", "[Contact]"].includes(String(message.body || "").trim());
@@ -336,7 +342,7 @@ export function MessageBubble({
         && !!webBridgeMedia
         && webBridgeMedia.status !== "stored"
         && attachments.length === 0;
-    const hasRenderableMediaAttachment = imageAttachments.length > 0 || audioAttachments.length > 0 || fileAttachments.length > 0;
+    const hasRenderableMediaAttachment = imageAttachments.length > 0 || audioAttachments.length > 0 || contactAttachments.length > 0 || fileAttachments.length > 0;
     const canRefetchMedia = !!onRefetchMedia && isWhatsApp && !isContactMessage && (hasRenderableMediaAttachment || hasLikelyMediaPlaceholder || hasUnstoredWebBridgeMedia);
 
     const handleSaveContact = useCallback(async (index: number, contact: SharedContactInfo) => {
@@ -1386,6 +1392,27 @@ export function MessageBubble({
                                     </div>
                                 )}
                             </div>
+                        ))}
+                        {contactAttachments.map((attachment, i) => (
+                            <a
+                                key={`contact-file-${i}-${attachment.url}`}
+                                href={getDownloadUrl(attachment.url)}
+                                download={attachment.fileName || `contact-${i + 1}.vcf`}
+                                onClick={(e) => e.stopPropagation()}
+                                className={cn(
+                                    "flex min-w-0 w-full max-w-full items-center gap-2 text-xs p-2 rounded border transition-colors",
+                                    isOutbound && !isEmail
+                                        ? "border-white/20 bg-white/10 text-blue-100 hover:bg-white/20"
+                                        : "border-blue-100 bg-blue-50 text-blue-700 hover:bg-blue-100"
+                                )}
+                            >
+                                <User className="h-3 w-3 shrink-0" />
+                                <span className="min-w-0 flex-1 truncate">
+                                    {attachment.fileName || `Contact card ${i + 1}`}
+                                </span>
+                                <Download className="h-3 w-3 shrink-0 opacity-70" />
+                                <span className="shrink-0">Download vCard</span>
+                            </a>
                         ))}
                         {fileAttachments.map((attachment, i) => (
                             <a

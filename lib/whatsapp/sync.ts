@@ -769,11 +769,25 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     const contactLidNorm = normalizeLidJid(contact?.lid);
     const msgLidNorm = normalizedMsgLid;
     if (contact && msg.lid && contactLidNorm !== msgLidNorm) {
-        await db.contact.update({
-            where: { id: contact.id },
-            data: { lid: msg.lid } as any
-        }).catch(err => console.error("Failed to link LID:", err));
-        console.log(`[WhatsApp Sync] Linked LID ${msg.lid} to contact ${contact.phone}`);
+        const contactPhoneDigits = normalizeDigits(contact.phone);
+        const phoneIdentityMatchesContact = !!rawInputPhone
+            && rawInputPhone.length >= 9
+            && (
+                contactPhoneDigits === rawInputPhone
+                || contactPhoneDigits.endsWith(rawInputPhone)
+                || rawInputPhone.endsWith(contactPhoneDigits)
+            );
+        const canAttachLid = matchedByLid || phoneIdentityMatchesContact || !contactLidNorm;
+
+        if (canAttachLid) {
+            await db.contact.update({
+                where: { id: contact.id },
+                data: { lid: msg.lid } as any
+            }).catch(err => console.error("Failed to link LID:", err));
+            console.log(`[WhatsApp Sync] Linked LID ${msg.lid} to contact ${contact.phone}`);
+        } else {
+            console.warn(`[WhatsApp Sync] Refusing to overwrite existing LID ${contact.lid} on contact ${contact.id} with unrelated LID ${msg.lid}`);
+        }
     }
 
     if (!contact) {

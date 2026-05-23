@@ -99,6 +99,7 @@ function inferExtension(fileName?: string, contentType?: string) {
     if (type === "text/plain") return ".txt";
     if (type === "application/zip") return ".zip";
     if (type === "text/csv") return ".csv";
+    if (type === "text/vcard" || type === "text/x-vcard" || type === "text/directory") return ".vcf";
     return ".bin";
 }
 

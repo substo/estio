@@ -349,6 +349,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const [chatTimelineInitialPainted, setChatTimelineInitialPainted] = useState(false);
     const messageSignatureRef = useRef<string>('0');
     const [activityLog, setActivityLog] = useState<any[]>([]);
+    const activityLogRef = useRef<any[]>([]);
     const [conversationListHasMore, setConversationListHasMore] = useState<boolean>(!!initialConversationListPageInfo?.hasMore);
     const [conversationListNextCursor, setConversationListNextCursor] = useState<string | null>(initialConversationListPageInfo?.nextCursor || null);
     const [conversationDeltaCursor, setConversationDeltaCursor] = useState<string | null>(initialConversationListPageInfo?.deltaCursor || null);
@@ -628,6 +629,10 @@ export function ConversationInterface({ locationId, initialConversations, initia
     useEffect(() => {
         messagesRef.current = messages;
     }, [messages]);
+
+    useEffect(() => {
+        activityLogRef.current = activityLog;
+    }, [activityLog]);
 
     useEffect(() => {
         conversationDeltaCursorRef.current = conversationDeltaCursor;
@@ -1751,6 +1756,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         realtimeMode,
         activeIdRef,
         messagesRef,
+        activityLogRef,
         messageSignatureRef,
         conversationDeltaCursorRef,
         workspaceMessageMetadataInFlightRef,

@@ -22,19 +22,25 @@ export function normalizeWebBridgeLid(value: unknown) {
 }
 
 export function extractReliableWebBridgePhone(identity: any, fallbackJid?: unknown) {
+    const lidDigits = normalizeDigits(
+        identity?.lidJid
+        || identity?.lid
+        || (parseWhatsAppWebChatIdentity(fallbackJid).reason === "lid_identity" ? fallbackJid : "")
+    );
     const candidates = [
-        identity?.phone,
-        identity?.number,
-        identity?.phoneNumber,
         identity?.phoneJid,
         identity?.id?._serialized,
         fallbackJid,
+        identity?.phone,
+        identity?.phoneNumber,
+        identity?.number,
     ];
 
     for (const candidate of candidates) {
         const parsed = parseWhatsAppWebChatIdentity(candidate);
         const digits = parsed.phone || normalizeDigits(candidate);
         if (parsed.reason === "lid_identity") continue;
+        if (lidDigits && digits === lidDigits) continue;
         if (isHighConfidenceResolvedPhone(digits)) return digits;
     }
 

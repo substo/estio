@@ -20,6 +20,7 @@ import { THREAD_TARGET_MESSAGE_COUNT } from '@/lib/conversations/thread-hydratio
 import { hasPendingTranscripts, getMessageSignature } from './conversation-transcript-actions';
 
 const ACTIVE_POLL_GRACE_MS = 2500;
+const ACTIVE_ACTIVITY_REFRESH_INTERVAL_MS = 60_000;
 
 export type ConversationRealtimeMode = 'disabled' | 'connecting' | 'connected' | 'fallback';
 
@@ -33,6 +34,7 @@ type UseConversationRefreshOrchestrationArgs = {
     realtimeMode: ConversationRealtimeMode;
     activeIdRef: RefObject<string | null>;
     messagesRef: RefObject<Message[]>;
+    activityLogRef: RefObject<any[]>;
     messageSignatureRef: RefObject<string>;
     conversationDeltaCursorRef: RefObject<string | null>;
     workspaceMessageMetadataInFlightRef: RefObject<Set<string>>;
@@ -61,6 +63,7 @@ export function useConversationRefreshOrchestration({
     realtimeMode,
     activeIdRef,
     messagesRef,
+    activityLogRef,
     messageSignatureRef,
     conversationDeltaCursorRef,
     workspaceMessageMetadataInFlightRef,
@@ -79,6 +82,7 @@ export function useConversationRefreshOrchestration({
     workspaceActivityLimit,
 }: UseConversationRefreshOrchestrationArgs) {
     const workspaceCoreRefreshInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
+    const workspaceActivityRefreshInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
 
     const refreshActiveWorkspaceCore = useCallback((
         conversationId: string,
@@ -110,11 +114,15 @@ export function useConversationRefreshOrchestration({
             return existingRefresh;
         }
 
+        const includeActivityForCoreRefresh = args.pendingTranscripts === true;
+
         trackClientRequest(args.logKind, {
             conversationId: targetConversationId,
             ...(typeof args.pendingTranscripts === "boolean" ? { pendingTranscripts: args.pendingTranscripts } : {}),
             refreshMode: "active_refresh",
             messageMetadataMode: args.pendingTranscripts ? "full" : "firstPaint",
+            includeActivity: includeActivityForCoreRefresh,
+            activityRefreshMode: includeActivityForCoreRefresh ? "pending_transcripts_inline" : "separate",
         });
 
         const refreshPromise = (async () => {
@@ -123,7 +131,7 @@ export function useConversationRefreshOrchestration({
             const messageMetadataMode = args.pendingTranscripts ? "full" : "firstPaint";
             const workspace = await getConversationWorkspaceCore(targetConversationId, {
                 includeMessages: true,
-                includeActivity: true,
+                includeActivity: includeActivityForCoreRefresh,
                 messageLimit: THREAD_TARGET_MESSAGE_COUNT,
                 activityLimit: workspaceActivityLimit,
                 messageMetadataMode,
@@ -135,7 +143,9 @@ export function useConversationRefreshOrchestration({
             const snapshot = createWorkspaceCoreSnapshot({
                 conversationHeader: workspace?.conversationHeader || null,
                 messages: workspaceMessages,
-                activityTimeline: Array.isArray(workspace?.activityTimeline) ? workspace.activityTimeline : [],
+                activityTimeline: includeActivityForCoreRefresh && Array.isArray(workspace?.activityTimeline)
+                    ? workspace.activityTimeline
+                    : (Array.isArray(activityLogRef.current) ? activityLogRef.current : []),
                 transcriptEligibility: workspace?.transcriptEligibility,
                 hydration: createWorkspaceHydrationState({
                     status: 'full',
@@ -173,6 +183,83 @@ export function useConversationRefreshOrchestration({
         trackClientRequest,
         workspaceActivityLimit,
         workspaceMessageMetadataInFlightRef,
+        activityLogRef,
+    ]);
+
+    const refreshActiveWorkspaceActivity = useCallback((
+        conversationId: string,
+        args: {
+            logKind: string;
+            shouldApply?: () => boolean;
+        }
+    ) => {
+        const targetConversationId = String(conversationId || "").trim();
+        if (!targetConversationId || targetConversationId !== activeIdRef.current) {
+            return Promise.resolve();
+        }
+
+        const existingRefresh = workspaceActivityRefreshInFlightRef.current.get(targetConversationId);
+        if (existingRefresh) {
+            trackClientRequest(`${args.logKind}_skipped_hydration`, {
+                conversationId: targetConversationId,
+                reason: "activity_refresh_inflight",
+                includeActivity: true,
+                activityRefreshMode: "slow_active_interval",
+            });
+            return existingRefresh;
+        }
+
+        trackClientRequest(args.logKind, {
+            conversationId: targetConversationId,
+            refreshMode: "active_refresh",
+            includeMessages: false,
+            includeActivity: true,
+            activityRefreshMode: "slow_active_interval",
+        });
+
+        const refreshPromise = (async () => {
+            const activityWorkspace = await getConversationWorkspaceCore(targetConversationId, {
+                includeMessages: false,
+                includeActivity: true,
+                messageLimit: THREAD_TARGET_MESSAGE_COUNT,
+                activityLimit: workspaceActivityLimit,
+                refreshMode: "active_refresh",
+            });
+            if (!activityWorkspace?.success || activeIdRef.current !== targetConversationId || args.shouldApply?.() === false) return;
+
+            const currentMessages = Array.isArray(messagesRef.current) ? messagesRef.current : [];
+            const snapshot = createWorkspaceCoreSnapshot({
+                conversationHeader: activityWorkspace?.conversationHeader || null,
+                messages: currentMessages,
+                activityTimeline: Array.isArray(activityWorkspace?.activityTimeline) ? activityWorkspace.activityTimeline : [],
+                transcriptEligibility: activityWorkspace?.transcriptEligibility,
+                hydration: createWorkspaceHydrationState({
+                    status: 'full',
+                    messages: currentMessages,
+                    initialCount: currentMessages.length,
+                    targetCount: THREAD_TARGET_MESSAGE_COUNT,
+                    requestedLimit: THREAD_TARGET_MESSAGE_COUNT,
+                }),
+            });
+            cacheWorkspaceCoreSnapshot(targetConversationId, snapshot);
+            applyWorkspaceCoreSnapshot(targetConversationId, snapshot);
+        })();
+
+        workspaceActivityRefreshInFlightRef.current.set(targetConversationId, refreshPromise);
+        void refreshPromise.finally(() => {
+            if (workspaceActivityRefreshInFlightRef.current.get(targetConversationId) === refreshPromise) {
+                workspaceActivityRefreshInFlightRef.current.delete(targetConversationId);
+            }
+        }).catch(() => undefined);
+
+        return refreshPromise;
+    }, [
+        activeIdRef,
+        applyWorkspaceCoreSnapshot,
+        cacheWorkspaceCoreSnapshot,
+        messagesRef,
+        trackClientRequest,
+        workspaceActivityLimit,
     ]);
 
     const runRealtimeRefresh = useCallback((conversationId?: string | null) => {
@@ -344,6 +431,37 @@ export function useConversationRefreshOrchestration({
             }
         };
     }, [viewMode, activeId, isTabVisible, featureFlags.balancedPolling, featureFlags.workspaceV2, featureFlags.realtimeSse, realtimeMode, activeIdRef, messagesRef, messageSignatureRef, markConversationReadInUi, trackClientRequest, refreshActiveWorkspaceCore, setActivityLog, setConversations, setMessages]);
+
+    useEffect(() => {
+        if (viewMode !== 'chats' || !activeId) return;
+        if (!isTabVisible) return;
+        if (!featureFlags.workspaceV2) return;
+        if (viewFilter === 'tasks') return;
+        if (searchQuery.trim()) return;
+
+        let cancelled = false;
+        const runActivityRefresh = async () => {
+            const selectedConversationId = activeIdRef.current;
+            if (!selectedConversationId) return;
+            try {
+                await refreshActiveWorkspaceActivity(selectedConversationId, {
+                    logKind: "active_activity_poll",
+                    shouldApply: () => !cancelled,
+                });
+            } catch (err) {
+                if (!cancelled) {
+                    console.error("Active conversation activity refresh failed:", err);
+                }
+            }
+        };
+
+        const intervalId = setInterval(runActivityRefresh, ACTIVE_ACTIVITY_REFRESH_INTERVAL_MS);
+
+        return () => {
+            cancelled = true;
+            clearInterval(intervalId);
+        };
+    }, [viewMode, viewFilter, activeId, isTabVisible, searchQuery, featureFlags.workspaceV2, activeIdRef, refreshActiveWorkspaceActivity]);
 
     return { runRealtimeRefresh };
 }

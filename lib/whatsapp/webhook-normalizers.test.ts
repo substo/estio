@@ -8,6 +8,7 @@ import {
     normalizeWhatsAppWebBridgeMessage,
     parseWhatsAppWebhookTimestamp,
 } from "@/lib/whatsapp/webhook-normalizers";
+import { extractReliableWebBridgePhone } from "@/lib/whatsapp/web-bridge-identity";
 
 test("getWhatsAppCloudInboundBody preserves provider-specific fallbacks", () => {
     assert.equal(getWhatsAppCloudInboundBody({ type: "text", text: { body: "hello" } }), "hello");
@@ -88,4 +89,14 @@ test("normalizeWhatsAppWebBridgeMessage preserves Web Bridge normalized fields",
     assert.equal(result.normalized?.contactName, "Mia");
     assert.equal(result.normalized?.remoteJid, "35799111111@c.us");
     assert.equal(result.normalized?.chatId, "35799111111@c.us");
+});
+
+test("extractReliableWebBridgePhone prefers phone JID and rejects LID number digits", () => {
+    const identity = {
+        lidJid: "258699151036638@lid",
+        number: "258699151036638",
+        phoneJid: "35794475454@c.us",
+    };
+
+    assert.equal(extractReliableWebBridgePhone(identity, "258699151036638@lid"), "35794475454");
 });
