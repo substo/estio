@@ -3201,10 +3201,23 @@ export async function checkSharedContactsSavedState(
        return { success: false, error: 'Location not found or unauthorized' };
     }
 
+    const normalizedPhones = phoneNumbers.map(normalizePhone).filter(Boolean) as string[];
+    if (normalizedPhones.length === 0) {
+      return { success: true, states: {} };
+    }
+
+    const phoneSuffixes = normalizedPhones
+      .map((phone) => phone.replace(/\D/g, ""))
+      .filter(Boolean)
+      .map((digits) => digits.length > 7 ? digits.slice(-7) : digits);
+
     const existingContacts = await db.contact.findMany({
       where: {
         locationId: location.id,
-        phone: { in: phoneNumbers.map(normalizePhone).filter(Boolean) as string[] }
+        OR: [
+          { phone: { in: normalizedPhones } },
+          ...phoneSuffixes.map((suffix) => ({ phone: { contains: suffix } })),
+        ],
       },
       select: { 
         id: true, 
@@ -3221,7 +3234,14 @@ export async function checkSharedContactsSavedState(
     phoneNumbers.forEach(inputPhone => {
       const normalized = normalizePhone(inputPhone);
       if (!normalized) return;
-      const matched = existingContacts.find(c => c.phone === normalized);
+      const inputDigits = normalized.replace(/\D/g, '');
+      const matched = existingContacts.find(c => {
+        const contactDigits = String(c.phone || '').replace(/\D/g, '');
+        return c.phone === normalized
+          || contactDigits === inputDigits
+          || (contactDigits.endsWith(inputDigits) && inputDigits.length >= 9)
+          || (inputDigits.endsWith(contactDigits) && contactDigits.length >= 9);
+      });
       if (matched) {
         finalStates[inputPhone] = { 
           saved: true, 

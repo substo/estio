@@ -19,7 +19,12 @@ import {
     type SelectionBatchItem,
 } from "./message-selection-actions";
 import { buildPlainLeadTextFromHtml } from "./paste-lead-rich-text";
-import type { SharedContactInfo } from "@/lib/contacts/vcard";
+import {
+    getSharedContactReadableMessage,
+    parseSharedContactsFromMessageBody,
+    parseVCardContacts,
+    type SharedContactInfo,
+} from "@/lib/contacts/vcard";
 
 type MessageAttachment = string | {
     id?: string;
@@ -53,38 +58,6 @@ type MessageAttachment = string | {
         } | null;
     } | null;
 };
-
-const CONTACTS_DATA_SEPARATOR = "\n---CONTACTS_DATA---\n";
-
-/**
- * Parse shared contact data from a message body that contains the structured separator.
- * Returns null if the message doesn't contain contact data.
- */
-function parseSharedContactsFromBody(body: string): SharedContactInfo[] | null {
-    if (!body || !body.includes("---CONTACTS_DATA---")) return null;
-    const separatorIndex = body.indexOf(CONTACTS_DATA_SEPARATOR);
-    if (separatorIndex < 0) return null;
-    const jsonPart = body.slice(separatorIndex + CONTACTS_DATA_SEPARATOR.length).trim();
-    if (!jsonPart) return null;
-    try {
-        const parsed = JSON.parse(jsonPart);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-            return parsed as SharedContactInfo[];
-        }
-    } catch {
-        // Not valid JSON — fallback
-    }
-    return null;
-}
-
-/**
- * Get the human-readable prefix from a contact message body (before the separator).
- */
-function getContactBodyReadablePart(body: string): string {
-    if (!body.includes("---CONTACTS_DATA---")) return body;
-    const separatorIndex = body.indexOf(CONTACTS_DATA_SEPARATOR);
-    return separatorIndex >= 0 ? body.slice(0, separatorIndex).trim() : body;
-}
 
 export interface MessageBubbleProps {
     message: {
@@ -224,11 +197,19 @@ export function MessageBubble({
             ? { id: undefined, url: attachment, mimeType: undefined, fileName: undefined, sharedContacts: null, transcript: null }
             : attachment
     ), [message.attachments]);
+    const bodySharedContacts = useMemo(
+        () => parseSharedContactsFromMessageBody(message.body || ""),
+        [message.body]
+    );
+    const bodyVCardDownloadHref = useMemo(() => {
+        const body = String(message.body || "");
+        if (parseVCardContacts(body).length === 0) return null;
+        return `data:text/vcard;charset=utf-8,${encodeURIComponent(body)}`;
+    }, [message.body]);
     const sharedContacts = useMemo(() => {
-        const bodySharedContacts = parseSharedContactsFromBody(message.body || "") || [];
         const attachmentSharedContacts = attachments.flatMap((attachment) => attachment.sharedContacts || []);
         return [...bodySharedContacts, ...attachmentSharedContacts];
-    }, [attachments, message.body]);
+    }, [attachments, bodySharedContacts]);
     const isContactMessage = !!sharedContacts && sharedContacts.length > 0;
     const [contactSaveStates, setContactSaveStates] = useState<Record<number, { saving?: boolean; saved?: boolean; contactId?: string; conversationId?: string; isNew?: boolean; error?: string }>>({}); 
     const [contactOpenMessageStates, setContactOpenMessageStates] = useState<Record<number, boolean>>({});
@@ -559,7 +540,7 @@ export function MessageBubble({
     // Prefers active text selection, then falls back to the full message body.
     const getActionableText = useCallback(() => {
         if (selectionTarget?.text?.trim()) return selectionTarget.text.trim();
-        if (isContactMessage) return getContactBodyReadablePart(message.body);
+        if (isContactMessage) return getSharedContactReadableMessage(message.body);
         if (isEmail) {
             const plainEmailText = buildPlainLeadTextFromHtml(message.body);
             if (plainEmailText.trim()) return plainEmailText.trim();
@@ -1016,6 +997,22 @@ export function MessageBubble({
                                     </div>
                                 );
                             })}
+                            {bodyVCardDownloadHref && (
+                                <a
+                                    href={bodyVCardDownloadHref}
+                                    download={`shared-contact-${message.id}.vcf`}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className={cn(
+                                        "inline-flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium transition-colors",
+                                        isOutbound
+                                            ? "bg-white/15 text-white hover:bg-white/25"
+                                            : "bg-blue-50 text-blue-700 hover:bg-blue-100"
+                                    )}
+                                >
+                                    <Download className="h-3 w-3" />
+                                    Download vCard
+                                </a>
+                            )}
                         </div>
                     ) : isEmail && !isExpanded ? (
                         // Snippet View

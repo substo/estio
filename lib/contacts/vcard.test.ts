@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isVCardMedia, parseVCardContacts } from "./vcard";
+import {
+    getSharedContactReadableMessage,
+    isVCardMedia,
+    parseSharedContactsFromMessageBody,
+    parseVCardContacts,
+} from "./vcard";
 
 test("parses vCard 3.0 contact fields", () => {
     const contacts = parseVCardContacts(`BEGIN:VCARD
@@ -73,4 +78,39 @@ test("classifies vCard media by content type or filename", () => {
     assert.equal(isVCardMedia({ url: "https://example.com/contact.vcard?x=1" }), true);
     assert.equal(isVCardMedia({ contentType: "image/png", fileName: "photo.png" }), false);
     assert.equal(isVCardMedia({ contentType: "application/pdf", fileName: "doc.pdf" }), false);
+});
+
+test("parses raw vCard message body into shared contacts", () => {
+    const contacts = parseSharedContactsFromMessageBody(`BEGIN:VCARD
+VERSION:3.0
+N:;Savvas Down Town Cyprus Sales and Rentals.;;;
+FN:Savvas Down Town Cyprus Sales and Rentals.
+TEL;type=Mobile;waid=35799917191:+357 99 917191
+X-WA-BIZ-DESCRIPTION:Your trusted real estate agent.
+X-WA-BIZ-NAME:Savvas Down Town Cyprus Sales and Rentals.
+END:VCARD`);
+
+    assert.equal(contacts.length, 1);
+    assert.equal(contacts[0].displayName, "Savvas Down Town Cyprus Sales and Rentals.");
+    assert.equal(contacts[0].phoneNumber, "+357 99 917191");
+    assert.equal(getSharedContactReadableMessage(`BEGIN:VCARD
+VERSION:3.0
+FN:Savvas Down Town Cyprus Sales and Rentals.
+END:VCARD`), "Savvas Down Town Cyprus Sales and Rentals.");
+});
+
+test("parses structured contact message body into shared contacts", () => {
+    const contacts = parseSharedContactsFromMessageBody(`[Contact]
+---CONTACTS_DATA---
+[{"displayName":"Rolf","phoneNumber":"+35799111222","email":"rolf@example.com"}]`);
+
+    assert.deepEqual(contacts, [{
+        displayName: "Rolf",
+        phoneNumber: "+35799111222",
+        email: "rolf@example.com",
+        organization: null,
+    }]);
+    assert.equal(getSharedContactReadableMessage(`[Contact]
+---CONTACTS_DATA---
+[]`), "[Contact]");
 });

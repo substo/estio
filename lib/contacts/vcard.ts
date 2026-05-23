@@ -5,6 +5,8 @@ export type SharedContactInfo = {
     organization?: string | null;
 };
 
+const CONTACTS_DATA_SEPARATOR = "\n---CONTACTS_DATA---\n";
+
 const VCARD_MIME_TYPES = new Set([
     "text/vcard",
     "text/x-vcard",
@@ -113,4 +115,62 @@ export function parseVCardContacts(input: string): SharedContactInfo[] {
     return cards
         .map(parseSingleVCard)
         .filter((contact): contact is SharedContactInfo => !!contact);
+}
+
+export function parseSharedContactsFromMessageBody(body: string): SharedContactInfo[] {
+    const source = String(body || "");
+    if (!source.trim()) return [];
+
+    const separatorIndex = source.indexOf(CONTACTS_DATA_SEPARATOR);
+    if (separatorIndex >= 0) {
+        const jsonPart = source.slice(separatorIndex + CONTACTS_DATA_SEPARATOR.length).trim();
+        if (jsonPart) {
+            try {
+                const parsed = JSON.parse(jsonPart);
+                if (Array.isArray(parsed)) {
+                    return parsed
+                        .map((contact) => normalizeSharedContact(contact))
+                        .filter((contact): contact is SharedContactInfo => !!contact);
+                }
+            } catch {
+                // Fall through to vCard parsing below.
+            }
+        }
+    }
+
+    return parseVCardContacts(source);
+}
+
+export function getSharedContactReadableMessage(body: string): string {
+    const source = String(body || "");
+    const separatorIndex = source.indexOf(CONTACTS_DATA_SEPARATOR);
+    if (separatorIndex >= 0) {
+        return source.slice(0, separatorIndex).trim();
+    }
+
+    if (/BEGIN:VCARD/i.test(source)) {
+        const contacts = parseVCardContacts(source);
+        if (contacts.length === 0) return "Shared contact";
+        return contacts.map((contact) => contact.displayName).join(", ");
+    }
+
+    return source;
+}
+
+function normalizeSharedContact(input: unknown): SharedContactInfo | null {
+    if (!input || typeof input !== "object") return null;
+    const value = input as Record<string, unknown>;
+    const displayName = String(value.displayName || value.name || value.fullName || "").trim();
+    const phoneNumber = String(value.phoneNumber || value.phone || "").trim() || null;
+    const email = String(value.email || "").trim() || null;
+    const organization = String(value.organization || value.company || "").trim() || null;
+    const fallbackName = displayName || phoneNumber || email;
+    if (!fallbackName) return null;
+
+    return {
+        displayName: fallbackName,
+        phoneNumber,
+        email,
+        organization,
+    };
 }
