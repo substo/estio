@@ -113,14 +113,21 @@ export function useConversationRefreshOrchestration({
         trackClientRequest(args.logKind, {
             conversationId: targetConversationId,
             ...(typeof args.pendingTranscripts === "boolean" ? { pendingTranscripts: args.pendingTranscripts } : {}),
+            refreshMode: "active_refresh",
+            messageMetadataMode: args.pendingTranscripts ? "full" : "firstPaint",
         });
 
         const refreshPromise = (async () => {
+            // Pending transcript polling needs full metadata so transcript/extraction
+            // status changes can update the thread signature and resolve the poll.
+            const messageMetadataMode = args.pendingTranscripts ? "full" : "firstPaint";
             const workspace = await getConversationWorkspaceCore(targetConversationId, {
                 includeMessages: true,
                 includeActivity: true,
                 messageLimit: THREAD_TARGET_MESSAGE_COUNT,
                 activityLimit: workspaceActivityLimit,
+                messageMetadataMode,
+                refreshMode: "active_refresh",
             });
             if (!workspace?.success || activeIdRef.current !== targetConversationId || args.shouldApply?.() === false) return;
 

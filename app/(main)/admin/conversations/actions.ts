@@ -1886,6 +1886,7 @@ export async function fetchMessages(
         beforeCursor?: string | null;
         includeLegacyEmailMeta?: boolean;
         metadataMode?: "full" | "firstPaint";
+        refreshMode?: "initial_hydration" | "active_refresh" | "deferred_activity" | "default";
     }
 ) {
     const startedAtMs = Date.now();
@@ -1899,6 +1900,7 @@ export async function fetchMessages(
         ? Math.min(Math.max(Math.floor(requestedTake), 1), 500)
         : null;
     const metadataMode = options?.metadataMode === "firstPaint" ? "firstPaint" : "full";
+    const refreshMode = options?.refreshMode || "default";
     const includeHeavyMessageMetadata = metadataMode !== "firstPaint";
     const includeLegacyEmailMeta = includeHeavyMessageMetadata && options?.includeLegacyEmailMeta !== false;
     const paginationCursor = decodeMessagePaginationCursor(options?.beforeCursor);
@@ -1920,7 +1922,10 @@ export async function fetchMessages(
             conversationId,
             requestedTake: boundedTake,
             beforeCursor: !!options?.beforeCursor,
+            refreshMode,
+            metadataMode,
             includeLegacyEmailMeta,
+            includeHeavyMessageMetadata,
             ensureHistory,
             found: false,
             total_ms: Date.now() - startedAtMs,
@@ -2255,6 +2260,7 @@ export async function fetchMessages(
         requestedConversationId: conversationId,
         requestedTake: boundedTake,
         beforeCursor: !!options?.beforeCursor,
+        refreshMode,
         metadataMode,
         includeLegacyEmailMeta,
         includeHeavyMessageMetadata,
@@ -2836,6 +2842,7 @@ const getCachedConversationWorkspaceSidebarMetadata = unstable_cache(
 type ConversationWorkspaceCoreOptions = Pick<ConversationWorkspaceOptions, "includeMessages" | "includeActivity" | "messageLimit" | "activityLimit"> & {
     activityBeforeCursor?: string | null;
     messageMetadataMode?: "full" | "firstPaint";
+    refreshMode?: "initial_hydration" | "active_refresh" | "deferred_activity" | "default";
 };
 
 export async function getConversationWorkspaceCore(
@@ -2867,6 +2874,8 @@ export async function getConversationWorkspaceCore(
             Math.max(Number(options?.activityLimit || DEFAULT_WORKSPACE_ACTIVITY_LIMIT), 1),
             MAX_WORKSPACE_ACTIVITY_LIMIT
         );
+        const refreshMode = options?.refreshMode || "default";
+        const messageMetadataMode = options?.messageMetadataMode === "firstPaint" ? "firstPaint" : "full";
 
         return await withServerTiming("conversations.workspace_core", {
             traceId,
@@ -2876,6 +2885,8 @@ export async function getConversationWorkspaceCore(
             includeActivity,
             messageLimit,
             activityLimit,
+            refreshMode,
+            messageMetadataMode,
             workspaceV2: flags.workspaceV2,
         }, async () => {
             const metadata = flags.workspaceV2
@@ -2899,7 +2910,8 @@ export async function getConversationWorkspaceCore(
                     ? fetchMessages(trimmedConversationId, {
                         take: messageLimit,
                         includeLegacyEmailMeta: includeActivity,
-                        metadataMode: options?.messageMetadataMode,
+                        metadataMode: messageMetadataMode,
+                        refreshMode,
                     })
                     : Promise.resolve([] as Message[]),
                 includeActivity
@@ -2945,6 +2957,8 @@ export async function getConversationWorkspaceCore(
                 includeActivity,
                 messageLimit,
                 activityLimit,
+                refreshMode,
+                messageMetadataMode,
                 message_count: messageWindow.count,
                 activity_count: Array.isArray(activityTimeline) ? activityTimeline.length : 0,
             }));

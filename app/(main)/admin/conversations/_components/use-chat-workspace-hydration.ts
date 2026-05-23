@@ -287,6 +287,7 @@ export function useChatWorkspaceHydration({
                     messageLimit: initialMessageLimit,
                     activityLimit: workspaceActivityLimit,
                     messageMetadataMode: "firstPaint",
+                    refreshMode: "initial_hydration",
                 });
 
                 if (cancelled || activeIdRef.current !== selectedConversationId) return;
@@ -432,6 +433,7 @@ export function useChatWorkspaceHydration({
                                 includeActivity: true,
                                 messageLimit: initialMessageLimit,
                                 activityLimit: workspaceActivityLimit,
+                                refreshMode: "deferred_activity",
                             });
                             if (cancelled || activeIdRef.current !== selectedConversationId) return;
                             if (!activityWorkspace?.success) return;
