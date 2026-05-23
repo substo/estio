@@ -534,29 +534,49 @@ NODE
         echo "❌ WHATSAPP_WEB_BRIDGE_SESSION_DIR must be outside release directories. Current: \$WHATSAPP_BRIDGE_SESSION_DIR"
         exit 1
     fi
-    if pm2 describe "\$WHATSAPP_BRIDGE_APP_NAME" > /dev/null 2>&1; then
-        pm2 delete "\$WHATSAPP_BRIDGE_APP_NAME" || true
+
+    WHATSAPP_BRIDGE_APP_WEBHOOK_URL=""
+    if [ -f "\$SYMLINK_PATH/.env" ]; then
+        WHATSAPP_BRIDGE_APP_WEBHOOK_URL=\$(grep -E '^WHATSAPP_WEB_BRIDGE_APP_WEBHOOK_URL=' "\$SYMLINK_PATH/.env" | tail -n1 | sed -E 's/^[^=]+=//' | tr -d '"' | tr -d "'" || true)
     fi
-    WHATSAPP_BRIDGE_APP_WEBHOOK_URL="http://127.0.0.1:\$TARGET_PORT/api/webhooks/whatsapp-web-bridge"
-    NODE_ENV=production PROCESS_ROLE=whatsapp-bridge WHATSAPP_WEB_BRIDGE_SESSION_DIR="\$WHATSAPP_BRIDGE_SESSION_DIR" WHATSAPP_WEB_BRIDGE_APP_WEBHOOK_URL="\$WHATSAPP_BRIDGE_APP_WEBHOOK_URL" \
-        pm2 start npm --name "\$WHATSAPP_BRIDGE_APP_NAME" --cwd "\$SYMLINK_PATH" -- run start:whatsapp-web-bridge
+    if [ -z "\$WHATSAPP_BRIDGE_APP_WEBHOOK_URL" ]; then
+        WHATSAPP_BRIDGE_APP_WEBHOOK_URL="https://estio.co/api/webhooks/whatsapp-web-bridge"
+    fi
+
+    BRIDGE_SECRET=""
+    if [ -f "\$SYMLINK_PATH/.env" ]; then
+        BRIDGE_SECRET=\$(grep -E '^WHATSAPP_WEB_BRIDGE_SECRET=' "\$SYMLINK_PATH/.env" | tail -n1 | sed -E 's/^[^=]+=//' | tr -d '"' | tr -d "'" || true)
+    fi
+
+    probe_whatsapp_bridge_health() {
+        if [ -n "\$BRIDGE_SECRET" ]; then
+            curl -fsS -H "x-whatsapp-web-bridge-secret: \$BRIDGE_SECRET" "http://127.0.0.1:\$WHATSAPP_BRIDGE_PORT/health" 2>/dev/null || true
+        else
+            curl -fsS "http://127.0.0.1:\$WHATSAPP_BRIDGE_PORT/health" 2>/dev/null || true
+        fi
+    }
+
+    CURRENT_BRIDGE_WEBHOOK_URL=\$(WHATSAPP_BRIDGE_APP_NAME="\$WHATSAPP_BRIDGE_APP_NAME" node -e 'const { execSync } = require("child_process"); const appName = process.env.WHATSAPP_BRIDGE_APP_NAME; const list = JSON.parse(execSync("pm2 jlist", { encoding: "utf8" })); const app = list.find((entry) => entry && entry.name === appName); console.log(app?.pm2_env?.WHATSAPP_WEB_BRIDGE_APP_WEBHOOK_URL || app?.pm2_env?.env?.WHATSAPP_WEB_BRIDGE_APP_WEBHOOK_URL || "");' 2>/dev/null || true)
+    BRIDGE_HEALTH_JSON=\$(probe_whatsapp_bridge_health)
+
+    if [ -n "\$BRIDGE_HEALTH_JSON" ] && [ "\$CURRENT_BRIDGE_WEBHOOK_URL" = "\$WHATSAPP_BRIDGE_APP_WEBHOOK_URL" ]; then
+        echo "✅ WhatsApp Web Bridge service is already reachable; preserving existing browser session"
+    else
+        if [ -n "\$BRIDGE_HEALTH_JSON" ] && [ -n "\$CURRENT_BRIDGE_WEBHOOK_URL" ] && [ "\$CURRENT_BRIDGE_WEBHOOK_URL" != "\$WHATSAPP_BRIDGE_APP_WEBHOOK_URL" ]; then
+            echo "🔁 WhatsApp Web Bridge webhook changed; restarting once to move from \$CURRENT_BRIDGE_WEBHOOK_URL to \$WHATSAPP_BRIDGE_APP_WEBHOOK_URL"
+        fi
+        if pm2 describe "\$WHATSAPP_BRIDGE_APP_NAME" > /dev/null 2>&1; then
+            pm2 delete "\$WHATSAPP_BRIDGE_APP_NAME" || true
+        fi
+        NODE_ENV=production PROCESS_ROLE=whatsapp-bridge WHATSAPP_WEB_BRIDGE_SESSION_DIR="\$WHATSAPP_BRIDGE_SESSION_DIR" WHATSAPP_WEB_BRIDGE_APP_WEBHOOK_URL="\$WHATSAPP_BRIDGE_APP_WEBHOOK_URL" \
+            pm2 start npm --name "\$WHATSAPP_BRIDGE_APP_NAME" --cwd "\$SYMLINK_PATH" -- run start:whatsapp-web-bridge
+    fi
     echo "📱 WhatsApp Web Bridge app webhook: \$WHATSAPP_BRIDGE_APP_WEBHOOK_URL"
 
     echo "🩺 Waiting for WhatsApp Web Bridge readiness..."
     BRIDGE_READY=0
-    BRIDGE_HEALTH_JSON=""
     for i in \$(seq 1 45); do
-        BRIDGE_SECRET=""
-        if [ -f "\$SYMLINK_PATH/.env" ]; then
-            BRIDGE_SECRET=\$(grep -E '^WHATSAPP_WEB_BRIDGE_SECRET=' "\$SYMLINK_PATH/.env" | tail -n1 | sed -E 's/^[^=]+=//' | tr -d '"' | tr -d "'" || true)
-        fi
-
-        if [ -n "\$BRIDGE_SECRET" ]; then
-            BRIDGE_HEALTH_JSON=\$(curl -fsS -H "x-whatsapp-web-bridge-secret: \$BRIDGE_SECRET" "http://127.0.0.1:\$WHATSAPP_BRIDGE_PORT/health" 2>/dev/null || true)
-        else
-            BRIDGE_HEALTH_JSON=\$(curl -fsS "http://127.0.0.1:\$WHATSAPP_BRIDGE_PORT/health" 2>/dev/null || true)
-        fi
-
+        BRIDGE_HEALTH_JSON=\$(probe_whatsapp_bridge_health)
         if [ -n "\$BRIDGE_HEALTH_JSON" ]; then
             BRIDGE_READY=1
             echo "✅ WhatsApp Web Bridge service is reachable"
