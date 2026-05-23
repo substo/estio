@@ -1880,22 +1880,48 @@ function resolveWhatsAppSendState(status: string | null | undefined, outboxStatu
     return undefined;
 }
 
-export async function fetchMessages(
-    conversationId: string,
-    options?: {
-        ensureHistory?: boolean;
-        take?: number | null;
-        beforeCursor?: string | null;
-        includeLegacyEmailMeta?: boolean;
-        metadataMode?: "full" | "firstPaint";
-        refreshMode?: "initial_hydration" | "active_refresh" | "deferred_activity" | "default";
-    }
-) {
-    const startedAtMs = Date.now();
-    const timings: Record<string, number> = {};
+type FetchMessagesOptions = {
+    ensureHistory?: boolean;
+    take?: number | null;
+    beforeCursor?: string | null;
+    includeLegacyEmailMeta?: boolean;
+    metadataMode?: "full" | "firstPaint";
+    refreshMode?: "initial_hydration" | "active_refresh" | "deferred_activity" | "default";
+};
+
+type ResolvedConversationForMessages = {
+    id: string;
+    ghlConversationId?: string | null;
+    contactId?: string | null;
+    replyLanguageOverride?: string | null;
+    contact: {
+        ghlContactId?: string | null;
+    };
+};
+
+type ResolvedLocationForMessages = {
+    id: string;
+    ghlAccessToken?: string | null;
+};
+
+async function fetchMessagesForResolvedConversation(args: {
+    requestedConversationId: string;
+    location: ResolvedLocationForMessages;
+    conversation: ResolvedConversationForMessages | null;
+    options?: FetchMessagesOptions;
+    reusedConversationContext: boolean;
+    initialTimings?: Record<string, number>;
+    startedAtMs?: number;
+}) {
+    const startedAtMs = args.startedAtMs || Date.now();
+    const timings: Record<string, number> = { ...(args.initialTimings || {}) };
     const markTiming = (key: string, sinceMs: number) => {
         timings[key] = Date.now() - sinceMs;
     };
+    const conversationId = args.requestedConversationId;
+    const location = args.location;
+    const conversation = args.conversation;
+    const options = args.options;
     const ensureHistory = !!options?.ensureHistory;
     const requestedTake = Number(options?.take);
     const boundedTake = Number.isFinite(requestedTake) && requestedTake > 0
@@ -1906,18 +1932,6 @@ export async function fetchMessages(
     const includeHeavyMessageMetadata = metadataMode !== "firstPaint";
     const includeLegacyEmailMeta = includeHeavyMessageMetadata && options?.includeLegacyEmailMeta !== false;
     const paginationCursor = decodeMessagePaginationCursor(options?.beforeCursor);
-    const authStartedAtMs = Date.now();
-    const location = ensureHistory
-        ? await getAuthenticatedLocationExternal()
-        : await getAuthenticatedLocationReadOnly();
-    markTiming("auth_ms", authStartedAtMs);
-
-    const conversationStartedAtMs = Date.now();
-    const conversation = await db.conversation.findFirst({
-        where: buildConversationReferenceWhere(location.id, conversationId),
-        include: { contact: true, syncRecords: true }
-    });
-    markTiming("conversation_ms", conversationStartedAtMs);
 
     if (!conversation) {
         console.log("[perf:conversations.fetch_messages]", JSON.stringify({
@@ -1929,6 +1943,7 @@ export async function fetchMessages(
             includeLegacyEmailMeta,
             includeHeavyMessageMetadata,
             ensureHistory,
+            reusedConversationContext: args.reusedConversationContext,
             found: false,
             activeRefreshMessageLimit: refreshMode === "active_refresh" ? boundedTake : undefined,
             returnedMessageCount: 0,
@@ -2270,6 +2285,7 @@ export async function fetchMessages(
         includeLegacyEmailMeta,
         includeHeavyMessageMetadata,
         ensureHistory,
+        reusedConversationContext: args.reusedConversationContext,
         activeRefreshMessageLimit: refreshMode === "active_refresh" ? boundedTake : undefined,
         returnedMessageCount: messages.length,
         message_count: messages.length,
@@ -2284,6 +2300,40 @@ export async function fetchMessages(
     }));
 
     return serializedMessages;
+}
+
+export async function fetchMessages(
+    conversationId: string,
+    options?: FetchMessagesOptions
+) {
+    const startedAtMs = Date.now();
+    const timings: Record<string, number> = {};
+    const markTiming = (key: string, sinceMs: number) => {
+        timings[key] = Date.now() - sinceMs;
+    };
+    const ensureHistory = !!options?.ensureHistory;
+    const authStartedAtMs = Date.now();
+    const location = ensureHistory
+        ? await getAuthenticatedLocationExternal()
+        : await getAuthenticatedLocationReadOnly();
+    markTiming("auth_ms", authStartedAtMs);
+
+    const conversationStartedAtMs = Date.now();
+    const conversation = await db.conversation.findFirst({
+        where: buildConversationReferenceWhere(location.id, conversationId),
+        include: { contact: true, syncRecords: true }
+    });
+    markTiming("conversation_ms", conversationStartedAtMs);
+
+    return fetchMessagesForResolvedConversation({
+        requestedConversationId: conversationId,
+        location,
+        conversation,
+        options,
+        reusedConversationContext: false,
+        initialTimings: timings,
+        startedAtMs,
+    });
 }
 
 type ConversationWorkspaceTaskSummary = {
@@ -2329,6 +2379,7 @@ type ConversationWorkspaceMetadata = {
 
 type ConversationWorkspaceCoreMetadata = {
     conversationHeader: Conversation;
+    resolvedConversation: ResolvedConversationForMessages;
     freshness: {
         generatedAt: string;
         conversationUpdatedAt: string | null;
@@ -2607,6 +2658,15 @@ async function queryConversationWorkspaceCoreMetadata(args: {
             dealMap,
             locationDefaultReplyLanguage,
         ),
+        resolvedConversation: {
+            id: conversation.id,
+            ghlConversationId: conversation.ghlConversationId || null,
+            contactId: conversation.contactId || null,
+            replyLanguageOverride: conversation.replyLanguageOverride || null,
+            contact: {
+                ghlContactId: conversation.contact?.ghlContactId || null,
+            },
+        },
         freshness: {
             generatedAt: new Date().toISOString(),
             conversationUpdatedAt: conversation.updatedAt ? new Date(conversation.updatedAt).toISOString() : null,
@@ -2829,7 +2889,7 @@ async function queryConversationWorkspaceMetadata(args: {
 const getCachedConversationWorkspaceCoreMetadata = unstable_cache(
     async (locationId: string, locationGhlId: string | null, conversationId: string) =>
         queryConversationWorkspaceCoreMetadata({ locationId, locationGhlId, conversationId }),
-    ["conversations:workspace:core:metadata:v1"],
+    ["conversations:workspace:core:metadata:v2"],
     {
         revalidate: 8,
         tags: ["conversations:workspace", "conversations:workspace:core"],
@@ -2898,6 +2958,7 @@ export async function getConversationWorkspaceCore(
             activityRefreshMode,
             refreshMode,
             messageMetadataMode,
+            reusedConversationContext: includeMessages,
             workspaceV2: flags.workspaceV2,
         }, async () => {
             const metadata = flags.workspaceV2
@@ -2918,11 +2979,17 @@ export async function getConversationWorkspaceCore(
 
             const [messages, activityTimeline, transcriptEligibility] = await Promise.all([
                 includeMessages
-                    ? fetchMessages(trimmedConversationId, {
-                        take: messageLimit,
-                        includeLegacyEmailMeta: includeActivity,
-                        metadataMode: messageMetadataMode,
-                        refreshMode,
+                    ? fetchMessagesForResolvedConversation({
+                        requestedConversationId: trimmedConversationId,
+                        location,
+                        conversation: metadata.resolvedConversation,
+                        options: {
+                            take: messageLimit,
+                            includeLegacyEmailMeta: includeActivity,
+                            metadataMode: messageMetadataMode,
+                            refreshMode,
+                        },
+                        reusedConversationContext: true,
                     })
                     : Promise.resolve([] as Message[]),
                 includeActivity
@@ -2972,6 +3039,7 @@ export async function getConversationWorkspaceCore(
                 activityRefreshMode,
                 refreshMode,
                 messageMetadataMode,
+                reusedConversationContext: includeMessages,
                 message_count: messageWindow.count,
                 returnedMessageCount: messageWindow.count,
                 activity_count: Array.isArray(activityTimeline) ? activityTimeline.length : 0,
