@@ -1,7 +1,7 @@
 import dynamic from "next/dynamic";
 import { useState, useEffect, useRef } from "react";
 import { Conversation } from "@/lib/ghl/conversations";
-import { generateAIDraft, generateMultiContextDraftAction, getContactContext, generatePlanAction, executeNextTaskAction, getAgentPlan, getAgentExecutions, orchestrateAction } from "../actions";
+import { generateAIDraft, generateMultiContextDraftAction, getContactContext, orchestrateAction } from "../actions";
 import { createPersistentDeal, findExistingDeal, removeConversationFromDeal } from "../../deals/actions";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,7 @@ import { GroupMembersList } from './group-members-list';
 import { TraceNodeRenderer } from "./trace-node-renderer";
 import { useCoordinatorTraceModal } from "./use-coordinator-trace-modal";
 import { useCoordinatorTranscriptUsage } from "./use-coordinator-transcript-usage";
+import { useCoordinatorAgentPlan } from "./use-coordinator-agent-plan";
 import type { ContactIdentityPatch } from "../../contacts/_components/contact-form";
 
 const EditContactDialog = dynamic(
@@ -75,19 +76,6 @@ interface DealContactOption {
     lastMessageDate: number;
     unreadCount?: number;
     lastMessageType?: string;
-}
-
-interface AgentTask {
-    id: string;
-    title: string;
-    status: 'pending' | 'in-progress' | 'done' | 'failed';
-    result?: string;
-}
-
-interface ThoughtStep {
-    step: number;
-    description: string;
-    conclusion: string;
 }
 
 function normalizeContactValue(value: unknown): string {
@@ -184,13 +172,6 @@ export function CoordinatorPanel({
     const [generating, setGenerating] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // Agent Planner State
-    const [goal, setGoal] = useState("Qualify the lead and book a viewing");
-    const [plan, setPlan] = useState<AgentTask[]>([]);
-    const [planning, setPlanning] = useState(false);
-    const [executing, setExecuting] = useState(false);
-    const [agentActions, setAgentActions] = useState<any[]>([]);
-    const [thoughtSteps, setThoughtSteps] = useState<ThoughtStep[]>([]);
     const [thinkingExpanded, setThinkingExpanded] = useState(false);
     const {
         rawTrace,
@@ -233,14 +214,6 @@ export function CoordinatorPanel({
     const [orchestrating, setOrchestrating] = useState(false);
     const [orchestrationResult, setOrchestrationResult] = useState<any>(null);
 
-    // Usage Stats State
-    const [conversationUsage, setConversationUsage] = useState({
-        promptTokens: 0,
-        completionTokens: 0,
-        totalTokens: 0,
-        totalCost: 0
-    });
-
     const transcriptUsage = useCoordinatorTranscriptUsage(conversation.id);
     const conversationIdRef = useRef(conversation.id);
 
@@ -260,53 +233,33 @@ export function CoordinatorPanel({
         setContactContext(initialContactContext || null);
     }, [initialContactContext, conversation.id]);
 
+    const {
+        goal,
+        setGoal,
+        plan,
+        setPlan,
+        planning,
+        executing,
+        agentActions,
+        thoughtSteps,
+        handleGeneratePlan,
+        handleExecuteNext,
+    } = useCoordinatorAgentPlan({
+        conversationId: conversation.id,
+        contactId: conversation.contactId,
+        onSuggestionsGenerated,
+        setContactContext,
+        setRawTrace,
+        setTraceTree,
+        setReasoning,
+        setError,
+    });
+
     const isContextMode = selectedConversations && selectedConversations.length > 0;
     const traceToolCalls = Array.isArray(rawTrace?.toolCalls) ? rawTrace.toolCalls : [];
     const leadParserToolCall = traceToolCalls.find((c: any) => c?.tool === "gemini.generateContent") || null;
     const leadParserRequest = leadParserToolCall?.arguments || null;
     const leadParserResponse = leadParserToolCall?.result || null;
-
-    // Fetch Plan on Load
-    useEffect(() => {
-        // Reset state immediately when conversation changes
-        setPlan([]);
-        setReasoning("");
-        setThoughtSteps([]);
-        setAgentActions([]);
-        setRawTrace(null);
-        setTraceTree(null);
-        setGoal("Qualify the lead and book a viewing"); // Reset to default goal
-
-        if (!conversation.id) return;
-
-        let cancelled = false;
-        const fetchTimer = setTimeout(() => {
-            if (cancelled) return;
-            getAgentPlan(conversation.id).then((res: any) => {
-                if (cancelled) return;
-                if (res) {
-                    if (res.plan) setPlan(res.plan);
-                    if (res.usage) setConversationUsage(res.usage);
-                    // Handle legacy return where res IS the plan array (if any stale cache/code)
-                    if (Array.isArray(res)) setPlan(res);
-                }
-            });
-
-            // Pull latest execution summary to hydrate Mission Control context.
-            getAgentExecutions(conversation.id).then(history => {
-                if (cancelled) return;
-                if (history && history.length > 0) {
-                    const latest = history[0];
-                    if (latest?.thoughtSummary) setReasoning(latest.thoughtSummary);
-                }
-            });
-        }, 150);
-
-        return () => {
-            cancelled = true;
-            clearTimeout(fetchTimer);
-        };
-    }, [conversation.id]);
 
     // Auto-detect existing deal on selection change
     useEffect(() => {
@@ -427,77 +380,6 @@ export function CoordinatorPanel({
             setGenerating(false);
         }
     };
-
-    const handleGeneratePlan = async () => {
-        setPlanning(true);
-        setError(null);
-        try {
-            const res = await generatePlanAction(conversation.id, conversation.contactId, goal);
-            if (res.success && res.plan) {
-                setPlan(res.plan);
-                setReasoning(res.thought || "Plan generated.");
-            } else {
-                setError(res.error || "Failed to generate plan");
-            }
-        } catch (e: any) {
-            setError(e.message);
-        } finally {
-            setPlanning(false);
-        }
-    }
-
-    const handleExecuteNext = async () => {
-        setExecuting(true);
-        setAgentActions([]);
-        setThoughtSteps([]);
-        setRawTrace(null);
-        try {
-            const res = await executeNextTaskAction(conversation.id, conversation.contactId);
-            if (res.success) {
-                // Update local plan state to reflect status change
-                const updatedPlan = [...plan];
-                const taskIndex = updatedPlan.findIndex(t => t.id === res.task.id);
-                if (taskIndex >= 0) updatedPlan[taskIndex] = res.task;
-                setPlan(updatedPlan);
-
-                setReasoning(res.thoughtSummary || "Task executed.");
-                setThoughtSteps(res.thoughtSteps || []);
-                setAgentActions(res.actions || []);
-                if ((res as any)?.suggestionQueued) {
-                    onSuggestionsGenerated?.([]);
-                }
-
-                // Update usage stats if returned
-                if (res.conversationUsage) {
-                    setConversationUsage(res.conversationUsage);
-                }
-
-                // Store full trace for modal display
-                setRawTrace({
-                    timestamp: new Date().toISOString(),
-                    task: res.task,
-                    thoughtSummary: res.thoughtSummary,
-                    thoughtSteps: res.thoughtSteps,
-                    toolCalls: res.actions,
-                    draftReply: res.draft,
-                    usage: res.usage // Update current trace usage too
-                });
-
-                // Refresh context
-                getContactContext(conversation.contactId).then(setContactContext);
-            } else {
-                if (res.message === "All tasks completed!") {
-                    setReasoning("All tasks are done! Great job.");
-                } else {
-                    setError(res.error || "Failed to execute task");
-                }
-            }
-        } catch (e: any) {
-            setError(e.message);
-        } finally {
-            setExecuting(false);
-        }
-    }
 
     const handleRemoveParticipant = async (conversationId: string) => {
         if (dealContextId) {
