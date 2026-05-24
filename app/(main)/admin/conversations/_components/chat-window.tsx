@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Conversation, Message } from "@/lib/ghl/conversations";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -19,15 +19,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { ActivityLogEntry } from "./activity-log-entry";
 import { SuggestedResponseQueue, type SuggestedResponseQueueItem } from "./suggested-response-queue";
 import { getReplyLanguageLabel } from "@/lib/ai/reply-language-options";
-
-export interface ActivityLogItem {
-    id: string;
-    type: 'activity';
-    createdAt: string;
-    action: string;
-    changes?: any;
-    user?: { name: string | null; email: string | null } | null;
-}
+import { useChatWindowTimelineScroll, type ActivityLogItem } from "./use-chat-window-timeline-scroll";
 
 interface ChatWindowProps {
     conversation: Conversation;
@@ -140,7 +132,6 @@ import {
 } from "@/app/(main)/admin/conversations/actions";
 import type { SelectionBatchInput, SelectionBatchItem } from "./message-selection-actions";
 import { ConversationComposer } from "./conversation-composer";
-import { calculatePrependScrollTop } from "@/lib/conversations/thread-hydration";
 import {
     buildMessageTranslationState,
     getBrowserLanguage,
@@ -227,8 +218,19 @@ export function ChatWindow({
     onResendMessage,
     smsRelayEnabled,
 }: ChatWindowProps & { suggestions?: string[] }) {
-    const scrollRef = useRef<HTMLDivElement>(null);
-    const timelineContentRef = useRef<HTMLDivElement>(null);
+    const {
+        scrollRef,
+        timelineContentRef,
+        timelineItems,
+        isTimelineReady,
+        getEnableMountAnimation,
+    } = useChatWindowTimelineScroll({
+        conversationId: conversation.id,
+        messages,
+        activityLog,
+        loading,
+        onInitialPaintReady,
+    });
     const [selectedModel, setSelectedModel] = useState("");
     const [selectionBatch, setSelectionBatch] = useState<SelectionBatchItem[]>([]);
     const [isSummarizingBatch, setIsSummarizingBatch] = useState(false);
@@ -243,16 +245,6 @@ export function ChatWindow({
     const [jumpMessageId, setJumpMessageId] = useState<string | null>(null);
     const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
     const jumpHighlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const shouldStickToBottomRef = useRef(true);
-    const hasForcedInitialBottomSnapRef = useRef(false);
-    const previousMessageIdsRef = useRef<string[]>([]);
-    const previousScrollHeightRef = useRef(0);
-    const previousScrollTopRef = useRef(0);
-    const knownMessageIdsRef = useRef<Set<string>>(new Set());
-    const previousTailMessageIdRef = useRef<string | null>(null);
-    const hasInitializedKnownMessagesRef = useRef(false);
-    const [isTimelineReady, setIsTimelineReady] = useState(false);
-    const hasReportedInitialPaintRef = useRef(false);
     const canUseTranscriptOnDemand = transcriptOnDemandEnabled !== false;
     const [addNoteOpen, setAddNoteOpen] = useState(false);
     const [addNoteText, setAddNoteText] = useState("");
@@ -264,29 +256,6 @@ export function ChatWindow({
     const [threadTranslationMode, setThreadTranslationMode] = useState<"original" | "translated">("original");
     const [autoTranslatingThread, setAutoTranslatingThread] = useState(false);
     const autoTranslationAttemptedRef = useRef<string | null>(null);
-
-    // Merge messages and activity log into a single timeline
-    const timelineItems = useMemo(() => {
-        const msgItems = messages.map(m => ({
-            kind: 'message' as const,
-            sortDate: new Date(m.dateAdded).getTime(),
-            message: m,
-        }));
-        const actItems = activityLog.map(a => ({
-            kind: 'activity' as const,
-            sortDate: new Date(a.createdAt).getTime(),
-            activity: a,
-        }));
-        return [...msgItems, ...actItems].sort((a, b) => a.sortDate - b.sortDate);
-    }, [messages, activityLog]);
-
-    const snapToBottom = useCallback(() => {
-        const container = scrollRef.current;
-        if (!container) return;
-        container.scrollTop = container.scrollHeight;
-        previousScrollTopRef.current = container.scrollTop;
-        previousScrollHeightRef.current = container.scrollHeight;
-    }, []);
 
     const handleAddNote = async () => {
         if (!addNoteText.trim() || !onAddActivityEntry) return;
@@ -341,16 +310,6 @@ export function ChatWindow({
         setShowTranscriptSearch(false);
         setJumpMessageId(null);
         messageRefs.current = {};
-        shouldStickToBottomRef.current = true;
-        hasForcedInitialBottomSnapRef.current = false;
-        previousMessageIdsRef.current = [];
-        previousScrollHeightRef.current = 0;
-        previousScrollTopRef.current = 0;
-        knownMessageIdsRef.current = new Set();
-        previousTailMessageIdRef.current = null;
-        hasInitializedKnownMessagesRef.current = false;
-        hasReportedInitialPaintRef.current = false;
-        setIsTimelineReady(false);
         setTranslationBannerDismissed(false);
         setThreadTranslationMode("original");
         setAutoTranslatingThread(false);
@@ -365,140 +324,6 @@ export function ChatWindow({
             }
         };
     }, []);
-
-    useEffect(() => {
-        const container = scrollRef.current;
-        if (!container) return;
-
-        const handleScroll = () => {
-            const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-            shouldStickToBottomRef.current = distanceFromBottom <= 80;
-            previousScrollTopRef.current = container.scrollTop;
-            previousScrollHeightRef.current = container.scrollHeight;
-        };
-
-        handleScroll();
-        container.addEventListener("scroll", handleScroll, { passive: true });
-        return () => container.removeEventListener("scroll", handleScroll);
-    }, [conversation.id]);
-
-    useLayoutEffect(() => {
-        const container = scrollRef.current;
-        if (!container) return;
-
-        const previousIds = previousMessageIdsRef.current;
-        const nextIds = messages.map((message) => message.id);
-        const previousFirstId = previousIds[0] || null;
-        const previousLastId = previousIds[previousIds.length - 1] || null;
-        const nextFirstId = nextIds[0] || null;
-        const nextLastId = nextIds[nextIds.length - 1] || null;
-
-        const didPrependOlderMessages = (
-            previousIds.length > 0
-            && nextIds.length > previousIds.length
-            && !!previousFirstId
-            && !!previousLastId
-            && nextLastId === previousLastId
-            && nextFirstId !== previousFirstId
-        );
-
-        if (didPrependOlderMessages) {
-            const compensatedTop = calculatePrependScrollTop(
-                previousScrollTopRef.current,
-                previousScrollHeightRef.current,
-                container.scrollHeight
-            );
-            container.scrollTop = compensatedTop;
-            previousScrollTopRef.current = compensatedTop;
-        }
-
-        previousMessageIdsRef.current = nextIds;
-        previousScrollHeightRef.current = container.scrollHeight;
-        previousScrollTopRef.current = container.scrollTop;
-    }, [conversation.id, messages]);
-
-    useEffect(() => {
-        const currentIds = messages.map((message) => message.id);
-        if (!hasInitializedKnownMessagesRef.current) {
-            knownMessageIdsRef.current = new Set(currentIds);
-            previousTailMessageIdRef.current = currentIds[currentIds.length - 1] || null;
-            if (currentIds.length > 0 || !loading) {
-                hasInitializedKnownMessagesRef.current = true;
-            }
-            return;
-        }
-
-        knownMessageIdsRef.current = new Set(currentIds);
-        previousTailMessageIdRef.current = currentIds[currentIds.length - 1] || null;
-    }, [conversation.id, messages, loading]);
-
-    // Always force a bottom snap the first time this conversation's timeline is hydrated.
-    useLayoutEffect(() => {
-        if (loading) return;
-        if (!timelineItems.length) return;
-        if (hasForcedInitialBottomSnapRef.current) return;
-
-        hasForcedInitialBottomSnapRef.current = true;
-        shouldStickToBottomRef.current = true;
-        snapToBottom();
-        requestAnimationFrame(() => {
-            if (shouldStickToBottomRef.current) {
-                snapToBottom();
-            }
-            setIsTimelineReady(true);
-            if (!hasReportedInitialPaintRef.current) {
-                hasReportedInitialPaintRef.current = true;
-                onInitialPaintReady?.();
-            }
-        });
-    }, [conversation.id, loading, onInitialPaintReady, timelineItems.length, snapToBottom]);
-
-    useEffect(() => {
-        if (!loading && timelineItems.length === 0) {
-            setIsTimelineReady(true);
-            if (!hasReportedInitialPaintRef.current) {
-                hasReportedInitialPaintRef.current = true;
-                onInitialPaintReady?.();
-            }
-        }
-    }, [loading, onInitialPaintReady, timelineItems.length]);
-
-    // Keep snapped to latest when new items arrive while user is still near bottom.
-    useLayoutEffect(() => {
-        if (loading) return;
-        if (!messages.length && !activityLog.length) return;
-        if (!shouldStickToBottomRef.current) return;
-        snapToBottom();
-    }, [conversation.id, messages, activityLog, loading, snapToBottom]);
-
-    // Stick to bottom through late layout changes (images, audio controls, iframe height updates),
-    // but only while user hasn't manually scrolled away from bottom.
-    useEffect(() => {
-        const container = scrollRef.current;
-        const content = timelineContentRef.current;
-        if (!container || !content) return;
-        if (typeof ResizeObserver === "undefined") return;
-
-        let rafId: number | null = null;
-        const scheduleSnap = () => {
-            if (!shouldStickToBottomRef.current) return;
-            if (rafId !== null) cancelAnimationFrame(rafId);
-            rafId = requestAnimationFrame(() => {
-                if (!shouldStickToBottomRef.current) return;
-                snapToBottom();
-            });
-        };
-
-        const observer = new ResizeObserver(() => scheduleSnap());
-        observer.observe(content);
-        observer.observe(container);
-        scheduleSnap();
-
-        return () => {
-            if (rafId !== null) cancelAnimationFrame(rafId);
-            observer.disconnect();
-        };
-    }, [conversation.id, snapToBottom]);
 
     const handleAddSelectionToBatch = useCallback((item: SelectionBatchInput) => {
         const normalizedText = normalizeSelectionForBatch(item.text);
@@ -713,18 +538,6 @@ export function ChatWindow({
         threadTranslationMode,
         translationReadEnabled,
     ]);
-    const previousTailMessageId = previousTailMessageIdRef.current;
-    const previousTailIndex = previousTailMessageId
-        ? messages.findIndex((message) => message.id === previousTailMessageId)
-        : -1;
-    const messageIndexById = useMemo(() => {
-        const indexMap = new Map<string, number>();
-        messages.forEach((message, index) => {
-            indexMap.set(message.id, index);
-        });
-        return indexMap;
-    }, [messages]);
-
     const handleSummarizeBatch = async () => {
         if (!selectionBatch.length) return;
         setIsSummarizingBatch(true);
@@ -1250,13 +1063,7 @@ export function ChatWindow({
                             );
                         }
                         const m = item.message!;
-                        const messageIndex = messageIndexById.get(m.id) ?? -1;
-                        const enableMountAnimation = (
-                            hasInitializedKnownMessagesRef.current
-                            && !knownMessageIdsRef.current.has(m.id)
-                            && previousTailIndex >= 0
-                            && messageIndex > previousTailIndex
-                        );
+                        const enableMountAnimation = getEnableMountAnimation(m.id);
                         return (
                             <div
                                 key={m.id}
