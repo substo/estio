@@ -1,25 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { Mail, Smartphone, Paperclip, ExternalLink, ChevronDown, ChevronUp, ArrowRight, Download, RefreshCw, Clock, Check, CheckCheck, AlertTriangle, User, MoreHorizontal, Clipboard, Search, FileText, Wand2, ListPlus, ListTodo, Sparkles, Home, Languages } from "lucide-react";
+import { Mail, Smartphone, Paperclip, ExternalLink, ChevronDown, ChevronUp, ArrowRight, Download, RefreshCw, Clock, Check, CheckCheck, AlertTriangle, User } from "lucide-react";
 import { format } from "date-fns";
-import { EmailFrame, type EmailFrameSelection } from "./email-frame";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
+import { EmailFrame } from "./email-frame";
 import { LinkifiedText } from "./linkified-text";
 import type { MessageTranslationState, MessageTranslationVariant } from "@/lib/ghl/conversations";
 import { selectActiveTranslation } from "@/lib/conversations/translation-view";
 import {
-    MessageSelectionActions,
-    type MessageSelectionActionTarget,
     type SelectionBatchInput,
     type SelectionBatchItem,
 } from "./message-selection-actions";
-import { buildPlainLeadTextFromHtml } from "./paste-lead-rich-text";
-import {
-    getSharedContactReadableMessage,
-} from "@/lib/contacts/vcard";
 import {
     classifyMessageAttachments,
     deriveBodyVCardDownloadHref,
@@ -31,6 +24,7 @@ import {
 import { MessageAudioAttachment } from "./message-audio-attachment";
 import { MessageImageAttachments } from "./message-image-attachments";
 import { MessageSharedContactCards } from "./message-shared-contact-cards";
+import { MessageBubbleActionsMenu, useMessageBubbleActions } from "./message-bubble-actions-menu";
 
 export interface MessageBubbleProps {
     message: {
@@ -154,7 +148,6 @@ export function MessageBubble({
     const isSMS = (message.type || '').toUpperCase().includes('SMS') || (message.type || '').toUpperCase().includes('PHONE');
     const isWhatsApp = (message.type || '').toUpperCase().includes('WHATSAPP');
     const [isExpanded, setIsExpanded] = useState(!isEmail); // Emails collapsed by default
-    const [selectionTarget, setSelectionTarget] = useState<MessageSelectionActionTarget | null>(null);
     const [isRefetchingMedia, setIsRefetchingMedia] = useState(false);
     const [transcriptActionAttachmentId, setTranscriptActionAttachmentId] = useState<string | null>(null);
     const [extractActionAttachmentId, setExtractActionAttachmentId] = useState<string | null>(null);
@@ -163,7 +156,6 @@ export function MessageBubble({
     const [activeTranslation, setActiveTranslation] = useState<MessageTranslationVariant | null>(resolvedMessageTranslation);
     const [translationViewMode, setTranslationViewMode] = useState<"thread" | "original" | "translated">("thread");
     const [isTranslatingMessage, setIsTranslatingMessage] = useState(false);
-    const contentRef = useRef<HTMLDivElement>(null);
     const attachments = useMemo(() => normalizeMessageAttachments(message.attachments), [message.attachments]);
     const bodySharedContacts = useMemo(
         () => deriveSharedContactsFromMessageBody(message.body || ""),
@@ -176,11 +168,32 @@ export function MessageBubble({
     }, [attachments, bodySharedContacts]);
     const isContactMessage = !!sharedContacts && sharedContacts.length > 0;
     const router = useRouter(); 
-    const [pendingAction, setPendingAction] = useState<string | null>(null);
-    const contextMenuButtonRef = useRef<HTMLButtonElement>(null);
+    const {
+        contentRef,
+        contextMenuButtonRef,
+        handleContextMenuAction,
+        handleEmailSelectionChange,
+        selectionActions,
+    } = useMessageBubbleActions({
+        messageId: message.id,
+        conversationId: message.conversationId || null,
+        body: message.body || "",
+        isEmail,
+        isContactMessage,
+        isExpanded,
+        translationReset: {
+            translation: message.translation,
+            translations: message.translations,
+            preferredDisplayLanguage,
+        },
+        aiModel: aiModel || null,
+        selectionBatch,
+        onAddSelectionToBatch,
+        onRemoveSelectionBatchItem,
+        onClearSelectionBatch,
+    });
 
     useEffect(() => {
-        setSelectionTarget(null);
         setExpandedTranscriptIds({});
         setTranscriptActionAttachmentId(null);
         setExtractActionAttachmentId(null);
@@ -301,119 +314,6 @@ export function MessageBubble({
         }
     };
 
-    const clearSelectionTarget = () => setSelectionTarget(null);
-
-    const setSelectionFromRect = useCallback((
-        rawText: string,
-        rect: { top: number; left: number; right: number; bottom: number; width: number; height: number },
-        source: "message" | "email"
-    ) => {
-        const text = String(rawText || "").replace(/\u00a0/g, " ").trim();
-        if (!text || text.length < 2 || (!rect.width && !rect.height)) {
-            if (source === "message") {
-                setSelectionTarget((prev) => (prev?.source === "message" ? null : prev));
-            } else {
-                setSelectionTarget((prev) => (prev?.source === "email" ? null : prev));
-            }
-            return;
-        }
-
-        setSelectionTarget({
-            text,
-            source,
-            rect,
-        });
-    }, []);
-
-    // Strategy A: Universal selection detection via document selectionchange.
-    // Works on both desktop (mouse drag) and mobile (touch selection handles).
-    // Replaces the previous onMouseUp/onKeyUp approach that didn't fire on mobile.
-    useEffect(() => {
-        const contentNode = contentRef.current;
-        if (!contentNode) return;
-
-        let timer: ReturnType<typeof setTimeout> | null = null;
-
-        const onSelectionChange = () => {
-            if (timer) clearTimeout(timer);
-            timer = setTimeout(() => {
-                const sel = window.getSelection();
-                if (!sel || sel.rangeCount === 0 || !sel.toString().trim()) {
-                    setSelectionTarget((prev) => (prev?.source === "message" ? null : prev));
-                    return;
-                }
-
-                const range = sel.getRangeAt(0);
-                // Allow cross-message drag selection as long as this bubble intersects
-                let intersects = false;
-                try { intersects = range.intersectsNode(contentNode); } catch { intersects = false; }
-                if (!intersects) return;
-
-                const rawText = sel.toString();
-                const rect = range.getBoundingClientRect();
-                setSelectionFromRect(rawText, {
-                    top: rect.top,
-                    left: rect.left,
-                    right: rect.right,
-                    bottom: rect.bottom,
-                    width: rect.width,
-                    height: rect.height,
-                }, "message");
-            }, 200);
-        };
-
-        document.addEventListener("selectionchange", onSelectionChange);
-        return () => {
-            document.removeEventListener("selectionchange", onSelectionChange);
-            if (timer) clearTimeout(timer);
-        };
-    }, [setSelectionFromRect]);
-
-    // Strategy B: Get actionable text for context menu triggers.
-    // Prefers active text selection, then falls back to the full message body.
-    const getActionableText = useCallback(() => {
-        if (selectionTarget?.text?.trim()) return selectionTarget.text.trim();
-        if (isContactMessage) return getSharedContactReadableMessage(message.body);
-        if (isEmail) {
-            const plainEmailText = buildPlainLeadTextFromHtml(message.body);
-            if (plainEmailText.trim()) return plainEmailText.trim();
-        }
-        return String(message.body || "")
-            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-            .replace(/<[^>]*>/g, " ")
-            .replace(/\s+/g, " ")
-            .trim();
-    }, [selectionTarget, isContactMessage, isEmail, message.body]);
-
-    // Strategy B: Handle context menu action trigger.
-    const handleContextMenuAction = useCallback((action: string) => {
-        const text = getActionableText();
-        if (!text || text.length < 2) return;
-        const button = contextMenuButtonRef.current;
-        const rect = button?.getBoundingClientRect() || { top: 200, left: 200, right: 220, bottom: 220, width: 20, height: 20 };
-        setSelectionTarget({
-            text,
-            source: "message",
-            rect: {
-                top: rect.top,
-                left: rect.left,
-                right: rect.right,
-                bottom: rect.bottom,
-                width: rect.width,
-                height: rect.height,
-            },
-        });
-        setPendingAction(action);
-    }, [getActionableText]);
-
-    const handleEmailSelectionChange = (selection: EmailFrameSelection | null) => {
-        if (!selection) {
-            setSelectionTarget((prev) => (prev?.source === "email" ? null : prev));
-            return;
-        }
-        setSelectionFromRect(selection.text, selection.rect, "email");
-    };
-
     const canTranslateMessage = translationReadEnabled
         && !isOutbound
         && !!onTranslateMessage
@@ -499,103 +399,16 @@ export function MessageBubble({
                     }
                 }}
             >
-                {/* Per-message context menu (Strategy B) — hover reveal desktop, always visible mobile */}
-                {!(isEmail && !isExpanded) && (
-                    <div className={cn(
-                        "absolute top-1.5 z-10 transition-opacity duration-150",
-                        isOutbound ? "left-1.5" : "right-1.5",
-                        "opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
-                    )}>
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <button
-                                    ref={contextMenuButtonRef}
-                                    type="button"
-                                    className={cn(
-                                        "h-6 w-6 rounded-full flex items-center justify-center transition-colors",
-                                        isOutbound
-                                            ? "bg-blue-500/40 hover:bg-blue-500/60 text-white"
-                                            : "bg-gray-100 hover:bg-gray-200 text-gray-500"
-                                    )}
-                                    onClick={(e) => e.stopPropagation()}
-                                    title="Message actions"
-                                >
-                                    <MoreHorizontal className="h-3.5 w-3.5" />
-                                </button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align={isOutbound ? "start" : "end"} className="w-44" data-no-pane-swipe>
-                                <DropdownMenuItem onClick={() => handleContextMenuAction("pasteLead")} className="gap-2 text-xs">
-                                    <Clipboard className="h-3.5 w-3.5" />
-                                    Paste Lead
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => handleContextMenuAction("findContact")} className="gap-2 text-xs">
-                                    <Search className="h-3.5 w-3.5" />
-                                    Find Contact
-                                </DropdownMenuItem>
-                                {!!onTranslateMessage && (
-                                    <>
-                                        <DropdownMenuSeparator />
-                                        <DropdownMenuItem onClick={() => handleTranslateMessage()} className="gap-2 text-xs text-blue-600 focus:text-blue-700">
-                                            <Languages className="h-3.5 w-3.5" />
-                                            Translate Message
-                                        </DropdownMenuItem>
-                                    </>
-                                )}
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                    onClick={() => handleContextMenuAction("summarize")}
-                                    className="gap-2 text-xs"
-                                    disabled={!message.conversationId}
-                                >
-                                    <FileText className="h-3.5 w-3.5" />
-                                    Summarize
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                    onClick={() => handleContextMenuAction("custom")}
-                                    className="gap-2 text-xs"
-                                    disabled={!message.conversationId}
-                                >
-                                    <Wand2 className="h-3.5 w-3.5" />
-                                    Custom
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                    onClick={() => handleContextMenuAction("createTask")}
-                                    className="gap-2 text-xs"
-                                    disabled={!message.conversationId}
-                                >
-                                    <ListTodo className="h-3.5 w-3.5" />
-                                    Create Task
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                    onClick={() => handleContextMenuAction("suggestTasks")}
-                                    className="gap-2 text-xs"
-                                    disabled={!message.conversationId}
-                                >
-                                    <Sparkles className="h-3.5 w-3.5" />
-                                    AI Tasks
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                    onClick={() => handleContextMenuAction("suggestViewings")}
-                                    className="gap-2 text-xs"
-                                    disabled={!message.conversationId}
-                                >
-                                    <Home className="h-3.5 w-3.5" />
-                                    Suggest Viewings
-                                </DropdownMenuItem>
-                                {onAddSelectionToBatch && (
-                                    <>
-                                        <DropdownMenuSeparator />
-                                        <DropdownMenuItem onClick={() => handleContextMenuAction("addBatch")} className="gap-2 text-xs">
-                                            <ListPlus className="h-3.5 w-3.5" />
-                                            Add to Batch
-                                        </DropdownMenuItem>
-                                    </>
-                                )}
-                            </DropdownMenuContent>
-                        </DropdownMenu>
-                    </div>
-                )}
+                <MessageBubbleActionsMenu
+                    isOutbound={isOutbound}
+                    canShow={!(isEmail && !isExpanded)}
+                    hasConversation={!!message.conversationId}
+                    canTranslate={!!onTranslateMessage}
+                    canAddSelectionToBatch={!!onAddSelectionToBatch}
+                    onTranslateMessage={handleTranslateMessage}
+                    contextMenuButtonRef={contextMenuButtonRef}
+                    onContextMenuAction={handleContextMenuAction}
+                />
                 {/* SMS/WhatsApp Header */}
                 {(isSMS || isWhatsApp) && (
                     <div className={cn(
@@ -929,19 +742,7 @@ export function MessageBubble({
                 )}
             </div>
 
-            <MessageSelectionActions
-                selection={selectionTarget}
-                onClearSelection={clearSelectionTarget}
-                conversationId={message.conversationId || null}
-                aiModel={aiModel || null}
-                messageId={message.id}
-                selectionBatch={selectionBatch}
-                onAddSelectionToBatch={onAddSelectionToBatch}
-                onRemoveSelectionBatchItem={onRemoveSelectionBatchItem}
-                onClearSelectionBatch={onClearSelectionBatch}
-                triggerAction={pendingAction}
-                onTriggerActionHandled={() => setPendingAction(null)}
-            />
+            {selectionActions}
         </div>
     );
 }
