@@ -1,7 +1,7 @@
 import dynamic from "next/dynamic";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Conversation } from "@/lib/ghl/conversations";
-import { generateAIDraft, generateMultiContextDraftAction, getContactContext, generatePlanAction, executeNextTaskAction, getAgentPlan, getAgentExecutions, getTraceTreeAction, getContactInsightsAction, orchestrateAction, getConversationTranscriptUsage } from "../actions";
+import { generateAIDraft, generateMultiContextDraftAction, getContactContext, generatePlanAction, executeNextTaskAction, getAgentPlan, getAgentExecutions, getTraceTreeAction, getContactInsightsAction, orchestrateAction } from "../actions";
 import { createPersistentDeal, findExistingDeal, removeConversationFromDeal } from "../../deals/actions";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { DEFAULT_REPLY_LANGUAGE, normalizeReplyLanguage } from "@/lib/ai/reply-language-options";
 import { GroupMembersList } from './group-members-list';
 import { TraceNodeRenderer } from "./trace-node-renderer";
+import { useCoordinatorTranscriptUsage } from "./use-coordinator-transcript-usage";
 import type { ContactIdentityPatch } from "../../contacts/_components/contact-form";
 
 const EditContactDialog = dynamic(
@@ -230,8 +231,7 @@ export function CoordinatorPanel({
         totalCost: 0
     });
 
-    // Transcript usage for this conversation
-    const [transcriptUsage, setTranscriptUsage] = useState({ totalTokens: 0, totalCost: 0, transcriptCount: 0, extractionCount: 0 });
+    const transcriptUsage = useCoordinatorTranscriptUsage(conversation.id);
     const conversationIdRef = useRef(conversation.id);
 
     useEffect(() => {
@@ -294,26 +294,6 @@ export function CoordinatorPanel({
                     if (latest?.thoughtSummary) setReasoning(latest.thoughtSummary);
                 }
             });
-        }, 150);
-
-        return () => {
-            cancelled = true;
-            clearTimeout(fetchTimer);
-        };
-    }, [conversation.id]);
-
-    // Fetch transcript usage for this conversation
-    useEffect(() => {
-        if (!conversation.id) return;
-
-        let cancelled = false;
-        const fetchTimer = setTimeout(() => {
-            if (cancelled) return;
-            getConversationTranscriptUsage(conversation.id)
-                .then((res) => {
-                    if (!cancelled) setTranscriptUsage(res);
-                })
-                .catch(() => { });
         }, 150);
 
         return () => {
