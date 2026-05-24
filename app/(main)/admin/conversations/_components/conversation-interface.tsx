@@ -145,6 +145,10 @@ import {
     useDealWorkspaceHydration,
     type DealWorkspaceCoreSnapshot,
 } from './use-deal-workspace-hydration';
+import {
+    ACTIVE_DEAL_REFRESH_EVENT_LIMIT,
+    useDealWorkspaceRefreshOrchestration,
+} from './use-deal-workspace-refresh-orchestration';
 import { useConversationRefreshOrchestration } from './use-conversation-refresh-orchestration';
 import {
     buildDealContactOptions,
@@ -962,68 +966,16 @@ export function ConversationInterface({ locationId, initialConversations, initia
         estimateThreadViewportHeightPx,
     });
 
-    const refreshActiveDealWorkspace = useCallback(async (
-        dealId: string,
-        options?: {
-            reason?: string;
-            take?: number;
-            refreshSidebar?: boolean;
-        }
-    ) => {
-        const normalizedDealId = String(dealId || "").trim();
-        if (!normalizedDealId) return null;
-
-        const requestedTake = Number(options?.take);
-        const take = Number.isFinite(requestedTake) && requestedTake > 0
-            ? Math.min(Math.max(Math.floor(requestedTake), 1), THREAD_TARGET_MESSAGE_COUNT)
-            : THREAD_TARGET_MESSAGE_COUNT;
-
-        trackClientRequest("deal_workspace_refresh", {
-            dealId: normalizedDealId,
-            reason: options?.reason || "manual",
-            take,
-        });
-
-        try {
-            const workspace = await getDealWorkspaceCore(normalizedDealId, { take });
-            if (!workspace?.success) return workspace;
-            if (activeDealIdRef.current !== normalizedDealId) return workspace;
-
-            const timelineEvents = Array.isArray(workspace.timelineEvents) ? workspace.timelineEvents : [];
-            const snapshot = createDealWorkspaceCoreSnapshot({
-                dealId: normalizedDealId,
-                title: workspace.deal?.title,
-                stage: workspace.deal?.stage,
-                metadata: workspace.deal?.metadata,
-                participants: Array.isArray(workspace.participants) ? workspace.participants : [],
-                timelineEvents,
-                hydration: createDealWorkspaceHydrationState({
-                    status: 'full',
-                    timelineEvents,
-                    timelineWindow: workspace.timelineWindow,
-                    initialCount: timelineEvents.length,
-                    targetCount: THREAD_TARGET_MESSAGE_COUNT,
-                    requestedLimit: take,
-                }),
-            });
-            cacheDealWorkspaceCoreSnapshot(normalizedDealId, snapshot);
-            applyDealWorkspaceCoreSnapshot(normalizedDealId, snapshot, activeIdRef.current);
-
-            if (options?.refreshSidebar) {
-                void loadDealWorkspaceSidebar(normalizedDealId, { reason: options.reason || "refresh" });
-            }
-
-            return workspace;
-        } catch (error) {
-            console.error("Failed to refresh deal workspace:", error);
-            return null;
-        }
-    }, [
+    const { refreshActiveDealWorkspace } = useDealWorkspaceRefreshOrchestration({
+        activeDealIdRef,
+        activeIdRef,
         applyDealWorkspaceCoreSnapshot,
         cacheDealWorkspaceCoreSnapshot,
+        getCachedDealWorkspaceCoreSnapshot,
+        isDealWorkspaceHydrationBusy,
         loadDealWorkspaceSidebar,
         trackClientRequest,
-    ]);
+    });
 
     useEffect(() => {
         if (viewMode !== 'deals') return;
@@ -1361,14 +1313,11 @@ export function ConversationInterface({ locationId, initialConversations, initia
             if (!selectedDealId) return;
 
             try {
-                if (isDealWorkspaceHydrationBusy(selectedDealId)) {
-                    trackClientRequest("deal_active_poll_skipped_hydration", { dealId: selectedDealId });
-                    return;
-                }
-
                 await refreshActiveDealWorkspace(selectedDealId, {
                     reason: "poll",
+                    take: ACTIVE_DEAL_REFRESH_EVENT_LIMIT,
                     refreshSidebar: true,
+                    hydrationSkipLogKind: "deal_active_poll_skipped_hydration",
                 });
             } catch (error) {
                 if (!cancelled) {
@@ -1393,11 +1342,9 @@ export function ConversationInterface({ locationId, initialConversations, initia
         activeDealId,
         featureFlags.balancedPolling,
         featureFlags.realtimeSse,
-        isDealWorkspaceHydrationBusy,
         isTabVisible,
         realtimeMode,
         refreshActiveDealWorkspace,
-        trackClientRequest,
         viewMode,
     ]);
 
@@ -1460,13 +1407,11 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 if (viewMode === 'deals') {
                     const payloadDealId = String(event?.payload?.dealId || "").trim();
                     if (eventType === "deal.update" && payloadDealId && payloadDealId === activeDealIdRef.current) {
-                        if (isDealWorkspaceHydrationBusy(payloadDealId)) {
-                            trackClientRequest("deal_realtime_refresh_skipped_hydration", { dealId: payloadDealId });
-                            return;
-                        }
                         void refreshActiveDealWorkspace(payloadDealId, {
                             reason: "realtime",
+                            take: ACTIVE_DEAL_REFRESH_EVENT_LIMIT,
                             refreshSidebar: true,
+                            hydrationSkipLogKind: "deal_realtime_refresh_skipped_hydration",
                         });
                     }
                     return;
@@ -1588,10 +1533,12 @@ export function ConversationInterface({ locationId, initialConversations, initia
             clearFallbackTimer();
             setRealtimeMode('connected');
             if (viewMode === 'deals') {
-                if (activeDealIdRef.current && !isDealWorkspaceHydrationBusy(activeDealIdRef.current)) {
+                if (activeDealIdRef.current) {
                     void refreshActiveDealWorkspace(activeDealIdRef.current, {
                         reason: "reconnect",
+                        take: ACTIVE_DEAL_REFRESH_EVENT_LIMIT,
                         refreshSidebar: true,
+                        hydrationSkipLogKind: "deal_realtime_refresh_skipped_hydration",
                     });
                 }
                 return;
@@ -1627,7 +1574,6 @@ export function ConversationInterface({ locationId, initialConversations, initia
         searchQuery,
         featureFlags.realtimeSse,
         getCachedWorkspaceCoreSnapshot,
-        isDealWorkspaceHydrationBusy,
         isTabVisible,
         prefetchWorkspaceCore,
         refreshActiveDealWorkspace,

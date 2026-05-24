@@ -117,6 +117,34 @@ function mergePrependTimelineEventsDedupe(existing: any[], older: any[]): any[] 
     return prepend.length > 0 ? [...prepend, ...existing] : [...existing];
 }
 
+export function mergeLatestTimelineWindowIntoCachedEvents(
+    cachedEvents: any[],
+    latestEvents: any[]
+): any[] {
+    const merged = Array.isArray(cachedEvents) ? [...cachedEvents] : [];
+    const latest = Array.isArray(latestEvents) ? latestEvents : [];
+    if (latest.length === 0) return merged;
+
+    const byId = new Map<string, any>();
+    for (const event of merged) {
+        const eventId = String(event?.id || "");
+        if (!eventId) continue;
+        byId.set(eventId, event);
+    }
+    for (const event of latest) {
+        const eventId = String(event?.id || "");
+        if (!eventId) continue;
+        byId.set(eventId, event);
+    }
+
+    return Array.from(byId.values()).sort((left, right) => {
+        const leftTs = Number(new Date(left?.createdAt || 0).getTime());
+        const rightTs = Number(new Date(right?.createdAt || 0).getTime());
+        if (leftTs !== rightTs) return leftTs - rightTs;
+        return String(left?.id || "").localeCompare(String(right?.id || ""));
+    });
+}
+
 type UseDealWorkspaceHydrationParams = {
     viewMode: 'chats' | 'deals';
     activeDealId: string | null;
