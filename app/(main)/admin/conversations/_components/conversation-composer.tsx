@@ -16,10 +16,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Check, ChevronsUpDown, Loader2, Send, Paperclip, Mic, Square, Sparkles } from "lucide-react";
 import { SuggestionBubbles } from "./suggestion-bubbles";
 import { AiModelSelect } from "@/components/ai/ai-model-select";
-import {
-    getSmsChannelEligibility,
-    getWhatsAppChannelEligibility,
-} from "@/app/(main)/admin/conversations/actions";
 import { useAiModelCatalog } from "@/components/ai/use-ai-model-catalog";
 import { toast } from "sonner";
 import { getSmsSegmentInfo } from "@/lib/sms/segments";
@@ -27,18 +23,7 @@ import {
     type ComposerChannel,
     useConversationComposerTranslationPreview,
 } from "./use-conversation-composer-translation-preview";
-
-type WhatsAppEligibilityState =
-    | { status: "checking" }
-    | { status: "eligible" }
-    | { status: "ineligible"; reason?: string }
-    | { status: "unknown"; reason?: string };
-
-type SmsEligibilityState =
-    | { status: "checking" }
-    | { status: "eligible" }
-    | { status: "ineligible"; reason?: string }
-    | { status: "unknown"; reason?: string };
+import { useConversationComposerChannel } from "./use-conversation-composer-channel";
 
 interface ConversationComposerProps {
     conversation: Conversation | null;
@@ -86,13 +71,6 @@ interface ConversationComposerProps {
     smsRelayEnabled?: boolean;
 }
 
-function getInitialChannel(conversation: Conversation | null): ComposerChannel {
-    const typeUpper = (conversation?.lastMessageType || conversation?.type || "").toUpperCase();
-    if (typeUpper.includes("EMAIL")) return "Email";
-    if (typeUpper.includes("WHATSAPP")) return "WhatsApp";
-    return "SMS";
-}
-
 function getPlaceholderText(channel: ComposerChannel): string {
     const channelHints: Record<ComposerChannel, string> = {
         WhatsApp: "Message or AI instruction...",
@@ -101,10 +79,6 @@ function getPlaceholderText(channel: ComposerChannel): string {
         SMS_RELAY: "Android SMS or AI instruction...",
     };
     return channelHints[channel] || channelHints.SMS;
-}
-
-function getFallbackChannelWithoutWhatsApp(conversation: Conversation | null): "SMS" | "Email" {
-    return getInitialChannel(conversation) === "Email" ? "Email" : "SMS";
 }
 
 function getAgentDraftLanguage() {
@@ -135,7 +109,6 @@ export function ConversationComposer({
 }: ConversationComposerProps) {
     const [sending, setSending] = useState(false);
     const [generatingDraft, setGeneratingDraft] = useState(false);
-    const [selectedChannel, setSelectedChannel] = useState<ComposerChannel>(getInitialChannel(conversation));
     const [selectedModel, setSelectedModel] = useState("");
     const [hasUserSelectedModel, setHasUserSelectedModel] = useState(false);
     const { models: availableModels, resolveModelForKind } = useAiModelCatalog();
@@ -144,8 +117,6 @@ export function ConversationComposer({
     );
     const [replyLanguageOpen, setReplyLanguageOpen] = useState(false);
     const [savingReplyLanguage, setSavingReplyLanguage] = useState(false);
-    const [whatsAppEligibility, setWhatsAppEligibility] = useState<WhatsAppEligibilityState>({ status: "checking" });
-    const [smsEligibility, setSmsEligibility] = useState<SmsEligibilityState>({ status: "checking" });
     const [isRecording, setIsRecording] = useState(false);
     const [agentDraftLanguage, setAgentDraftLanguage] = useState<string>(DEFAULT_REPLY_LANGUAGE);
 
@@ -157,6 +128,16 @@ export function ConversationComposer({
     const appliedInsertDraftSeedKeyRef = useRef<string | null>(null);
 
     const isUnavailable = disabled || !conversation;
+    const {
+        selectedChannel,
+        selectChannel,
+        isWhatsAppDisabled,
+        isSmsDisabled,
+        channelSelectorTitle,
+    } = useConversationComposerChannel({
+        conversation,
+        isUnavailable,
+    });
     const {
         previewingTranslation,
         translationPreviewText,
@@ -190,7 +171,6 @@ export function ConversationComposer({
     }, [resolveModelForKind]);
 
     useEffect(() => {
-        setSelectedChannel(getInitialChannel(conversation));
         setIsRecording(false);
         setSelectedReplyLanguage(conversation?.replyLanguageOverride || REPLY_LANGUAGE_AUTO_VALUE);
         clearTranslationPreview();
@@ -207,90 +187,6 @@ export function ConversationComposer({
     useEffect(() => {
         setSelectedReplyLanguage(conversation?.replyLanguageOverride || REPLY_LANGUAGE_AUTO_VALUE);
     }, [conversation?.replyLanguageOverride]);
-
-    useEffect(() => {
-        if (!conversation?.id) {
-            setWhatsAppEligibility({ status: "unknown", reason: "No conversation selected." });
-            return;
-        }
-
-        let cancelled = false;
-        setWhatsAppEligibility({ status: "checking" });
-
-        getWhatsAppChannelEligibility(conversation.id)
-            .then((res) => {
-                if (cancelled) return;
-
-                if (!res?.success) {
-                    setWhatsAppEligibility({ status: "unknown", reason: res?.reason });
-                    return;
-                }
-
-                if (res.status === "eligible") {
-                    setWhatsAppEligibility({ status: "eligible" });
-                    return;
-                }
-
-                if (res.status === "ineligible") {
-                    setWhatsAppEligibility({ status: "ineligible", reason: res.reason });
-                    setSelectedChannel((prev) => (prev === "WhatsApp" ? getFallbackChannelWithoutWhatsApp(conversation) : prev));
-                    return;
-                }
-
-                setWhatsAppEligibility({ status: "unknown", reason: res.reason });
-            })
-            .catch((err) => {
-                if (cancelled) return;
-                console.error("Failed to check WhatsApp eligibility:", err);
-                setWhatsAppEligibility({ status: "unknown", reason: "Could not verify WhatsApp availability." });
-            });
-
-        return () => {
-            cancelled = true;
-        };
-    }, [conversation?.id]);
-
-    useEffect(() => {
-        if (!conversation?.id) {
-            setSmsEligibility({ status: "unknown", reason: "No conversation selected." });
-            return;
-        }
-
-        let cancelled = false;
-        setSmsEligibility({ status: "checking" });
-
-        getSmsChannelEligibility(conversation.id)
-            .then((res) => {
-                if (cancelled) return;
-
-                if (!res?.success) {
-                    setSmsEligibility({ status: "unknown", reason: res?.reason });
-                    return;
-                }
-
-                if (res.status === "eligible") {
-                    setSmsEligibility({ status: "eligible" });
-                    return;
-                }
-
-                if (res.status === "ineligible") {
-                    setSmsEligibility({ status: "ineligible", reason: res.reason });
-                    setSelectedChannel((prev) => (prev === "SMS" ? "Email" : prev));
-                    return;
-                }
-
-                setSmsEligibility({ status: "unknown", reason: res.reason });
-            })
-            .catch((err) => {
-                if (cancelled) return;
-                console.error("Failed to check SMS eligibility:", err);
-                setSmsEligibility({ status: "unknown", reason: "Could not verify SMS availability." });
-            });
-
-        return () => {
-            cancelled = true;
-        };
-    }, [conversation?.id]);
 
     const stopRecorderTracks = () => {
         if (mediaStreamRef.current) {
@@ -595,14 +491,6 @@ export function ConversationComposer({
         ? `Source: Conversation override (${getReplyLanguageLabel(selectedReplyLanguage) || selectedReplyLanguage})`
         : `Source: Location default (${getReplyLanguageLabel(conversation?.locationDefaultReplyLanguage || DEFAULT_REPLY_LANGUAGE) || conversation?.locationDefaultReplyLanguage || DEFAULT_REPLY_LANGUAGE})`;
 
-    const isWhatsAppDisabled = whatsAppEligibility.status === "ineligible";
-    const isSmsDisabled = smsEligibility.status === "ineligible";
-    const channelSelectorTitle =
-        selectedChannel === "SMS" && isSmsDisabled
-            ? (smsEligibility.reason || "SMS not available for this contact")
-            : isWhatsAppDisabled
-                ? (whatsAppEligibility.reason || "WhatsApp not available for this contact")
-                : undefined;
     const smsSegmentInfo = getSmsSegmentInfo(draft);
     const showSmsRelaySegmentInfo = selectedChannel === "SMS_RELAY" && draft.length > 0;
     const smsRelaySegmentLabel = `${smsSegmentInfo.segments || 1} SMS part${(smsSegmentInfo.segments || 1) === 1 ? "" : "s"} · ${smsSegmentInfo.remaining} left`;
@@ -685,12 +573,7 @@ export function ConversationComposer({
                         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 sm:flex-nowrap">
                             <Select
                                 value={selectedChannel}
-                                onValueChange={(v: ComposerChannel) => {
-                                    if (isUnavailable) return;
-                                    if (v === "SMS" && isSmsDisabled) return;
-                                    if (v === "WhatsApp" && isWhatsAppDisabled) return;
-                                    setSelectedChannel(v);
-                                }}
+                                onValueChange={(v: ComposerChannel) => selectChannel(v)}
                                 disabled={isUnavailable}
                             >
                                 <SelectTrigger
