@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef } from "react";
 import { Conversation } from "@/lib/ghl/conversations";
 import {
     REPLY_LANGUAGE_AUTO_VALUE,
@@ -21,6 +21,7 @@ import {
 import { useConversationComposerChannel } from "./use-conversation-composer-channel";
 import { useConversationComposerMedia } from "./use-conversation-composer-media";
 import { useConversationComposerAiDraft } from "./use-conversation-composer-ai-draft";
+import { useConversationComposerSend } from "./use-conversation-composer-send";
 
 interface ConversationComposerProps {
     conversation: Conversation | null;
@@ -99,8 +100,8 @@ export function ConversationComposer({
     viewingLanguageLabel,
     smsRelayEnabled = false,
 }: ConversationComposerProps) {
-    const [sending, setSending] = useState(false);
     const isUnavailable = disabled || !conversation;
+    const isRecordingRef = useRef(false);
     const {
         generatingDraft,
         selectedModel,
@@ -155,6 +156,27 @@ export function ConversationComposer({
         autoReplyLanguageValue: REPLY_LANGUAGE_AUTO_VALUE,
         onPreviewTranslatedReply,
     });
+    const canUseWriteTranslation = translationWriteEnabled && !!onPreviewTranslatedReply;
+    const {
+        sending,
+        setSending,
+        handleSend,
+    } = useConversationComposerSend({
+        draft,
+        isUnavailable,
+        isRecording: isRecordingRef,
+        selectedChannel,
+        selectedReplyLanguage,
+        autoReplyLanguageValue: REPLY_LANGUAGE_AUTO_VALUE,
+        canUseWriteTranslation,
+        translationPreviewText,
+        translationPreviewLanguage,
+        translationPreviewDetectedSource,
+        onPreviewTranslatedReply,
+        onSendMessage,
+        onDraftClear,
+        clearTranslationPreview,
+    });
     const {
         fileInputRef,
         isRecording,
@@ -171,77 +193,13 @@ export function ConversationComposer({
         onSendMedia,
         onDraftClear,
     });
+    isRecordingRef.current = isRecording;
 
     useEffect(() => {
         setIsRecording(false);
         clearTranslationPreview();
     }, [clearTranslationPreview, conversation?.id, setIsRecording]);
 
-    const handleSend = async (mode: "original" | "translated" = "original") => {
-        if (isUnavailable || isRecording || !draft.trim()) return;
-
-        const sourceText = draft.trim();
-        let textToSend = sourceText;
-        let translationMeta: {
-            translationSourceText: string;
-            translationTargetLanguage: string | null;
-            translationDetectedSourceLanguage: string | null;
-        } | undefined;
-
-        if (mode === "translated" && translationPreviewText.trim()) {
-            // User explicitly clicked "Send Translated" with an active preview
-            textToSend = translationPreviewText.trim();
-            if (sourceText !== textToSend) {
-                translationMeta = {
-                    translationSourceText: sourceText,
-                    translationTargetLanguage: translationPreviewLanguage || (selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE ? null : selectedReplyLanguage),
-                    translationDetectedSourceLanguage: translationPreviewDetectedSource || null,
-                };
-            }
-        } else if (
-            mode === "original" &&
-            selectedReplyLanguage !== REPLY_LANGUAGE_AUTO_VALUE &&
-            canUseWriteTranslation &&
-            onPreviewTranslatedReply
-        ) {
-            // Auto-translate on send: reply language is explicitly set, seamlessly translate
-            // before sending (enterprise best practice — matches Intercom/Zendesk behavior).
-            // This catches both AI-drafted and manually-typed messages.
-            setSending(true);
-            try {
-                const result = await onPreviewTranslatedReply(sourceText, selectedChannel, selectedReplyLanguage);
-                if (result?.success && result.translatedText?.trim()) {
-                    const translated = result.translatedText.trim();
-                    if (translated !== sourceText) {
-                        textToSend = translated;
-                        translationMeta = {
-                            translationSourceText: sourceText,
-                            translationTargetLanguage: result.targetLanguage || selectedReplyLanguage,
-                            translationDetectedSourceLanguage: result.detectedSourceLanguage || null,
-                        };
-                    }
-                }
-            } catch (autoTranslateError) {
-                // Graceful degradation: send original if auto-translate fails
-                console.warn("[Composer] Auto-translate on send failed, sending original:", autoTranslateError);
-            } finally {
-                setSending(false);
-            }
-        }
-
-        setSending(true);
-        try {
-            await Promise.resolve(onSendMessage(textToSend, selectedChannel, translationMeta));
-            onDraftClear();
-            clearTranslationPreview();
-        } catch (err) {
-            console.error("Message send failed", err);
-        } finally {
-            setSending(false);
-        }
-    };
-
-    const canUseWriteTranslation = translationWriteEnabled && !!onPreviewTranslatedReply;
     const willAutoTranslate = selectedReplyLanguage !== REPLY_LANGUAGE_AUTO_VALUE && canUseWriteTranslation && !!onPreviewTranslatedReply;
 
     const smsSegmentInfo = getSmsSegmentInfo(draft);
