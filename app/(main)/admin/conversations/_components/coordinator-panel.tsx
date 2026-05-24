@@ -1,8 +1,7 @@
 import dynamic from "next/dynamic";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Conversation } from "@/lib/ghl/conversations";
 import { generateAIDraft, generateMultiContextDraftAction, orchestrateAction } from "../actions";
-import { createPersistentDeal, findExistingDeal, removeConversationFromDeal } from "../../deals/actions";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -23,6 +22,7 @@ import { useCoordinatorTraceModal } from "./use-coordinator-trace-modal";
 import { useCoordinatorTranscriptUsage } from "./use-coordinator-transcript-usage";
 import { useCoordinatorAgentPlan } from "./use-coordinator-agent-plan";
 import { useCoordinatorContactContext } from "./use-coordinator-contact-context";
+import { useCoordinatorDealContext } from "./use-coordinator-deal-context";
 import type { ContactIdentityPatch } from "../../contacts/_components/contact-form";
 
 const EditContactDialog = dynamic(
@@ -192,10 +192,6 @@ export function CoordinatorPanel({
         contactId: conversation.contactId,
     });
 
-    // Context Builder State
-    const [dealTitle, setDealTitle] = useState("");
-    const [dealContextId, setDealContextId] = useState<string | null>(null);
-
     const {
         contactContext,
         setContactContext,
@@ -245,37 +241,19 @@ export function CoordinatorPanel({
         setError,
     });
 
-    const isContextMode = selectedConversations && selectedConversations.length > 0;
+    const {
+        isContextMode,
+        ensureDealContext,
+    } = useCoordinatorDealContext({
+        selectedConversations,
+        existingDealContextId,
+        existingDealTitle,
+        onDeselect,
+    });
     const traceToolCalls = Array.isArray(rawTrace?.toolCalls) ? rawTrace.toolCalls : [];
     const leadParserToolCall = traceToolCalls.find((c: any) => c?.tool === "gemini.generateContent") || null;
     const leadParserRequest = leadParserToolCall?.arguments || null;
     const leadParserResponse = leadParserToolCall?.result || null;
-
-    // Auto-detect existing deal on selection change
-    useEffect(() => {
-        if (existingDealContextId) {
-            setDealContextId(existingDealContextId);
-            setDealTitle(String(existingDealTitle || "").trim());
-            return;
-        }
-
-        if (!selectedConversations || selectedConversations.length === 0) {
-            setDealContextId(null);
-            setDealTitle("");
-            return;
-        }
-
-        const ids = selectedConversations.map(c => c.id);
-        findExistingDeal(ids).then(deals => {
-            if (deals && deals.length > 0) {
-                setDealContextId(deals[0].id);
-                setDealTitle(deals[0].title);
-            } else {
-                setDealContextId(null);
-                setDealTitle("");
-            }
-        });
-    }, [existingDealContextId, existingDealTitle, selectedConversations]);
 
     const handleOrchestrate = async () => {
         setOrchestrating(true);
@@ -308,14 +286,7 @@ export function CoordinatorPanel({
         try {
             if (isContextMode) {
                 // Multi-Context Flow (Simplified)
-                let contextId = dealContextId;
-                if (!contextId) {
-                    const ids = selectedConversations!.map(c => c.id);
-                    const title = dealTitle || `Deal: ${selectedConversations![0].contactName} & others`;
-                    const newContext = await createPersistentDeal(title, ids);
-                    setDealContextId(newContext.id);
-                    contextId = newContext.id;
-                }
+                const contextId = await ensureDealContext();
                 const res = await generateMultiContextDraftAction(contextId!, 'LEAD');
                 setReasoning(res.reasoning);
                 onSuggestionsGenerated?.([]);
@@ -335,17 +306,6 @@ export function CoordinatorPanel({
         } finally {
             setGenerating(false);
         }
-    };
-
-    const handleRemoveParticipant = async (conversationId: string) => {
-        if (dealContextId) {
-            try {
-                await removeConversationFromDeal(dealContextId, conversationId);
-            } catch (e) {
-                console.error("Failed to remove from deal", e);
-            }
-        }
-        onDeselect?.(conversationId);
     };
 
     return (
