@@ -20,6 +20,7 @@ import { ActivityLogEntry } from "./activity-log-entry";
 import { SuggestedResponseQueue, type SuggestedResponseQueueItem } from "./suggested-response-queue";
 import { getReplyLanguageLabel } from "@/lib/ai/reply-language-options";
 import { useChatWindowTimelineScroll, type ActivityLogItem } from "./use-chat-window-timeline-scroll";
+import { useChatWindowTranscriptSearch } from "./use-chat-window-transcript-search";
 
 interface ChatWindowProps {
     conversation: Conversation;
@@ -128,7 +129,6 @@ import { MessageBubble } from "./message-bubble";
 import {
     improveInternalNoteText,
     summarizeSelectionToCrmLog,
-    searchConversationTranscriptMatches,
 } from "@/app/(main)/admin/conversations/actions";
 import type { SelectionBatchInput, SelectionBatchItem } from "./message-selection-actions";
 import { ConversationComposer } from "./conversation-composer";
@@ -138,10 +138,6 @@ import {
     isLikelyForeignLanguageMessage,
     getResolvedConversationTranslationLanguage,
 } from "@/lib/conversations/translation-view";
-
-type TranscriptSearchResult = Awaited<ReturnType<typeof searchConversationTranscriptMatches>>;
-type TranscriptSearchSuccess = Extract<TranscriptSearchResult, { success: true }>;
-type TranscriptSearchMatch = TranscriptSearchSuccess["results"][number];
 
 const TRANSCRIPT_SEARCH_KEYWORDS = [
     "budget",
@@ -236,15 +232,20 @@ export function ChatWindow({
     const [isSummarizingBatch, setIsSummarizingBatch] = useState(false);
     const [bulkTranscriptWindow, setBulkTranscriptWindow] = useState<"30d" | "all">("30d");
     const [isBulkTranscribingAudio, setIsBulkTranscribingAudio] = useState(false);
-    const [showTranscriptSearch, setShowTranscriptSearch] = useState(false);
-    const [transcriptSearchQuery, setTranscriptSearchQuery] = useState("");
-    const [isTranscriptSearching, setIsTranscriptSearching] = useState(false);
-    const [transcriptSearchError, setTranscriptSearchError] = useState<string | null>(null);
-    const [transcriptSearchTotal, setTranscriptSearchTotal] = useState(0);
-    const [transcriptSearchResults, setTranscriptSearchResults] = useState<TranscriptSearchMatch[]>([]);
-    const [jumpMessageId, setJumpMessageId] = useState<string | null>(null);
-    const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
-    const jumpHighlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const {
+        showTranscriptSearch,
+        setShowTranscriptSearch,
+        transcriptSearchQuery,
+        setTranscriptSearchQuery,
+        isTranscriptSearching,
+        transcriptSearchError,
+        transcriptSearchTotal,
+        transcriptSearchResults,
+        highlightedMessageId,
+        messageRefs,
+        jumpToMessage,
+        handleTranscriptSearch,
+    } = useChatWindowTranscriptSearch({ conversationId: conversation.id });
     const canUseTranscriptOnDemand = transcriptOnDemandEnabled !== false;
     const [addNoteOpen, setAddNoteOpen] = useState(false);
     const [addNoteText, setAddNoteText] = useState("");
@@ -303,27 +304,11 @@ export function ChatWindow({
     useEffect(() => {
         setSelectionBatch([]);
         setIsBulkTranscribingAudio(false);
-        setTranscriptSearchQuery("");
-        setTranscriptSearchError(null);
-        setTranscriptSearchResults([]);
-        setTranscriptSearchTotal(0);
-        setShowTranscriptSearch(false);
-        setJumpMessageId(null);
-        messageRefs.current = {};
         setTranslationBannerDismissed(false);
         setThreadTranslationMode("original");
         setAutoTranslatingThread(false);
         autoTranslationAttemptedRef.current = null;
     }, [conversation.id]);
-
-    useEffect(() => {
-        return () => {
-            if (jumpHighlightTimeoutRef.current) {
-                clearTimeout(jumpHighlightTimeoutRef.current);
-                jumpHighlightTimeoutRef.current = null;
-            }
-        };
-    }, []);
 
     const handleAddSelectionToBatch = useCallback((item: SelectionBatchInput) => {
         const normalizedText = normalizeSelectionForBatch(item.text);
@@ -367,59 +352,6 @@ export function ChatWindow({
             setIsBulkTranscribingAudio(false);
         }
     }, [isBulkTranscribingAudio, onBulkTranscribeUnprocessedAudio]);
-
-    const jumpToMessage = useCallback((messageId: string) => {
-        const target = messageRefs.current[messageId];
-        if (!target) {
-            toast.error("Message not found in current view.");
-            return;
-        }
-
-        target.scrollIntoView({ behavior: "smooth", block: "center" });
-        setJumpMessageId(messageId);
-        if (jumpHighlightTimeoutRef.current) {
-            clearTimeout(jumpHighlightTimeoutRef.current);
-        }
-        jumpHighlightTimeoutRef.current = setTimeout(() => {
-            setJumpMessageId((current) => current === messageId ? null : current);
-            jumpHighlightTimeoutRef.current = null;
-        }, 2200);
-    }, []);
-
-    const handleTranscriptSearch = useCallback(async (overrideQuery?: string) => {
-        const query = String(overrideQuery ?? transcriptSearchQuery).trim();
-        if (!query) {
-            setTranscriptSearchError(null);
-            setTranscriptSearchResults([]);
-            setTranscriptSearchTotal(0);
-            return;
-        }
-
-        setIsTranscriptSearching(true);
-        setTranscriptSearchError(null);
-        try {
-            const result = await searchConversationTranscriptMatches(conversation.id, {
-                query,
-                limit: 20,
-            });
-
-            if (!result?.success) {
-                setTranscriptSearchResults([]);
-                setTranscriptSearchTotal(0);
-                setTranscriptSearchError(result?.error || "Failed to search transcripts.");
-                return;
-            }
-
-            setTranscriptSearchResults(result.results || []);
-            setTranscriptSearchTotal(Number(result.totalMatches || 0));
-        } catch (error: any) {
-            setTranscriptSearchResults([]);
-            setTranscriptSearchTotal(0);
-            setTranscriptSearchError(String(error?.message || "Failed to search transcripts."));
-        } finally {
-            setIsTranscriptSearching(false);
-        }
-    }, [conversation.id, transcriptSearchQuery]);
 
     const handleTranscriptKeyword = useCallback((keyword: string) => {
         setTranscriptSearchQuery(keyword);
@@ -1072,7 +1004,7 @@ export function ChatWindow({
                                 }}
                                 className={cn(
                                     "rounded-xl transition-colors min-w-0 max-w-full overflow-x-hidden",
-                                    jumpMessageId === m.id && "ring-2 ring-blue-300 bg-blue-50/60"
+                                    highlightedMessageId === m.id && "ring-2 ring-blue-300 bg-blue-50/60"
                                 )}
                             >
                                 <MessageBubble
