@@ -1,7 +1,6 @@
 import dynamic from "next/dynamic";
 import { useState } from "react";
 import { Conversation } from "@/lib/ghl/conversations";
-import { generateAIDraft, generateMultiContextDraftAction, orchestrateAction } from "../actions";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -12,13 +11,13 @@ import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { DEFAULT_REPLY_LANGUAGE, normalizeReplyLanguage } from "@/lib/ai/reply-language-options";
 import { CoordinatorTraceModal } from "./coordinator-trace-modal";
 import { useCoordinatorTraceModal } from "./use-coordinator-trace-modal";
 import { useCoordinatorTranscriptUsage } from "./use-coordinator-transcript-usage";
 import { useCoordinatorAgentPlan } from "./use-coordinator-agent-plan";
 import { useCoordinatorContactContext } from "./use-coordinator-contact-context";
 import { useCoordinatorDealContext } from "./use-coordinator-deal-context";
+import { useCoordinatorQuickActions } from "./use-coordinator-quick-actions";
 import { CoordinatorContactOverviewCard } from "./coordinator-contact-overview-card";
 import type { ContactIdentityPatch } from "../../contacts/_components/contact-form";
 
@@ -69,11 +68,6 @@ interface DealContactOption {
     lastMessageType?: string;
 }
 
-function getBrowserDraftLanguage() {
-    if (typeof window === "undefined") return DEFAULT_REPLY_LANGUAGE;
-    return normalizeReplyLanguage(window.navigator.language || "") || DEFAULT_REPLY_LANGUAGE;
-}
-
 export function CoordinatorPanel({
     locationId,
     conversation,
@@ -96,7 +90,6 @@ export function CoordinatorPanel({
     onContactMerged
 }: CoordinatorPanelProps) {
     const [reasoning, setReasoning] = useState("");
-    const [generating, setGenerating] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
     const [thinkingExpanded, setThinkingExpanded] = useState(false);
@@ -139,10 +132,6 @@ export function CoordinatorPanel({
         ? `${Number(initialAgentSummary?.completedPlanSteps || 0)}/${Number(initialAgentSummary?.totalPlanSteps || 0)}`
         : null;
 
-    // Orchestrator State (Phase 1)
-    const [orchestrating, setOrchestrating] = useState(false);
-    const [orchestrationResult, setOrchestrationResult] = useState<any>(null);
-
     const transcriptUsage = useCoordinatorTranscriptUsage(conversation.id);
 
     const {
@@ -176,58 +165,22 @@ export function CoordinatorPanel({
         existingDealTitle,
         onDeselect,
     });
-    const handleOrchestrate = async () => {
-        setOrchestrating(true);
-        setError(null);
-        setOrchestrationResult(null);
-        try {
-            const res = await orchestrateAction(conversation.id, conversation.contactId);
-            setOrchestrationResult(res);
-
-            if (res.reasoning) {
-                setReasoning(res.reasoning);
-            }
-            if ((res as any)?.suggestionQueued) {
-                onSuggestionsGenerated?.([]);
-            }
-
-            // Auto-refresh trace history
-            refreshExecutionHistory();
-
-        } catch (e: any) {
-            setError("Orchestration failed: " + e.message);
-        } finally {
-            setOrchestrating(false);
-        }
-    };
-
-    const handleGenerateDraftOnly = async () => {
-        setGenerating(true);
-        setError(null);
-        try {
-            if (isContextMode) {
-                // Multi-Context Flow (Simplified)
-                const contextId = await ensureDealContext();
-                const res = await generateMultiContextDraftAction(contextId!, 'LEAD');
-                setReasoning(res.reasoning);
-                onSuggestionsGenerated?.([]);
-            } else {
-                const res = await generateAIDraft(
-                    conversation.id,
-                    conversation.contactId,
-                    undefined,
-                    undefined,
-                    { mode: "chat", draftLanguage: getBrowserDraftLanguage() }
-                );
-                setReasoning(res.reasoning || "Suggested response queued for review.");
-                onSuggestionsGenerated?.([]);
-            }
-        } catch (e: any) {
-            setError("Failed to generate draft. " + e.message);
-        } finally {
-            setGenerating(false);
-        }
-    };
+    const {
+        generating,
+        orchestrating,
+        orchestrationResult,
+        handleOrchestrate,
+        handleGenerateDraftOnly,
+    } = useCoordinatorQuickActions({
+        conversationId: conversation.id,
+        contactId: conversation.contactId,
+        isContextMode,
+        ensureDealContext,
+        onSuggestionsGenerated,
+        refreshExecutionHistory,
+        setReasoning,
+        setError,
+    });
 
     return (
         <div className="h-full bg-muted/30 border-l p-3 overflow-y-auto space-y-3 min-w-0 flex flex-col">
