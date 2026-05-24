@@ -1,7 +1,7 @@
 import dynamic from "next/dynamic";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Conversation } from "@/lib/ghl/conversations";
-import { generateAIDraft, generateMultiContextDraftAction, getContactContext, orchestrateAction } from "../actions";
+import { generateAIDraft, generateMultiContextDraftAction, orchestrateAction } from "../actions";
 import { createPersistentDeal, findExistingDeal, removeConversationFromDeal } from "../../deals/actions";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ import { TraceNodeRenderer } from "./trace-node-renderer";
 import { useCoordinatorTraceModal } from "./use-coordinator-trace-modal";
 import { useCoordinatorTranscriptUsage } from "./use-coordinator-transcript-usage";
 import { useCoordinatorAgentPlan } from "./use-coordinator-agent-plan";
+import { useCoordinatorContactContext } from "./use-coordinator-contact-context";
 import type { ContactIdentityPatch } from "../../contacts/_components/contact-form";
 
 const EditContactDialog = dynamic(
@@ -195,14 +196,20 @@ export function CoordinatorPanel({
     const [dealTitle, setDealTitle] = useState("");
     const [dealContextId, setDealContextId] = useState<string | null>(null);
 
-    // Context Display State
-    const [contactContext, setContactContext] = useState<any>(initialContactContext || null);
-    const [loadingContext, setLoadingContext] = useState(false);
-    const [sidebarTab, setSidebarTab] = useState<'overview' | 'tasks' | 'viewings'>('overview');
-    const [loadedSidebarTabs, setLoadedSidebarTabs] = useState<{ overview: boolean; tasks: boolean; viewings: boolean }>({
-        overview: true,
-        tasks: !lazySidebarDataEnabled,
-        viewings: !lazySidebarDataEnabled,
+    const {
+        contactContext,
+        setContactContext,
+        loadingContext,
+        sidebarTab,
+        setSidebarTab,
+        loadedSidebarTabs,
+        handleContactSaved,
+    } = useCoordinatorContactContext({
+        conversationId: conversation.id,
+        contactId: conversation.contactId,
+        initialContactContext,
+        lazySidebarDataEnabled,
+        onContactSaved,
     });
     const taskOpenCount = Number(initialTaskSummary?.open || 0);
     const upcomingViewingCount = Number(initialViewingSummary?.upcoming || 0);
@@ -215,23 +222,6 @@ export function CoordinatorPanel({
     const [orchestrationResult, setOrchestrationResult] = useState<any>(null);
 
     const transcriptUsage = useCoordinatorTranscriptUsage(conversation.id);
-    const conversationIdRef = useRef(conversation.id);
-
-    useEffect(() => {
-        conversationIdRef.current = conversation.id;
-    }, [conversation.id]);
-
-    useEffect(() => {
-        if (!lazySidebarDataEnabled) {
-            setLoadedSidebarTabs({ overview: true, tasks: true, viewings: true });
-            return;
-        }
-        setLoadedSidebarTabs((prev) => ({ ...prev, [sidebarTab]: true }));
-    }, [sidebarTab, lazySidebarDataEnabled]);
-
-    useEffect(() => {
-        setContactContext(initialContactContext || null);
-    }, [initialContactContext, conversation.id]);
 
     const {
         goal,
@@ -286,40 +276,6 @@ export function CoordinatorPanel({
             }
         });
     }, [existingDealContextId, existingDealTitle, selectedConversations]);
-
-    // Fetch Context on Load or Conversation Change
-    useEffect(() => {
-        if (!conversation?.contactId) {
-            setContactContext(null);
-            return;
-        }
-        if (initialContactContext?.contact) {
-            setContactContext(initialContactContext);
-            return;
-        }
-
-        // Clear previous state explicitly when changing contacts
-        setContactContext(null);
-        
-        let cancelled = false;
-        const fetchTimer = setTimeout(() => {
-            if (cancelled) return;
-            setLoadingContext(true);
-            getContactContext(conversation.contactId, { refreshExternal: false })
-                .then(data => {
-                    if (!cancelled) setContactContext(data);
-                })
-                .catch(err => console.error("Failed to load context", err))
-                .finally(() => {
-                    if (!cancelled) setLoadingContext(false);
-                });
-        }, 150);
-
-        return () => {
-            cancelled = true;
-            clearTimeout(fetchTimer);
-        };
-    }, [conversation.contactId, initialContactContext]);
 
     const handleOrchestrate = async () => {
         setOrchestrating(true);
@@ -390,49 +346,6 @@ export function CoordinatorPanel({
             }
         }
         onDeselect?.(conversationId);
-    };
-
-    const handleContactSaved = async (patch: ContactIdentityPatch) => {
-        if (!patch?.id) return;
-
-        setContactContext((prev: any) => {
-            if (!prev?.contact || String(prev.contact.id) !== String(patch.id)) return prev;
-            return {
-                ...prev,
-                contact: {
-                    ...prev.contact,
-                    ...patch,
-                },
-            };
-        });
-
-        onContactSaved?.(patch);
-
-        const sourceConversationId = conversation.id;
-        const sourceContactId = conversation.contactId;
-        if (!sourceContactId) return;
-
-        try {
-            const refreshed = await getContactContext(sourceContactId);
-            if (conversationIdRef.current !== sourceConversationId || !refreshed) return;
-
-            setContactContext(refreshed);
-
-            const refreshedContact = (refreshed as any)?.contact;
-            if (refreshedContact?.id) {
-                onContactSaved?.({
-                    id: refreshedContact.id,
-                    name: refreshedContact.name ?? null,
-                    email: refreshedContact.email ?? null,
-                    phone: refreshedContact.phone ?? null,
-                    firstName: refreshedContact.firstName ?? null,
-                    lastName: refreshedContact.lastName ?? null,
-                    preferredLang: refreshedContact.preferredLang ?? null,
-                });
-            }
-        } catch (error) {
-            console.error("Failed to refetch contact context after save", error);
-        }
     };
 
     return (
