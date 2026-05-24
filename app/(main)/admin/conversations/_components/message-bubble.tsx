@@ -21,43 +21,16 @@ import {
 import { buildPlainLeadTextFromHtml } from "./paste-lead-rich-text";
 import {
     getSharedContactReadableMessage,
-    parseSharedContactsFromMessageBody,
-    parseVCardContacts,
     type SharedContactInfo,
 } from "@/lib/contacts/vcard";
-
-type MessageAttachment = string | {
-    id?: string;
-    url: string;
-    mimeType?: string | null;
-    fileName?: string | null;
-    sharedContacts?: SharedContactInfo[] | null;
-    transcript?: {
-        status: "pending" | "processing" | "completed" | "failed";
-        text?: string | null;
-        error?: string | null;
-        model?: string | null;
-        provider?: string | null;
-        updatedAt?: string | null;
-        restricted?: boolean;
-        extraction?: {
-            status: "pending" | "processing" | "completed" | "failed";
-            payload?: {
-                prospects?: string[];
-                requirements?: string[];
-                budget?: string | null;
-                locations?: string[];
-                objections?: string[];
-                nextActions?: string[];
-            } | null;
-            error?: string | null;
-            model?: string | null;
-            provider?: string | null;
-            updatedAt?: string | null;
-            restricted?: boolean;
-        } | null;
-    } | null;
-};
+import {
+    classifyMessageAttachments,
+    deriveBodyVCardDownloadHref,
+    deriveMediaUnavailableState,
+    deriveSharedContactsFromMessageBody,
+    normalizeMessageAttachments,
+    type MessageAttachment,
+} from "./message-bubble-attachment-actions";
 
 export interface MessageBubbleProps {
     message: {
@@ -192,20 +165,12 @@ export function MessageBubble({
     const [translationViewMode, setTranslationViewMode] = useState<"thread" | "original" | "translated">("thread");
     const [isTranslatingMessage, setIsTranslatingMessage] = useState(false);
     const contentRef = useRef<HTMLDivElement>(null);
-    const attachments = useMemo(() => (message.attachments || []).map((attachment) =>
-        typeof attachment === "string"
-            ? { id: undefined, url: attachment, mimeType: undefined, fileName: undefined, sharedContacts: null, transcript: null }
-            : attachment
-    ), [message.attachments]);
+    const attachments = useMemo(() => normalizeMessageAttachments(message.attachments), [message.attachments]);
     const bodySharedContacts = useMemo(
-        () => parseSharedContactsFromMessageBody(message.body || ""),
+        () => deriveSharedContactsFromMessageBody(message.body || ""),
         [message.body]
     );
-    const bodyVCardDownloadHref = useMemo(() => {
-        const body = String(message.body || "");
-        if (parseVCardContacts(body).length === 0) return null;
-        return `data:text/vcard;charset=utf-8,${encodeURIComponent(body)}`;
-    }, [message.body]);
+    const bodyVCardDownloadHref = useMemo(() => deriveBodyVCardDownloadHref(message.body), [message.body]);
     const sharedContacts = useMemo(() => {
         const attachmentSharedContacts = attachments.flatMap((attachment) => attachment.sharedContacts || []);
         return [...bodySharedContacts, ...attachmentSharedContacts];
@@ -291,38 +256,21 @@ export function MessageBubble({
     };
 
     const snippet = isEmail ? getSnippet(message.body) : "";
-    const imageAttachments = attachments.filter((attachment) => {
-        const mimeType = (attachment.mimeType || "").toLowerCase();
-        if (mimeType.startsWith("image/")) return true;
-
-        const target = (attachment.fileName || attachment.url || "").toLowerCase().split("?")[0];
-        return [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".svg"].some((ext) => target.endsWith(ext));
-    });
-    const audioAttachments = attachments.filter((attachment) => {
-        const mimeType = (attachment.mimeType || "").toLowerCase();
-        if (mimeType.startsWith("audio/")) return true;
-
-        const target = (attachment.fileName || attachment.url || "").toLowerCase().split("?")[0];
-        return [".ogg", ".opus", ".mp3", ".m4a", ".webm", ".wav", ".aac"].some((ext) => target.endsWith(ext));
-    });
-    const contactAttachments = attachments.filter((attachment) => {
-        if ((attachment.sharedContacts || []).length > 0) return true;
-        const mimeType = (attachment.mimeType || "").split(";")[0].trim().toLowerCase();
-        if (["text/vcard", "text/x-vcard", "text/directory"].includes(mimeType)) return true;
-        const target = (attachment.fileName || attachment.url || "").toLowerCase().split("?")[0];
-        return target.endsWith(".vcf") || target.endsWith(".vcard");
-    });
-    const fileAttachments = attachments.filter((attachment) =>
-        !imageAttachments.includes(attachment) && !audioAttachments.includes(attachment) && !contactAttachments.includes(attachment)
-    );
+    const {
+        imageAttachments,
+        audioAttachments,
+        contactAttachments,
+        fileAttachments,
+    } = useMemo(() => classifyMessageAttachments(attachments), [attachments]);
     const selectedImage = selectedImageIndex !== null ? imageAttachments[selectedImageIndex] : null;
     const hasLikelyMediaPlaceholder = ["[Audio]", "[Image]", "[Media]", "[Document]", "[Contact]"].includes(String(message.body || "").trim());
     const webBridgeMedia = message.webBridgeMedia || null;
-    const hasUnstoredWebBridgeMedia = isWhatsApp
-        && String(message.source || "") === "whatsapp_web_bridge"
-        && !!webBridgeMedia
-        && webBridgeMedia.status !== "stored"
-        && attachments.length === 0;
+    const hasUnstoredWebBridgeMedia = deriveMediaUnavailableState({
+        isWhatsApp,
+        source: message.source,
+        webBridgeMedia,
+        attachments,
+    });
     const hasRenderableMediaAttachment = imageAttachments.length > 0 || audioAttachments.length > 0 || contactAttachments.length > 0 || fileAttachments.length > 0;
     const canRefetchMedia = !!onRefetchMedia && isWhatsApp && !isContactMessage && (hasRenderableMediaAttachment || hasLikelyMediaPlaceholder || hasUnstoredWebBridgeMedia);
 
