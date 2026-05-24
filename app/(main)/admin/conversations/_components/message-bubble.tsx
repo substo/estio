@@ -31,6 +31,16 @@ import {
     normalizeMessageAttachments,
     type MessageAttachment,
 } from "./message-bubble-attachment-actions";
+import {
+    formatExtractionSummary,
+    getExtractionActionLabel,
+    getExtractionStatusTone,
+    getTranscriptActionLabel,
+    getTranscriptPreviewText,
+    getTranscriptStatusTone,
+    isPendingStatus,
+    shouldShowTranscriptToggle,
+} from "./message-bubble-transcript-actions";
 
 export interface MessageBubbleProps {
     message: {
@@ -407,13 +417,6 @@ export function MessageBubble({
         } finally {
             setExtractActionAttachmentId(null);
         }
-    };
-
-    const formatExtractionList = (value: unknown): string[] => {
-        if (!Array.isArray(value)) return [];
-        return value
-            .map((item) => String(item || "").trim())
-            .filter((item) => !!item);
     };
 
     const clearSelectionTarget = () => setSelectionTarget(null);
@@ -1065,7 +1068,15 @@ export function MessageBubble({
                                 </div>
                             </button>
                         ))}
-                        {audioAttachments.map((attachment, i) => (
+                        {audioAttachments.map((attachment, i) => {
+                            const isOutboundBubble = isOutbound && !isEmail;
+                            const transcript = attachment.transcript;
+                            const transcriptExpanded = isTranscriptExpanded(attachment.id, i);
+                            const transcriptText = transcript?.text || "";
+                            const extraction = transcript?.extraction;
+                            const extractionSummary = extraction ? formatExtractionSummary(extraction.payload) : null;
+
+                            return (
                             <div
                                 key={`audio-${i}-${attachment.url}`}
                                 data-horizontal-scroll
@@ -1095,7 +1106,6 @@ export function MessageBubble({
                                         Download
                                     </a>
                                 </div>
-
                                 {!attachment.transcript && onRequestTranscript && attachment.id && (
                                     <div className="mt-2 rounded-md border border-black/10 bg-white/70 px-2 py-1.5 text-xs">
                                         <div className="flex items-center gap-2">
@@ -1113,7 +1123,11 @@ export function MessageBubble({
                                                         : "bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-70"
                                                 )}
                                             >
-                                                {transcriptActionAttachmentId === attachment.id ? "Starting..." : "Transcribe now"}
+                                                {getTranscriptActionLabel({
+                                                    activeAttachmentId: transcriptActionAttachmentId,
+                                                    attachmentId: attachment.id,
+                                                    mode: "start",
+                                                })}
                                             </button>
                                         </div>
                                     </div>
@@ -1134,9 +1148,7 @@ export function MessageBubble({
                                             </span>
                                             <span className={cn(
                                                 "rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide",
-                                                attachment.transcript.status === "completed" && (isOutbound && !isEmail ? "bg-emerald-500/25 text-emerald-100" : "bg-emerald-100 text-emerald-700"),
-                                                attachment.transcript.status === "failed" && (isOutbound && !isEmail ? "bg-red-500/25 text-red-100" : "bg-red-100 text-red-700"),
-                                                (attachment.transcript.status === "pending" || attachment.transcript.status === "processing") && (isOutbound && !isEmail ? "bg-amber-500/25 text-amber-100" : "bg-amber-100 text-amber-700")
+                                                getTranscriptStatusTone(attachment.transcript.status, isOutboundBubble)
                                             )}>
                                                 {attachment.transcript.status}
                                             </span>
@@ -1150,7 +1162,7 @@ export function MessageBubble({
                                             )}
                                         </div>
 
-                                        {(attachment.transcript.status === "pending" || attachment.transcript.status === "processing") && (
+                                        {isPendingStatus(attachment.transcript.status) && (
                                             <p className={cn("mt-1 text-[11px]", isOutbound && !isEmail ? "text-blue-100/90" : "text-gray-600")}>
                                                 Transcribing...
                                             </p>
@@ -1168,14 +1180,9 @@ export function MessageBubble({
                                                             "whitespace-pre-wrap leading-relaxed [overflow-wrap:anywhere] [word-break:break-word]",
                                                             isOutbound && !isEmail ? "text-blue-50" : "text-gray-700"
                                                         )}>
-                                                            {(() => {
-                                                                const text = String(attachment.transcript?.text || "");
-                                                                const expanded = isTranscriptExpanded(attachment.id, i);
-                                                                if (expanded || text.length <= 280) return text;
-                                                                return `${text.slice(0, 280)}...`;
-                                                            })()}
+                                                            {getTranscriptPreviewText(transcriptText, transcriptExpanded)}
                                                         </p>
-                                                        {String(attachment.transcript.text || "").length > 280 && (
+                                                        {shouldShowTranscriptToggle(transcriptText) && (
                                                             <button
                                                                 type="button"
                                                                 onClick={(e) => {
@@ -1187,7 +1194,7 @@ export function MessageBubble({
                                                                     isOutbound && !isEmail ? "text-blue-100 hover:text-white" : "text-gray-600 hover:text-gray-900"
                                                                 )}
                                                             >
-                                                                {isTranscriptExpanded(attachment.id, i) ? "Show less" : "Show more"}
+                                                                {transcriptExpanded ? "Show less" : "Show more"}
                                                             </button>
                                                         )}
                                                     </>
@@ -1206,7 +1213,11 @@ export function MessageBubble({
                                                                         : "bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-70"
                                                                 )}
                                                             >
-                                                                {transcriptActionAttachmentId === attachment.id ? "Regenerating..." : "Regenerate transcript"}
+                                                                {getTranscriptActionLabel({
+                                                                    activeAttachmentId: transcriptActionAttachmentId,
+                                                                    attachmentId: attachment.id,
+                                                                    mode: "regenerate",
+                                                                })}
                                                             </button>
                                                         )}
                                                         {onExtractViewingNotes && attachment.id && (
@@ -1221,9 +1232,11 @@ export function MessageBubble({
                                                                         : "bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-70"
                                                                 )}
                                                             >
-                                                                {extractActionAttachmentId === attachment.id
-                                                                    ? (attachment.transcript?.extraction ? "Regenerating notes..." : "Extracting...")
-                                                                    : (attachment.transcript?.extraction ? "Regenerate notes" : "Extract viewing notes")}
+                                                                {getExtractionActionLabel({
+                                                                    activeAttachmentId: extractActionAttachmentId,
+                                                                    attachmentId: attachment.id,
+                                                                    hasExtraction: !!attachment.transcript?.extraction,
+                                                                })}
                                                             </button>
                                                         )}
                                                     </div>
@@ -1250,7 +1263,11 @@ export function MessageBubble({
                                                                 : "bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-70"
                                                         )}
                                                     >
-                                                        {transcriptActionAttachmentId === attachment.id ? "Retrying..." : "Retry transcript"}
+                                                        {getTranscriptActionLabel({
+                                                            activeAttachmentId: transcriptActionAttachmentId,
+                                                            attachmentId: attachment.id,
+                                                            mode: "retry",
+                                                        })}
                                                     </button>
                                                 )}
                                             </div>
@@ -1269,9 +1286,7 @@ export function MessageBubble({
                                                     <span className="font-medium">Viewing notes</span>
                                                     <span className={cn(
                                                         "rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide",
-                                                        attachment.transcript.extraction.status === "completed" && (isOutbound && !isEmail ? "bg-emerald-500/25 text-emerald-100" : "bg-emerald-100 text-emerald-700"),
-                                                        attachment.transcript.extraction.status === "failed" && (isOutbound && !isEmail ? "bg-red-500/25 text-red-100" : "bg-red-100 text-red-700"),
-                                                        (attachment.transcript.extraction.status === "pending" || attachment.transcript.extraction.status === "processing") && (isOutbound && !isEmail ? "bg-amber-500/25 text-amber-100" : "bg-amber-100 text-amber-700")
+                                                        getExtractionStatusTone(attachment.transcript.extraction.status, isOutboundBubble)
                                                     )}>
                                                         {attachment.transcript.extraction.status}
                                                     </span>
@@ -1285,7 +1300,7 @@ export function MessageBubble({
                                                     )}
                                                 </div>
 
-                                                {(attachment.transcript.extraction.status === "pending" || attachment.transcript.extraction.status === "processing") && (
+                                                {isPendingStatus(attachment.transcript.extraction.status) && (
                                                     <p className={cn("mt-1 text-[11px]", isOutbound && !isEmail ? "text-blue-100/90" : "text-gray-600")}>
                                                         Extracting viewing notes...
                                                     </p>
@@ -1310,7 +1325,11 @@ export function MessageBubble({
                                                                         : "bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-70"
                                                                 )}
                                                             >
-                                                                {extractActionAttachmentId === attachment.id ? "Retrying..." : "Retry extraction"}
+                                                                {getExtractionActionLabel({
+                                                                    activeAttachmentId: extractActionAttachmentId,
+                                                                    attachmentId: attachment.id,
+                                                                    retry: true,
+                                                                })}
                                                             </button>
                                                         )}
                                                     </div>
@@ -1323,12 +1342,12 @@ export function MessageBubble({
                                                         </p>
                                                     ) : (
                                                         <div className="mt-1 space-y-0.5 [overflow-wrap:anywhere] [word-break:break-word]">
-                                                            <p>Prospects: {formatExtractionList((attachment.transcript.extraction.payload as any)?.prospects).join("; ") || "None"}</p>
-                                                            <p>Requirements: {formatExtractionList((attachment.transcript.extraction.payload as any)?.requirements).join("; ") || "None"}</p>
-                                                            <p>Budget: {String((attachment.transcript.extraction.payload as any)?.budget || "").trim() || "Not specified"}</p>
-                                                            <p>Locations: {formatExtractionList((attachment.transcript.extraction.payload as any)?.locations).join("; ") || "None"}</p>
-                                                            <p>Objections: {formatExtractionList((attachment.transcript.extraction.payload as any)?.objections).join("; ") || "None"}</p>
-                                                            <p>Next actions: {formatExtractionList((attachment.transcript.extraction.payload as any)?.nextActions).join("; ") || "None"}</p>
+                                                            <p>Prospects: {extractionSummary?.prospects}</p>
+                                                            <p>Requirements: {extractionSummary?.requirements}</p>
+                                                            <p>Budget: {extractionSummary?.budget}</p>
+                                                            <p>Locations: {extractionSummary?.locations}</p>
+                                                            <p>Objections: {extractionSummary?.objections}</p>
+                                                            <p>Next actions: {extractionSummary?.nextActions}</p>
                                                         </div>
                                                     )
                                                 )}
@@ -1337,7 +1356,8 @@ export function MessageBubble({
                                     </div>
                                 )}
                             </div>
-                        ))}
+                            );
+                        })}
                         {contactAttachments.map((attachment, i) => (
                             <a
                                 key={`contact-file-${i}-${attachment.url}`}
