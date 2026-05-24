@@ -7,8 +7,23 @@
  *   PERF_UI_CAPTURE_CONSOLE=1 \
  *   npm run perf:conversations:ui-playwright
  *
- * PERF_BASE_URL defaults to http://localhost:3000. PERF_AUTH_COOKIE must be a
- * logged-in browser cookie string that can access /admin/conversations.
+ * Run against specific conversations instead of the first visible rows:
+ *   PERF_BASE_URL=http://localhost:3000 \
+ *   PERF_TARGET_CONVERSATION_IDS=conv_a,conv_b,conv_c \
+ *   npm run perf:conversations:ui-playwright
+ *
+ * Run with a saved Playwright storage state for Clerk auth:
+ *   PERF_BASE_URL=http://localhost:3000 \
+ *   PERF_STORAGE_STATE_PATH=/absolute/path/to/clerk-storage-state.json \
+ *   PERF_TARGET_CONVERSATION_IDS=conv_a,conv_b \
+ *   npm run perf:conversations:ui-playwright
+ *
+ * Do not commit storage state files. They can contain live Clerk session data.
+ *
+ * PERF_BASE_URL defaults to http://localhost:3000. PERF_AUTH_COOKIE can still
+ * be used as a logged-in browser cookie string that can access
+ * /admin/conversations, but PERF_STORAGE_STATE_PATH is usually more reliable
+ * for Clerk sessions.
  *
  * Chat switching is measured from row click until the active chat root exposes:
  *   data-chat-initial-paint-ready="true"
@@ -60,6 +75,17 @@ function summarize(samplesMs) {
     maxMs: sorted[sorted.length - 1] || 0,
     avgMs: sorted.length ? total / sorted.length : 0,
   };
+}
+
+function parseCsvEnv(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function cssAttributeValue(value) {
+  return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
 async function benchmarkActivation(page, ids, options) {
@@ -221,14 +247,26 @@ async function main() {
 
   const baseUrl = String(process.env.PERF_BASE_URL || "http://localhost:3000").replace(/\/+$/, "");
   const authCookie = String(process.env.PERF_AUTH_COOKIE || "").trim();
+  const storageStatePath = String(process.env.PERF_STORAGE_STATE_PATH || "").trim();
+  const targetConversationIds = parseCsvEnv(process.env.PERF_TARGET_CONVERSATION_IDS);
   const iterations = Math.max(6, Number(process.env.PERF_UI_ITERATIONS || 18));
   const captureConsole = ["1", "true", "yes"].includes(String(process.env.PERF_UI_CAPTURE_CONSOLE || "").toLowerCase());
-  const target = `${baseUrl}/admin/conversations`;
+  const target = targetConversationIds.length > 0
+    ? `${baseUrl}/admin/conversations?id=${encodeURIComponent(targetConversationIds[0])}`
+    : `${baseUrl}/admin/conversations`;
   const consolePerfLogs = [];
+  const contextOptions = {};
+
+  if (storageStatePath) {
+    if (!fs.existsSync(storageStatePath)) {
+      throw new Error(`PERF_STORAGE_STATE_PATH does not exist: ${storageStatePath}`);
+    }
+    contextOptions.storageState = storageStatePath;
+  }
 
   const browser = await chromium.launch({ headless: true });
   try {
-    const context = await browser.newContext();
+    const context = await browser.newContext(contextOptions);
     if (authCookie) {
       const cookieParts = authCookie.split(";").map((part) => part.trim()).filter(Boolean);
       for (const pair of cookieParts) {
@@ -257,11 +295,19 @@ async function main() {
     await page.waitForSelector('[data-conversation-id]', { timeout: 20_000 });
     const listFirstPaintMs = Date.now() - listStartedAt;
 
-    const conversationIds = await page.$$eval('[data-conversation-id]', (rows) =>
-      rows.map((row) => row.getAttribute("data-conversation-id")).filter(Boolean).slice(0, 5)
-    );
+    const conversationIds = targetConversationIds.length > 0
+      ? targetConversationIds
+      : await page.$$eval('[data-conversation-id]', (rows) =>
+        rows.map((row) => row.getAttribute("data-conversation-id")).filter(Boolean).slice(0, 5)
+      );
     if (!conversationIds || conversationIds.length < 2) {
-      throw new Error("Need at least 2 conversation rows to run switch benchmark.");
+      throw new Error("Need at least 2 conversation IDs to run switch benchmark.");
+    }
+
+    if (targetConversationIds.length > 0) {
+      for (const id of conversationIds) {
+        await page.waitForSelector(`[data-conversation-id="${cssAttributeValue(id)}"]`, { timeout: 20_000 });
+      }
     }
 
     const chatStats = await benchmarkActivation(page, conversationIds, {
