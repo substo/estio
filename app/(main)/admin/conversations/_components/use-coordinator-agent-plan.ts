@@ -54,7 +54,7 @@ export function useCoordinatorAgentPlan({
     const [executing, setExecuting] = useState(false);
     const [agentActions, setAgentActions] = useState<any[]>([]);
     const [thoughtSteps, setThoughtSteps] = useState<ThoughtStep[]>([]);
-    const [, setConversationUsage] = useState<ConversationUsage>({
+    const [conversationUsage, setConversationUsage] = useState<ConversationUsage>({
         promptTokens: 0,
         completionTokens: 0,
         totalTokens: 0,
@@ -182,6 +182,7 @@ export function useCoordinatorAgentPlan({
         executing,
         agentActions,
         thoughtSteps,
+        conversationUsage,
         handleGeneratePlan,
         handleExecuteNext,
     };
