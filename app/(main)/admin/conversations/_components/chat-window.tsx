@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Conversation, Message } from "@/lib/ghl/conversations";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -18,10 +18,10 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ActivityLogEntry } from "./activity-log-entry";
 import { SuggestedResponseQueue, type SuggestedResponseQueueItem } from "./suggested-response-queue";
-import { getReplyLanguageLabel } from "@/lib/ai/reply-language-options";
 import { useChatWindowTimelineScroll, type ActivityLogItem } from "./use-chat-window-timeline-scroll";
 import { useChatWindowTranscriptSearch } from "./use-chat-window-transcript-search";
 import { useChatWindowSelectionBatch } from "./use-chat-window-selection-batch";
+import { useChatWindowThreadTranslation } from "./use-chat-window-thread-translation";
 
 interface ChatWindowProps {
     conversation: Conversation;
@@ -129,12 +129,6 @@ import { MessageBubble } from "./message-bubble";
 
 import { improveInternalNoteText } from "@/app/(main)/admin/conversations/actions";
 import { ConversationComposer } from "./conversation-composer";
-import {
-    buildMessageTranslationState,
-    getBrowserLanguage,
-    isLikelyForeignLanguageMessage,
-    getResolvedConversationTranslationLanguage,
-} from "@/lib/conversations/translation-view";
 
 const TRANSCRIPT_SEARCH_KEYWORDS = [
     "budget",
@@ -146,10 +140,6 @@ const TRANSCRIPT_SEARCH_KEYWORDS = [
     "bedroom",
     "villa",
 ];
-
-function getThreadTranslationPreferenceKey(conversationId: string, targetLanguage: string) {
-    return `conversation-thread-translation:${conversationId}:${targetLanguage.toLowerCase()}`;
-}
 
 export function ChatWindow({
     conversation,
@@ -237,11 +227,25 @@ export function ChatWindow({
     const [addNoteDate, setAddNoteDate] = useState(new Date().toISOString().slice(0, 16));
     const [addingNote, setAddingNote] = useState(false);
     const [improvingNote, setImprovingNote] = useState(false);
-    const [translatingVisibleThread, setTranslatingVisibleThread] = useState(false);
-    const [translationBannerDismissed, setTranslationBannerDismissed] = useState(false);
-    const [threadTranslationMode, setThreadTranslationMode] = useState<"original" | "translated">("original");
-    const [autoTranslatingThread, setAutoTranslatingThread] = useState(false);
-    const autoTranslationAttemptedRef = useRef<string | null>(null);
+    const {
+        translatingVisibleThread,
+        autoTranslatingThread,
+        setTranslationBannerDismissed,
+        threadTranslationMode,
+        setThreadTranslationMode,
+        resolvedTranslationTargetLanguage,
+        resolvedReplyLanguage,
+        inboundForeignCandidates,
+        resolvedTranslationTargetLanguageLabel,
+        shouldShowTranslationBanner,
+        handleTranslateVisibleThread,
+    } = useChatWindowThreadTranslation({
+        conversation,
+        messages,
+        onTranslateVisibleThread,
+        translationReadEnabled,
+        translationBannerEnabled,
+    });
 
     const handleAddNote = async () => {
         if (!addNoteText.trim() || !onAddActivityEntry) return;
@@ -288,10 +292,6 @@ export function ChatWindow({
     // Reset transient state when conversation changes
     useEffect(() => {
         setIsBulkTranscribingAudio(false);
-        setTranslationBannerDismissed(false);
-        setThreadTranslationMode("original");
-        setAutoTranslatingThread(false);
-        autoTranslationAttemptedRef.current = null;
     }, [conversation.id]);
 
     const handleBulkTranscribeUnprocessedAudio = useCallback(async (window: "30d" | "all") => {
@@ -309,117 +309,6 @@ export function ChatWindow({
         void handleTranscriptSearch(keyword);
     }, [handleTranscriptSearch]);
 
-    const [agentDisplayLanguage, setAgentDisplayLanguage] = useState("en");
-    useEffect(() => {
-        setAgentDisplayLanguage(getBrowserLanguage());
-    }, []);
-    const resolvedTranslationTargetLanguage = agentDisplayLanguage || "en";
-    const resolvedReplyLanguage = useMemo(
-        () => getResolvedConversationTranslationLanguage(conversation),
-        [conversation.locationDefaultReplyLanguage, conversation.replyLanguageOverride]
-    );
-    const inboundForeignCandidates = useMemo(() => {
-        return messages.filter((message) => isLikelyForeignLanguageMessage(message, resolvedTranslationTargetLanguage));
-    }, [messages, resolvedTranslationTargetLanguage]);
-    const eligibleInboundTranslationIds = useMemo(() => {
-        return messages
-            .filter((message) => {
-                if (!isLikelyForeignLanguageMessage(message, resolvedTranslationTargetLanguage)) return false;
-                return buildMessageTranslationState(message, message.translations || [], resolvedTranslationTargetLanguage).viewDefault !== "translated";
-            })
-            .map((message) => String(message.id || "").trim())
-            .filter(Boolean);
-    }, [messages, resolvedTranslationTargetLanguage]);
-    const threadSupportsTranslatedDefault = useMemo(() => {
-        const inboundForeignCount = messages.filter((message) => isLikelyForeignLanguageMessage(message, resolvedTranslationTargetLanguage)).length;
-        if (inboundForeignCount < 2) return false;
-        return messages.some((message) => buildMessageTranslationState(message, message.translations || [], resolvedTranslationTargetLanguage).viewDefault === "translated");
-    }, [messages, resolvedTranslationTargetLanguage]);
-    const threadShouldPreferTranslated = threadSupportsTranslatedDefault || inboundForeignCandidates.length >= 2;
-    const resolvedTranslationTargetLanguageLabel = getReplyLanguageLabel(resolvedTranslationTargetLanguage) || resolvedTranslationTargetLanguage;
-    const shouldShowTranslationBanner = translationReadEnabled
-        && translationBannerEnabled
-        && !translationBannerDismissed
-        && inboundForeignCandidates.length >= 2
-        && !!onTranslateVisibleThread;
-
-    useEffect(() => {
-        if (typeof window === "undefined") return;
-        const storageKey = getThreadTranslationPreferenceKey(conversation.id, resolvedTranslationTargetLanguage);
-        const stored = window.localStorage.getItem(storageKey);
-        if (stored === "original" || stored === "translated") {
-            setThreadTranslationMode(stored);
-            return;
-        }
-        setThreadTranslationMode(threadShouldPreferTranslated ? "translated" : "original");
-    }, [conversation.id, resolvedTranslationTargetLanguage, threadShouldPreferTranslated]);
-
-    useEffect(() => {
-        if (typeof window === "undefined") return;
-        const storageKey = getThreadTranslationPreferenceKey(conversation.id, resolvedTranslationTargetLanguage);
-        window.localStorage.setItem(storageKey, threadTranslationMode);
-    }, [conversation.id, resolvedTranslationTargetLanguage, threadTranslationMode]);
-
-    const handleTranslateVisibleThread = useCallback(async (options?: { silent?: boolean; auto?: boolean }) => {
-        if (!onTranslateVisibleThread || translatingVisibleThread || autoTranslatingThread) return;
-        const visibleInboundIds = eligibleInboundTranslationIds.length > 0
-            ? eligibleInboundTranslationIds
-            : messages
-                .filter((message) => message.direction === "inbound" && String(message.body || "").trim().length > 0)
-                .map((message) => String(message.id || "").trim())
-                .filter(Boolean);
-        if (visibleInboundIds.length === 0) return;
-
-        if (options?.auto) {
-            setAutoTranslatingThread(true);
-        } else {
-            setTranslatingVisibleThread(true);
-        }
-        try {
-            const result = await onTranslateVisibleThread(
-                visibleInboundIds,
-                resolvedTranslationTargetLanguage
-            );
-            if (!result?.success) {
-                if (!options?.silent) {
-                    toast.error(result?.error || "Failed to translate visible messages.");
-                }
-                return;
-            }
-            setThreadTranslationMode("translated");
-            setTranslationBannerDismissed(true);
-            if (!options?.silent) {
-                toast.success(`Translated ${Number(result.translatedCount || 0)} messages.`);
-            }
-        } finally {
-            if (options?.auto) {
-                setAutoTranslatingThread(false);
-            } else {
-                setTranslatingVisibleThread(false);
-            }
-        }
-    }, [autoTranslatingThread, eligibleInboundTranslationIds, messages, onTranslateVisibleThread, resolvedTranslationTargetLanguage, translatingVisibleThread]);
-
-    useEffect(() => {
-        if (!translationReadEnabled || !onTranslateVisibleThread) return;
-        if (threadTranslationMode !== "translated") return;
-        if (inboundForeignCandidates.length < 2) return;
-        if (eligibleInboundTranslationIds.length === 0) return;
-
-        const autoKey = `${conversation.id}:${resolvedTranslationTargetLanguage}`;
-        if (autoTranslationAttemptedRef.current === autoKey) return;
-        autoTranslationAttemptedRef.current = autoKey;
-        void handleTranslateVisibleThread({ silent: true, auto: true });
-    }, [
-        conversation.id,
-        eligibleInboundTranslationIds.length,
-        handleTranslateVisibleThread,
-        inboundForeignCandidates.length,
-        onTranslateVisibleThread,
-        resolvedTranslationTargetLanguage,
-        threadTranslationMode,
-        translationReadEnabled,
-    ]);
     const conversationType = String(conversation.lastMessageType || conversation.type || "").toUpperCase();
     const isWhatsAppConversation = conversationType.includes("WHATSAPP");
     const isEmailConversation = conversation.type === 'Email' || conversation.lastMessageType === 'TYPE_EMAIL' || conversationType.includes("EMAIL");
