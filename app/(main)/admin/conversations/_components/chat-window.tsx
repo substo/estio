@@ -13,7 +13,6 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ActivityLogEntry } from "./activity-log-entry";
@@ -22,6 +21,7 @@ import { useChatWindowTimelineScroll, type ActivityLogItem } from "./use-chat-wi
 import { useChatWindowTranscriptSearch } from "./use-chat-window-transcript-search";
 import { useChatWindowSelectionBatch } from "./use-chat-window-selection-batch";
 import { useChatWindowThreadTranslation } from "./use-chat-window-thread-translation";
+import { useChatWindowActivityNote } from "./use-chat-window-activity-note";
 
 interface ChatWindowProps {
     conversation: Conversation;
@@ -127,7 +127,6 @@ function getChannelName(type: string): string {
 
 import { MessageBubble } from "./message-bubble";
 
-import { improveInternalNoteText } from "@/app/(main)/admin/conversations/actions";
 import { ConversationComposer } from "./conversation-composer";
 
 const TRANSCRIPT_SEARCH_KEYWORDS = [
@@ -222,11 +221,23 @@ export function ChatWindow({
         handleTranscriptSearch,
     } = useChatWindowTranscriptSearch({ conversationId: conversation.id });
     const canUseTranscriptOnDemand = transcriptOnDemandEnabled !== false;
-    const [addNoteOpen, setAddNoteOpen] = useState(false);
-    const [addNoteText, setAddNoteText] = useState("");
-    const [addNoteDate, setAddNoteDate] = useState(new Date().toISOString().slice(0, 16));
-    const [addingNote, setAddingNote] = useState(false);
-    const [improvingNote, setImprovingNote] = useState(false);
+    const {
+        addNoteOpen,
+        setAddNoteOpen,
+        addNoteText,
+        setAddNoteText,
+        addNoteDate,
+        setAddNoteDate,
+        addingNote,
+        improvingNote,
+        handleAddNote,
+        handleImproveNote,
+    } = useChatWindowActivityNote({
+        conversationId: conversation.id,
+        contactId: conversation.contactId,
+        selectedModel,
+        onAddActivityEntry,
+    });
     const {
         translatingVisibleThread,
         autoTranslatingThread,
@@ -246,48 +257,6 @@ export function ChatWindow({
         translationReadEnabled,
         translationBannerEnabled,
     });
-
-    const handleAddNote = async () => {
-        if (!addNoteText.trim() || !onAddActivityEntry) return;
-        setAddingNote(true);
-        try {
-            await onAddActivityEntry(addNoteText.trim(), new Date(addNoteDate).toISOString());
-            setAddNoteText("");
-            setAddNoteDate(new Date().toISOString().slice(0, 16));
-            setAddNoteOpen(false);
-            toast.success("Note added to activity log");
-        } catch (e: any) {
-            toast.error(e?.message || "Failed to add note");
-        } finally {
-            setAddingNote(false);
-        }
-    };
-
-    const handleImproveNote = async () => {
-        const sourceText = addNoteText.trim();
-        if (!sourceText || improvingNote) return;
-
-        setImprovingNote(true);
-        try {
-            const result = await improveInternalNoteText({
-                text: sourceText,
-                noteType: "activity",
-                conversationId: conversation.id,
-                contactId: conversation.contactId,
-                modelOverride: selectedModel || undefined,
-            });
-            if (!result.success) {
-                toast.error(result.error || "Failed to improve note");
-                return;
-            }
-            setAddNoteText(result.improvedText);
-            toast.success("Note improved");
-        } catch (error: any) {
-            toast.error(error?.message || "Failed to improve note");
-        } finally {
-            setImprovingNote(false);
-        }
-    };
 
     // Reset transient state when conversation changes
     useEffect(() => {
