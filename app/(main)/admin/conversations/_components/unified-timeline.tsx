@@ -1,8 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Conversation } from '@/lib/ghl/conversations';
-import { calculatePrependScrollTop } from '@/lib/conversations/thread-hydration';
 
 import { MessageBubble } from './message-bubble';
 import { MessageSquare, Sparkles, ArrowLeft, ListTodo } from "lucide-react";
@@ -10,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { ConversationComposer } from './conversation-composer';
 import { ActivityLogEntry } from "./activity-log-entry";
 import { SuggestedResponseQueue, type SuggestedResponseQueueItem } from "./suggested-response-queue";
+import { useUnifiedTimelineScroll } from './use-unified-timeline-scroll';
 
 interface UnifiedTimelineProps {
     dealId: string;
@@ -97,148 +97,17 @@ export function UnifiedTimeline({
     onResendMessage,
 }: UnifiedTimelineProps) {
     const [selectedModel, setSelectedModel] = useState("");
-    const [isTimelineReady, setIsTimelineReady] = useState(false);
-    const timelineRef = useRef<HTMLDivElement>(null);
-    const timelineContentRef = useRef<HTMLDivElement>(null);
-    const shouldStickToBottomRef = useRef(true);
-    const hasForcedInitialBottomSnapRef = useRef(false);
-    const hasReportedInitialPaintRef = useRef(false);
-    const previousEventIdsRef = useRef<string[]>([]);
-    const previousScrollHeightRef = useRef(0);
-    const previousScrollTopRef = useRef(0);
-
-    const snapToBottom = useCallback(() => {
-        const container = timelineRef.current;
-        if (!container) return;
-        container.scrollTop = container.scrollHeight;
-        previousScrollTopRef.current = container.scrollTop;
-        previousScrollHeightRef.current = container.scrollHeight;
-    }, []);
-
-    useEffect(() => {
-        shouldStickToBottomRef.current = true;
-        hasForcedInitialBottomSnapRef.current = false;
-        hasReportedInitialPaintRef.current = false;
-        previousEventIdsRef.current = [];
-        previousScrollHeightRef.current = 0;
-        previousScrollTopRef.current = 0;
-        setIsTimelineReady(false);
-    }, [dealId]);
-
-    useEffect(() => {
-        const container = timelineRef.current;
-        if (!container) return;
-
-        const handleScroll = () => {
-            const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-            shouldStickToBottomRef.current = distanceFromBottom <= 80;
-            previousScrollTopRef.current = container.scrollTop;
-            previousScrollHeightRef.current = container.scrollHeight;
-        };
-
-        handleScroll();
-        container.addEventListener("scroll", handleScroll, { passive: true });
-        return () => container.removeEventListener("scroll", handleScroll);
-    }, [dealId]);
-
-    useLayoutEffect(() => {
-        const container = timelineRef.current;
-        if (!container) return;
-
-        const previousIds = previousEventIdsRef.current;
-        const nextIds = (timelineEvents || []).map((event) => String(event?.id || ""));
-        const previousFirstId = previousIds[0] || null;
-        const previousLastId = previousIds[previousIds.length - 1] || null;
-        const nextFirstId = nextIds[0] || null;
-        const nextLastId = nextIds[nextIds.length - 1] || null;
-
-        const didPrependOlderEvents = (
-            previousIds.length > 0
-            && nextIds.length > previousIds.length
-            && !!previousFirstId
-            && !!previousLastId
-            && nextLastId === previousLastId
-            && nextFirstId !== previousFirstId
-        );
-
-        if (didPrependOlderEvents) {
-            const compensatedTop = calculatePrependScrollTop(
-                previousScrollTopRef.current,
-                previousScrollHeightRef.current,
-                container.scrollHeight
-            );
-            container.scrollTop = compensatedTop;
-            previousScrollTopRef.current = compensatedTop;
-        }
-
-        previousEventIdsRef.current = nextIds;
-        previousScrollHeightRef.current = container.scrollHeight;
-        previousScrollTopRef.current = container.scrollTop;
-    }, [dealId, timelineEvents]);
-
-    useLayoutEffect(() => {
-        if (loading) return;
-        if ((timelineEvents || []).length === 0) return;
-        if (hasForcedInitialBottomSnapRef.current) return;
-
-        hasForcedInitialBottomSnapRef.current = true;
-        shouldStickToBottomRef.current = true;
-        snapToBottom();
-        requestAnimationFrame(() => {
-            if (shouldStickToBottomRef.current) {
-                snapToBottom();
-            }
-            setIsTimelineReady(true);
-            if (!hasReportedInitialPaintRef.current) {
-                hasReportedInitialPaintRef.current = true;
-                onInitialPaintReady?.();
-            }
-        });
-    }, [dealId, loading, onInitialPaintReady, snapToBottom, timelineEvents]);
-
-    useEffect(() => {
-        if (!loading && (timelineEvents || []).length === 0) {
-            setIsTimelineReady(true);
-            if (!hasReportedInitialPaintRef.current) {
-                hasReportedInitialPaintRef.current = true;
-                onInitialPaintReady?.();
-            }
-        }
-    }, [loading, onInitialPaintReady, timelineEvents]);
-
-    useLayoutEffect(() => {
-        if (loading) return;
-        if (!(timelineEvents || []).length) return;
-        if (!shouldStickToBottomRef.current) return;
-        snapToBottom();
-    }, [dealId, loading, snapToBottom, timelineEvents]);
-
-    useEffect(() => {
-        const container = timelineRef.current;
-        const content = timelineContentRef.current;
-        if (!container || !content) return;
-        if (typeof ResizeObserver === "undefined") return;
-
-        let rafId: number | null = null;
-        const scheduleSnap = () => {
-            if (!shouldStickToBottomRef.current) return;
-            if (rafId !== null) cancelAnimationFrame(rafId);
-            rafId = requestAnimationFrame(() => {
-                if (!shouldStickToBottomRef.current) return;
-                snapToBottom();
-            });
-        };
-
-        const observer = new ResizeObserver(() => scheduleSnap());
-        observer.observe(content);
-        observer.observe(container);
-        scheduleSnap();
-
-        return () => {
-            if (rafId !== null) cancelAnimationFrame(rafId);
-            observer.disconnect();
-        };
-    }, [dealId, snapToBottom]);
+    const events = useMemo(() => (Array.isArray(timelineEvents) ? timelineEvents : []), [timelineEvents]);
+    const {
+        timelineRef,
+        timelineContentRef,
+        isTimelineReady,
+    } = useUnifiedTimelineScroll({
+        dealId,
+        timelineEvents: events,
+        loading,
+        onInitialPaintReady,
+    });
 
     return (
         <div
@@ -265,7 +134,7 @@ export function UnifiedTimeline({
                 </div>
                 <div className="flex items-center gap-2">
                     <div className="text-xs text-muted-foreground hidden sm:block">
-                        {(timelineEvents || []).length} events
+                        {events.length} events
                     </div>
                     {onOpenMissionControl && (
                         <Button
@@ -282,12 +151,12 @@ export function UnifiedTimeline({
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-4" ref={timelineRef}>
-                {loading && (!timelineEvents || timelineEvents.length === 0) ? (
+                {loading && events.length === 0 ? (
                     <div className="flex items-center justify-center h-full text-gray-400">
                         <Sparkles className="w-5 h-5 animate-spin mr-2" />
                         Loading timeline...
                     </div>
-                ) : !timelineEvents || timelineEvents.length === 0 ? (
+                ) : events.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-full text-gray-400">
                         <MessageSquare className="w-8 h-8 mb-2 opacity-20" />
                         <p className="text-sm">No activity yet. Start a conversation!</p>
@@ -295,9 +164,9 @@ export function UnifiedTimeline({
                 ) : (
                     <div
                         ref={timelineContentRef}
-                        className={!loading && timelineEvents.length > 0 && !isTimelineReady ? "opacity-0" : ""}
+                        className={!loading && events.length > 0 && !isTimelineReady ? "opacity-0" : ""}
                     >
-                        {timelineEvents.map((event) => {
+                        {events.map((event) => {
                             if (event?.kind === "activity") {
                                 return (
                                     <ActivityLogEntry
