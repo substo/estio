@@ -158,7 +158,13 @@ export function useDealWorkspaceRefreshOrchestration({
         trackClientRequest,
     ]);
 
-    return { refreshActiveDealWorkspace };
+    const isDealWorkspaceRefreshBusy = useCallback((dealId?: string | null) => {
+        const normalizedDealId = String(dealId || "").trim();
+        if (!normalizedDealId) return false;
+        return dealWorkspaceRefreshInFlightRef.current.has(normalizedDealId);
+    }, []);
+
+    return { refreshActiveDealWorkspace, isDealWorkspaceRefreshBusy };
 }
 
 export { ACTIVE_REFRESH_MESSAGE_LIMIT as ACTIVE_DEAL_REFRESH_EVENT_LIMIT };

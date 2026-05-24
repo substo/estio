@@ -316,6 +316,15 @@ export function useConversationRefreshOrchestration({
         viewMode,
     ]);
 
+    const isConversationWorkspaceRefreshBusy = useCallback((conversationId?: string | null) => {
+        const targetConversationId = String(conversationId || "").trim();
+        if (!targetConversationId) return false;
+        return (
+            workspaceCoreRefreshInFlightRef.current.has(targetConversationId)
+            || workspaceActivityRefreshInFlightRef.current.has(targetConversationId)
+        );
+    }, []);
+
     useEffect(() => {
         if (viewMode !== 'chats' || viewFilter === 'tasks') return;
         if (!isTabVisible) return;
@@ -476,5 +485,5 @@ export function useConversationRefreshOrchestration({
         };
     }, [viewMode, viewFilter, activeId, isTabVisible, searchQuery, featureFlags.workspaceV2, activeIdRef, refreshActiveWorkspaceActivity]);
 
-    return { runRealtimeRefresh };
+    return { runRealtimeRefresh, isConversationWorkspaceRefreshBusy };
 }

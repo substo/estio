@@ -8,7 +8,6 @@ import type { ContactIdentityPatch } from '../../contacts/_components/contact-fo
 import {
     fetchConversations,
     fetchMessages,
-    getConversationWorkspaceCore,
     getConversationWorkspaceSidebar,
     refreshConversationOnDemand,
     sendReply,
@@ -40,7 +39,6 @@ import { toast } from '@/components/ui/use-toast';
 import {
     createPersistentDeal,
     getDealContexts,
-    getDealWorkspaceCore,
 } from '../../deals/actions';
 import { shouldApplyRealtimeEnvelope } from '@/lib/conversations/realtime-merge';
 import {
@@ -56,15 +54,12 @@ import {
 import {
     THREAD_INITIAL_FALLBACK_MESSAGES,
     THREAD_TARGET_MESSAGE_COUNT,
-    computeInitialMessageLimitFromViewport,
 } from '@/lib/conversations/thread-hydration';
 import {
     matchesByCorrelation,
 } from '@/lib/conversations/outbound-reconciliation';
 import {
     collectPendingMessagesForConversation,
-    createWorkspaceCoreSnapshot,
-    createWorkspaceHydrationState,
     isWorkspaceRefreshBusy,
     mergeSnapshotPreservingPendingMessages,
     type WorkspaceCoreSnapshot,
@@ -150,6 +145,7 @@ import {
     useDealWorkspaceRefreshOrchestration,
 } from './use-deal-workspace-refresh-orchestration';
 import { useConversationRefreshOrchestration } from './use-conversation-refresh-orchestration';
+import { useConversationWorkspacePrefetch } from './use-conversation-workspace-prefetch';
 import {
     buildDealContactOptions,
     chooseNextDealConversationId,
@@ -814,108 +810,6 @@ export function ConversationInterface({ locationId, initialConversations, initia
         setLoadedDealId(dealId);
     }, [applyDealParticipants]);
 
-    const prefetchWorkspaceCore = useCallback(async (conversationId: string) => {
-        if (!conversationId) return;
-        if (workspaceCoreCacheRef.current.has(conversationId)) return;
-        if (workspaceCoreInFlightRef.current.has(conversationId)) return;
-
-        workspaceCoreInFlightRef.current.add(conversationId);
-        try {
-            trackClientRequest("workspace_core_prefetch", { conversationId });
-            const prefetchedLimit = computeInitialMessageLimitFromViewport(estimateThreadViewportHeightPx());
-            const workspace = await getConversationWorkspaceCore(conversationId, {
-                includeMessages: true,
-                includeActivity: false,
-                messageLimit: prefetchedLimit,
-                activityLimit: WORKSPACE_ACTIVITY_LIMIT,
-                messageMetadataMode: "firstPaint",
-            });
-            if (!workspace?.success) return;
-
-            const prefetchedMessages = Array.isArray(workspace?.messages) ? workspace.messages : [];
-            const hydration = createWorkspaceHydrationState({
-                status: prefetchedMessages.length >= THREAD_TARGET_MESSAGE_COUNT ? 'full' : 'partial',
-                messages: prefetchedMessages,
-                messageWindow: workspace?.messageWindow,
-                initialCount: prefetchedMessages.length,
-                targetCount: THREAD_TARGET_MESSAGE_COUNT,
-                requestedLimit: prefetchedLimit,
-            });
-            cacheWorkspaceCoreSnapshot(conversationId, createWorkspaceCoreSnapshot({
-                conversationHeader: workspace?.conversationHeader || null,
-                messages: prefetchedMessages,
-                activityTimeline: [],
-                transcriptEligibility: workspace?.transcriptEligibility,
-                hydration,
-            }));
-        } catch (error) {
-            console.error("Workspace prefetch failed:", error);
-        } finally {
-            workspaceCoreInFlightRef.current.delete(conversationId);
-        }
-    }, [cacheWorkspaceCoreSnapshot, trackClientRequest]);
-
-    const prefetchWorkspaceSidebar = useCallback(async (conversationId: string) => {
-        const normalizedConversationId = String(conversationId || "").trim();
-        if (!normalizedConversationId) return;
-        if (getCachedWorkspaceSidebarSnapshot(normalizedConversationId)) return;
-        if (workspaceSidebarInFlightRef.current.has(normalizedConversationId)) return;
-
-        workspaceSidebarInFlightRef.current.add(normalizedConversationId);
-        try {
-            trackClientRequest("workspace_sidebar_prefetch", { conversationId: normalizedConversationId });
-            const sidebar = await getConversationWorkspaceSidebar(normalizedConversationId);
-            if (!sidebar?.success) return;
-            cacheWorkspaceSidebarSnapshot(normalizedConversationId, {
-                contactContext: sidebar.contactContext || null,
-                taskSummary: sidebar.taskSummary || null,
-                viewingSummary: sidebar.viewingSummary || null,
-                agentSummary: sidebar.agentSummary || null,
-            });
-        } catch (error) {
-            console.error("Workspace sidebar prefetch failed:", error);
-        } finally {
-            workspaceSidebarInFlightRef.current.delete(normalizedConversationId);
-        }
-    }, [cacheWorkspaceSidebarSnapshot, getCachedWorkspaceSidebarSnapshot, trackClientRequest]);
-
-    const prefetchDealWorkspaceCore = useCallback(async (dealId: string) => {
-        if (!dealId) return;
-        if (dealWorkspaceCoreCacheRef.current.has(dealId)) return;
-        if (dealWorkspaceCoreInFlightRef.current.has(dealId)) return;
-
-        dealWorkspaceCoreInFlightRef.current.add(dealId);
-        try {
-            trackClientRequest("deal_workspace_core_prefetch", { dealId });
-            const prefetchedLimit = computeInitialMessageLimitFromViewport(estimateThreadViewportHeightPx());
-            const workspace = await getDealWorkspaceCore(dealId, { take: prefetchedLimit });
-            if (!workspace?.success) return;
-
-            const timelineEvents = Array.isArray(workspace.timelineEvents) ? workspace.timelineEvents : [];
-            const hydration = createDealWorkspaceHydrationState({
-                status: timelineEvents.length >= THREAD_TARGET_MESSAGE_COUNT ? 'full' : 'partial',
-                timelineEvents,
-                timelineWindow: workspace.timelineWindow,
-                initialCount: timelineEvents.length,
-                targetCount: THREAD_TARGET_MESSAGE_COUNT,
-                requestedLimit: prefetchedLimit,
-            });
-            cacheDealWorkspaceCoreSnapshot(dealId, createDealWorkspaceCoreSnapshot({
-                dealId,
-                title: workspace.deal?.title,
-                stage: workspace.deal?.stage,
-                metadata: workspace.deal?.metadata,
-                participants: Array.isArray(workspace.participants) ? workspace.participants : [],
-                timelineEvents,
-                hydration,
-            }));
-        } catch (error) {
-            console.error("Deal workspace prefetch failed:", error);
-        } finally {
-            dealWorkspaceCoreInFlightRef.current.delete(dealId);
-        }
-    }, [cacheDealWorkspaceCoreSnapshot, trackClientRequest]);
-
     useEffect(() => {
         const onVisibility = () => setIsTabVisible(typeof document === 'undefined' ? true : !document.hidden);
         onVisibility();
@@ -966,7 +860,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         estimateThreadViewportHeightPx,
     });
 
-    const { refreshActiveDealWorkspace } = useDealWorkspaceRefreshOrchestration({
+    const { refreshActiveDealWorkspace, isDealWorkspaceRefreshBusy } = useDealWorkspaceRefreshOrchestration({
         activeDealIdRef,
         activeIdRef,
         applyDealWorkspaceCoreSnapshot,
@@ -1271,7 +1165,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         workspaceActivityLimit: WORKSPACE_ACTIVITY_LIMIT,
     });
 
-    const { runRealtimeRefresh } = useConversationRefreshOrchestration({
+    const { runRealtimeRefresh, isConversationWorkspaceRefreshBusy } = useConversationRefreshOrchestration({
         viewMode,
         viewFilter,
         activeId,
@@ -1297,6 +1191,36 @@ export function ConversationInterface({ locationId, initialConversations, initia
         isWorkspaceHydrationBusy,
         markConversationReadInUi,
         trackClientRequest,
+        workspaceActivityLimit: WORKSPACE_ACTIVITY_LIMIT,
+    });
+
+    const {
+        prefetchWorkspaceCore,
+        prefetchWorkspaceSidebar,
+        prefetchDealWorkspaceCore,
+    } = useConversationWorkspacePrefetch({
+        viewMode,
+        activeId,
+        activeDealId,
+        conversations,
+        deals,
+        activeIdRef,
+        activeDealIdRef,
+        workspaceCoreInFlightRef,
+        workspaceSidebarInFlightRef,
+        dealWorkspaceCoreInFlightRef,
+        isWorkspaceHydrationBusy,
+        isConversationWorkspaceRefreshBusy,
+        isDealWorkspaceHydrationBusy,
+        isDealWorkspaceRefreshBusy,
+        cacheWorkspaceCoreSnapshot,
+        getCachedWorkspaceCoreSnapshot,
+        cacheWorkspaceSidebarSnapshot,
+        getCachedWorkspaceSidebarSnapshot,
+        cacheDealWorkspaceCoreSnapshot,
+        getCachedDealWorkspaceCoreSnapshot,
+        trackClientRequest,
+        estimateThreadViewportHeightPx,
         workspaceActivityLimit: WORKSPACE_ACTIVITY_LIMIT,
     });
 
@@ -1583,79 +1507,6 @@ export function ConversationInterface({ locationId, initialConversations, initia
         viewFilter,
         viewMode,
     ]);
-
-    useEffect(() => {
-        if (viewMode !== 'chats') return;
-
-        const candidateIds = conversations
-            .filter((conversation) => conversation.id !== activeId)
-            .slice(0, 3)
-            .map((conversation) => conversation.id);
-
-        if (candidateIds.length === 0) return;
-
-        let cancelled = false;
-        let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-        let idleHandle: number | null = null;
-
-        const runPrefetch = () => {
-            if (cancelled) return;
-            for (const conversationId of candidateIds) {
-                void prefetchWorkspaceCore(conversationId);
-                void prefetchWorkspaceSidebar(conversationId);
-            }
-        };
-
-        if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-            idleHandle = (window as any).requestIdleCallback(runPrefetch, { timeout: 1200 });
-        } else {
-            timeoutHandle = setTimeout(runPrefetch, 350);
-        }
-
-        return () => {
-            cancelled = true;
-            if (timeoutHandle) clearTimeout(timeoutHandle);
-            if (idleHandle !== null && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
-                (window as any).cancelIdleCallback(idleHandle);
-            }
-        };
-    }, [viewMode, activeId, conversations, prefetchWorkspaceCore, prefetchWorkspaceSidebar]);
-
-    useEffect(() => {
-        if (viewMode !== 'deals') return;
-
-        const candidateIds = deals
-            .filter((deal) => deal?.id && deal.id !== activeDealId)
-            .slice(0, 3)
-            .map((deal) => deal.id);
-
-        if (candidateIds.length === 0) return;
-
-        let cancelled = false;
-        let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-        let idleHandle: number | null = null;
-
-        const runPrefetch = () => {
-            if (cancelled) return;
-            for (const dealId of candidateIds) {
-                void prefetchDealWorkspaceCore(dealId);
-            }
-        };
-
-        if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-            idleHandle = (window as any).requestIdleCallback(runPrefetch, { timeout: 1200 });
-        } else {
-            timeoutHandle = setTimeout(runPrefetch, 350);
-        }
-
-        return () => {
-            cancelled = true;
-            if (timeoutHandle) clearTimeout(timeoutHandle);
-            if (idleHandle !== null && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
-                (window as any).cancelIdleCallback(idleHandle);
-            }
-        };
-    }, [activeDealId, deals, prefetchDealWorkspaceCore, viewMode]);
 
     // Handle clicking a conversation in the list
     const handleSelect = (id: string) => {
