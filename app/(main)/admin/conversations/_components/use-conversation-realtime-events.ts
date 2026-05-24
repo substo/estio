@@ -8,6 +8,11 @@ import {
 } from '@/lib/conversations/realtime-merge';
 import { ACTIVE_DEAL_REFRESH_EVENT_LIMIT } from './use-deal-workspace-refresh-orchestration';
 import type { ActivityTimelineItem } from './conversation-workspace-ui-actions';
+import {
+    appendInboundMessageIfMissing,
+    buildOptimisticInboundMessage,
+    normalizeInboundRealtimePayload,
+} from './conversation-realtime-message-actions';
 
 export type ConversationRealtimeMode = 'disabled' | 'connecting' | 'connected' | 'fallback';
 
@@ -118,45 +123,23 @@ export function routeConversationRealtimeEnvelope({
     }
 
     if (viewMode === "chats" && conversationId && eventType === "message.inbound") {
-        const payload = parseRealtimePayload(event);
-        const messageId = String(payload?.messageId || "").trim();
-        const body = String(payload?.body ?? "");
-        const createdAt = String(payload?.createdAt || new Date().toISOString());
-        const wamId = String(payload?.wamId || "");
+        const payload = normalizeInboundRealtimePayload(parseRealtimePayload(event));
 
-        if (conversationId === activeIdRef.current && messageId) {
-            const optimisticMessage: Message = {
-                id: messageId,
-                wamId: wamId || undefined,
-                clientMessageId: String(payload?.clientMessageId || "") || undefined,
-                conversationId: "",
-                contactId: "",
-                body,
-                type: "WhatsApp",
-                direction: "inbound" as const,
-                status: "received",
-                sendState: "sent",
-                dateAdded: createdAt,
-                attachments: [],
-            } as Message;
+        if (conversationId === activeIdRef.current && payload.messageId) {
+            const optimisticMessage = buildOptimisticInboundMessage(payload);
 
             setMessages((prev) => {
-                if (prev.some((m) => m.id === messageId || (wamId && (m as any).wamId === wamId))) {
-                    return prev;
-                }
-                return [...prev, optimisticMessage];
+                return appendInboundMessageIfMissing(prev, optimisticMessage, payload);
             });
 
             const cached = getCachedWorkspaceCoreSnapshot(conversationId);
             if (cached) {
                 const cachedMessages = Array.isArray(cached.messages) ? cached.messages : [];
-                const alreadyInCache = cachedMessages.some(
-                    (m: Message) => m.id === messageId || (wamId && (m as any).wamId === wamId)
-                );
-                if (!alreadyInCache) {
+                const nextCachedMessages = appendInboundMessageIfMissing(cachedMessages, optimisticMessage, payload);
+                if (nextCachedMessages !== cachedMessages) {
                     cacheWorkspaceCoreSnapshot(conversationId, {
                         ...cached,
-                        messages: [...cachedMessages, optimisticMessage],
+                        messages: nextCachedMessages,
                     });
                 }
             }

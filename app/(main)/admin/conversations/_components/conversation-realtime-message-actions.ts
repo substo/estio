@@ -14,6 +14,19 @@ export type RealtimeMessagePatchResult = {
     payload: RealtimeMessagePatchPayload;
 };
 
+export type InboundRealtimePayload = {
+    messageId: string;
+    clientMessageId: string;
+    wamId: string;
+    body: string;
+    createdAt: string;
+};
+
+export type InboundRealtimeCorrelation = {
+    messageId: string;
+    wamId: string;
+};
+
 export function normalizeRealtimeMessagePatchPayload(payload: Record<string, unknown>): RealtimeMessagePatchPayload {
     return {
         messageId: String(payload?.messageId || "").trim(),
@@ -62,4 +75,47 @@ export function applyRealtimeMessagePatchToMessages(
         matched,
         payload: normalized,
     };
+}
+
+export function normalizeInboundRealtimePayload(payload: Record<string, unknown>): InboundRealtimePayload {
+    return {
+        messageId: String(payload?.messageId || "").trim(),
+        clientMessageId: String(payload?.clientMessageId || "").trim(),
+        wamId: String(payload?.wamId || "").trim(),
+        body: String(payload?.body ?? ""),
+        createdAt: String(payload?.createdAt || new Date().toISOString()),
+    };
+}
+
+export function buildOptimisticInboundMessage(payload: InboundRealtimePayload): Message {
+    return {
+        id: payload.messageId,
+        wamId: payload.wamId || undefined,
+        clientMessageId: payload.clientMessageId || undefined,
+        conversationId: "",
+        contactId: "",
+        body: payload.body,
+        type: "WhatsApp",
+        direction: "inbound" as const,
+        status: "received",
+        sendState: "sent",
+        dateAdded: payload.createdAt,
+        attachments: [],
+    } as Message;
+}
+
+export function appendInboundMessageIfMissing(
+    messages: Message[],
+    optimisticMessage: Message,
+    correlation: InboundRealtimeCorrelation
+): Message[] {
+    if (!correlation.messageId) return messages;
+    if (messages.some((message) => (
+        message.id === correlation.messageId
+        || (correlation.wamId && (message as any).wamId === correlation.wamId)
+    ))) {
+        return messages;
+    }
+
+    return [...messages, optimisticMessage];
 }

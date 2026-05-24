@@ -2,8 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Message } from '@/lib/ghl/conversations';
 import {
+    appendInboundMessageIfMissing,
     applyRealtimeMessagePatchToMessages,
+    buildOptimisticInboundMessage,
     getRealtimeMessageSendState,
+    normalizeInboundRealtimePayload,
 } from './conversation-realtime-message-actions';
 
 function message(overrides: Partial<Message> & Record<string, unknown>): Message {
@@ -90,4 +93,78 @@ test('getRealtimeMessageSendState preserves realtime status mapping', () => {
     assert.equal(getRealtimeMessageSendState('sent'), 'sent');
     assert.equal(getRealtimeMessageSendState('delivered'), 'sent');
     assert.equal(getRealtimeMessageSendState('read'), 'sent');
+});
+
+test('buildOptimisticInboundMessage builds optimistic inbound WhatsApp message with same defaults', () => {
+    const payload = normalizeInboundRealtimePayload({
+        messageId: 'msg-in-1',
+        clientMessageId: 'cmid-in-1',
+        wamId: 'wam-in-1',
+        body: 'hello inbound',
+        createdAt: '2026-05-24T10:00:00.000Z',
+    });
+
+    const optimistic = buildOptimisticInboundMessage(payload);
+
+    assert.deepEqual(optimistic, {
+        id: 'msg-in-1',
+        wamId: 'wam-in-1',
+        clientMessageId: 'cmid-in-1',
+        conversationId: '',
+        contactId: '',
+        body: 'hello inbound',
+        type: 'WhatsApp',
+        direction: 'inbound',
+        status: 'received',
+        sendState: 'sent',
+        dateAdded: '2026-05-24T10:00:00.000Z',
+        attachments: [],
+    } as Message);
+});
+
+test('appendInboundMessageIfMissing skips append when id exists', () => {
+    const existing = message({ id: 'msg-in-1', direction: 'inbound' });
+    const optimistic = message({ id: 'msg-in-1', direction: 'inbound' });
+
+    const result = appendInboundMessageIfMissing([existing], optimistic, {
+        messageId: 'msg-in-1',
+        wamId: '',
+    });
+
+    assert.deepEqual(result, [existing]);
+});
+
+test('appendInboundMessageIfMissing skips append when wamId exists', () => {
+    const existing = message({ id: 'msg-existing', direction: 'inbound', wamId: 'wam-in-1' });
+    const optimistic = message({ id: 'msg-in-1', direction: 'inbound', wamId: 'wam-in-1' });
+
+    const result = appendInboundMessageIfMissing([existing], optimistic, {
+        messageId: 'msg-in-1',
+        wamId: 'wam-in-1',
+    });
+
+    assert.deepEqual(result, [existing]);
+});
+
+test('appendInboundMessageIfMissing appends when missing', () => {
+    const existing = message({ id: 'msg-existing', direction: 'inbound', wamId: 'wam-existing' });
+    const optimistic = message({ id: 'msg-in-1', direction: 'inbound', wamId: 'wam-in-1' });
+
+    const result = appendInboundMessageIfMissing([existing], optimistic, {
+        messageId: 'msg-in-1',
+        wamId: 'wam-in-1',
+    });
+
+    assert.deepEqual(result, [existing, optimistic]);
+});
+
+test('appendInboundMessageIfMissing handles missing messageId as not appendable', () => {
+    const optimistic = message({ id: '', direction: 'inbound', wamId: 'wam-in-1' });
+
+    const result = appendInboundMessageIfMissing([], optimistic, {
+        messageId: '',
+        wamId: 'wam-in-1',
+    });
+
+    assert.deepEqual(result, []);
 });
