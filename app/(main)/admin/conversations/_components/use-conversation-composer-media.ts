@@ -198,6 +198,7 @@ export function useConversationComposerMedia({
     return {
         fileInputRef,
         isRecording,
+        setIsRecording,
         handleMediaPickClick,
         handleMediaSelected,
         handleRecordToggle,

@@ -1,9 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Conversation } from "@/lib/ghl/conversations";
 import {
-    DEFAULT_REPLY_LANGUAGE,
-    getReplyLanguageLabel,
-    normalizeReplyLanguage,
     REPLY_LANGUAGE_AUTO_VALUE,
     REPLY_LANGUAGE_OPTIONS,
 } from "@/lib/ai/reply-language-options";
@@ -16,8 +13,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Check, ChevronsUpDown, Loader2, Send, Paperclip, Mic, Square, Sparkles } from "lucide-react";
 import { SuggestionBubbles } from "./suggestion-bubbles";
 import { AiModelSelect } from "@/components/ai/ai-model-select";
-import { useAiModelCatalog } from "@/components/ai/use-ai-model-catalog";
-import { toast } from "sonner";
 import { getSmsSegmentInfo } from "@/lib/sms/segments";
 import {
     type ComposerChannel,
@@ -25,6 +20,7 @@ import {
 } from "./use-conversation-composer-translation-preview";
 import { useConversationComposerChannel } from "./use-conversation-composer-channel";
 import { useConversationComposerMedia } from "./use-conversation-composer-media";
+import { useConversationComposerAiDraft } from "./use-conversation-composer-ai-draft";
 
 interface ConversationComposerProps {
     conversation: Conversation | null;
@@ -82,11 +78,6 @@ function getPlaceholderText(channel: ComposerChannel): string {
     return channelHints[channel] || channelHints.SMS;
 }
 
-function getAgentDraftLanguage() {
-    if (typeof window === "undefined") return DEFAULT_REPLY_LANGUAGE;
-    return normalizeReplyLanguage(window.navigator.language || "") || DEFAULT_REPLY_LANGUAGE;
-}
-
 export function ConversationComposer({
     conversation,
     draft,
@@ -109,21 +100,35 @@ export function ConversationComposer({
     smsRelayEnabled = false,
 }: ConversationComposerProps) {
     const [sending, setSending] = useState(false);
-    const [generatingDraft, setGeneratingDraft] = useState(false);
-    const [selectedModel, setSelectedModel] = useState("");
-    const [hasUserSelectedModel, setHasUserSelectedModel] = useState(false);
-    const { models: availableModels, resolveModelForKind } = useAiModelCatalog();
-    const [selectedReplyLanguage, setSelectedReplyLanguage] = useState<string>(
-        conversation?.replyLanguageOverride || REPLY_LANGUAGE_AUTO_VALUE
-    );
-    const [replyLanguageOpen, setReplyLanguageOpen] = useState(false);
-    const [savingReplyLanguage, setSavingReplyLanguage] = useState(false);
-    const [agentDraftLanguage, setAgentDraftLanguage] = useState<string>(DEFAULT_REPLY_LANGUAGE);
-
-    const hasUserSelectedModelRef = useRef(false);
-    const appliedInsertDraftSeedKeyRef = useRef<string | null>(null);
-
     const isUnavailable = disabled || !conversation;
+    const {
+        generatingDraft,
+        selectedModel,
+        handleModelChange,
+        availableModels,
+        selectedReplyLanguage,
+        replyLanguageOpen,
+        setReplyLanguageOpen,
+        savingReplyLanguage,
+        handleAiDraft,
+        handleReplyLanguageSelect,
+        selectedReplyLanguageLabel,
+        resolvedDraftLanguageLabel,
+        resolvedViewingLanguageLabel,
+        replyLanguageSourceHint,
+        autoTranslateTargetLabel,
+    } = useConversationComposerAiDraft({
+        conversation,
+        draft,
+        isUnavailable,
+        insertDraftSeed,
+        onDraftChange,
+        onGenerateDraft,
+        onSetReplyLanguageOverride,
+        onModelChange,
+        translationTargetLanguageLabel,
+        viewingLanguageLabel,
+    });
     const {
         selectedChannel,
         selectChannel,
@@ -153,6 +158,7 @@ export function ConversationComposer({
     const {
         fileInputRef,
         isRecording,
+        setIsRecording,
         handleMediaPickClick,
         handleMediaSelected,
         handleRecordToggle,
@@ -167,37 +173,9 @@ export function ConversationComposer({
     });
 
     useEffect(() => {
-        onModelChange?.(selectedModel);
-    }, [selectedModel, onModelChange]);
-
-    useEffect(() => {
-        setAgentDraftLanguage(getAgentDraftLanguage());
-    }, []);
-
-    useEffect(() => {
-        if (hasUserSelectedModelRef.current) return;
-        const preferredModel = resolveModelForKind("general") || resolveModelForKind("draft");
-        if (!preferredModel) return;
-        setSelectedModel(preferredModel);
-    }, [resolveModelForKind]);
-
-    useEffect(() => {
         setIsRecording(false);
-        setSelectedReplyLanguage(conversation?.replyLanguageOverride || REPLY_LANGUAGE_AUTO_VALUE);
         clearTranslationPreview();
-    }, [clearTranslationPreview, conversation?.id]);
-
-    useEffect(() => {
-        if (!insertDraftSeed?.key) return;
-        if (appliedInsertDraftSeedKeyRef.current === insertDraftSeed.key) return;
-        appliedInsertDraftSeedKeyRef.current = insertDraftSeed.key;
-        const nextBody = String(insertDraftSeed.body || "");
-        onDraftChange(nextBody);
-    }, [insertDraftSeed?.key, insertDraftSeed?.body, onDraftChange]);
-
-    useEffect(() => {
-        setSelectedReplyLanguage(conversation?.replyLanguageOverride || REPLY_LANGUAGE_AUTO_VALUE);
-    }, [conversation?.replyLanguageOverride]);
+    }, [clearTranslationPreview, conversation?.id, setIsRecording]);
 
     const handleSend = async (mode: "original" | "translated" = "original") => {
         if (isUnavailable || isRecording || !draft.trim()) return;
@@ -263,77 +241,8 @@ export function ConversationComposer({
         }
     };
 
-    const handleAiDraft = async (instructionOverride?: string) => {
-        if (!onGenerateDraft || generatingDraft || isUnavailable) return;
-        setGeneratingDraft(true);
-        try {
-            const instruction = instructionOverride || draft.trim();
-            const modelOverride = hasUserSelectedModel ? selectedModel : undefined;
-            let streamedBuffer = "";
-            const text = await onGenerateDraft(
-                instruction,
-                modelOverride,
-                agentDraftLanguage,
-                (chunk) => {
-                    if (!chunk) return;
-                    streamedBuffer += chunk;
-                    onDraftChange(streamedBuffer);
-                }
-            );
-            if (text) {
-                onDraftChange(text);
-            } else if (streamedBuffer) {
-                onDraftChange(streamedBuffer);
-            }
-        } catch (e) {
-            console.error("Draft generation failed", e);
-        } finally {
-            setGeneratingDraft(false);
-        }
-    };
-
-    const handleReplyLanguageSelect = async (value: string) => {
-        const nextSelection = value || REPLY_LANGUAGE_AUTO_VALUE;
-        setReplyLanguageOpen(false);
-        if (isUnavailable || !conversation || !onSetReplyLanguageOverride || savingReplyLanguage) return;
-
-        const previousSelection = selectedReplyLanguage || REPLY_LANGUAGE_AUTO_VALUE;
-        const normalizedReplyLanguage = normalizeReplyLanguage(nextSelection);
-
-        setSelectedReplyLanguage(nextSelection);
-        setSavingReplyLanguage(true);
-        try {
-            const result = await onSetReplyLanguageOverride(normalizedReplyLanguage);
-            if (!result?.success) {
-                setSelectedReplyLanguage(previousSelection);
-                toast.error(result?.error || "Failed to save reply language.");
-                return;
-            }
-            setSelectedReplyLanguage(result.replyLanguageOverride || REPLY_LANGUAGE_AUTO_VALUE);
-        } catch (error: any) {
-            setSelectedReplyLanguage(previousSelection);
-            toast.error(error?.message || "Failed to save reply language.");
-        } finally {
-            setSavingReplyLanguage(false);
-        }
-    };
-
-    const selectedReplyLanguageLabel = selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE
-        ? "Reply in: Auto"
-        : `Reply in: ${getReplyLanguageLabel(selectedReplyLanguage) || selectedReplyLanguage}`;
-    const resolvedDraftLanguageLabel = getReplyLanguageLabel(agentDraftLanguage) || agentDraftLanguage || DEFAULT_REPLY_LANGUAGE;
     const canUseWriteTranslation = translationWriteEnabled && !!onPreviewTranslatedReply;
     const willAutoTranslate = selectedReplyLanguage !== REPLY_LANGUAGE_AUTO_VALUE && canUseWriteTranslation && !!onPreviewTranslatedReply;
-    const autoTranslateTargetLabel = getReplyLanguageLabel(selectedReplyLanguage) || selectedReplyLanguage;
-    const resolvedSendLanguageLabel = getReplyLanguageLabel(
-        selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE
-            ? (conversation?.locationDefaultReplyLanguage || DEFAULT_REPLY_LANGUAGE)
-            : selectedReplyLanguage
-    ) || translationTargetLanguageLabel || DEFAULT_REPLY_LANGUAGE;
-    const resolvedViewingLanguageLabel = getReplyLanguageLabel(viewingLanguageLabel || null) || viewingLanguageLabel || DEFAULT_REPLY_LANGUAGE;
-    const replyLanguageSourceHint = selectedReplyLanguage !== REPLY_LANGUAGE_AUTO_VALUE
-        ? `Source: Conversation override (${getReplyLanguageLabel(selectedReplyLanguage) || selectedReplyLanguage})`
-        : `Source: Location default (${getReplyLanguageLabel(conversation?.locationDefaultReplyLanguage || DEFAULT_REPLY_LANGUAGE) || conversation?.locationDefaultReplyLanguage || DEFAULT_REPLY_LANGUAGE})`;
 
     const smsSegmentInfo = getSmsSegmentInfo(draft);
     const showSmsRelaySegmentInfo = selectedChannel === "SMS_RELAY" && draft.length > 0;
@@ -441,11 +350,7 @@ export function ConversationComposer({
                                     <div className="w-px h-4 bg-slate-200" />
                                     <AiModelSelect
                                         value={selectedModel}
-                                        onValueChange={(value) => {
-                                            hasUserSelectedModelRef.current = true;
-                                            setHasUserSelectedModel(true);
-                                            setSelectedModel(value);
-                                        }}
+                                        onValueChange={handleModelChange}
                                         disabled={isUnavailable}
                                         triggerClassName="h-7 w-[94px] sm:w-[110px] text-[11px] border-0 bg-slate-50 hover:bg-slate-100 focus:ring-0 px-2"
                                         itemClassName="text-xs"
