@@ -55,9 +55,6 @@ import {
     THREAD_TARGET_MESSAGE_COUNT,
 } from '@/lib/conversations/thread-hydration';
 import {
-    matchesByCorrelation,
-} from '@/lib/conversations/outbound-reconciliation';
-import {
     collectPendingMessagesForConversation,
     isWorkspaceRefreshBusy,
     mergeSnapshotPreservingPendingMessages,
@@ -105,6 +102,7 @@ import {
     markMessageSendingById,
     normalizeSendError,
 } from './conversation-message-actions';
+import { applyRealtimeMessagePatchToMessages } from './conversation-realtime-message-actions';
 import {
     applyMessageTranslation,
     applyReplyLanguageOverrideToConversations,
@@ -641,41 +639,14 @@ export function ConversationInterface({ locationId, initialConversations, initia
         const normalizedConversationId = String(conversationId || "").trim();
         if (!normalizedConversationId || activeIdRef.current !== normalizedConversationId) return false;
 
-        const messageId = String(payload?.messageId || "").trim();
-        const clientMessageId = String(payload?.clientMessageId || "").trim();
-        const wamId = String(payload?.wamId || "").trim();
-        const nextStatus = String(payload?.status || "").trim();
-
         let matched = false;
         let nextMessagesSnapshot: Message[] | null = null;
 
         setMessages((prev) => {
-            const next = prev.map((message) => {
-                const isMatch = matchesByCorrelation(message as any, {
-                    messageId: messageId || null,
-                    clientMessageId: clientMessageId || null,
-                    wamId: wamId || messageId || null,
-                });
-                if (!isMatch) return message;
-
-                matched = true;
-                return {
-                    ...message,
-                    ...(messageId ? { id: messageId } : {}),
-                    ...(clientMessageId ? { clientMessageId } : {}),
-                    ...(wamId ? { wamId } : {}),
-                    ...(nextStatus ? { status: nextStatus } : {}),
-                    ...(nextStatus ? {
-                        sendState: nextStatus === "sending"
-                            ? "sending"
-                            : nextStatus === "failed"
-                                ? "failed"
-                                : "sent"
-                    } : {}),
-                } as Message;
-            });
-            nextMessagesSnapshot = next;
-            return next;
+            const result = applyRealtimeMessagePatchToMessages(prev, payload);
+            matched = result.matched;
+            nextMessagesSnapshot = result.messages;
+            return result.messages;
         });
 
         if (!matched || !nextMessagesSnapshot) return false;
