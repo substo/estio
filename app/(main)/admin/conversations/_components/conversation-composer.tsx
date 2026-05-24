@@ -23,8 +23,10 @@ import {
 import { useAiModelCatalog } from "@/components/ai/use-ai-model-catalog";
 import { toast } from "sonner";
 import { getSmsSegmentInfo } from "@/lib/sms/segments";
-
-type ComposerChannel = "SMS" | "Email" | "WhatsApp" | "SMS_RELAY";
+import {
+    type ComposerChannel,
+    useConversationComposerTranslationPreview,
+} from "./use-conversation-composer-translation-preview";
 
 type WhatsAppEligibilityState =
     | { status: "checking" }
@@ -142,11 +144,6 @@ export function ConversationComposer({
     );
     const [replyLanguageOpen, setReplyLanguageOpen] = useState(false);
     const [savingReplyLanguage, setSavingReplyLanguage] = useState(false);
-    const [previewingTranslation, setPreviewingTranslation] = useState(false);
-    const [translationPreviewText, setTranslationPreviewText] = useState("");
-    const [translationPreviewLanguage, setTranslationPreviewLanguage] = useState<string | null>(null);
-    const [translationPreviewDetectedSource, setTranslationPreviewDetectedSource] = useState<string | null>(null);
-    const [translationPreviewSourceText, setTranslationPreviewSourceText] = useState("");
     const [whatsAppEligibility, setWhatsAppEligibility] = useState<WhatsAppEligibilityState>({ status: "checking" });
     const [smsEligibility, setSmsEligibility] = useState<SmsEligibilityState>({ status: "checking" });
     const [isRecording, setIsRecording] = useState(false);
@@ -160,6 +157,22 @@ export function ConversationComposer({
     const appliedInsertDraftSeedKeyRef = useRef<string | null>(null);
 
     const isUnavailable = disabled || !conversation;
+    const {
+        previewingTranslation,
+        translationPreviewText,
+        translationPreviewLanguage,
+        translationPreviewDetectedSource,
+        hasTranslationPreview,
+        clearTranslationPreview,
+        handlePreviewTranslation,
+    } = useConversationComposerTranslationPreview({
+        draft,
+        isUnavailable,
+        selectedChannel,
+        selectedReplyLanguage,
+        autoReplyLanguageValue: REPLY_LANGUAGE_AUTO_VALUE,
+        onPreviewTranslatedReply,
+    });
 
     useEffect(() => {
         onModelChange?.(selectedModel);
@@ -180,11 +193,8 @@ export function ConversationComposer({
         setSelectedChannel(getInitialChannel(conversation));
         setIsRecording(false);
         setSelectedReplyLanguage(conversation?.replyLanguageOverride || REPLY_LANGUAGE_AUTO_VALUE);
-        setTranslationPreviewText("");
-        setTranslationPreviewLanguage(null);
-        setTranslationPreviewDetectedSource(null);
-        setTranslationPreviewSourceText("");
-    }, [conversation?.id]);
+        clearTranslationPreview();
+    }, [clearTranslationPreview, conversation?.id]);
 
     useEffect(() => {
         if (!insertDraftSeed?.key) return;
@@ -197,17 +207,6 @@ export function ConversationComposer({
     useEffect(() => {
         setSelectedReplyLanguage(conversation?.replyLanguageOverride || REPLY_LANGUAGE_AUTO_VALUE);
     }, [conversation?.replyLanguageOverride]);
-
-    useEffect(() => {
-        const current = String(draft || "").trim();
-        if (!translationPreviewText) return;
-        if (!translationPreviewSourceText) return;
-        if (current === translationPreviewSourceText) return;
-        setTranslationPreviewText("");
-        setTranslationPreviewLanguage(null);
-        setTranslationPreviewDetectedSource(null);
-        setTranslationPreviewSourceText("");
-    }, [draft, translationPreviewSourceText, translationPreviewText]);
 
     useEffect(() => {
         if (!conversation?.id) {
@@ -379,36 +378,11 @@ export function ConversationComposer({
         try {
             await Promise.resolve(onSendMessage(textToSend, selectedChannel, translationMeta));
             onDraftClear();
-            setTranslationPreviewText("");
-            setTranslationPreviewLanguage(null);
-            setTranslationPreviewDetectedSource(null);
-            setTranslationPreviewSourceText("");
+            clearTranslationPreview();
         } catch (err) {
             console.error("Message send failed", err);
         } finally {
             setSending(false);
-        }
-    };
-
-    const handlePreviewTranslation = async () => {
-        if (!onPreviewTranslatedReply || previewingTranslation || isUnavailable) return;
-        const sourceText = String(draft || "").trim();
-        if (!sourceText) return;
-
-        setPreviewingTranslation(true);
-        try {
-            const targetLanguage = selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE ? null : selectedReplyLanguage;
-            const result = await onPreviewTranslatedReply(sourceText, selectedChannel, targetLanguage);
-            if (!result?.success || !result.translatedText) {
-                toast.error(result?.error || "Failed to preview translation.");
-                return;
-            }
-            setTranslationPreviewText(String(result.translatedText || ""));
-            setTranslationPreviewLanguage(result.targetLanguage || targetLanguage || null);
-            setTranslationPreviewDetectedSource(result.detectedSourceLanguage || null);
-            setTranslationPreviewSourceText(sourceText);
-        } finally {
-            setPreviewingTranslation(false);
         }
     };
 
@@ -629,7 +603,6 @@ export function ConversationComposer({
             : isWhatsAppDisabled
                 ? (whatsAppEligibility.reason || "WhatsApp not available for this contact")
                 : undefined;
-    const hasTranslationPreview = !!translationPreviewText.trim();
     const smsSegmentInfo = getSmsSegmentInfo(draft);
     const showSmsRelaySegmentInfo = selectedChannel === "SMS_RELAY" && draft.length > 0;
     const smsRelaySegmentLabel = `${smsSegmentInfo.segments || 1} SMS part${(smsSegmentInfo.segments || 1) === 1 ? "" : "s"} · ${smsSegmentInfo.remaining} left`;
@@ -697,12 +670,7 @@ export function ConversationComposer({
                                 <button
                                     type="button"
                                     className="text-slate-500 hover:text-slate-700"
-                                    onClick={() => {
-                                        setTranslationPreviewText("");
-                                        setTranslationPreviewLanguage(null);
-                                        setTranslationPreviewDetectedSource(null);
-                                        setTranslationPreviewSourceText("");
-                                    }}
+                                    onClick={clearTranslationPreview}
                                 >
                                     Clear
                                 </button>
