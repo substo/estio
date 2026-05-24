@@ -40,7 +40,6 @@ import {
     createPersistentDeal,
     getDealContexts,
 } from '../../deals/actions';
-import { shouldApplyRealtimeEnvelope } from '@/lib/conversations/realtime-merge';
 import {
     appendConversationPageFromResponse as appendConversationPageStateFromResponse,
     applyConversationDeltaPayload as applyConversationDeltaListPayload,
@@ -146,6 +145,7 @@ import {
 } from './use-deal-workspace-refresh-orchestration';
 import { useConversationRefreshOrchestration } from './use-conversation-refresh-orchestration';
 import { useConversationWorkspacePrefetch } from './use-conversation-workspace-prefetch';
+import { useConversationRealtimeEvents } from './use-conversation-realtime-events';
 import {
     buildDealContactOptions,
     chooseNextDealConversationId,
@@ -279,8 +279,6 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const [realtimeMode, setRealtimeMode] = useState<'disabled' | 'connecting' | 'connected' | 'fallback'>(
         featureFlags.realtimeSse ? 'connecting' : 'disabled'
     );
-    const realtimeEventIdsRef = useRef<Set<string>>(new Set());
-    const realtimeEventLastTsByConversationRef = useRef<Record<string, number>>({});
     const realtimeRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const readResetInFlightRef = useRef<Set<string>>(new Set());
     const pendingOutboundByConversationRef = useRef<Map<string, Map<string, Message>>>(new Map());
@@ -426,10 +424,6 @@ export function ConversationInterface({ locationId, initialConversations, initia
     useEffect(() => {
         activeDealIdRef.current = activeDealId;
     }, [activeDealId]);
-
-    useEffect(() => {
-        setRealtimeMode(featureFlags.realtimeSse ? 'connecting' : 'disabled');
-    }, [featureFlags.realtimeSse]);
 
     useEffect(() => {
         if (!featureFlags.shallowUrlSync) return;
@@ -1272,241 +1266,26 @@ export function ConversationInterface({ locationId, initialConversations, initia
         viewMode,
     ]);
 
-    useEffect(() => {
-        if (!featureFlags.realtimeSse) {
-            setRealtimeMode('disabled');
-            return;
-        }
-
-        const shouldDisableRealtime = (
-            !isTabVisible
-            || (viewMode === 'chats' && searchQuery.trim().length > 0)
-            || (viewMode === 'chats' && viewFilter === 'tasks')
-            || (viewMode !== 'chats' && viewMode !== 'deals')
-        );
-
-        if (shouldDisableRealtime) {
-            setRealtimeMode('fallback');
-            return;
-        }
-
-        let closed = false;
-        let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
-        let eventSource: EventSource | null = null;
-
-        const clearFallbackTimer = () => {
-            if (fallbackTimer) {
-                clearTimeout(fallbackTimer);
-                fallbackTimer = null;
-            }
-        };
-
-        const scheduleFallback = () => {
-            clearFallbackTimer();
-            fallbackTimer = setTimeout(() => {
-                if (closed) return;
-                setRealtimeMode('fallback');
-            }, 10_000);
-        };
-
-        const handleIncomingEnvelope = (rawData: string) => {
-            try {
-                const event = JSON.parse(rawData || "{}");
-                const conversationId = event?.conversationId ? String(event.conversationId) : null;
-                const eventType = String(event?.type || "");
-                const shouldApply = shouldApplyRealtimeEnvelope(
-                    {
-                        seenEventIds: realtimeEventIdsRef.current,
-                        lastTsByConversationId: realtimeEventLastTsByConversationRef.current,
-                    },
-                    {
-                        id: event?.id ? String(event.id) : null,
-                        conversationId,
-                        ts: event?.ts ? String(event.ts) : null,
-                    },
-                    { maxTrackedEventIds: 1000 }
-                );
-                if (!shouldApply) return;
-
-                if (viewMode === 'deals') {
-                    const payloadDealId = String(event?.payload?.dealId || "").trim();
-                    if (eventType === "deal.update" && payloadDealId && payloadDealId === activeDealIdRef.current) {
-                        void refreshActiveDealWorkspace(payloadDealId, {
-                            reason: "realtime",
-                            take: ACTIVE_DEAL_REFRESH_EVENT_LIMIT,
-                            refreshSidebar: true,
-                            hydrationSkipLogKind: "deal_realtime_refresh_skipped_hydration",
-                        });
-                    }
-                    return;
-                }
-
-                if (viewMode === "chats" && conversationId && (eventType === "message.status" || eventType === "message.outbound")) {
-                    const payload = event?.payload && typeof event.payload === "object"
-                        ? event.payload as Record<string, unknown>
-                        : {};
-                    const patched = applyRealtimeMessagePatch(conversationId, payload);
-                    if (patched) return;
-
-                    // Fallback consistency repair for unknown message ids.
-                    runRealtimeRefresh(conversationId);
-                    return;
-                }
-
-                if (viewMode === "chats" && conversationId && eventType === "activity.created") {
-                    const payload = event?.payload && typeof event.payload === "object"
-                        ? event.payload as Record<string, unknown>
-                        : {};
-                    const activityEntry = payload?.activityEntry && typeof payload.activityEntry === "object"
-                        ? payload.activityEntry as ActivityTimelineItem
-                        : null;
-
-                    if (activityEntry?.id) {
-                        upsertActivityEntryInWorkspace(conversationId, activityEntry);
-                        return;
-                    }
-
-                    runRealtimeRefresh(conversationId);
-                    return;
-                }
-
-                // ── Optimistic inbound message insertion ──
-                // When the SSE carries an enriched message.inbound event we can
-                // render the bubble immediately without a server round-trip.
-                if (viewMode === "chats" && conversationId && eventType === "message.inbound") {
-                    const payload = event?.payload && typeof event.payload === "object"
-                        ? event.payload as Record<string, unknown>
-                        : {};
-                    const messageId = String(payload?.messageId || "").trim();
-                    const body = String(payload?.body ?? "");
-                    const createdAt = String(payload?.createdAt || new Date().toISOString());
-                    const wamId = String(payload?.wamId || "");
-
-                    if (conversationId === activeIdRef.current && messageId) {
-                        // Active conversation → optimistic append
-                        const optimisticMessage: Message = {
-                            id: messageId,
-                            wamId: wamId || undefined,
-                            clientMessageId: String(payload?.clientMessageId || "") || undefined,
-                            conversationId: "",   // not used by UI rendering
-                            contactId: "",        // not used by UI rendering
-                            body,
-                            type: "WhatsApp",
-                            direction: "inbound" as const,
-                            status: "received",
-                            sendState: "sent",
-                            dateAdded: createdAt,
-                            attachments: [],
-                        } as Message;
-
-                        setMessages((prev) => {
-                            // Guard against duplicate
-                            if (prev.some((m) => m.id === messageId || (wamId && (m as any).wamId === wamId))) {
-                                return prev;
-                            }
-                            return [...prev, optimisticMessage];
-                        });
-
-                        // Also update the cached snapshot so switching away and back
-                        // still shows the message instantly.
-                        const cached = getCachedWorkspaceCoreSnapshot(conversationId);
-                        if (cached) {
-                            const cachedMessages = Array.isArray(cached.messages) ? cached.messages : [];
-                            const alreadyInCache = cachedMessages.some(
-                                (m) => m.id === messageId || (wamId && (m as any).wamId === wamId)
-                            );
-                            if (!alreadyInCache) {
-                                cacheWorkspaceCoreSnapshot(conversationId, {
-                                    ...cached,
-                                    messages: [...cachedMessages, optimisticMessage],
-                                });
-                            }
-                        }
-
-                        // Still trigger a background refresh to reconcile optimistic
-                        // data with the real server state (attachments, transcript, etc.)
-                        runRealtimeRefresh(conversationId);
-                        return;
-                    }
-
-                    // Non-active conversation → eagerly invalidate cache + prefetch
-                    // so the workspace is ready by the time the user clicks.
-                    const existingCache = getCachedWorkspaceCoreSnapshot(conversationId);
-                    if (existingCache) {
-                        // Invalidate stale cache so next open triggers a fresh fetch
-                        // but keep it around for instant partial render.
-                        workspaceCoreInFlightRef.current.delete(conversationId);
-                    }
-                    void prefetchWorkspaceCore(conversationId);
-
-                    // Still run the list-level delta to update sidebar badge/preview.
-                    runRealtimeRefresh(conversationId);
-                    return;
-                }
-
-                runRealtimeRefresh(conversationId);
-            } catch (error) {
-                console.error("Failed to parse realtime conversation event:", error);
-            }
-        };
-
-        setRealtimeMode('connecting');
-        eventSource = new EventSource('/api/conversations/events');
-        eventSource.onopen = () => {
-            if (closed) return;
-            clearFallbackTimer();
-            setRealtimeMode('connected');
-            if (viewMode === 'deals') {
-                if (activeDealIdRef.current) {
-                    void refreshActiveDealWorkspace(activeDealIdRef.current, {
-                        reason: "reconnect",
-                        take: ACTIVE_DEAL_REFRESH_EVENT_LIMIT,
-                        refreshSidebar: true,
-                        hydrationSkipLogKind: "deal_realtime_refresh_skipped_hydration",
-                    });
-                }
-                return;
-            }
-            runRealtimeRefresh(activeIdRef.current);
-        };
-        eventSource.addEventListener('conversation', (evt) => {
-            if (closed) return;
-            handleIncomingEnvelope((evt as MessageEvent).data);
-        });
-        eventSource.onmessage = (evt) => {
-            if (closed) return;
-            handleIncomingEnvelope(evt.data);
-        };
-        eventSource.onerror = () => {
-            if (closed) return;
-            setRealtimeMode('connecting');
-            scheduleFallback();
-        };
-
-        return () => {
-            closed = true;
-            clearFallbackTimer();
-            if (eventSource) {
-                eventSource.close();
-                eventSource = null;
-            }
-        };
-    }, [
-        activeDealId,
-        applyRealtimeMessagePatch,
-        cacheWorkspaceCoreSnapshot,
-        searchQuery,
-        featureFlags.realtimeSse,
-        getCachedWorkspaceCoreSnapshot,
+    useConversationRealtimeEvents({
+        featureRealtimeSse: featureFlags.realtimeSse,
         isTabVisible,
-        prefetchWorkspaceCore,
-        refreshActiveDealWorkspace,
-        runRealtimeRefresh,
-        trackClientRequest,
-        upsertActivityEntryInWorkspace,
+        searchQuery,
         viewFilter,
+        activeDealId,
         viewMode,
-    ]);
+        activeIdRef,
+        activeDealIdRef,
+        workspaceCoreInFlightRef,
+        setMessages,
+        setRealtimeMode,
+        runRealtimeRefresh,
+        refreshActiveDealWorkspace,
+        applyRealtimeMessagePatch,
+        upsertActivityEntryInWorkspace,
+        prefetchWorkspaceCore,
+        getCachedWorkspaceCoreSnapshot,
+        cacheWorkspaceCoreSnapshot,
+    });
 
     // Handle clicking a conversation in the list
     const handleSelect = (id: string) => {
