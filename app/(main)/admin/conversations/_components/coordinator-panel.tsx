@@ -1,7 +1,7 @@
 import dynamic from "next/dynamic";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Conversation } from "@/lib/ghl/conversations";
-import { generateAIDraft, generateMultiContextDraftAction, getContactContext, generatePlanAction, executeNextTaskAction, getAgentPlan, getAgentExecutions, getTraceTreeAction, getContactInsightsAction, orchestrateAction } from "../actions";
+import { generateAIDraft, generateMultiContextDraftAction, getContactContext, generatePlanAction, executeNextTaskAction, getAgentPlan, getAgentExecutions, orchestrateAction } from "../actions";
 import { createPersistentDeal, findExistingDeal, removeConversationFromDeal } from "../../deals/actions";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { DEFAULT_REPLY_LANGUAGE, normalizeReplyLanguage } from "@/lib/ai/reply-language-options";
 import { GroupMembersList } from './group-members-list';
 import { TraceNodeRenderer } from "./trace-node-renderer";
+import { useCoordinatorTraceModal } from "./use-coordinator-trace-modal";
 import { useCoordinatorTranscriptUsage } from "./use-coordinator-transcript-usage";
 import type { ContactIdentityPatch } from "../../contacts/_components/contact-form";
 
@@ -191,14 +192,23 @@ export function CoordinatorPanel({
     const [agentActions, setAgentActions] = useState<any[]>([]);
     const [thoughtSteps, setThoughtSteps] = useState<ThoughtStep[]>([]);
     const [thinkingExpanded, setThinkingExpanded] = useState(false);
-    const [rawTrace, setRawTrace] = useState<any>(null);
-    const [traceTree, setTraceTree] = useState<any>(null); // Full hierarchical trace
-    const [insights, setInsights] = useState<any[]>([]); // Memory insights
-    const [traceModalOpen, setTraceModalOpen] = useState(false);
-    const [executionHistory, setExecutionHistory] = useState<any[]>([]);
-    const [loadingHistory, setLoadingHistory] = useState(false);
-    const [loadingTraceDetails, setLoadingTraceDetails] = useState(false);
-    const rawTraceRef = useRef<any>(null);
+    const {
+        rawTrace,
+        setRawTrace,
+        traceTree,
+        setTraceTree,
+        insights,
+        traceModalOpen,
+        setTraceModalOpen,
+        executionHistory,
+        loadingHistory,
+        loadingTraceDetails,
+        handleSelectTrace,
+        refreshExecutionHistory,
+    } = useCoordinatorTraceModal({
+        conversationId: conversation.id,
+        contactId: conversation.contactId,
+    });
 
     // Context Builder State
     const [dealTitle, setDealTitle] = useState("");
@@ -250,10 +260,6 @@ export function CoordinatorPanel({
         setContactContext(initialContactContext || null);
     }, [initialContactContext, conversation.id]);
 
-    useEffect(() => {
-        rawTraceRef.current = rawTrace;
-    }, [rawTrace]);
-
     const isContextMode = selectedConversations && selectedConversations.length > 0;
     const traceToolCalls = Array.isArray(rawTrace?.toolCalls) ? rawTrace.toolCalls : [];
     const leadParserToolCall = traceToolCalls.find((c: any) => c?.tool === "gemini.generateContent") || null;
@@ -301,46 +307,6 @@ export function CoordinatorPanel({
             clearTimeout(fetchTimer);
         };
     }, [conversation.id]);
-
-    const handleSelectTrace = useCallback(async (trace: any) => {
-        setRawTrace(trace);
-        setTraceTree(null);
-        setInsights([]);
-        setLoadingTraceDetails(true);
-
-        try {
-            // 1. Fetch Tree
-            if (trace.traceId) {
-                const tree = await getTraceTreeAction(trace.traceId);
-                setTraceTree(tree);
-            }
-
-            // 2. Fetch Insights (Memory)
-            if (conversation.contactId) {
-                const recentInsights = await getContactInsightsAction(conversation.contactId);
-                setInsights(recentInsights);
-            }
-        } catch (e) {
-            console.error("Failed to load trace details", e);
-        } finally {
-            setLoadingTraceDetails(false);
-        }
-    }, [conversation.contactId]);
-
-    // Fetch History when Modal Opens
-    useEffect(() => {
-        if (traceModalOpen && conversation.id) {
-            setLoadingHistory(true);
-            getAgentExecutions(conversation.id).then(history => {
-                setExecutionHistory(history);
-                // If there's no selected trace but we have history, select the latest
-                if (!rawTraceRef.current && history.length > 0) {
-                    void handleSelectTrace(history[0]);
-                }
-                setLoadingHistory(false);
-            });
-        }
-    }, [traceModalOpen, conversation.id, handleSelectTrace]);
 
     // Auto-detect existing deal on selection change
     useEffect(() => {
@@ -418,11 +384,7 @@ export function CoordinatorPanel({
             }
 
             // Auto-refresh trace history
-            setLoadingHistory(true);
-            getAgentExecutions(conversation.id).then(history => {
-                setExecutionHistory(history);
-                setLoadingHistory(false);
-            });
+            refreshExecutionHistory();
 
         } catch (e: any) {
             setError("Orchestration failed: " + e.message);
