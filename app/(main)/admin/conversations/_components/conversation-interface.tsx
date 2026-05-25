@@ -71,6 +71,7 @@ import { WhatsAppImportModal } from './whatsapp-import-modal';
 import { CreateDealDialog } from './create-deal-dialog';
 import { SyncAllChatsDialog } from './sync-all-chats-dialog';
 import { NewConversationDialog } from './new-conversation-dialog';
+import { ConversationWorkspaceLayout } from './conversation-workspace-layout';
 import { useSuggestedResponseQueue } from './use-suggested-response-queue';
 import { useMobileConversationPanes, type MobilePane } from './use-mobile-conversation-panes';
 import { useConversationComposerDrafts } from './use-conversation-composer-drafts';
@@ -162,7 +163,6 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
 import type { ConversationFeatureFlags } from '@/lib/feature-flags';
 
 const CoordinatorPanel = dynamic(
@@ -2745,59 +2745,20 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
     return (
         <>
-            {isMobileViewport ? (
-                <div
-                    ref={mobilePaneContainerRef}
-                    className="relative h-full w-full overflow-hidden touch-pan-y"
-                    onTouchStart={handleMobileTouchStart}
-                    onTouchMove={handleMobileTouchMove}
-                    onTouchEnd={handleMobileTouchEnd}
-                >
-                    <div
-                        ref={mobilePaneHostRef}
-                        className="h-full w-full min-w-0 max-w-full overflow-x-hidden"
-                        data-mobile-pane={currentMobilePane}
-                    >
-                        {mobilePaneContent[currentMobilePane]}
-                    </div>
-                    {mobilePaneHint && (
-                        <div className="pointer-events-none absolute bottom-2 left-1/2 z-20 -translate-x-1/2 rounded-full bg-slate-900/75 px-3 py-1 text-[10px] font-medium text-white">
-                            {mobilePaneHint}
-                        </div>
-                    )}
-                </div>
-            ) : (
-                <PanelGroup orientation="horizontal" className="h-full w-full max-w-full overflow-hidden">
-                    {/* Left: List */}
-                    <Panel
-                        defaultSize={24}
-                        minSize={18}
-                        className="overflow-hidden min-w-0"
-                    >
-                        {conversationListPane}
-                    </Panel>
-
-                    <PanelResizeHandle
-                        className="w-1 bg-gray-200 hover:bg-blue-400 transition-colors z-50 flex flex-col justify-center"
-                        style={{ width: '2px', cursor: 'col-resize' }}
-                    />
-
-                    {/* Center: Chat */}
-                    <Panel defaultSize={52} minSize={36} className="overflow-hidden min-w-0">
-                        {conversationMainPane}
-                    </Panel>
-
-                    <PanelResizeHandle
-                        className="w-1 bg-gray-200 hover:bg-blue-400 transition-colors z-50"
-                        style={{ width: '1px', cursor: 'col-resize' }}
-                    />
-
-                    {/* Right: AI Coordinator */}
-                    <Panel defaultSize={24} minSize={20} className="min-w-0">
-                        {missionControlPane}
-                    </Panel>
-                </PanelGroup>
-            )}
+            <ConversationWorkspaceLayout
+                isMobileViewport={isMobileViewport}
+                mobilePaneContainerRef={mobilePaneContainerRef}
+                mobilePaneHostRef={mobilePaneHostRef}
+                currentMobilePane={currentMobilePane}
+                mobilePaneHint={mobilePaneHint}
+                mobilePaneContent={mobilePaneContent}
+                handleMobileTouchStart={handleMobileTouchStart}
+                handleMobileTouchMove={handleMobileTouchMove}
+                handleMobileTouchEnd={handleMobileTouchEnd}
+                conversationListPane={conversationListPane}
+                conversationMainPane={conversationMainPane}
+                missionControlPane={missionControlPane}
+            />
 
             <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
                 <AlertDialogContent>
