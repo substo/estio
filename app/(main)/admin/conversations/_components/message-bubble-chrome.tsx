@@ -1,6 +1,7 @@
 "use client";
 
 import { format } from "date-fns";
+import { memo } from "react";
 import {
     AlertTriangle,
     ArrowRight,
@@ -43,7 +44,7 @@ interface MessageBubbleChromeProps {
     onResendMessage?: (messageId: string) => void | Promise<void>;
 }
 
-export function MessageBubbleChannelHeader({
+export const MessageBubbleChannelHeader = memo(function MessageBubbleChannelHeader({
     message,
     isEmail,
     isSMS,
@@ -104,9 +105,9 @@ export function MessageBubbleChannelHeader({
             )}
         </>
     );
-}
+});
 
-export function MessageBubbleEmailExpandFooter({
+export const MessageBubbleEmailExpandFooter = memo(function MessageBubbleEmailExpandFooter({
     isEmail,
     isExpanded,
     onExpandToggle,
@@ -131,9 +132,9 @@ export function MessageBubbleEmailExpandFooter({
             )}
         </div>
     );
-}
+});
 
-export function MessageBubbleTimestampStatusRow({
+export const MessageBubbleTimestampStatusRow = memo(function MessageBubbleTimestampStatusRow({
     message,
     isEmail,
     isSMS,
@@ -198,4 +199,4 @@ export function MessageBubbleTimestampStatusRow({
             )}
         </div>
     );
-}
+});

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import type { MessageTranslationState, MessageTranslationVariant } from "@/lib/ghl/conversations";
@@ -327,6 +327,9 @@ export function MessageBubble({
             return effectiveViewMode === "translated" ? "original" : "translated";
         });
     };
+    const handleEmailExpandToggle = useCallback(() => {
+        setIsExpanded((current) => !current);
+    }, []);
 
     return (
         <div
@@ -476,7 +479,7 @@ export function MessageBubble({
                 <MessageBubbleEmailExpandFooter
                     isEmail={isEmail}
                     isExpanded={isExpanded}
-                    onExpandToggle={() => setIsExpanded(!isExpanded)}
+                    onExpandToggle={handleEmailExpandToggle}
                 />
             </div>
 
