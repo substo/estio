@@ -25,6 +25,26 @@ const ACTIVE_ACTIVITY_REFRESH_INTERVAL_MS = 60_000;
 
 export type ConversationRealtimeMode = 'disabled' | 'connecting' | 'connected' | 'fallback';
 
+export function getActiveWorkspaceRefreshOptions({
+    pendingTranscripts,
+    workspaceActivityLimit,
+}: {
+    pendingTranscripts: boolean;
+    workspaceActivityLimit: number;
+}) {
+    const includeActivity = pendingTranscripts === true;
+    const messageLimit = pendingTranscripts ? THREAD_TARGET_MESSAGE_COUNT : ACTIVE_REFRESH_MESSAGE_LIMIT;
+    const messageMetadataMode = pendingTranscripts ? "full" : "firstPaint";
+
+    return {
+        messageLimit,
+        messageMetadataMode,
+        includeActivity,
+        activityLimit: workspaceActivityLimit,
+        refreshMode: "active_refresh",
+    } as const;
+}
+
 type UseConversationRefreshOrchestrationArgs = {
     viewMode: 'chats' | 'deals';
     viewFilter: 'active' | 'archived' | 'trash' | 'tasks';
@@ -115,37 +135,38 @@ export function useConversationRefreshOrchestration({
             return existingRefresh;
         }
 
-        const includeActivityForCoreRefresh = args.pendingTranscripts === true;
+        const refreshOptions = getActiveWorkspaceRefreshOptions({
+            pendingTranscripts: args.pendingTranscripts === true,
+            workspaceActivityLimit,
+        });
 
         trackClientRequest(args.logKind, {
             conversationId: targetConversationId,
             ...(typeof args.pendingTranscripts === "boolean" ? { pendingTranscripts: args.pendingTranscripts } : {}),
-            refreshMode: "active_refresh",
-            messageMetadataMode: args.pendingTranscripts ? "full" : "firstPaint",
-            activeRefreshMessageLimit: args.pendingTranscripts ? THREAD_TARGET_MESSAGE_COUNT : ACTIVE_REFRESH_MESSAGE_LIMIT,
-            includeActivity: includeActivityForCoreRefresh,
-            activityRefreshMode: includeActivityForCoreRefresh ? "pending_transcripts_inline" : "separate",
+            refreshMode: refreshOptions.refreshMode,
+            messageMetadataMode: refreshOptions.messageMetadataMode,
+            activeRefreshMessageLimit: refreshOptions.messageLimit,
+            includeActivity: refreshOptions.includeActivity,
+            activityRefreshMode: refreshOptions.includeActivity ? "pending_transcripts_inline" : "separate",
         });
 
         const refreshPromise = (async () => {
             // Pending transcript polling needs full metadata so transcript/extraction
             // status changes can update the thread signature and resolve the poll.
-            const messageMetadataMode = args.pendingTranscripts ? "full" : "firstPaint";
-            const messageLimit = args.pendingTranscripts ? THREAD_TARGET_MESSAGE_COUNT : ACTIVE_REFRESH_MESSAGE_LIMIT;
             const workspace = await getConversationWorkspaceCore(targetConversationId, {
                 includeMessages: true,
-                includeActivity: includeActivityForCoreRefresh,
-                messageLimit,
-                activityLimit: workspaceActivityLimit,
-                messageMetadataMode,
-                refreshMode: "active_refresh",
+                includeActivity: refreshOptions.includeActivity,
+                messageLimit: refreshOptions.messageLimit,
+                activityLimit: refreshOptions.activityLimit,
+                messageMetadataMode: refreshOptions.messageMetadataMode,
+                refreshMode: refreshOptions.refreshMode,
             });
             if (!workspace?.success || activeIdRef.current !== targetConversationId || args.shouldApply?.() === false) return;
 
             const workspaceMessages = Array.isArray(workspace?.messages) ? workspace.messages : [];
             trackClientRequest(`${args.logKind}_result`, {
                 conversationId: targetConversationId,
-                activeRefreshMessageLimit: messageLimit,
+                activeRefreshMessageLimit: refreshOptions.messageLimit,
                 returnedMessageCount: workspaceMessages.length,
             });
             const existingMessages = Array.isArray(messagesRef.current) ? messagesRef.current : [];
@@ -155,7 +176,7 @@ export function useConversationRefreshOrchestration({
             const snapshot = createWorkspaceCoreSnapshot({
                 conversationHeader: workspace?.conversationHeader || null,
                 messages: nextMessages,
-                activityTimeline: includeActivityForCoreRefresh && Array.isArray(workspace?.activityTimeline)
+                activityTimeline: refreshOptions.includeActivity && Array.isArray(workspace?.activityTimeline)
                     ? workspace.activityTimeline
                     : (Array.isArray(activityLogRef.current) ? activityLogRef.current : []),
                 transcriptEligibility: workspace?.transcriptEligibility,
@@ -165,7 +186,7 @@ export function useConversationRefreshOrchestration({
                     messageWindow: workspace?.messageWindow,
                     initialCount: nextMessages.length,
                     targetCount: THREAD_TARGET_MESSAGE_COUNT,
-                    requestedLimit: messageLimit,
+                    requestedLimit: refreshOptions.messageLimit,
                 }),
             });
             cacheWorkspaceCoreSnapshot(targetConversationId, snapshot);
