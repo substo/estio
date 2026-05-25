@@ -16,6 +16,7 @@ import {
     deriveSharedContactsFromMessageBody,
     normalizeMessageAttachments,
     type MessageAttachment,
+    type NormalizedMessageAttachment,
 } from "./message-bubble-attachment-actions";
 import { MessageAudioAttachment } from "./message-audio-attachment";
 import { MessageBubbleMediaStatus } from "./message-bubble-media-status";
@@ -28,6 +29,8 @@ import {
     MessageBubbleEmailExpandFooter,
     MessageBubbleTimestampStatusRow,
 } from "./message-bubble-chrome";
+
+const EMPTY_ATTACHMENTS: NormalizedMessageAttachment[] = [];
 
 export interface MessageBubbleProps {
     message: {
@@ -226,7 +229,7 @@ export function MessageBubble({
     const hasRenderableMediaAttachment = imageAttachments.length > 0 || audioAttachments.length > 0 || contactAttachments.length > 0 || fileAttachments.length > 0;
     const canRefetchMedia = !!onRefetchMedia && isWhatsApp && !isContactMessage && (hasRenderableMediaAttachment || hasLikelyMediaPlaceholder || hasUnstoredWebBridgeMedia);
 
-    const getDownloadUrl = (url: string) => {
+    const getDownloadUrl = useCallback((url: string) => {
         try {
             if (url.includes("/api/media/attachments/")) {
                 const parsed = new URL(url, "http://localhost");
@@ -237,9 +240,9 @@ export function MessageBubble({
             // Fall through to original URL
         }
         return url;
-    };
+    }, []);
 
-    const handleRefetchMedia = async (e: React.MouseEvent<HTMLButtonElement>) => {
+    const handleRefetchMedia = useCallback(async (e: React.MouseEvent<HTMLButtonElement>) => {
         e.stopPropagation();
         if (!onRefetchMedia || isRefetchingMedia) return;
 
@@ -249,19 +252,19 @@ export function MessageBubble({
         } finally {
             setIsRefetchingMedia(false);
         }
-    };
+    }, [isRefetchingMedia, message.id, onRefetchMedia]);
 
-    const isTranscriptExpanded = (attachmentId?: string, fallbackIndex?: number) => {
+    const isTranscriptExpanded = useCallback((attachmentId?: string, fallbackIndex?: number) => {
         const key = attachmentId || `${message.id}:audio:${fallbackIndex || 0}`;
         return !!expandedTranscriptIds[key];
-    };
+    }, [expandedTranscriptIds, message.id]);
 
-    const toggleTranscriptExpanded = (attachmentId?: string, fallbackIndex?: number) => {
+    const toggleTranscriptExpanded = useCallback((attachmentId?: string, fallbackIndex?: number) => {
         const key = attachmentId || `${message.id}:audio:${fallbackIndex || 0}`;
         setExpandedTranscriptIds((prev) => ({ ...prev, [key]: !prev[key] }));
-    };
+    }, [message.id]);
 
-    const handleRequestTranscript = async (
+    const handleRequestTranscript = useCallback(async (
         e: React.MouseEvent<HTMLButtonElement>,
         attachmentId?: string,
         options?: { force?: boolean }
@@ -285,9 +288,9 @@ export function MessageBubble({
         } finally {
             setTranscriptActionAttachmentId(null);
         }
-    };
+    }, [message.id, onRequestTranscript, onRetryTranscript, transcriptActionAttachmentId]);
 
-    const handleExtractViewingNotes = async (
+    const handleExtractViewingNotes = useCallback(async (
         e: React.MouseEvent<HTMLButtonElement>,
         attachmentId?: string,
         options?: { force?: boolean }
@@ -301,14 +304,14 @@ export function MessageBubble({
         } finally {
             setExtractActionAttachmentId(null);
         }
-    };
+    }, [extractActionAttachmentId, message.id, onExtractViewingNotes]);
 
     const canTranslateMessage = translationReadEnabled
         && !isOutbound
         && !!onTranslateMessage
         && String(message.body || "").trim().length > 0;
 
-    const handleTranslateMessage = async () => {
+    const handleTranslateMessage = useCallback(async () => {
         if (!onTranslateMessage || isTranslatingMessage) return;
         setIsTranslatingMessage(true);
         try {
@@ -319,14 +322,14 @@ export function MessageBubble({
         } finally {
             setIsTranslatingMessage(false);
         }
-    };
+    }, [isTranslatingMessage, message.id, onTranslateMessage, preferredDisplayLanguage]);
 
-    const handleToggleTranslationViewMode = () => {
+    const handleToggleTranslationViewMode = useCallback(() => {
         setTranslationViewMode((current) => {
             const effectiveViewMode = current === "thread" ? threadTranslationMode : current;
             return effectiveViewMode === "translated" ? "original" : "translated";
         });
-    };
+    }, [threadTranslationMode]);
     const handleEmailExpandToggle = useCallback(() => {
         setIsExpanded((current) => !current);
     }, []);
@@ -463,8 +466,8 @@ export function MessageBubble({
                 )}
 
                 <MessageBubbleMediaStatus
-                    contactAttachments={[]}
-                    fileAttachments={[]}
+                    contactAttachments={EMPTY_ATTACHMENTS}
+                    fileAttachments={EMPTY_ATTACHMENTS}
                     webBridgeMedia={webBridgeMedia}
                     hasUnstoredWebBridgeMedia={hasUnstoredWebBridgeMedia}
                     canRefetchMedia={canRefetchMedia}

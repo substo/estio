@@ -1,6 +1,7 @@
 "use client";
 
 import { AlertTriangle, Download, ExternalLink, Paperclip, RefreshCw, User } from "lucide-react";
+import { memo } from "react";
 import type { MouseEvent } from "react";
 import { cn } from "@/lib/utils";
 import type { NormalizedMessageAttachment } from "./message-bubble-attachment-actions";
@@ -35,7 +36,7 @@ type MessageBubbleMediaStatusProps = {
     isEmail: boolean;
 };
 
-export function MessageBubbleMediaStatus({
+function MessageBubbleMediaStatusComponent({
     contactAttachments,
     fileAttachments,
     webBridgeMedia,
@@ -137,3 +138,5 @@ export function MessageBubbleMediaStatus({
         </>
     );
 }
+
+export const MessageBubbleMediaStatus = memo(MessageBubbleMediaStatusComponent);
