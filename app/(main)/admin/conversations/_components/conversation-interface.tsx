@@ -63,9 +63,9 @@ import {
     type WorkspaceHydrationState,
     type WorkspaceHydrationStatus,
 } from '@/lib/conversations/workspace-state';
-import { UnifiedTimeline } from './unified-timeline';
 import { ConversationList } from './conversation-list';
 import { ChatWindow } from './chat-window';
+import { DealWorkspacePane } from './deal-workspace-pane';
 import { UndoToast } from './undo-toast';
 import { WhatsAppImportModal } from './whatsapp-import-modal';
 import { CreateDealDialog } from './create-deal-dialog';
@@ -2516,94 +2516,83 @@ export function ConversationInterface({ locationId, initialConversations, initia
             </div>
         )
     ) : (
-        activeDealId ? (
-            <UnifiedTimeline
-                dealId={activeDealId}
-                title={activeDealTitle}
-                timelineEvents={dealTimelineEvents}
-                loading={isDealLoading}
-                hydrationStatus={dealTimelineHydrationStatus}
-                composerConversation={selectedDealConversation}
-                onBack={isMobileViewport ? handleBackToList : undefined}
-                onOpenMissionControl={isMobileViewport ? handleOpenMissionControl : undefined}
-                onInitialPaintReady={() => {
-                    if (activeDealIdRef.current === activeDealId) {
-                        setDealTimelineInitialPainted(true);
-                    }
-                }}
-                onSendMessage={(text, type, options) => handleSendMessage(text, type, options, selectedDealConversation || undefined)}
-                composerDraft={getComposerDraft(selectedDealConversation?.id)}
-                onComposerDraftChange={(draft) => setComposerDraftForConversation(selectedDealConversation?.id, draft)}
-                onComposerDraftClear={() => clearComposerDraftForConversation(selectedDealConversation?.id)}
-                onResendMessage={handleResendMessage}
-                onSendMedia={(file, caption) => handleSendMedia(file, caption, selectedDealConversation || undefined)}
-                onPreviewTranslatedReply={async (sourceText, channel, targetLanguage) => {
-                    if (!selectedDealConversation) {
-                        return { success: false as const, error: "No conversation selected." };
-                    }
-                    return previewTranslatedReply(selectedDealConversation.id, sourceText, channel, targetLanguage || null);
-                }}
-                translationWriteEnabled={featureFlags.conversationTranslationWrite}
-                onGenerateDraft={async (
-                    instruction?: string,
-                    model?: string,
-                    draftLanguage?: string | null,
-                    onChunk?: (chunk: string) => void
-                ) => {
-                    if (!selectedDealConversation) return null;
-                    try {
-                        const res = await generateDraftWithStreamingFallback({
-                            conversationId: selectedDealConversation.id,
-                            contactId: selectedDealConversation.contactId,
-                            instruction,
-                            model,
-                            mode: "deal",
-                            dealId: activeDealId || undefined,
-                            draftLanguage,
-                            onChunk,
-                            generateDraft: generateAIDraft,
-                            onStreamError: (streamError) => {
-                                console.warn("[AI Draft] Deal stream path failed, falling back to server action.", streamError);
-                            },
-                        });
-                        if (res.reasoning) {
-                            toast({ title: "Draft Generated", description: res.reasoning });
-                        }
-                        return res.draft || null;
-                    } catch (error: any) {
-                        toast({ title: "Draft Failed", description: error?.message || "Failed to generate draft", variant: "destructive" });
-                        return null;
-                    }
-                }}
-                onSetReplyLanguageOverride={async (replyLanguage: string | null) => {
-                    if (!selectedDealConversation) {
-                        return { success: false as const, error: "No conversation selected." };
-                    }
-                    const result = await setConversationReplyLanguageOverride(selectedDealConversation.id, replyLanguage);
-                    if (result.success) {
-                        applyConversationReplyLanguageOverride(selectedDealConversation.id, result.replyLanguageOverride ?? null);
-                    }
-                    return result;
-                }}
-                suggestions={suggestions}
-                suggestedResponseQueue={suggestedResponseQueue}
-                suggestedResponseQueueLoading={loadingSuggestedResponseQueue}
-                onAcceptSuggestedResponse={handleAcceptSuggestedResponse}
-                onRejectSuggestedResponse={handleRejectSuggestedResponse}
-                composerInsertSeed={composerInsertSeed}
-                composerDisabled={loadingDealContext || !selectedDealConversation}
-                composerDisabledReason={
-                    loadingDealContext
-                        ? "Loading recent deal timeline..."
-                        : "Select a contact in Mission Control to reply."
+        <DealWorkspacePane
+            activeDealId={activeDealId}
+            activeDealTitle={activeDealTitle}
+            timelineEvents={dealTimelineEvents}
+            loading={isDealLoading}
+            hydrationStatus={dealTimelineHydrationStatus}
+            selectedDealConversation={selectedDealConversation}
+            isMobileViewport={isMobileViewport}
+            loadingDealContext={loadingDealContext}
+            suggestions={suggestions}
+            suggestedResponseQueue={suggestedResponseQueue}
+            suggestedResponseQueueLoading={loadingSuggestedResponseQueue}
+            composerInsertSeed={composerInsertSeed}
+            composerDraft={getComposerDraft(selectedDealConversation?.id)}
+            translationWriteEnabled={featureFlags.conversationTranslationWrite}
+            onBack={handleBackToList}
+            onOpenMissionControl={handleOpenMissionControl}
+            onInitialPaintReady={() => {
+                if (activeDealIdRef.current === activeDealId) {
+                    setDealTimelineInitialPainted(true);
                 }
-                replyingToLabel={selectedDealConversation?.contactName || undefined}
-            />
-        ) : (
-            <div className="h-full flex items-center justify-center text-gray-400 bg-slate-50">
-                Select a deal to view timeline
-            </div>
-        )
+            }}
+            onSendMessage={(text, type, options) => handleSendMessage(text, type, options, selectedDealConversation || undefined)}
+            onComposerDraftChange={(draft) => setComposerDraftForConversation(selectedDealConversation?.id, draft)}
+            onComposerDraftClear={() => clearComposerDraftForConversation(selectedDealConversation?.id)}
+            onResendMessage={handleResendMessage}
+            onSendMedia={(file, caption) => handleSendMedia(file, caption, selectedDealConversation || undefined)}
+            onPreviewTranslatedReply={async (sourceText, channel, targetLanguage) => {
+                if (!selectedDealConversation) {
+                    return { success: false as const, error: "No conversation selected." };
+                }
+                return previewTranslatedReply(selectedDealConversation.id, sourceText, channel, targetLanguage || null);
+            }}
+            onGenerateDraft={async (
+                instruction?: string,
+                model?: string,
+                draftLanguage?: string | null,
+                onChunk?: (chunk: string) => void
+            ) => {
+                if (!selectedDealConversation) return null;
+                try {
+                    const res = await generateDraftWithStreamingFallback({
+                        conversationId: selectedDealConversation.id,
+                        contactId: selectedDealConversation.contactId,
+                        instruction,
+                        model,
+                        mode: "deal",
+                        dealId: activeDealId || undefined,
+                        draftLanguage,
+                        onChunk,
+                        generateDraft: generateAIDraft,
+                        onStreamError: (streamError) => {
+                            console.warn("[AI Draft] Deal stream path failed, falling back to server action.", streamError);
+                        },
+                    });
+                    if (res.reasoning) {
+                        toast({ title: "Draft Generated", description: res.reasoning });
+                    }
+                    return res.draft || null;
+                } catch (error: any) {
+                    toast({ title: "Draft Failed", description: error?.message || "Failed to generate draft", variant: "destructive" });
+                    return null;
+                }
+            }}
+            onSetReplyLanguageOverride={async (replyLanguage: string | null) => {
+                if (!selectedDealConversation) {
+                    return { success: false as const, error: "No conversation selected." };
+                }
+                const result = await setConversationReplyLanguageOverride(selectedDealConversation.id, replyLanguage);
+                if (result.success) {
+                    applyConversationReplyLanguageOverride(selectedDealConversation.id, result.replyLanguageOverride ?? null);
+                }
+                return result;
+            }}
+            onAcceptSuggestedResponse={handleAcceptSuggestedResponse}
+            onRejectSuggestedResponse={handleRejectSuggestedResponse}
+        />
     );
 
     const missionControlPane = viewMode === 'chats' ? (
