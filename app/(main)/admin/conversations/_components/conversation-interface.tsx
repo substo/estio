@@ -2340,6 +2340,166 @@ export function ConversationInterface({ locationId, initialConversations, initia
         void refreshSuggestedResponseQueue({ trigger: "mission" });
     }, [refreshSuggestedResponseQueue]);
 
+    const handleChatAddActivityEntry = useCallback(async (entryText: string, dateIso: string) => {
+        if (!activeConversation) return;
+
+        const clientMutationId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+            ? crypto.randomUUID()
+            : `activity-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        const result = await addConversationActivityEntry(
+            activeConversation.id,
+            entryText,
+            dateIso,
+            clientMutationId
+        );
+        if (result?.activityEntry) {
+            upsertActivityEntryInWorkspace(
+                activeConversation.id,
+                result.activityEntry as ActivityTimelineItem
+            );
+        }
+    }, [activeConversation, upsertActivityEntryInWorkspace]);
+
+    const handleChatFetchHistory = useCallback(async () => {
+        if (!activeConversation) return;
+
+        setLoadingMessages(true);
+        try {
+            toast({ title: "Fetching History", description: "Checking Gmail for recent messages..." });
+            // Dynamic import or passed prop action
+            const { fetchContactHistory } = await import('@/lib/google/actions');
+            const res = await fetchContactHistory(activeConversation.contactId);
+
+            if (res.success) {
+                toast({ title: "History Fetched", description: `Found ${res.count} messages.` });
+                const msgs = await fetchMessages(activeConversation.id, THREAD_REFRESH_MESSAGES_OPTIONS);
+                setMessages(mergeSnapshotPreservingPending(activeConversation.id, msgs));
+            } else {
+                toast({ title: "Fetch Failed", description: res.error, variant: "destructive" });
+            }
+        } catch (e: any) {
+            toast({ title: "Error", description: e.message, variant: "destructive" });
+        } finally {
+            setLoadingMessages(false);
+        }
+    }, [activeConversation, mergeSnapshotPreservingPending]);
+
+    const handleChatGenerateDraft = useCallback(async (
+        instruction?: string,
+        model?: string,
+        draftLanguage?: string | null,
+        onChunk?: (chunk: string) => void
+    ) => {
+        if (!activeConversation) return null;
+
+        try {
+            const res = await generateDraftWithStreamingFallback({
+                conversationId: activeConversation.id,
+                contactId: activeConversation.contactId,
+                instruction,
+                model,
+                mode: "chat",
+                draftLanguage,
+                onChunk,
+                generateDraft: generateAIDraft,
+                onStreamError: (streamError) => {
+                    console.warn("[AI Draft] Stream path failed, falling back to server action.", streamError);
+                },
+            });
+            if (res.reasoning) {
+                toast({ title: "Draft Generated", description: res.reasoning });
+            }
+            return res.draft || null;
+        } catch (e: any) {
+            toast({ title: "Draft Failed", description: e.message, variant: "destructive" });
+            return null;
+        }
+    }, [activeConversation]);
+
+    const handleChatSetReplyLanguageOverride = useCallback(async (replyLanguage: string | null) => {
+        if (!activeConversation) {
+            return { success: false as const, error: "No conversation selected." };
+        }
+
+        const result = await setConversationReplyLanguageOverride(activeConversation.id, replyLanguage);
+        if (result.success) {
+            applyConversationReplyLanguageOverride(activeConversation.id, result.replyLanguageOverride ?? null);
+        }
+        return result;
+    }, [activeConversation, applyConversationReplyLanguageOverride]);
+
+    const handleChatInitialPaintReady = useCallback(() => {
+        if (activeIdRef.current === activeConversation?.id) {
+            setChatTimelineInitialPainted(true);
+            const loadedAt = initialWorkspaceLoadedAtRef.current[activeConversation.id] || 0;
+            trackClientMetric("thread_messages_ready_ms", loadedAt ? Date.now() - loadedAt : 0, {
+                conversationId: activeConversation.id,
+                message_count: messages.length,
+                cache_hit: !!getCachedWorkspaceCoreSnapshot(activeConversation.id),
+            });
+        }
+    }, [activeConversation, getCachedWorkspaceCoreSnapshot, messages.length, trackClientMetric]);
+
+    const handleDealInitialPaintReady = useCallback(() => {
+        if (activeDealIdRef.current === activeDealId) {
+            setDealTimelineInitialPainted(true);
+        }
+    }, [activeDealId]);
+
+    const handleDealPreviewTranslatedReply = useCallback(async (
+        sourceText: string,
+        channel: "SMS" | "Email" | "WhatsApp",
+        targetLanguage?: string | null
+    ) => {
+        if (!selectedDealConversation) {
+            return { success: false as const, error: "No conversation selected." };
+        }
+        return previewTranslatedReply(selectedDealConversation.id, sourceText, channel, targetLanguage || null);
+    }, [selectedDealConversation]);
+
+    const handleDealGenerateDraft = useCallback(async (
+        instruction?: string,
+        model?: string,
+        draftLanguage?: string | null,
+        onChunk?: (chunk: string) => void
+    ) => {
+        if (!selectedDealConversation) return null;
+        try {
+            const res = await generateDraftWithStreamingFallback({
+                conversationId: selectedDealConversation.id,
+                contactId: selectedDealConversation.contactId,
+                instruction,
+                model,
+                mode: "deal",
+                dealId: activeDealId || undefined,
+                draftLanguage,
+                onChunk,
+                generateDraft: generateAIDraft,
+                onStreamError: (streamError) => {
+                    console.warn("[AI Draft] Deal stream path failed, falling back to server action.", streamError);
+                },
+            });
+            if (res.reasoning) {
+                toast({ title: "Draft Generated", description: res.reasoning });
+            }
+            return res.draft || null;
+        } catch (error: any) {
+            toast({ title: "Draft Failed", description: error?.message || "Failed to generate draft", variant: "destructive" });
+            return null;
+        }
+    }, [activeDealId, selectedDealConversation]);
+
+    const handleDealSetReplyLanguageOverride = useCallback(async (replyLanguage: string | null) => {
+        if (!selectedDealConversation) {
+            return { success: false as const, error: "No conversation selected." };
+        }
+        const result = await setConversationReplyLanguageOverride(selectedDealConversation.id, replyLanguage);
+        if (result.success) {
+            applyConversationReplyLanguageOverride(selectedDealConversation.id, result.replyLanguageOverride ?? null);
+        }
+        return result;
+    }, [applyConversationReplyLanguageOverride, selectedDealConversation]);
+
     const conversationListPane = (
         <ConversationList
             searchQuery={searchQuery}
@@ -2417,97 +2577,17 @@ export function ConversationInterface({ locationId, initialConversations, initia
             onBulkTranscribeUnprocessedAudio={handleBulkTranscribeUnprocessedAudio}
             transcriptOnDemandEnabled={transcriptOnDemandEnabled}
             onSync={handleSync}
-            onAddActivityEntry={async (entryText: string, dateIso: string) => {
-                const clientMutationId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-                    ? crypto.randomUUID()
-                    : `activity-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-                const result = await addConversationActivityEntry(
-                    activeConversation!.id,
-                    entryText,
-                    dateIso,
-                    clientMutationId
-                );
-                if (result?.activityEntry) {
-                    upsertActivityEntryInWorkspace(
-                        activeConversation!.id,
-                        result.activityEntry as ActivityTimelineItem
-                    );
-                }
-            }}
-            onFetchHistory={async () => {
-                setLoadingMessages(true);
-                try {
-                    toast({ title: "Fetching History", description: "Checking Gmail for recent messages..." });
-                    // Dynamic import or passed prop action
-                    const { fetchContactHistory } = await import('@/lib/google/actions');
-                    const res = await fetchContactHistory(activeConversation!.contactId);
-
-                    if (res.success) {
-                        toast({ title: "History Fetched", description: `Found ${res.count} messages.` });
-                        const msgs = await fetchMessages(activeConversation!.id, THREAD_REFRESH_MESSAGES_OPTIONS);
-                        setMessages(mergeSnapshotPreservingPending(activeConversation!.id, msgs));
-                    } else {
-                        toast({ title: "Fetch Failed", description: res.error, variant: "destructive" });
-                    }
-                } catch (e: any) {
-                    toast({ title: "Error", description: e.message, variant: "destructive" });
-                } finally {
-                    setLoadingMessages(false);
-                }
-            }}
+            onAddActivityEntry={handleChatAddActivityEntry}
+            onFetchHistory={handleChatFetchHistory}
             suggestions={[...(activeConversation?.suggestedActions || []), ...suggestions]}
             suggestedResponseQueue={suggestedResponseQueue}
             suggestedResponseQueueLoading={loadingSuggestedResponseQueue}
             onAcceptSuggestedResponse={handleAcceptSuggestedResponse}
             onRejectSuggestedResponse={handleRejectSuggestedResponse}
             composerInsertSeed={composerInsertSeed}
-            onGenerateDraft={async (
-                instruction?: string,
-                model?: string,
-                draftLanguage?: string | null,
-                onChunk?: (chunk: string) => void
-            ) => {
-                try {
-                    const res = await generateDraftWithStreamingFallback({
-                        conversationId: activeConversation!.id,
-                        contactId: activeConversation!.contactId,
-                        instruction,
-                        model,
-                        mode: "chat",
-                        draftLanguage,
-                        onChunk,
-                        generateDraft: generateAIDraft,
-                        onStreamError: (streamError) => {
-                            console.warn("[AI Draft] Stream path failed, falling back to server action.", streamError);
-                        },
-                    });
-                    if (res.reasoning) {
-                        toast({ title: "Draft Generated", description: res.reasoning });
-                    }
-                    return res.draft || null;
-                } catch (e: any) {
-                    toast({ title: "Draft Failed", description: e.message, variant: "destructive" });
-                    return null;
-                }
-            }}
-            onSetReplyLanguageOverride={async (replyLanguage: string | null) => {
-                const result = await setConversationReplyLanguageOverride(activeConversation!.id, replyLanguage);
-                if (result.success) {
-                    applyConversationReplyLanguageOverride(activeConversation!.id, result.replyLanguageOverride ?? null);
-                }
-                return result;
-            }}
-            onInitialPaintReady={() => {
-                if (activeIdRef.current === activeConversation?.id) {
-                    setChatTimelineInitialPainted(true);
-                    const loadedAt = initialWorkspaceLoadedAtRef.current[activeConversation!.id] || 0;
-                    trackClientMetric("thread_messages_ready_ms", loadedAt ? Date.now() - loadedAt : 0, {
-                        conversationId: activeConversation!.id,
-                        message_count: messages.length,
-                        cache_hit: !!getCachedWorkspaceCoreSnapshot(activeConversation!.id),
-                    });
-                }
-            }}
+            onGenerateDraft={handleChatGenerateDraft}
+            onSetReplyLanguageOverride={handleChatSetReplyLanguageOverride}
+            onInitialPaintReady={handleChatInitialPaintReady}
         />
     ) : (
         <DealWorkspacePane
@@ -2527,63 +2607,15 @@ export function ConversationInterface({ locationId, initialConversations, initia
             translationWriteEnabled={featureFlags.conversationTranslationWrite}
             onBack={handleBackToList}
             onOpenMissionControl={handleOpenMissionControl}
-            onInitialPaintReady={() => {
-                if (activeDealIdRef.current === activeDealId) {
-                    setDealTimelineInitialPainted(true);
-                }
-            }}
+            onInitialPaintReady={handleDealInitialPaintReady}
             onSendMessage={(text, type, options) => handleSendMessage(text, type, options, selectedDealConversation || undefined)}
             onComposerDraftChange={(draft) => setComposerDraftForConversation(selectedDealConversation?.id, draft)}
             onComposerDraftClear={() => clearComposerDraftForConversation(selectedDealConversation?.id)}
             onResendMessage={handleResendMessage}
             onSendMedia={(file, caption) => handleSendMedia(file, caption, selectedDealConversation || undefined)}
-            onPreviewTranslatedReply={async (sourceText, channel, targetLanguage) => {
-                if (!selectedDealConversation) {
-                    return { success: false as const, error: "No conversation selected." };
-                }
-                return previewTranslatedReply(selectedDealConversation.id, sourceText, channel, targetLanguage || null);
-            }}
-            onGenerateDraft={async (
-                instruction?: string,
-                model?: string,
-                draftLanguage?: string | null,
-                onChunk?: (chunk: string) => void
-            ) => {
-                if (!selectedDealConversation) return null;
-                try {
-                    const res = await generateDraftWithStreamingFallback({
-                        conversationId: selectedDealConversation.id,
-                        contactId: selectedDealConversation.contactId,
-                        instruction,
-                        model,
-                        mode: "deal",
-                        dealId: activeDealId || undefined,
-                        draftLanguage,
-                        onChunk,
-                        generateDraft: generateAIDraft,
-                        onStreamError: (streamError) => {
-                            console.warn("[AI Draft] Deal stream path failed, falling back to server action.", streamError);
-                        },
-                    });
-                    if (res.reasoning) {
-                        toast({ title: "Draft Generated", description: res.reasoning });
-                    }
-                    return res.draft || null;
-                } catch (error: any) {
-                    toast({ title: "Draft Failed", description: error?.message || "Failed to generate draft", variant: "destructive" });
-                    return null;
-                }
-            }}
-            onSetReplyLanguageOverride={async (replyLanguage: string | null) => {
-                if (!selectedDealConversation) {
-                    return { success: false as const, error: "No conversation selected." };
-                }
-                const result = await setConversationReplyLanguageOverride(selectedDealConversation.id, replyLanguage);
-                if (result.success) {
-                    applyConversationReplyLanguageOverride(selectedDealConversation.id, result.replyLanguageOverride ?? null);
-                }
-                return result;
-            }}
+            onPreviewTranslatedReply={handleDealPreviewTranslatedReply}
+            onGenerateDraft={handleDealGenerateDraft}
+            onSetReplyLanguageOverride={handleDealSetReplyLanguageOverride}
             onAcceptSuggestedResponse={handleAcceptSuggestedResponse}
             onRejectSuggestedResponse={handleRejectSuggestedResponse}
         />
