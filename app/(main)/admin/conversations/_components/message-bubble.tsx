@@ -5,8 +5,6 @@ import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Mail, Smartphone, Paperclip, ExternalLink, ChevronDown, ChevronUp, ArrowRight, Download, RefreshCw, Clock, Check, CheckCheck, AlertTriangle, User } from "lucide-react";
 import { format } from "date-fns";
-import { EmailFrame } from "./email-frame";
-import { LinkifiedText } from "./linkified-text";
 import type { MessageTranslationState, MessageTranslationVariant } from "@/lib/ghl/conversations";
 import { selectActiveTranslation } from "@/lib/conversations/translation-view";
 import {
@@ -25,6 +23,7 @@ import { MessageAudioAttachment } from "./message-audio-attachment";
 import { MessageImageAttachments } from "./message-image-attachments";
 import { MessageSharedContactCards } from "./message-shared-contact-cards";
 import { MessageBubbleActionsMenu, useMessageBubbleActions } from "./message-bubble-actions-menu";
+import { MessageBubbleBody, MessageBubbleTranslationActions } from "./message-bubble-body";
 
 export interface MessageBubbleProps {
     message: {
@@ -206,20 +205,6 @@ export function MessageBubble({
         setActiveTranslation(selectActiveTranslation(message.translations || [], preferredDisplayLanguage || null) || message.translation?.active || null);
     }, [message.translation, message.translations, preferredDisplayLanguage]);
 
-    // Helper to detect if content is rich HTML (heuristic)
-    const isRichHtml = message.body && (message.body.includes('<div') || message.body.includes('<html') || message.body.includes('<table'));
-
-    // Helper to strip HTML for snippet
-    const getSnippet = (html: string) => {
-        if (!html) return "";
-        const text = html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '') // Remove style blocks
-            .replace(/<[^>]*>/g, ' ') // Replace tags with space
-            .replace(/\s+/g, ' ') // Collapse spaces
-            .trim();
-        return text.substring(0, 150) + (text.length > 150 ? "..." : "");
-    };
-
-    const snippet = isEmail ? getSnippet(message.body) : "";
     const {
         imageAttachments,
         audioAttachments,
@@ -332,48 +317,11 @@ export function MessageBubble({
         }
     };
 
-    const renderMessageBody = () => {
-        const effectiveViewMode = translationViewMode === "thread" ? threadTranslationMode : translationViewMode;
-        const showTranslatedText = !!activeTranslation?.translatedText?.trim() && effectiveViewMode === "translated";
-        const translatedText = String(activeTranslation?.translatedText || "").trim();
-        const sourceText = isOutbound && activeTranslation?.sourceText
-            ? String(activeTranslation.sourceText || "").trim()
-            : "";
-        if (translatedText && showTranslatedText) {
-            return (
-                <div className="space-y-1">
-                    <div className={cn(
-                        "text-[11px] font-medium",
-                        isOutbound ? "text-blue-100" : "text-slate-500"
-                    )}>
-                        {isOutbound ? "Sent to client" : `Translated${activeTranslation?.sourceLanguage ? ` from ${activeTranslation.sourceLanguage}` : ""}`}
-                    </div>
-                    <LinkifiedText text={translatedText} />
-                </div>
-            );
-        }
-
-        if (effectiveViewMode !== "translated" && (isEmail || isRichHtml)) {
-            return <EmailFrame html={message.body} onSelectionChange={handleEmailSelectionChange} />;
-        }
-
-        if ((isEmail || isRichHtml) && !activeTranslation) {
-            return <EmailFrame html={message.body} onSelectionChange={handleEmailSelectionChange} />;
-        }
-        if (sourceText) {
-            return (
-                <div className="space-y-1">
-                    <div className={cn(
-                        "text-[11px] font-medium",
-                        isOutbound ? "text-blue-100" : "text-slate-500"
-                    )}>
-                        Internal source
-                    </div>
-                    <LinkifiedText text={sourceText} />
-                </div>
-            );
-        }
-        return <LinkifiedText text={sourceText || message.body} />;
+    const handleToggleTranslationViewMode = () => {
+        setTranslationViewMode((current) => {
+            const effectiveViewMode = current === "thread" ? threadTranslationMode : current;
+            return effectiveViewMode === "translated" ? "original" : "translated";
+        });
     };
 
     return (
@@ -476,80 +424,31 @@ export function MessageBubble({
                             locationId={locationId}
                             router={router}
                         />
-                    ) : isEmail && !isExpanded ? (
-                        // Snippet View
-                        <div className="text-gray-500 text-sm italic">
-                            {snippet || "Click to view email content..."}
-                        </div>
                     ) : (
-                        renderMessageBody()
+                        <MessageBubbleBody
+                            body={message.body}
+                            isEmail={isEmail}
+                            isExpanded={isExpanded}
+                            isOutbound={isOutbound}
+                            activeTranslation={activeTranslation}
+                            translationViewMode={translationViewMode}
+                            threadTranslationMode={threadTranslationMode}
+                            onEmailSelectionChange={handleEmailSelectionChange}
+                        />
                     )}
                 </div>
 
-                {(canTranslateMessage || activeTranslation) && (
-                    <div className={cn("px-4 pb-1", isEmail && "bg-white")}>
-                        <div className="flex items-center gap-2 text-[11px]">
-                            {canTranslateMessage && !activeTranslation && (
-                                <button
-                                    type="button"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        void handleTranslateMessage();
-                                    }}
-                                    disabled={isTranslatingMessage}
-                                    className={cn(
-                                        "rounded px-1.5 py-0.5",
-                                        isOutbound ? "text-blue-100 hover:bg-white/20" : "text-blue-600 hover:bg-blue-50"
-                                    )}
-                                >
-                                    {isTranslatingMessage ? "Translating..." : "Translate"}
-                                </button>
-                            )}
-                            {activeTranslation && (
-                                <>
-                                    <button
-                                        type="button"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            setTranslationViewMode((current) => {
-                                                const effectiveViewMode = current === "thread" ? threadTranslationMode : current;
-                                                return effectiveViewMode === "translated" ? "original" : "translated";
-                                            });
-                                        }}
-                                        className={cn(
-                                            "rounded px-1.5 py-0.5",
-                                            isOutbound ? "text-blue-100 hover:bg-white/20" : "text-slate-600 hover:bg-slate-100"
-                                        )}
-                                    >
-                                        {(() => {
-                                            const effectiveViewMode = translationViewMode === "thread" ? threadTranslationMode : translationViewMode;
-                                            if (isOutbound) {
-                                                return effectiveViewMode === "translated" ? "Show sent" : "Show source";
-                                            }
-                                            return effectiveViewMode === "translated" ? "Show original" : "Show translation";
-                                        })()}
-                                    </button>
-                                    {canTranslateMessage && (
-                                        <button
-                                            type="button"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                void handleTranslateMessage();
-                                            }}
-                                            disabled={isTranslatingMessage}
-                                            className={cn(
-                                                "rounded px-1.5 py-0.5",
-                                                isOutbound ? "text-blue-100 hover:bg-white/20" : "text-blue-600 hover:bg-blue-50"
-                                            )}
-                                        >
-                                            {isTranslatingMessage ? "Refreshing..." : "Refresh translation"}
-                                        </button>
-                                    )}
-                                </>
-                            )}
-                        </div>
-                    </div>
-                )}
+                <MessageBubbleTranslationActions
+                    isEmail={isEmail}
+                    isOutbound={isOutbound}
+                    activeTranslation={activeTranslation}
+                    translationViewMode={translationViewMode}
+                    threadTranslationMode={threadTranslationMode}
+                    canTranslateMessage={canTranslateMessage}
+                    isTranslatingMessage={isTranslatingMessage}
+                    onTranslateMessage={handleTranslateMessage}
+                    onToggleTranslationViewMode={handleToggleTranslationViewMode}
+                />
 
                 {/* Attachments */}
                 {attachments.length > 0 && (
