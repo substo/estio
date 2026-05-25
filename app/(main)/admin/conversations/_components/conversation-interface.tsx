@@ -64,7 +64,7 @@ import {
     type WorkspaceHydrationStatus,
 } from '@/lib/conversations/workspace-state';
 import { ConversationList } from './conversation-list';
-import { ChatWindow } from './chat-window';
+import { ChatWorkspacePane } from './chat-workspace-pane';
 import { DealWorkspacePane } from './deal-workspace-pane';
 import { UndoToast } from './undo-toast';
 import { WhatsAppImportModal } from './whatsapp-import-modal';
@@ -2389,132 +2389,126 @@ export function ConversationInterface({ locationId, initialConversations, initia
     );
 
     const conversationMainPane = viewMode === 'chats' ? (
-        activeConversation ? (
-            <ChatWindow
-                key={activeConversation.id} // Force remount to reset internal state/scroll
-                conversation={activeConversation}
-                messages={messages}
-                activityLog={activityLog}
-                loading={isChatLoading}
-                onBack={isMobileViewport ? handleBackToList : undefined}
-                onOpenMissionControl={isMobileViewport ? handleOpenMissionControl : undefined}
-                onSendMessage={handleSendMessage}
-                composerDraft={getComposerDraft(activeConversation.id)}
-                onComposerDraftChange={(draft) => setComposerDraftForConversation(activeConversation.id, draft)}
-                onComposerDraftClear={() => clearComposerDraftForConversation(activeConversation.id)}
-                onTranslateMessage={handleTranslateMessage}
-                onTranslateVisibleThread={handleTranslateVisibleThread}
-                onPreviewTranslatedReply={handlePreviewTranslatedReply}
-                translationReadEnabled={featureFlags.conversationTranslationRead}
-                translationWriteEnabled={featureFlags.conversationTranslationWrite}
-                translationBannerEnabled={featureFlags.conversationTranslationBanner}
-                smsRelayEnabled={featureFlags.smsRelayEnabled}
-                onResendMessage={handleResendMessage}
-                onSendMedia={handleSendMedia}
-                onRefetchMedia={handleRefetchMedia}
-                onRequestTranscript={handleRequestTranscript}
-                onExtractViewingNotes={handleExtractViewingNotes}
-                onRetryTranscript={handleRetryTranscript}
-                onBulkTranscribeUnprocessedAudio={handleBulkTranscribeUnprocessedAudio}
-                transcriptOnDemandEnabled={transcriptOnDemandEnabled}
-                onSync={handleSync}
-                onAddActivityEntry={async (entryText: string, dateIso: string) => {
-                    const clientMutationId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-                        ? crypto.randomUUID()
-                        : `activity-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-                    const result = await addConversationActivityEntry(
-                        activeConversation.id,
-                        entryText,
-                        dateIso,
-                        clientMutationId
+        <ChatWorkspacePane
+            activeConversation={activeConversation}
+            messages={messages}
+            activityLog={activityLog}
+            loading={isChatLoading}
+            isMobileViewport={isMobileViewport}
+            onBack={handleBackToList}
+            onOpenMissionControl={handleOpenMissionControl}
+            onSendMessage={handleSendMessage}
+            composerDraft={getComposerDraft(activeConversation?.id)}
+            onComposerDraftChange={(draft) => setComposerDraftForConversation(activeConversation?.id, draft)}
+            onComposerDraftClear={() => clearComposerDraftForConversation(activeConversation?.id)}
+            onTranslateMessage={handleTranslateMessage}
+            onTranslateVisibleThread={handleTranslateVisibleThread}
+            onPreviewTranslatedReply={handlePreviewTranslatedReply}
+            translationReadEnabled={featureFlags.conversationTranslationRead}
+            translationWriteEnabled={featureFlags.conversationTranslationWrite}
+            translationBannerEnabled={featureFlags.conversationTranslationBanner}
+            smsRelayEnabled={featureFlags.smsRelayEnabled}
+            onResendMessage={handleResendMessage}
+            onSendMedia={handleSendMedia}
+            onRefetchMedia={handleRefetchMedia}
+            onRequestTranscript={handleRequestTranscript}
+            onExtractViewingNotes={handleExtractViewingNotes}
+            onRetryTranscript={handleRetryTranscript}
+            onBulkTranscribeUnprocessedAudio={handleBulkTranscribeUnprocessedAudio}
+            transcriptOnDemandEnabled={transcriptOnDemandEnabled}
+            onSync={handleSync}
+            onAddActivityEntry={async (entryText: string, dateIso: string) => {
+                const clientMutationId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+                    ? crypto.randomUUID()
+                    : `activity-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+                const result = await addConversationActivityEntry(
+                    activeConversation!.id,
+                    entryText,
+                    dateIso,
+                    clientMutationId
+                );
+                if (result?.activityEntry) {
+                    upsertActivityEntryInWorkspace(
+                        activeConversation!.id,
+                        result.activityEntry as ActivityTimelineItem
                     );
-                    if (result?.activityEntry) {
-                        upsertActivityEntryInWorkspace(
-                            activeConversation.id,
-                            result.activityEntry as ActivityTimelineItem
-                        );
-                    }
-                }}
-                onFetchHistory={async () => {
-                    setLoadingMessages(true);
-                    try {
-                        toast({ title: "Fetching History", description: "Checking Gmail for recent messages..." });
-                        // Dynamic import or passed prop action
-                        const { fetchContactHistory } = await import('@/lib/google/actions');
-                        const res = await fetchContactHistory(activeConversation.contactId);
+                }
+            }}
+            onFetchHistory={async () => {
+                setLoadingMessages(true);
+                try {
+                    toast({ title: "Fetching History", description: "Checking Gmail for recent messages..." });
+                    // Dynamic import or passed prop action
+                    const { fetchContactHistory } = await import('@/lib/google/actions');
+                    const res = await fetchContactHistory(activeConversation!.contactId);
 
-                        if (res.success) {
-                            toast({ title: "History Fetched", description: `Found ${res.count} messages.` });
-                            const msgs = await fetchMessages(activeConversation.id, THREAD_REFRESH_MESSAGES_OPTIONS);
-                            setMessages(mergeSnapshotPreservingPending(activeConversation.id, msgs));
-                        } else {
-                            toast({ title: "Fetch Failed", description: res.error, variant: "destructive" });
-                        }
-                    } catch (e: any) {
-                        toast({ title: "Error", description: e.message, variant: "destructive" });
-                    } finally {
-                        setLoadingMessages(false);
+                    if (res.success) {
+                        toast({ title: "History Fetched", description: `Found ${res.count} messages.` });
+                        const msgs = await fetchMessages(activeConversation!.id, THREAD_REFRESH_MESSAGES_OPTIONS);
+                        setMessages(mergeSnapshotPreservingPending(activeConversation!.id, msgs));
+                    } else {
+                        toast({ title: "Fetch Failed", description: res.error, variant: "destructive" });
                     }
-                }}
-                suggestions={[...(activeConversation?.suggestedActions || []), ...suggestions]}
-                suggestedResponseQueue={suggestedResponseQueue}
-                suggestedResponseQueueLoading={loadingSuggestedResponseQueue}
-                onAcceptSuggestedResponse={handleAcceptSuggestedResponse}
-                onRejectSuggestedResponse={handleRejectSuggestedResponse}
-                composerInsertSeed={composerInsertSeed}
-                onGenerateDraft={async (
-                    instruction?: string,
-                    model?: string,
-                    draftLanguage?: string | null,
-                    onChunk?: (chunk: string) => void
-                ) => {
-                    try {
-                        const res = await generateDraftWithStreamingFallback({
-                            conversationId: activeConversation.id,
-                            contactId: activeConversation.contactId,
-                            instruction,
-                            model,
-                            mode: "chat",
-                            draftLanguage,
-                            onChunk,
-                            generateDraft: generateAIDraft,
-                            onStreamError: (streamError) => {
-                                console.warn("[AI Draft] Stream path failed, falling back to server action.", streamError);
-                            },
-                        });
-                        if (res.reasoning) {
-                            toast({ title: "Draft Generated", description: res.reasoning });
-                        }
-                        return res.draft || null;
-                    } catch (e: any) {
-                        toast({ title: "Draft Failed", description: e.message, variant: "destructive" });
-                        return null;
+                } catch (e: any) {
+                    toast({ title: "Error", description: e.message, variant: "destructive" });
+                } finally {
+                    setLoadingMessages(false);
+                }
+            }}
+            suggestions={[...(activeConversation?.suggestedActions || []), ...suggestions]}
+            suggestedResponseQueue={suggestedResponseQueue}
+            suggestedResponseQueueLoading={loadingSuggestedResponseQueue}
+            onAcceptSuggestedResponse={handleAcceptSuggestedResponse}
+            onRejectSuggestedResponse={handleRejectSuggestedResponse}
+            composerInsertSeed={composerInsertSeed}
+            onGenerateDraft={async (
+                instruction?: string,
+                model?: string,
+                draftLanguage?: string | null,
+                onChunk?: (chunk: string) => void
+            ) => {
+                try {
+                    const res = await generateDraftWithStreamingFallback({
+                        conversationId: activeConversation!.id,
+                        contactId: activeConversation!.contactId,
+                        instruction,
+                        model,
+                        mode: "chat",
+                        draftLanguage,
+                        onChunk,
+                        generateDraft: generateAIDraft,
+                        onStreamError: (streamError) => {
+                            console.warn("[AI Draft] Stream path failed, falling back to server action.", streamError);
+                        },
+                    });
+                    if (res.reasoning) {
+                        toast({ title: "Draft Generated", description: res.reasoning });
                     }
-                }}
-                onSetReplyLanguageOverride={async (replyLanguage: string | null) => {
-                    const result = await setConversationReplyLanguageOverride(activeConversation.id, replyLanguage);
-                    if (result.success) {
-                        applyConversationReplyLanguageOverride(activeConversation.id, result.replyLanguageOverride ?? null);
-                    }
-                    return result;
-                }}
-                onInitialPaintReady={() => {
-                    if (activeIdRef.current === activeConversation.id) {
-                        setChatTimelineInitialPainted(true);
-                        const loadedAt = initialWorkspaceLoadedAtRef.current[activeConversation.id] || 0;
-                        trackClientMetric("thread_messages_ready_ms", loadedAt ? Date.now() - loadedAt : 0, {
-                            conversationId: activeConversation.id,
-                            message_count: messages.length,
-                            cache_hit: !!getCachedWorkspaceCoreSnapshot(activeConversation.id),
-                        });
-                    }
-                }}
-            />
-        ) : (
-            <div className="h-full flex items-center justify-center text-gray-400 bg-slate-50">
-                Select a conversation
-            </div>
-        )
+                    return res.draft || null;
+                } catch (e: any) {
+                    toast({ title: "Draft Failed", description: e.message, variant: "destructive" });
+                    return null;
+                }
+            }}
+            onSetReplyLanguageOverride={async (replyLanguage: string | null) => {
+                const result = await setConversationReplyLanguageOverride(activeConversation!.id, replyLanguage);
+                if (result.success) {
+                    applyConversationReplyLanguageOverride(activeConversation!.id, result.replyLanguageOverride ?? null);
+                }
+                return result;
+            }}
+            onInitialPaintReady={() => {
+                if (activeIdRef.current === activeConversation?.id) {
+                    setChatTimelineInitialPainted(true);
+                    const loadedAt = initialWorkspaceLoadedAtRef.current[activeConversation!.id] || 0;
+                    trackClientMetric("thread_messages_ready_ms", loadedAt ? Date.now() - loadedAt : 0, {
+                        conversationId: activeConversation!.id,
+                        message_count: messages.length,
+                        cache_hit: !!getCachedWorkspaceCoreSnapshot(activeConversation!.id),
+                    });
+                }
+            }}
+        />
     ) : (
         <DealWorkspacePane
             activeDealId={activeDealId}
