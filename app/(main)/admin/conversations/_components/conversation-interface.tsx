@@ -52,6 +52,7 @@ import {
 } from '@/lib/conversations/workspace-core-cache';
 import {
     THREAD_INITIAL_FALLBACK_MESSAGES,
+    THREAD_REFRESH_MESSAGES_OPTIONS,
     THREAD_TARGET_MESSAGE_COUNT,
 } from '@/lib/conversations/thread-hydration';
 import {
@@ -189,7 +190,6 @@ const WORKSPACE_CORE_CACHE_TTL_MS = 2 * 60 * 1000;
 const WORKSPACE_SIDEBAR_CACHE_TTL_MS = 5 * 60 * 1000;
 const WORKSPACE_ACTIVITY_LIMIT = 180;
 const ACTIVE_POLL_GRACE_MS = 2500;
-const THREAD_REFRESH_MESSAGES_OPTIONS = { take: THREAD_TARGET_MESSAGE_COUNT } as const;
 
 function estimateThreadViewportHeightPx(): number | null {
     if (typeof window === 'undefined') return null;

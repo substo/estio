@@ -3,9 +3,14 @@ import test from 'node:test';
 
 import type { Message } from '@/lib/ghl/conversations';
 import {
+    THREAD_REFRESH_MESSAGES_OPTIONS,
+    THREAD_TARGET_MESSAGE_COUNT,
+} from '@/lib/conversations/thread-hydration';
+import {
     getMessageSignature,
     getTranscriptActionModeLabel,
     hasPendingTranscripts,
+    refreshMessagesAfterTranscriptAction,
 } from './conversation-transcript-actions';
 
 const baseMessage = {
@@ -80,4 +85,32 @@ test('getMessageSignature changes when transcript state changes', () => {
 test('getTranscriptActionModeLabel preserves existing inline fallback wording', () => {
     assert.equal(getTranscriptActionModeLabel('inline-fallback'), 'inline fallback');
     assert.equal(getTranscriptActionModeLabel('queue'), 'queue');
+});
+
+test('refreshMessagesAfterTranscriptAction refreshes the capped thread window', async () => {
+    const refreshed = [{ ...baseMessage, id: 'msg-refreshed' }];
+    const fetchCalls: Array<{ conversationId: string; options?: { take?: number | null } }> = [];
+    const setCalls: Message[][] = [];
+    const messageSignatureRef = { current: '0' };
+
+    await refreshMessagesAfterTranscriptAction({
+        conversationId: 'conv-1',
+        activeConversationId: 'conv-1',
+        fetchMessages: async (conversationId, options) => {
+            fetchCalls.push({ conversationId, options });
+            return refreshed;
+        },
+        setMessages: (next) => {
+            setCalls.push(typeof next === 'function' ? next([]) : next);
+        },
+        messageSignatureRef,
+    });
+
+    assert.deepEqual(fetchCalls, [{
+        conversationId: 'conv-1',
+        options: { take: THREAD_TARGET_MESSAGE_COUNT },
+    }]);
+    assert.deepEqual(fetchCalls[0]?.options, THREAD_REFRESH_MESSAGES_OPTIONS);
+    assert.deepEqual(setCalls, [refreshed]);
+    assert.equal(messageSignatureRef.current, getMessageSignature(refreshed));
 });

@@ -81,6 +81,43 @@ test("mergeSnapshotPreservingPendingMessages keeps stale optimistic outbound and
     assert.equal(merged[0].status, "sent");
 });
 
+test("mergeSnapshotPreservingPendingMessages preserves optimistic outbound omitted from capped refresh", () => {
+    const cappedRefreshSnapshot = [
+        {
+            id: "msg_recent_1",
+            direction: "inbound",
+            status: "delivered",
+            dateAdded: "2026-03-24T10:00:00.000Z",
+        },
+        {
+            id: "msg_recent_2",
+            direction: "inbound",
+            status: "delivered",
+            dateAdded: "2026-03-24T10:00:01.000Z",
+        },
+    ] as any[];
+    const optimisticOutbound = {
+        id: "opt-outbound-1",
+        clientMessageId: "cmid_omitted_from_cap",
+        conversationId: "conv_1",
+        direction: "outbound",
+        status: "sending",
+        sendState: "queued",
+        body: "still pending locally",
+        dateAdded: "2026-03-24T10:00:02.000Z",
+    };
+
+    const merged = mergeSnapshotPreservingPendingMessages(cappedRefreshSnapshot, [optimisticOutbound] as any[]);
+
+    assert.deepEqual(merged.map((message) => message.id), [
+        "msg_recent_1",
+        "msg_recent_2",
+        "opt-outbound-1",
+    ]);
+    assert.equal((merged[2] as any).clientMessageId, "cmid_omitted_from_cap");
+    assert.equal(merged[2].status, "sending");
+});
+
 test("mergeLatestMessageWindowIntoCachedMessages preserves older cached messages and updates latest window", () => {
     const cached = [
         { id: "m1", dateAdded: "2026-03-24T10:00:00.000Z", body: "older" },

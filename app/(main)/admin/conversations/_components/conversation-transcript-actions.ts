@@ -2,7 +2,7 @@
 
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import type { Message } from '@/lib/ghl/conversations';
-import { THREAD_TARGET_MESSAGE_COUNT } from '@/lib/conversations/thread-hydration';
+import { THREAD_REFRESH_MESSAGES_OPTIONS } from '@/lib/conversations/thread-hydration';
 
 type ToastInput = {
     title: string;
@@ -74,7 +74,7 @@ export async function refreshMessagesAfterTranscriptAction(args: {
     setMessages: Dispatch<SetStateAction<Message[]>>;
     messageSignatureRef: MutableRefObject<string>;
 }): Promise<void> {
-    const refreshed = await args.fetchMessages(args.conversationId, { take: THREAD_TARGET_MESSAGE_COUNT });
+    const refreshed = await args.fetchMessages(args.conversationId, THREAD_REFRESH_MESSAGES_OPTIONS);
     if (args.activeConversationId === args.conversationId) {
         const nextMessages = args.mergeMessages
             ? args.mergeMessages(args.conversationId, refreshed)
