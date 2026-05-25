@@ -77,6 +77,31 @@ function summarize(samplesMs) {
   };
 }
 
+function summarizeCounts(samples) {
+  const sorted = samples
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value))
+    .sort((a, b) => a - b);
+  const total = sorted.reduce((acc, value) => acc + value, 0);
+  return {
+    count: sorted.length,
+    min: sorted[0] || 0,
+    p50: percentile(sorted, 50),
+    p95: percentile(sorted, 95),
+    max: sorted[sorted.length - 1] || 0,
+    avg: sorted.length ? total / sorted.length : 0,
+  };
+}
+
+function summarizeMountedRows(entries, fieldMap) {
+  return Object.fromEntries(
+    Object.entries(fieldMap).map(([summaryKey, eventKey]) => [
+      summaryKey,
+      summarizeCounts(entries.map((entry) => entry[eventKey])),
+    ])
+  );
+}
+
 function parseCsvEnv(value) {
   return String(value || "")
     .split(",")
@@ -88,6 +113,98 @@ function cssAttributeValue(value) {
   return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
+async function parsePerfConsoleMessage(message, activeAttempt) {
+  const args = message.args();
+  const text = message.text();
+  let label = "";
+  let payload = null;
+
+  if (args.length > 0) {
+    label = String(await args[0].jsonValue().catch(() => "") || "");
+  }
+  if (!label.includes("[perf:conversations.")) {
+    label = text.match(/\[perf:conversations\.[^\]]+\]/)?.[0] || "";
+  }
+  if (!label) return null;
+
+  if (args.length > 1) {
+    payload = await args[1].jsonValue().catch(() => null);
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    const jsonMatch = text.match(/\{.*\}$/);
+    if (jsonMatch) {
+      payload = JSON.parse(jsonMatch[0]);
+    }
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    payload = {};
+  }
+
+  return {
+    label,
+    text,
+    payload,
+    capturedAt: new Date().toISOString(),
+    openAttempt: activeAttempt ? { ...activeAttempt } : null,
+  };
+}
+
+function toMountedRowEntry(event) {
+  const payload = event.payload || {};
+  if (event.label === "[perf:conversations.chat_timeline_mount_count]") {
+    return {
+      surface: "chat",
+      targetId: payload.conversationId || event.openAttempt?.targetId || null,
+      openAttempt: event.openAttempt,
+      mountedTimelineItems: Number(payload.mountedItemCount || 0),
+      mountedMessages: Number(payload.mountedMessageCount || 0),
+      mountedActivityItems: Number(payload.mountedActivityCount || 0),
+      sourceMessageCount: Number(payload.sourceMessageCount || 0),
+      sourceActivityCount: Number(payload.sourceActivityCount || 0),
+      loading: Boolean(payload.loading),
+      initialPaintReady: Boolean(payload.initialPaintReady),
+      capturedAt: event.capturedAt,
+    };
+  }
+  if (event.label === "[perf:conversations.deal_timeline_mount_count]") {
+    return {
+      surface: "deal",
+      targetId: payload.dealId || event.openAttempt?.targetId || null,
+      openAttempt: event.openAttempt,
+      mountedTimelineItems: Number(payload.mountedItemCount || 0),
+      mountedMessages: Number(payload.mountedMessageCount || 0),
+      mountedActivityItems: Number(payload.mountedActivityCount || 0),
+      loading: Boolean(payload.loading),
+      hydrationStatus: payload.hydrationStatus || null,
+      initialPaintReady: Boolean(payload.initialPaintReady),
+      capturedAt: event.capturedAt,
+    };
+  }
+  return null;
+}
+
+function buildMountedRowCounts(perfConsoleEvents) {
+  const runs = perfConsoleEvents
+    .map(toMountedRowEntry)
+    .filter(Boolean);
+  const chatRuns = runs.filter((entry) => entry.surface === "chat");
+  const dealRuns = runs.filter((entry) => entry.surface === "deal");
+
+  return {
+    runs,
+    summary: {
+      chat: summarizeMountedRows(chatRuns, {
+        mountedTimelineItems: "mountedTimelineItems",
+        mountedMessages: "mountedMessages",
+        mountedActivityItems: "mountedActivityItems",
+      }),
+      deal: summarizeMountedRows(dealRuns, {
+        mountedTimelineItems: "mountedTimelineItems",
+      }),
+    },
+  };
+}
+
 async function benchmarkActivation(page, ids, options) {
   const warmSamples = [];
   const coldSamples = [];
@@ -95,6 +212,14 @@ async function benchmarkActivation(page, ids, options) {
   for (let i = 0; i < options.iterations; i += 1) {
     const id = ids[i % ids.length];
     const isWarmPhase = i >= Math.floor(options.iterations / 3);
+    if (typeof options.onAttemptStart === "function") {
+      options.onAttemptStart({
+        surface: options.surface || "unknown",
+        targetId: id,
+        attemptIndex: i,
+        phase: isWarmPhase ? "warm" : "cold",
+      });
+    }
 
     const elapsed = await page.evaluate(async (args) => {
       const row = document.querySelector(args.rowSelector.replace("__ID__", args.id));
@@ -129,6 +254,10 @@ async function benchmarkActivation(page, ids, options) {
     } else {
       coldSamples.push(elapsed);
     }
+  }
+
+  if (typeof options.onAttemptStart === "function") {
+    options.onAttemptStart(null);
   }
 
   return {
@@ -255,6 +384,8 @@ async function main() {
     ? `${baseUrl}/admin/conversations?id=${encodeURIComponent(targetConversationIds[0])}`
     : `${baseUrl}/admin/conversations`;
   const consolePerfLogs = [];
+  const consolePerfEvents = [];
+  let activeOpenAttempt = null;
   const contextOptions = {};
 
   if (storageStatePath) {
@@ -283,10 +414,25 @@ async function main() {
 
     const page = await context.newPage();
     if (captureConsole) {
-      page.on("console", (message) => {
+      page.on("console", async (message) => {
         const text = message.text();
         if (!text.includes("[perf:conversations.")) return;
         consolePerfLogs.push(text);
+        try {
+          const event = await parsePerfConsoleMessage(message, activeOpenAttempt);
+          if (event) {
+            consolePerfEvents.push(event);
+          }
+        } catch (error) {
+          consolePerfEvents.push({
+            label: text.match(/\[perf:conversations\.[^\]]+\]/)?.[0] || "[perf:conversations.parse_error]",
+            text,
+            payload: {},
+            parseError: error?.message || String(error),
+            capturedAt: new Date().toISOString(),
+            openAttempt: activeOpenAttempt ? { ...activeOpenAttempt } : null,
+          });
+        }
       });
     }
 
@@ -316,6 +462,10 @@ async function main() {
       activeSelector: "[data-chat-active-conversation-id]",
       activeAttribute: "data-chat-active-conversation-id",
       readyAttribute: "data-chat-initial-paint-ready",
+      surface: "chat",
+      onAttemptStart: (attempt) => {
+        activeOpenAttempt = attempt;
+      },
     });
     const contactEdit = await benchmarkContactEditOpen(page);
 
@@ -333,11 +483,20 @@ async function main() {
         activeSelector: "[data-deal-active-id]",
         activeAttribute: "data-deal-active-id",
         readyAttribute: "data-deal-initial-paint-ready",
+        surface: "deal",
+        onAttemptStart: (attempt) => {
+          activeOpenAttempt = attempt;
+        },
       });
     }
 
     await clickTab(page, "Chats");
     const bindToOpen = await runBindToOpenBenchmark(page);
+    await page.waitForTimeout(100).catch(() => null);
+
+    const mountedRowCounts = captureConsole
+      ? buildMountedRowCounts(consolePerfEvents)
+      : undefined;
 
     const output = {
       target,
@@ -353,6 +512,8 @@ async function main() {
         chats: 'data-chat-initial-paint-ready="true"',
         deals: 'data-deal-initial-paint-ready="true"',
       },
+      mountedRowCounts,
+      consolePerfEvents: captureConsole ? consolePerfEvents : undefined,
       consolePerfLogs: captureConsole ? consolePerfLogs : undefined,
       targets: {
         listFirstPaintLtMs: 1000,
