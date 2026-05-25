@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Conversation, Message } from "@/lib/ghl/conversations";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -193,6 +193,7 @@ export function ChatWindow({
         onInitialPaintReady,
     });
     const [selectedModel, setSelectedModel] = useState("");
+    const lastTimelineCountLogRef = useRef<string | null>(null);
     const {
         selectionBatch,
         isSummarizingBatch,
@@ -258,6 +259,32 @@ export function ChatWindow({
         translationBannerEnabled,
     });
 
+    useEffect(() => {
+        if (process.env.NODE_ENV === "production") return;
+        const mountedMessageCount = timelineItems.filter((item) => item.kind === "message").length;
+        const mountedActivityCount = timelineItems.length - mountedMessageCount;
+        const logKey = [
+            conversation.id,
+            timelineItems.length,
+            mountedMessageCount,
+            mountedActivityCount,
+            loading ? "loading" : "ready",
+            isTimelineReady ? "painted" : "hidden",
+        ].join(":");
+        if (lastTimelineCountLogRef.current === logKey) return;
+        lastTimelineCountLogRef.current = logKey;
+        console.debug("[perf:conversations.chat_timeline_mount_count]", {
+            conversationId: conversation.id,
+            mountedItemCount: timelineItems.length,
+            mountedMessageCount,
+            mountedActivityCount,
+            sourceMessageCount: messages.length,
+            sourceActivityCount: activityLog.length,
+            loading,
+            initialPaintReady: isTimelineReady,
+        });
+    }, [activityLog.length, conversation.id, isTimelineReady, loading, messages.length, timelineItems]);
+
     // Reset transient state when conversation changes
     useEffect(() => {
         setIsBulkTranscribingAudio(false);
@@ -292,6 +319,9 @@ export function ChatWindow({
         <div
             data-chat-active-conversation-id={conversation.id}
             data-chat-initial-paint-ready={isTimelineReady ? "true" : "false"}
+            data-chat-mounted-timeline-items={timelineItems.length}
+            data-chat-mounted-messages={messages.length}
+            data-chat-mounted-activity-items={activityLog.length}
             className="h-full flex flex-col bg-white min-w-0 overflow-hidden"
         >
             {/* Header */}

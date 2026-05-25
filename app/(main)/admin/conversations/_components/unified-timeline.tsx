@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Conversation } from '@/lib/ghl/conversations';
 
 import { MessageBubble } from './message-bubble';
@@ -97,6 +97,7 @@ export function UnifiedTimeline({
     onResendMessage,
 }: UnifiedTimelineProps) {
     const [selectedModel, setSelectedModel] = useState("");
+    const lastTimelineCountLogRef = useRef<string | null>(null);
     const events = useMemo(() => (Array.isArray(timelineEvents) ? timelineEvents : []), [timelineEvents]);
     const {
         timelineRef,
@@ -109,11 +110,37 @@ export function UnifiedTimeline({
         onInitialPaintReady,
     });
 
+    useEffect(() => {
+        if (process.env.NODE_ENV === "production") return;
+        const mountedMessageCount = events.filter((event) => event?.kind !== "activity").length;
+        const mountedActivityCount = events.length - mountedMessageCount;
+        const logKey = [
+            dealId,
+            events.length,
+            mountedMessageCount,
+            mountedActivityCount,
+            loading ? "loading" : "ready",
+            isTimelineReady ? "painted" : "hidden",
+        ].join(":");
+        if (lastTimelineCountLogRef.current === logKey) return;
+        lastTimelineCountLogRef.current = logKey;
+        console.debug("[perf:conversations.deal_timeline_mount_count]", {
+            dealId,
+            mountedItemCount: events.length,
+            mountedMessageCount,
+            mountedActivityCount,
+            loading,
+            hydrationStatus,
+            initialPaintReady: isTimelineReady,
+        });
+    }, [dealId, events, hydrationStatus, isTimelineReady, loading]);
+
     return (
         <div
             data-deal-active-id={dealId}
             data-deal-hydration-status={hydrationStatus}
             data-deal-initial-paint-ready={isTimelineReady ? "true" : "false"}
+            data-deal-mounted-timeline-items={events.length}
             className="flex-1 bg-slate-200/50 p-0 flex flex-col relative overflow-hidden h-full min-w-0 w-full"
         >
             <div className="h-14 border-b bg-white flex items-center px-3 sm:px-4 justify-between shrink-0 gap-2">
