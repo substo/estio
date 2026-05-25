@@ -3,13 +3,11 @@ import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { Layers, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card";
-import { ConversationPreviewCard } from "./conversation-preview-card";
 import { WhatsAppStatus } from './whatsapp-status';
 import { GlobalTaskList } from './global-task-list';
 import { useConversationListControls } from './use-conversation-list-controls';
 import { ConversationListHeader } from './conversation-list-header';
-import { ConversationListRow } from './conversation-list-row';
+import { ConversationListItem } from './conversation-list-item';
 
 interface ConversationListProps {
     conversations: Conversation[];
@@ -239,35 +237,19 @@ export function ConversationList({
             <div ref={listScrollRef} className="flex-1 overflow-y-auto overflow-x-hidden sm:pr-1 [scrollbar-gutter:stable] min-w-0">
                 {conversations.map((c) => {
                     const isChecked = selectedIds?.has(c.id) || false;
-                    const row = (
-                        <ConversationListRow
-                            conversation={c}
-                            selectedId={selectedId}
-                            isSelectionMode={isSelectionMode}
-                            isChecked={isChecked}
-                            onSelect={onSelect}
-                            onToggleSelect={onToggleSelect}
-                            onHoverConversation={onHoverConversation}
-                        />
-                    );
 
                     return (
                         <div key={c.id}>
-                            {disablePreviewCard ? row : (
-                                <HoverCard openDelay={300} closeDelay={100}>
-                                    <HoverCardTrigger asChild>
-                                        {row}
-                                    </HoverCardTrigger>
-                                    <HoverCardContent
-                                        side="right"
-                                        align="start"
-                                        sideOffset={8}
-                                        className="w-80 p-0"
-                                    >
-                                        <ConversationPreviewCard conversation={c} />
-                                    </HoverCardContent>
-                                </HoverCard>
-                            )}
+                            <ConversationListItem
+                                conversation={c}
+                                selectedId={selectedId}
+                                isSelectionMode={isSelectionMode}
+                                isChecked={isChecked}
+                                disablePreviewCard={disablePreviewCard}
+                                onSelect={onSelect}
+                                onToggleSelect={onToggleSelect}
+                                onHoverConversation={onHoverConversation}
+                            />
                         </div>
                     );
                 })}
