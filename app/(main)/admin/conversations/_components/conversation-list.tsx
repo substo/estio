@@ -1,16 +1,15 @@
 import { Conversation } from "@/lib/ghl/conversations";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
-import { Mail, MessageSquare, MessageCircle, Layers, Link as LinkIcon, Loader2 } from "lucide-react";
+import { Layers, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card";
 import { ConversationPreviewCard } from "./conversation-preview-card";
 import { WhatsAppStatus } from './whatsapp-status';
 import { GlobalTaskList } from './global-task-list';
-import Link from 'next/link';
 import { useConversationListControls } from './use-conversation-list-controls';
 import { ConversationListHeader } from './conversation-list-header';
+import { ConversationListRow } from './conversation-list-row';
 
 interface ConversationListProps {
     conversations: Conversation[];
@@ -50,28 +49,6 @@ interface ConversationListProps {
     onSearchChange?: (q: string) => void;
     isSearching?: boolean;
     disablePreviewCard?: boolean;
-}
-
-/**
- * Map GHL conversation type codes to friendly display names
- */
-function getChannelInfo(type: string): { name: string; icon: React.ReactNode; color: string } {
-    const typeUpper = type?.toUpperCase() || '';
-
-    if (typeUpper.includes('EMAIL')) {
-        return { name: 'Email', icon: <Mail className="w-3 h-3" />, color: 'bg-purple-50 text-purple-600' };
-    }
-    if (typeUpper.includes('WHATSAPP')) {
-        return { name: 'WhatsApp', icon: <MessageCircle className="w-3 h-3" />, color: 'bg-green-50 text-green-600' };
-    }
-    if (typeUpper.includes('PHONE') || typeUpper.includes('SMS') || typeUpper.includes('CALL')) {
-        return { name: 'SMS', icon: <MessageSquare className="w-3 h-3" />, color: 'bg-blue-50 text-blue-600' };
-    }
-    if (typeUpper.includes('WEBCHAT') || typeUpper.includes('LIVE')) {
-        return { name: 'Live Chat', icon: <MessageSquare className="w-3 h-3" />, color: 'bg-orange-50 text-orange-600' };
-    }
-    // Fallback
-    return { name: type || 'Unknown', icon: <MessageSquare className="w-3 h-3" />, color: 'bg-gray-50 text-gray-600' };
 }
 
 export function ConversationList({
@@ -261,68 +238,17 @@ export function ConversationList({
 
             <div ref={listScrollRef} className="flex-1 overflow-y-auto overflow-x-hidden sm:pr-1 [scrollbar-gutter:stable] min-w-0">
                 {conversations.map((c) => {
-                    const channel = getChannelInfo(c.lastMessageType || c.type);
-                    const isChecked = selectedIds?.has(c.id);
+                    const isChecked = selectedIds?.has(c.id) || false;
                     const row = (
-                        <div
-                            data-conversation-id={c.id}
-                            className={cn(
-                                "border-b transition-colors flex items-start py-2 pl-2 pr-3 cursor-pointer w-full min-w-0",
-                                selectedId === c.id && !isSelectionMode ? "bg-slate-100 border-l-blue-500" : "border-l-transparent",
-                                isSelectionMode && isChecked ? "bg-indigo-50" : "hover:bg-slate-50",
-                                selectedId === c.id ? "border-l-4" : "border-l-4"
-                            )}
-                            // In Selection Mode, clicking the row toggles selection (UX choice)
-                            // OR clicking the row still selects it for view, but clicking Checkbox selects for action.
-                            // Usually Select Mode implies clicking row selects for action.
-                            onClick={() => {
-                                if (isSelectionMode && onToggleSelect) {
-                                    onToggleSelect(c.id, !isChecked);
-                                } else {
-                                    onSelect(c.id);
-                                }
-                            }}
-                            onMouseEnter={() => onHoverConversation?.(c.id)}
-                        >
-                            {/* Checkbox for Selection Mode */}
-                            {isSelectionMode && onToggleSelect && (
-                                <div
-                                    className="mr-3 pt-1"
-                                    onClick={(e) => e.stopPropagation()}
-                                >
-                                    <Checkbox
-                                        checked={isChecked}
-                                        onCheckedChange={(checked: boolean | string) => onToggleSelect(c.id, checked === true)}
-                                    />
-                                </div>
-                            )}
-
-                            <div className="flex-1 min-w-0 w-0 overflow-hidden">
-                                {/* Contact name */}
-                                <div className="flex items-center justify-between gap-2 min-w-0">
-                                    <h4 className="block w-full min-w-0 flex-1 truncate font-semibold text-sm">
-                                        {c.contactName || c.contactId || "Unknown Contact"}
-                                    </h4>
-                                    <div className="ml-2 mr-0.5 flex-none shrink-0 flex items-center gap-1">
-                                        {c.unreadCount > 0 && (
-                                            <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] leading-[18px] text-center font-semibold">
-                                                {c.unreadCount > 99 ? "99+" : c.unreadCount}
-                                            </span>
-                                        )}
-                                        {(c as any).activeDealId && (
-                                            <div title={`Linked to Deal: ${(c as any).activeDealTitle}`}>
-                                                <LinkIcon className="h-3 w-3 text-indigo-500" />
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                                {/* Channel icon */}
-                                <div className="flex items-center gap-1 mt-1">
-                                    {channel.icon}
-                                    <span className="text-[10px] text-gray-500">{channel.name}</span>
-                                </div>
-                            </div>
-                        </div>
+                        <ConversationListRow
+                            conversation={c}
+                            selectedId={selectedId}
+                            isSelectionMode={isSelectionMode}
+                            isChecked={isChecked}
+                            onSelect={onSelect}
+                            onToggleSelect={onToggleSelect}
+                            onHoverConversation={onHoverConversation}
+                        />
                     );
 
                     return (

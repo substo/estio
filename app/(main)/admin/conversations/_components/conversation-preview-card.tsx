@@ -1,32 +1,10 @@
 import { Conversation } from "@/lib/ghl/conversations";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
-import { Mail, MessageSquare, MessageCircle } from "lucide-react";
+import { getChannelInfo } from "./conversation-channel-info";
 
 interface ConversationPreviewCardProps {
     conversation: Conversation;
-}
-
-/**
- * Map GHL conversation type codes to friendly display names
- */
-function getChannelInfo(type: string): { name: string; icon: React.ReactNode; color: string } {
-    const typeUpper = type?.toUpperCase() || '';
-
-    if (typeUpper.includes('EMAIL')) {
-        return { name: 'Email', icon: <Mail className="w-3 h-3" />, color: 'bg-purple-50 text-purple-600' };
-    }
-    if (typeUpper.includes('WHATSAPP')) {
-        return { name: 'WhatsApp', icon: <MessageCircle className="w-3 h-3" />, color: 'bg-green-50 text-green-600' };
-    }
-    if (typeUpper.includes('PHONE') || typeUpper.includes('SMS') || typeUpper.includes('CALL')) {
-        return { name: 'SMS', icon: <MessageSquare className="w-3 h-3" />, color: 'bg-blue-50 text-blue-600' };
-    }
-    if (typeUpper.includes('WEBCHAT') || typeUpper.includes('LIVE')) {
-        return { name: 'Live Chat', icon: <MessageSquare className="w-3 h-3" />, color: 'bg-orange-50 text-orange-600' };
-    }
-    // Fallback
-    return { name: type || 'Unknown', icon: <MessageSquare className="w-3 h-3" />, color: 'bg-gray-50 text-gray-600' };
 }
 
 /**
