@@ -189,6 +189,7 @@ const WORKSPACE_CORE_CACHE_TTL_MS = 2 * 60 * 1000;
 const WORKSPACE_SIDEBAR_CACHE_TTL_MS = 5 * 60 * 1000;
 const WORKSPACE_ACTIVITY_LIMIT = 180;
 const ACTIVE_POLL_GRACE_MS = 2500;
+const THREAD_REFRESH_MESSAGES_OPTIONS = { take: THREAD_TARGET_MESSAGE_COUNT } as const;
 
 function estimateThreadViewportHeightPx(): number | null {
     if (typeof window === 'undefined') return null;
@@ -1724,10 +1725,11 @@ export function ConversationInterface({ locationId, initialConversations, initia
         }
 
         try {
-            const refreshed = await fetchMessages(activeConversationId);
+            const refreshed = await fetchMessages(activeConversationId, THREAD_REFRESH_MESSAGES_OPTIONS);
             if (activeIdRef.current === activeConversationId) {
-                setMessages(refreshed);
-                messageSignatureRef.current = getMessageSignature(refreshed);
+                const nextMessages = mergeSnapshotPreservingPending(activeConversationId, refreshed);
+                setMessages(nextMessages);
+                messageSignatureRef.current = getMessageSignature(nextMessages);
             }
         } catch {
             // Ignore refresh errors; optimistic/message-level updates can still continue.
@@ -2086,9 +2088,9 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 return;
             }
 
-            const refreshed = await fetchMessages(selectedConversationId);
+            const refreshed = await fetchMessages(selectedConversationId, THREAD_REFRESH_MESSAGES_OPTIONS);
             if (activeIdRef.current === selectedConversationId) {
-                setMessages(refreshed);
+                setMessages(mergeSnapshotPreservingPending(selectedConversationId, refreshed));
             }
 
             const deletedStorageSuffix = (res.removedStorageObjects || 0) > 0
@@ -2125,6 +2127,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 conversationId,
                 activeConversationId: activeIdRef.current,
                 fetchMessages,
+                mergeMessages: mergeSnapshotPreservingPending,
                 setMessages,
                 messageSignatureRef,
             }),
@@ -2160,6 +2163,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 conversationId,
                 activeConversationId: activeIdRef.current,
                 fetchMessages,
+                mergeMessages: mergeSnapshotPreservingPending,
                 setMessages,
                 messageSignatureRef,
             }),
@@ -2191,6 +2195,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 conversationId,
                 activeConversationId: activeIdRef.current,
                 fetchMessages,
+                mergeMessages: mergeSnapshotPreservingPending,
                 setMessages,
                 messageSignatureRef,
             }),
@@ -2227,6 +2232,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 conversationId,
                 activeConversationId: activeIdRef.current,
                 fetchMessages,
+                mergeMessages: mergeSnapshotPreservingPending,
                 setMessages,
                 messageSignatureRef,
             }),
@@ -2275,8 +2281,8 @@ export function ConversationInterface({ locationId, initialConversations, initia
                             description: `Fetched ${count} messages (Total: ${totalSynced})...`
                         });
                         // Re-fetch to display them as they come in
-                        const msgs = await fetchMessages(activeId);
-                        setMessages(msgs);
+                        const msgs = await fetchMessages(activeId, THREAD_REFRESH_MESSAGES_OPTIONS);
+                        setMessages(mergeSnapshotPreservingPending(activeId, msgs));
                     }
 
                     // Stop if we fetched fewer than requested (end of history)
@@ -2291,8 +2297,8 @@ export function ConversationInterface({ locationId, initialConversations, initia
             }
 
             toast({ title: "Sync Complete", description: `Total messages recovered: ${totalSynced}` });
-            const msgs = await fetchMessages(activeId);
-            setMessages(msgs);
+            const msgs = await fetchMessages(activeId, THREAD_REFRESH_MESSAGES_OPTIONS);
+            setMessages(mergeSnapshotPreservingPending(activeId, msgs));
 
         } catch (e) {
             console.error("Sync error:", e);
@@ -2439,8 +2445,8 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
                         if (res.success) {
                             toast({ title: "History Fetched", description: `Found ${res.count} messages.` });
-                            const msgs = await fetchMessages(activeConversation.id);
-                            setMessages(msgs);
+                            const msgs = await fetchMessages(activeConversation.id, THREAD_REFRESH_MESSAGES_OPTIONS);
+                            setMessages(mergeSnapshotPreservingPending(activeConversation.id, msgs));
                         } else {
                             toast({ title: "Fetch Failed", description: res.error, variant: "destructive" });
                         }
@@ -2829,8 +2835,8 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     contactName={activeConversation.contactName || 'Unknown'}
                     onImportComplete={async () => {
                         // Refresh messages for the active conversation
-                        const msgs = await fetchMessages(activeConversation.id);
-                        setMessages(msgs);
+                        const msgs = await fetchMessages(activeConversation.id, THREAD_REFRESH_MESSAGES_OPTIONS);
+                        setMessages(mergeSnapshotPreservingPending(activeConversation.id, msgs));
                         toast({ title: 'Import Complete', description: 'Messages have been imported.' });
                     }}
                 />

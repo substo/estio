@@ -2,6 +2,7 @@
 
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import type { Message } from '@/lib/ghl/conversations';
+import { THREAD_TARGET_MESSAGE_COUNT } from '@/lib/conversations/thread-hydration';
 
 type ToastInput = {
     title: string;
@@ -68,14 +69,18 @@ export function getTranscriptActionModeLabel(mode: unknown): string {
 export async function refreshMessagesAfterTranscriptAction(args: {
     conversationId: string;
     activeConversationId: string | null;
-    fetchMessages: (conversationId: string) => Promise<Message[]>;
+    fetchMessages: (conversationId: string, options?: { take?: number | null }) => Promise<Message[]>;
+    mergeMessages?: (conversationId: string, snapshotMessages: Message[]) => Message[];
     setMessages: Dispatch<SetStateAction<Message[]>>;
     messageSignatureRef: MutableRefObject<string>;
 }): Promise<void> {
-    const refreshed = await args.fetchMessages(args.conversationId);
+    const refreshed = await args.fetchMessages(args.conversationId, { take: THREAD_TARGET_MESSAGE_COUNT });
     if (args.activeConversationId === args.conversationId) {
-        args.setMessages(refreshed);
-        args.messageSignatureRef.current = getMessageSignature(refreshed);
+        const nextMessages = args.mergeMessages
+            ? args.mergeMessages(args.conversationId, refreshed)
+            : refreshed;
+        args.setMessages(nextMessages);
+        args.messageSignatureRef.current = getMessageSignature(nextMessages);
     }
 }
 

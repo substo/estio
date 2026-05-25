@@ -163,7 +163,7 @@ export function useChatWorkspaceHydration({
                 if (cancelled || activeIdRef.current !== selectedConversationId) return;
                 trackClientRequest("legacy_selection_load", { conversationId: selectedConversationId });
                 Promise.all([
-                    fetchMessages(selectedConversationId),
+                    fetchMessages(selectedConversationId, { take: THREAD_TARGET_MESSAGE_COUNT }),
                     fetchConversationActivityLog(selectedConversationId),
                     refreshConversation(selectedConversationId),
                 ])

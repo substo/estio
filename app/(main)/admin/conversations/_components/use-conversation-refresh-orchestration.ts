@@ -395,7 +395,7 @@ export function useConversationRefreshOrchestration({
                 if (!featureFlags.workspaceV2) {
                     trackClientRequest("legacy_active_poll", { conversationId: selectedConversationId, pendingTranscripts });
                     const [latestMessages, latestActivity, freshConversation] = await Promise.all([
-                        fetchMessages(selectedConversationId),
+                        fetchMessages(selectedConversationId, { take: THREAD_TARGET_MESSAGE_COUNT }),
                         fetchConversationActivityLog(selectedConversationId),
                         refreshConversation(selectedConversationId),
                     ]);
