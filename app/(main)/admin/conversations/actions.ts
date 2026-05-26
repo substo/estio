@@ -7606,30 +7606,9 @@ export async function refreshConversation(conversationId: string) {
 
     if (!conversation) return null;
 
-    // Map to UI format (Conversation interface)
-    return {
-        id: conversation.id,
-        legacyConversationId: conversation.ghlConversationId || null,
-        providerConversationId: isLikelyGhlConversationId(conversation.ghlConversationId) ? conversation.ghlConversationId : null,
-        ghlConversationId: isLikelyGhlConversationId(conversation.ghlConversationId) ? conversation.ghlConversationId : null,
-        contactId: conversation.contactId,
-        legacyContactId: conversation.contact.ghlContactId || null,
-        providerContactId: conversation.contact.ghlContactId || null,
-        contactName: conversation.contact.name || "Unknown",
-        contactPhone: conversation.contact.phone || undefined,
-        contactEmail: conversation.contact.email || undefined,
-        contactPreferredLanguage: conversation.contact.preferredLang || null,
-        replyLanguageOverride: conversation.replyLanguageOverride || null,
-        locationDefaultReplyLanguage: await getLocationDefaultReplyLanguage(location.id),
-        lastMessageBody: conversation.lastMessageBody || "",
-        lastMessageDate: Math.floor(conversation.lastMessageAt.getTime() / 1000),
-        unreadCount: conversation.unreadCount,
-        status: conversation.status as any,
-        type: conversation.lastMessageType || 'TYPE_SMS',
-        lastMessageType: conversation.lastMessageType || undefined,
-        locationId: location.id || "",
-        suggestedActions: conversation.suggestedActions || []
-    };
+    const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(location.id);
+
+    return mapConversationRowToUi(conversation, location, undefined, locationDefaultReplyLanguage);
 }
 
 export async function markConversationAsRead(conversationId: string) {
