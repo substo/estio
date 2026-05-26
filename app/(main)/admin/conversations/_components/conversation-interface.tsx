@@ -57,6 +57,8 @@ import {
 } from '@/lib/conversations/thread-hydration';
 import {
     collectPendingMessagesForConversation,
+    createWorkspaceCoreSnapshot,
+    createWorkspaceHydrationState,
     isWorkspaceRefreshBusy,
     mergeSnapshotPreservingPendingMessages,
     type WorkspaceCoreSnapshot,
@@ -1093,6 +1095,47 @@ export function ConversationInterface({ locationId, initialConversations, initia
     ).trim().toLowerCase();
     const dealMissionConversation = dealTimelineInitialPainted ? selectedDealConversation : null;
 
+    const applyRefreshedChatMessages = useCallback((conversationId: string, refreshedMessages: Message[]) => {
+        const normalizedConversationId = String(conversationId || "").trim();
+        if (!normalizedConversationId) return;
+
+        const nextMessages = mergeSnapshotPreservingPending(normalizedConversationId, refreshedMessages);
+        const currentSnapshot = getCachedWorkspaceCoreSnapshot(normalizedConversationId);
+        const header =
+            currentSnapshot?.conversationHeader
+            || (activeIdRef.current === normalizedConversationId ? activeConversation : null)
+            || selectedConversationCacheRef.current.get(normalizedConversationId)
+            || null;
+        const nextSnapshot = createWorkspaceCoreSnapshot({
+            conversationHeader: header,
+            messages: nextMessages,
+            activityTimeline: activeIdRef.current === normalizedConversationId
+                ? (Array.isArray(activityLogRef.current) ? activityLogRef.current : [])
+                : (currentSnapshot?.activityTimeline || []),
+            transcriptOnDemandEnabled: currentSnapshot?.transcriptOnDemandEnabled || false,
+            hydration: createWorkspaceHydrationState({
+                status: currentSnapshot?.hydration?.status || 'full',
+                messages: nextMessages,
+                messageWindow: currentSnapshot?.hydration,
+                initialCount: currentSnapshot?.hydration?.initialCount || nextMessages.length,
+                targetCount: THREAD_TARGET_MESSAGE_COUNT,
+                requestedLimit: currentSnapshot?.hydration?.requestedLimit || THREAD_TARGET_MESSAGE_COUNT,
+            }),
+        });
+
+        cacheWorkspaceCoreSnapshot(normalizedConversationId, nextSnapshot);
+        if (activeIdRef.current === normalizedConversationId) {
+            applyWorkspaceCoreSnapshot(normalizedConversationId, nextSnapshot);
+            setLoadingMessages(false);
+        }
+    }, [
+        activeConversation,
+        applyWorkspaceCoreSnapshot,
+        cacheWorkspaceCoreSnapshot,
+        getCachedWorkspaceCoreSnapshot,
+        mergeSnapshotPreservingPending,
+    ]);
+
     useChatWorkspaceHydration({
         viewMode,
         activeId,
@@ -1727,9 +1770,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         try {
             const refreshed = await fetchMessages(activeConversationId, THREAD_REFRESH_MESSAGES_OPTIONS);
             if (activeIdRef.current === activeConversationId) {
-                const nextMessages = mergeSnapshotPreservingPending(activeConversationId, refreshed);
-                setMessages(nextMessages);
-                messageSignatureRef.current = getMessageSignature(nextMessages);
+                applyRefreshedChatMessages(activeConversationId, refreshed);
             }
         } catch {
             // Ignore refresh errors; optimistic/message-level updates can still continue.
@@ -1740,7 +1781,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             translatedCount: Number(result.translatedCount || 0),
             failedCount: Number(result.failedCount || 0),
         };
-    }, []);
+    }, [applyRefreshedChatMessages]);
 
     const handlePreviewTranslatedReply = useCallback(async (
         sourceText: string,
@@ -2090,7 +2131,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
             const refreshed = await fetchMessages(selectedConversationId, THREAD_REFRESH_MESSAGES_OPTIONS);
             if (activeIdRef.current === selectedConversationId) {
-                setMessages(mergeSnapshotPreservingPending(selectedConversationId, refreshed));
+                applyRefreshedChatMessages(selectedConversationId, refreshed);
             }
 
             const deletedStorageSuffix = (res.removedStorageObjects || 0) > 0
@@ -2282,7 +2323,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                         });
                         // Re-fetch to display them as they come in
                         const msgs = await fetchMessages(activeId, THREAD_REFRESH_MESSAGES_OPTIONS);
-                        setMessages(mergeSnapshotPreservingPending(activeId, msgs));
+                        applyRefreshedChatMessages(activeId, msgs);
                     }
 
                     // Stop if we fetched fewer than requested (end of history)
@@ -2298,7 +2339,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
             toast({ title: "Sync Complete", description: `Total messages recovered: ${totalSynced}` });
             const msgs = await fetchMessages(activeId, THREAD_REFRESH_MESSAGES_OPTIONS);
-            setMessages(mergeSnapshotPreservingPending(activeId, msgs));
+            applyRefreshedChatMessages(activeId, msgs);
 
         } catch (e) {
             console.error("Sync error:", e);
@@ -2373,7 +2414,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             if (res.success) {
                 toast({ title: "History Fetched", description: `Found ${res.count} messages.` });
                 const msgs = await fetchMessages(activeConversation.id, THREAD_REFRESH_MESSAGES_OPTIONS);
-                setMessages(mergeSnapshotPreservingPending(activeConversation.id, msgs));
+                applyRefreshedChatMessages(activeConversation.id, msgs);
             } else {
                 toast({ title: "Fetch Failed", description: res.error, variant: "destructive" });
             }
@@ -2382,7 +2423,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         } finally {
             setLoadingMessages(false);
         }
-    }, [activeConversation, mergeSnapshotPreservingPending]);
+    }, [activeConversation, applyRefreshedChatMessages]);
 
     const handleChatGenerateDraft = useCallback(async (
         instruction?: string,
@@ -2812,7 +2853,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     onImportComplete={async () => {
                         // Refresh messages for the active conversation
                         const msgs = await fetchMessages(activeConversation.id, THREAD_REFRESH_MESSAGES_OPTIONS);
-                        setMessages(mergeSnapshotPreservingPending(activeConversation.id, msgs));
+                        applyRefreshedChatMessages(activeConversation.id, msgs);
                         toast({ title: 'Import Complete', description: 'Messages have been imported.' });
                     }}
                 />
